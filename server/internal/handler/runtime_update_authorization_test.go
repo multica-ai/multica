@@ -107,7 +107,7 @@ func TestGetUpdateRequiresRuntimeManager(t *testing.T) {
 				actorID = plainMemberID
 			}
 
-			update, err := testHandler.UpdateStore.Create(context.Background(), runtimeID, "v9.9.9", runtimeOwnerID)
+			update, err := testHandler.UpdateStore.Create(context.Background(), runtimeID, "runtime:"+runtimeID, "v9.9.9", runtimeOwnerID, true)
 			if err != nil {
 				t.Fatalf("create update request: %v", err)
 			}

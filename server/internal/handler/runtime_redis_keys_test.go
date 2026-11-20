@@ -20,13 +20,13 @@ func TestRuntimePendingRedisKeysShareClusterHashTag(t *testing.T) {
 			localSkillImportKey("req-1"),
 		},
 		"update claim": {
-			updatePendingKey("runtime-1"),
+			updateOffersKey("runtime-1"),
 			updateKey("req-1"),
 		},
-		"update active guard": {
-			updateActiveKey("runtime-1"),
+		"update create": {
+			updateMachineSlotKey("daemon:daemon-1"),
 			updateKey("req-1"),
-			updatePendingKey("runtime-1"),
+			updateOffersKey("runtime-1"),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

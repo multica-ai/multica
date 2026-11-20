@@ -462,6 +462,10 @@ type ChatSessionUpdatedPayload struct {
 type DaemonHeartbeatRequestPayload struct {
 	RuntimeID           string `json:"runtime_id"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	// SupportsDeferredUpdate says the daemon understands
+	// DaemonHeartbeatPendingUpdate.Deferrable. Only such a daemon receives
+	// deferrable offers; every other daemon keeps the fail-fast contract.
+	SupportsDeferredUpdate bool `json:"supports_deferred_update,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
@@ -498,10 +502,26 @@ const HeartbeatStatusRuntimeGone = "runtime_gone"
 
 // DaemonHeartbeatPendingUpdate describes a CLI-update action the daemon
 // should run for the runtime.
+//
+// Deferrable is set for a daemon that advertised SupportsDeferredUpdate when
+// the client that started the update can show a queued one. A daemon that sees
+// it reports "scheduled" instead of failing, holds the request, and starts it
+// once its last task finishes, after the server accepts its "running" report.
+// The server re-offers the request periodically (also after it is running, in
+// case the daemon missed that answer), so a daemon that restarts picks it up
+// again. Without the flag a busy daemon fails the request with
+// RuntimeUpdateBusyError, as every daemon did before queued updates.
 type DaemonHeartbeatPendingUpdate struct {
 	ID            string `json:"id"`
 	TargetVersion string `json:"target_version"`
+	Deferrable    bool   `json:"deferrable,omitempty"`
 }
+
+// RuntimeUpdateBusyError is the failure a daemon reports when it cannot start
+// a non-deferrable update because agent work is active. Released daemons send
+// this exact text, and the Runtimes page shows it as a neutral notice rather
+// than a failure, so keep it unchanged.
+const RuntimeUpdateBusyError = "runtime update deferred because agent work is starting or still active; retry when the machine is idle"
 
 // DaemonHeartbeatPendingModelList describes a request for the daemon to
 // enumerate the runtime's supported models.
