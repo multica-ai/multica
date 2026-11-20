@@ -6,6 +6,7 @@ package wecom
 // focused on delivery and this module owns the wording + link building.
 
 import (
+	"encoding/json"
 	"net/url"
 	"os"
 	"strings"
@@ -37,6 +38,16 @@ const inboxMarkdownMaxLen = 4000
 // pack's zh-Hans labels are the same table this file used to hold, character
 // for character; the card is a 1:1 push to a named Multica member, so it is
 // their own profile language that picks the pack (outbound.go).
+
+var inboxStatusLabels = map[string]string{
+	"backlog":     "Backlog",
+	"todo":        "Todo",
+	"in_progress": "In Progress",
+	"in_review":   "In Review",
+	"done":        "Done",
+	"blocked":     "Blocked",
+	"cancelled":   "Cancelled",
+}
 
 // inboxAppURL resolves the frontend URL for building the "view detail" link.
 // Priority: WECOM_APP_URL → MULTICA_APP_URL → FRONTEND_ORIGIN. Only HTTPS
@@ -168,6 +179,46 @@ func inboxItemBody(item map[string]any) string {
 		return v
 	}
 	return ""
+}
+
+// inboxStatusTransitionBody renders the structured details carried by a real
+// status_changed inbox:new event. statusName resolves custom keys through the
+// workspace catalog; built-ins do not need a database lookup.
+func inboxStatusTransitionBody(item map[string]any, statusName func(string) string) string {
+	if typeStr, _ := item["type"].(string); typeStr != "status_changed" {
+		return ""
+	}
+
+	var details map[string]string
+	switch raw := item["details"].(type) {
+	case json.RawMessage:
+		if json.Unmarshal(raw, &details) != nil {
+			return ""
+		}
+	case map[string]string:
+		details = raw
+	default:
+		return ""
+	}
+
+	from := strings.TrimSpace(details["from"])
+	to := strings.TrimSpace(details["to"])
+	if from != "" {
+		from = statusName(from)
+	}
+	if to != "" {
+		to = statusName(to)
+	}
+	switch {
+	case from != "" && to != "":
+		return from + " → " + to
+	case from != "":
+		return from + " →"
+	case to != "":
+		return "→ " + to
+	default:
+		return ""
+	}
 }
 
 // inboxItemLink builds the {appURL}/{slug|wsUUID}/inbox?issue={issueID}
