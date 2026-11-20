@@ -49,8 +49,8 @@ vi.mock("../../../common/actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
 
-function renderPicker(onUpdate: () => void = () => {}) {
-  return render(
+function picker(onUpdate: () => void) {
+  return (
     <I18nProvider locale="en" resources={{ en: { issues: enIssues } }}>
       <AssigneePicker
         assigneeType={null}
@@ -59,8 +59,12 @@ function renderPicker(onUpdate: () => void = () => {}) {
         open
         onOpenChange={() => {}}
       />
-    </I18nProvider>,
+    </I18nProvider>
   );
+}
+
+function renderPicker(onUpdate: () => void = () => {}) {
+  return render(picker(onUpdate));
 }
 
 /** Row names inside the Recent section, in display order. */
@@ -141,5 +145,24 @@ describe("AssigneePicker Recent group", () => {
 
     await user.keyboard("{Enter}");
     expect(onUpdate).toHaveBeenCalledWith({ assignee_type: "member", assignee_id: "user-2" });
+  });
+
+  it("keeps the keyboard highlight on the same row when Recent loads late", async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+    const { rerender } = renderPicker(onUpdate);
+
+    await screen.findByText("Members");
+    // Unassigned, then Ada Lovelace.
+    await user.click(screen.getByPlaceholderText("Assign to..."));
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+
+    // The frequency response arrives and Recent is inserted above Members.
+    frequency = [{ assignee_type: "agent", assignee_id: "agent-1", frequency: 4 }];
+    rerender(picker(onUpdate));
+    await screen.findByText("Recent");
+
+    await user.keyboard("{Enter}");
+    expect(onUpdate).toHaveBeenCalledWith({ assignee_type: "member", assignee_id: "user-1" });
   });
 });
