@@ -2934,6 +2934,9 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/comments", body, &result); err != nil {
+		if commentAddDeliveryUncertain(err) {
+			fmt.Fprintf(os.Stderr, "The comment may have been posted. Check `multica issue comment list %s` before retrying.\n", issueRef.Display)
+		}
 		return fmt.Errorf("add comment: %w", err)
 	}
 
@@ -2945,6 +2948,18 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func commentAddDeliveryUncertain(err error) bool {
+	var networkErr *cli.NetworkError
+	if errors.As(err, &networkErr) {
+		switch networkErr.Kind {
+		case cli.KindNetworkTimeout, cli.KindNetworkStalled, cli.KindNetworkIncompleteResponse, cli.KindNetworkOffline:
+			return true
+		}
+	}
+	var httpErr *cli.HTTPError
+	return errors.As(err, &httpErr) && httpErr.Kind() == cli.KindServerError
 }
 
 func runIssueCommentUpdate(cmd *cobra.Command, args []string) error {

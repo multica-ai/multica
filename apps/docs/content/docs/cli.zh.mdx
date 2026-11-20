@@ -125,6 +125,8 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
+如果 `issue comment add` 超时或响应丢失，评论可能已经发出。服务器恢复连接后，先用 `multica issue comment list <issue-id>` 核对，再决定是否重发。如果是在回复评论，加上 `--thread <comment-id>` 查看对应讨论串。重要评论可以先保存到文件，再通过 `--content-file` 发送，这样即使发送失败也能保留原文。
+
 查看某次运行的消息、停止运行或重试：
 
 ```bash

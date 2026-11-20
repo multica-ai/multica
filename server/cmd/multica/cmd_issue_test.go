@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -614,6 +615,63 @@ func TestRunIssueCommentAddUploadsAttachmentWithoutIssueID(t *testing.T) {
 	attachmentIDs, ok := commentBody["attachment_ids"].([]any)
 	if !ok || len(attachmentIDs) != 1 || attachmentIDs[0] != "attachment-1" {
 		t.Fatalf("comment attachment_ids = %#v, want [attachment-1]", commentBody["attachment_ids"])
+	}
+}
+
+func TestRunIssueCommentAddChecksDeliveryBeforeRetry(t *testing.T) {
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	for _, tc := range []struct {
+		name     string
+		status   int
+		response string
+		wantHint bool
+		wantExit int
+	}{
+		{"lost acknowledgement", http.StatusCreated, "{", true, cli.ExitNetwork},
+		{"connection closes before response", 0, "", true, cli.ExitNetwork},
+		{"gateway error", http.StatusBadGateway, "gateway failed", true, cli.ExitGeneric},
+		{"validation error", http.StatusUnprocessableEntity, "comment rejected", false, cli.ExitValidation},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var posts atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/api/issues/"+issueID+"/comments" {
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				posts.Add(1)
+				if tc.status == 0 {
+					conn, _, err := http.NewResponseController(w).Hijack()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_ = conn.Close()
+					return
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.response)
+			}))
+			defer srv.Close()
+			setCLITestServerEnv(t, srv.URL)
+			cmd := newIssueCommentAddTestCmd()
+			if err := cmd.Flags().Set("content", "review verdict"); err != nil {
+				t.Fatal(err)
+			}
+			stderr := captureStderr(t)
+			defer stderr.restore()
+			err := runIssueCommentAdd(cmd, []string{issueID})
+			if err == nil || cli.ExitCodeFor(err) != tc.wantExit {
+				t.Fatalf("comment error = %v, want exit code %d", err, tc.wantExit)
+			}
+			if got := posts.Load(); got != 1 {
+				t.Fatalf("POST count = %d, want 1", got)
+			}
+			if hint := strings.Contains(stderr.read(), "multica issue comment list "+issueID); hint != tc.wantHint {
+				t.Fatalf("read-back hint = %v, want %v. stderr: %s", hint, tc.wantHint, stderr.read())
+			}
+		})
 	}
 }
 
