@@ -699,7 +699,7 @@
     "workspace_title": "ワークスペースに公開",
     "workspace_desc": "このワークスペースの全員がこのエージェントを実行できます",
     "members_title": "特定のメンバーに公開",
-    "members_desc": "選択した人だけがこのエージェントを実行できます",
+    "members_desc": "あなたと選択した人がこのエージェントを実行できます",
     "team_title": "チームに公開",
     "team_desc": "チーム全体にアクセス権を付与します",
     "team_coming_soon": "近日公開",

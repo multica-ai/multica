@@ -699,7 +699,7 @@
     "workspace_title": "워크스페이스에 공개",
     "workspace_desc": "이 워크스페이스의 모든 사람이 이 에이전트를 실행할 수 있습니다",
     "members_title": "특정 사용자에게 공개",
-    "members_desc": "선택한 사람만 이 에이전트를 실행할 수 있습니다",
+    "members_desc": "나와 선택한 사람이 이 에이전트를 실행할 수 있습니다",
     "team_title": "팀에 공개",
     "team_desc": "팀 전체에 접근 권한을 부여합니다",
     "team_coming_soon": "출시 예정",
