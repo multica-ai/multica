@@ -12,7 +12,10 @@ vi.mock("./wakeup-condition-names", () => ({
 vi.mock("../../common/use-viewing-timezone", () => ({
   useViewingTimezone: () => "UTC",
 }));
-vi.mock("@multica/core/api", () => ({ api: { listIssueWakeups: vi.fn(), editIssueWakeupInstruction: vi.fn() } }));
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
+  api: { listIssueWakeups: vi.fn(), editIssueWakeupInstruction: vi.fn() },
+}));
 const list = vi.mocked(api.listIssueWakeups);
 const edit = vi.mocked(api.editIssueWakeupInstruction);
 let rule: IssueWakeup;
