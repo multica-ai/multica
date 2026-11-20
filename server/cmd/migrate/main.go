@@ -158,6 +158,7 @@ var concurrentIndexCleanups = map[string]string{
 	"704_doc_comment_pkey_index":                                "doc_comment_pkey_idx",
 	"706_doc_comment_doc_idx":                                   "doc_comment_doc_idx",
 	"707_doc_comment_workspace_idx":                             "doc_comment_workspace_idx",
+	"709_dashboard_range_view_scope_idx":                        "uq_dashboard_range_view_scope",
 	"671_weixin_account_state_unique_index":                     "weixin_account_state_pkey",
 	"669_weixin_login_session_unique_index":                     "weixin_login_session_pkey",
 	"666_weixin_login_expiry_idx":                               "weixin_login_expiry_idx",
