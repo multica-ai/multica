@@ -164,9 +164,6 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
             ) : null}
           </PopoverContent>
         </Popover>
-        {memberSharing.state === "read_only" || memberSharing.state === "unavailable" ? (
-          <PaidFeatureUpgradeBadge feature="runtime_member_sharing" className="mx-1" />
-        ) : null}
       </div>
       {current === "members" ? (
         <button
@@ -191,7 +188,12 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
         </button>
       ) : null}
       {memberSharing.state === "read_only" || memberSharing.state === "unavailable" ? (
-        <PaidFeatureNotice state={memberSharing.state} />
+        // The badge sits with the notice, not in the scope switcher: the
+        // properties column is too narrow for both without truncating labels.
+        <div className="flex items-start justify-between gap-2">
+          <PaidFeatureNotice state={memberSharing.state} />
+          <PaidFeatureUpgradeBadge feature="runtime_member_sharing" className="shrink-0" />
+        </div>
       ) : null}
       <RevokeRuntimeAccessDialog open={revokeOpen} onOpenChange={setRevokeOpen}
         runtime={runtime} wsId={wsId} initialPlan={revokePlan} sharedWith={revokeMembers} />
