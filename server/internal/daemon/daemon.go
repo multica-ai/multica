@@ -4682,7 +4682,16 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	// automatically on the next tick — that is the fallback the WS path
 	// relies on.
 	if d.wsHeartbeatRecentlyAcked(rid) {
-		d.logger.Debug("heartbeat: skipping HTTP tick, WS recently acked", "runtime_id", rid)
+		// No log line here on purpose. This is the steady state for a healthy
+		// daemon: every registered runtime takes this branch on every tick, so
+		// logging it costs one line per runtime per interval — forever, and even
+		// when the daemon is idle. With the handful of provider CLIs a typical
+		// developer machine has installed that is a continuous ~1 line/s into
+		// daemon.log, which dominated the file (~97% of its bytes) and kept
+		// writing to disk around the clock for a condition that needs no
+		// attention. The transition that actually matters — WS heartbeat going
+		// quiet and HTTP taking over — is still observable via the "HTTP tick"
+		// line below.
 		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
