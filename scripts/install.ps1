@@ -84,6 +84,81 @@ function Get-ComposePublishedPort {
     return $published
 }
 
+# Host port the compose file is configured to publish for a service, resolved by
+# Compose itself (`docker compose config`) so it follows the same
+# environment-over-.env precedence as `up`. Only used by the occupied-port
+# preflight below; $null when Compose cannot resolve it, in which case the
+# preflight is skipped and `up` behaves as before. Must be called from the
+# installation directory.
+function Get-ComposeConfiguredPort {
+    param(
+        [Parameter(Mandatory = $true)][string]$Service,
+        [Parameter(Mandatory = $true)][int]$ContainerPort
+    )
+
+    try {
+        $output = docker compose -f docker-compose.selfhost.yml config --format json 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $output) {
+            return $null
+        }
+        $config = ($output -join "`n") | ConvertFrom-Json
+        foreach ($mapping in @($config.services.$Service.ports)) {
+            $published = "$($mapping.published)"
+            if ([int]$mapping.target -eq $ContainerPort -and $published -match '^[0-9]+$') {
+                return $published
+            }
+        }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+# True when something already accepts connections on 127.0.0.1:<port>, the
+# address the self-host stack publishes on.
+function Test-HostPortInUse {
+    param([Parameter(Mandatory = $true)][int]$Port)
+
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $attempt = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        if (-not $attempt.AsyncWaitHandle.WaitOne(1000)) {
+            return $false
+        }
+        $client.EndConnect($attempt)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
+}
+
+# Fail before pulling and starting anything when a host port the stack needs is
+# already taken, instead of letting Docker abort halfway through `up -d` with
+# "port is already allocated" (#883). A port this installation's own running
+# stack already publishes is not a conflict: re-running the installer to
+# upgrade recreates those containers in place.
+function Assert-SelfHostPortsAvailable {
+    $checks = @(
+        @{ Service = "backend"; ContainerPort = 8080; Setting = "PORT=<free port> in $InstallDir\.env (or BACKEND_PORT / API_PORT / SERVER_PORT if you already set one of those)" }
+        @{ Service = "frontend"; ContainerPort = 3000; Setting = "FRONTEND_PORT=<free port> in $InstallDir\.env" }
+    )
+
+    foreach ($check in $checks) {
+        $port = Get-ComposeConfiguredPort -Service $check.Service -ContainerPort $check.ContainerPort
+        if (-not $port) {
+            continue
+        }
+        if ((Get-ComposePublishedPort -Service $check.Service -ContainerPort $check.ContainerPort) -eq $port) {
+            continue
+        }
+        if (Test-HostPortInUse -Port ([int]$port)) {
+            Write-Fail "Port $port is already in use on this machine, so the Multica $($check.Service) cannot be published on it.`n  Stop whatever is listening there (see: netstat -ano | findstr :$port),`n  or pick another port: set $($check.Setting)`n  and re-run the installer."
+        }
+    }
+}
+
 function Get-LatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
@@ -438,6 +513,8 @@ function Install-Server {
     } else {
         Write-Ok "Using existing .env"
     }
+
+    Assert-SelfHostPortsAvailable
 
     Write-Info "Pulling official Multica images..."
     Pull-OfficialSelfHostImages
