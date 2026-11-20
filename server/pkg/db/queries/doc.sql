@@ -82,7 +82,8 @@ WHERE id = @id AND workspace_id = @workspace_id
 RETURNING *;
 
 -- name: DeleteDoc :exec
-WITH v AS (DELETE FROM doc_version WHERE doc_version.doc_id = @id AND doc_version.workspace_id = @workspace_id)
+WITH v AS (DELETE FROM doc_version WHERE doc_version.doc_id = @id AND doc_version.workspace_id = @workspace_id),
+c AS (DELETE FROM doc_comment WHERE doc_comment.doc_id = @id AND doc_comment.workspace_id = @workspace_id)
 DELETE FROM doc WHERE doc.id = @id AND doc.workspace_id = @workspace_id;
 
 -- name: GetDocVersion :one
@@ -127,5 +128,48 @@ RETURNING *;
 
 -- name: DeleteWorkspaceDocs :exec
 WITH v AS (DELETE FROM doc_version WHERE doc_version.workspace_id = @workspace_id),
+c AS (DELETE FROM doc_comment WHERE doc_comment.workspace_id = @workspace_id),
 f AS (DELETE FROM doc_folder WHERE doc_folder.workspace_id = @workspace_id)
 DELETE FROM doc WHERE doc.workspace_id = @workspace_id;
+
+-- name: ListDocComments :many
+SELECT * FROM doc_comment
+WHERE doc_id = @doc_id AND workspace_id = @workspace_id
+ORDER BY created_at, id;
+
+-- name: GetDocComment :one
+SELECT * FROM doc_comment
+WHERE id = @id AND doc_id = @doc_id AND workspace_id = @workspace_id;
+
+-- name: CreateDocComment :one
+INSERT INTO doc_comment (
+    id, workspace_id, doc_id, parent_id, author_type, author_id, content,
+    anchor_quote, anchor_prefix, anchor_suffix
+) VALUES (
+    @id, @workspace_id, @doc_id, sqlc.narg('parent_id'), @author_type, @author_id, @content,
+    @anchor_quote, @anchor_prefix, @anchor_suffix
+)
+RETURNING *;
+
+-- name: SetDocCommentResolution :one
+-- Resolves (or, with null fields, reopens) a discussion. Roots only.
+UPDATE doc_comment SET
+    resolved_at = sqlc.narg('resolved_at'),
+    resolved_by_type = sqlc.narg('resolved_by_type'),
+    resolved_by_id = sqlc.narg('resolved_by_id'),
+    updated_at = now()
+WHERE id = @id AND doc_id = @doc_id AND workspace_id = @workspace_id AND parent_id IS NULL
+RETURNING *;
+
+-- name: DeleteDocCommentThread :exec
+-- Deletes a comment; deleting a root takes its replies with it.
+DELETE FROM doc_comment
+WHERE workspace_id = @workspace_id AND doc_id = @doc_id
+  AND (id = @id OR parent_id = @id);
+
+-- name: ListDocThreadParticipants :many
+-- Members who wrote in a discussion: its root author and every reply author.
+SELECT DISTINCT author_id FROM doc_comment
+WHERE workspace_id = @workspace_id AND doc_id = @doc_id
+  AND (id = @root_id OR parent_id = @root_id)
+  AND author_type = 'member';

@@ -102,7 +102,7 @@ multica project update <project-id> --visibility private --member alice@example.
 multica project member add <project-id> carol@example.com
 ```
 
-Rendre un projet privé à **Tout l’espace de travail** permet à tous les membres de l'espace de travail de voir le projet, ses tâches, ses commentaires et ses pièces jointes. L'application demande une confirmation avant d'enregistrer ; `multica project update --visibility workspace` applique le changement immédiatement.
+Rendre un projet privé à **Tout l’espace de travail** permet à toute personne ayant le rôle `owner`, `admin` ou `member` de voir le projet, ses tâches, ses commentaires et ses pièces jointes. Les invités ne voient le projet que s’il est partagé avec eux. L'application demande une confirmation avant d'enregistrer ; `multica project update --visibility workspace` applique le changement immédiatement.
 
 Si l’offre de votre espace de travail limite les projets privés, les projets déjà privés le restent et leurs membres y gardent accès. Vous ne pouvez alors ni créer de projet privé, ni rendre un projet privé, ni y ajouter de membre, même en nommant responsable une personne extérieure au projet. Les membres habilités peuvent toujours modifier les détails du projet, retirer des membres, ouvrir l’accès à tout l’espace de travail, et archiver ou supprimer le projet. Le propriétaire de l’espace peut toujours rejoindre le projet (voir [Reprise par le propriétaire de l'espace de travail](#workspace-owner-recovery)).
 
@@ -114,7 +114,7 @@ Cliquez sur **Rejoindre** et confirmez pour vous ajouter à la liste des membres
 
 ## Dossiers [#folders]
 
-Les dossiers regroupent des projets liés, par exemple tout ce qui concerne un lancement ou une équipe, pour que la section Projets de la barre latérale reste courte. Les dossiers sont partagés : tous les membres voient les mêmes dossiers, et n'importe quel membre peut en créer, en renommer, en supprimer, et y ajouter ou en retirer des projets. Un projet est dans un dossier au plus, et les dossiers ne s'imbriquent pas. Un dossier sert uniquement à organiser : il ne change pas qui peut voir les projets.
+Les dossiers regroupent des projets liés, par exemple tout ce qui concerne un lancement ou une équipe, pour que la section Projets de la barre latérale reste courte. Les rôles `owner`, `admin` et `member` voient les mêmes dossiers et peuvent en créer, en renommer, en supprimer, et y ajouter ou en retirer des projets. Un projet est dans un dossier au plus, et les dossiers ne s'imbriquent pas. Un dossier sert uniquement à organiser : il ne change pas qui peut voir les projets.
 
 - **Créer un dossier** : cliquez sur **+** dans la section Projets de la barre latérale et choisissez **Nouveau dossier**, ou choisissez **Déplacer vers un dossier → Nouveau dossier…** dans le menu d'un projet pour le créer avec ce projet dedans.
 - **Déplacer un projet** : choisissez **Déplacer vers un dossier** dans le menu du projet, ou faites glisser le projet sur un dossier de la barre latérale, ou hors de celui-ci. À la création d'un projet, choisissez son dossier dans la boîte de dialogue ; **+** sur la ligne d'un dossier crée un projet dans ce dossier.
@@ -136,7 +136,7 @@ Les automatisations actives qui créent des tâches dans ce projet sont mises en
 
 ## Créer, modifier et supprimer
 
-Tout membre de l'espace de travail peut créer et modifier des projets. Les membres peuvent supprimer les projets qu'ils ont créés ou créés par un agent dont ils sont actuellement propriétaires ; les agents ne peuvent supprimer que leurs propres projets. Les membres humains `owner` et `admin` peuvent supprimer tout projet, y compris les anciens projets dont le créateur est inconnu. Seules les personnes inscrites sur la liste des membres d'un projet privé peuvent le modifier ou le supprimer : un `owner` ou un `admin` doit donc d'abord y figurer.
+Les rôles `owner`, `admin` et `member` peuvent créer et modifier des projets. Les membres peuvent supprimer les projets qu'ils ont créés ou créés par un agent dont ils sont actuellement propriétaires ; les agents ne peuvent supprimer que leurs propres projets. Les membres humains `owner` et `admin` peuvent supprimer tout projet, y compris les anciens projets dont le créateur est inconnu. Seules les personnes inscrites sur la liste des membres d'un projet privé peuvent le modifier ou le supprimer : un `owner` ou un `admin` doit donc d'abord y figurer.
 
 <Callout type="warning">
 Supprimer un projet ne supprime pas ses tâches : elles sont détachées et restent dans l'espace de travail. La description, le statut et les ressources du projet sont définitivement supprimés.

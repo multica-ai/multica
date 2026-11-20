@@ -63,6 +63,11 @@ type autopilotQuotaPolicy struct {
 	notifications       *entitlement.NotificationPolicy
 }
 
+// errAutopilotQuotaWouldReject leaves the admission transaction before a
+// rejection so the caller can fetch the policy from Cloud again (outside the
+// period lock) and run the admission once more on it.
+var errAutopilotQuotaWouldReject = errors.New("autopilot quota would reject on the cached policy")
+
 func newAutopilotIdempotencyKey() string { return uuid.NewString() }
 
 // NewRequestIdempotencyKey is used only when an HTTP caller omitted its key;
@@ -82,7 +87,32 @@ func (s *AutopilotService) quotaPolicy(ctx context.Context, workspaceID pgtype.U
 	if s.Entitlements == nil || !workspaceID.Valid {
 		return autopilotQuotaPolicy{}, false
 	}
-	decision := s.Entitlements.Gate(ctx, uuid.UUID(workspaceID.Bytes), entitlement.GateAutopilotRuns)
+	return autopilotQuotaPolicyFromDecision(
+		s.Entitlements.Gate(ctx, uuid.UUID(workspaceID.Bytes), entitlement.GateAutopilotRuns),
+	)
+}
+
+// refreshedQuotaPolicy fetches the policy from Cloud right before a
+// rejection, skipping any reuse window, so a limit raised moments ago — an
+// add-on Stripe's webhook confirmed while the buyer has not returned to the
+// app yet — admits the run whichever instance cached the old one.
+func (s *AutopilotService) refreshedQuotaPolicy(ctx context.Context, workspaceID pgtype.UUID) (autopilotQuotaPolicy, bool) {
+	if s.Entitlements == nil || !workspaceID.Valid {
+		return autopilotQuotaPolicy{}, false
+	}
+	workspace := uuid.UUID(workspaceID.Bytes)
+	var decision entitlement.Decision
+	if fresh, ok := s.Entitlements.(entitlement.FreshRefresher); ok {
+		decision = fresh.RefreshGateNow(ctx, workspace, entitlement.GateAutopilotRuns)
+	} else if refresher, ok := s.Entitlements.(entitlement.Refresher); ok {
+		decision = refresher.RefreshGate(ctx, workspace, entitlement.GateAutopilotRuns)
+	} else {
+		decision = s.Entitlements.Gate(ctx, workspace, entitlement.GateAutopilotRuns)
+	}
+	return autopilotQuotaPolicyFromDecision(decision)
+}
+
+func autopilotQuotaPolicyFromDecision(decision entitlement.Decision) (autopilotQuotaPolicy, bool) {
 	gate := decision.Gate
 	if gate.Action == entitlement.ActionOff {
 		return autopilotQuotaPolicy{}, false
@@ -224,7 +254,31 @@ func (s *AutopilotService) createAutopilotRunWithQuota(
 		run, err := s.Queries.CreateAutopilotRun(ctx, params)
 		return run, false, err
 	}
+	run, reused, err := s.admitAutopilotRunWithQuota(ctx, policy, true, workspaceID, source, idempotencyKey, params)
+	if !errors.Is(err, errAutopilotQuotaWouldReject) {
+		return run, reused, err
+	}
+	// The run was about to be rejected on the cached policy. Decide once more
+	// on Cloud's current one, so an add-on paid moments ago admits it.
+	policy, enabled = s.refreshedQuotaPolicy(ctx, workspaceID)
+	if !enabled {
+		run, err := s.Queries.CreateAutopilotRun(ctx, params)
+		return run, false, err
+	}
+	return s.admitAutopilotRunWithQuota(ctx, policy, false, workspaceID, source, idempotencyKey, params)
+}
 
+// admitAutopilotRunWithQuota is one admission attempt under policy. With
+// refreshBeforeReject set, a rejection returns errAutopilotQuotaWouldReject
+// instead, before anything is written.
+func (s *AutopilotService) admitAutopilotRunWithQuota(
+	ctx context.Context,
+	policy autopilotQuotaPolicy,
+	refreshBeforeReject bool,
+	workspaceID pgtype.UUID,
+	source, idempotencyKey string,
+	params db.CreateAutopilotRunParams,
+) (db.AutopilotRun, bool, error) {
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return db.AutopilotRun{}, false, fmt.Errorf("begin quota admission: %w", err)
@@ -292,6 +346,11 @@ func (s *AutopilotService) createAutopilotRunWithQuota(
 	}
 
 	wouldBlock := period.UsedCount+period.ReservedCount >= policy.limit
+	if wouldBlock && policy.action == entitlement.ActionEnforce && refreshBeforeReject {
+		// Nothing was written yet; the deferred rollback releases the period
+		// lock before the caller calls Cloud.
+		return db.AutopilotRun{}, false, errAutopilotQuotaWouldReject
+	}
 	if wouldBlock && policy.action == entitlement.ActionEnforce {
 		period, err = qtx.IncrementAutopilotQuotaBlocked(ctx, db.IncrementAutopilotQuotaBlockedParams{
 			Source: source, WorkspaceID: workspaceID,

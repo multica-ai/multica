@@ -572,7 +572,12 @@ class ApiClient {
   ): Promise<MemberWithUser[]> {
     const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/members`,
-      { signal: opts?.signal },
+      {
+        signal: opts?.signal,
+        // Without it the server leaves guests out of the list, and useIsGuest
+        // could not recognize a guest. Mirrors protocol.AppCapabilityWorkspaceGuestsV1.
+        headers: { "X-Client-Capabilities": "workspace-guests-v1" },
+      },
     );
     return parseWithFallback(raw, MemberListSchema, EMPTY_MEMBER_LIST, {
       endpoint: "listMembers",

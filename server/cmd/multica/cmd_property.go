@@ -206,12 +206,23 @@ func init() {
 
 // fetchProperties loads the full definition catalog (including archived — the
 // callers that must exclude archived filter locally, and value resolution for
-// display needs archived definitions too).
+// display needs archived definitions too). usage_count is left at 0: counting
+// costs a pass over the workspace's issues, which name resolution does not
+// need. Commands that print usage_count use fetchPropertiesWithUsage.
 func fetchProperties(ctx context.Context, client *cli.APIClient) ([]propertyDTO, error) {
+	return fetchPropertyCatalog(ctx, client, "/api/properties?include_archived=true&include_usage=false")
+}
+
+// fetchPropertiesWithUsage is fetchProperties with real usage counts.
+func fetchPropertiesWithUsage(ctx context.Context, client *cli.APIClient) ([]propertyDTO, error) {
+	return fetchPropertyCatalog(ctx, client, "/api/properties?include_archived=true")
+}
+
+func fetchPropertyCatalog(ctx context.Context, client *cli.APIClient, path string) ([]propertyDTO, error) {
 	var result struct {
 		Properties []propertyDTO `json:"properties"`
 	}
-	if err := client.GetJSON(ctx, "/api/properties?include_archived=true", &result); err != nil {
+	if err := client.GetJSON(ctx, path, &result); err != nil {
 		return nil, fmt.Errorf("list properties: %w", err)
 	}
 	return result.Properties, nil
@@ -318,7 +329,7 @@ func runPropertyGet(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	properties, err := fetchProperties(ctx, client)
+	properties, err := fetchPropertiesWithUsage(ctx, client)
 	if err != nil {
 		return err
 	}

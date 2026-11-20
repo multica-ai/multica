@@ -39,10 +39,14 @@ import type {
   WorkspaceFeatureState,
   WorkspaceFeatures,
   MemberLimit,
+  StorageUsage,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
+  CreateWorkspaceAutopilotAddonCheckoutResponse,
+  WorkspaceAutopilotAddonCheckout,
+  WorkspaceAutopilotAddonPrice,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspacePlanChangePreview,
   ChangeWorkspacePlanResponse,
@@ -2367,6 +2371,26 @@ export const RuntimeRateLimitsResponseSchema = z.object({
   rate_limits: RuntimeRateLimitsSchema.nullable().catch(null),
 }).loose();
 
+export const RuntimeUpdateSchema = z.object({
+  id: z.string(),
+  runtime_id: z.string().default(""),
+  // An unknown future status keeps the card neutral and polling.
+  status: z
+    .enum(["pending", "scheduled", "running", "completed", "failed", "timeout", "cancelled", "expired"])
+    .catch("pending"),
+  target_version: z.string().default(""),
+  output: z.string().optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+  active_tasks: z.number().optional().catch(undefined),
+  cancellable: z.boolean().default(false).catch(false),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ActiveRuntimeUpdateResponseSchema = z.object({
+  update: RuntimeUpdateSchema.nullable().catch(null),
+}).loose();
+
 // Agent task responses. The base object stays loose so daemon/runtime fields
 // can drift while task-list consumers still validate the fields they render.
 
@@ -3620,6 +3644,9 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
     limits: z
       .object({
         autopilot_runs: WorkspaceEntitlementLimitSchema,
+        // Optional: a Cloud without the storage limit omits it, and a
+        // malformed one must not fail the whole snapshot.
+        storage_bytes: WorkspaceEntitlementLimitSchema.nullable().optional().catch(null),
       })
       .loose(),
     current_period_end: z.string().nullable().optional(),
@@ -3635,6 +3662,7 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
       seats: value.seats,
       limits: {
         autopilotRuns: value.limits.autopilot_runs,
+        storageBytes: value.limits.storage_bytes ?? null,
       },
       currentPeriodEnd: value.current_period_end ?? null,
       snapshotExpiresAt: value.snapshot_expires_at ?? null,
@@ -3678,7 +3706,21 @@ export const WorkspaceSubscriptionSummarySchema = z
       // Absent on a cloud that predates plan switching: no switch is offered.
       change_plan: z.boolean().optional(),
       check_plan_change: z.boolean().optional(),
+      // Absent on a cloud that predates add-ons; a malformed value offers none.
+      purchase_autopilot_runs: z.boolean().optional().catch(undefined),
     }).loose(),
+    // Absent on an older cloud, and a malformed value reads as no add-ons:
+    // the limit in the entitlement already includes them.
+    autopilot_addon: z
+      .object({
+        purchased_runs: z.number().int().nonnegative(),
+        period_start: z.string().min(1),
+        period_end: z.string().min(1),
+      })
+      .loose()
+      .nullable()
+      .optional()
+      .catch(null),
     // Absent on an older cloud, and a malformed value reads as no hold: the
     // server still refuses the operations a hold blocks.
     plan_change: z
@@ -3749,7 +3791,16 @@ export const WorkspaceSubscriptionSummarySchema = z
         purchaseSeats: value.available_actions.purchase_seats,
         changePlan: value.available_actions.change_plan ?? false,
         checkPlanChange: value.available_actions.check_plan_change ?? false,
+        purchaseAutopilotRuns:
+          value.available_actions.purchase_autopilot_runs ?? false,
       },
+      autopilotAddon: value.autopilot_addon
+        ? {
+            purchasedRuns: value.autopilot_addon.purchased_runs,
+            periodStart: value.autopilot_addon.period_start,
+            periodEnd: value.autopilot_addon.period_end,
+          }
+        : null,
       planChange: value.plan_change
         ? {
             targetPlan: value.plan_change.target_plan,
@@ -3857,18 +3908,75 @@ const WorkspaceSubscriptionPlanPricesSchema = z
     }),
   );
 
+// The add-on pack is optional and read on its own: a missing or malformed
+// pack price hides the add-on without taking the plan prices down with it.
+const WorkspaceAutopilotAddonPriceSchema = z
+  .object({
+    currency: z.string().regex(/^[a-z]{3}$/),
+    unit_amount: z.number().int().positive(),
+    runs_per_pack: z.number().int().positive(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceAutopilotAddonPrice => ({
+      currency: value.currency,
+      unitAmount: value.unit_amount,
+      runsPerPack: value.runs_per_pack,
+    }),
+  );
+
 // Every paid plan must be priced: a response missing one plan reads as "prices
 // unavailable" as a whole rather than offering one plan without the other.
 export const WorkspaceSubscriptionPricesSchema = z
   .object({
     pro: WorkspaceSubscriptionPlanPricesSchema,
     business: WorkspaceSubscriptionPlanPricesSchema,
+    autopilot_addon: WorkspaceAutopilotAddonPriceSchema.nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .transform(
     (value): WorkspaceSubscriptionPrices => ({
       pro: value.pro,
       business: value.business,
+      autopilotAddon: value.autopilot_addon ?? null,
+    }),
+  );
+
+export const CreateWorkspaceAutopilotAddonCheckoutResponseSchema = z
+  .object({
+    session_id: z.string().min(1),
+    url: StripeHostedURLSchema,
+  })
+  .loose()
+  .transform(
+    (value): CreateWorkspaceAutopilotAddonCheckoutResponse => ({
+      sessionId: value.session_id,
+      url: value.url,
+    }),
+  );
+
+// A session status this client does not know reads as open: the page keeps
+// waiting for Stripe instead of claiming success or failure.
+export const WorkspaceAutopilotAddonCheckoutSchema = z
+  .object({
+    session_id: z.string().min(1),
+    status: z.enum(["paid", "open", "unpaid", "expired"]).catch("open"),
+    packs: z.number().int().positive(),
+    runs: z.number().int().positive(),
+    currency: z.string().regex(/^[a-z]{3}$/),
+    amount: z.number().int().nonnegative(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceAutopilotAddonCheckout => ({
+      sessionId: value.session_id,
+      status: value.status,
+      packs: value.packs,
+      runs: value.runs,
+      currency: value.currency,
+      amount: value.amount,
     }),
   );
 
@@ -3912,6 +4020,30 @@ export const MemberLimitSchema = z
             limit: value.limit,
             members: value.members ?? 0,
             pendingInvitations: value.pending_invitations ?? 0,
+          },
+  );
+
+// Storage usage that cannot be read, or an action from a newer server, reads
+// as off: the server still checks every upload.
+export const StorageUsageSchema = z
+  .object({
+    action: z.enum(["off", "observe", "enforce"]).catch("off"),
+    used_bytes: z.number().int().nonnegative().nullable().catch(null).default(null),
+    limit_bytes: z.number().int().nonnegative().nullable().catch(null).default(null),
+    reached: z.boolean().nullable().catch(null).default(null),
+  })
+  .loose()
+  .transform(
+    (value): StorageUsage =>
+      value.action === "off" || value.limit_bytes === null
+        ? { action: "off", usedBytes: null, limitBytes: null, reached: null }
+        : {
+            action: value.action,
+            // Missing when the server could not read usage in time.
+            usedBytes: value.used_bytes,
+            limitBytes: value.limit_bytes,
+            reached:
+              value.action === "enforce" && value.used_bytes !== null ? (value.reached ?? false) : null,
           },
   );
 
@@ -4008,6 +4140,14 @@ export const WorkspacePlanChangePreviewSchema = z
     next_invoice_amount: z.number().int().nonnegative(),
     invoice_now: z.boolean(),
     quoted_at: z.string().min(1),
+    // Absent on a cloud that predates add-ons.
+    autopilot_runs_limit_after: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .refine((value) => value.current_plan !== value.target_plan, {
@@ -4025,6 +4165,7 @@ export const WorkspacePlanChangePreviewSchema = z
       nextInvoiceAmount: value.next_invoice_amount,
       invoiceNow: value.invoice_now,
       quotedAt: value.quoted_at,
+      autopilotRunsLimitAfter: value.autopilot_runs_limit_after ?? null,
     }),
   );
 

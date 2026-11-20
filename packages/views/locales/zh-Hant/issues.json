@@ -1075,6 +1075,7 @@
     "assignee": {
       "trigger_unassigned": "未分配",
       "search_placeholder": "分配給...",
+      "recent_group": "最近",
       "members_group": "成員",
       "agents_group": "AI 代理",
       "squads_group": "小隊",

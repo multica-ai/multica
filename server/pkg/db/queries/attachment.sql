@@ -374,3 +374,11 @@ ORDER BY id;
 DELETE FROM attachment
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND source_context_id IS NOT NULL;
+
+-- name: SumWorkspaceAttachmentBytes :one
+-- Attachment bytes a workspace holds, for its storage limit (MUL-9489). Every
+-- row counts, whatever owns it; thumbnails are not attachment rows. An
+-- index-only scan on idx_attachment_workspace_size.
+SELECT COALESCE(SUM(size_bytes), 0)::bigint AS used_bytes
+FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id);

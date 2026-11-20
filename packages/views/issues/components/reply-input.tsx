@@ -5,6 +5,7 @@ import { annotationsWithPending, type AnnotationComposerSlot } from "./annotatio
 import { ReplyAnnotations } from "./reply-annotations";
 import { useCallback, useRef, useState, useEffect, useImperativeHandle, useMemo, type Ref } from "react";
 import { toast } from "sonner";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
@@ -120,7 +121,7 @@ function ReplyInput({
   // back to session-local state inside the hook.
   // `gate` widens the editor gate with coordinator-owned placeholders — see
   // CommentInput.
-  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate } =
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate, storageRefusal, dismissStorageRefusal } =
     useCommentUploads(draftKey, { issueId }, uploadGate, editorRef);
   const hasAttachments = useMemo(
     () => pendingAttachments.some((a) => contentReferencesAttachment(content, a)) || gate.uploading,
@@ -373,6 +374,9 @@ function ReplyInput({
         <VoiceHud voice={voice} />
         <VoiceSetupDialog voice={voice} />
         <VoiceErrorRow voice={voice} className="mt-1" />
+        {storageRefusal && (
+          <StorageLimitNotice refusal={storageRefusal} onDismiss={dismissStorageRefusal} className="mt-1" />
+        )}
         {expanded && <ComposerToolbar
           className="mt-1 animate-in fade-in slide-in-from-top-1 duration-150"
           voice={voice}

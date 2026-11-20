@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+Si la CLI ne peut pas vérifier le jeton, examinez l’erreur signalée avant de vous reconnecter.
+
 Causes fréquentes :
 
 - Le CLI ne s'est pas connecté, ou le jeton stocké sur cette machine a expiré.
@@ -65,6 +67,8 @@ Les déploiements auto-hébergés doivent aussi interroger le `/health` de l'API
 ```bash
 multica config show
 ```
+
+Sous macOS, si les journaux du daemon indiquent `connect: no route to host` alors que `curl -fsS <server-url>/health` réussit dans un terminal sur le même Mac, recueillez les deux résultats au même moment. Précisez comment le daemon a été lancé (Desktop, service de connexion ou terminal) ainsi que les versions de macOS et du daemon. Le résultat du terminal confirme seulement la connectivité du processus shell.
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> signale que le serveur est injoignable</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">

@@ -19,6 +19,7 @@ import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import {
   agentListOptions,
+  assigneeFrequencyOptions,
   memberListOptions,
   skillListOptions,
   squadListOptions,
@@ -127,6 +128,9 @@ export function RouteDataPrefetch({
     if (!wsId) return;
     const warm = () => {
       for (const key of guest ? GUEST_ROUTES : WARM_ON_IDLE) ROUTES[key](qc, wsId, userId);
+      // The assignee picker's Recent group, so it renders on the picker's
+      // first open instead of popping in after a fetch.
+      if (!guest) void qc.prefetchQuery(assigneeFrequencyOptions(wsId));
     };
     if (typeof window.requestIdleCallback === "function") {
       const id = window.requestIdleCallback(warm, { timeout: 3000 });

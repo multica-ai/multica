@@ -1053,6 +1053,7 @@
       "codex_resume_oversized": "Session trop volumineuse pour être reprise",
       "idle_watchdog": "Agent arrêté après une période d'inactivité",
       "local_directory_error": "Erreur de répertoire local",
+      "local_directory_missing": "Le dossier local du projet n'existe plus",
       "cancelled": "Annulée par le système",
       "agent_error": "Erreur d'exécution de l'agent",
       "codex_semantic_inactivity": "Délai d'inactivité sémantique de Codex dépassé",

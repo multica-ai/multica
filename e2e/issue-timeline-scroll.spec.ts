@@ -3,7 +3,8 @@ import { createTestApi, loginAsDefault } from "./helpers";
 
 async function readingPosition(page: Page, commentId?: string) {
   return page.evaluate((id) => {
-    const container = document.querySelector<HTMLElement>('[data-tab-scroll-root^="main:"]')!;
+    const container = document.querySelector<HTMLElement>('[data-tab-scroll-root^="main:"]');
+    if (!container) return null;
     const c = container.getBoundingClientRect();
     const comment = id
       ? container.querySelector<HTMLElement>(`#comment-${id}`)
@@ -53,7 +54,7 @@ test("Inbox restores the current reply after leaving a virtualized long thread",
 
     const leaveAndReturn = async () => {
       await page.locator(`a[href="/${slug}/issues"]`).first().click();
-      await expect(page).toHaveURL(new RegExp(`/${slug}/issues`));
+      await expect(page).toHaveURL((url) => url.pathname === `/${slug}/issues`);
       await page.goBack();
     };
     const expectRestored = async (position: { id: string; offset: number }) => {
@@ -80,7 +81,7 @@ test("Inbox restores the current reply after leaving a virtualized long thread",
     await leaveAndReturn();
     await expectRestored(reading);
     await page.locator(`a[href="/${slug}/issues"]`).first().click();
-    await expect(page).toHaveURL(new RegExp(`/${slug}/issues`));
+    await expect(page).toHaveURL((url) => url.pathname === `/${slug}/issues`);
     await page.setViewportSize({ width: 1200, height: 900 });
     await page.goBack();
     await expectRestored(reading);
@@ -109,14 +110,13 @@ async function scrollUpShifts(page: Page, steps: number, delta = 150) {
       // move its top, so only layout changes above it show up as a shift.
       const ref = [...container.querySelectorAll<HTMLElement>('[id^="comment-"]')]
         .find((el) => { const r = el.getBoundingClientRect(); return r.top > c.top + 80 && r.top < c.bottom - 80; });
-      if (!ref) return null;
-      const before = ref.getBoundingClientRect().top;
+      const before = ref?.getBoundingClientRect().top;
       const scrollBefore = container.scrollTop;
       container.scrollTop = scrollBefore - d;
       const applied = scrollBefore - container.scrollTop;
       for (let f = 0; f < 10; f++) await new Promise((r) => requestAnimationFrame(r));
       await new Promise((r) => setTimeout(r, 60));
-      return ref.isConnected ? ref.getBoundingClientRect().top - before - applied : null;
+      return ref?.isConnected && before !== undefined ? ref.getBoundingClientRect().top - before - applied : null;
     }, delta);
     if (shift !== null) shifts.push(Math.round(shift));
   }

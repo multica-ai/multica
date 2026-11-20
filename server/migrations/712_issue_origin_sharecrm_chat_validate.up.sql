@@ -1,0 +1,13 @@
+-- Validate the check migration 711 left behind.
+--
+-- When 667/668, or a retired widen (681_issue_origin_sharecrm_chat,
+-- 683_issue_origin_sharecrm_chat, 685_issue_origin_sharecrm_chat,
+-- 695_issue_origin_sharecrm_chat, 697_issue_origin_sharecrm_chat, or
+-- 703_issue_origin_sharecrm_chat) followed by its validate file, already
+-- validated a check that includes sharecrm_chat, 711 did not invalidate it
+-- and this statement returns without scanning issue.
+-- A database that reaches 711 still NOT VALID (upstream 667/668 never
+-- allowed sharecrm_chat, or a retired widen left the check NOT VALID)
+-- scans here under SHARE UPDATE EXCLUSIVE, separate from 711's
+-- ACCESS EXCLUSIVE catalog swap.
+ALTER TABLE issue VALIDATE CONSTRAINT issue_origin_type_check;

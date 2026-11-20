@@ -133,6 +133,8 @@ Multica 使用 `amp --execute --stream-json --executor local`，通过标准输�
 
 **升级 DSH 后。** 如果探测提示 profile 中的核心包不兼容，先备份守护进程诊断中指出的配置文件。检查 `@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-tools` 和 `@deepseek-ai/dsh-llm` 的本地覆盖：尽量使用应用自带的核心包，或让覆盖版本与已安装的 DSH 版本匹配。保留需要的独立插件和钩子，不要删除所有依赖。修复后重新运行 `dsh --profile multica --probe`。Multica 会将这种已确认的兼容性拒绝报告为需要手动修复 profile，不会覆盖现有配置。
 
+如果探测提示已安装的 DSH 不满足 `@multica-ai/dsh-runtime` 的要求并跳过了它，请先备份配置文件，再将 Multica 桥接插件更新到兼容的构建版本。更新后重新运行 `dsh --profile multica --probe`。
+
 守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness。`/health` 诊断会区分 profile 缺失、已确认需要手动修复、协议不兼容和探测暂时不可用。启动失败时，诊断会包含检测到的 CLI 版本、配置文件位置，以及可用的脱敏输出。
 
 </Accordion>

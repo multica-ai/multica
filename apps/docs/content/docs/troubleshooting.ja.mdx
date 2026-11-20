@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+CLI がトークンを検証できない場合は、再ログインする前に表示されたエラーを確認してください。
+
 よくある原因:
 
 - CLI がまだログインしていない、またはローカルに保存されたトークンが失効している。
@@ -65,6 +67,8 @@ multica daemon restart
 ```bash
 multica config show
 ```
+
+macOS でデーモンログに `connect: no route to host` が出る一方、同じ Mac のターミナルで `curl -fsS <server-url>/health` が成功する場合は、同じ時間帯の両方の結果を記録してください。デーモンの起動方法（Desktop、ログインサービス、ターミナル）と、macOS とデーモンのバージョンも添えてください。ターミナルでの成功は、そのシェルプロセスから接続できたことだけを示します。
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> がサーバーに到達できないと報告する</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">

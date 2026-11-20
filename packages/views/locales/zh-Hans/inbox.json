@@ -68,12 +68,19 @@
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
-    "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置前，后续自动化执行将不会启动。",
+    "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置、升级套餐或加购之前，后续自动化执行将不会启动。",
     "project_owner_joined_body": "{{name}} 是工作区所有者，已把自己加入这个私有项目，现在可以看到其中的任务、评论和附件。",
     "open_project": "打开项目",
-    "autopilot_quota_upgrade": "查看升级方案",
+    "autopilot_quota_upgrade": "查看选项",
     "archive": "归档",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "open_doc": "打开文档",
+    "autopilot_quota_upgrade_action": "升级",
+    "autopilot_quota_addon_action": "加购执行次数",
+    "autopilot_quota_portal_action": "管理账单",
+    "autopilot_quota_contact_upgrade": "请联系工作区所有者或管理员升级套餐。",
+    "autopilot_quota_contact_addon": "请联系工作区所有者或管理员加购执行次数。",
+    "autopilot_quota_contact_addon_or_upgrade": "请联系工作区所有者或管理员加购执行次数或升级套餐。"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -103,7 +110,9 @@
     "app_action_requested": "等待你确认",
     "app_action_reminder": "确认即将过期",
     "app_connect_requested": "请连接应用",
-    "app_action_result": "应用操作结果"
+    "app_action_result": "应用操作结果",
+    "doc_comment": "文档有新评论",
+    "doc_mentioned": "在文档中提到了你"
   },
   "labels": {
     "set_status_to": "状态设为",

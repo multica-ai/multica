@@ -66,5 +66,31 @@
   "unavailable": {
     "title": "Docs isn't available here",
     "description": "This workspace doesn't have Docs turned on."
+  },
+  "comments": {
+    "title": "Comments",
+    "add": "Comment",
+    "open": "Open {{count}}",
+    "resolved": "Resolved {{count}}",
+    "close": "Close comments",
+    "quote_missing": "The commented text was changed",
+    "reply_placeholder": "Reply, or @ someone…",
+    "new_placeholder": "Add a comment, @ to mention…",
+    "submit": "Comment",
+    "reply": "Reply",
+    "cancel": "Cancel",
+    "resolve": "Resolve",
+    "reopen": "Reopen",
+    "delete": "Delete comment",
+    "resolved_by": "Resolved by {{name}}",
+    "replies_one": "{{count}} reply",
+    "replies_other": "{{count}} replies",
+    "empty_open": "No open comments. Select text and choose Comment to start one.",
+    "empty_resolved": "No resolved comments.",
+    "errors": {
+      "save": "Could not post the comment",
+      "delete": "Could not delete the comment",
+      "resolve": "Could not update the discussion"
+    }
   }
 }

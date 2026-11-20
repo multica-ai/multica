@@ -10,7 +10,16 @@ export const docKeys = {
     [...docKeys.all(wsId), "versions", id] as const,
   version: (wsId: string, id: string, number: number) =>
     [...docKeys.all(wsId), "version", id, number] as const,
+  comments: (wsId: string, id: string) =>
+    [...docKeys.all(wsId), "comments", id] as const,
 };
+
+export function docCommentsOptions(wsId: string, docId: string) {
+  return queryOptions({
+    queryKey: docKeys.comments(wsId, docId),
+    queryFn: () => api.listDocComments(docId),
+  });
+}
 
 export function docTreeOptions(wsId: string) {
   return queryOptions({

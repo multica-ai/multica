@@ -619,6 +619,7 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 	// each other. Nobody's projects are listed to a guest.
 	requester, _ := ctxMember(r.Context())
 	requesterIsGuest := projectaccess.IsGuestRole(requester.Role)
+	includeGuests := clientRendersGuestRole(r)
 	visibleGuests := map[[16]byte]bool{requester.UserID.Bytes: true}
 	if requesterIsGuest {
 		mine := map[string]bool{}
@@ -637,6 +638,9 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 	resp := make([]MemberWithUserResponse, 0, len(members))
 	for _, m := range members {
 		guest := projectaccess.IsGuestRole(m.Role)
+		if guest && !includeGuests {
+			continue
+		}
 		if requesterIsGuest && guest && !visibleGuests[m.UserID.Bytes] {
 			continue
 		}
@@ -677,6 +681,13 @@ func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberW
 		Email:       user.Email,
 		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(user.AvatarUrl)),
 	}
+}
+
+// clientRendersGuestRole reports whether the caller declared it can render
+// guest rows. Member and invitation lists hide guests from older clients,
+// whose role tables have no guest entry and crash on one.
+func clientRendersGuestRole(r *http.Request) bool {
+	return requestHasClientCapability(r, protocol.AppCapabilityWorkspaceGuestsV1)
 }
 
 func normalizeMemberRole(role string) (string, bool) {

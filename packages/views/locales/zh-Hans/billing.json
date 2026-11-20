@@ -28,6 +28,7 @@
     "actions": {
       "retry": "重试",
       "retry_autopilots": "重试加载自动化用量",
+      "retry_storage": "重试附件存储用量",
       "upgrade_to": "升级到 {{plan}}",
       "switch_to": "切换到 {{plan}}",
       "manage": "管理账单",
@@ -137,7 +138,17 @@
       "usage_unavailable": "用量暂时不可用",
       "members": "成员",
       "members_pending": "待接受的邀请：{{pending}}",
-      "metering": "时间表、Webhook 和智能体发起的运行计入额度，成员点击\"立即运行\"不计入。"
+      "metering": "时间表、Webhook 和智能体发起的运行计入额度，成员点击\"立即运行\"不计入。",
+      "storage": "附件存储",
+      "storage_description": "任务、评论和聊天中的附件。",
+      "storage_label": "附件存储用量",
+      "addon": "加购执行次数",
+      "addon_description": "额度用完后自动化会暂停，直到下月重置或加购。",
+      "addon_included": "其中加购 {{runs}} 次",
+      "addon_none": "本月未加购",
+      "addon_purchased": "本月已加购 {{runs}} 次",
+      "addon_buy": "加购 · {{price}} / {{runs}} 次",
+      "addon_buy_fallback": "加购执行次数"
     },
     "seats": {
       "title": "席位",
@@ -215,7 +226,9 @@
       "success_title": "套餐已更换",
       "success_description": "这个工作区现在使用 {{plan}}。",
       "unresolved": "上一次套餐变更的结果没有确认。请先联系支持，再更换套餐。",
-      "check_failed": "无法检查套餐变更，请重试。"
+      "check_failed": "无法检查套餐变更，请重试。",
+      "addon_downgrade_notice": "切换后本月上限变为 {{limit}} 次（含已加购的次数），本月已用 {{used}} 次。",
+      "addon_downgrade_notice_limit_only": "切换后本月上限变为 {{limit}} 次（含已加购的次数）。"
     },
     "confirm": {
       "title": "前往 Stripe Checkout？",
@@ -244,7 +257,22 @@
     "read_only": "只读，升级后可编辑",
     "unavailable": "当前工作区的套餐不包含此功能。",
     "view_plans": "查看套餐",
-    "locked_error": "当前工作区的套餐不包含此功能。已有设置继续生效，升级后可以新增。"
+    "locked_error": "当前工作区的套餐不包含此功能。已有设置继续生效，升级后可以新增。",
+    "upgrade_to_add": "升级套餐",
+    "business": "Business",
+    "badge_label": "Business 功能，查看详情",
+    "upgrade_to_business": "升级到 Business",
+    "ask_admin": "请联系工作区管理员升级到 Business。",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "允许指定成员运行智能体是 Business 功能",
+        "description": "\"仅自己\"和\"整个工作区\"在所有套餐中都可以使用。"
+      },
+      "runtime_member_sharing": {
+        "title": "与指定成员共享运行时是 Business 功能",
+        "description": "\"私有\"和\"公开\"在所有套餐中都可以使用。"
+      }
+    }
   },
   "trial": {
     "status": {
@@ -308,5 +336,35 @@
         "after": "到期后已有访客保留访问权限，邀请新访客需要 Pro 或 Business。"
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} 没有上传",
+    "copy_title": "子任务没有创建：无法复制源附件",
+    "admin_body": "附件存储已满（{{used}} / {{limit}}），已有附件不受影响。",
+    "admin_body_no_figures": "附件存储已满，已有附件不受影响。",
+    "member_body": "附件存储已满。请联系管理员升级套餐，或删除不需要的附件。",
+    "dismiss": "关闭"
+  },
+  "autopilot_addon": {
+    "title": "加购自动化执行",
+    "description": "加购的次数在本月有效，所有成员共享，先用套餐额度再用加购。",
+    "options_label": "加购次数",
+    "option": "{{runs}} 次",
+    "usage_summary": "本月已用 {{used}} / {{limit}} 次，{{date}} 重置。",
+    "pay": "去支付 {{amount}}",
+    "pay_fallback": "去支付",
+    "cancel": "取消",
+    "loading": "正在加载加购价格…",
+    "unavailable": "该工作区现在无法加购。",
+    "conflict": "现在无法加购，或价格已变化。请查看选项后重试。",
+    "error": "无法打开付款页面。请重试。",
+    "success_title": "已加购",
+    "success_description": "本月已增加 {{runs}} 次，自动化会在下一次运行时恢复。",
+    "confirming_title": "正在确认付款",
+    "confirming_description": "Stripe 确认付款后会立即加上次数。请稍后查看下方的用量。",
+    "not_paid_title": "付款未完成",
+    "not_paid_description": "没有扣款，也没有加上次数。",
+    "cancel_title": "已取消付款",
+    "cancel_description": "没有扣款。"
   }
 }

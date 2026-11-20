@@ -10,6 +10,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // guestFixture: a guest of one workspace-visible project (shared), with a
@@ -49,10 +50,11 @@ func newGuestFixture(t *testing.T) guestFixture {
 }
 
 // guestRequest runs handler behind the workspace middleware, as the router
-// does, so the guest route allowlist applies.
+// does, so the guest route allowlist applies. It speaks as a guest-aware
+// client: only those can sign a guest in.
 func guestRequest(t *testing.T, handler http.HandlerFunc, userID, method, path string, body any, params ...string) *testutil.Response {
 	t.Helper()
-	req := asUser(newRequest(method, path, body), userID)
+	req := withGuestCapability(asUser(newRequest(method, path, body), userID))
 	if len(params) > 0 {
 		req = withURLParams(req, params...)
 	}
@@ -265,13 +267,90 @@ func TestGuestPromotionAndDemotion(t *testing.T) {
 	}
 
 	var members []MemberWithUserResponse
-	req = withURLParam(newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/members", nil), "id", testWorkspaceID)
+	req = withGuestCapability(withURLParam(newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/members", nil), "id", testWorkspaceID))
 	testutil.Call(t, testHandler.ListMembersWithUser, req).Want(http.StatusOK).JSON(&members)
+	listed := false
 	for _, m := range members {
-		if m.UserID == f.guest && fmt.Sprint(m.ProjectIDs) != fmt.Sprint([]string{f.other}) {
+		if m.UserID != f.guest {
+			continue
+		}
+		listed = true
+		if fmt.Sprint(m.ProjectIDs) != fmt.Sprint([]string{f.other}) {
 			t.Errorf("members list guest project_ids = %v, want only other", m.ProjectIDs)
 		}
 	}
+	if !listed {
+		t.Error("members list misses the guest")
+	}
+}
+
+// Clients released before guests index their role tables by role and crash on
+// "guest", so member and invitation lists leave guests out unless the caller
+// declares it can render them.
+func TestMemberAndInvitationListsHideGuestsFromOlderClients(t *testing.T) {
+	clearInvitationsForTestWorkspace(t)
+	f := newGuestFixture(t)
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/members",
+		CreateMemberRequest{Email: f.marker + "-invitee@multica.test", Role: "guest", ProjectIDs: []string{f.shared}}), "id", testWorkspaceID)
+	testutil.Call(t, testHandler.CreateInvitation, req).Want(http.StatusCreated)
+	req = withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/members",
+		CreateMemberRequest{Email: f.marker + "-member@multica.test", Role: "member"}), "id", testWorkspaceID)
+	testutil.Call(t, testHandler.CreateInvitation, req).Want(http.StatusCreated)
+
+	for _, tc := range []struct {
+		name       string
+		capability string
+		wantGuests bool
+	}{
+		{"older client", "", false},
+		{"other capabilities only", "stable_attachment_urls", false},
+		{"guest-aware client", "stable_attachment_urls, workspace-guests-v1", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withCapability := func(req *http.Request) *http.Request {
+				if tc.capability != "" {
+					req.Header.Set("X-Client-Capabilities", tc.capability)
+				}
+				return req
+			}
+
+			var members []MemberWithUserResponse
+			req := withCapability(withURLParam(newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/members", nil), "id", testWorkspaceID))
+			testutil.Call(t, testHandler.ListMembersWithUser, req).Want(http.StatusOK).JSON(&members)
+			guests, owner := 0, false
+			for _, m := range members {
+				if m.Role == projectaccess.RoleGuest {
+					guests++
+				}
+				owner = owner || m.UserID == testUserID
+			}
+			if !owner {
+				t.Error("members list misses the owner")
+			}
+			if (guests > 0) != tc.wantGuests {
+				t.Errorf("members list has %d guests, want guests = %v", guests, tc.wantGuests)
+			}
+
+			var invitations []InvitationResponse
+			req = withCapability(withURLParam(newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/invitations", nil), "id", testWorkspaceID))
+			testutil.Call(t, testHandler.ListWorkspaceInvitations, req).Want(http.StatusOK).JSON(&invitations)
+			roles := map[string]int{}
+			for _, inv := range invitations {
+				roles[inv.Role]++
+			}
+			if roles["member"] != 1 {
+				t.Errorf("invitations by role = %v, want the member invitation", roles)
+			}
+			if (roles[projectaccess.RoleGuest] > 0) != tc.wantGuests {
+				t.Errorf("invitations by role = %v, want guests = %v", roles, tc.wantGuests)
+			}
+		})
+	}
+}
+
+func withGuestCapability(req *http.Request) *http.Request {
+	req.Header.Set("X-Client-Capabilities", protocol.AppCapabilityWorkspaceGuestsV1)
+	return req
 }
 
 func TestGuestSeesOnlyGuestsItSharesAProjectWith(t *testing.T) {

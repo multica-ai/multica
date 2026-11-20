@@ -16,6 +16,7 @@ export type WSEventType =
   | "doc_folder:created"
   | "doc_folder:updated"
   | "doc_folder:deleted"
+  | "doc_comment:changed"
   | "issue:created"
   | "issue:updated"
   | "issue_attachments:changed"

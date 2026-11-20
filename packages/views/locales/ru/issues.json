@@ -1239,6 +1239,7 @@
     "assignee": {
       "trigger_unassigned": "Не назначено",
       "search_placeholder": "Назначить на...",
+      "recent_group": "Недавние",
       "members_group": "Участники",
       "agents_group": "Агенты",
       "squads_group": "Команды",

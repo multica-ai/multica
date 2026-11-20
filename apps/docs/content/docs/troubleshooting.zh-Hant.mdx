@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+如果 CLI 無法驗證權杖，請先檢查提示中的錯誤，再決定是否重新登入。
+
 常見原因包括：
 
 - CLI 尚未登入，或本機儲存的令牌已經失效；
@@ -65,6 +67,8 @@ multica daemon restart
 ```bash
 multica config show
 ```
+
+在 macOS 上，如果守護程序日誌顯示 `connect: no route to host`，但同一台 Mac 的終端機可以成功執行 `curl -fsS <server-url>/health`，請記錄同一時段的兩項結果。附上守護程序的啟動方式（Desktop、登入服務或終端機），以及 macOS 和守護程序的版本。終端機的結果只說明該 shell 程序可以連線。
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> 報告伺服器不可達</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">

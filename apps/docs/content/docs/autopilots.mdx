@@ -28,6 +28,10 @@ Open **Autopilot** in the sidebar, pick a template or start from scratch, then c
 
 An autopilot is enabled by default after saving. **Run now** executes the full flow once at any time, without waiting for the schedule.
 
+On Multica Cloud, a member’s **Run now** uses none of the workspace’s automation quota, even when the quota is exhausted. Scheduled runs, webhook runs, and runs an agent triggers on a member’s behalf count toward the quota.
+
+When the quota runs out, counted runs are skipped until the quota resets at the start of next month. On Pro and Business, an owner or admin can instead buy more runs in **Settings → Billing** ($10 per 1,000 runs, paid on Stripe's checkout page and valid for the current month); on Free, upgrading raises the limit. The owners and admins, and the member who created the autopilot, get an Inbox notice the first time a run is skipped at each limit.
+
 Below is an autopilot whose execution mode is Create issue. Click **Run now**, or skip ahead to the next scheduled time, and watch it create an issue, hand it to the agent, and complete the run.
 
 <AutopilotDemo />
@@ -141,7 +145,7 @@ When debugging a sender, check Multica's responses against this table:
 |---|---|---|
 | 200 | `accepted` | Accepted and a run was created; returns the delivery and run IDs. |
 | 200 | `skipped` | Accepted, but this run was skipped (for example, the runtime is offline in run-only mode); includes the reason. |
-| 200 | `ignored` | No run created: the trigger is disabled, the autopilot is paused or archived, or the event was filtered; the `reason` field explains why. |
+| 200 | `ignored` | No run created: the trigger is disabled, the autopilot is paused or archived, or the event was filtered; the `reason` field explains why. An exhausted automation quota returns `reason_code: quota_exceeded`. |
 | 200 | `duplicate` | The idempotency key hit an existing delivery; returns the original delivery ID and doesn't run again. |
 | 400 | Error message | The body is empty, not valid JSON, or not a JSON object/array. |
 | 401 | `rejected` | The trigger has a signing secret configured, but the request is missing a signature or the signature doesn't match. |
@@ -177,7 +181,7 @@ Pausing manually stops schedules, webhooks, and **Run now**. Deletion is actuall
 
 ## Permissions
 
-- Any workspace member can create autopilots;
+- Members with the `owner`, `admin`, or `member` role can create autopilots.
 - the creator and workspace owners/admins can edit, run, delete, and manage triggers;
 - the creator and owners/admins can add collaborators to management access;
 - collaborators can edit, run, and manage triggers, but can't grant access to others;
