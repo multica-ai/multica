@@ -263,6 +263,35 @@ describe("UpdateSection queued updates", () => {
     expect(screen.getByRole("button", { name: "Update" })).toBeInTheDocument();
   });
 
+  it("drops the previous machine's queue when switching to one without an update", async () => {
+    vi.mocked(api.getActiveUpdate).mockImplementation(async (runtimeId) =>
+      runtimeId === "runtime-1" ? update({}) : null,
+    );
+    const view = renderSection({ runtimeId: "runtime-1", currentVersion: "v0.4.0" });
+    expect(await screen.findByText("Updates when idle")).toBeInTheDocument();
+
+    view.rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <UpdateSection runtimeId="runtime-2" currentVersion="v0.4.0" isOnline />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Update" })).toBeInTheDocument();
+    expect(screen.queryByText("Updates when idle")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
+  it("does not report a downgrade as done before the daemon runs the target", async () => {
+    vi.mocked(api.getActiveUpdate).mockResolvedValue(
+      update({ status: "running", target_version: "v0.4.0", cancellable: false }),
+    );
+
+    renderSection({ runtimeId: "runtime-1", currentVersion: "v0.4.1" });
+
+    expect(await screen.findByText("Updating...")).toBeInTheDocument();
+    expect(screen.queryByText(/Update complete/)).not.toBeInTheDocument();
+  });
+
   it("shows an expired queue as a neutral note", async () => {
     vi.mocked(api.getActiveUpdate).mockResolvedValue(update({ status: "expired", cancellable: false }));
 

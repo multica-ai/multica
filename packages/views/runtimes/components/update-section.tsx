@@ -111,6 +111,12 @@ function neutralFailure(update: RuntimeUpdate): Note | null {
   return null;
 }
 
+function sameReleaseVersion(a: string, b: string): boolean {
+  const pa = parseReleaseVersion(a);
+  const pb = parseReleaseVersion(b);
+  return !!pa && !!pb && pa.every((part, i) => part === pb[i]);
+}
+
 interface UpdateSectionProps {
   /** Null for a read-only viewer who cannot use a runtime as the command channel. */
   runtimeId: string | null;
@@ -146,13 +152,16 @@ export function UpdateSection({
   }, []);
 
   // A reload, or another runtime of the same daemon, picks up the queue.
+  // Switching machines replaces whatever the previous one showed.
   useEffect(() => {
+    setUpdate(null);
+    setNote(null);
     if (!runtimeId) return;
     let stale = false;
     api
       .getActiveUpdate(runtimeId)
       .then((active) => {
-        if (!stale && active) setUpdate(active);
+        if (!stale) setUpdate(active);
       })
       .catch(() => {});
     return () => {
@@ -180,10 +189,11 @@ export function UpdateSection({
   }, [runtimeId, updateId, polling, queued]);
 
   // The daemon restarts right after installing, often before its report
-  // lands; the runtime reporting the target version is proof enough.
+  // lands; the runtime reporting the target version is proof enough. Only an
+  // exact match counts: a CLI request may target an older version.
   useEffect(() => {
     if (update?.status !== "running" || !currentVersion) return;
-    if (!isNewer(update.target_version, currentVersion)) {
+    if (sameReleaseVersion(update.target_version, currentVersion)) {
       setUpdate({ ...update, status: "completed", output: `Updated to ${update.target_version}` });
     }
   }, [currentVersion, update]);
