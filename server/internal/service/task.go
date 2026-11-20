@@ -5457,7 +5457,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// ON CONFLICT DO NOTHING, which yields the slot instead of raising and so
 		// can never abort this transaction — which also carries the parent's
 		// failed status.
-		createRetry := wantRetry
+		createRetry := wantRetry && retryEligible(failureReason, t)
 		if createRetry {
 			successor, herr := hasRunnableSuccessor(ctx, qtx, t)
 			if herr != nil {
@@ -5722,12 +5722,13 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 // that did download is already cached on disk — a retry resumes from there
 // instead of re-fetching the whole set (MUL-5370).
 var retryableReasons = map[string]bool{
-	string(taskfailure.ReasonRuntimeOffline):         true,
-	string(taskfailure.ReasonRuntimeRecovery):        true,
-	string(taskfailure.ReasonTimeout):                true,
-	"codex_semantic_inactivity":                      true,
-	string(taskfailure.ReasonAgentProviderNetwork):   true,
-	string(taskfailure.ReasonSkillBundleUnavailable): true,
+	string(taskfailure.ReasonRuntimeOffline):                   true,
+	string(taskfailure.ReasonRuntimeRecovery):                  true,
+	string(taskfailure.ReasonTimeout):                          true,
+	"codex_semantic_inactivity":                                true,
+	string(taskfailure.ReasonAgentProviderNetwork):             true,
+	string(taskfailure.ReasonSkillBundleUnavailable):           true,
+	string(taskfailure.ReasonLocalWorktreePrerequisiteMissing): true,
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
@@ -5744,6 +5745,7 @@ var retryableReasons = map[string]bool{
 // keeps the task's generic max_attempts ceiling and retries immediately.
 const (
 	runtimeOfflineRetryDeferral   = time.Second
+	localWorktreeMaxAttempts      = 4
 	providerNetworkMaxAttempts    = 3
 	providerNetworkFinalRetryWait = 5 * time.Second
 )
@@ -5766,6 +5768,9 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 	if reason == string(taskfailure.ReasonAgentProviderNetwork) && taskMaxAttempts < providerNetworkMaxAttempts {
 		return providerNetworkMaxAttempts
 	}
+	if reason == taskfailure.ReasonLocalWorktreePrerequisiteMissing.String() && taskMaxAttempts < localWorktreeMaxAttempts {
+		return localWorktreeMaxAttempts
+	}
 	return taskMaxAttempts
 }
 
@@ -5782,6 +5787,16 @@ func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 	if reason == string(taskfailure.ReasonAgentProviderNetwork) &&
 		failedAttempt >= providerNetworkMaxAttempts-1 {
 		return providerNetworkFinalRetryWait
+	}
+	if reason == taskfailure.ReasonLocalWorktreePrerequisiteMissing.String() {
+		switch failedAttempt {
+		case 1:
+			return time.Minute
+		case 2:
+			return 5 * time.Minute
+		default:
+			return 15 * time.Minute
+		}
 	}
 	return 0
 }
@@ -5859,6 +5874,9 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // a human may have edited in the meantime, so replaying the failed attempt is
 // never what the workspace wants.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+	if failureReason == taskfailure.ReasonLocalWorktreePrerequisiteMissing.String() && (t.StartedAt.Valid || !t.IssueID.Valid) {
+		return false
+	}
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
