@@ -192,7 +192,11 @@
       "pinned_settings": "Visualización de fijados",
       "views_settings": "Visualización de vistas",
       "views_builtin": "Vistas integradas",
-      "views_show_count": "Recuentos"
+      "views_show_count": "Recuentos",
+      "guest_badge": "Invitado",
+      "guest_badge_hint": "Puedes ver y comentar los proyectos compartidos contigo.",
+      "involved": "Mis tareas",
+      "shared_projects": "Compartidos contigo"
     },
     "team": {
       "new_agent": "Nuevo agente",

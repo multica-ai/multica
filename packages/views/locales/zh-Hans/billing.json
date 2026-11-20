@@ -136,7 +136,8 @@
       "resets_at": "{{date}} 重置",
       "usage_unavailable": "用量暂时不可用",
       "members": "成员",
-      "members_pending": "待接受的邀请：{{pending}}"
+      "members_pending": "待接受的邀请：{{pending}}",
+      "metering": "时间表、Webhook 和智能体发起的运行计入额度，成员点击\"立即运行\"不计入。"
     },
     "seats": {
       "title": "席位",
@@ -301,6 +302,10 @@
       "private_projects": {
         "name": "私有项目",
         "after": "到期后保持私有，访问名单只读。"
+      },
+      "guests": {
+        "name": "访客",
+        "after": "到期后已有访客保留访问权限，邀请新访客需要 Pro 或 Business。"
       }
     }
   }

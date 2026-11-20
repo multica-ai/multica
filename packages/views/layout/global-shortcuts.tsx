@@ -13,7 +13,8 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import { useSearchStore } from "@multica/core/command-bar";
 import { useModalStore } from "@multica/core/modals";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { isImeComposing } from "@multica/core/utils";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
 import { useAppShell } from "./app-shell-context";
@@ -52,6 +53,8 @@ export function GlobalShortcuts() {
   const toggleNav = useAppShell()?.toggleNav ?? toggleSidebar;
   const navigation = useNavigation();
   const workspacePaths = useWorkspacePaths();
+  // A guest (MUL-9420) cannot create issues, so its `C` stays unclaimed.
+  const guest = useIsGuest(useCurrentWorkspace()?.id);
 
   // Subscribe so changing a binding in Settings immediately refreshes the
   // listener closure; getShortcut remains useful to non-React call sites.
@@ -97,6 +100,7 @@ export function GlobalShortcuts() {
         if ((candidate === "toggleChat" || candidate === "newChat") && !canUseFloatingChat()) {
           return false;
         }
+        if (candidate === "createIssue" && guest) return false;
         return shortcutMatchesEvent(getShortcut(candidate), event);
       });
       if (!actionId) return;
@@ -145,7 +149,7 @@ export function GlobalShortcuts() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [navigation, overrides, toggleNav, workspacePaths]);
+  }, [guest, navigation, overrides, toggleNav, workspacePaths]);
 
   return null;
 }

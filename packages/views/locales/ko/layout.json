@@ -188,7 +188,11 @@
       "pinned_settings": "고정 항목 표시",
       "views_settings": "보기 표시",
       "views_builtin": "기본 보기",
-      "views_show_count": "개수"
+      "views_show_count": "개수",
+      "guest_badge": "게스트",
+      "guest_badge_hint": "공유된 프로젝트를 보고 댓글을 남길 수 있습니다.",
+      "involved": "참여 중",
+      "shared_projects": "공유된 프로젝트"
     },
     "team": {
       "new_agent": "새 에이전트",

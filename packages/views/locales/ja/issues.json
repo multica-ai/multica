@@ -600,7 +600,8 @@
     "project_directory_path_copied_with_branch": "プロジェクトディレクトリのパスをコピーしました — 作業は {{branch}} ブランチにあります",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
     "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません",
-    "pull_requests_empty_title": "関連する PR はありません。"
+    "pull_requests_empty_title": "関連する PR はありません。",
+    "guest_readonly_note": "ゲストは閲覧とコメントのみ可能で、タスクのプロパティは変更できません。"
   },
   "timeline": {
     "loading": "読み込み中...",
@@ -764,7 +765,9 @@
     "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。",
     "reply_action": "返信",
     "actions_label": "コメントの操作",
-    "create_issue_from_selection": "選択内容からサブタスクを作成"
+    "create_issue_from_selection": "選択内容からサブタスクを作成",
+    "guest_placeholder": "返信… メンバーを @ できます",
+    "guest_hint": "ゲストはエージェントを @ したり、タスクを割り当てたりできません"
   },
   "reply": {
     "recipients_changed": "返信先が変更されました。送信先を確認してから、もう一度送信してください。",

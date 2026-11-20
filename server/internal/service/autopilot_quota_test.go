@@ -175,6 +175,76 @@ func TestAutopilotQuotaRejectsUnknownExecutionSource(t *testing.T) {
 	}
 }
 
+func TestAutopilotQuotaUnmeteredRunIgnoresFullQuota(t *testing.T) {
+	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 0)
+	metrics := &autopilotQuotaMetricsRecorder{}
+	fixture.service.QuotaMetrics = metrics
+	ctx := context.Background()
+	params := fixture.createRunArgs
+	params.Source = "manual"
+
+	run, reused, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manual", "member-run-now", params)
+	if err != nil || reused {
+		t.Fatalf("unmetered admission = reused %v, %v; want a fresh run", reused, err)
+	}
+	if run.QuotaReservationID.Valid {
+		t.Fatal("unmetered run reserved quota")
+	}
+	usage, err := fixture.service.AutopilotQuotaUsage(ctx, fixture.workspaceID)
+	if err != nil || *usage.Used != 0 || *usage.Reserved != 0 || len(usage.BlockedCounts) != 0 {
+		t.Fatalf("usage after unmetered run = %+v, %v; want nothing counted or blocked", usage, err)
+	}
+	if got := metrics.count("enforce", "manual", "unmetered"); got != 1 {
+		t.Fatalf("unmetered decisions = %d, want 1", got)
+	}
+
+	// A retried request reuses its run; a new request gets a new one.
+	again, reused, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manual", "member-run-now", params)
+	if err != nil || !reused || again.ID != run.ID {
+		t.Fatalf("retried unmetered admission = %s reused %v, %v; want %s reused", util.UUIDToString(again.ID), reused, err, util.UUIDToString(run.ID))
+	}
+	other, reused, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manual", "member-run-now-2", params)
+	if err != nil || reused || other.ID == run.ID {
+		t.Fatalf("second unmetered admission = %s reused %v, %v; want a new run", util.UUIDToString(other.ID), reused, err)
+	}
+
+	// The same source stays metered when it is not a member's own press.
+	if _, _, err := fixture.service.createAutopilotRunWithQuota(ctx, fixture.workspaceID, "manual", "agent-run-now", params); !errors.As(err, new(*AutopilotQuotaExceededError)) {
+		t.Fatalf("metered manual admission error = %v, want quota exceeded", err)
+	}
+
+	if _, _, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manul", "invalid-source", params); err == nil ||
+		!strings.Contains(err.Error(), "invalid autopilot execution source") {
+		t.Fatalf("unknown source error = %v, want application validation", err)
+	}
+}
+
+func TestAutopilotQuotaUnmeteredConcurrentRetriesShareOneRun(t *testing.T) {
+	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 0)
+	ctx := context.Background()
+	params := fixture.createRunArgs
+	params.Source = "manual"
+
+	const attempts = 8
+	ids := make([]pgtype.UUID, attempts)
+	errs := make([]error, attempts)
+	var wg sync.WaitGroup
+	for i := range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			run, _, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manual", "concurrent-run-now", params)
+			ids[i], errs[i] = run.ID, err
+		}()
+	}
+	wg.Wait()
+	for i := range attempts {
+		if errs[i] != nil || ids[i] != ids[0] {
+			t.Fatalf("attempt %d = %s, %v; want every attempt to share %s", i, util.UUIDToString(ids[i]), errs[i], util.UUIDToString(ids[0]))
+		}
+	}
+}
+
 func TestAutopilotQuotaEnforcesBoundaryAndFinalizesIdempotently(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()

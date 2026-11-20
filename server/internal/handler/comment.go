@@ -1733,6 +1733,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	if h.refuseGuestMention(w, r, uuidToString(issue.WorkspaceID), userID, authorType, req.Content) {
+		return
+	}
 
 	// A running turn receives text only, so a comment that carries files is
 	// always a normal trigger. A member's explicit skill selection is the
@@ -1887,6 +1890,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		unboundIDs, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
 			WorkspaceID:   issue.WorkspaceID,
 			AttachmentIds: attachmentIDs,
+			UploaderType:  authorType,
+			UploaderID:    parseUUID(authorID),
 		})
 		if err == nil {
 			created, err = qtx.CreateComment(r.Context(), createParams)
@@ -1905,6 +1910,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				IssueID:       issue.ID,
 				WorkspaceID:   issue.WorkspaceID,
 				AttachmentIds: attachmentIDs,
+				UploaderType:  authorType,
+				UploaderID:    parseUUID(authorID),
 			})
 		}
 		if err == nil {
@@ -3475,6 +3482,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
+	// The same mention rule as CreateComment: an edit must not add what a
+	// new comment could not carry.
+	if h.refuseGuestMention(w, r, workspaceID, userID, actorType, req.Content) {
+		return
+	}
 	if req.ExpectedRevision != nil {
 		if *req.ExpectedRevision < 1 {
 			writeError(w, http.StatusBadRequest, "expected_revision must be a positive integer")
@@ -3511,6 +3523,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	sourceTaskID := existing.SourceTaskID
 	var triggerIssue *db.Issue
 	var cancelled []db.AgentTaskQueue
+	cancelInEditTx := strictContentEdit || replaceAttachments
 	if oldContent != req.Content {
 		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
 		if err != nil {
@@ -3535,9 +3548,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			sourceTaskID = pgtype.UUID{}
 		}
 		// Legacy clients keep the existing cancel-before-update behavior. Strict
-		// revision writes defer cancellation until the conditional UPDATE wins,
-		// so a race that returns 409 cannot mutate the task queue.
-		if !strictContentEdit {
+		// revision writes, and any edit that sets attachments, cancel inside
+		// the edit's transaction once everything else has succeeded, so a 409
+		// (a lost revision race, an attachment no longer available) leaves the
+		// task queue untouched.
+		if !cancelInEditTx {
 			cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
 			if err != nil {
 				slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
@@ -3576,17 +3591,33 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
+		// Unbound drafts this edit may adopt are locked before UpdateComment
+		// takes the issue, the order CreateComment uses. The reverse order
+		// deadlocks against a comment created with the same draft.
+		if replaceAttachments && len(attachmentIDs) > 0 {
+			_, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
+				WorkspaceID:   existing.WorkspaceID,
+				AttachmentIds: attachmentIDs,
+				UploaderType:  actorType,
+				UploaderID:    parseUUID(actorID),
+			})
+		}
 		var updated db.UpdateCommentRow
-		updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		if err == nil {
+			updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		}
 		if err == nil {
 			comment = updated.Comment()
 			issueRevision = updated.IssueRevision
 		}
-		if err == nil && oldContent != req.Content && strictContentEdit {
-			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
-			if err == nil {
-				err = service.SettleTerminalTaskState(r.Context(), qtx, cancelled...)
-			}
+		if err == nil && replaceAttachments && len(attachmentIDs) > 0 {
+			_, err = qtx.BindUploaderDraftAttachmentsToIssue(r.Context(), db.BindUploaderDraftAttachmentsToIssueParams{
+				IssueID:       existing.IssueID,
+				WorkspaceID:   existing.WorkspaceID,
+				AttachmentIds: attachmentIDs,
+				UploaderType:  actorType,
+				UploaderID:    parseUUID(actorID),
+			})
 		}
 		if err == nil && replaceAttachments {
 			var changed int64
@@ -3595,6 +3626,23 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				IssueID:       existing.IssueID,
 				AttachmentIds: attachmentIDs,
 			})
+			// Every requested file must have ended up on the comment. One a
+			// concurrent request took first (a comment published with the
+			// same draft) refuses the whole edit instead of saving the text
+			// without it.
+			if err == nil && len(attachmentIDs) > 0 {
+				var got []pgtype.UUID
+				got, err = qtx.ListCommentAttachmentIDsAmong(r.Context(), db.ListCommentAttachmentIDsAmongParams{
+					CommentID:     comment.ID,
+					WorkspaceID:   existing.WorkspaceID,
+					AttachmentIds: attachmentIDs,
+				})
+				if err == nil {
+					if missing := firstMissingID(attachmentIDs, got); missing.Valid {
+						err = commentAttachmentUnavailableError{id: missing}
+					}
+				}
+			}
 			if err == nil && changed > 0 && oldContent == req.Content {
 				comment, err = qtx.BumpCommentRevision(r.Context(), db.BumpCommentRevisionParams{
 					ID:          comment.ID,
@@ -3602,8 +3650,23 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
+		// Last, after the attachments checked out: the runs built from the old
+		// body are cancelled in the same transaction, so any failure above
+		// rolls back with them still queued.
+		if err == nil && oldContent != req.Content {
+			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
+			if err == nil {
+				err = service.SettleTerminalTaskState(r.Context(), qtx, cancelled...)
+			}
+		}
 		if err == nil {
 			err = tx.Commit(r.Context())
+		}
+		if err != nil {
+			// Release the issue and comment locks before the error handling
+			// below reads them on other connections.
+			_ = tx.Rollback(r.Context())
+			cancelled = nil
 		}
 		if err == nil {
 			h.TaskService.BroadcastCancelledTasks(r.Context(), uuidToString(existing.WorkspaceID), cancelled)
@@ -3620,10 +3683,15 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
-		if triggerIssue != nil && !strictContentEdit {
+		if triggerIssue != nil && !cancelInEditTx {
 			// Cancellation committed but the edit did not. Restore the complete
 			// original batch, including the still-valid unchanged comment.
 			h.retriggerCancelledTaskSurvivors(r.Context(), *triggerIssue, cancelled, pgtype.UUID{})
+		}
+		var unavailable commentAttachmentUnavailableError
+		if errors.As(err, &unavailable) {
+			writeError(w, http.StatusConflict, "attachment "+uuidToString(unavailable.id)+" is no longer available")
+			return
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			current, reloadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{ID: commentUUID, WorkspaceID: wsUUID})
@@ -3823,6 +3891,28 @@ type commentDeletion struct {
 // lockCommentAttachments validates and pins the full requested set, including
 // existing issue attachments. The caller must already hold the issue's row
 // lock and have locked ownerless uploads before it; see CreateComment.
+// commentAttachmentUnavailableError reports a requested attachment that a
+// comment edit could not take, so the edit is rolled back.
+type commentAttachmentUnavailableError struct{ id pgtype.UUID }
+
+func (e commentAttachmentUnavailableError) Error() string {
+	return "attachment " + uuidToString(e.id) + " is no longer available"
+}
+
+// firstMissingID returns the first id in want that is not in have.
+func firstMissingID(want, have []pgtype.UUID) pgtype.UUID {
+	seen := make(map[pgtype.UUID]struct{}, len(have))
+	for _, id := range have {
+		seen[id] = struct{}{}
+	}
+	for _, id := range want {
+		if _, ok := seen[id]; !ok {
+			return id
+		}
+	}
+	return pgtype.UUID{}
+}
+
 func lockCommentAttachments(ctx context.Context, qtx *db.Queries, workspaceID, issueID pgtype.UUID, ids, unboundIDs []pgtype.UUID) (missing pgtype.UUID, err error) {
 	locked, err := qtx.LockAttachmentsForCommentLink(ctx, db.LockAttachmentsForCommentLinkParams{
 		WorkspaceID:   workspaceID,
