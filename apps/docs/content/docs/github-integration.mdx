@@ -17,6 +17,8 @@ Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab insta
 
 A workspace owner or admin can complete the connection:
 
+A new connection also requires GitHub installation control: a personal installation must belong to the authorizing GitHub user; an organization installation requires admin permission on every repository it covers. Read-only or partial access is insufficient. Select at least one repository for an organization installation before connecting.
+
 <Steps>
 <Step>
 Open **Settings → Code**.
@@ -31,6 +33,10 @@ In GitHub, pick the account or organization and authorize all repositories or a 
 Return to Multica after the installation completes.
 </Step>
 </Steps>
+
+Use **Add account or organization** in the GitHub row or the **Add repository** menu to connect another installation without disconnecting an existing one. Each connection lists its account and who connected it; the repository picker lets you switch between accounts. **Pause GitHub features** applies to all connections in the workspace.
+
+If GitHub returns no user authorization, Multica cannot verify a new connection, even if the App is already installed or connected to another workspace. Retry connecting and complete authorization; if this repeats, ask your Multica operator to check the App’s user authorization settings. Changing repository access alone may not complete a new connection.
 
 The connection status shows on the same page. Regular members can view the status but can't connect, disconnect, or change the switches.
 
@@ -109,7 +115,7 @@ How a PR was linked doesn't matter: the title, the branch name, and a `Closes MU
 
 The check runs when a PR event touches the issue: a linked PR merges, a PR is linked, or a link is removed. Reopening an issue doesn't move it back; the next linked PR that merges does. Changing the setting doesn't move issues whose PRs merged earlier.
 
-The status change is written to the timeline as a system action naming the PRs, and members subscribed to the issue are notified.
+The status change is written to the timeline as a system action naming the PRs, and members subscribed to the issue are notified if they turned on status change notifications.
 
 ## Multiple workspaces
 
@@ -121,7 +127,7 @@ If one identifier matches an issue in more than one of the connected workspaces 
 
 ## Disconnect
 
-Choosing **Disconnect** from the GitHub row's **⋯** menu on **Settings → Code** only removes the relationship between the current Multica workspace and the installation; it does not uninstall the App from GitHub for you. Existing PR records are kept, and new events stop flowing into that workspace.
+On **Settings → Code**, choose **Disconnect** beside the account you want to remove. Only that installation’s connection to the current workspace is removed; other connections keep receiving events. The App remains installed on GitHub, and existing PR records and links are kept.
 
 To revoke repository authorization on the GitHub side, uninstall the App or adjust its repository scope from your personal or organization GitHub App installations page. After uninstalling, every Multica workspace linked to that installation stops receiving events.
 
@@ -139,8 +145,8 @@ Create the App under GitHub's **Developer settings → GitHub Apps** and fill in
 | Field | Value |
 |---|---|
 | Homepage URL | Your Multica frontend address, e.g. `https://multica.example.com` |
-| Callback URL | Leave blank |
-| Setup URL | `https://<api-host>/api/github/setup`, with **Redirect on update** enabled |
+| Callback URL | `https://<api-host>/api/github/setup` |
+| Request user authorization (OAuth) during installation | Enable |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | A random string you keep long-term |
 
@@ -152,13 +158,14 @@ Repository permissions:
 | Pull requests | Read-only |
 | Checks | Read-only; used to show CI status |
 | Commit statuses | Read-only; used to aggregate legacy-status CI |
+| Actions | Optional, read-only; lets CI status ignore a cancelled run that a newer run of the same workflow replaced on the same commit |
 
 Subscribe to these events:
 
 - **Pull request**;
 - **Check suite**, **Check run**, and **Status**, which trigger CI and mergeability refreshes.
 
-PR snapshots use the Pull requests, Checks, and Commit statuses REST APIs. Contents access is not required.
+PR snapshots use the Pull requests, Checks, and Commit statuses REST APIs. Contents access is not required. With the optional Actions permission, Multica also reads the commit's workflow runs. Without it, a cancelled run still counts as failed even after a newer run of the same workflow passes.
 
 <Callout type="warning">
 This is the **Webhook secret**, not the OAuth Client secret. If the two sides have different webhook secrets, GitHub deliveries return `401 invalid signature`.
@@ -174,19 +181,21 @@ Take the slug from the App's public URL. For example, the slug of `https://githu
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<the webhook secret you entered when creating the App>
+GITHUB_APP_CLIENT_ID=<Client ID>
+GITHUB_APP_CLIENT_SECRET=<Client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-If either `GITHUB_APP_SLUG` or `GITHUB_WEBHOOK_SECRET` is missing, the connect button is disabled and the webhook endpoint refuses to process events.
+All six GitHub variables in this section are required for new connections, including `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`. Missing any of them disables Connect; webhook acceptance requires only `GITHUB_WEBHOOK_SECRET`. Existing bindings continue working. Set the first Callback URL to this endpoint and enable installation OAuth before deploying. GitHub does not use a separate Setup URL when installation OAuth is enabled.
 
-For the PR card to show CI status and mergeability, also set the next two variables. Multica uses them to authenticate as the App and pull snapshots:
+For new connections, PR-card CI status and mergeability, also set the next two variables. Multica uses a metadata-only installation token to compare the complete installation repository list with the repositories the connecting user administers:
 
 ```dotenv
 GITHUB_APP_ID=<the GitHub App's numeric ID>
 GITHUB_APP_PRIVATE_KEY=<full PEM private key, keeping the BEGIN/END lines and newlines>
 ```
 
-Generate the private key under the GitHub App's **Private keys → Generate a private key**. Without these two variables, PRs still mirror and issues still auto-link and change status on merge; the PR card just shows no CI or merge state.
+Generate the private key under the GitHub App's **Private keys → Generate a private key**. Without these two variables, Connect is disabled. Existing bindings still mirror PRs and update issues from webhooks, but PR cards lack CI and mergeability status.
 
 </Step>
 <Step>
@@ -206,7 +215,7 @@ Restart the API server, then complete the connection in **Settings → Code**.
 
 ## Troubleshooting
 
-- **Connect button disabled**: check that `GITHUB_APP_SLUG` and `GITHUB_WEBHOOK_SECRET` reached the API process.
+- **Connect button disabled**: check all six GitHub variables above, the first Callback URL, and **Request user authorization (OAuth) during installation**.
 - **Webhook returns 401**: confirm the GitHub App and the API use the same webhook secret, then redeliver from GitHub's **Recent Deliveries**.
 - **PR not linked**: check that the repository is in the App's authorized scope, auto-linking is on, the identifier belongs to the current workspace, and nobody removed the PR from the issue.
 - **Identifier in the body but not linked**: put it right after a closing keyword (`Closes MUL-123`), or in the branch name or PR title, or link the PR by hand.

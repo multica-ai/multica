@@ -1,5 +1,5 @@
 import { api } from "../api";
-import type { SearchIssuesResponse, SearchProjectsResponse } from "../types";
+import type { SearchDocsResponse, SearchIssuesResponse, SearchProjectsResponse } from "../types";
 import { LocalSearchIndexClient, startSearchIndexWorker } from "./client";
 
 let client: LocalSearchIndexClient | null = null;
@@ -22,9 +22,18 @@ export async function searchIssues(params: SearchParams): Promise<SearchIssuesRe
 }
 
 /** Project search with the same local-first behavior as `searchIssues`. */
-export async function searchProjects(params: SearchParams): Promise<SearchProjectsResponse> {
+export async function searchProjects(params: Parameters<typeof api.searchProjects>[0]): Promise<SearchProjectsResponse> {
   const local = await getLocalSearchIndex().searchProjects(params);
   return local ?? api.searchProjects(params);
+}
+
+/**
+ * Doc search. The local index does not hold docs yet, so the server always
+ * answers; callers go through here so docs join the local-first path in one
+ * place when it does.
+ */
+export async function searchDocs(params: Parameters<typeof api.searchDocs>[0]): Promise<SearchDocsResponse> {
+  return api.searchDocs(params);
 }
 
 /** Whether searches in this tab are currently answered locally. */

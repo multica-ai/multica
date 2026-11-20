@@ -116,6 +116,24 @@ describe("slash command suggestion items", () => {
     expect(items(qc).map((i) => i.label)).toEqual(["deploy", "review"]);
   });
 
+  it("filters paused skills from the active agent", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        agent({
+          id: "agent-1",
+          skills: [
+            { id: "paused", name: "paused", description: "", enabled: false },
+            { id: "active", name: "active", description: "", enabled: true },
+          ],
+        }),
+      ],
+    });
+
+    expect(items(qc).map((item) => item.id)).toEqual(["active"]);
+  });
+
   it("filters skills by name case-insensitively", () => {
     chatState.selectedAgentId = "agent-1";
     const qc = fakeQc({
@@ -551,8 +569,61 @@ describe("SlashCommandList empty states", () => {
 });
 
 describe("buildBuiltinCommandItems", () => {
-  it("returns the full built-in command set for an empty query", () => {
-    expect(buildBuiltinCommandItems("")).toEqual(BUILTIN_COMMANDS);
+  it("returns only quick actions and /note for an empty query with many skills", () => {
+    const skills = Array.from({ length: 18 }, (_, index) => ({
+      id: `skill-${index}`,
+      name: `skill-${index}`,
+      description: "",
+    }));
+    const actions = [{ id: "qa-1", name: "Request changes", description: "Review this" }];
+
+    expect(buildBuiltinCommandItems("", actions, skills)).toEqual([
+      { id: "quick-action:qa-1", label: "Request changes", description: "Review this" },
+      BUILTIN_COMMANDS[0],
+    ]);
+  });
+
+  it("merges matching quick actions, skills, and /note for a nonempty query", () => {
+    expect(buildBuiltinCommandItems(
+      "no",
+      [
+        { id: "qa-1", name: "notify", description: "Notify the team" },
+        { id: "qa-2", name: "review", description: "Review this" },
+      ],
+      [{ id: "skill-1", name: "note-deploy", description: "Ship changes" }],
+    )).toEqual([
+      { id: "quick-action:qa-1", label: "notify", description: "Notify the team" },
+      { id: "skill:skill-1", label: "note-deploy", description: "Ship changes" },
+      BUILTIN_COMMANDS[0],
+    ]);
+  });
+
+  it("ranks Issue skills by name and description within the shared item cap", () => {
+    const skills = [
+      ...Array.from({ length: 25 }, (_, index) => ({
+        id: `description-${index}`,
+        name: `skill-${index}`,
+        description: "Build a throwaway prototype",
+      })),
+      { id: "named", name: "wayfinder", description: "" },
+    ];
+    const result = buildBuiltinCommandItems("wa", [], skills);
+
+    expect(result).toHaveLength(20);
+    expect(result[0]?.id).toBe("skill:named");
+    expect(result.every((item) => item.id.startsWith("skill:"))).toBe(true);
+  });
+
+  it.each(["n", "no"])("reserves /note for query %j with 25 matching skills", (query) => {
+    const skills = Array.from({ length: 25 }, (_, index) => ({
+      id: `skill-${index}`,
+      name: `skill-${index}`,
+      description: "note",
+    }));
+
+    const result = buildBuiltinCommandItems(query, [], skills);
+    expect(result).toHaveLength(20);
+    expect(result.at(-1)?.id).toBe("note");
   });
 
   it("includes /note while the query is a prefix of the label", () => {
@@ -567,8 +638,9 @@ describe("buildBuiltinCommandItems", () => {
     expect(buildBuiltinCommandItems("ote")).toEqual([]);
   });
 
-  it("returns nothing for a query that matches no command", () => {
-    expect(buildBuiltinCommandItems("deploy")).toEqual([]);
+  it("returns nothing for a query that matches no command or skill", () => {
+    const skills = [{ id: "skill-1", name: "code-review", description: "Review code" }];
+    expect(buildBuiltinCommandItems("zzz", [], skills)).toEqual([]);
   });
 });
 
@@ -593,121 +665,85 @@ describe("SlashCommandList built-in command rendering", () => {
 });
 
 
-// Async quick-action rendering in the `/` menu (MUL-5465, review finding #4).
-//
-// The render request resolves after an arbitrary delay, during which the user
-// keeps typing. Three behaviours have to hold, and each one was a real bug at
-// some point in this PR:
-//   - a rejection must not destroy what the user typed
-//   - a success must replace the ORIGINAL command, not wherever the caret is
-//   - a command edited mid-flight must be left alone, not overwritten
-describe("builtin `/` menu — async quick action rendering", () => {
-  // Minimal editor stand-in: enough ProseMirror surface for the command to
-  // read the range text and issue its chain.
-  function fakeEditor(text: string) {
-    const calls: { from: number; to: number; content: string; contentType?: string }[] = [];
-    let docText = text;
+describe("builtin `/` menu — cached quick action content", () => {
+  const range = { from: 0, to: 7 };
+  const item = { id: `${QUICK_ACTION_ITEM_PREFIX}qa-1`, label: "review" };
+
+  function fakeEditor() {
     const chain = {
-      focus: () => chain,
-      insertContentAt: (
-        range: { from: number; to: number },
-        content: string,
-        opts?: { contentType?: string },
-      ) => {
-        calls.push({ from: range.from, to: range.to, content, contentType: opts?.contentType });
-        return chain;
-      },
-      insertContent: (content: string) => {
-        calls.push({ from: -1, to: -1, content });
-        return chain;
-      },
-      deleteRange: () => chain,
-      run: () => true,
+      focus: vi.fn(() => chain),
+      command: vi.fn(() => chain),
+      insertContentAt: vi.fn(() => chain),
+      run: vi.fn(() => true),
     };
     return {
-      calls,
-      setText: (next: string) => {
-        docText = next;
-      },
+      chain,
       editor: {
         chain: () => chain,
-        state: {
-          doc: {
-            get content() {
-              return { size: docText.length + 1 };
-            },
-            textBetween: (from: number, to: number) => docText.slice(from, to),
-          },
-        },
         view: { state: { selection: { $to: { nodeAfter: null } } } },
       },
     };
   }
 
-  const range = { from: 0, to: 7 };
-  const item = { id: `${QUICK_ACTION_ITEM_PREFIX}qa-1`, label: "review" };
-
-  it("leaves the typed command intact and reports the failure when render rejects", async () => {
-    const { editor, calls } = fakeEditor("/review");
-    const onRenderError = vi.fn();
-    const suggestion = createBuiltinCommandSuggestion({
-      renderQuickAction: () => Promise.reject(new Error("boom")),
-      onRenderError,
-    });
+  it("replaces the command range synchronously and parses mention markdown", () => {
+    const selection = window.getSelection()!;
+    const collapse = vi.spyOn(selection, "collapseToEnd").mockImplementation(() => {});
+    const { editor, chain } = fakeEditor();
+    const content = "[@Reviewer](mention://agent/agent-id)\n\nReview this";
+    const getQuickActionContent = vi.fn(() => content);
+    const suggestion = createBuiltinCommandSuggestion({ getQuickActionContent });
 
     suggestion.command!({ editor, range, props: item } as never);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
 
-    expect(calls).toHaveLength(0);
-    expect(onRenderError).toHaveBeenCalledTimes(1);
+    expect(getQuickActionContent).toHaveBeenCalledWith("qa-1");
+    expect(chain.insertContentAt).toHaveBeenCalledWith(range, content, { contentType: "markdown" });
+    expect(chain.run).toHaveBeenCalledOnce();
+    collapse.mockRestore();
   });
 
-  it("replaces the original range once a delayed render resolves", async () => {
-    const { editor, calls } = fakeEditor("/review");
-    let resolve!: (v: string) => void;
-    const suggestion = createBuiltinCommandSuggestion({
-      renderQuickAction: () => new Promise<string>((r) => { resolve = r; }),
-    });
+  it("leaves the command untouched when content is unavailable", () => {
+    const { editor, chain } = fakeEditor();
+    const suggestion = createBuiltinCommandSuggestion({ getQuickActionContent: () => "" });
 
     suggestion.command!({ editor, range, props: item } as never);
-    expect(calls).toHaveLength(0); // nothing destroyed while in flight
 
-    await act(async () => {
-      resolve("rendered body");
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    expect(chain.insertContentAt).not.toHaveBeenCalled();
+  });
 
-    // contentType must be "markdown": inserted as a plain string, the
-    // server-rendered `[@Name](mention://…)` lands as literal text and
-    // serialises back out with escaped brackets, so the mention never becomes
-    // a node and renders as raw markup in the thread.
-    expect(calls).toEqual([
-      { from: 0, to: 7, content: "rendered body", contentType: "markdown" },
+  it("inserts a skill through the shared slashCommand node shape", () => {
+    const selection = window.getSelection()!;
+    const collapse = vi.spyOn(selection, "collapseToEnd").mockImplementation(() => {});
+    const { editor, chain } = fakeEditor();
+    const suggestion = createBuiltinCommandSuggestion();
+
+    suggestion.command!({
+      editor,
+      range,
+      props: { id: "skill:skill-1", label: "deploy" },
+    } as never);
+
+    expect(chain.insertContentAt).toHaveBeenCalledWith(range, [
+      {
+        type: "slashCommand",
+        attrs: { id: "skill-1", label: "deploy", mentionSuggestionChar: "/" },
+      },
+      { type: "text", text: " " },
     ]);
+    expect(chain.run).toHaveBeenCalledOnce();
+    collapse.mockRestore();
   });
 
-  it("abandons the insert when the command was edited while the request was open", async () => {
-    const { editor, calls, setText } = fakeEditor("/review");
-    let resolve!: (v: string) => void;
-    const suggestion = createBuiltinCommandSuggestion({
-      renderQuickAction: () => new Promise<string>((r) => { resolve = r; }),
-    });
+  it("keeps /note as plain text", () => {
+    const selection = window.getSelection()!;
+    const collapse = vi.spyOn(selection, "collapseToEnd").mockImplementation(() => {});
+    const { editor, chain } = fakeEditor();
+    const suggestion = createBuiltinCommandSuggestion();
 
-    suggestion.command!({ editor, range, props: item } as never);
-    // The user rewrites the command; a prefix-only check would still see a
-    // leading "/" here and clobber it.
-    setText("/fixnow");
+    suggestion.command!({ editor, range, props: { id: "note", label: "note" } } as never);
 
-    await act(async () => {
-      resolve("rendered body");
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(calls).toHaveLength(0);
+    expect(chain.insertContentAt).toHaveBeenCalledWith(range, [
+      { type: "text", text: "/note " },
+    ]);
+    collapse.mockRestore();
   });
 });

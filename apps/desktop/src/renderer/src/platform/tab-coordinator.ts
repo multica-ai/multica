@@ -125,6 +125,29 @@ export function createScrollRestorationAdapter(
       const active = getActiveTab(useTabStore.getState());
       return active?.memento.scroll[scrollMementoKey(routeKey, containerKey)];
     },
+    registerScrollRoot(containerKey, element) {
+      const routeKey = activeRouteKey();
+      // Peek/preview scrollers opt out of capture by omitting this marker.
+      if (routeKey === null || !element.hasAttribute("data-tab-scroll-root")) {
+        return () => {};
+      }
+      const state = useTabStore.getState();
+      const generation = state.mountGeneration;
+      return () => {
+        const state = useTabStore.getState();
+        // Tab, pathname and reload transitions already captured synchronously.
+        // Their teardown must not overwrite that snapshot with a collapsed
+        // scroller. Query/hash synchronization can leave this element mounted,
+        // so it must keep capturing on a later detach.
+        if (
+          activeRouteKey() !== routeKey ||
+          state.mountGeneration !== generation
+        ) return;
+        state.commitScrollMemento(tabId, routeKey, {
+          [containerKey]: captureElementScrollEntry(element),
+        });
+      };
+    },
     getViewState(entryKey) {
       const routeKey = activeRouteKey();
       if (routeKey === null) return undefined;
@@ -175,13 +198,12 @@ function reconcile(): void {
  *
  * Plain scroll containers self-mark with `data-tab-scroll-root` (the
  * attribute value is the container key, "main" when bare). Containers sitting
- * at 0 are simply absent from the result — the store's per-route REPLACE
- * semantics turn that absence into "clear the stale offset".
+ * at 0 on both axes are included, so the store clears exactly those stale
+ * offsets while preserving records for currently unmounted views.
  *
  * External sources (sandboxed iframe documents) are merged in for the
- * outgoing tab ONLY; unlike plain containers they are ALWAYS written,
- * including at top 0, because their entry carries a `contentKey` and a
- * top:0 write with the new key is how a content change replaces a stale
+ * outgoing tab ONLY. Their zero entries are retained because they carry a
+ * `contentKey`: a top:0 write with the new key replaces a stale
  * positive offset rather than resurrecting it.
  */
 function captureScrollEntries(
@@ -193,9 +215,8 @@ function captureScrollEntries(
       "[data-tab-scroll-root]",
     );
     els.forEach((el) => {
-      if (el.scrollTop <= 0) return;
       const key = el.getAttribute("data-tab-scroll-root") || "main";
-      entries[key] = { top: el.scrollTop, height: el.scrollHeight };
+      entries[key] = captureElementScrollEntry(el);
     });
   }
   if (outgoingTabId) {
@@ -208,6 +229,11 @@ function captureScrollEntries(
     }
   }
   return entries;
+}
+
+function captureElementScrollEntry(element: HTMLElement): ScrollRestorationEntry {
+  const { scrollTop: top, scrollLeft: left, scrollHeight: height } = element;
+  return left > 0 ? { top, height, left } : { top, height };
 }
 
 function handleStoreChange(): void {
@@ -233,8 +259,8 @@ function handleStoreChange(): void {
     lastActiveUrl = activeUrl;
     if (outgoingTabId && outgoingUrl) {
       const routeKey = splitTabUrl(outgoingUrl).pathname;
-      // Always commit — REPLACE semantics clear entries for containers that
-      // scrolled back to 0; the store skips the write when nothing changed.
+      // Include zero offsets to clear only the mounted containers' records;
+      // unmounted views retain their last capture.
       useTabStore
         .getState()
         .commitScrollMemento(

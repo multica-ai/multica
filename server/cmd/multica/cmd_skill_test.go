@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 func newSkillImportTestCmd() *cobra.Command {
@@ -169,6 +171,122 @@ func TestRunSkillImportSendsOnConflictAndPrintsStructuredResult(t *testing.T) {
 	}
 	if got["status"] != "updated" {
 		t.Fatalf("status = %v", got["status"])
+	}
+}
+
+// The user-visible line for a failed URL import or refresh is FormatError of
+// the returned error. Each case is a response the import/refresh endpoints
+// actually write (see importFetchErrorResponse), plus a proxy's own 502 page,
+// which has no message and must keep the generic copy (GH #9812).
+var skillSourceErrorCases = []struct {
+	name   string
+	status int
+	body   string
+	want   string // FormatError output after the per-command lead-in
+}{
+	{
+		name:   "413 over file-count cap",
+		status: http.StatusRequestEntityTooLarge,
+		body:   `{"error":"import cap exceeded: import bundle would contain 600 files, exceeding the 512 file limit"}`,
+		want:   "Request too large: import cap exceeded: import bundle would contain 600 files, exceeding the 512 file limit",
+	},
+	{
+		name:   "502 source error",
+		status: http.StatusBadGateway,
+		body:   `{"error":"SKILL.md not found at skills/foo in acme/skills@main"}`,
+		want:   "{leadIn}SKILL.md not found at skills/foo in acme/skills@main",
+	},
+	{
+		name:   "503 source unavailable",
+		status: http.StatusServiceUnavailable,
+		body:   `{"error":"import source temporarily unavailable: could not read the acme/skills repository tree"}`,
+		want:   "{leadIn}import source temporarily unavailable: could not read the acme/skills repository tree",
+	},
+	{
+		name:   "504 fetch deadline",
+		status: http.StatusGatewayTimeout,
+		body:   `{"error":"skill import timed out fetching source files; the skill may be too large or the source too slow"}`,
+		want:   "{leadIn}skill import timed out fetching source files; the skill may be too large or the source too slow",
+	},
+	{
+		name:   "proxy 502 page keeps generic copy",
+		status: http.StatusBadGateway,
+		body:   `<html><body>502 Bad Gateway</body></html>`,
+		want:   "The Multica service is temporarily unavailable (server error). Please try again later; if it persists, contact support. Re-run with --debug to see the raw server response.",
+	},
+}
+
+func newSkillSourceErrorServer(t *testing.T, wantPath string, status int, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != wantPath {
+			t.Fatalf("path = %q, want %q", r.URL.Path, wantPath)
+		}
+		if strings.HasPrefix(body, "{") {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+}
+
+func setEnglishLocale(t *testing.T) {
+	t.Helper()
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_MESSAGES", "")
+	t.Setenv("LANG", "en_US.UTF-8")
+}
+
+func TestRunSkillImportSurfacesSourceFetchErrors(t *testing.T) {
+	for _, tc := range skillSourceErrorCases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			setEnglishLocale(t)
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+			srv := newSkillSourceErrorServer(t, "/api/skills/import", tc.status, tc.body)
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+			cmd := newSkillImportTestCmd()
+			_ = cmd.Flags().Set("url", "https://github.com/acme/skills/tree/main/skills/foo")
+			_, err := captureStdout(t, func() error { return runSkillImport(cmd, nil) })
+			if err == nil {
+				t.Fatal("expected import to fail")
+			}
+			want := strings.ReplaceAll(tc.want, "{leadIn}", "Skill import failed: ")
+			if got := cli.FormatError(err, false); got != want {
+				t.Errorf("FormatError = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestRunSkillRefreshSurfacesSourceFetchErrors(t *testing.T) {
+	for _, tc := range skillSourceErrorCases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			setEnglishLocale(t)
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+			srv := newSkillSourceErrorServer(t, "/api/skills/skill-123/refresh", tc.status, tc.body)
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+			cmd := &cobra.Command{Use: "refresh"}
+			cmd.Flags().String("server-url", "", "")
+			cmd.Flags().String("workspace-id", "", "")
+			cmd.Flags().String("profile", "", "")
+			cmd.Flags().String("output", "table", "")
+			_, err := captureStdout(t, func() error { return runSkillRefresh(cmd, []string{"skill-123"}) })
+			if err == nil {
+				t.Fatal("expected refresh to fail")
+			}
+			want := strings.ReplaceAll(tc.want, "{leadIn}", "Skill refresh failed: ")
+			if got := cli.FormatError(err, false); got != want {
+				t.Errorf("FormatError = %q, want %q", got, want)
+			}
+		})
 	}
 }
 

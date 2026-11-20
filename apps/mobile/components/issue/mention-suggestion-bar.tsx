@@ -26,7 +26,7 @@ import { useMemo } from "react";
 import { FlatList, Pressable, View } from "react-native";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import type { Agent, Issue, MemberWithUser, Squad } from "@multica/core/types";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
+import { canAssignAgentToIssue } from "@multica/core/permissions/rules";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -51,6 +51,7 @@ import {
 import type { MentionMarker } from "@/lib/mention-serialize";
 import { cn } from "@/lib/utils";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { isGuestRole } from "@/lib/member-role";
 
 type Mode = "comment" | "chat";
 
@@ -161,7 +162,11 @@ export function MentionSuggestionBar({
     }
 
     // Comment mode.
-    const showAll = !q || "all".startsWith(q);
+    const myRole =
+      members.find((m) => m.user_id === userId)?.role ?? null;
+    // A guest (MUL-9420) mentions people only — see comment-mention-candidates.
+    const guest = isGuestRole(myRole);
+    const showAll = !guest && (!q || "all".startsWith(q));
     const matchedMembers = [...members]
       .filter((m) => !q || m.name.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -169,8 +174,6 @@ export function MentionSuggestionBar({
     // mirrors web (packages/views/editor/extensions/mention-suggestion.tsx:418-424).
     // A private agent shown in the suggestion list would create a mention the
     // assignee can never act on; web hides them, mobile must too.
-    const myRole =
-      members.find((m) => m.user_id === userId)?.role ?? null;
     const runnableAgentIds = new Set(
       agents
         .filter(
@@ -182,6 +185,7 @@ export function MentionSuggestionBar({
     const matchedAgents = [...agents]
       .filter(
         (a) =>
+          !guest &&
           !a.archived_at &&
           isAgentRuntimeBound(a) &&
           (!q || a.name.toLowerCase().includes(q)) &&
@@ -193,6 +197,7 @@ export function MentionSuggestionBar({
     const matchedSquads = [...squads]
       .filter(
         (s) =>
+          !guest &&
           !s.archived_at &&
           runnableAgentIds.has(s.leader_id) &&
           (!q || s.name.toLowerCase().includes(q)),

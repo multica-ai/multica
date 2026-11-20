@@ -1,30 +1,11 @@
-/** Design tokens forwarded over the bridge so a surface looks native. */
-export const SURFACE_THEME_TOKENS = [
-  "--background",
-  "--foreground",
-  "--muted",
-  "--muted-foreground",
-  "--border",
-  "--primary",
-  "--primary-foreground",
-  "--destructive",
-  "--radius",
-  "--text-caption",
-  "--text-body",
-] as const;
+import { readEmbedTheme } from "../common/embed-theme";
 
 export const SURFACE_BRIDGE_CONNECT_MESSAGE = "multica:plugin-bridge-connect";
 export const SURFACE_BRIDGE_PROTOCOL_VERSION = 2;
 
+/** Design tokens forwarded over the bridge so a surface looks native: the embed token contract. */
 export function readThemeTokens(element: Element | null): Record<string, string> {
-  if (!element || typeof getComputedStyle !== "function") return {};
-  const computed = getComputedStyle(element);
-  const tokens: Record<string, string> = {};
-  for (const name of SURFACE_THEME_TOKENS) {
-    const value = computed.getPropertyValue(name).trim();
-    if (value) tokens[name] = value;
-  }
-  return tokens;
+  return readEmbedTheme(element).tokens;
 }
 
 function escapeAttribute(value: string): string {

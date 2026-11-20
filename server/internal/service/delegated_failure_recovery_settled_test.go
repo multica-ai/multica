@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -136,12 +138,13 @@ func TestPlannedButUndeliveredRecoveryStaysPending(t *testing.T) {
 		t.Fatal("automatic cancellation settled a recovery it never delivered")
 	}
 
-	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-	if err != nil {
-		t.Fatalf("RecoverPendingDelegatedFailures: %v", err)
-	}
-	if result.Replayed != 1 {
-		t.Fatalf("sweep after undelivered cancellation = %+v, want one replay", result)
+	sweepDelegatedFailureRecoveries(t, svc)
+	var active int
+	testutil.New(f.pool, f.workspaceID, f.userID).QueryRow(t, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE trigger_comment_id = $1 AND status = 'queued'`, recoveryCommentID).Scan(&active)
+	if active != 1 {
+		t.Fatalf("queued recovery tasks after undelivered cancellation = %d, want one replay", active)
 	}
 }
 
@@ -340,38 +343,64 @@ func TestNonTerminalTaskWithAReceiptIsNotSettled(t *testing.T) {
 	}
 }
 
+func settlementTriggerPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	// Trigger DDL takes a table lock, and the trigger rejects every settlement
+	// while it exists. Keep both off the comment table other packages share.
+	return testutil.IsolatedDB(t, sharedTestPool(t).Config().ConnString())
+}
+
+func rejectRecoverySettlement(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		CREATE FUNCTION reject_recovery_settlement() RETURNS trigger AS $$
+		BEGIN RAISE EXCEPTION 'settlement rejected'; END;
+		$$ LANGUAGE plpgsql`); err != nil {
+		t.Fatalf("create settlement trigger function: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		CREATE TRIGGER reject_recovery_settlement
+		BEFORE UPDATE OF recovery_settled_at ON comment
+		FOR EACH ROW EXECUTE FUNCTION reject_recovery_settlement()`); err != nil {
+		t.Fatalf("install settlement trigger: %v", err)
+	}
+}
+
+// A sibling package can keep a transaction open on comment while it writes
+// another comment on a second connection. Trigger DDL must not queue behind
+// that transaction and block the second write.
+func TestSettlementTriggerDoesNotBlockSharedComments(t *testing.T) {
+	shared := sharedTestPool(t)
+	pool := settlementTriggerPool(t)
+
+	// Finish database setup before holding a lock that can delay shared DDL.
+	holder, err := shared.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(context.Background())
+	if _, err := holder.Exec(context.Background(), `LOCK TABLE comment IN ROW EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rejectRecoverySettlement(t, ctx, pool)
+}
+
 // The atomicity that replaced the old best-effort call: if settlement cannot
 // commit, the terminal write must not commit either. Otherwise the stranded
 // receipt is unreachable — the outbox scan excludes a comment whose covering
 // task is terminal and holds it, so it would never replay and never settle.
 func TestBulkCancelRollsBackWhenSettlementFails(t *testing.T) {
-	f, svc := seedDelegatedFailureFixture(t)
+	f, svc := seedDelegatedFailureFixtureIn(t, settlementTriggerPool(t))
 	ctx := context.Background()
 	recoveryTaskID, recoveryCommentID := f.seedRecoverySignal(t, svc)
 	f.markDelivered(t, recoveryTaskID, recoveryCommentID)
 
 	// A trigger that fails only on the settlement UPDATE, so the cancel inside
 	// the same transaction has to roll back with it.
-	if _, err := f.pool.Exec(ctx, `
-		CREATE OR REPLACE FUNCTION reject_recovery_settlement() RETURNS trigger AS $$
-		BEGIN RAISE EXCEPTION 'settlement rejected'; END;
-		$$ LANGUAGE plpgsql`); err != nil {
-		t.Fatalf("create settlement trigger function: %v", err)
-	}
-	if _, err := f.pool.Exec(ctx, `
-		CREATE TRIGGER reject_recovery_settlement
-		BEFORE UPDATE OF recovery_settled_at ON comment
-		FOR EACH ROW EXECUTE FUNCTION reject_recovery_settlement()`); err != nil {
-		t.Fatalf("install settlement trigger: %v", err)
-	}
-	// Drop the function as well as the trigger: the test database is shared, so
-	// a leftover reject_recovery_settlement() would outlive this test and stay
-	// attachable to comment by any later run.
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		_, _ = f.pool.Exec(cleanupCtx, `DROP TRIGGER IF EXISTS reject_recovery_settlement ON comment`)
-		_, _ = f.pool.Exec(cleanupCtx, `DROP FUNCTION IF EXISTS reject_recovery_settlement()`)
-	})
+	rejectRecoverySettlement(t, ctx, f.pool)
 
 	agentID, err := util.ParseUUID(f.coordinator)
 	if err != nil {

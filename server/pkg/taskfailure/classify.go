@@ -122,7 +122,7 @@ func explicitContextOverflow(lower string) bool {
 // failure_reason today and lets per-backend structured upgrades land
 // independently.
 func Classify(rawError string) Reason {
-	trimmed := strings.TrimSpace(rawError)
+	trimmed := strings.TrimSpace(WithoutCodebuddyProtocolSummary(rawError))
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
 		// but that bucket is not part of the canonical taxonomy. In-flight
@@ -217,6 +217,7 @@ func Classify(rawError string) Reason {
 	case httpQuotaCodeRe.MatchString(lower),
 		containsAny(lower,
 			"insufficient_balance",
+			"insufficient balance",
 			"balance is too low",
 			"monthly usage limit",
 			"usage limit",
@@ -237,12 +238,15 @@ func Classify(rawError string) Reason {
 		):
 		return ReasonAgentProviderQuotaLimit
 
-	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit.
+	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit, and
+	//    Kiro's throttling message, which carries none of those words and
+	//    would otherwise reach rule 6 through its "Internal error" wrapper.
 	case httpCapacityCodeRe.MatchString(lower),
 		containsAny(lower,
 			"rate limit",
 			"overloaded",
 			"no capacity available",
+			kiroThrottledWitness,
 		):
 		return ReasonAgentProviderCapacityOrRateLimit
 
@@ -613,6 +617,17 @@ const (
 	kiroDispatchFailurePhrase     = "dispatch failure"
 )
 
+// kiroThrottledWitness is Kiro CLI's fixed message for a throttled request
+// (GH #10652), surfaced through the same -32603 response-stream wrapper:
+//
+//	kiro session/prompt failed: session/prompt: Internal error (code=-32603,
+//	data=Encountered an error in the response stream: The request was
+//	throttled by the service (request_id: ...))
+//
+// The whole phrase is matched rather than a bare "throttled", which also
+// appears in unrelated text such as log or heartbeat descriptions.
+const kiroThrottledWitness = "request was throttled by the service"
+
 func isKiroDispatchFailure(lower string) bool {
 	return strings.Contains(lower, kiroResponseStreamErrorPhrase) &&
 		strings.Contains(lower, kiroDispatchFailurePhrase)
@@ -708,6 +723,14 @@ var legacyTokenRateLimitReasons = map[string]bool{
 // can be deleted once no daemon old enough to produce its wire shape is still
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
+	rawError = WithoutCodebuddyProtocolSummary(rawError)
+	// Older daemons treated the billing rejection as a rate limit because
+	// they only recognized the numeric status and the structured balance code.
+	if reason == ReasonAgentProviderCapacityOrRateLimit.String() &&
+		strings.Contains(strings.ToLower(rawError), "insufficient balance") &&
+		Classify(rawError) == ReasonAgentProviderQuotaLimit {
+		return ReasonAgentProviderQuotaLimit
+	}
 	if legacyConcurrentRequestLimitReasons[reason] &&
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit
@@ -761,6 +784,14 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 		Classify(rawError) == ReasonAgentProviderNetwork {
 		return ReasonAgentProviderNetwork
 	}
+	// GH #10652: a daemon predating kiroThrottledWitness files Kiro's
+	// throttling under the same wrapper buckets. Neither bucket is retryable,
+	// so this only corrects the label; Classify must still agree.
+	if legacyKiroDispatchFailureReasons[reason] &&
+		strings.Contains(lowerError, kiroThrottledWitness) &&
+		Classify(rawError) == ReasonAgentProviderCapacityOrRateLimit {
+		return ReasonAgentProviderCapacityOrRateLimit
+	}
 	if legacyOpencodeStreamEndedReasons[reason] &&
 		(strings.HasPrefix(lowerError, opencodeStreamEndedPrefix) ||
 			strings.HasPrefix(lowerError, codeartsStreamEndedPrefix)) {
@@ -787,8 +818,23 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	if isAgentSideReason(reason) && hasAnyPrefix(lowerError, legacyEnvironmentPrepareWitnesses...) {
 		return ReasonEnvironmentPrepareFailed
 	}
+	// MUL-9665: a daemon predating ReasonLocalDirectoryMissing reports a
+	// deleted or moved project folder as the generic local_directory_error,
+	// which tells the user nothing about what to fix.
+	if reason == legacyLocalDirectoryReason && strings.HasPrefix(lowerError, legacyLocalDirectoryMissingPrefix) {
+		return ReasonLocalDirectoryMissing
+	}
 	return Reason(reason)
 }
+
+// legacyLocalDirectoryReason is the daemon's catchall for local_directory
+// failures. It sits outside the canonical taxonomy, so it has no constant.
+const legacyLocalDirectoryReason = "local_directory_error"
+
+// legacyLocalDirectoryMissingPrefix opens the error an older daemon's
+// validateLocalPath returns when the linked directory is gone. Compared
+// lowercased, like every witness here.
+const legacyLocalDirectoryMissingPrefix = "local_directory: path does not exist:"
 
 // containsAll reports whether s contains every one of the supplied substrings.
 // Used where a single phrase would be ambiguous and only the combination

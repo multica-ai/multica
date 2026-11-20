@@ -16,7 +16,7 @@ Two resource types are supported today:
 | Resource | Best for | Where runs happen |
 |---|---|---|
 | **GitHub repository** | Code shared by the team, with checkouts managed by the runtime | A runtime-managed working directory |
-| **Local directory** | An existing checkout, a very large repository, or when you want to inspect local changes directly | The original directory on a specific computer |
+| **Local directory** | An existing checkout, a very large repository, or when you want to inspect local changes directly | The original folder or an isolated worktree on a specific computer |
 
 ## How resources enter a run
 
@@ -24,17 +24,23 @@ When an agent works an issue inside the project, Multica adds the project name, 
 
 The workspace's linked repository list is always included in the run context. Repositories linked to the project additionally specify the code and default ref this body of work uses.
 
-A local directory only applies to the daemon it is bound to. When the daemon executing a run has a matching local directory, the agent works directly in that directory; other computers keep using the project's GitHub repositories or the workspace repositories.
+A local directory only applies to the daemon it is bound to. When the daemon executing a run has a matching local directory, the agent uses it in `in_place` mode or an isolated worktree of it in `worktree` mode; other computers keep using the project's GitHub repositories or the workspace repositories.
 
 ## Add a GitHub repository
 
-Open the project and choose "Add resource" under **Resources**. Pick a repository already linked to the workspace, or paste a Git URL. Workspace repositories are managed in **Settings → Code**; once GitHub is connected, the same page offers **Pick from GitHub** to import repositories the App is authorized for.
+Open the project and click **Add repository** in **Resources → Repositories**. Search for a repository already linked to the workspace, or paste a Git URL. Workspace repositories are managed in **Settings → Code**; once GitHub is connected, the same page offers **Pick from GitHub** to import repositories the App is authorized for.
+
+Pasting a GitHub branch URL (`https://github.com/owner/repo/tree/branch`) fills in the repository URL and starting branch separately. URL-encoded branch names are decoded; query parameters and page anchors are excluded. Check the starting branch before adding the repository. Changing the repository URL clears the previous starting branch unless the new URL specifies one.
 
 Repositories are not limited to GitHub: any Git URL the runtime can reach works as a repository resource. Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab under **Settings → Code**; see [Self-hosted Git hosting](/vcs-integration).
 
 When creating a project, you can also pick repositories directly under **Repos**. One project can link multiple GitHub repositories.
 
 A resource's `ref` sets the branch, tag, or commit that later checkouts use by default. `default_branch_hint` only gives the agent a default-branch hint and does not force a branch switch.
+
+For a managed repository, the agent starts in the task working directory. `multica repo checkout` normally creates a subdirectory for the repository and prints its path. Run commands that need the repository root from that path. If the agent process itself must start at the root and you control the runtime computer, attach an existing checkout as a local directory. Both `in_place` and `worktree` start the agent at a repository root; prefer `worktree` for git repositories to keep runs isolated and parallel. See [How runs share the directory](#how-runs-share-the-directory).
+
+If the repository's target subdirectory already contains another repository or leftover files and checkout reports a path conflict, run `multica repo checkout` from a different directory inside the same task working directory. Keep the original directory until you've checked whether it contains work you need.
 
 ## Add a local directory
 
@@ -54,17 +60,17 @@ Make sure Desktop's local daemon is online.
 </Step>
 <Step>
 
-Open the project's **Resources**, or the **Local directory** tab of the create-project dialog. The same choice is available there before the project exists.
+For an existing project, open **Resources → Local folders** and follow the steps below. When creating a project, use the **Local folder** tab instead; the folder and mode are saved when you create the project.
 
 </Step>
 <Step>
 
-Choose "Add local directory", then pick the folder to use.
+Under your computer, click **Choose folder...**, then pick the folder to use.
 
 </Step>
 <Step>
 
-Pick how runs should use it: **Direct** or **Parallel**, described under [How runs share the directory](#how-runs-share-the-directory). Desktop preselects **Parallel** when the folder is a git repository the runtime on that machine can isolate, and **Direct** otherwise. Change it right there, or later from **Resources** with the pencil next to the directory.
+Pick **Edit directly** or **Run in parallel**, described under [How runs share the directory](#how-runs-share-the-directory), then click **Add folder**. Desktop preselects **Run in parallel** when the folder is a git repository the runtime on that machine can isolate, and **Edit directly** otherwise. To change it later, click the folder's mode label in **Resources** and choose another mode; the selection saves immediately.
 
 </Step>
 </Steps>
@@ -83,7 +89,7 @@ In the default `in_place` mode a local directory is not an isolated environment:
 
 ## How runs share the directory
 
-A local directory has two execution modes, set per resource with `execution_mode`. Desktop labels them **Direct** and **Parallel**; the API, the CLI and the rest of this page use the identifiers.
+A local directory has two execution modes, set per resource with `execution_mode`. Desktop shows them as **Edit directly** and **Run in parallel** when you add a folder, and as **Direct** and **Parallel** on the folder's mode label; the API, the CLI and the rest of this page use the identifiers.
 
 <LocalDirModeDemo />
 
@@ -92,7 +98,7 @@ A local directory has two execution modes, set per resource with `execution_mode
 
 The agent works directly in your directory, and runs execute one at a time. When two runs use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
 
-Waiting does not modify the directory. A waiting run can be cancelled; otherwise it waits until the directory becomes available.
+Waiting does not modify the directory or consume a daemon execution slot. A waiting run can be cancelled; otherwise it resumes startup once both the directory and execution capacity are available.
 
 A plain non-git directory can only use this mode: worktree mode covers git repositories.
 
@@ -121,7 +127,7 @@ There is one branch per issue rather than one per run: `agent/<agent>/<issue>` (
 
 `<agent>` comes from the agent's name: lowercased, with everything other than a–z and 0–9 turned into `-`, up to 30 characters. A name with no Latin letters or digits becomes `agent`. So Ops helper working on OPS-21 gets `agent/ops-helper/ops-21`, while an agent named 运营助手 gets `agent/agent/ops-21`. `<issue>` is the issue identifier in lowercase.
 
-A run that failed partway still reports its branch, because it still committed whatever the agent had produced.
+A run that failed partway still reports its branch: the agent's commits are on it, and what it left uncommitted is kept as described in [Nothing is silently dropped](#nothing-is-silently-lost).
 
 </Accordion>
 <Accordion title="A follow-up continues where the last run stopped" id="follow-ups-continue-the-branch">
@@ -156,9 +162,18 @@ A run that could not record its branch — it failed before finishing, the recor
 </Accordion>
 <Accordion title="Nothing is silently dropped" id="nothing-is-silently-lost">
 
-Anything the agent leaves uncommitted is committed to that branch before the worktree is removed, including when the run fails partway.
+During a worktree run, a tracked runtime instruction file such as `CLAUDE.md` or `AGENTS.md` is marked `skip-worktree` in the task's private index. This keeps the injected brief out of the agent's commits without changing your checkout. Intentional edits to that file remain uncommitted until cleanup restores normal tracking: they follow the delivery rules below. Untracked runtime files and skill directories still need to be excluded from the agent's commits.
 
-In the rare case that commit itself cannot be made — for example a repo with `commit.gpgSign` and no signing key available to the runtime — the worktree is deliberately kept, the run is reported as failed, and `git worktree list` in your repo points at the directory holding the work.
+Nothing the agent leaves uncommitted is deleted with the worktree, including when the run fails partway. Where it goes depends on whether the agent committed during the run:
+
+- **The agent made no commit:** everything it left that is not gitignored is committed to the branch. Your repository's commit hooks do not run for this commit.
+- **The agent made commits of its own:** only those commits are delivered. Whatever it left uncommitted (generated output, scratch files, edits it did not commit) is saved under a hidden ref, `refs/multica/leftovers/<branch>/<task>`, and does not reach the branch. The agent is told this rule at the start of every run, so an agent that commits decides what is delivered.
+
+One exception: a run that starts by finishing a merge with your local edits (see [conflicts](#conflicts-are-resolved-by-the-agent)) commits everything it leaves, because those uncommitted changes include your edits.
+
+To see what a run saved, list the refs with `git for-each-ref refs/multica/leftovers` and inspect one with `git show --stat <ref>`. `git restore --source=<ref> -- <path>` brings a file back into your checkout.
+
+In the rare case that the commit or the save itself cannot be made — for example a repo with `commit.gpgSign` and no signing key available to the runtime — the worktree is deliberately kept, the run is reported as failed, and `git worktree list` in your repo points at the directory holding the work.
 
 </Accordion>
 <Accordion title="A run that changes nothing leaves nothing behind" id="no-changes-leave-nothing">
@@ -166,9 +181,9 @@ In the rare case that commit itself cannot be made — for example a repo with `
 Its branch is deleted rather than left as an empty entry in `git branch`, unless it is the issue's branch carrying earlier runs' work, which always survives.
 
 </Accordion>
-<Accordion title="The branch and hidden ref left in your repo" id="what-stays-in-your-repo">
+<Accordion title="The branch and hidden refs left in your repo" id="what-stays-in-your-repo">
 
-The worktree lives in the runtime's workspace directory and is reclaimed on [the normal cleanup schedule](/daemon-runtimes#cleanup). Two things persist in your repo: the branch, and one hidden ref per branch under `refs/multica/local-state/` recording who owns it and what your directory looked like when it was last continued.
+The worktree lives in the runtime's workspace directory and is reclaimed on [the normal cleanup schedule](/daemon-runtimes#cleanup). What persists in your repo is the branch; one hidden ref per branch under `refs/multica/local-state/`, recording who owns it and what your directory looked like when it was last continued; and one hidden ref under `refs/multica/leftovers/` for each run that left uncommitted changes after making commits of its own.
 
 The hidden refs never appear in `git branch`; list them with `git for-each-ref refs/multica`. Multica deletes each one with its branch, and drops any whose branch you deleted yourself the next time a run starts on that repo. You can also remove them at once with `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
 

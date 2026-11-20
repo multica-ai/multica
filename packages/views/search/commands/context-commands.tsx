@@ -14,6 +14,7 @@ import {
   Pin,
   PinOff,
   Play,
+  Settings2,
   SquarePen,
   UserPlus,
 } from "@multica/ui/icons";
@@ -27,7 +28,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { canAssignAgentToIssue, useCurrentMember } from "@multica/core/permissions";
+import { canAssignAgentToIssue, useCurrentMember, useIsGuest } from "@multica/core/permissions";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { getShortcut } from "@multica/core/shortcuts";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -53,6 +54,7 @@ export function useProjectCommandGroup(
   });
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
+  const guest = useIsGuest(wsId);
 
   return useMemo(() => {
     if (!context) return null;
@@ -68,14 +70,19 @@ export function useProjectCommandGroup(
         crumb: project.title,
         primary: true,
       },
-      {
-        id: "project-new-issue",
-        label: t(($) => $.project.new_issue),
-        icon: SquarePen,
-        keywords: ["new", "issue", "create", "新建", "任务"],
-        run: () => openCreateIssueWithPreference({ project_id: project.id }),
-        primary: true,
-      },
+      // A guest (MUL-9420) cannot create issues.
+      ...(guest
+        ? []
+        : [
+            {
+              id: "project-new-issue",
+              label: t(($) => $.project.new_issue),
+              icon: SquarePen,
+              keywords: ["new", "issue", "create", "新建", "任务"],
+              run: () => openCreateIssueWithPreference({ project_id: project.id }),
+              primary: true,
+            },
+          ]),
       {
         id: "project-pin",
         label: pinned ? t(($) => $.project.unpin) : t(($) => $.project.pin),
@@ -104,7 +111,7 @@ export function useProjectCommandGroup(
       heading: <ContextHeading label={t(($) => $.context.current_project)} subject={project.title} />,
       commands,
     };
-  }, [context, createPin, deletePin, getShareableUrl, p, pins, t]);
+  }, [context, createPin, deletePin, getShareableUrl, guest, p, pins, t]);
 }
 
 export function useAgentCommandGroup(context: ContextOf<"agent"> | null): PaletteCommandGroup | null {
@@ -178,6 +185,14 @@ export function useAgentCommandGroup(context: ContextOf<"agent"> | null): Palett
           if (pinned) unpinAgent.mutate(agent.id);
           else pinAgent.mutate(agent.id);
         },
+      },
+      {
+        id: "agent-settings",
+        label: t(($) => $.agent.settings),
+        icon: Settings2,
+        keywords: ["settings", "configure", "model", "runtime", "设置", "配置"],
+        run: () => navigation.push(`${p.agentDetail(agent.id)}?view=general`),
+        primary: true,
       },
     ];
     return {

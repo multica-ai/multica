@@ -1,0 +1,160 @@
+{
+  "page": {
+    "title": "Squads",
+    "new_button": "Nuevo squad",
+    "empty_no_match": "Ningún squad coincide con tus filtros.",
+    "table": {
+      "name": "Squad",
+      "leader": "Líder",
+      "members": "Miembros",
+      "creator": "Creado por",
+      "created": "Creado"
+    },
+    "no_matches": "Ningún squad coincide",
+    "row_menu": "Acciones del squad",
+    "archive_action": "Archivar"
+  },
+  "member_type": {
+    "agent": "Agente",
+    "member": "Miembro"
+  },
+  "archive_dialog": {
+    "title": "¿Archivar este squad?",
+    "description": "\"{{name}}\" se archivará. Las tareas asignadas actualmente a este squad se transferirán a su líder. Esto no se puede deshacer: crea un squad nuevo si necesitas recuperar el enrutado.",
+    "cancel": "Cancelar",
+    "confirm": "Archivar",
+    "archiving": "Archivando…",
+    "success": "Squad archivado"
+  },
+  "name_editor": {
+    "placeholder": "Nombre del squad"
+  },
+  "add_member_dialog": {
+    "title": "Añadir miembro",
+    "description": "Elige miembros del espacio de trabajo o agentes.",
+    "label_member": "Miembro",
+    "label_role": "Rol",
+    "label_optional": "(opcional)",
+    "cancel": "Cancelar",
+    "select_target": "Selecciona un miembro o agente",
+    "search_placeholder": "Buscar miembros o agentes...",
+    "members_section": "Miembros",
+    "agents_section": "Agentes",
+    "role_placeholder": "p. ej., Revisor, Líder de frontend",
+    "add": "Añadir"
+  },
+  "role_editor": {
+    "empty": "Añadir rol…",
+    "placeholder": "Rol (p. ej., Revisor)"
+  },
+  "description_editor": {
+    "empty": "Añadir una descripción",
+    "placeholder": "¿De qué es responsable este squad?"
+  },
+  "members_tab": {
+    "section_title": "Miembros",
+    "add_member_button": "Añadir miembro",
+    "create_agent_button": "Crear agente",
+    "leader_chip": "Líder",
+    "view_agent_tooltip": "Abrir detalle del agente",
+    "make_leader_tooltip": "Hacer líder del squad",
+    "remove_member_tooltip": "Quitar del squad",
+    "status_working": "Trabajando",
+    "status_idle": "Inactivo",
+    "status_offline": "Desconectado",
+    "status_unstable": "Inestable",
+    "status_archived": "Archivado",
+    "issue_status_blocked": "bloqueada",
+    "active_issue_more": "y {{count}} más",
+    "empty_title": "Aún no hay miembros",
+    "empty_description": "Añade agentes o miembros para que reciban las tareas asignadas a este squad."
+  },
+  "details": {
+    "leader": "Líder",
+    "members": "Miembros",
+    "created_by": "Creado por",
+    "created": "Creado",
+    "updated": "Actualizado",
+    "visibility": "Visibilidad",
+    "visibility_workspace": "Espacio de trabajo"
+  },
+  "toasts": {
+    "member_added": "Miembro añadido",
+    "member_add_failed": "No se ha podido añadir el miembro",
+    "member_removed": "Miembro eliminado",
+    "member_remove_failed": "No se ha podido eliminar el miembro",
+    "role_updated": "Rol actualizado",
+    "role_update_failed": "No se ha podido actualizar el rol",
+    "leader_updated": "Líder actualizado",
+    "leader_update_failed": "No se ha podido actualizar el líder",
+    "archive_failed": "No se ha podido archivar el squad",
+    "instructions_saved": "Instrucciones guardadas",
+    "update_failed": "No se ha podido guardar"
+  },
+  "profile_card": {
+    "unavailable": "Squad no disponible",
+    "detail_link": "Detalle →",
+    "archived": "Archivado",
+    "member_count_one": "{{count}} miembro",
+    "member_count_other": "{{count}} miembros",
+    "members_section": "Miembros",
+    "more_members_one": "+{{count}} más",
+    "more_members_other": "+{{count}} más"
+  },
+  "instructions_tab": {
+    "description": "El líder lee estas instrucciones cada vez que trabaja en una tarea asignada a este squad.",
+    "unsaved_changes": "Cambios sin guardar",
+    "save_button": "Guardar",
+    "placeholder": "p. ej., Empieza siempre escribiendo un test que falle. Prefiere commits pequeños y atómicos."
+  },
+  "scope": {
+    "mine": "Mis squads",
+    "all": "Todos los squads"
+  },
+  "toolbar": {},
+  "detail": {
+    "assign_work": "Asignar trabajo",
+    "copy_link": "Copiar enlace",
+    "link_copied": "Enlace copiado",
+    "not_found": "Squad no encontrado",
+    "not_found_description": "Puede haberse eliminado o puede que no tengas acceso.",
+    "back_to_list": "Todos los squads",
+    "instructions": "Instrucciones",
+    "edit": "Editar",
+    "cancel": "Cancelar",
+    "recent_work": "Trabajo reciente",
+    "recent_work_empty": "Aún no se han asignado tareas a este squad.",
+    "member_menu": "Acciones de {{name}}",
+    "working_on": "Trabajando en"
+  },
+  "intro": {
+    "title": "Agrupa agentes en un squad y trabajarán como un equipo",
+    "description": "Asigna una tarea al squad. Su agente líder la lee, encarga cada paso al miembro cuyo rol encaja y hace seguimiento hasta cumplir el objetivo. Tú solo tratas con un responsable.",
+    "slides": {
+      "route": {
+        "title": "Un responsable que reparte el trabajo por ti",
+        "description": "El líder lee la tarea y menciona al miembro más adecuado para el siguiente paso. Solo ese miembro empieza a trabajar."
+      },
+      "roles": {
+        "title": "Reparte el trabajo por roles",
+        "description": "Las descripciones de los roles indican al líder qué se le da bien a cada miembro. Los miembros pueden ser agentes o personas."
+      },
+      "progress": {
+        "title": "Sigue el progreso en un solo lugar",
+        "description": "La página del squad muestra su trabajo reciente y en qué está trabajando cada miembro."
+      }
+    },
+    "art": {
+      "assignee": "Asignado",
+      "squad_name": "Squad de frontend",
+      "issue_dark_mode": "Añadir un selector de modo oscuro a los ajustes",
+      "issue_board_columns": "Hacer redimensionables las columnas del tablero",
+      "issue_inbox_gestures": "Gestos de deslizamiento en la bandeja de entrada móvil",
+      "issue_paste_images": "Pegar imágenes en los comentarios",
+      "delegating": "Eligiendo un miembro por su rol...",
+      "role_frontend": "Frontend",
+      "role_testing": "Pruebas",
+      "role_product": "Producto"
+    }
+  }
+}

@@ -76,6 +76,22 @@ func TestBuildMetaSkillContentBriefContent(t *testing.T) {
 	}
 }
 
+// TestBuildMetaSkillContentDocsFollowFlag pins that the `multica doc` command
+// and the mention://doc form reach the brief only when the server's docs_v1
+// flag is on, so a deployment without Docs never points agents at it.
+func TestBuildMetaSkillContentDocsFollowFlag(t *testing.T) {
+	t.Parallel()
+
+	for _, enabled := range []bool{false, true} {
+		out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1", DocsEnabled: enabled})
+		for _, line := range []string{"`multica doc list|search|get|create|update|move`", "mention://doc/<doc-id>"} {
+			if got := strings.Contains(out, line); got != enabled {
+				t.Errorf("DocsEnabled=%v: brief contains %q = %v\n---\n%s", enabled, line, got, out)
+			}
+		}
+	}
+}
+
 // TestBuildMetaSkillContentIssueBodyFormatting pins the shared issue-body
 // hierarchy rule across every task kind that can author an issue.
 func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
@@ -231,7 +247,7 @@ func TestQuickCreateBriefOwnsRunAndOutputRules(t *testing.T) {
 
 	for _, want := range []string{
 		// exactly one create, no retry — a retry would duplicate the issue
-		"Run exactly one `multica issue create --output json` invocation",
+		"Run exactly one `" + multicaCLICommand() + " issue create --output json` invocation",
 		"Do not retry for any reason",
 		// no issue to query, transition, or comment on
 		"Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add`",
@@ -304,6 +320,31 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 		if strings.Contains(out, banned) {
 			t.Errorf("quick_create slim Available Commands should NOT advertise %q (hard guardrails forbid the call)", banned)
 		}
+	}
+}
+
+func TestAntigravityBackgroundTaskSafetyAllKinds(t *testing.T) {
+	t.Parallel()
+	for name, ctx := range map[string]TaskContextForEnv{
+		"comment":      {IssueID: "i", TriggerCommentID: "c"},
+		"assignment":   {IssueID: "i"},
+		"autopilot":    {AutopilotRunID: "r"},
+		"quick-create": {QuickCreatePrompt: "p"},
+		"chat":         {ChatSessionID: "c"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agy := buildMetaSkillContent("antigravity", ctx)
+			if !strings.Contains(agy, "yield the model subturn while waiting") ||
+				strings.Contains(agy, "whatever a tool response promises") || strings.Contains(agy, "Never background-and-yield") {
+				t.Fatal("Antigravity model-subturn contract missing or contradicted")
+			}
+			for _, provider := range []string{"claude", "codex", "codebuddy", "hermes"} {
+				other := buildMetaSkillContent(provider, ctx)
+				if !strings.Contains(other, "Never background-and-yield") || strings.Contains(other, "yield the model subturn") {
+					t.Fatalf("%s inherited Antigravity's exception", provider)
+				}
+			}
+		})
 	}
 }
 

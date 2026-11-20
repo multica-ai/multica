@@ -17,6 +17,8 @@ GitHub 連携が読み取るのは、インストール時に許可されたリ�
 
 ワークスペースの owner または admin が接続できます。
 
+新規接続には GitHub 側の管理権限も必要です。個人の installation は認可するユーザー本人のものである必要があります。組織の installation では対象の全リポジトリで admin 権限が必要で、読み取り権限や一部だけの管理権限では接続できません。組織の installation には少なくとも1つのリポジトリを選択してください。
+
 <Steps>
 <Step>
 **設定 → コード** を開きます。
@@ -31,6 +33,10 @@ GitHub でアカウントまたは organization を選び、すべてのリポ�
 インストールが完了したら Multica に戻ります。
 </Step>
 </Steps>
+
+GitHub の行または**リポジトリを追加** メニューで **アカウントまたは組織を追加** を選ぶと、既存の接続を解除せずに別のインストールを接続できます。各接続にはアカウントと接続した人が表示され、リポジトリ選択画面でアカウントを切り替えられます。**GitHub 機能を一時停止** はワークスペースの全接続に適用されます。
+
+GitHub がユーザー認証を返さない場合、App がインストール済みでも、別のワークスペースに接続済みでも、新しい接続は検証できません。再接続して認証を完了してください。繰り返す場合は Multica の運用担当者に App のユーザー認証設定の確認を依頼してください。リポジトリの範囲変更だけでは新しい接続を完了できない場合があります。
 
 接続状態は同じページに表示されます。通常のメンバーは状態を確認できますが、接続、切断、スイッチの変更はできません。
 
@@ -107,7 +113,7 @@ PR の紐づけ方は結果に影響しません。タイトル、ブランチ�
 
 判定は PR イベントがタスクに関わったときだけ行います。紐づいた PR のマージ、紐づけの追加、紐づけの解除です。タスクを再度開いても元には戻らず、次に紐づいた PR がマージされたときに変更されます。設定を変えても、以前にマージされたタスクには影響しません。
 
-状態の変更は関連する PR を示したシステム操作としてタイムラインに記録され、そのタスクを購読しているメンバーへ通知されます。この設定は[セルフホスト Git ホスティング](/vcs-integration)を含むすべてのコードホストで共通です。
+状態の変更は関連する PR を示したシステム操作としてタイムラインに記録され、そのタスクを購読し、ステータス変更の通知をオンにしているメンバーへ通知されます。この設定は[セルフホスト Git ホスティング](/vcs-integration)を含むすべてのコードホストで共通です。
 
 ## 複数のワークスペース
 
@@ -119,7 +125,7 @@ PR の紐づけ方は結果に影響しません。タイトル、ブランチ�
 
 ## 接続を解除する
 
-**設定 → コード** の GitHub の行で **⋯** メニューから**接続解除**を選ぶと、現在の Multica ワークスペースと installation の関係だけが削除されます。GitHub から App がアンインストールされることはありません。既存の PR 記録は保持されますが、新しいイベントはこのワークスペースに届かなくなります。
+**設定 → コード** で、削除したいアカウントの横にある **接続解除** を選びます。対象のインストールと現在のワークスペースの接続だけが削除され、他の接続はイベントを受信し続けます。App は GitHub にインストールされたままで、既存の PR 記録とリンクは保持されます。
 
 GitHub 側のリポジトリアクセスを取り消す場合は、個人または organization の GitHub App installations ページで App をアンインストールするか、リポジトリの範囲を変更してください。App をアンインストールすると、その installation に接続していたすべての Multica ワークスペースがイベントを受信しなくなります。
 
@@ -137,8 +143,8 @@ GitHub の **Developer settings → GitHub Apps** で App を作成し、次の�
 | フィールド | 値 |
 |---|---|
 | Homepage URL | Multica のフロントエンド URL。例: `https://multica.example.com` |
-| Callback URL | 空欄 |
-| Setup URL | `https://<api-host>/api/github/setup`。**Redirect on update** を有効にする |
+| Callback URL | `https://<api-host>/api/github/setup` |
+| Request user authorization (OAuth) during installation | 有効にする |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 長期保管するランダムな文字列 |
 
@@ -150,13 +156,14 @@ Repository permissions:
 | Pull requests | Read-only |
 | Checks | Read-only。CI の状態表示に使用 |
 | Commit statuses | Read-only。legacy status 形式の CI 集計に使用 |
+| Actions | 任意。Read-only。同じコミットで同じワークフローの新しい実行に置き換えられた、キャンセル済みの実行を CI 状態から除外するために使用 |
 
 次のイベントを購読します。
 
 - **Pull request**
 - **Check suite**、**Check run**、**Status**。CI とマージ可能性を更新するために使用します。
 
-PR スナップショットは Pull requests、Checks、Commit statuses の REST API から取得します。Contents 権限は不要です。
+PR スナップショットは Pull requests、Checks、Commit statuses の REST API から取得します。Contents 権限は不要です。任意の Actions 権限を付与すると、そのコミットのワークフロー実行も読み取ります。付与しない場合、同じワークフローの新しい実行が成功しても、キャンセルされた古い実行は失敗として数えられます。
 
 <Callout type="warning">
 必要なのは **Webhook secret** であり、OAuth Client secret ではありません。GitHub と Multica に入力した Webhook secret が異なる場合、GitHub delivery は `401 invalid signature` を返します。
@@ -172,19 +179,21 @@ App の公開 URL から slug を確認します。たとえば `https://github.
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<webhook secret entered when creating the App>
+GITHUB_APP_CLIENT_ID=<Client ID>
+GITHUB_APP_CLIENT_SECRET=<Client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-`GITHUB_APP_SLUG` と `GITHUB_WEBHOOK_SECRET` のいずれかがない場合、接続ボタンは無効になり、webhook エンドポイントもイベントを拒否します。
+新しい接続には、この節の6つの GitHub 変数すべてが必要です。`GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` も必須です。いずれかがない場合は接続ボタンが無効になります。webhook の受信には `GITHUB_WEBHOOK_SECRET` のみが必要で、既存の接続は引き続き動作します。デプロイ前に最初の Callback URL をこのエンドポイントに設定し、インストール時の OAuth 認可を有効にしてください。このオプションを有効にすると、GitHub は別の Setup URL を使用しません。
 
-PR カードに CI の状態とマージ可能性を表示するには、次の 2 つの変数も必要です。Multica はこれを使って App として認証し、スナップショットを取得します。
+新規接続と PR カードの CI 状態・マージ可否のために、次の2つの変数も設定してください。Multica は metadata 読み取り専用トークンで installation の全リポジトリを取得し、接続ユーザーが管理するリポジトリと照合します。
 
 ```dotenv
 GITHUB_APP_ID=<numeric GitHub App ID>
 GITHUB_APP_PRIVATE_KEY=<complete PEM private key, including BEGIN/END lines and newlines>
 ```
 
-秘密鍵は GitHub App の **Private keys → Generate a private key** から生成します。この 2 つを設定しなくても、PR のミラー、タスクの自動紐づけ、マージ時のステータス変更は動作します。PR カードに CI やマージ状態が表示されないだけです。
+秘密鍵は GitHub App の **Private keys → Generate a private key** から生成します。この2つの変数がない場合、接続ボタンは無効になります。既存の接続は webhook で PR をミラーしタスクを更新しますが、PR カードに CI やマージ状態は表示されません。
 
 </Step>
 <Step>
@@ -204,7 +213,7 @@ API サービスを再起動し、**設定 → コード** から接続します
 
 ## よくある問題
 
-- **接続ボタンを使用できない**: `GITHUB_APP_SLUG` と `GITHUB_WEBHOOK_SECRET` が API プロセスに設定されていることを確認します。
+- **接続ボタンを使用できない**: 上記6つの GitHub 変数、最初の Callback URL、**Request user authorization (OAuth) during installation** を確認します。
 - **Webhook が 401 を返す**: GitHub App と API が同じ Webhook secret を使っていることを確認し、GitHub の **Recent Deliveries** から再配信します。
 - **PR が紐づかない**: リポジトリが App の許可範囲にあること、PR の自動紐づけが有効であること、番号が現在のワークスペースのものであること、誰かがタスクから外していないかを確認します。
 - **本文に番号を書いても紐づかない**: `Closes MUL-123` を使うか、番号をブランチ名または PR タイトルに入れるか、手動で紐づけます。

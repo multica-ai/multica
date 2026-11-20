@@ -9,11 +9,65 @@ import { issueViewEverywhereOptions } from "./queries";
 import { issueViewPreferenceOptions, useUpdateIssueViewPreference } from "./preferences";
 
 /** The views every workspace has without saving anything. */
-export type BuiltinViewKey = "my_issues" | "my_agents" | "all_issues";
-export const BUILTIN_VIEW_KEYS: readonly BuiltinViewKey[] = ["my_issues", "my_agents", "all_issues"];
+export type BuiltinViewKey = "all_issues" | "my_work" | "working" | "subscribed" | "snoozed";
+export const BUILTIN_VIEW_KEYS: readonly BuiltinViewKey[] = ["all_issues", "my_work", "working", "subscribed", "snoozed"];
 
 export const builtinViewItemId = (key: BuiltinViewKey) => `builtin:${key}`;
 export const savedViewItemId = (viewId: string) => `view:${viewId}`;
+
+/** Built-ins an order saved before My work replaced My issues and My agents can hold. */
+const LEGACY_MY_WORK_IDS = new Set(["builtin:my_issues", "builtin:my_agents"]);
+const LEGACY_UNREAD_ID = "builtin:unread";
+
+/**
+ * A saved order in today's built-ins: My issues and My agents become My work,
+ * followed by Working and Subscribed, which did not exist then; Unread goes.
+ */
+export function migrateSidebarViewOrder(order: readonly string[]): string[] {
+  if (!order.some((id) => LEGACY_MY_WORK_IDS.has(id) || id === LEGACY_UNREAD_ID)) return [...order];
+  const added = [builtinViewItemId("working"), builtinViewItemId("subscribed")].filter((id) => !order.includes(id));
+  const next: string[] = [];
+  for (const id of order) {
+    if (id === LEGACY_UNREAD_ID) continue;
+    if (!LEGACY_MY_WORK_IDS.has(id)) {
+      next.push(id);
+      continue;
+    }
+    const myWork = builtinViewItemId("my_work");
+    if (next.includes(myWork)) continue;
+    next.push(myWork, ...added);
+  }
+  return [...new Set(next)];
+}
+
+/**
+ * Built-ins added after users began arranging the list. A saved order that
+ * has never held one gets it after the built-in it follows by default; once
+ * removed it is remembered as hidden and stays out.
+ */
+const LATER_BUILTINS: readonly { id: string; after: string }[] = [
+  { id: builtinViewItemId("snoozed"), after: builtinViewItemId("subscribed") },
+];
+
+export function withLaterBuiltins(order: readonly string[], hidden: readonly string[]): string[] {
+  const next = [...order];
+  for (const { id, after } of LATER_BUILTINS) {
+    if (next.includes(id) || hidden.includes(id)) continue;
+    const at = next.indexOf(after);
+    if (at >= 0) {
+      next.splice(at + 1, 0, id);
+      continue;
+    }
+    const lastBuiltin = next.findLastIndex((other) => other.startsWith("builtin:"));
+    next.splice(lastBuiltin + 1, 0, id);
+  }
+  return next;
+}
+
+/** The later built-ins an order leaves out, so they are not added back. */
+function hiddenLaterBuiltins(order: readonly string[]): string[] {
+  return LATER_BUILTINS.map(({ id }) => id).filter((id) => !order.includes(id));
+}
 
 export const SIDEBAR_VIEWS_SCOPE = { scope_type: "sidebar" } as const;
 
@@ -25,8 +79,9 @@ const EMPTY_VIEWS: IssueView[] = [];
 const EMPTY_PINS: PinnedItem[] = [];
 
 /**
- * The starred list before the user has arranged it: the built-ins, the
- * user's own views, then views they had pinned under the old Pinned section.
+ * The starred list before the user has arranged it: the default built-ins,
+ * the user's own views, then views they had pinned under the old Pinned
+ * section.
  */
 export function defaultSidebarViewOrder(
   views: readonly IssueView[],
@@ -95,7 +150,12 @@ export function useSidebarViews(wsId: string, userId: string | undefined) {
   const save = useUpdateIssueViewPreference(wsId, SIDEBAR_VIEWS_SCOPE);
 
   const preference = preferenceQuery.data;
-  const savedOrder = preference && preference.updated_at !== "" ? preference.prefs.order : null;
+  const storedOrder = preference && preference.updated_at !== "" ? preference.prefs.order : null;
+  const storedHidden = preference && preference.updated_at !== "" ? preference.prefs.hidden : null;
+  const savedOrder = useMemo(
+    () => (storedOrder ? withLaterBuiltins(migrateSidebarViewOrder(storedOrder), storedHidden ?? []) : null),
+    [storedOrder, storedHidden],
+  );
   const order = useMemo(
     () =>
       savedOrder ??
@@ -115,7 +175,7 @@ export function useSidebarViews(wsId: string, userId: string | undefined) {
     (savedOrder !== null || (viewsQuery.isSuccess && (!userId || pinsQuery.isSuccess)));
   const write = useCallback(
     (next: string[]) => {
-      if (ready) save({ hidden: [], order: next });
+      if (ready) save({ hidden: hiddenLaterBuiltins(next), order: next });
     },
     [ready, save],
   );

@@ -23,12 +23,10 @@ import type {
  */
 export const QUICK_ACTIONS_PENDING_TIMEOUT_MS = 12_000;
 
-// NOTE on workspace scoping:
-// `wsId` is used only as part of queryKey for cache isolation per workspace.
-// The actual workspace context comes from ApiClient's X-Workspace-Slug header,
-// which is set by the URL-driven [workspaceSlug] layout. Callers must ensure
-// the header is in sync with the wsId they pass here — otherwise cache writes
-// will be misattributed during a workspace switch race window.
+// Sessions, pinned agents, pending tasks, and the running indicator explicitly
+// bind requests to the workspace UUID in their query key. Other session/task
+// queries still use ApiClient's current workspace header, which callers must
+// keep aligned with the resource's workspace and any wsId in the query key.
 
 export const chatKeys = {
   all: (wsId: string) => ["chat", wsId] as const,
@@ -52,6 +50,11 @@ export const chatKeys = {
   draftRestoresAll: () => ["chat", "draft-restores"] as const,
   /** Durable deferred-cancellation draft restores for a session (#5219). */
   draftRestores: (sessionId: string) => [...chatKeys.draftRestoresAll(), sessionId] as const,
+  wakeupsAll: () => ["chat", "wakeups"] as const,
+  /** A conversation's wakeups: active ones plus those that ended recently. */
+  wakeups: (sessionId: string) => [...chatKeys.wakeupsAll(), sessionId] as const,
+  /** The caller's wakeups across their conversations in this workspace. */
+  myWakeups: (wsId: string) => [...chatKeys.all(wsId), "my-wakeups"] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-user pinned agents for the quick-agent bar. */
@@ -77,7 +80,7 @@ export function isTaskMessageTaskId(taskId: string | null | undefined): taskId i
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),
-    queryFn: () => api.listChatSessions({ status: "all" }),
+    queryFn: () => api.listChatSessions({ status: "all" }, { workspaceId: wsId }),
     staleTime: Infinity,
   });
 }
@@ -96,12 +99,16 @@ function sessionActivityTime(s: ChatSession): number {
  * order when pin timestamps aren't carried in the list payload.
  */
 export function sortChatSessions(sessions: ChatSession[]): ChatSession[] {
-  return [...sessions].sort((a, b) => {
-    const ap = a.pinned ? 1 : 0;
-    const bp = b.pinned ? 1 : 0;
-    if (ap !== bp) return bp - ap;
-    return sessionActivityTime(b) - sessionActivityTime(a);
-  });
+  // Parse dates once per session, rather than on each comparison.
+  return sessions
+    .map((session) => ({ session, activity: sessionActivityTime(session) }))
+    .sort((a, b) => {
+      const ap = a.session.pinned ? 1 : 0;
+      const bp = b.session.pinned ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return b.activity - a.activity;
+    })
+    .map(({ session }) => session);
 }
 
 /**
@@ -121,7 +128,7 @@ export function countUnreadChatSessions(sessions: ChatSession[]): number {
 export function chatPinnedAgentsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pinnedAgents(wsId),
-    queryFn: () => api.listChatPinnedAgents(),
+    queryFn: () => api.listChatPinnedAgents({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }
@@ -188,6 +195,25 @@ export function chatDraftRestoresOptions(sessionId: string) {
     queryFn: () => api.listChatDraftRestores(sessionId),
     enabled: !!sessionId,
     staleTime: 0,
+  });
+}
+
+/** Kept fresh by chat:wakeup_changed; the countdowns tick client-side. */
+export function chatWakeupsOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: chatKeys.wakeups(sessionId),
+    queryFn: () => api.listChatSessionWakeups(sessionId),
+    enabled: !!sessionId,
+    staleTime: Infinity,
+  });
+}
+
+export function myChatWakeupsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: chatKeys.myWakeups(wsId),
+    queryFn: () => api.listMyChatWakeups(),
+    enabled: !!wsId,
+    staleTime: Infinity,
   });
 }
 
@@ -335,7 +361,7 @@ export function isTaskMessageTimelineHeld(
 export function pendingChatTasksOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTasks(wsId),
-    queryFn: () => api.listPendingChatTasks(),
+    queryFn: () => api.listPendingChatTasks({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }
@@ -350,7 +376,7 @@ export function pendingChatTasksOptions(wsId: string) {
 export function hasPendingChatTasksOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTasksHasAny(wsId),
-    queryFn: () => api.hasAnyPendingChatTasks(),
+    queryFn: () => api.hasAnyPendingChatTasks({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }

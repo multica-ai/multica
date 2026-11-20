@@ -45,6 +45,8 @@ const (
 	// post-quantum key share makes it ~1.5 KB) while curl on the same machine
 	// gets through (GH #8654).
 	KindNetworkTLSHandshakeTimeout
+	// The HTTP response started but its body ended before decoding completed.
+	KindNetworkIncompleteResponse
 
 	// HTTP status layer.
 	KindAuthRequired // 401
@@ -57,6 +59,7 @@ const (
 	KindNotFound    // 404
 	KindConflict    // 409
 	KindValidation  // 400 / 422
+	KindTooLarge    // 413
 	KindRateLimited // 429
 	KindServerError // 5xx
 
@@ -76,7 +79,7 @@ const (
 // IsNetwork reports whether the kind is a transport-layer failure.
 func (k ErrorKind) IsNetwork() bool {
 	switch k {
-	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkStalled, KindNetworkTLSHandshakeTimeout:
+	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkStalled, KindNetworkTLSHandshakeTimeout, KindNetworkIncompleteResponse:
 		return true
 	default:
 		return false
@@ -102,6 +105,8 @@ func (k ErrorKind) String() string {
 		return "network_stalled"
 	case KindNetworkTLSHandshakeTimeout:
 		return "network_tls_handshake_timeout"
+	case KindNetworkIncompleteResponse:
+		return "network_incomplete_response"
 	case KindAuthRequired:
 		return "auth_required"
 	case KindTaskTokenRejected:
@@ -114,6 +119,8 @@ func (k ErrorKind) String() string {
 		return "conflict"
 	case KindValidation:
 		return "validation"
+	case KindTooLarge:
+		return "too_large"
 	case KindRateLimited:
 		return "rate_limited"
 	case KindServerError:
@@ -212,6 +219,8 @@ func (e *HTTPError) Kind() ErrorKind {
 		return KindConflict
 	case 400, 422:
 		return KindValidation
+	case 413:
+		return KindTooLarge
 	case 429:
 		return KindRateLimited
 	default:
@@ -321,11 +330,15 @@ func wrapTransport(req *http.Request, err error) error {
 	if err == nil {
 		return nil
 	}
+	return networkError(req, err, classifyNetworkError(err))
+}
+
+func networkError(req *http.Request, err error, kind ErrorKind) *NetworkError {
 	op := ""
 	if req != nil && req.URL != nil {
 		op = req.Method + " " + req.URL.Path
 	}
-	return &NetworkError{Kind: classifyNetworkError(err), Op: op, Err: err}
+	return &NetworkError{Kind: kind, Op: op, Err: err}
 }
 
 // wrapBodyRead classifies an error raised while reading or decoding a
@@ -353,11 +366,13 @@ func wrapBodyRead(req *http.Request, err error) error {
 	if errors.As(err, &stalled) {
 		return wrapTransport(req, err)
 	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return networkError(req, err, KindNetworkIncompleteResponse)
+	}
 	var netErr net.Error
 	if errors.As(err, &netErr) ||
 		errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, context.Canceled) ||
-		errors.Is(err, io.ErrUnexpectedEOF) {
+		errors.Is(err, context.Canceled) {
 		return wrapTransport(req, err)
 	}
 	return err
@@ -416,6 +431,10 @@ var kindMessages = map[ErrorKind][2]string{
 		"Could not establish a secure connection to the Multica server (TLS/certificate error). Check your system clock and CA certificates.",
 		"无法与 Multica 服务器建立安全连接（TLS/证书错误）。请检查系统时间和 CA 证书。",
 	},
+	KindNetworkIncompleteResponse: {
+		"The response ended before it was complete. If this keeps happening, check the Multica server or proxy logs.",
+		"响应在完整接收前已结束。如果问题持续发生，请检查 Multica 服务器或代理日志。",
+	},
 	KindNetworkOffline: {
 		"Could not reach the Multica server. Check your network connection.",
 		"无法访问 Multica 服务器。请检查网络连接。",
@@ -444,6 +463,10 @@ var kindMessages = map[ErrorKind][2]string{
 		"The request was invalid. Check the values you provided; run the command with --help to see the expected format.",
 		"请求无效。请检查所填写的参数；可用 --help 查看期望的格式。",
 	},
+	KindTooLarge: {
+		"The request is larger than the server accepts. Reduce its size and try again. Re-run with --debug to see the raw server response.",
+		"请求超出服务器允许的大小。请缩小后重试。可加 --debug 查看服务器原始响应。",
+	},
 	KindRateLimited: {
 		"Too many requests. Please wait a moment and try again; if this keeps happening, reduce how frequently you call the API.",
 		"请求过于频繁。请稍候重试；若持续出现，请降低 API 调用频率。",
@@ -469,9 +492,23 @@ var kindMessages = map[ErrorKind][2]string{
 // already exists", "set parent_id (--parent) to <id>"). Agents took the retry
 // hint literally and burned hours re-sending an unchanged request (GH #6264,
 // GH #5948), and the server-side wording added in MUL-4417 never reached them.
+//
+// 413 belongs here because the server names the limit that was hit and the
+// size that hit it. Before 413 had a kind, a skill import over the file-count
+// cap printed "An unexpected error occurred." for a URL import while the same
+// bundle as a ZIP (rejected with 400) printed the limit (GH #9812).
 var serverMessagePrefixes = map[ErrorKind][2]string{
 	KindValidation: {"Invalid request: ", "请求无效："},
 	KindConflict:   {"Request conflict: ", "请求冲突："},
+	KindTooLarge:   {"Request too large: ", "请求过大："},
+}
+
+// TaskTokenRejectedMessage returns the localized stop guidance for a rejected
+// task token. It is for callers that talk to an endpoint outside the API
+// client (the local daemon's environment routes) and want to append the same
+// guidance to the endpoint's own explanation, so there is one copy of it.
+func TaskTokenRejectedMessage() string {
+	return messageFor(KindTaskTokenRejected, DetectLanguage())
 }
 
 // messageFor returns the localized message for a kind.
@@ -603,6 +640,22 @@ func extractServerMessage(body string) string {
 		return s
 	}
 	return code
+}
+
+// ServerMessage returns the human-readable message a server error body
+// carries, or "" when err is not an HTTP failure or the body has none (an HTML
+// proxy page, an empty body).
+//
+// It exists for a command whose endpoint writes actionable prose on a status
+// whose generic copy is deliberately vague. A 5xx from most routes means "the
+// Multica service failed"; a 5xx from skill import means "the upstream source
+// failed", and the server names which one and why.
+func ServerMessage(err error) string {
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		return ""
+	}
+	return extractServerMessage(httpErr.Body)
 }
 
 // ServerErrorCode returns the stable `code` a server error body carries, or ""

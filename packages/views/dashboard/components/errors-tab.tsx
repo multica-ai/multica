@@ -14,6 +14,7 @@ import {
 } from "../../runtimes/components/charts";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
+import { CollectionPageState } from "../../layout/collection-page";
 import {
   aggregateDailyErrors,
   aggregateWeeklyErrors,
@@ -165,12 +166,7 @@ export function ErrorsTab({
       </div>
 
       {totals.failed === 0 ? (
-        <div className="flex flex-col items-center rounded-lg border border-dashed py-12 text-center">
-          <BarChart3 className="h-6 w-6 text-faint-foreground" />
-          <p className="mt-3 text-caption text-muted-foreground">
-            {t(($) => $.errors.no_data)}
-          </p>
-        </div>
+        <CollectionPageState icon={BarChart3} title={t(($) => $.errors.no_data)} />
       ) : (
         <>
           <ErrorTrendCard

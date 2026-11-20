@@ -364,7 +364,7 @@ func normalizeRuntimeMcpEntry(provider string, value any) any {
 
 func loadClaudePluginMcpServerConfigs(home string) map[string]any {
 	out := map[string]any{}
-	for _, plugin := range listEnabledClaudePlugins(home) {
+	for _, plugin := range listEnabledClaudePlugins(filepath.Join(home, ".claude")) {
 		manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 		paths := claudePluginComponentPaths(
 			plugin.InstallPath,
@@ -524,7 +524,7 @@ func runtimeMcpSummaries(servers map[string]any, source string) []runtimeLocalMc
 
 func listClaudePluginMcpServers(home string) []runtimeLocalMcpServerSummary {
 	out := make([]runtimeLocalMcpServerSummary, 0)
-	for _, plugin := range listEnabledClaudePlugins(home) {
+	for _, plugin := range listEnabledClaudePlugins(filepath.Join(home, ".claude")) {
 		manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 		paths := claudePluginComponentPaths(
 			plugin.InstallPath,

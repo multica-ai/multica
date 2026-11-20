@@ -44,7 +44,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
-import { plainTriggerSummary } from "../../issues/components/task-run-labels";
+import { plainTriggerSummary, useFormatSpend } from "../../issues/components/task-run-labels";
 import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
@@ -80,6 +80,7 @@ import {
 } from "./build-steps";
 import { buildRunOutcome } from "./run-outcome";
 import { RunTimeline } from "./run-timeline";
+import { ContextReceiptButton } from "./context-receipt";
 import {
   base64ByteLength,
   readImageResult,
@@ -91,6 +92,7 @@ import {
 } from "./trace-event-presenter";
 import type { TraceSummaryLabels } from "./trace-event-presenter";
 import {
+  CommandDetailSurface,
   DiffDetailSurface,
   FileWriteSurface,
   PatchDetailSurface,
@@ -100,7 +102,7 @@ import { languageForPath } from "./diff-highlight";
 import { useLocale, useT } from "../../i18n";
 import {
   formatTokens,
-  formatUsd,
+  hasTokenFigure,
   summarizeTaskUsage,
 } from "../../runtimes/utils";
 import { formatBytes } from "../format-bytes";
@@ -326,6 +328,7 @@ export function AgentTranscriptDialog({
   contentState,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
+  const formatSpend = useFormatSpend();
   const locale = useLocale();
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, open);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
@@ -868,7 +871,7 @@ export function AgentTranscriptDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
+        className="!max-w-5xl !w-[calc(100%-4rem)] !max-h-[calc(100%-4rem)] !h-[calc(100%-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
         finalFocus={finalFocus}
       >
@@ -932,13 +935,20 @@ export function AgentTranscriptDialog({
                 title={t(($) => $.transcript.usage_chip_title)}
               >
                 <Coins aria-hidden="true" className="h-3 w-3 text-muted-foreground" />
-                <span className="font-medium">{formatTokens(usage.tokens)}</span>
-                <span className="text-faint-foreground">·</span>
-                <span className="text-muted-foreground">{formatUsd(usage.cost)}</span>
+                {hasTokenFigure(usage) && (
+                  <>
+                    <span className="font-medium">{formatTokens(usage.tokens)}</span>
+                    <span className="text-faint-foreground">·</span>
+                  </>
+                )}
+                <span className="text-muted-foreground">{formatSpend(usage)}</span>
               </span>
             )}
 
             <div className="flex shrink-0 items-center gap-0.5">
+              {/* What the agent was handed (MUL-9013). Renders nothing for
+                  runs whose daemon predates the receipt. */}
+              <ContextReceiptButton taskId={task.id} open={open} />
               {hasRunDetails && (
                 <Popover>
                   <PopoverTrigger
@@ -1067,7 +1077,7 @@ export function AgentTranscriptDialog({
                           )}
                           <RunDetailRow
                             label={t(($) => $.transcript.details_cost)}
-                            value={formatUsd(usage.cost)}
+                            value={formatSpend(usage)}
                           />
                         </>
                       )}
@@ -1849,6 +1859,12 @@ export function StepBody({ item }: { item: TimelineItem }) {
     );
   }
 
+  // Tool input has no server-side budget, so it is clipped for display.
+  const clipForDisplay = (text: string) =>
+    text.length > DISPLAY_CLIP_CHARS
+      ? `${redactSecrets(text.slice(0, DISPLAY_CLIP_CHARS))}\n${t(($) => $.transcript.display_clipped)}`
+      : redactSecrets(text);
+
   switch (detail.kind) {
     case "diff":
       return <DiffDetailSurface lines={detail.lines} path={detail.path} />;
@@ -1856,18 +1872,19 @@ export function StepBody({ item }: { item: TimelineItem }) {
       return <PatchDetailSurface files={detail.files} truncated={detail.truncated} />;
     case "file":
       return <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />;
+    case "command":
+      return (
+        <CommandDetailSurface
+          command={clipForDisplay(detail.command)}
+          params={detail.params && clipForDisplay(detail.params)}
+        />
+      );
     default: {
-      const text = detail.text;
       // A stored tool result is already capped at 8192 bytes by the daemon, so
       // clipping it again could only shave a couple of hundred more characters
-      // — under a note that already reports the same loss. Tool input has no
-      // server-side budget and keeps the clip at its existing length; nothing
-      // about how long an input renders is this change's business.
-      const clip = item.type === "tool_result" ? null : DISPLAY_CLIP_CHARS;
+      // — under a note that already reports the same loss.
       const clipped =
-        clip !== null && text.length > clip
-          ? `${redactSecrets(text.slice(0, clip))}\n${t(($) => $.transcript.display_clipped)}`
-          : redactSecrets(text);
+        item.type === "tool_result" ? redactSecrets(detail.text) : clipForDisplay(detail.text);
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
       return (
         <ToolDetailSurface

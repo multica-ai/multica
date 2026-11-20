@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "Nouvelle automatisation",
-    "start_blank": "Partir de zéro",
     "table": {
       "name": "Nom",
       "agent": "Agent",
@@ -15,10 +14,6 @@
       "created": "Création"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "Aucune automatisation pour l'instant",
-      "hint": "Planifiez du travail récurrent pour vos agents IA. Choisissez un modèle ou partez de zéro."
-    },
     "no_matches": "Aucune automatisation correspondante",
     "retry": "Réessayer"
   },
@@ -26,7 +21,8 @@
     "active": "Active",
     "paused": "En pause",
     "paused_runtime_required": "En pause — l'assigné a besoin d'un runtime",
-    "archived": "Archivée"
+    "archived": "Archivée",
+    "paused_project_archived": "En pause — son projet est archivé"
   },
   "execution_mode": {
     "create_issue": "Créer une tâche",
@@ -66,6 +62,8 @@
   },
   "detail": {
     "not_found": "Automatisation introuvable",
+    "not_found_description": "Elle a peut-être été supprimée, ou vous n'y avez pas accès.",
+    "back_to_list": "Toutes les automatisations",
     "pause_aria": "Mettre l'automatisation en pause",
     "activate_aria": "Activer l'automatisation",
     "paused_runtime_required": "En pause car l'assigné a perdu son runtime. Associez un runtime, puis réactivez cette automatisation.",
@@ -83,7 +81,6 @@
     "run_blocked_attribution": "Non déclenchée — l'exécution n'a pas pu être attribuée à un membre responsable",
     "run_blocked_already_active": "Non déclenchée — une exécution récente couvre déjà ce cas",
     "run_blocked_quota_exceeded": "Non déclenché — la limite d'exécutions de la période est atteinte",
-    "run_blocked_issue_limit_reached": "Non déclenchée : l'espace de travail a atteint sa limite de tâches",
     "run_blocked_generic": "Non déclenchée — l'exécution a été bloquée",
     "section_triggers": "Déclencheurs",
     "section_run_history": "Historique des exécutions",
@@ -118,7 +115,8 @@
       "cancel": "Annuler",
       "confirm": "Supprimer",
       "deleting": "Suppression..."
-    }
+    },
+    "paused_project_archived": "En pause car son projet a été archivé. Restaurez le projet, puis réactivez cette automatisation."
   },
   "access": {
     "title": "Gérer l'accès",
@@ -150,6 +148,8 @@
   "run": {
     "issue_linked": "Tâche liée",
     "view_log": "Voir le journal d'exécution",
+    "stop": "Arrêter l'exécution",
+    "stop_failed": "Impossible d'arrêter l'exécution.",
     "skipped_group": {
       "label": "Ignorées",
       "summary": "{{count}} exécutions ignorées"
@@ -183,6 +183,10 @@
     "url_copied": "URL du webhook copiée",
     "url_copy_failed": "Échec de la copie",
     "edit_schedule": "Modifier la planification",
+    "edit_webhook": "Modifier le webhook",
+    "event_filter_summary_all": "Accepte tous les événements",
+    "event_filter_summary_conditions_one": "{{count}} condition",
+    "event_filter_summary_conditions_other": "{{count}} conditions",
     "rotate_url": "Renouveler l'URL",
     "rotate_confirm_title": "Renouveler l'URL du webhook",
     "rotate_confirm_description": "L'URL actuelle cessera de fonctionner immédiatement. Tous les systèmes externes qui l'appellent devront être mis à jour avec la nouvelle. Continuer ?",
@@ -246,6 +250,18 @@
       "disabled_invalid_signature": "Rejeu impossible — la signature était invalide",
       "disabled_rejected": "Impossible de rejouer une livraison rejetée",
       "disabled_queued": "Encore en file d'attente — rejouez une fois qu'elle sera traitée"
+    },
+    "ignore": {
+      "title": "Motif du filtrage",
+      "payload_filtered": "Conditions de la charge utile non remplies",
+      "event_filtered": "Événement ou action non correspondant",
+      "trigger_disabled": "Déclencheur désactivé",
+      "autopilot_paused": "Automatisation en pause",
+      "autopilot_archived": "Automatisation archivée",
+      "quota_exceeded": "Quota d’exécutions atteint",
+      "actual_value": "Valeur réelle",
+      "missing": "Champ absent",
+      "truncated": "Aperçu tronqué. Consultez le contenu brut pour la valeur complète."
     }
   },
   "add_trigger_dialog": {
@@ -271,6 +287,12 @@
     "submitting": "Enregistrement...",
     "toast_updated": "Planification mise à jour",
     "toast_update_failed": "Échec de la mise à jour de la planification"
+  },
+  "edit_webhook_dialog": {
+    "title": "Modifier le webhook",
+    "label_placeholder": "ex. Pull requests GitHub",
+    "toast_updated": "Webhook mis à jour",
+    "toast_update_failed": "Échec de la mise à jour du webhook"
   },
   "dialog": {
     "sr_create": "Nouvelle automatisation",
@@ -327,12 +349,40 @@
     "webhook_created_done": "Terminé",
     "event_filter_label": "Filtres d'événements",
     "event_filter_docs_link_label": "Comprendre le fonctionnement des filtres d'événements",
-    "event_filter_event_placeholder": "ex. workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "Ajouter",
-    "event_filter_remove_label": "Retirer le filtre",
-    "event_filter_hint": "Ne traiter que les webhooks correspondant à ces événements. Laissez vide pour tous les accepter.",
+    "event_filter_event_placeholder": "Événement, ex. pull_request",
+    "event_filter_actions_placeholder": "Actions (facultatif)",
+    "event_filter_add_rule": "Ajouter une règle",
+    "event_filter_event_label": "Événement",
+    "event_filter_actions_label": "Actions",
+    "event_filter_new_rule_label": "Nouvelle règle",
+    "event_filter_condition_label": "Condition",
+    "event_filter_error_event_required": "Saisissez un nom d'événement.",
+    "event_filter_error_path_required": "Saisissez un champ de la charge utile.",
+    "event_filter_error_path_invalid": "Séparez les noms de champ par des points, {{path}} caractères maximum.",
+    "event_filter_error_value_required": "Saisissez une valeur.",
+    "event_filter_error_too_many_values": "{{values}} valeurs maximum.",
+    "event_filter_remove_label": "Supprimer la règle",
+    "event_filter_hint": "Seuls les événements correspondant à une règle et à toutes ses conditions sont traités. Laissez vide pour tout accepter.",
+    "event_filter_condition_remove_label": "Retirer la condition",
+    "event_filter_condition_add_label": "Ajouter une condition",
+    "event_filter_condition_ops": {
+      "equals": "est",
+      "not_equals": "n'est pas",
+      "contains": "contient",
+      "in": "est parmi",
+      "exists": "existe"
+    },
+    "event_filter_condition_path_label": "Champ de la charge utile",
+    "event_filter_condition_path_placeholder": "Champ de la charge utile, ex. pull_request.base.ref",
+    "event_filter_condition_op_label": "Opérateur",
+    "event_filter_condition_value_label": "Valeur",
+    "event_filter_condition_value_placeholder": "ex. main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Ignorer la casse",
     "schedule_multiple_notice": "Cette automatisation a {{count}} planifications. Fermez cette fenêtre et modifiez chacune dans la liste Déclencheurs ci-dessous.",
+    "webhook_multiple_notice": "Cette automatisation a plusieurs webhooks. Fermez cette fenêtre et modifiez chacun dans la liste Déclencheurs ci-dessous.",
+    "webhook_edit_filters": "Modifier les filtres",
+    "webhook_filters_saved_separately": "Les filtres sont enregistrés à part : Annuler ici ne les rétablit pas.",
     "schedule_empty": "Aucune planification — cette automatisation ne s'exécute que sur déclenchement manuel.",
     "schedule_add": "Ajouter une planification",
     "error_title_required": "Saisissez un nom pour cette automatisation.",
@@ -346,7 +396,8 @@
         "label": "Exécution seule",
         "description": "Exécution silencieuse, aucune tâche créée"
       }
-    }
+    },
+    "event_filter_condition_all": "Et la charge utile remplit toutes les conditions"
   },
   "schedule_editor": {
     "time_label": "Heure",
@@ -485,7 +536,6 @@
     "select_page": "Sélectionner tous les réveils activés",
     "load_error": "Impossible de charger les réveils",
     "loading": "Chargement des réveils…",
-    "empty": "Aucune règle de réveil",
     "disable_selected": "Désactiver la sélection",
     "confirm_title": "Désactiver {{count}} réveils ?",
     "confirm_body": "Les réveils futurs seront arrêtés. Les exécutions en file non confiées à un agent seront retirées. Les exécutions déjà confiées continueront ; arrêtez-les depuis le journal d’exécution.",
@@ -502,7 +552,6 @@
     },
     "target_agent": "Agent à réveiller",
     "empty_filtered": "Aucun réveil correspondant",
-    "clear_filters": "Effacer les filtres",
     "batch_success": "{{count}} règles désactivées",
     "batch_partial": "{{succeeded}} désactivées ; {{failed}} échecs. Les éléments en échec restent sélectionnés pour réessayer.",
     "source": "Source",
@@ -523,6 +572,57 @@
     "banner_view": "Voir",
     "create": "Nouveau réveil",
     "create_pick_issue": "Choisissez la tâche où ajouter un réveil",
-    "create_pick_issue_description": "Le réveil appartient à cette tâche et s’arrête avec elle."
+    "create_pick_issue_description": "Le réveil appartient à cette tâche et s’arrête avec elle.",
+    "intro": {
+      "title": "Rappelez vos agents au bon moment",
+      "description": "Les réveils sont attachés aux tâches : quand une PR est fusionnée, que quelqu'un répond ou que l'heure arrive, l'agent revient reprendre le travail. Quand la tâche se termine, ses réveils s'arrêtent.",
+      "slides": {
+        "event": {
+          "title": "Attendre qu'il se passe quelque chose",
+          "description": "Inutile de faire tourner un agent à vide en attendant. Dès que la condition est remplie, Multica le réveille."
+        },
+        "time": {
+          "title": "Ou choisir une heure",
+          "description": "Un réveil ponctuel convient à « revoir ça demain après-midi », un réveil récurrent à un contrôle quotidien."
+        },
+        "ends": {
+          "title": "S'arrête avec la tâche",
+          "description": "Les réveils appartiennent à leur tâche. Une fois celle-ci terminée ou annulée, ils se désactivent : aucune règle orpheline."
+        }
+      },
+      "art": {
+        "issue_inbox": "État vide des groupes de la boîte de réception",
+        "issue_board": "Colonnes du tableau redimensionnables",
+        "issue_paste": "Coller des images dans les commentaires",
+        "reply": "« La PR est fusionnée. Je mets à jour la doc et je ferme la tâche. »",
+        "event_examples": "PR fusionnée, nouveau commentaire"
+      }
+    },
+    "defaults": {
+      "title": "À la fin des sous-tâches",
+      "description": "Réveille le responsable de la tâche parente quand une étape se termine alors qu’une étape suivante attend, puis une fois de plus quand toutes les sous-tâches sont fermées. Un responsable humain reçoit une notification à la place.",
+      "badge": "Valeur par défaut de l’espace",
+      "enabled": "Activé par défaut",
+      "instruction": "Instruction par défaut",
+      "instruction_hint": "Envoyée à l’agent réveillé. Laissez vide pour utiliser l’instruction intégrée ci-dessous.",
+      "instruction_placeholder": "Laisser vide pour l’instruction intégrée",
+      "builtin": "Instruction intégrée",
+      "instruction_invalid": "Limitez l’instruction à 4 000 octets.",
+      "save": "Enregistrer",
+      "saving": "Enregistrement…",
+      "save_error": "Impossible d’enregistrer la valeur par défaut.",
+      "customized_one": "{{count}} tâche ouverte a son propre réglage et ignore cette valeur par défaut.",
+      "customized_other": "{{count}} tâches ouvertes ont leur propre réglage et ignorent cette valeur par défaut.",
+      "admin_only": "Seuls les propriétaires et administrateurs peuvent modifier ces valeurs.",
+      "load_error": "Impossible de charger les valeurs par défaut des réveils.",
+      "edit_instruction": "Modifier l’instruction par défaut",
+      "view_instruction": "Voir l’instruction par défaut"
+    }
+  },
+  "intro": {
+    "label": "Automatisation",
+    "title": "Laissez vos agents se mettre au travail tout seuls",
+    "description": "Définissez une planification ou un webhook. À chaque déclenchement, Multica crée une tâche pour un agent, ou lance directement l'agent. Choisissez un modèle et adaptez-le.",
+    "templates": "Partir d'un modèle"
   }
 }

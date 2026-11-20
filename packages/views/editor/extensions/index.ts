@@ -21,7 +21,7 @@
  */
 import type { RefObject } from "react";
 import StarterKit from "@tiptap/starter-kit";
-import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import { CodeBlockExtension } from "./code-block";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
@@ -46,6 +46,7 @@ import {
 import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import type { BuiltinCommandSuggestionOptions } from "./slash-command-suggestion";
+import { createBlockInsertSuggestion } from "./block-insert-suggestion";
 import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import { CodeBlockView } from "./code-block-view";
 import { TableView } from "./table-view";
@@ -147,6 +148,7 @@ export interface EditorExtensionsOptions {
   placeholder?: string | (() => string);
   queryClient?: import("@tanstack/react-query").QueryClient;
   onSubmitRef?: RefObject<(() => void) | undefined>;
+  onEnterRef?: RefObject<(() => void) | undefined>;
   onUploadFileRef?: RefObject<
     ((file: File, uploadId: string) => Promise<UploadResult | null>) | undefined
   >;
@@ -168,19 +170,20 @@ export interface EditorExtensionsOptions {
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
+  mentionHideGuests?: boolean;
   /** When true, attach the `/` picker. Default false. */
   enableSlashCommands?: boolean;
   /**
    * Which `/` menu to attach when enableSlashCommands is true:
    * - "skill" (default) — the chat picker listing the active agent's skills.
-   * - "command" — the fixed built-in command menu (issue comments), e.g. /note.
+   * - "command" — Issue quick actions, skills matching a nonempty query, and /note.
+   * - "blocks" — the document block menu: headings, lists, code, tables, uploads.
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "blocks";
   /**
-   * Quick actions offered in the "command" `/` menu, plus the resolver that
-   * turns a pick into the text it would post (MUL-5465). Both are functions so
-   * the editor is created once while still reading live data; the setup layer
-   * owns React Query access. Omit on composers with no issue context.
+   * Quick actions and Issue target-agent skills offered in the "command" `/`
+   * menu, plus the resolver that turns a quick-action pick into draft text.
+   * Functions keep the editor mounted while reading live React Query data.
    */
   quickActionMenu?: BuiltinCommandSuggestionOptions;
   /**
@@ -231,7 +234,7 @@ export function createEditorExtensions(
     // `- ` still falls through to PatchedListItem's bullet list.
     TaskList,
     PatchedTaskItem,
-    CodeBlockLowlight.extend({
+    CodeBlockExtension.extend({
       addNodeView() {
         return ReactNodeViewRenderer(CodeBlockView);
       },
@@ -278,7 +281,7 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems }) }
+          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, hideGuests: options.mentionHideGuests }) }
           : {}),
     }),
     // Linear-style bare identifier → issue mention. Attached only when a
@@ -295,11 +298,13 @@ export function createEditorExtensions(
       HTMLAttributes: { class: "slash-command" },
       suggestion: !options.enableSlashCommands
         ? { char: "/", allow: () => false }
-        : options.slashCommandMode === "command"
-          ? createBuiltinCommandSuggestion(options.quickActionMenu)
-          : options.queryClient
-            ? createSlashCommandSuggestion(options.queryClient)
-            : { char: "/", allow: () => false },
+        : options.slashCommandMode === "blocks"
+          ? createBlockInsertSuggestion(options.onUploadFileRef)
+          : options.slashCommandMode === "command"
+            ? createBuiltinCommandSuggestion(options.quickActionMenu)
+            : options.queryClient
+              ? createSlashCommandSuggestion(options.queryClient)
+              : { char: "/", allow: () => false },
     }),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),
@@ -309,7 +314,7 @@ export function createEditorExtensions(
       if (!fn) return false;
       fn();
       return true;
-    }),
+    }, () => options.onEnterRef?.current),
     createBlurShortcutExtension(),
     createFileUploadExtension(options.onUploadFileRef!, options.pasteAsFileThresholdRef),
   ];

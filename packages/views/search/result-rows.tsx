@@ -21,9 +21,11 @@ import { ActorAvatar } from "../common/actor-avatar";
 import { availabilityConfig } from "../agents/presence";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { ArchivedProjectTag } from "../projects/components/project-archive";
 import { useProjectStatusLabels } from "../projects/components/labels";
 import { useT } from "../i18n";
 import { HighlightText } from "./highlight-text";
+import { stripMentionMarkdown } from "../issues/utils/strip-mention-markdown";
 import { ROW_CLASS, RowHint } from "./rows";
 
 function IssueAssigneeAvatar({
@@ -65,6 +67,8 @@ export function ProjectResultRow({
 
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="project"
       value={`project:${project.id}`}
       disabled={disabled}
       onSelect={onSelect}
@@ -75,6 +79,7 @@ export function ProjectResultRow({
         <span className="min-w-0 flex-1 truncate">
           <HighlightText text={project.title} query={query} />
         </span>
+        {project.archived_at && <ArchivedProjectTag />}
         <span
           className={`shrink-0 text-caption ${PROJECT_STATUS_CONFIG[status]?.color ?? "text-muted-foreground"}`}
         >
@@ -85,7 +90,7 @@ export function ProjectResultRow({
       {project.match_source === "description" && project.matched_snippet && (
         <div className={SNIPPET_CLASS}>
           <span className="truncate text-caption text-muted-foreground">
-            <HighlightText text={project.matched_snippet} query={query} />
+            <HighlightText text={stripMentionMarkdown(project.matched_snippet)} query={query} />
           </span>
         </div>
       )}
@@ -116,6 +121,8 @@ export function IssueResultRow({
     "matched_comment_snippet" in issue ? issue.matched_comment_snippet : undefined;
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="issue"
       value={value ?? issue.id}
       disabled={disabled}
       onSelect={onSelect}
@@ -140,7 +147,7 @@ export function IssueResultRow({
         <div className={SNIPPET_CLASS}>
           <FileText className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
           <span className="truncate text-caption text-muted-foreground">
-            <HighlightText text={descriptionSnippet} query={query} />
+            <HighlightText text={stripMentionMarkdown(descriptionSnippet)} query={query} />
           </span>
         </div>
       )}
@@ -148,7 +155,7 @@ export function IssueResultRow({
         <div className={SNIPPET_CLASS}>
           <MessageSquare className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
           <span className="truncate text-caption text-muted-foreground">
-            <HighlightText text={commentSnippet} query={query} />
+            <HighlightText text={stripMentionMarkdown(commentSnippet)} query={query} />
           </span>
         </div>
       )}
@@ -206,7 +213,14 @@ export function ActorRow({
   showStatusDot?: boolean;
 }) {
   return (
-    <CommandPrimitive.Item value={value} disabled={disabled} onSelect={onSelect} className={ROW_CLASS}>
+    <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type={actorType}
+      value={value}
+      disabled={disabled}
+      onSelect={onSelect}
+      className={ROW_CLASS}
+    >
       <ActorAvatar
         actorType={actorType}
         actorId={actorId}
@@ -246,7 +260,14 @@ export function ObjectRow({
   disabled?: boolean;
 }) {
   return (
-    <CommandPrimitive.Item value={value} disabled={disabled} onSelect={onSelect} className={ROW_CLASS}>
+    <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="object"
+      value={value}
+      disabled={disabled}
+      onSelect={onSelect}
+      className={ROW_CLASS}
+    >
       {icon}
       <span className="min-w-0 shrink truncate">
         <HighlightText text={title} query={query} />

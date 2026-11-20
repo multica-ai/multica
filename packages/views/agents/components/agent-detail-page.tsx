@@ -89,6 +89,7 @@ import {
 import { AgentInstructionsSection } from "./agent-instructions-section";
 import { AgentPropertiesPanel } from "./agent-properties-panel";
 import { describeCancelImpact } from "./agent-row-actions";
+import { AgentChannelLinks, AgentChannelsSection } from "./agent-channels-section";
 import { AgentSkillsSection } from "./agent-skills-section";
 import { AgentWorkDialog } from "./agent-work-dialog";
 import { AgentWorkSections } from "./tabs/activity-tab";
@@ -116,6 +117,7 @@ interface AgentDetailPageProps {
 export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
+  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
@@ -172,7 +174,15 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancelRuns, setConfirmCancelRuns] = useState(false);
 
-  const urlView = viewFromParams(navigation.searchParams);
+  const requestedView = viewFromParams(navigation.searchParams);
+  const urlView = requestedView === "integrations" ? "channels" : requestedView;
+  useEffect(() => {
+    if (requestedView !== "integrations" || !agent) return;
+    const params = new URLSearchParams(navigation.searchParams);
+    params.delete("tab");
+    params.set("view", "channels");
+    navigation.replace(`${navigation.pathname}?${params}`);
+  }, [requestedView, navigation, agent]);
   const [advancedSection, setAdvancedSection] = useState<AdvancedSection | null>(
     () => (isAdvancedSection(urlView) ? urlView : null),
   );
@@ -326,6 +336,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   if (!agent && (agentsLoading || detailQuery.isPending)) {
     return (
       <ObjectPage
+        type="agent"
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={<Skeleton className="h-4 w-40" />}
@@ -339,6 +350,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   if (!agent && isForbidden) {
     return (
       <ObjectPage
+        type="agent"
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={
@@ -374,6 +386,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       : t(($) => $.detail.load_failed_title);
     return (
       <ObjectPage
+        type="agent"
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={<span className="truncate text-muted-foreground">{title}</span>}
@@ -486,6 +499,14 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           <MessageSquare />
         </IconButton>
       )}
+      <IconButton
+        label={t(($) => $.detail.settings)}
+        tooltipSide="bottom"
+        className="text-muted-foreground"
+        onClick={() => openAdvanced("general")}
+      >
+        <Settings2 />
+      </IconButton>
       {!isArchived && canAssign.allowed && (
         <Button type="button" size="sm" onClick={handleAssign}>
           <Plus />
@@ -507,7 +528,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         <DropdownMenuContent align="end" className="w-auto min-w-48">
           <DropdownMenuItem onClick={() => openAdvanced("general")}>
             <Settings2 />
-            {t(($) => $.detail.advanced_settings)}
+            {t(($) => $.detail.settings)}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -619,6 +640,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   return (
     <>
       <ObjectPage
+        type="agent"
+        scrollRef={setScrollParent}
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={
@@ -645,6 +668,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             canEdit={canEdit.allowed}
             onUpdate={handleUpdate}
             onEditAccess={() => openAdvanced("access")}
+            onOpenSettings={() => openAdvanced("general")}
           />
         }
       >
@@ -662,10 +686,18 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 ) : null
               }
             />
+            <AgentChannelLinks agent={agent} />
             {notices.length > 0 && <div className="space-y-2">{notices}</div>}
           </div>
 
-          <AgentWorkSections agent={agent} onViewAll={() => openWork(true)} />
+          <AgentWorkSections
+            key={`${wsId}:${agent.id}`}
+            agent={agent}
+            scrollParent={scrollParent}
+            onViewAll={() => openWork(true)}
+          />
+
+          <AgentChannelsSection agent={agent} />
 
           <AgentInstructionsSection
             agent={agent}

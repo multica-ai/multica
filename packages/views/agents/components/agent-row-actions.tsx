@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   AlertCircle,
   Copy,
   ExternalLink,
   RotateCcw,
+  Settings2,
   Square,
   Trash2,
 } from "@multica/ui/icons";
@@ -47,6 +48,10 @@ interface AgentRowActionsProps {
   // this agent's config as a template. A href rather than a callback so the
   // menu item is a real link (modifier-click opens it in a new tab).
   duplicateHref: string;
+  /** Items for the top of the menu, for actions only one surface offers. */
+  leading?: ReactNode;
+  /** For rows that open the menu only on right-click. */
+  triggerHidden?: boolean;
 }
 
 /**
@@ -60,6 +65,8 @@ export function AgentRowActions({
   presence,
   canManage,
   duplicateHref,
+  leading,
+  triggerHidden,
 }: AgentRowActionsProps) {
   const { t } = useT("agents");
   const { t: tCommon } = useT("common");
@@ -128,7 +135,17 @@ export function AgentRowActions({
 
   return (
     <>
-      <CollectionRowMenu label={t(($) => $.row.actions_aria)} contentClassName="w-auto">
+      <CollectionRowMenu
+        label={t(($) => $.row.actions_aria)}
+        contentClassName="w-auto"
+        triggerHidden={triggerHidden}
+      >
+        {leading && (
+          <>
+            {leading}
+            <DropdownMenuSeparator />
+          </>
+        )}
         {/* Same shape as every other entity row menu: an explicit CTA is a
             foreground open executed through the adapter (an anchor-based
             item would depend on native activation surviving the menu
@@ -146,6 +163,14 @@ export function AgentRowActions({
           {tCommon(($) => $.navigation.open_in_new_tab)}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() =>
+            intentNavigate(`${paths.agentDetail(agent.id)}?view=general`, "push")
+          }
+        >
+          <Settings2 className="h-3.5 w-3.5" />
+          {t(($) => $.detail.settings)}
+        </DropdownMenuItem>
         {showStop && (
           <DropdownMenuItem
             onClick={() => setConfirmCancel(true)}

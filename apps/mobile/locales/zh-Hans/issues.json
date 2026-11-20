@@ -132,6 +132,9 @@
     "issue_actions": "任务操作"
   },
   "delete": {
+    "failed_title": "无法删除任务",
+    "permission_denied": "你没有删除此任务的权限。",
+    "failed": "任务未能删除，请重试。",
     "title": "删除任务？",
     "message": "{{identifier}} 及其评论、表情和附件将被永久删除，且无法撤销。"
   },
@@ -268,6 +271,9 @@
       "completed": "运行成功",
       "failed": "运行失败",
       "cancelled": "已取消"
+    },
+    "failure_badge": {
+      "local_directory_missing": "文件夹不存在"
     }
   },
   "header_filter": "筛选",

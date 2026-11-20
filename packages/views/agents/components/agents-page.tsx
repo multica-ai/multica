@@ -5,7 +5,6 @@ import {
   AlertCircle,
   Bot,
   Lock,
-  Plus,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -51,10 +50,12 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   CollectionCreateButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
+  CollectionSearch,
 } from "../../layout/collection-page";
 import {
   CollectionDisplayMenu,
@@ -67,11 +68,13 @@ import {
 } from "../../layout/collection-list";
 import { availabilityConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
+import { AgentSetupChecklist } from "./agent-setup-checklist";
 import {
   AgentListFilterMenu,
   countActiveFilterDimensions,
 } from "./agent-list-toolbar";
 import { useLocale, useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 export interface AgentListRow {
   agent: Agent;
@@ -96,6 +99,23 @@ function lastActiveDaysAgo(activity: AgentActivity | null): number | null {
     if (bucket && bucket.total > 0) return activity.buckets.length - 1 - i;
   }
   return null;
+}
+
+/**
+ * List search: the query, trimmed and case-folded, matches the name or the
+ * description, directly or by pinyin. An empty query matches every row.
+ */
+export function matchesAgentSearch(row: AgentListRow, search: string): boolean {
+  const query = search.trim().toLowerCase();
+  if (!query) return true;
+  const { name, description } = row.agent;
+  return (
+    name.toLowerCase().includes(query) ||
+    matchesPinyin(name, query) ||
+    (!!description &&
+      (description.toLowerCase().includes(query) ||
+        matchesPinyin(description, query)))
+  );
 }
 
 /**
@@ -155,6 +175,7 @@ export function rowMatchesFilters(
  */
 import { isAccessChangeReady } from "@multica/core/agents";
 import { AgentBatchToolbar } from "./agent-batch-toolbar";
+import { AgentsIntro } from "./agents-intro";
 export { isAccessChangeReady };
 
 export interface AgentsPageProps {
@@ -190,23 +211,6 @@ function ListError({
       actions={
         <Button type="button" variant="outline" size="sm" onClick={onRetry}>
           {t(($) => $.page.try_again)}
-        </Button>
-      }
-    />
-  );
-}
-
-function EmptyState({ onCreate }: { onCreate: () => void }) {
-  const { t } = useT("agents");
-  return (
-    <CollectionPageState
-      icon={Bot}
-      title={t(($) => $.empty.title)}
-      description={t(($) => $.empty.description)}
-      actions={
-        <Button type="button" onClick={onCreate} size="sm">
-          <Plus aria-hidden="true" className="size-3" />
-          {t(($) => $.page.new_agent)}
         </Button>
       }
     />
@@ -381,7 +385,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     error: listError,
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
-  const { data: runtimes = [] } = useQuery(
+  const { data: runtimes = [], isSuccess: runtimesLoaded } = useQuery(
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -409,6 +413,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const toggleColumn = useAgentsViewStore((s) => s.toggleColumn);
   const toggleFilter = useAgentsViewStore((s) => s.toggleFilter);
   const clearFilters = useAgentsViewStore((s) => s.clearFilters);
+  // Session-only, so the query survives opening an agent and coming back.
+  const search = useAgentsViewStore((s) => s.search);
+  const setSearch = useAgentsViewStore((s) => s.setSearch);
 
   const runtimesById = useMemo(() => {
     const m = new Map<string, AgentRuntime>();
@@ -490,9 +497,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     isWorkspaceAdmin,
   ]);
 
-  // Visible rows: filters, then sort.
+  // Visible rows: search and filters, then sort.
   const rows = useMemo<AgentListRow[]>(() => {
-    const filtered = scopeRows.filter((row) => rowMatchesFilters(row, filters));
+    const filtered = scopeRows.filter(
+      (row) => matchesAgentSearch(row, search) && rowMatchesFilters(row, filters),
+    );
 
     const dir = sortDirection === "asc" ? 1 : -1;
     filtered.sort((a, b) => {
@@ -521,15 +530,25 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       );
     });
     return filtered;
-  }, [scopeRows, filters, sortField, sortDirection]);
+  }, [scopeRows, search, filters, sortField, sortDirection]);
 
   const noMatchText = useMemo(() => {
+    const query = search.trim();
+    if (query) {
+      if (scope === "archived") {
+        return t(($) => $.no_matches.search_archived, { query });
+      }
+      if (countActiveFilterDimensions(filters) > 0) {
+        return t(($) => $.no_matches.search_active_filtered, { query });
+      }
+      return t(($) => $.no_matches.search_active, { query });
+    }
     if (scope === "archived") return t(($) => $.no_matches.no_archived);
     if (countActiveFilterDimensions(filters) > 0) {
       return t(($) => $.no_matches.no_filter_match);
     }
-    return t(($) => $.no_matches.title);
-  }, [filters, scope, t]);
+    return null;
+  }, [filters, scope, search, t]);
 
   // Straight to the manual form: a duplicate already has every field decided,
   // so the method chooser would be a step with nothing to choose.
@@ -633,7 +652,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   };
 
   const showEmpty = !listError && !isLoading && agents.length === 0;
-  const hasNarrowing = countActiveFilterDimensions(filters) > 0;
+  const hasNarrowing =
+    countActiveFilterDimensions(filters) > 0 || search.trim() !== "";
+  const resetNarrowing = () => {
+    clearFilters();
+    setSearch("");
+  };
   const scopeTitles: Record<AgentsScope, string> = {
     mine: t(($) => $.page.scope_title.mine),
     all: t(($) => $.page.scope_title.all),
@@ -688,7 +712,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
               allRows={scopeRows}
               members={members}
             />
-            {hasNarrowing ? <CollectionResetButton onClick={clearFilters} /> : null}
+            <CollectionSearch
+              value={search}
+              onChange={setSearch}
+              label={t(($) => $.page.search)}
+            />
+            {hasNarrowing ? <CollectionResetButton onClick={resetNarrowing} /> : null}
           </>
         }
         actions={
@@ -710,9 +739,17 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       {listError ? (
         <ListError listError={listError} onRetry={() => refetchList()} />
       ) : showEmpty ? (
-        <div className="flex flex-1 items-center justify-center">
-          <EmptyState onCreate={openCreate} />
-        </div>
+        <AgentsIntro
+          onCreate={openCreate}
+          checklist={
+            runtimesLoaded ? (
+              <AgentSetupChecklist
+                hasRuntime={runtimes.length > 0}
+                runtimesHref={paths.runtimes()}
+              />
+            ) : null
+          }
+        />
       ) : (
         <CollectionList
           label={scopeTitles[scope]}
@@ -733,7 +770,15 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
           )}
           sort={sort}
           selection={{ selectedIds, onChange: setSelectedIds }}
-          empty={noMatchText}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.no_matches.title)}
+              description={noMatchText}
+              onReset={resetNarrowing}
+              hasFilters={countActiveFilterDimensions(filters) > 0}
+              hasSearch={search.trim() !== ""}
+            />
+          }
         />
       )}
 

@@ -90,6 +90,8 @@ export function useUpdateRuntime(wsId: string) {
         // Empty string clears the custom name; omit to leave unchanged.
         custom_name?: string;
         apply_to_machine?: boolean;
+        // null removes the runtime-wide concurrency cap; omit to leave unchanged.
+        max_concurrent_tasks?: number | null;
       };
     }) => api.updateRuntime(runtimeId, patch),
     onSettled: () => {

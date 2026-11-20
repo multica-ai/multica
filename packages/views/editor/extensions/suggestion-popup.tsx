@@ -5,6 +5,7 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from "@floatin
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 
 interface SuggestionPopupRenderOptions<
   TItem,
@@ -21,6 +22,8 @@ interface SuggestionPopupRenderOptions<
     ref: TRef | null | undefined,
     props: SuggestionKeyDownProps,
   ) => boolean;
+  /** Preferred side; `flip` still moves it when that side lacks room. */
+  placement?: "top-start" | "bottom-start";
 }
 
 export function createSuggestionPopupRender<
@@ -34,6 +37,7 @@ export function createSuggestionPopupRender<
   getProps,
   subscribe,
   onKeyDown,
+  placement = "top-start",
 }: SuggestionPopupRenderOptions<TItem, TSelected, TRef, TComponentProps>) {
   return () => {
     let renderer: ReactRenderer<TRef> | null = null;
@@ -62,9 +66,10 @@ export function createSuggestionPopupRender<
     };
 
     const isInsideSuggestionSurface = (
-      target: EventTarget | null,
+      eventTarget: EventTarget | null,
       props: SuggestionProps<TItem, TSelected>,
     ) => {
+      const target = contextMenuOrigin(eventTarget);
       if (!(target instanceof Node)) return false;
       return props.editor.view.dom.contains(target) || !!popup?.contains(target);
     };
@@ -118,7 +123,8 @@ export function createSuggestionPopupRender<
         // squashed". Document-body editors (issue/project description, agent
         // instructions) also host this popup; there the caret usually has room
         // both ways, so `flip` keeps them on-screen regardless of the default.
-        placement: "top-start",
+        // The Docs block menu opts into `bottom-start`: it reads down the page.
+        placement,
         strategy: "fixed",
         middleware: [
           offset(6),
@@ -182,6 +188,8 @@ export function createSuggestionPopupRender<
         popup = doc.createElement("div");
         popup.style.position = "fixed";
         popup.style.zIndex = "50";
+        const owner = props.editor.view.dom.closest("[data-editor-overlay-owner]")?.getAttribute("data-editor-overlay-owner");
+        if (owner) popup.setAttribute("data-editor-overlay-owner", owner);
         popup.appendChild(renderer.element);
         doc.body.appendChild(popup);
 

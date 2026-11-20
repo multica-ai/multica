@@ -172,6 +172,201 @@ assert_stop_handles_listener() {
   )
 }
 
+# Launcher 100 owns listener 200; listener 999 is someone else's. The api's
+# sources fingerprint as fp-now, and `make up` recorded `api_build` for it
+# ("-" for no record).
+assert_component_state() {
+  local case_name=$1 component=$2 listener=$3 reported_commit=$4 probe_ok=$5
+  local expected_state=$6 expected_detail=$7 api_build=${8:-100 fp-now}
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/state-$case_name"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    FRONTEND_PORT=13000
+    TEST_LISTENER=$listener
+    TEST_COMMIT=$reported_commit
+    TEST_PROBE_OK=$probe_ok
+    [ "$api_build" = - ] || printf '%s\n' "$api_build" > "$(api_build_file)"
+
+    component_pid() { printf '100'; }
+    port_listener_pid() { printf '%s' "$TEST_LISTENER"; }
+    process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    checkout_commit() { printf 'bbb2222'; }
+    api_source_fingerprint() { printf 'fp-now'; }
+    health_json() {
+      printf '{"pid":%s,"commit":"%s","started_at":"2026-01-01T00:00:00Z"}' "$TEST_LISTENER" "$TEST_COMMIT"
+    }
+    curl() { [ "$TEST_PROBE_OK" = 1 ]; }
+
+    local row state detail
+    row="$(component_state "$component")"
+    state="${row%%|*}"
+    detail="${row##*|}"
+    [ "$state" = "$expected_state" ] \
+      || fail "$case_name state = $state, want $expected_state ($row)"
+    case "$detail" in
+      *"$expected_detail"*) ;;
+      *) fail "$case_name detail = $detail, want it to contain: $expected_detail" ;;
+    esac
+  )
+}
+
+# Launcher 100 owns listener 200; listener 999 is someone else's. The probe of
+# `/` fails `failed_probes` times before answering ("never" keeps failing), and
+# every clock read advances 10s so the 300s wait runs out without sleeping.
+assert_start_web() {
+  local case_name=$1 listener=$2 failed_probes=$3 expected_status=$4
+  local expected_output=$5 expected_events=$6
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-web-$case_name"
+    mkdir -p "$STATE_DIR"
+    FRONTEND_PORT=13000
+    ENV_FILE=.env.example
+    local events="$STATE_DIR/events" probes="$STATE_DIR/probes" clock="$STATE_DIR/clock"
+    printf '%s' "$listener" > "$STATE_DIR/listener"
+    : > "$events"
+    TEST_FAILED_PROBES=$failed_probes
+
+    component_pid() { printf '100'; }
+    port_listener_pid() { cat "$STATE_DIR/listener"; }
+    process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    describe_port_owner() { printf 'pid %s' "$(port_listener_pid "$1")"; }
+    curl() {
+      local count
+      count=$(($(cat "$probes" 2>/dev/null || echo 0) + 1))
+      printf '%s' "$count" > "$probes"
+      [ "$TEST_FAILED_PROBES" != never ] && [ "$count" -gt "$TEST_FAILED_PROBES" ]
+    }
+    now_epoch() {
+      local now
+      now=$(($(cat "$clock" 2>/dev/null || echo 1000) + 10))
+      printf '%s' "$now" > "$clock"
+      printf '%s' "$now"
+    }
+    sleep() { :; }
+    kill() { printf 'kill %s\n' "$*" >> "$events"; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; : > "$STATE_DIR/listener"; }
+    launch_detached() { printf 'launch %s\n' "$1" >> "$events"; exit 0; }
+
+    local status=0
+    ( start_web ) > "$out" 2>&1 || status=$?
+    [ "$status" = "$expected_status" ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_web exited $status, want $expected_status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+  )
+}
+
+# Launcher 100 owns listener 200, which reports `reported_commit`; a relaunch
+# gets launcher 101 and the same listener. The api's sources fingerprint as
+# fp-now, and `make up` previously recorded `api_build` ("-" for no record).
+assert_start_api() {
+  local case_name=$1 reported_commit=$2 api_build=$3 expected_output=$4
+  local expected_events=$5 expected_build=$6
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-api-$case_name"
+    LOG_DIR="$STATE_DIR"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    ENV_FILE=.env.example
+    local events="$STATE_DIR/events"
+    : > "$events"
+    printf '100\n' > "$(pid_file api)"
+    [ "$api_build" = - ] || printf '%s\n' "$api_build" > "$(api_build_file)"
+    TEST_COMMIT=$reported_commit
+
+    component_pid() { cat "$(pid_file api)"; }
+    port_listener_pid() { printf '200'; }
+    port_free() { :; }
+    process_group_id() { [ "$1" = 200 ] && component_pid api || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    checkout_commit() { printf 'bbb2222'; }
+    api_source_fingerprint() { printf 'fp-now'; }
+    health_json() {
+      printf '{"pid":200,"commit":"%s","started_at":"2026-01-01T00:00:00Z"}' "$TEST_COMMIT"
+    }
+    now_epoch() { printf '1000'; }
+    sleep() { :; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; }
+    launch_detached() {
+      printf 'launch %s\n' "$1" >> "$events"
+      printf '101\n' > "$(pid_file api)"
+      TEST_COMMIT=bbb2222
+    }
+
+    local status=0
+    ( start_api ) > "$out" 2>&1 || status=$?
+    [ "$status" = 0 ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_api exited $status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+    [ "$(cat "$(api_build_file)" 2>/dev/null)" = "$expected_build" ] \
+      || fail "$case_name recorded api build = '$(cat "$(api_build_file)" 2>/dev/null)', want '$expected_build'"
+  )
+}
+
+# The fingerprint follows server/'s uncommitted state in a real repository:
+# tracked edits, staged edits and untracked files count, ignored files and
+# changes outside server/ do not, and undoing an edit restores it.
+assert_api_source_fingerprint() (
+  local repo="$tmp_dir/fingerprint-repo" clean
+  mkdir -p "$repo/server/bin"
+  git -C "$repo" init -q
+  printf 'package main\n' > "$repo/server/main.go"
+  printf 'bin/\n' > "$repo/server/.gitignore"
+  printf 'readme\n' > "$repo/README.md"
+  git -C "$repo" add -A
+  git -C "$repo" -c user.name=t -c user.email=t@example.com commit -qm init
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  DIR="$repo"
+  fingerprint_is() {
+    local label=$1 relation=$2 actual
+    actual="$(api_source_fingerprint)"
+    [ -n "$actual" ] || fail "fingerprint $label: empty"
+    if [ "$relation" = same ]; then
+      [ "$actual" = "$clean" ] || fail "fingerprint $label: changed, want it unchanged"
+    else
+      [ "$actual" != "$clean" ] || fail "fingerprint $label: unchanged, want it changed"
+    fi
+    printf '%s' "$actual"
+  }
+  clean="$(api_source_fingerprint)"
+  [ -n "$clean" ] || fail "fingerprint of a clean tree is empty"
+  [ "$(api_source_fingerprint)" = "$clean" ] || fail "fingerprint is not stable"
+
+  printf 'built\n' > "$repo/server/bin/multica"
+  printf 'edited\n' >> "$repo/README.md"
+  fingerprint_is "ignored file and edit outside server/" same >/dev/null
+
+  printf '// edit\n' >> "$repo/server/main.go"
+  fingerprint_is "tracked edit" changed >/dev/null
+  git -C "$repo" add server/main.go
+  fingerprint_is "staged edit" changed >/dev/null
+  git -C "$repo" reset -q
+  git -C "$repo" checkout -q -- server/main.go
+  fingerprint_is "reverted edit" same >/dev/null
+
+  local first
+  printf 'package main\n' > "$repo/server/new.go"
+  first="$(fingerprint_is "untracked file" changed)"
+  printf '// edit\n' >> "$repo/server/new.go"
+  [ "$(fingerprint_is "edited untracked file" changed)" != "$first" ] \
+    || fail "fingerprint did not follow an edit to an untracked file"
+  rm "$repo/server/new.go"
+  fingerprint_is "removed untracked file" same >/dev/null
+)
+
 # ---------------------------------------------------------------------------
 # An empty registry is a normal state, not an error.
 # ---------------------------------------------------------------------------
@@ -231,6 +426,8 @@ node -e '
   const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   if (payload.name !== "probe-901") throw new Error("name = " + payload.name);
   if (payload.backend_port !== 18981) throw new Error("backend_port = " + payload.backend_port);
+  if (payload.desktop_cdp_port !== null) throw new Error("desktop_cdp_port = " + payload.desktop_cdp_port);
+  if (payload.workspace_slug !== "dev") throw new Error("workspace_slug = " + payload.workspace_slug);
   for (const key of ["api", "web", "daemon", "desktop"]) {
     if (!payload.components[key]) throw new Error("missing component " + key);
     if (payload.components[key].state !== "stopped") {
@@ -256,6 +453,15 @@ if [ "$status" -ne 0 ]; then
 fi
 require_contains "$out" "stopped"
 
+# `make down C=daemon` must reach the script as a component filter. Dropping C
+# here stops api and web too, which is what `make up C=...` users do not expect.
+make -s -n -C "$root_dir" down C=daemon > "$out" 2>&1 || fail "make -n down C=daemon failed"
+require_contains "$out" "dev-env.sh down --components daemon"
+if make -s -n -C "$root_dir" destroy C=daemon > "$out" 2>&1; then
+  fail "make destroy C=daemon must refuse instead of destroying the whole environment"
+fi
+require_contains "$out" "make down C=daemon"
+
 # Commands launched through env-exec must not inherit the daemon-task identity
 # hints that make human/profile CLI commands reject --profile.
 write_manifest "clean-env-903" "$root_dir" 903
@@ -265,9 +471,27 @@ MULTICA_WORKSPACES_ROOT=/owner/workspaces \
   dev_env exec clean-env-903 -- sh -c '
     test -z "${MULTICA_TASK_CONFIG_ROOT:-}" &&
     test -z "${MULTICA_TASK_WORKSPACES_ROOT:-}" &&
-    test "$MULTICA_WORKSPACES_ROOT" = "$1"
+    test "$MULTICA_WORKSPACES_ROOT" = "$1" &&
+    test "$MULTICA_DEV_ENV" = clean-env-903
   ' _ "$MULTICA_DEV_WORKSPACES_PARENT/multica_workspaces_dev-dev-env-test-903" \
-  > "$out" 2>&1 || fail "env-exec leaked daemon task identity or owner workspaces root"
+  > "$out" 2>&1 || fail "env-exec leaked daemon task identity or owner workspaces root, or did not name its environment"
+# Outside a task nothing was stripped, so the CLI must still be free to call a
+# marker in the checkout a leftover.
+env -u MULTICA_TASK_ID -u MULTICA_AGENT_ID -u MULTICA_TASK_CONFIG_ROOT -u MULTICA_DEV_ENV \
+  bash "$root_dir/scripts/dev-env.sh" exec clean-env-903 -- sh -c 'test -z "${MULTICA_DEV_ENV:-}"' \
+  > "$out" 2>&1 || fail "env-exec named its environment for a run that stripped no task identity"
+
+# scripts/desktop-cdp.mjs finds Desktop through env-exec: a recorded CDP port
+# becomes its endpoint, and an environment without one never inherits a URL.
+write_manifest "cdp-exec-906" "$root_dir" 906
+printf 'DESKTOP_CDP_PORT=10129\n' >> "$MULTICA_DEV_HOME/envs/cdp-exec-906/manifest.env"
+dev_env exec cdp-exec-906 -- sh -c '
+  test "$MULTICA_DEV_DESKTOP_CDP_URL" = http://127.0.0.1:10129 &&
+  test "$MULTICA_DEV_DESKTOP_RENDERER_URL" = http://localhost:6080
+' > "$out" 2>&1 || fail "env-exec did not export the Desktop CDP and renderer URLs"
+MULTICA_DEV_DESKTOP_CDP_URL=http://127.0.0.1:1 dev_env exec clean-env-903 -- sh -c '
+  test -z "${MULTICA_DEV_DESKTOP_CDP_URL:-}"
+' > "$out" 2>&1 || fail "env-exec leaked a CDP URL into an environment without one"
 
 # A health response without process identity is never proof that the process is
 # this checkout's freshly launched API.
@@ -288,6 +512,243 @@ assert_nested_listener_is_recorded
 # process group. An unrelated port occupant never receives a signal.
 assert_stop_handles_listener nested 420 310 200 "" 420
 assert_stop_handles_listener external 999 999 1 888
+
+# Status separates "ours but out of date or busy" from "not ours". Only the
+# latter means inspecting the port for an external listener; a commit after
+# `make up` or a slow Next compile must not read like a hijacked port.
+assert_component_state api-current api 200 bbb2222 1 running "commit bbb2222"
+assert_component_state api-stale api 200 aaa1111 1 stale "running aaa1111, checkout at bbb2222; run make up"
+assert_component_state api-foreign api 999 bbb2222 1 mismatch "not this checkout/process"
+assert_component_state api-foreign-old api 999 aaa1111 1 mismatch "not this checkout/process"
+assert_component_state api-dirty api 200 bbb2222 1 stale "pid 200 was compiled before server/ changed (uncommitted changes differ); run make up" "100 fp-old"
+assert_component_state api-unrecorded api 200 bbb2222 1 stale "has no recorded source fingerprint" -
+assert_component_state api-other-launcher api 200 bbb2222 1 stale "has no recorded source fingerprint" "300 fp-now"
+assert_component_state web-running web 200 - 1 running "pid 200"
+assert_component_state web-busy web 200 - 0 busy "pid 200 is ours but not responding"
+assert_component_state web-foreign web 999 - 1 mismatch "listener pid 999 is not owned"
+assert_component_state web-foreign-silent web 999 - 0 mismatch "listener pid 999 is not owned"
+
+# `make up` waits for its own web server while Next compiles instead of calling
+# the port busy, restarts it only once the launch timeout runs out, and still
+# refuses a listener it does not own.
+assert_start_web compiling 200 3 0 "web already running on :13000 (pid 200)" ""
+assert_start_web hung 200 never 0 "did not answer within 300s; restarting it" $'stop web\nlaunch web'
+assert_start_web foreign 999 0 1 "Port 13000 is busy: pid 999" ""
+assert_start_web foreign-silent 999 never 1 "Port 13000 is busy: pid 999" ""
+
+# `go run` compiles the api once, so `make up` restarts an api of the current
+# commit when server/ has uncommitted changes it was not compiled from, and
+# keeps it when nothing changed.
+assert_api_source_fingerprint
+assert_start_api unchanged bbb2222 "100 fp-now" "api already running on :18080 (pid 200, commit bbb2222)" "" "100 fp-now"
+assert_start_api dirty bbb2222 "100 fp-old" "was compiled before server/ changed (uncommitted changes differ); restarting it" $'stop api\nlaunch api' "101 fp-now"
+assert_start_api unrecorded bbb2222 - "has no recorded source fingerprint" $'stop api\nlaunch api' "101 fp-now"
+assert_start_api old-commit aaa1111 "100 fp-now" "is ours but not commit bbb2222; restarting it" $'stop api\nlaunch api' "101 fp-now"
+
+# ---------------------------------------------------------------------------
+# Daemon: `daemon start` is a no-op while one is running, so `make up` has to
+# restart a daemon that is not running this checkout's current build itself.
+# ---------------------------------------------------------------------------
+head_commit="$(git -C "$root_dir" rev-parse HEAD)"
+old_commit=0123456789abcdef0123456789abcdef01234567
+old_short="$(git -C "$root_dir" rev-parse --short "$old_commit")"
+daemon_fake="$tmp_dir/daemon-fake"
+mkdir -p "$daemon_fake/server/bin" "$daemon_fake/go-bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$daemon_fake/go-bin/go"
+chmod +x "$daemon_fake/go-bin/go"
+cat > "$daemon_fake/server/bin/multica" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_DAEMON/calls"
+case "$1 $2" in
+  "daemon status") cat "$FAKE_DAEMON/status" ;;
+  "daemon stop") printf '{"status":"stopped"}' > "$FAKE_DAEMON/status" ;;
+  "daemon start")
+    printf '{"status":"running","pid":5002,"cli_commit":"%s","uptime":"1s"}' \
+      "$(cat "$FAKE_DAEMON/start_commit")" > "$FAKE_DAEMON/status" ;;
+esac
+EOF
+chmod +x "$daemon_fake/server/bin/multica"
+
+# Args: case, commit the running daemon reports, recorded "<pid> <hash>" (or
+# "-" for none), commit a fresh start reports, expected exit, expected output,
+# expected record afterwards.
+assert_start_daemon() (
+  local case_name=$1 running_commit=$2 recorded=$3 start_commit=$4
+  local expected_status=$5 expected=$6 expected_record=$7 status=0 bin_hash
+  export FAKE_DAEMON="$tmp_dir/daemon-$case_name"
+  mkdir -p "$FAKE_DAEMON"
+  printf '{"status":"running","pid":5001,"cli_commit":"%s","active_task_count":1}' \
+    "$running_commit" > "$FAKE_DAEMON/status"
+  printf '%s' "$start_commit" > "$FAKE_DAEMON/start_commit"
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  PATH="$daemon_fake/go-bin:$PATH"
+  DIR="$root_dir" PROFILE=dev-test STATE_DIR="$FAKE_DAEMON" PROFILE_DIR="$FAKE_DAEMON"
+  WORKSPACES_ROOT="$FAKE_DAEMON/ws" MULTICA_BIN="$daemon_fake/server/bin/multica"
+  bin_hash="$(file_sha256 "$MULTICA_BIN")"
+  [ -n "$bin_hash" ] || fail "file_sha256 printed nothing"
+  case "$recorded" in
+    -) ;;
+    current) printf '5001 %s\n' "$bin_hash" > "$(daemon_build_file)" ;;
+    *) printf '%s\n' "$recorded" > "$(daemon_build_file)" ;;
+  esac
+  (start_daemon) > "$out" 2>&1 || status=$?
+  [ "$status" = "$expected_status" ] || { sed 's/^/  /' "$out" >&2; fail "$case_name: start_daemon exited $status, want $expected_status"; }
+  require_contains "$out" "$expected"
+  case "$expected_record" in
+    restarted) [ "$(cat "$(daemon_build_file)")" = "5002 $bin_hash" ] \
+      || fail "$case_name: recorded build is '$(cat "$(daemon_build_file)" 2>/dev/null)', want the restarted daemon" ;;
+    kept) ! grep -q '^daemon stop' "$FAKE_DAEMON/calls" \
+      || fail "$case_name: stopped a daemon that already ran the current build" ;;
+  esac
+)
+assert_start_daemon current "$head_commit" current "$head_commit" 0 "daemon already running for profile dev-test (pid 5001" kept
+assert_start_daemon old-commit "$old_commit" current "$head_commit" 0 "runs commit $old_short, checkout is at" restarted
+assert_start_daemon dirty-edit "$head_commit" "5001 not-this-binary" "$head_commit" 0 "uncommitted changes differ" restarted
+assert_start_daemon unrecorded "$head_commit" - "$head_commit" 0 "was not started from" restarted
+assert_start_daemon other-pid "$head_commit" "4000 x" "$head_commit" 0 "interrupts 1 active task(s)" restarted
+assert_start_daemon wrong-start "$old_commit" current "$old_commit" 1 "reports commit $old_short after start" -
+
+# `make status` shows the daemon's commit, and calls a daemon that `make up`
+# would restart stale instead of running.
+assert_daemon_state() (
+  local case_name=$1 running_commit=$2 recorded=$3 expected_state=$4 expected=$5 row
+  export FAKE_DAEMON="$tmp_dir/daemon-state-$case_name"
+  mkdir -p "$FAKE_DAEMON"
+  printf '{"status":"running","pid":5001,"cli_commit":"%s","uptime":"3m0s"}' \
+    "$running_commit" > "$FAKE_DAEMON/status"
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  DIR="$root_dir" PROFILE=dev-test STATE_DIR="$FAKE_DAEMON" PROFILE_DIR="$FAKE_DAEMON"
+  WORKSPACES_ROOT="$FAKE_DAEMON/ws" MULTICA_BIN="$daemon_fake/server/bin/multica"
+  [ "$recorded" = - ] || printf '5001 %s\n' "$(file_sha256 "$MULTICA_BIN")" > "$(daemon_build_file)"
+  row="$(component_state daemon)"
+  [ "${row%%|*}" = "$expected_state" ] || fail "$case_name: daemon state row '$row', want $expected_state"
+  case "$row" in *"$expected"*) ;; *) fail "$case_name: daemon state row '$row', want '$expected'" ;; esac
+)
+assert_daemon_state current "$head_commit" current running "pid 5001 commit $(git -C "$root_dir" rev-parse --short HEAD) up 3m0s"
+assert_daemon_state old-commit "$old_commit" current stale "runs commit $old_short, checkout is at"
+assert_daemon_state unrecorded "$head_commit" - stale "run make up C=daemon to restart"
+
+# ---------------------------------------------------------------------------
+# Desktop: CDP port, env file, process tree, and the daemon Desktop starts.
+# ---------------------------------------------------------------------------
+
+# A recorded CDP port is reported for Playwright, and the next allocation skips
+# a port another environment already holds.
+write_manifest "cdp-905" "$tmp_dir/checkout" 905
+printf 'DESKTOP_CDP_PORT=19999\n' >> "$MULTICA_DEV_HOME/envs/cdp-905/manifest.env"
+dev_env status cdp-905 --json > "$out" 2>&1 || fail "status --json with a CDP port must succeed"
+node -e '
+  const payload = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  if (payload.desktop_cdp_port !== 19999) throw new Error("desktop_cdp_port = " + payload.desktop_cdp_port);
+' "$out" || fail "status --json did not report the recorded CDP port"
+allocated="$(bash -c 'source "$1"; port_free() { :; }; allocate_cdp_port self 19999' _ "$root_dir/scripts/dev-env.sh")"
+[ "$allocated" = 20000 ] || fail "CDP allocation reused another environment's port: $allocated"
+dev_env destroy cdp-905 --yes > "$out" 2>&1 || fail "destroying the CDP fixture failed"
+
+status=0
+dev_env up --components api --cdp > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "up accepted --cdp without the desktop component"
+require_contains "$out" "need the desktop component"
+
+# Clearing the port without the desktop component would leave a running
+# Desktop serving it while status reports null.
+status=0
+dev_env up --components api --no-cdp > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "up accepted --no-cdp without the desktop component"
+require_contains "$out" "need the desktop component"
+
+status=0
+dev_env up --components desktop --remote-debugging-port 80 > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "up accepted a privileged CDP port"
+require_contains "$out" "between 1024 and 65535"
+
+# `up` without the desktop component still points a missing or managed env
+# file at this backend, and never rewrites a file a human wrote.
+assert_desktop_env_sync() (
+  local case_name=$1 initial=$2 expected=$3
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  NAME=sync-env BACKEND_PORT=18555 FRONTEND_PORT=13555
+  DESKTOP_ENV_FILE="$tmp_dir/desktop-env-$case_name"
+  rm -f "$DESKTOP_ENV_FILE"
+  [ -z "$initial" ] || printf '%s\n' "$initial" > "$DESKTOP_ENV_FILE"
+  sync_desktop_env_file > "$out" 2>&1
+  grep -Fqx "$expected" "$DESKTOP_ENV_FILE" \
+    || fail "$case_name env file = $(cat "$DESKTOP_ENV_FILE"), want a line: $expected"
+)
+assert_desktop_env_sync missing "" "VITE_API_URL=http://localhost:18555"
+assert_desktop_env_sync managed-elsewhere "# Managed by scripts/dev-env.sh for environment old-env." \
+  "VITE_API_URL=http://localhost:18555"
+assert_desktop_env_sync managed-missing-app "# Managed by scripts/dev-env.sh for environment sync-env.
+VITE_API_URL=http://localhost:18555
+VITE_WS_URL=ws://localhost:18555/ws" "VITE_APP_URL=http://localhost:13555"
+assert_desktop_env_sync hand-written "VITE_API_URL=https://staging.example" "VITE_API_URL=https://staging.example"
+
+# Turbo puts Electron in a nested process group; the stop path finds it through
+# the launcher's PPID chain instead.
+bash -c 'sleep 30 & bash -c "sleep 30; :" & wait' 2>/dev/null &
+tree_root=$!
+sleep 0.5
+tree="$(bash -c 'source "$1"; descendant_pids "$2"' _ "$root_dir/scripts/dev-env.sh" "$tree_root" | sort)"
+for child in $tree; do kill "$child" 2>/dev/null || true; done
+wait "$tree_root" 2>/dev/null || true
+[ "$(printf '%s\n' "$tree" | grep -c .)" -ge 3 ] \
+  || fail "descendant_pids found $(printf '%s' "$tree" | tr '\n' ' ') under $tree_root, want both sleeps and the nested shell"
+
+# Desktop's own daemon outlives Electron. Stopping Desktop stops it, and only a
+# confirmed stop lets destroy remove the profile Desktop derived from this
+# backend's URL; that profile holds the pid a retried destroy needs.
+desktop_profile_dir="$MULTICA_DEV_PROFILES_HOME/desktop-localhost-18080"
+mkdir -p "$desktop_profile_dir"
+desktop_daemon="$(sleep 60 > /dev/null 2>&1 & printf '%s' "$!")"
+printf '%s\n' "$desktop_daemon" > "$desktop_profile_dir/daemon.pid"
+fake_checkout="$tmp_dir/fake-checkout"
+stop_mode="$tmp_dir/daemon-stop-mode"
+mkdir -p "$fake_checkout/server/bin"
+# The fake CLI stops the daemon only in "kill" mode. "lies" exits 0 with the
+# daemon still alive, like a plain `daemon stop` that is still finishing a run.
+cat > "$fake_checkout/server/bin/multica" <<EOF
+#!/usr/bin/env bash
+[ "\$*" = "daemon stop --force --profile desktop-localhost-18080" ] || exit 0
+case "\$(cat "$stop_mode")" in
+  kill)
+    kill -KILL $desktop_daemon
+    while kill -0 $desktop_daemon 2>/dev/null; do sleep 0.1; done
+    ;;
+  lies) ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$fake_checkout/server/bin/multica"
+
+printf 'lies' > "$stop_mode"
+status=0
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  BACKEND_PORT=18080 MULTICA_BIN="$fake_checkout/server/bin/multica" DIR="$fake_checkout"
+  stop_desktop_daemon
+) > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "stop_desktop_daemon trusted a stop that left the daemon running"
+kill -0 "$desktop_daemon" 2>/dev/null || fail "the fake daemon died before the retry test"
+
+printf 'fails' > "$stop_mode"
+write_manifest "desktop-profile-906" "$fake_checkout" 0
+status=0
+dev_env destroy desktop-profile-906 --yes > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "destroy succeeded while Desktop's daemon was still running"
+[ -f "$desktop_profile_dir/daemon.pid" ] || fail "a failed destroy removed Desktop's daemon pid"
+[ -f "$MULTICA_DEV_HOME/envs/desktop-profile-906/manifest.env" ] \
+  || fail "a failed destroy discarded the manifest"
+require_contains "$out" "kept Desktop's CLI profile desktop-localhost-18080"
+
+printf 'kill' > "$stop_mode"
+dev_env destroy desktop-profile-906 --yes > "$out" 2>&1 \
+  || { sed 's/^/  /' "$out" >&2; fail "retrying destroy after the daemon could be stopped failed"; }
+! kill -0 "$desktop_daemon" 2>/dev/null || fail "Desktop's daemon is still running after destroy"
+[ ! -d "$desktop_profile_dir" ] || fail "destroy left Desktop's CLI profile behind"
 
 # ---------------------------------------------------------------------------
 # Unknown names and components fail loudly instead of doing something else.
@@ -343,5 +804,44 @@ fi
 printf 'n\n' | dev_env destroy orphan-902 > "$out" 2>&1 || fail "declining destroy must exit 0"
 require_contains "$out" "Cancelled."
 [ -d "$MULTICA_DEV_HOME/envs/orphan-902" ] || fail "declined destroy removed the environment anyway"
+
+# ---------------------------------------------------------------------------
+# uutils mkdir (Ubuntu 26.04) reports success to a caller that lost the race
+# to create a directory. A mkdir that succeeds on the held allocation lock must
+# not hand it to a second holder, or two `up`s allocate the same slot.
+# ---------------------------------------------------------------------------
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  command mkdir -p "$LOCK_DIR"
+  printf '%s\n' "$PPID" > "$LOCK_DIR/pid"
+  mkdir() { command mkdir "$@" 2>/dev/null || [ -d "$LOCK_DIR" ]; }
+  sleep() { :; }
+  if (acquire_lock) > "$out" 2>&1; then
+    fail "a mkdir that succeeded on the held lock directory let a second holder in"
+  fi
+  require_contains "$out" "Timed out waiting for the allocation lock"
+  [ "$(cat "$LOCK_DIR/pid")" = "$PPID" ] || fail "the lock holder's pid was overwritten"
+  command rm -rf "$LOCK_DIR"
+)
+
+# Releasing must drop only this holder's claim. Under uutils mkdir the next
+# caller can claim the directory as soon as the pid file is unlinked; deleting
+# the directory after that would hand the lock to a third caller.
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  acquire_lock
+  rm() {
+    command rm -f "$LOCK_DIR/pid"
+    # The next caller claims the lock between the unlink and the directory removal.
+    printf '%s\n' "$PPID" > "$LOCK_DIR/pid"
+    case "$1" in -r*) command rmdir "$LOCK_DIR" ;; esac
+  }
+  release_lock 2> "$out" || fail "release_lock failed when the next holder had already claimed the lock"
+  unset -f rm
+  [ "$(cat "$LOCK_DIR/pid" 2>/dev/null)" = "$PPID" ] || fail "release_lock removed the next holder's lock"
+  command rm -rf "$LOCK_DIR"
+)
 
 echo "✓ dev-env.sh registry behaviour verified"

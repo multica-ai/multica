@@ -72,6 +72,7 @@ export function MemberDetailPage({ userId }: { userId: string }) {
   if (isLoading) {
     return (
       <ObjectPage
+        type="member"
         layoutId={LAYOUT_ID}
         segments={segments}
         leaf={<Skeleton className="h-4 w-32" />}
@@ -88,6 +89,7 @@ export function MemberDetailPage({ userId }: { userId: string }) {
 
   return (
     <ObjectPage
+      type="member"
       layoutId={LAYOUT_ID}
       segments={segments}
       leaf={
@@ -131,6 +133,7 @@ function MemberIssues({
 
   return (
     <ObjectPage
+      type="member"
       layoutId={LAYOUT_ID}
       segments={segments}
       leaf={
@@ -166,12 +169,10 @@ function MemberIssues({
               : null
           }
           renderEmpty={() => (
-            <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-              <ListTodo className="h-10 w-10 text-faint-foreground" />
-              <p className="text-body">
-                {t(($) => $.actor_issues.empty[scope].title)}
-              </p>
-            </div>
+            <CollectionPageState
+              icon={ListTodo}
+              title={t(($) => $.actor_issues.empty[scope].title)}
+            />
           )}
         />
       </div>

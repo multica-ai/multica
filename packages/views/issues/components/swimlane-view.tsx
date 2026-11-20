@@ -670,7 +670,11 @@ function SwimLaneViewImpl({
     // Extra children are not part of the server-grouped page yet, so apply
     // the same running-task issue ids returned by `/api/working-agents`.
     agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
+    agentIdleFilter: activeFiltersProp?.agentIdleFilter ?? false,
+    activeIssueIds: activeFiltersProp?.activeIssueIds,
     runningIssueIds: activeFiltersProp?.runningIssueIds,
+    unreadFilter: activeFiltersProp?.unreadFilter ?? false,
+    unreadIssueIds: activeFiltersProp?.unreadIssueIds,
     creatorFilters: activeFiltersProp?.creatorFilters ?? [],
     projectFilters: activeFiltersProp?.projectFilters ?? [],
     includeNoProject: activeFiltersProp?.includeNoProject ?? false,
@@ -988,10 +992,23 @@ function SwimLaneViewImpl({
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   // The outer scroll box is the customScrollParent for the lane Virtuoso.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const laneListRef = useRef<HTMLDivElement>(null);
   // Pull-based scroll restoration (MUL-4741): same wiring as board/list/
   // issue-detail — ref-attach assigns the saved offset pre-paint, and the
-  // lane Virtuoso is born at it via initialScrollTop.
+  // lane Virtuoso starts at it via an initial item offset. Unlike
+  // initialScrollTop, this also restores a single tall lane.
   const restoredScrollTop = useRestoredScrollOffset("swimlane");
+  const initialLaneLocation = useMemo(() => {
+    const list = laneListRef.current;
+    if (restoredScrollTop === undefined || !scrollEl || !list) return 0;
+    // Item offsets are relative to the lane list, while the memento includes
+    // the outer padding and sticky status header above it.
+    const listTop =
+      list.getBoundingClientRect().top -
+      scrollEl.getBoundingClientRect().top +
+      scrollEl.scrollTop;
+    return { index: 0, offset: restoredScrollTop - listTop };
+  }, [restoredScrollTop, scrollEl]);
   const restoreScrollRef = useRestoredScrollRef("swimlane");
   const attachScroller = useCallback(
     (el: HTMLDivElement | null) => {
@@ -1473,7 +1490,7 @@ function SwimLaneViewImpl({
                         variant="ghost"
                         size="icon-sm"
                         aria-label={t(($) => $.board.hide_column)}
-                        className="rounded-full text-muted-foreground"
+                        className="text-muted-foreground"
                       >
                         <MoreHorizontal className="size-3.5" />
                       </Button>
@@ -1491,7 +1508,7 @@ function SwimLaneViewImpl({
                                   variant="ghost"
                                   size="icon-sm"
                                   aria-label={t(($) => $.board.hide_column)}
-                                  className="rounded-full text-muted-foreground"
+                                  className="text-muted-foreground"
                                 >
                                   <MoreHorizontal className="size-3.5" />
                                 </Button>
@@ -1535,25 +1552,27 @@ function SwimLaneViewImpl({
               settled after a remount, so the lane area never paints blank; once
               it's set, mount the Virtuoso with a matching `initialItemCount` to
               survive the measurement frame (MUL-4750). */}
-          {scrollEl ? (
-            <Virtuoso
-              customScrollParent={scrollEl}
-              data={orderedLanes}
-              computeItemKey={computeLaneKey}
-              initialScrollTop={restoredScrollTop}
-              initialItemCount={Math.min(orderedLanes.length, SWIMLANE_LANE_SEED_COUNT)}
-              increaseViewportBy={{ top: 600, bottom: 600 }}
-              components={laneComponents}
-              itemContent={renderLane}
-            />
-          ) : (
-            <VirtuosoSeed
-              data={orderedLanes}
-              itemContent={renderLane}
-              computeItemKey={computeLaneKey}
-              count={SWIMLANE_LANE_SEED_COUNT}
-            />
-          )}
+          <div ref={laneListRef}>
+            {scrollEl ? (
+              <Virtuoso
+                customScrollParent={scrollEl}
+                data={orderedLanes}
+                computeItemKey={computeLaneKey}
+                initialTopMostItemIndex={initialLaneLocation}
+                initialItemCount={Math.min(orderedLanes.length, SWIMLANE_LANE_SEED_COUNT)}
+                increaseViewportBy={{ top: 600, bottom: 600 }}
+                components={laneComponents}
+                itemContent={renderLane}
+              />
+            ) : (
+              <VirtuosoSeed
+                data={orderedLanes}
+                itemContent={renderLane}
+                computeItemKey={computeLaneKey}
+                count={SWIMLANE_LANE_SEED_COUNT}
+              />
+            )}
+          </div>
         </SortableContext>
         </div>
       </div>

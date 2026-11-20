@@ -35,9 +35,8 @@ import { chatSessionsOptions } from "@/data/queries/chat";
  *
  * The lookup mirrors `unreadCountForWorkspace` in
  * packages/core/inbox/queries.ts rather than importing it — that module pulls
- * in core's API client, which mobile does not use (same reason
- * `deduplicateInboxItems` is mirrored into lib/inbox-display.ts). A workspace
- * with nothing unread is absent from the response, so a missing entry is zero.
+ * in core's API client, which mobile does not use. A workspace with nothing
+ * unread is absent from the response, so a missing entry is zero.
  */
 export function useInboxUnreadCount(wsId: string | null | undefined): number {
   const { data } = useQuery({

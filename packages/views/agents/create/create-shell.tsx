@@ -5,6 +5,8 @@ import { Check, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Separator } from "@multica/ui/components/ui/separator";
 import { cn } from "@multica/ui/lib/utils";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useVisualViewportKeyboard } from "../../chat/components/use-visual-viewport-keyboard";
 import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
@@ -25,6 +27,7 @@ export function AgentCreateShell({
   onClose,
   chips,
   children,
+  fitVisualViewport = false,
 }: {
   title: string;
   /** Names the screen where there is no step position to show. */
@@ -35,10 +38,22 @@ export function AgentCreateShell({
   /** Right-aligned context badges (method, runtime). Hidden on small screens. */
   chips?: ReactNode;
   children: ReactNode;
+  /** Keep the conversation, page header and actions above the mobile keyboard. */
+  fitVisualViewport?: boolean;
 }) {
   const { t } = useT("agents");
+  const isMobile = useIsMobile();
+  const keyboard = useVisualViewportKeyboard();
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
+    <div
+      data-testid="agent-create-shell"
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
+      // Fit the whole page so the workspace cannot cover its close/step header.
+      style={fitVisualViewport && isMobile && keyboard ? {
+        position: "fixed", left: 0, right: 0, zIndex: 20,
+        bottom: keyboard.occludedBottom, height: keyboard.viewportHeight,
+      } : undefined}
+    >
       <PageHeader
         leading={
           <IconButton

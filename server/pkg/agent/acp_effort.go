@@ -230,7 +230,7 @@ func acpOptionsAfterModelSwitch(ctx context.Context, request acpRequestFn, sessi
 // each and reading the options it advertises there — the per-model read that
 // annotateACPThinkingForSessionModel cannot do from a single response. A model
 // whose switch yields no options keeps a nil Thinking rather than borrowing a
-// sibling's levels. A session with no configOptions at all (Hermes Agent) is
+// sibling's levels. A session with no configOptions at all is
 // skipped outright: switching models there cannot surface a catalog.
 func probeACPModelEffort(ctx context.Context, request acpRequestFn, sessionResult json.RawMessage, models []Model) {
 	sessionID := extractACPSessionID(sessionResult)

@@ -8,6 +8,7 @@ import { renderWithI18n } from "../../test/i18n";
 
 const update = vi.fn();
 const runNow = vi.fn();
+const cancelTaskById = vi.fn();
 let detail: { autopilot: Autopilot; triggers: AutopilotTrigger[]; collaborators: [] };
 let runs: AutopilotRun[];
 
@@ -23,7 +24,14 @@ vi.mock("@multica/core/paths", () => ({
 }));
 vi.mock("@multica/core/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/api")>();
-  return { ...actual, api: { ...actual.api, getBaseUrl: () => "https://api.test" } };
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      getBaseUrl: () => "https://api.test",
+      cancelTaskById: (...args: unknown[]) => cancelTaskById(...args),
+    },
+  };
 });
 vi.mock("@multica/core/autopilots/queries", () => ({
   autopilotDetailOptions: () => ({ queryKey: ["autopilot"], queryFn: async () => detail }),
@@ -147,6 +155,7 @@ function mount() {
 beforeEach(() => {
   update.mockReset();
   runNow.mockReset();
+  cancelTaskById.mockReset();
   detail = { autopilot: makeAutopilot(), triggers: [scheduleTrigger], collaborators: [] };
   runs = [
     run({ id: "r1", issue_id: "issue-24" }),
@@ -166,6 +175,19 @@ describe("AutopilotDetailPage", () => {
     expect(runNow).toHaveBeenCalledWith("ap-1");
   });
 
+  it("edits the whole autopilot from the header, next to Run now", async () => {
+    const user = userEvent.setup();
+    mount();
+    const header = await screen.findByRole("banner");
+    await within(header).findByText("Daily Sync");
+
+    const edit = within(header).getByRole("button", { name: "Edit" });
+    const runNowButton = within(header).getByRole("button", { name: "Run now" });
+    expect(edit.compareDocumentPosition(runNowButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(edit);
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Edit autopilot dialog");
+  });
+
   it("can't run a paused autopilot", async () => {
     detail.autopilot = makeAutopilot({ status: "paused" });
     mount();
@@ -173,16 +195,14 @@ describe("AutopilotDetailPage", () => {
     expect(await screen.findByRole("button", { name: "Run now" })).toBeDisabled();
   });
 
-  it("keeps edit, copy link and delete in the ⋯ menu", async () => {
-    const user = userEvent.setup();
+  it("keeps copy link and delete in the ⋯ menu", async () => {
     mount();
     await screen.findByRole("heading", { name: "Daily Sync", level: 1 });
 
     openMoreActions();
     expect(await screen.findByRole("menuitem", { name: "Copy link" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete autopilot" })).toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "Edit" }));
-    expect(await screen.findByRole("dialog")).toHaveTextContent("Edit autopilot dialog");
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
   });
 
   it("pauses from the panel's status switch", async () => {
@@ -200,7 +220,7 @@ describe("AutopilotDetailPage", () => {
 
     const prompt = screen.getByRole("heading", { name: "Prompt", level: 2 }).closest("section")!;
     expect(within(prompt).getByText("Summarize what changed yesterday.")).toBeVisible();
-    expect(within(prompt).getByRole("button", { name: "Edit" })).toBeVisible();
+    expect(within(prompt).queryByRole("button", { name: "Edit" })).toBeNull();
 
     const triggers = screen.getByRole("heading", { name: "Triggers", level: 2 }).closest("section")!;
     expect(within(triggers).getByText("1")).toBeVisible();
@@ -213,12 +233,40 @@ describe("AutopilotDetailPage", () => {
     expect(within(history).getByText("Runtime is offline")).toHaveClass("text-destructive");
   });
 
+  it("stops a running run-only run from its history row", async () => {
+    const user = userEvent.setup();
+    detail.autopilot = makeAutopilot({ execution_mode: "run_only" });
+    runs = [
+      run({ id: "r1", status: "running", task_id: "task-1" }),
+      run({ id: "r2", status: "completed", task_id: "task-2" }),
+    ];
+    cancelTaskById.mockResolvedValue({});
+    mount();
+    const history = (await screen.findByRole("heading", { name: "Run history", level: 2 })).closest("section")!;
+
+    const stop = await within(history).findByRole("button", { name: "Stop run" });
+    expect(within(history).getAllByRole("button", { name: "Stop run" })).toHaveLength(1);
+    await user.click(stop);
+    expect(cancelTaskById).toHaveBeenCalledWith("task-1");
+  });
+
+  it("keeps the stop button off a reader's run history", async () => {
+    detail.autopilot = makeAutopilot({ execution_mode: "run_only", can_write: false } as Partial<Autopilot>);
+    runs = [run({ id: "r1", status: "running", task_id: "task-1" })];
+    mount();
+    const history = (await screen.findByRole("heading", { name: "Run history", level: 2 })).closest("section")!;
+
+    await within(history).findByText("1");
+    expect(within(history).queryByRole("button", { name: "Stop run" })).toBeNull();
+  });
+
   it("shows a reader the page without write controls", async () => {
     detail.autopilot = makeAutopilot({ can_write: false } as Partial<Autopilot>);
     mount();
     await screen.findByRole("heading", { name: "Daily Sync", level: 1 });
 
     expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     expect(screen.getByRole("switch", { name: "Pause autopilot" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.queryByRole("button", { name: "Add trigger" })).toBeNull();
     openMoreActions();

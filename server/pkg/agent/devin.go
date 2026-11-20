@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -431,109 +432,68 @@ func selectDevinAuthMethod(methods []string, haveWindsurfKey bool) string {
 	return ""
 }
 
-// discoverDevinModels runs `devin models list --format json`.
-// Unknown/empty output degrades to an empty catalog (manual entry).
 func discoverDevinModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
-	if runtimeCmd.Path == "" {
-		runtimeCmd.Path = "devin"
-	}
-	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
-		return []Model{}, nil
-	}
-	stdout, err := devinModelsOutput(ctx, runtimeCmd, nil, "")
+	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		defaultBin:   "devin",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-devin-discovery-",
+		timeout:      15 * time.Second,
+		strictErrors: true,
+		parseModels:  parseDevinSessionModels,
+		selectAuthMethod: func(initResult json.RawMessage, childEnv []string) (string, error) {
+			return selectDevinAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "WINDSURF_API_KEY")), nil
+		},
+	})
 	if err != nil {
-		return nil, err
+		var rpcErr *acpRPCError
+		if errors.As(err, &rpcErr) {
+			detail := devinDiagnostic(rpcErr.Message, os.Environ())
+			if data := devinDiagnostic(rpcErr.Data, os.Environ()); data != "" {
+				detail += "; " + data
+			}
+			return nil, fmt.Errorf("devin model discovery %s failed (code=%d): %s", rpcErr.Method, rpcErr.Code, detail)
+		}
+		return nil, fmt.Errorf("devin model discovery: %s", devinDiagnostic(err.Error(), os.Environ()))
 	}
-	return parseDevinModels(stdout)
+	if len(models) == 0 {
+		return nil, fmt.Errorf("Devin returned no model choices: set WINDSURF_API_KEY in the daemon environment or run devin auth login as the daemon user, and check your team's model allowlist")
+	}
+	return models, nil
+}
+
+// Redact before taking a bounded tail so truncation cannot split a credential
+// away from the field name that identifies it to the shared sanitizer.
+func devinDiagnostic(value string, env []string) string {
+	for _, entry := range env {
+		key, secret, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(key, "WINDSURF_API_KEY") && secret != "" {
+			value = strings.ReplaceAll(value, secret, "[REDACTED]")
+		}
+	}
+	value = strings.TrimSpace(sanitizeAgentDiagnostic(value))
+	if len(value) > agentStderrTailBytes {
+		value = "…" + strings.ToValidUTF8(value[len(value)-agentStderrTailBytes:], "")
+	}
+	return value
 }
 
 func devinModelsOutput(ctx context.Context, runtimeCmd Command, env []string, cwd string) ([]byte, error) {
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models", "list", "--format", "json")
+	if env == nil {
+		env = os.Environ()
+	}
 	cmd.Env, cmd.Dir = env, cwd
 	hideAgentWindow(cmd)
 	stdout, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
-		return nil, fmt.Errorf("devin model discovery: %w", err)
+		detail := devinDiagnostic(err.Error(), env)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			detail = withAgentStderr(detail, "devin", devinDiagnostic(string(exitErr.Stderr), env))
+		}
+		return nil, fmt.Errorf("devin model aliases: %s", detail)
 	}
 	return stdout, nil
-}
-
-func parseDevinModels(data []byte) ([]Model, error) {
-	type entry struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Label    string `json:"label"`
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
-		ModelUID string `json:"model_uid"`
-	}
-	var families struct {
-		Families []struct {
-			Slug     string  `json:"slug"`
-			Variants []entry `json:"variants"`
-		} `json:"families"`
-	}
-	if err := json.Unmarshal(data, &families); err == nil && len(families.Families) > 0 {
-		out := make([]Model, 0, 64)
-		seen := map[string]bool{}
-		for _, fam := range families.Families {
-			provider := strings.TrimSpace(fam.Slug)
-			for _, e := range fam.Variants {
-				id := strings.TrimSpace(e.ModelUID)
-				if id == "" {
-					id = strings.TrimSpace(e.ID)
-				}
-				if id == "" || seen[id] {
-					continue
-				}
-				seen[id] = true
-				label := strings.TrimSpace(e.Label)
-				if label == "" {
-					label = strings.TrimSpace(e.Name)
-				}
-				if label == "" {
-					label = id
-				}
-				out = append(out, Model{ID: id, Label: label, Provider: provider})
-			}
-		}
-		if len(out) > 0 {
-			return out, nil
-		}
-	}
-	var models []entry
-	var wrapper struct {
-		Models []entry `json:"models"`
-	}
-	if err := json.Unmarshal(data, &wrapper); err == nil && len(wrapper.Models) > 0 {
-		models = wrapper.Models
-	} else if err := json.Unmarshal(data, &models); err != nil {
-		return []Model{}, nil
-	}
-	out := make([]Model, 0, len(models))
-	seen := map[string]bool{}
-	for _, e := range models {
-		id := strings.TrimSpace(e.ID)
-		if id == "" {
-			id = strings.TrimSpace(e.ModelUID)
-		}
-		if id == "" {
-			id = strings.TrimSpace(e.Model)
-		}
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		label := strings.TrimSpace(e.Name)
-		if label == "" {
-			label = strings.TrimSpace(e.Label)
-		}
-		if label == "" {
-			label = id
-		}
-		out = append(out, Model{ID: id, Label: label, Provider: strings.TrimSpace(e.Provider)})
-	}
-	return out, nil
 }

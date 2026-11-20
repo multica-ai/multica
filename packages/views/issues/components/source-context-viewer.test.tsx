@@ -142,8 +142,8 @@ describe("SourceContextBadge", () => {
     fireEvent.click(screen.getByRole("button", { name: "Context snapshot" }));
 
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveClass("h-[min(82dvh,56rem)]", "sm:max-w-4xl");
-    expect(dialog).not.toHaveClass("h-[calc(100dvh-2rem)]", "sm:max-w-[calc(100%-2rem)]");
+    expect(dialog).toHaveClass("h-[min(82%,56rem)]", "sm:max-w-4xl");
+    expect(dialog).not.toHaveClass("h-[calc(100%-2rem)]", "sm:max-w-[calc(100%-2rem)]");
     expect(screen.getByText("Source comment")).toHaveClass(
       "rounded-xs",
       "bg-info/10",
@@ -162,7 +162,7 @@ describe("SourceContextBadge", () => {
     const expand = screen.getByRole("button", { name: "Expand captured context" });
     expect(expand.closest('[data-slot="dialog-header"]')).toBeInTheDocument();
     fireEvent.click(expand);
-    expect(dialog).toHaveClass("h-[calc(100dvh-2rem)]", "sm:max-w-[calc(100%-2rem)]");
+    expect(dialog).toHaveClass("h-[calc(100%-2rem)]", "sm:max-w-[calc(100%-2rem)]");
     expect(screen.getByRole("button", { name: "Restore captured context size" })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -609,7 +609,7 @@ describe("SourceContextBadge", () => {
       expect(screen.getByText(author.expected)).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Go to source comment" }) !== null)
         .toBe(display.openCurrent);
-      expect(dialog).toHaveClass("h-[min(82dvh,56rem)]", "sm:max-w-4xl");
+      expect(dialog).toHaveClass("h-[min(82%,56rem)]", "sm:max-w-4xl");
     },
   );
 });

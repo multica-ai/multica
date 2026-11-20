@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS doc_comment_doc_idx;

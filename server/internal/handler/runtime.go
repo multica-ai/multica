@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/agentconfig"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -46,10 +47,13 @@ type AgentRuntimeResponse struct {
 	SharedWith []string `json:"shared_with"`
 	// ProfileID is set when this runtime is an instance of a custom
 	// runtime_profile (MUL-3284); null for built-in runtimes.
-	ProfileID  *string `json:"profile_id"`
-	LastSeenAt *string `json:"last_seen_at"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	ProfileID *string `json:"profile_id"`
+	// MaxConcurrentTasks caps tasks running at once across every agent bound
+	// to this runtime (GitHub #9626); null means no runtime-wide cap.
+	MaxConcurrentTasks *int32  `json:"max_concurrent_tasks"`
+	LastSeenAt         *string `json:"last_seen_at"`
+	CreatedAt          string  `json:"created_at"`
+	UpdatedAt          string  `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -62,24 +66,25 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	}
 
 	return AgentRuntimeResponse{
-		ID:           uuidToString(rt.ID),
-		WorkspaceID:  uuidToString(rt.WorkspaceID),
-		DaemonID:     textToPtr(rt.DaemonID),
-		Name:         rt.Name,
-		CustomName:   textToPtr(rt.CustomName),
-		RuntimeMode:  rt.RuntimeMode,
-		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
-		Status:       rt.Status,
-		DeviceInfo:   rt.DeviceInfo,
-		Metadata:     metadata,
-		OwnerID:      uuidToPtr(rt.OwnerID),
-		Visibility:   rt.Visibility,
-		SharedWith:   runtimeSharedWithStrings(rt.SharedWith),
-		ProfileID:    uuidToPtr(rt.ProfileID),
-		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
-		CreatedAt:    timestampToString(rt.CreatedAt),
-		UpdatedAt:    timestampToString(rt.UpdatedAt),
+		ID:                 uuidToString(rt.ID),
+		WorkspaceID:        uuidToString(rt.WorkspaceID),
+		DaemonID:           textToPtr(rt.DaemonID),
+		Name:               rt.Name,
+		CustomName:         textToPtr(rt.CustomName),
+		RuntimeMode:        rt.RuntimeMode,
+		Provider:           rt.Provider,
+		LaunchHeader:       agent.LaunchHeader(rt.Provider),
+		Status:             rt.Status,
+		DeviceInfo:         rt.DeviceInfo,
+		Metadata:           metadata,
+		OwnerID:            uuidToPtr(rt.OwnerID),
+		Visibility:         rt.Visibility,
+		SharedWith:         runtimeSharedWithStrings(rt.SharedWith),
+		ProfileID:          uuidToPtr(rt.ProfileID),
+		MaxConcurrentTasks: int4ToPtr(rt.MaxConcurrentTasks),
+		LastSeenAt:         timestampToPtr(rt.LastSeenAt),
+		CreatedAt:          timestampToString(rt.CreatedAt),
+		UpdatedAt:          timestampToString(rt.UpdatedAt),
 	}
 }
 
@@ -230,9 +235,10 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 	}
 
 	// No date bucketing — tz only sets the cutoff boundary so "last 30
-	// days" means 30 of the viewer's days.
+	// days" means 30 of the viewer's days. Without a date column the client
+	// cannot trim the extra day, so the window closes here.
 	viewTZ := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, viewTZ)
+	since := parseExactSinceParamInTZ(r, 30, viewTZ)
 
 	rows, err := h.Queries.ListRuntimeUsageByAgent(r.Context(), db.ListRuntimeUsageByAgentParams{
 		RuntimeID: rt.ID,
@@ -343,14 +349,9 @@ func (h *Handler) GetRuntimeUsageByHour(w http.ResponseWriter, r *http.Request) 
 //
 // The cutoff yields N+1 calendar buckets (today-days … today inclusive).
 // The extra day versus a naive "-(days-1)" is deliberate headroom, not an
-// off-by-one:
-//   - Runtime detail's sliceWindow filters `date >= today-days` (closed) and
-//     its prior-window delta reaches back to today-2*days, so the today-days
-//     bucket MUST exist or the oldest bar / KPI delta silently loses data.
-//   - The workspace dashboard re-filters client-side with -(days-1); the one
-//     extra day the backend returns is trimmed there — harmless.
-//
-// Do not "tighten" this to -(days-1): it would break the runtime detail page.
+// off-by-one: date-bucketed clients (runtime detail's sliceWindow, the
+// workspace dashboard) trim to -(days-1) themselves. Responses without a date
+// column cannot be trimmed and should use parseExactSinceParamInTZ instead.
 func sinceFromDays(now time.Time, days int, loc *time.Location) time.Time {
 	local := now.In(loc)
 	startOfToday := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
@@ -368,15 +369,13 @@ func parseSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype
 
 // parseExactSinceParamInTZ is parseSinceParamInTZ without the extra day of
 // headroom: `days=N` yields exactly N calendar buckets (today's partial
-// bucket + N-1 prior full days), which is the window the workspace dashboard
-// actually displays.
+// bucket + N-1 prior full days), which is the window the runtime detail page
+// and workspace dashboard actually display.
 //
-// The N+1 cutoff exists so date-bucketed series can reach one bucket further
-// back than they render (runtime detail's prior-window delta needs it), and
-// the dashboard trims the surplus client-side with `-(days-1)`. A response
-// with NO date dimension cannot be trimmed that way, so an aggregate served
-// off the N+1 cutoff silently covers one more day than the chart beside it.
-// Endpoints whose rows carry no date use this variant instead.
+// Date-bucketed clients trim the surplus client-side with `-(days-1)`. A
+// response with NO date dimension cannot be trimmed that way, so an aggregate
+// served off the N+1 cutoff silently covers one more day than the chart beside
+// it. Endpoints whose rows carry no date should use this variant instead.
 func parseExactSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype.Timestamptz {
 	return parseDaysCutoff(r, defaultDays, tzName, 1)
 }
@@ -478,6 +477,27 @@ type UpdateAgentRuntimeRequest struct {
 	// runtime per provider) instead of just this one. Ignored when the
 	// runtime has no daemon_id.
 	ApplyToMachine bool `json:"apply_to_machine,omitempty"`
+	// MaxConcurrentTasks sets the runtime-wide concurrency cap (GitHub
+	// #9626): an integer in the agent limit range, or null to remove the
+	// cap. Absent leaves it unchanged. Owner / workspace admin only.
+	MaxConcurrentTasks json.RawMessage `json:"max_concurrent_tasks,omitempty"`
+	maxConcurrentTasks pgtype.Int4
+}
+
+// parseRuntimeMaxConcurrentTasks decodes the tri-state PATCH field: JSON null
+// clears the cap, an integer within the agent limit range sets it.
+func parseRuntimeMaxConcurrentTasks(raw json.RawMessage) (pgtype.Int4, error) {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return pgtype.Int4{}, nil
+	}
+	var v int32
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return pgtype.Int4{}, errors.New("max_concurrent_tasks must be an integer or null")
+	}
+	if err := agentconfig.ValidateMaxConcurrentTasks(v); err != nil {
+		return pgtype.Int4{}, fmt.Errorf("max_concurrent_tasks %w", err)
+	}
+	return pgtype.Int4{Int32: v, Valid: true}, nil
 }
 
 // maxRuntimeCustomNameLen caps a runtime's custom name. Default names are
@@ -534,6 +554,13 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	if req.CustomName != nil {
 		if len([]rune(strings.TrimSpace(*req.CustomName))) > maxRuntimeCustomNameLen {
 			writeError(w, http.StatusBadRequest, "custom name is too long")
+			return
+		}
+	}
+	if req.MaxConcurrentTasks != nil {
+		req.maxConcurrentTasks, err = parseRuntimeMaxConcurrentTasks(req.MaxConcurrentTasks)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -615,6 +642,23 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.MaxConcurrentTasks != nil {
+		updated, err := h.updateRuntimeMaxConcurrentTasks(r.Context(), runtimeUUID, req.maxConcurrentTasks)
+		if err != nil {
+			slog.Error("UpdateAgentRuntimeMaxConcurrentTasks failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to update runtime")
+			return
+		}
+		rt = updated
+		changed = true
+		// Raising or removing the cap can make queued work claimable right
+		// away; nudge the runtime's daemon instead of waiting for its next
+		// poll.
+		if h.TaskService != nil {
+			h.TaskService.NotifyRuntimeCapacityChanged(rt.ID)
+		}
+	}
+
 	if changed {
 		// Notify connected clients that runtime metadata changed so the
 		// list/detail pages refresh — matches the pattern used by
@@ -625,6 +669,35 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, runtimeToResponse(rt))
+}
+
+// updateRuntimeMaxConcurrentTasks writes the runtime-wide cap and then waits
+// on the runtime claim lock before committing. Claims read the cap only after
+// taking that lock, so once this returns no claim can still commit against
+// the old value (a claim queued behind the lock reads the new one). The row
+// is updated before the lock is taken; see LockRuntimeClaimCapacity for why
+// that order cannot deadlock with claims or runtime teardown.
+func (h *Handler) updateRuntimeMaxConcurrentTasks(ctx context.Context, runtimeID pgtype.UUID, limit pgtype.Int4) (db.AgentRuntime, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.AgentRuntime{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	updated, err := qtx.UpdateAgentRuntimeMaxConcurrentTasks(ctx, db.UpdateAgentRuntimeMaxConcurrentTasksParams{
+		MaxConcurrentTasks: limit,
+		ID:                 runtimeID,
+	})
+	if err != nil {
+		return db.AgentRuntime{}, err
+	}
+	if err := qtx.LockRuntimeClaimCapacity(ctx, runtimeID); err != nil {
+		return db.AgentRuntime{}, fmt.Errorf("lock runtime claim capacity: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.AgentRuntime{}, fmt.Errorf("commit: %w", err)
+	}
+	return updated, nil
 }
 
 func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
@@ -805,6 +878,9 @@ func (h *Handler) requireRuntimeReadAccess(w http.ResponseWriter, r *http.Reques
 
 	rt, err := h.getAgentRuntime(r.Context(), source, runtimeUUID)
 	if err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return db.AgentRuntime{}, db.Member{}, false
+		}
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return db.AgentRuntime{}, db.Member{}, false
 	}
@@ -867,6 +943,7 @@ func (h *Handler) runtimeLiveProfile(ctx context.Context, rt db.AgentRuntime) (d
 func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile, blockers profileInstanceBlockers) map[string]any {
 	known := blockers.known
 	ttlDays := service.OfflineRuntimeTTLDays()
+	keepsLegacyAnchor := !profile.DaemonID.Valid && profile.CreatedBy.Valid && profile.CreatedBy == rt.OwnerID
 	name := rt.Name
 	if rt.CustomName.Valid && strings.TrimSpace(rt.CustomName.String) != "" {
 		name = rt.CustomName.String
@@ -880,6 +957,8 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 
 	parts := []string{lead}
 	switch {
+	case keepsLegacyAnchor:
+		parts = append(parts, "Edit this custom runtime and choose the machine that should keep it. Unused copies on other machines are removed when the binding is saved; move or archive their agents and finish pending tasks first. Until then, this legacy instance is kept so the machine can reconnect.")
 	case rt.Status == "online":
 		parts = append(parts, fmt.Sprintf(
 			"It is still online, so its daemon would register it again. Stop that daemon first; Multica then removes the runtime automatically after %d days offline, once no agent is bound to it and nothing is still running on it.",
@@ -932,6 +1011,10 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 		"runtime_status":          rt.Status,
 		"last_seen_at":            timestampToPtr(rt.LastSeenAt),
 		"auto_cleanup_after_days": ttlDays,
+	}
+	if keepsLegacyAnchor {
+		resp["auto_cleanup_after_days"] = 0
+		resp["requires_machine_binding"] = true
 	}
 	if known {
 		resp["active_agent_count"] = len(blockers.agents)

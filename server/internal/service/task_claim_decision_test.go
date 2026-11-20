@@ -28,6 +28,7 @@ func TestClaimDecisionReasonFor(t *testing.T) {
 		{name: "claimed stays claimed", outcome: claimOutcomeClaimed, scope: claimScope{claimPath: claimPathAgent}, want: claimReasonClaimed},
 		{name: "claimed via runtime poll", outcome: claimOutcomeClaimed, scope: claimScope{claimPath: claimPathRuntime, candidates: 3}, want: claimReasonClaimed},
 		{name: "no capacity maps to concurrency cap", outcome: claimOutcomeNoCapacity, scope: claimScope{claimPath: claimPathRuntime}, want: claimReasonAgentConcurrencyCap},
+		{name: "runtime no capacity maps to runtime cap", outcome: claimOutcomeRuntimeNoCapacity, scope: claimScope{claimPath: claimPathBatch}, want: claimReasonRuntimeConcurrencyCap},
 		{name: "no runtime maps to unbound agent", outcome: claimOutcomeNoRuntime, scope: claimScope{claimPath: claimPathAgent}, want: claimReasonAgentUnbound},
 		{name: "runtime mismatch maps to rebound agent", outcome: claimOutcomeRuntimeMismatch, scope: claimScope{claimPath: claimPathRuntime}, want: claimReasonAgentRebound},
 

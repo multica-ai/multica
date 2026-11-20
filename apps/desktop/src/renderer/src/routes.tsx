@@ -1,3 +1,5 @@
+import { DocsHomePage } from "@multica/views/docs";
+import { DocRoute, DocHistoryRoute, DocFolderRoute } from "./pages/doc-pages";
 import { useEffect, useLayoutEffect } from "react";
 import { createMemoryRouter, Outlet, useLocation, useMatches } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
@@ -21,10 +23,7 @@ import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
-import {
-  AiCreateAgentPage,
-  ManualCreateAgentPage,
-} from "@multica/views/agents";
+import { ManualCreateAgentPage } from "@multica/views/agents";
 import { DesktopChooseRuntimePage } from "./components/desktop-choose-runtime-page";
 import { AgentCreatedPage } from "./pages/agent-created-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
@@ -163,6 +162,12 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Issue" },
           },
           {
+            // The issue, opened on the newest version of one deliverable.
+            path: "issues/:id/deliverables/:name",
+            element: <IssueDetailPage />,
+            handle: { title: "Issue" },
+          },
+          {
             path: "projects",
             element: <ProjectsPage />,
             handle: { title: "Projects" },
@@ -206,6 +211,10 @@ export const appRoutes: RouteObject[] = [
             element: <RuntimeSettingsPage />,
             handle: { title: "Runtime" },
           },
+          {path: "docs", element: <DocsHomePage />, handle: {title: "Docs"}},
+          {path: "docs/folders/:id", element: <DocFolderRoute />, handle: {title: "Folder"}},
+          {path: "docs/:id", element: <DocRoute />, handle: {title: "Doc"}},
+          {path: "docs/:id/history", element: <DocHistoryRoute />, handle: {title: "History"}},
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
           {
             path: "skills/:id",
@@ -226,11 +235,6 @@ export const appRoutes: RouteObject[] = [
           {
             path: "agents/new/manual",
             element: <ManualCreateAgentPage />,
-            handle: { title: "Create Agent" },
-          },
-          {
-            path: "agents/new/ai",
-            element: <AiCreateAgentPage />,
             handle: { title: "Create Agent" },
           },
           {

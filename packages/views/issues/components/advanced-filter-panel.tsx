@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import {
   ADVANCED_FILTER_MAX_CONDITIONS,
   advancedFilterConditionSlots,
@@ -33,7 +34,6 @@ import {
   isPropertyCondition,
   propertyFilterField,
   propertyIdOfField,
-  pruneAdvancedFilter,
   simpleFromAdvancedFilter,
   type AdvancedFilterCondition,
   type AdvancedFilterField,
@@ -57,6 +57,7 @@ import {
 } from "@multica/core/issues/stores/filter-operators";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { isImeComposing } from "@multica/core/utils";
 import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
@@ -302,7 +303,7 @@ function TypedValueInput({
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}
       onKeyDown={(event) => {
-        if (event.key === "Enter") commit();
+        if (event.key === "Enter" && !isImeComposing(event)) commit();
       }}
       className="h-7 min-w-0 flex-1 rounded-md px-2 text-caption md:text-caption"
     />
@@ -647,48 +648,6 @@ function AddButton({ children, ...props }: React.ComponentProps<typeof Button>) 
   );
 }
 
-/** A condition as a phrase: "Label includes any of Bug +1". */
-function useConditionPhrase(fields: ConditionFields, catalog: Catalog) {
-  const operatorLabel = useOperatorLabel();
-  const wsId = useWorkspaceId();
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const actorName = useMemo(() => buildChipActorNames(members, [], []), [members]);
-  const valueName = usePropertyValueName(actorName);
-  return (condition: AdvancedFilterCondition): string => {
-    const property = isPropertyCondition(condition)
-      ? fields.propertyById.get(propertyIdOfField(condition.field) ?? "")
-      : undefined;
-    const spec = filterFieldSpec(condition, property?.type);
-    const op = conditionOperator(condition, spec);
-    const head = `${fields.describe(condition.field).label} ${operatorLabel(op, spec.kind)}`;
-    if (isEmptinessOperator(op)) return head;
-    let value: string;
-    if (isTypedValueKind(spec.kind)) {
-      value = conditionText(condition);
-    } else if (isPropertyCondition(condition)) {
-      value = summarize(condition.values.map((v) => (property ? valueName(property, v) : undefined)));
-    } else {
-      const options = catalog(condition.field);
-      value = summarize(condition.values.map((v) => options.find((option) => option.value === v)?.label));
-    }
-    return `${head} ${value}`;
-  };
-}
-
-/** A pruned tree as one sentence, a group in parentheses. */
-function describeGroup(
-  group: AdvancedFilterGroup,
-  phrase: (condition: AdvancedFilterCondition) => string,
-  joinWord: (match: "all" | "any") => string,
-  nested = false,
-): string {
-  const parts = group.children.map((child) =>
-    child.type === "group" ? describeGroup(child, phrase, joinWord, true) : phrase(child),
-  );
-  const text = parts.join(` ${joinWord(group.match)} `);
-  return nested && parts.length > 1 ? `(${text})` : text;
-}
-
 /** A group under the root: its own match in the header, then its rows. An
  *  empty group is a slot to add the first condition into. */
 function FilterGroupCard({
@@ -816,12 +775,17 @@ export function AdvancedFilterPanel({
   // A group is usually the other word: "and" rules holding an "or".
   const newGroup = (children: AdvancedFilterNode[] = []) =>
     createFilterGroup(root.match === "all" ? "any" : "all", children);
-  const phrase = useConditionPhrase(fields, catalog);
-  const joinWord = useJoinWord();
-  const pruned = pruneAdvancedFilter(root);
-  const summary = pruned?.children.some((child) => child.type === "group")
-    ? describeGroup(pruned, phrase, joinWord)
-    : null;
+  const toSimpleButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 shrink-0 px-2 text-caption"
+      disabled={!representable}
+      onClick={exitAdvancedFilter}
+    >
+      {t(($) => $.filters.advanced_to_simple)}
+    </Button>
+  );
 
   return (
     <div className="flex flex-col">
@@ -873,11 +837,6 @@ export function AdvancedFilterPanel({
             )}
           </div>
         ))}
-        {summary && (
-          <p className="pt-1 text-caption text-pretty text-muted-foreground" data-testid="advanced-filter-summary">
-            {t(($) => $.filters.advanced_summary, { summary })}
-          </p>
-        )}
       </div>
 
       <div className="flex items-center gap-1 px-2 py-1.5">
@@ -899,19 +858,16 @@ export function AdvancedFilterPanel({
       </div>
 
       <div className="flex items-center gap-2 border-t border-border px-2 py-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 shrink-0 px-2 text-caption"
-          disabled={!representable}
-          onClick={exitAdvancedFilter}
-        >
-          {t(($) => $.filters.advanced_to_simple)}
-        </Button>
-        {!representable && (
-          <span className="min-w-0 truncate text-caption text-muted-foreground" title={t(($) => $.filters.advanced_to_simple_blocked)}>
-            {t(($) => $.filters.advanced_to_simple_blocked)}
-          </span>
+        {representable ? (
+          toSimpleButton
+        ) : (
+          // A disabled button gets no pointer events, so the wrapper carries the reason.
+          <Tooltip>
+            <TooltipTrigger render={<span tabIndex={0} className="shrink-0 rounded-lg outline-none" />}>
+              {toSimpleButton}
+            </TooltipTrigger>
+            <TooltipContent side="top">{t(($) => $.filters.advanced_to_simple_blocked)}</TooltipContent>
+          </Tooltip>
         )}
         <Button
           variant="ghost"

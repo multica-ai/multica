@@ -105,15 +105,15 @@ func newFlagTestCmd(name string) *cobra.Command {
 }
 
 func TestResolveTextFlag(t *testing.T) {
-	t.Run("inline value is unescaped", func(t *testing.T) {
+	t.Run("inline value is preserved literally", func(t *testing.T) {
 		c := newFlagTestCmd("description")
 		_ = c.Flags().Set("description", `para1\n\npara2`)
 		got, ok, err := resolveTextFlag(c, "description")
 		if err != nil || !ok {
 			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
 		}
-		if got != "para1\n\npara2" {
-			t.Errorf("got %q, want decoded paragraphs", got)
+		if got != `para1\n\npara2` {
+			t.Errorf("got %q, want literal backslashes", got)
 		}
 	})
 
@@ -559,12 +559,62 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	cmd.Flags().Bool("content-stdin", false, "")
 	cmd.Flags().String("content-file", "", "")
 	cmd.Flags().Bool("allow-external-file", false, "")
-	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().StringArray("attachment", nil, "")
 	cmd.Flags().String("parent", "", "")
 	cmd.Flags().StringSlice("steer", nil, "")
 	cmd.Flags().Bool("steer-active", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func TestRunIssueCommentAddUploadsAttachmentWithoutIssueID(t *testing.T) {
+	const issueRef = "MUL-1"
+	t.Chdir(t.TempDir())
+	attachmentPath := "comment.txt"
+	if err := os.WriteFile(attachmentPath, []byte("comment attachment"), 0o644); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	var uploadedIssueID string
+	var commentBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueRef:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": issueRef})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("parse upload: %v", err)
+			}
+			uploadedIssueID = r.FormValue("issue_id")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "attachment-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/comments":
+			if err := json.NewDecoder(r.Body).Decode(&commentBody); err != nil {
+				t.Fatalf("decode comment body: %v", err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1", "content": "with attachment"})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "with attachment")
+	_ = cmd.Flags().Set("attachment", attachmentPath)
+	if err := runIssueCommentAdd(cmd, []string{issueRef}); err != nil {
+		t.Fatalf("runIssueCommentAdd: %v", err)
+	}
+	if uploadedIssueID != "" {
+		t.Fatalf("upload issue_id = %q, want empty for a comment attachment", uploadedIssueID)
+	}
+	attachmentIDs, ok := commentBody["attachment_ids"].([]any)
+	if !ok || len(attachmentIDs) != 1 || attachmentIDs[0] != "attachment-1" {
+		t.Fatalf("comment attachment_ids = %#v, want [attachment-1]", commentBody["attachment_ids"])
+	}
 }
 
 func TestRunIssueCommentAddSteering(t *testing.T) {
@@ -701,7 +751,7 @@ func TestRunIssueCommentUpdateSendsExpectedRequest(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
-		if len(body) != 2 || body["content"] != "updated\ncomment" || body["expected_revision"] != float64(7) {
+		if len(body) != 2 || body["content"] != `updated\ncomment` || body["expected_revision"] != float64(7) {
 			t.Fatalf("body = %#v, want content plus expected revision", body)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -734,7 +784,7 @@ func TestRunIssueCommentUpdateSendsExpectedRequest(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode stdout JSON %q: %v", out, err)
 	}
-	if got["id"] != commentID || got["content"] != "updated\ncomment" {
+	if got["id"] != commentID || got["content"] != `updated\ncomment` {
 		t.Fatalf("stdout = %#v", got)
 	}
 }
@@ -919,12 +969,13 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("assignee", "", "")
 	cmd.Flags().String("assignee-id", "", "")
+	cmd.Flags().Bool("assignee-picker", false, "")
 	cmd.Flags().String("parent", "", "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("due-date", "", "")
 	cmd.Flags().Bool("allow-duplicate", false, "")
 	cmd.Flags().String("output", "json", "")
-	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().StringArray("attachment", nil, "")
 	cmd.Flags().StringSlice("attachment-id", nil, "")
 	cmd.Flags().StringArray("property", nil, "")
 	return cmd
@@ -3783,9 +3834,7 @@ func TestRunIssueCreateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
 }
 
 func TestRunIssueUpdateRejectsInvalidStatusBeforeRequest(t *testing.T) {
-	cmd := &cobra.Command{Use: "update"}
-	cmd.Flags().String("status", "", "")
-	cmd.Flags().String("priority", "", "")
+	cmd := newIssueUpdateTestCmd()
 	_ = cmd.Flags().Set("status", "not a status")
 	err := runIssueUpdate(cmd, []string{"MUL-1"})
 	if err == nil {
@@ -3797,9 +3846,7 @@ func TestRunIssueUpdateRejectsInvalidStatusBeforeRequest(t *testing.T) {
 }
 
 func TestRunIssueUpdateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
-	cmd := &cobra.Command{Use: "update"}
-	cmd.Flags().String("status", "", "")
-	cmd.Flags().String("priority", "", "")
+	cmd := newIssueUpdateTestCmd()
 	_ = cmd.Flags().Set("priority", "P1")
 	err := runIssueUpdate(cmd, []string{"MUL-1"})
 	if err == nil {
@@ -3817,7 +3864,7 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
 	cmd.Flags().Bool("allow-external-file", false, "")
-	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().StringArray("attachment", nil, "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("assignee", "", "")
@@ -3958,6 +4005,8 @@ func newIssueListTestCmd() *cobra.Command {
 	cmd.Flags().String("assignee", "", "")
 	cmd.Flags().String("assignee-id", "", "")
 	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("updated-since", "", "")
+	cmd.Flags().String("updated-until", "", "")
 	cmd.Flags().StringSlice("metadata", nil, "")
 	cmd.Flags().StringArray("property", nil, "")
 	cmd.Flags().Int("limit", 50, "")
@@ -4602,6 +4651,52 @@ func TestRunIssueListFieldsFiltersJSONOutput(t *testing.T) {
 				if _, ok := got[f]; !ok {
 					t.Fatalf("issue missing field %q; got keys %v", f, keysOf(got))
 				}
+			}
+		})
+	}
+}
+
+func TestRunIssueListRequesterFieldProjection(t *testing.T) {
+	requesterID := "user-requester"
+	for _, tc := range []struct {
+		name string
+		id   *string
+	}{
+		{"attributed", &requesterID},
+		{"unattributed", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issue := sampleIssueResponse()
+			issue.CreatorType = "agent"
+			issue.RequesterID = tc.id
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+			}))
+			defer srv.Close()
+			setCLITestServerEnv(t, srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("fields", "id,requester_id")
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+			var resp struct {
+				Issues []map[string]any `json:"issues"`
+			}
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				t.Fatalf("unmarshal output: %v", err)
+			}
+			var wantRequester any
+			if tc.id != nil {
+				wantRequester = *tc.id
+			}
+			want := []map[string]any{{"id": issue.ID, "requester_id": wantRequester}}
+			if !reflect.DeepEqual(resp.Issues, want) {
+				t.Fatalf("issues = %#v, want %#v", resp.Issues, want)
 			}
 		})
 	}
@@ -5655,6 +5750,114 @@ func TestRunIssueListRejectsOutOfRangeLimitAndOffset(t *testing.T) {
 	}
 }
 
+func TestRunIssueListUpdatedRange(t *testing.T) {
+	const (
+		since   = "2026-11-05T10:00:00.123456789+08:00"
+		until   = "2026-11-05T02:01:00.987654321Z"
+		project = "12345678-1234-4234-8234-123456789abc"
+	)
+	for _, filtered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("filtered=%t", filtered), func(t *testing.T) {
+			srv, requests, query := newFakeIssueListServer(t, fakeIssueRows(1), 1)
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueListTestCmd()
+			flags := []string{
+				"--output", "json", "--project", project, "--fields", "id,title",
+				"--limit", "100", "--offset", "200", "--sort", "created_at", "--direction", "asc",
+			}
+			if filtered {
+				flags = append(flags, "--updated-since", since, "--updated-until", until)
+			}
+			if err := cmd.ParseFlags(flags); err != nil {
+				t.Fatal(err)
+			}
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+			if *requests != 1 {
+				t.Fatalf("list requests = %d, want 1", *requests)
+			}
+			want := url.Values{
+				"workspace_id": {"ws-1"}, "project_id": {project},
+				"limit": {"100"}, "offset": {"200"}, "sort": {"created_at"}, "direction": {"asc"},
+			}
+			if filtered {
+				want.Set("date_field", "updated_at")
+				want.Set("date_start", since)
+				want.Set("date_end", until)
+			}
+			if !reflect.DeepEqual(*query, want) {
+				t.Fatalf("query = %v, want %v", *query, want)
+			}
+			var envelope struct {
+				Issues  []map[string]any `json:"issues"`
+				Total   int              `json:"total"`
+				Limit   int              `json:"limit"`
+				Offset  int              `json:"offset"`
+				HasMore bool             `json:"has_more"`
+			}
+			if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if len(envelope.Issues) != 1 || len(envelope.Issues[0]) != 2 || envelope.Issues[0]["id"] == nil || envelope.Issues[0]["title"] == nil {
+				t.Fatalf("projected issues = %v, want one issue with id and title", envelope.Issues)
+			}
+			if envelope.Total != 1 || envelope.Limit != 100 || envelope.Offset != 200 || envelope.HasMore {
+				t.Fatalf("unexpected pagination envelope: %+v", envelope)
+			}
+		})
+	}
+}
+
+func TestRunIssueListRejectsInvalidUpdatedRange(t *testing.T) {
+	const since = "2026-11-05T10:00:00Z"
+	const until = "2026-11-05T10:01:00Z"
+	cases := []struct {
+		name    string
+		flags   []string
+		wantErr string
+	}{
+		{"missing until", []string{"--updated-since", since}, "--updated-since and --updated-until must be set together"},
+		{"missing since", []string{"--updated-until", until}, "--updated-since and --updated-until must be set together"},
+		{"empty since", []string{"--updated-since=", "--updated-until", until}, "invalid --updated-since"},
+		{"empty until", []string{"--updated-since", since, "--updated-until="}, "invalid --updated-until"},
+		{"both empty", []string{"--updated-since=", "--updated-until="}, "invalid --updated-since"},
+		{"invalid since", []string{"--updated-since", "yesterday", "--updated-until", until}, "invalid --updated-since"},
+		{"invalid until", []string{"--updated-since", since, "--updated-until", "2026-11-05"}, "invalid --updated-until"},
+		{"equal bounds", []string{"--updated-since", since, "--updated-until", since}, "--updated-since must be before --updated-until"},
+		{"reversed bounds", []string{"--updated-since", until, "--updated-until", since}, "--updated-since must be before --updated-until"},
+		{"reversed across timezones", []string{"--updated-since", since, "--updated-until", "2026-11-05T11:00:00+02:00"}, "--updated-since must be before --updated-until"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			cmd := newIssueListTestCmd()
+			if err := cmd.ParseFlags(append(tc.flags, "--assignee", "someone")); err != nil {
+				t.Fatal(err)
+			}
+			err := runIssueList(cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+			if requests != 0 {
+				t.Fatalf("received %d requests; invalid bounds must fail before resolving filters", requests)
+			}
+		})
+	}
+}
+
 // TestRunIssueListSendsLimitAndOffset guards that limit and offset reach the
 // query as given.
 func TestRunIssueListSendsLimitAndOffset(t *testing.T) {
@@ -5936,5 +6139,280 @@ func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
 				t.Fatalf("requests = %v, want only %v", paths, want)
 			}
 		})
+	}
+}
+
+func newIssueSearchTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "search"}
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().Bool("include-closed", false, "")
+	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueSearchSendsProjectID(t *testing.T) {
+	const projectID = "11111111-2222-3333-4444-555555555555"
+	var gotQuery url.Values
+	var requestPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPaths = append(requestPaths, r.URL.Path)
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issues": []any{},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("project", projectID)
+	_, err := captureStdout(t, func() error {
+		return runIssueSearch(cmd, []string{"auth bug"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueSearch: %v", err)
+	}
+	if want := []string{"/api/issues/search"}; !slices.Equal(requestPaths, want) {
+		t.Fatalf("requests = %v, want %v", requestPaths, want)
+	}
+	if got := gotQuery.Get("q"); got != "auth bug" {
+		t.Errorf("q = %q, want %q", got, "auth bug")
+	}
+	if got := gotQuery.Get("project_id"); got != projectID {
+		t.Errorf("project_id = %q, want %q", got, projectID)
+	}
+}
+
+func TestRunIssueSearchResolvesProjectPrefix(t *testing.T) {
+	const fullProjectID = "11111111-2222-3333-4444-555555555555"
+	var gotSearchProjectID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/projects":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{
+					{"id": fullProjectID, "title": "Core Platform", "status": "in_progress"},
+				},
+			})
+		case "/api/issues/search":
+			gotSearchProjectID = r.URL.Query().Get("project_id")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issues": []any{},
+			})
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("project", "11111111")
+	_, err := captureStdout(t, func() error {
+		return runIssueSearch(cmd, []string{"deployment"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueSearch: %v", err)
+	}
+	if gotSearchProjectID != fullProjectID {
+		t.Fatalf("project_id = %q, want %q", gotSearchProjectID, fullProjectID)
+	}
+}
+
+func TestRunIssueSearchProjectFilterErrors(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("project", "xyz")
+	err := runIssueSearch(cmd, []string{"deployment"})
+	if err == nil {
+		t.Fatal("expected error for malformed project prefix")
+	}
+	if count := strings.Count(err.Error(), "resolve project:"); count != 1 {
+		t.Fatalf("expected single 'resolve project:' prefix, got %d in %q", count, err.Error())
+	}
+
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	cmdMissingWS := newIssueSearchTestCmd()
+	_ = cmdMissingWS.Flags().Set("project", "11111111")
+	err = runIssueSearch(cmdMissingWS, []string{"deployment"})
+	if err == nil {
+		t.Fatal("expected error when workspace_id is missing for --project")
+	}
+	if !strings.Contains(err.Error(), "workspace_id is required") || strings.Contains(err.Error(), "resolve project:") {
+		t.Fatalf("expected requireWorkspaceID error, got %q", err.Error())
+	}
+}
+
+func TestIssueSearchCommandRegistration(t *testing.T) {
+	for _, flagName := range []string{"limit", "include-closed", "project", "output"} {
+		if issueSearchCmd.Flags().Lookup(flagName) == nil {
+			t.Errorf("expected --%s flag on issue search command", flagName)
+		}
+	}
+	if got := issueSearchCmd.Flags().Lookup("project").Usage; got != "Filter by project ID" {
+		t.Errorf("project flag usage = %q, want %q", got, "Filter by project ID")
+	}
+}
+
+// issuePullRequestServer serves one issue's linked PRs and records the link and
+// unlink calls the CLI makes against it.
+type issuePullRequestServer struct {
+	linkBody   map[string]any
+	unlinkPath string
+}
+
+func (s *issuePullRequestServer) start(t *testing.T) {
+	t.Helper()
+	listed := map[string]any{
+		"pull_requests": []map[string]any{
+			{"id": "11111111-1111-1111-1111-111111111111", "number": float64(42), "state": "open", "title": "Fix the thing", "html_url": "https://github.com/acme/app/pull/42"},
+			{"id": "22222222-2222-2222-2222-222222222222", "number": float64(7), "state": "merged", "title": "API side", "html_url": "https://github.com/acme/api/pull/7"},
+			{"id": "33333333-3333-3333-3333-333333333333", "number": float64(7), "state": "open", "title": "Web side", "html_url": "https://github.com/acme/web/pull/7"},
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/issues/MUL-9" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-uuid", "identifier": "MUL-9"})
+		case r.URL.Path == "/api/issues/issue-uuid/pull-requests" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(listed)
+		case r.URL.Path == "/api/issues/issue-uuid/pull-requests" && r.Method == http.MethodPost:
+			_ = json.NewDecoder(r.Body).Decode(&s.linkBody)
+			if strings.Contains(fmt.Sprint(s.linkBody["url"]), "/pull/999") {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]any{"error": "pull request not found; it appears here once its repository is connected and the PR has been synced"})
+				return
+			}
+			json.NewEncoder(w).Encode(listed)
+		case strings.HasPrefix(r.URL.Path, "/api/issues/issue-uuid/pull-requests/") && r.Method == http.MethodDelete:
+			s.unlinkPath = r.URL.Path
+			json.NewEncoder(w).Encode(listed)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+}
+
+func runQuiet(t *testing.T, run func() error) (string, error) {
+	t.Helper()
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
+	err := run()
+	_ = w.Close()
+	os.Stdout = old
+	return string(<-drainCh), err
+}
+
+func TestRunIssuePullRequestsLinkPostsURL(t *testing.T) {
+	s := &issuePullRequestServer{}
+	s.start(t)
+
+	out, err := runQuiet(t, func() error {
+		return runIssuePullRequestsLink(newIssuePullRequestsTestCmd(), []string{"MUL-9", "https://github.com/acme/app/pull/42/files"})
+	})
+	if err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	// The server normalizes the URL; the CLI passes it through untouched.
+	if s.linkBody["url"] != "https://github.com/acme/app/pull/42/files" || s.linkBody["pull_request_id"] != nil {
+		t.Fatalf("link body = %#v", s.linkBody)
+	}
+	if !strings.Contains(out, "https://github.com/acme/app/pull/42") {
+		t.Fatalf("expected the updated PR list in the output:\n%s", out)
+	}
+}
+
+func TestRunIssuePullRequestsLinkByIDRestoresUnlinkedPR(t *testing.T) {
+	s := &issuePullRequestServer{}
+	s.start(t)
+
+	if _, err := runQuiet(t, func() error {
+		return runIssuePullRequestsLink(newIssuePullRequestsTestCmd(), []string{"MUL-9", "22222222-2222-2222-2222-222222222222"})
+	}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if s.linkBody["pull_request_id"] != "22222222-2222-2222-2222-222222222222" || s.linkBody["url"] != nil {
+		t.Fatalf("link body = %#v", s.linkBody)
+	}
+}
+
+func TestRunIssuePullRequestsUnlinkResolvesPR(t *testing.T) {
+	cases := []struct {
+		name, ref, wantID string
+	}{
+		{"by URL with a trailing page", "https://github.com/acme/app/pull/42/files?w=1", "11111111-1111-1111-1111-111111111111"},
+		{"by URL without a scheme, any case", "GitHub.com/acme/web/pull/7", "33333333-3333-3333-3333-333333333333"},
+		{"by unique number", "#42", "11111111-1111-1111-1111-111111111111"},
+		{"by id", "22222222-2222-2222-2222-222222222222", "22222222-2222-2222-2222-222222222222"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &issuePullRequestServer{}
+			s.start(t)
+			if _, err := runQuiet(t, func() error {
+				return runIssuePullRequestsUnlink(newIssuePullRequestsTestCmd(), []string{"MUL-9", tc.ref})
+			}); err != nil {
+				t.Fatalf("unlink: %v", err)
+			}
+			if want := "/api/issues/issue-uuid/pull-requests/" + tc.wantID; s.unlinkPath != want {
+				t.Fatalf("DELETE %s, want %s", s.unlinkPath, want)
+			}
+		})
+	}
+}
+
+func TestRunIssuePullRequestsUnlinkRefusesAmbiguousOrUnknownPR(t *testing.T) {
+	cases := []struct {
+		name, ref, wantErr string
+	}{
+		{"number shared by two repos", "7", "matches 2 linked PRs"},
+		{"number not linked", "99", "no linked pull request has number 99"},
+		{"URL not linked", "https://github.com/acme/app/pull/43", "is not linked to this issue"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &issuePullRequestServer{}
+			s.start(t)
+			_, err := runQuiet(t, func() error {
+				return runIssuePullRequestsUnlink(newIssuePullRequestsTestCmd(), []string{"MUL-9", tc.ref})
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want it to mention %q", err, tc.wantErr)
+			}
+			if s.unlinkPath != "" {
+				t.Fatalf("expected no DELETE, got %s", s.unlinkPath)
+			}
+		})
+	}
+}
+
+func TestRunIssuePullRequestsLinkExplainsUnsyncedPR(t *testing.T) {
+	s := &issuePullRequestServer{}
+	s.start(t)
+
+	_, err := runQuiet(t, func() error {
+		return runIssuePullRequestsLink(newIssuePullRequestsTestCmd(), []string{"MUL-9", "https://github.com/acme/app/pull/999"})
+	})
+	if err == nil || !strings.Contains(err.Error(), "not in this workspace yet") {
+		t.Fatalf("err = %v, want the not-synced explanation", err)
 	}
 }

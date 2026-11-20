@@ -49,6 +49,7 @@ export function AiBuilderSessionPage({ sessionId }: { sessionId: string }) {
 
   return (
     <AgentCreateShell
+      fitVisualViewport
       title={
         squadId
           ? t(($) => $.creation_studio.squad_title)

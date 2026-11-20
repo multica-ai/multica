@@ -36,6 +36,7 @@ Multica는 현재 다음 명령을 감지합니다.
 | Kiro CLI | `kiro-cli` | [Kiro CLI 설치](https://kiro.dev/docs/cli/installation/) |
 | MiniMax Code | `mcode` | [MiniMax Code CLI 설치](https://www.npmjs.com/package/@minimax-ai/code) |
 | Muse Code | `muse` | [Muse Code 설치](https://dev.meta.ai/docs/muse-code) |
+| ZCode | `zcode` / ZCode Desktop | [ZCode](https://zcode.z.ai/) |
 | Devin CLI | `devin` | [Devin CLI 설치](https://docs.devin.ai/cli/quickstart) (3000.3.22+). 로컬 ACP이며 먼저 `devin auth login` 실행 |
 | OpenClaw | `openclaw` | [OpenClaw 설치](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 빠른 시작](https://opencode.ai/en/docs) |
@@ -45,6 +46,8 @@ Multica는 현재 다음 명령을 감지합니다.
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI 빠른 시작](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Amp | `amp` | [Amp CLI](https://ampcode.com/docs/cli) |
+| Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 공식 사이트](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
@@ -71,10 +74,14 @@ Multica는 현재 다음 명령을 감지합니다.
 | Copilot | 1.0.0 |
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
+| Factory Droid | 1.8.0 |
 | MiniMax Code | 0.1.2 |
+| Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
 | Dim | 0.3.10 |
+| Devin CLI | 3000.3.22 |
 | ZeroClaw | 0.8.0 |
+| ZCode | 0.16.0 |
 
 다음 도구는 로그인 외에 추가 설정이 필요합니다.
 
@@ -98,7 +105,11 @@ Node.js 20+를 설치하고 `npm install -g @deepseek-ai/dsh`를 실행한 뒤 M
 
 **DSH Desktop.** npm 패키지 대신 DeepSeek Harness Desktop을 설치했다면, 데몬은 그 앱이 생성하는 CLI 심(shim)도 앱 자체의 사용자 데이터 디렉터리에서 찾습니다. macOS는 `~/Library/Application Support/DSH Desktop`, Windows는 `%APPDATA%\DSH Desktop`입니다. Windows의 이 경로는 로밍 애플리케이션 데이터이지 설치 디렉터리가 아닙니다. 앱 자체는 Program Files 또는 `%LOCALAPPDATA%\Programs`에 설치되지만, 앱이 구동하는 CLI는 사용자별 다른 상태와 함께 저장됩니다. 이 경로의 버전 구간은 생성된 id이므로 데몬이 열거하여 가장 최신 것을 우선합니다. `PATH`에 다른 것이 필요하지 않습니다. 생성된 심은 앱에 포함된 런타임을 절대 경로로 실행합니다. DSH Desktop이 기본이 아닌 위치에 있다면 `MULTICA_DSH_PATH`로 그 심을 지정하세요.
 
-데몬은 `dsh --profile multica --probe`가 성공한 경우에만 DeepSeek Harness를 등록하고, 실패하면 `/health`에 프로필 누락을 보고합니다.
+**DSH 업그레이드 후.** 프로브가 프로필 내부 코어 패키지의 비호환성을 보고하면 데몬 진단에 표시된 매니페스트를 백업하세요. `@deepseek-ai/dsh-agent`, `@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-llm`의 재정의를 확인하고, 가능하면 앱에 포함된 코어 패키지를 사용하거나 설치된 DSH와 호환되는 버전으로 맞추세요. 필요한 독립 플러그인과 훅은 유지하고 모든 의존성을 삭제하지 마세요. 수정 후 `dsh --profile multica --probe`를 다시 실행하세요. Multica는 확인된 호환성 거부를 수동 프로필 복구가 필요한 상태로 보고하며 기존 프로필을 덮어쓰지 않습니다.
+
+프로브에 설치된 DSH가 요구 사항을 충족하지 않아 `@multica-ai/dsh-runtime`을 건너뛰었다고 표시되면 매니페스트를 백업하고 Multica 브리지를 호환되는 빌드로 업데이트하세요. 업데이트 후 `dsh --profile multica --probe`를 다시 실행하세요.
+
+데몬은 `dsh --profile multica --probe`가 성공한 경우에만 DeepSeek Harness를 등록합니다. `/health` 진단은 프로필 누락, 확인된 수동 복구 필요, 프로토콜 비호환, 프로브의 일시적 사용 불가를 구분합니다. 시작 실패 시 감지된 CLI 버전, 매니페스트 위치, 가능한 경우 민감 정보를 가린 진단 출력을 포함합니다.
 
 </Accordion>
 <Accordion title="MiniMax Code" id="minimax-code">
@@ -119,6 +130,13 @@ QwenPaw 자체 설정에서 공급자와 모델을 선택하세요. Multica는 �
 <Accordion title="Reasonix" id="reasonix">
 
 데몬을 시작하기 전에 `reasonix setup`을 실행해 기본 공급자와 모델을 설정하세요.
+
+</Accordion>
+<Accordion title="Qoder CLI / Qoder CN CLI" id="qoder">
+
+Qoder 데스크톱 앱은 작동하지만 Multica 로컬 실행에서 인증 오류가 발생하면, 데몬 호스트에서 데몬을 실행하는 OS 사용자로 Qoder CLI를 열고 같은 모델을 테스트하세요. 실행 파일이 감지됐다는 것은 데몬이 파일을 찾을 수 있다는 뜻일 뿐입니다. CLI는 데몬 환경과 에이전트에 설정한 환경 변수를 사용해 시작합니다. Qoder 데스크톱 앱에서만 사용할 수 있는 자격 증명은 CLI에서 사용하지 못할 수 있습니다. CLI에서도 실패하면 CLI 로그인이나 공급자 설정을 완료한 뒤 Multica 실행을 재시도하세요.
+
+터미널 테스트에 성공해도 셸이 불러온 자격 증명이 데몬에 전달되지 않았을 수 있습니다. 공급자가 환경 변수로 키나 토큰을 받는다면 데몬의 시작 환경에 해당 변수를 설정한 뒤 데몬을 다시 시작하세요. 권한이 제한된 자격 증명은 에이전트의 **환경** 탭에서도 설정할 수 있습니다. 이 탭에 추가한 값은 [Multica 서버 데이터베이스에 평문으로 저장됩니다](/agents-create#환경-변수와-자격-증명).
 
 </Accordion>
 </Accordions>
@@ -209,3 +227,5 @@ Multica Desktop을 종료한 뒤 다시 엽니다.
 - [에이전트 생성 및 설정](/agents-create) — 방금 연결한 런타임을 선택합니다.
 - [데몬과 런타임](/daemon-runtimes) — 온라인 상태, 동시 실행, 사용자 지정 런타임을 알아봅니다.
 - [AI 코딩 도구 비교](/providers) — Multica에서 도구별 기능을 비교합니다.
+
+macOS의 ZCode Desktop은 앱 번들에서 자동으로 감지되며 Node.js가 설치되어 있어야 합니다. Linux에서는 데몬이 PATH의 `zcode` 또는 `/opt/ZCode/zcode`를 통해 ZCode Desktop을 자동으로 감지하고 데스크톱 창을 열지 않고 내장 CLI를 실행합니다. Linux에서는 Node.js를 별도로 설치하거나 환경 변수를 직접 설정할 필요가 없습니다. 데스크톱 앱에서 작동하는 API 연결을 활성화하세요. 모델과 추론 수준 선택지는 ZCode에서 제공합니다. [도구 비교](/providers#zcode)를 참고하세요.

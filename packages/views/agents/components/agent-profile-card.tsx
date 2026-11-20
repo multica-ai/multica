@@ -14,6 +14,8 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { Settings2 } from "@multica/ui/icons";
+import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AppLink } from "../../navigation";
@@ -129,6 +131,20 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         )}
         {owner && <MetaRow label={t(($) => $.profile_card.owner_label)} value={owner.name} />}
       </div>
+
+      {!isArchived && (
+        <div className="border-t pt-3">
+          <Button
+            variant="outline"
+            size="xs"
+            render={<AppLink href={`${p.agentDetail(agent.id)}?view=general`} />}
+            nativeButton={false}
+          >
+            <Settings2 />
+            {t(($) => $.detail.settings)}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

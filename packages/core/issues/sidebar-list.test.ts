@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../types";
 import {
+  noProjectCountRequest,
+  noProjectSidebarRequest,
   projectSidebarRequest,
   shownSidebarStatuses,
   builtinSidebarRequest,
+  sidebarCountRequest,
   sidebarProjects,
+  noProjectRowIndex,
+  NO_PROJECT_ORDER_ID,
   viewSidebarRequest,
 } from "./sidebar-list";
 import {
@@ -26,49 +31,84 @@ const STATUSES = [
 describe("projectSidebarRequest", () => {
   it("leaves out finished statuses and sorts by update time by default", () => {
     expect(projectSidebarRequest("p1", DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES, "u1")).toEqual({
-      project_id: "p1",
-      statuses: ["backlog", "todo", "in_progress", "merged"],
-      sort_by: "updated_at",
-      sort_direction: "desc",
-    });
-  });
-
-  it("maps the assignee and sub-issue settings onto server filters", () => {
-    const settings: SidebarIssueSettings = {
-      ...DEFAULT_SIDEBAR_ISSUE_SETTINGS,
-      hiddenStatuses: [],
-      assignee: "my_agents",
-      showSubIssues: false,
-    };
-    expect(projectSidebarRequest("p1", settings, STATUSES, "u1")).toEqual({
-      project_id: "p1",
-      involves_user_id: "u1",
-      top_level_only: true,
-      sort_by: "updated_at",
-      sort_direction: "desc",
-    });
-  });
-
-  it("lists me and my agents through the table query, which can OR the two", () => {
-    const settings: SidebarIssueSettings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, assignee: "me_and_my_agents" };
-    expect(projectSidebarRequest("p1", settings, STATUSES, "u1")).toEqual({
       table: {
         scope: { kind: "project", project_id: "p1" },
-        filters: {
-          statuses: ["backlog", "todo", "in_progress", "merged"],
-          relations: ["assigned", "my_agents"],
-          include_sub_issues: true,
-        },
+        filters: { statuses: ["backlog", "todo", "in_progress", "merged"], include_sub_issues: true },
         sort: { field: "updated_at", direction: "desc" },
       },
     });
+  });
+
+  it("maps every assignee setting onto table relations", () => {
+    const relations = (assignee: SidebarIssueSettings["assignee"]) =>
+      projectSidebarRequest("p1", { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, assignee }, STATUSES, "u1")?.table.filters
+        .relations;
+    expect(relations("anyone")).toBeUndefined();
+    expect(relations("me")).toEqual(["assigned"]);
+    expect(relations("my_agents")).toEqual(["my_agents"]);
+    expect(relations("me_and_my_agents")).toEqual(["assigned", "my_agents"]);
+    const settings: SidebarIssueSettings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, assignee: "me" };
     expect(projectSidebarRequest("p1", settings, STATUSES, undefined)).toBeNull();
+  });
+
+  it("maps the sub-issue setting", () => {
+    const settings: SidebarIssueSettings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [], showSubIssues: false };
+    expect(projectSidebarRequest("p1", settings, STATUSES, "u1")?.table.filters).toEqual({ include_sub_issues: false });
   });
 
   it("lists nothing when every status is hidden", () => {
     const settings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: STATUSES.map((s) => s.key) };
     expect(shownSidebarStatuses(settings, STATUSES)).toEqual([]);
     expect(projectSidebarRequest("p1", settings, STATUSES, "u1")).toBeNull();
+  });
+});
+
+describe("No project", () => {
+  it("lists issues outside every project with the project rows' settings", () => {
+    const settings: SidebarIssueSettings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, assignee: "me" };
+    expect(noProjectSidebarRequest(settings, STATUSES, "u1")).toEqual({
+      table: {
+        scope: { kind: "workspace" },
+        filters: {
+          include_no_project: true,
+          statuses: ["backlog", "todo", "in_progress", "merged"],
+          relations: ["assigned"],
+          include_sub_issues: true,
+        },
+        sort: { field: "updated_at", direction: "desc" },
+      },
+    });
+  });
+
+  it("counts open issues, sub-issues included, as a project's count does", () => {
+    expect(noProjectCountRequest(STATUSES)).toEqual({
+      query: {
+        scope: { kind: "workspace" },
+        filters: { statuses: ["backlog", "todo", "in_progress", "merged"], include_sub_issues: true },
+        sort: { field: "position", direction: "asc" },
+      },
+      facets: [{ kind: "project" }],
+      include_total: false,
+    });
+  });
+});
+
+describe("sidebarCountRequest", () => {
+  it("totals what the row lists, whatever its ordering", () => {
+    const request = builtinSidebarRequest("subscribed", DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES)!;
+    expect(sidebarCountRequest(request)).toEqual({
+      query: { ...request.table, sort: { field: "position", direction: "asc" } },
+      facets: [{ kind: "priority" }],
+      include_total: true,
+    });
+  });
+
+  it("facets on a dimension the request leaves unfiltered", () => {
+    const request = viewSidebarRequest(
+      { query: { priorityFilters: ["high"] }, display: {}, scope_type: "workspace", scope_variant: null },
+      "2026-03-11",
+    )!;
+    expect(sidebarCountRequest(request).facets).toEqual([{ kind: "creator" }]);
   });
 });
 
@@ -115,6 +155,14 @@ describe("viewSidebarRequest", () => {
       }),
     ).toMatchObject({ advanced: { match: "any", children: [{ field: "priorities", values: ["urgent"] }] } });
     expect(filters({ agentRunningFilter: true })).toMatchObject({ working_only: true });
+    expect(filters({ agentIdleFilter: true })).toMatchObject({ idle_only: true });
+    expect(filters({ unreadFilter: true })).toMatchObject({ unread_issue_ids: [] });
+    expect(
+      viewSidebarRequest({ ...workspace, query: { unreadFilter: true } }, TODAY, ["b", "a"])?.table.filters,
+    ).toMatchObject({ unread_issue_ids: ["a", "b"] });
+    expect(
+      viewSidebarRequest({ ...workspace, query: {} }, TODAY, ["a"])?.table.filters,
+    ).not.toHaveProperty("unread_issue_ids");
     // "Is not" with nothing selected is not a condition, and no due-date rule needs no day.
     expect(filters({ negatedFilters: ["status"] })).toEqual({ include_sub_issues: true });
   });
@@ -152,32 +200,31 @@ describe("viewSidebarRequest", () => {
 });
 
 describe("builtinSidebarRequest", () => {
-  it("scopes each built-in like its page and lists with the sidebar settings", () => {
-    const request = (builtin: Parameters<typeof builtinSidebarRequest>[0], relation: Parameters<typeof builtinSidebarRequest>[1] = "assigned") =>
-      builtinSidebarRequest(builtin, relation, DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES)?.table;
-    expect(request("all_issues")).toEqual({
+  it("filters All issues like each built-in's page and lists with the sidebar settings", () => {
+    const filters = (builtin: Parameters<typeof builtinSidebarRequest>[0], working?: string[]) =>
+      builtinSidebarRequest(builtin, { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [] }, STATUSES, working)
+        ?.table.filters;
+    expect(builtinSidebarRequest("all_issues", DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES)?.table).toEqual({
       scope: { kind: "workspace" },
       filters: { statuses: ["backlog", "todo", "in_progress", "merged"], include_sub_issues: true },
       sort: { field: "updated_at", direction: "desc" },
     });
-    expect(request("my_issues", "created")?.scope).toEqual({ kind: "my", relation: "created" });
-    expect(request("my_issues", "all")?.scope).toEqual({ kind: "my", relation: "any" });
-    expect(request("my_agents", "assigned")?.scope).toEqual({ kind: "my", relation: "involved" });
+    expect(filters("my_work")).toEqual({ relations: ["assigned", "my_agents"], include_sub_issues: true });
+    expect(filters("subscribed")).toEqual({ relations: ["subscribed"], include_sub_issues: true });
+    expect(filters("working", ["i2", "i1"])).toEqual({ working_issue_ids: ["i1", "i2"], include_sub_issues: true });
+    expect(filters("working")).toEqual({ working_issue_ids: [], include_sub_issues: true });
   });
 
-  it("maps the assignee setting and lists nothing when every status is hidden", () => {
-    const mine = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [], assignee: "my_agents" as const };
-    expect(builtinSidebarRequest("all_issues", "assigned", mine, STATUSES)?.table.filters).toEqual({
-      relations: ["my_agents"],
-      include_sub_issues: true,
-    });
-    const both = { ...mine, assignee: "me_and_my_agents" as const };
-    expect(builtinSidebarRequest("all_issues", "assigned", both, STATUSES)?.table.filters).toEqual({
-      relations: ["assigned", "my_agents"],
-      include_sub_issues: true,
-    });
+  it("ignores the project-only assignee setting and lists nothing when every status is hidden", () => {
+    for (const assignee of ["me", "my_agents", "me_and_my_agents"] as const) {
+      const settings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [], assignee };
+      expect(builtinSidebarRequest("subscribed", settings, STATUSES)?.table.filters).toEqual({
+        relations: ["subscribed"],
+        include_sub_issues: true,
+      });
+    }
     const none = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: STATUSES.map((s) => s.key) };
-    expect(builtinSidebarRequest("all_issues", "assigned", none, STATUSES)).toBeNull();
+    expect(builtinSidebarRequest("all_issues", none, STATUSES)).toBeNull();
   });
 });
 
@@ -217,5 +264,39 @@ describe("sidebarProjects", () => {
     expect(
       sidebarProjects(projects, { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, onlyMine: true }, [], "u1").map((p) => p.id),
     ).toEqual(["p1"]);
+  });
+
+  it("orders by recent activity, issues included, falling back to the project's own edit", () => {
+    const settings: SidebarProjectSettings = {
+      ...DEFAULT_SIDEBAR_PROJECT_SETTINGS,
+      ordering: "updated",
+      statuses: ["in_progress", "planned", "paused"],
+    };
+    const withActivity = [
+      { ...projects[0]!, last_activity_at: "2026-10-01T00:00:00.000000Z" },
+      { ...projects[1]!, last_activity_at: "2026-10-09T00:00:00Z" },
+      projects[3]!,
+    ];
+    expect(sidebarProjects(withActivity, settings, [], "u1").map((p) => p.id)).toEqual(["p2", "p4", "p1"]);
+  });
+});
+
+describe("noProjectRowIndex", () => {
+  const shown = [{ id: "p1" }, { id: "p2" }, { id: "p3" }];
+  const manual = DEFAULT_SIDEBAR_PROJECT_SETTINGS;
+
+  it("puts No project first until it is dragged", () => {
+    expect(noProjectRowIndex(shown, manual, [])).toBe(0);
+    expect(noProjectRowIndex(shown, manual, ["p2", "p1"])).toBe(0);
+  });
+
+  it("follows its place in the manual order, counting only the shown projects before it", () => {
+    expect(noProjectRowIndex(shown, manual, ["p1", "p2", NO_PROJECT_ORDER_ID, "p3"])).toBe(2);
+    expect(noProjectRowIndex(shown, manual, ["p1", "hidden", NO_PROJECT_ORDER_ID, "p2"])).toBe(1);
+    expect(noProjectRowIndex(shown, manual, ["p1", "p2", "p3", NO_PROJECT_ORDER_ID])).toBe(3);
+  });
+
+  it("stays first when the projects sort by name or date", () => {
+    expect(noProjectRowIndex(shown, { ordering: "name" }, ["p1", "p2", NO_PROJECT_ORDER_ID])).toBe(0);
   });
 });

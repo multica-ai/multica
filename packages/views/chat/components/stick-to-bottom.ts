@@ -130,6 +130,8 @@ export interface StickToBottom {
   isFollowing(): boolean;
   /** Wire to Virtuoso's `totalListHeightChanged`: the content resized. */
   onContentHeightChanged(): void;
+  /** Release the follow before scrolling to an older row on the reader's behalf. */
+  disengage(): void;
   /**
    * False until the newest message has actually arrived at the bottom of the
    * viewport. Keep the list hidden until then: Virtuoso opens it by scrolling
@@ -354,6 +356,7 @@ export function useStickToBottom(
     () => ({
       isFollowing: () => follow.isFollowing(),
       onContentHeightChanged: onResize,
+      disengage: () => follow.disengage(),
       hasReachedLiveEnd,
     }),
     [follow, onResize, hasReachedLiveEnd],

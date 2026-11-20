@@ -16,7 +16,8 @@ export function ViewNameInput({
 }: {
   initial: string;
   onCommit: (name: string) => void;
-  onDone: () => void;
+  /** `submitted` is true only when Enter ended the edit. */
+  onDone: (submitted: boolean) => void;
   className?: string;
 }) {
   const { t } = useT("issues");
@@ -29,11 +30,11 @@ export function ViewNameInput({
     ref.current?.select();
   }, []);
 
-  const finish = (commit: boolean) => {
+  const finish = (commit: boolean, submitted = false) => {
     if (finished.current) return;
     finished.current = true;
     if (commit && value.trim()) onCommit(value);
-    onDone();
+    onDone(submitted);
   };
 
   return (
@@ -46,7 +47,7 @@ export function ViewNameInput({
       onBlur={() => finish(true)}
       onKeyDown={(event) => {
         event.stopPropagation();
-        if (event.key === "Enter") finish(true);
+        if (event.key === "Enter") finish(true, true);
         else if (event.key === "Escape") finish(false);
       }}
       onPointerDown={(event) => event.stopPropagation()}

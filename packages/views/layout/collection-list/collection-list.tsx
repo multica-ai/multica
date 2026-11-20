@@ -25,6 +25,10 @@ import {
 import { useModalStore } from "@multica/core/modals";
 import { useIntentNavigate, useRowLink } from "../../navigation";
 import { useT } from "../../i18n";
+import {
+  useRestoredScrollOffset,
+  useRestoredScrollRef,
+} from "../../platform/scroll-restoration";
 import { CollectionRowContext, type RowMenuState } from "./row-context";
 
 export type CollectionSortDirection = "asc" | "desc";
@@ -98,13 +102,18 @@ export interface CollectionListProps<T> {
   sort?: CollectionSort;
   selection?: CollectionSelection<T>;
   loading?: boolean;
-  /** Shown in place of rows when there are none. */
+  /** Shown in place of rows when there are none, usually `CollectionNoMatches`. */
   empty?: ReactNode;
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
   /** Renders inside the page's own scroller instead of owning one. */
   embedded?: boolean;
+  /**
+   * Names the list's scroller for scroll restoration, which keys offsets by
+   * route. Override when one route swaps between different lists.
+   */
+  scrollKey?: string;
   /** J/K and arrows reach the list while nothing else has focus. */
   pageShortcuts?: boolean;
   className?: string;
@@ -178,6 +187,7 @@ export function CollectionList<T>({
   loadingMore = false,
   onLoadMore,
   embedded = false,
+  scrollKey = "collection",
   pageShortcuts = !embedded,
   className,
 }: CollectionListProps<T>) {
@@ -187,6 +197,15 @@ export function CollectionList<T>({
   const intentNavigate = useIntentNavigate();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const restoredScrollTop = useRestoredScrollOffset(scrollKey);
+  const restoreScrollRef = useRestoredScrollRef(scrollKey);
+  const attachScroller = useCallback(
+    (el: HTMLDivElement | null) => {
+      scrollRef.current = el;
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
 
   const columns = useMemo(
     () =>
@@ -242,6 +261,10 @@ export function CollectionList<T>({
     paddingStart: HEADER_HEIGHT,
     scrollPaddingStart: HEADER_HEIGHT,
     overscan: 12,
+    // The virtualizer scrolls its element to this offset when it attaches,
+    // even while it has nothing to window; the default 0 would undo the
+    // restored offset.
+    initialOffset: restoredScrollTop,
   });
 
   // Selection
@@ -526,17 +549,17 @@ export function CollectionList<T>({
       <SkeletonRow key={i} columns={columns} selectable={selectable} menu={hasMenu} />
     ));
   } else if (flatRows.length === 0 && !groups?.length) {
-    body = empty ? (
-      <div className="col-span-full py-16 text-center text-body text-muted-foreground">
-        {empty}
-      </div>
-    ) : null;
+    body = empty ? <div className="col-span-full">{empty}</div> : null;
   } else if (virtualize) {
     const virtualItems = virtualizer.getVirtualItems();
     const first = virtualItems[0];
     const last = virtualItems[virtualItems.length - 1];
     const top = first ? first.start - HEADER_HEIGHT : 0;
-    const bottom = last ? virtualizer.getTotalSize() - last.end : 0;
+    // Before the virtualizer has measured the viewport it yields no items;
+    // the spacer still spans every row, so a restored offset is not clamped.
+    const bottom = last
+      ? virtualizer.getTotalSize() - last.end
+      : virtualizer.getTotalSize() - HEADER_HEIGHT;
     body = (
       <>
         {top > 0 ? <div aria-hidden className="col-span-full" style={{ height: top }} /> : null}
@@ -617,7 +640,11 @@ export function CollectionList<T>({
 
   if (embedded) return <div className="@container min-w-0 overflow-x-auto">{grid}</div>;
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto @container">
+    <div
+      ref={attachScroller}
+      data-tab-scroll-root={scrollKey}
+      className="min-h-0 flex-1 overflow-auto @container"
+    >
       {grid}
     </div>
   );

@@ -3,17 +3,16 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Bot,
-  CircleUser,
   Copy,
   Layers,
   Link2,
-  ListTodo,
+  Plus,
   Star,
   Trash2,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -39,6 +38,7 @@ import { ActorAvatar } from "../common/actor-avatar";
 import {
   CollectionCreateButton,
   CollectionPageHeader,
+  CollectionPageState,
   CollectionScopeItems,
 } from "../layout/collection-page";
 import {
@@ -49,7 +49,7 @@ import {
   type CollectionColumn,
 } from "../layout/collection-list";
 import { useT } from "../i18n";
-import { useBuiltinViewNavigation } from "./builtin-views";
+import { BUILTIN_VIEW_ICON, useBuiltinViewNavigation } from "./builtin-views";
 import { DeleteViewDialog } from "./delete-view-dialog";
 import { useIssueViewActions } from "./use-view-actions";
 
@@ -62,12 +62,6 @@ const WORKSPACE_SCOPE = { scope_type: "workspace" } as const;
 type DirectoryRow =
   | { kind: "builtin"; id: string; key: BuiltinViewKey; name: string }
   | { kind: "view"; id: string; view: IssueView };
-
-const BUILTIN_ICON: Record<BuiltinViewKey, React.ReactNode> = {
-  my_issues: <CircleUser className="size-4 shrink-0 text-muted-foreground" />,
-  my_agents: <Bot className="size-4 shrink-0 text-muted-foreground" />,
-  all_issues: <ListTodo className="size-4 shrink-0 text-muted-foreground" />,
-};
 
 /** Every view the user can open, and the switch that puts it in the sidebar. */
 export function AllViewsPage() {
@@ -150,7 +144,7 @@ export function AllViewsPage() {
         <CollectionNameCell
           icon={
             row.kind === "builtin" ? (
-              BUILTIN_ICON[row.key]
+              <span className="flex text-muted-foreground">{BUILTIN_VIEW_ICON[row.key]}</span>
             ) : (
               <Layers className="size-4 shrink-0 text-muted-foreground" />
             )
@@ -293,7 +287,19 @@ export function AllViewsPage() {
             </CollectionRowMenu>
           );
         }}
-        empty={t(($) => $.views.directory.no_matches)}
+        empty={
+          <CollectionPageState
+            icon={Layers}
+            title={t(($) => $.views.directory.empty_title)}
+            description={t(($) => $.views.directory.empty_description)}
+            actions={
+              <Button type="button" size="sm" onClick={newView}>
+                <Plus aria-hidden="true" />
+                {t(($) => $.views.directory.new_view)}
+              </Button>
+            }
+          />
+        }
       />
       <DeleteViewDialog
         view={deleteTarget}

@@ -1,5 +1,6 @@
 "use client";
 
+import { docDetailOptions, docTreeOptions } from "@multica/core/docs";
 import { useMemo } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { issueStatusListOptions, buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
@@ -13,7 +14,7 @@ import {
   type TabEntityData,
   type TabLabelKey,
 } from "@multica/core/paths";
-import { issueDetailOptions } from "@multica/core/issues/queries";
+import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { autopilotDetailOptions } from "@multica/core/autopilots/queries";
 import {
@@ -32,6 +33,7 @@ import {
 } from "@multica/core/inbox/queries";
 import { useInboxFilters } from "@multica/core/inbox/filter-store";
 import { cn } from "@multica/ui/lib/utils";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { ActorAvatar } from "../common/actor-avatar";
@@ -44,12 +46,10 @@ import { ROUTE_ICON_COMPONENTS } from "./route-icon-components";
  * live from the query cache. This is the view half of the contract whose pure
  * core is `@multica/core/paths` (`parseTabSubject` + `resolveTabPresentation`).
  *
- * Cache-only reads: every query in `useTabEntityData` is `enabled: false`. It
- * observes whatever the pages/directory already loaded and re-renders when that
- * data changes, so an open tab's icon/title stay in sync (project renamed,
- * issue status changed, chat session retitled) without amplifying requests. A
- * resource that has not loaded yet renders a stable type fallback until its
- * page fills the cache.
+ * Reads are cache-only by default. The desktop tab strip opts into fetching
+ * issue details and the status catalog so restored background tabs resolve
+ * without mounting their pages. Other resources observe the pages' caches and
+ * keep their type fallback until those pages load.
  *
  * The one exception is an actor tab's avatar: `ResourceLeadingVisual` renders
  * `ActorAvatar`, which loads the (workspace-global, sidebar-warmed) member /
@@ -71,12 +71,17 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "member",
   "squad",
   "skill",
+  "doc",
+  "docFolder",
   "machine",
   "runtime",
 ]);
 
-/** Gather cached entity data for a subject. All reads are cache-only. */
-function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
+interface ResolvedTabEntityData extends TabEntityData {
+  issue?: NonNullable<TabEntityData["issue"]> & { id: string };
+}
+
+function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): ResolvedTabEntityData {
   const { t: chatT } = useT("chat");
 
   // Read both inbox lists cache-only; the archived view keeps its own list, so
@@ -117,20 +122,13 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
       : subject.kind === "inbox"
         ? (subject.selectedKey ?? "")
         : "";
-  // An issue tab's URL segment may be a human-readable identifier (`MUL-123`).
-  // The route seeds that entry when it resolves, but only the UUID-keyed entry
-  // receives realtime patches — so hop through it, or a tab opened by
-  // identifier would freeze on the title and status it had when first opened.
-  // Both reads stay cache-only, and a UUID segment resolves to itself.
-  const rawIssue = useQuery({
-    ...issueDetailOptions(wsId, issueId || NONE),
-    enabled: false,
-  }).data;
-  const issue =
-    useQuery({
-      ...issueDetailOptions(wsId, rawIssue?.id || NONE),
-      enabled: false,
-    }).data ?? rawIssue;
+  // An inbox key can name an issue-less notification. Only fetch known
+  // issue-backed rows; unknown selections can still resolve from cache.
+  // The canonical query seeds/subscribes to the UUID entry even when the URL
+  // uses an identifier, so background tabs receive realtime patches too.
+  const { issue } = useCanonicalIssue(wsId, issueId, {
+    enabled: fetch && (subject.kind === "issue" || !!inboxItem?.issue_id),
+  });
 
   const project = useQuery({
     ...projectDetailOptions(wsId, subject.kind === "project" ? subject.id : NONE),
@@ -143,6 +141,11 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     ),
     enabled: false,
   }).data;
+  const doc = useQuery({
+    ...docDetailOptions(wsId, subject.kind === "doc" ? subject.id : NONE),
+    enabled: false,
+  }).data;
+  const docTree = useQuery({ ...docTreeOptions(wsId), enabled: false }).data;
   const skill = useQuery({
     ...skillDetailOptions(wsId, subject.kind === "skill" ? subject.id : NONE),
     enabled: false,
@@ -154,14 +157,16 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
   const runtimes = useQuery({ ...runtimeListOptions(wsId), enabled: false }).data;
   const sessions = useQuery({ ...chatSessionsOptions(wsId), enabled: false }).data;
 
-  const data: TabEntityData = {};
+  const data: ResolvedTabEntityData = {};
   switch (subject.kind) {
     case "issue":
       if (issue) {
         data.issue = {
+          id: issue.id,
           identifier: issue.identifier,
           title: issue.title,
           status: issue.status,
+          status_category: issue.status_category,
         };
       }
       break;
@@ -170,6 +175,12 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
       break;
     case "autopilot":
       if (autopilot) data.autopilot = { title: autopilot.autopilot.title };
+      break;
+    case "doc":
+      if (doc) data.doc = { title: doc.title };
+      break;
+    case "docFolder":
+      data.docFolder = docTree?.folders.find((f) => f.id === subject.id);
       break;
     case "skill":
       if (skill) data.skill = { name: skill.name };
@@ -258,6 +269,10 @@ function useTabTitle(
 export interface TabPresentationResult {
   visual: TabVisual;
   title: string;
+  /** False while a resource title is only a type label or persisted fallback. */
+  titleResolved: boolean;
+  /** Also available for background tabs whose issue pages have not mounted. */
+  issueIdentity?: { id: string; identifier: string };
 }
 
 /**
@@ -270,19 +285,24 @@ export interface TabPresentationResult {
 export function useTabPresentation(
   url: string,
   fallbackTitle?: string,
+  { fetch = false }: { fetch?: boolean } = {},
 ): TabPresentationResult {
   const subject = useMemo(() => parseTabSubject(url), [url]);
   const ws = useCurrentWorkspace();
   const wsId = ws?.id ?? "";
-  const data = useTabEntityData(subject, wsId);
-  const statuses = useQuery({ ...issueStatusListOptions(wsId), enabled: false }).data;
+  const data = useTabEntityData(subject, wsId, fetch);
+  const statuses = useQuery({
+    ...issueStatusListOptions(wsId),
+    enabled: fetch && !!wsId && subject.kind === "issue",
+  }).data;
   const catalog = useMemo(() => buildIssueStatusCatalog(statuses), [statuses]);
   const { visual, title: titleSpec } = resolveTabPresentation(subject, data);
-  // A selected notification whose identity has not resolved from cache yet is
+  // A selected notification or chat session not resolved from cache yet is
   // pending in exactly the sense a not-yet-loaded issue is — keep the tab's
   // persisted title instead of collapsing it to the bare container label.
   const selectionPending =
-    subject.kind === "inbox" && !!subject.selectedKey && !data.inboxSelection;
+    (subject.kind === "inbox" && !!subject.selectedKey && !data.inboxSelection) ||
+    (subject.kind === "chat" && !!subject.sessionId && !data.chatSessionTitle);
   const title = useTabTitle(titleSpec, fallbackTitle, selectionPending);
 
   // The actor avatar resolves through workspace directory queries and throws
@@ -302,9 +322,19 @@ export function useTabPresentation(
 
   return {
     visual: safeVisual.kind === "issue-status" && safeVisual.status && catalog.entryOf(safeVisual.status)?.is_system === false
-      ? { ...safeVisual, color: catalog.colorOf(safeVisual.status), icon: catalog.iconOf(safeVisual.status) }
+      ? {
+          ...safeVisual,
+          category: safeVisual.category ?? catalog.categoryOf(safeVisual.status),
+          color: catalog.colorOf(safeVisual.status),
+          icon: catalog.iconOf(safeVisual.status),
+        }
       : safeVisual,
     title,
+    titleResolved: !selectionPending &&
+      (titleSpec.kind !== "tab" || !PENDING_RESOURCE_KEYS.has(titleSpec.tabKey)),
+    issueIdentity: data.issue
+      ? { id: data.issue.id, identifier: data.issue.identifier }
+      : undefined,
   };
 }
 
@@ -329,10 +359,11 @@ export function ResourceLeadingVisual({
       break;
     }
     case "issue-status":
-      // A null status (loading) renders StatusIcon's neutral fallback glyph.
-      inner = (
+      inner = visual.status === null ? (
+        <Skeleton aria-hidden className="size-3 rounded-sm" />
+      ) : (
         <StatusIcon
-          status={visual.status ?? ""}
+          status={visual.status}
           category={visual.category}
           color={visual.color}
           icon={visual.icon}

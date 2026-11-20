@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  Bot,
   ChevronRight,
   Lock,
   MoreHorizontal,
@@ -24,6 +25,7 @@ import {
   runtimeDisplayName,
   runtimeProfileListOptions,
 } from "@multica/core/runtimes";
+import { runtimeReportsRateLimits } from "@multica/core/runtimes/rate-limits";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -46,14 +48,17 @@ import {
   ObjectProperty,
   ObjectSection,
   ObjectSectionCard,
+  ObjectSectionEmpty,
 } from "../../layout/object-page";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { HealthBadge, HealthIcon, shortDaemonId, useHealthLabel } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
+import { RateLimitSection } from "./rate-limit-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { RuntimeAccessEditor, RuntimeAccessReadout } from "./runtime-access-editor";
+import { RuntimeConcurrencyField } from "./runtime-concurrency-field";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
@@ -164,6 +169,7 @@ export function RuntimeDetail({
   return (
     <>
       <ObjectPage
+        type="runtime"
         layoutId="multica_runtime_detail_layout"
         segments={[
           { href: paths.runtimes(), label: t(($) => $.page.title) },
@@ -191,6 +197,7 @@ export function RuntimeDetail({
             device={device}
             cliVersion={cliVersion}
             canEditVisibility={!!isRuntimeOwner}
+            canEditRuntime={!!canEditRuntime}
           />
         }
       >
@@ -226,6 +233,12 @@ export function RuntimeDetail({
               agentHref={(id) => paths.agentDetail(id)}
             />
           </ObjectSection>
+
+          {canReadRuntime && runtimeReportsRateLimits(runtime.provider) && (
+            <ObjectSection title={t(($) => $.rate_limits.title)}>
+              <RateLimitSection runtime={runtime} />
+            </ObjectSection>
+          )}
 
           {canReadRuntime && (
             <ObjectSection title={t(($) => $.detail.usage_title)}>
@@ -306,6 +319,7 @@ function RuntimeProperties({
   device,
   cliVersion,
   canEditVisibility,
+  canEditRuntime,
 }: {
   runtime: AgentRuntime;
   health: ReturnType<typeof deriveRuntimeHealth>;
@@ -319,6 +333,8 @@ function RuntimeProperties({
    * though they may still rename or delete the runtime.
    */
   canEditVisibility: boolean;
+  /** Runtime owner or workspace admin; gates the concurrency cap. */
+  canEditRuntime: boolean;
 }) {
   const { t } = useT("runtimes");
   const { t: tLayout } = useT("layout");
@@ -351,8 +367,9 @@ function RuntimeProperties({
         </ObjectProperty>
         <ObjectProperty label={t(($) => $.detail.fact_device)}>
           {device?.hostname ? (
-            <TruncatedTooltip content={device.hostname}>
-              <span className="block truncate font-mono">{device.hostname}</span>
+            <TruncatedTooltip content={device.hostname} focusable>
+              {/* The value column clips, so the focus ring draws inside. */}
+              <span className="block truncate font-mono focus-visible:ring-2 focus-visible:ring-inset">{device.hostname}</span>
             </TruncatedTooltip>
           ) : (
             <span className="text-muted-foreground">—</span>
@@ -383,6 +400,11 @@ function RuntimeProperties({
           )}
         </div>
       </ObjectPanelSection>
+      <ObjectPanelSection title={t(($) => $.detail.concurrency_title)}>
+        <div className="pr-0.5 pt-1">
+          <RuntimeConcurrencyField runtime={runtime} canEdit={canEditRuntime} />
+        </div>
+      </ObjectPanelSection>
     </div>
   );
 }
@@ -400,9 +422,7 @@ export function ServingAgentList({
   const { t: tAgents } = useT("agents");
   if (agents.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed px-4 py-6 text-center text-caption text-muted-foreground">
-        {t(($) => $.detail.no_agents)}
-      </p>
+      <ObjectSectionEmpty icon={Bot} description={t(($) => $.detail.no_agents)} />
     );
   }
   return (

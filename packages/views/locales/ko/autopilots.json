@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "새 오토파일럿",
-    "start_blank": "처음부터 시작",
     "table": {
       "name": "이름",
       "agent": "에이전트",
@@ -15,10 +14,6 @@
       "created": "생성일"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "아직 오토파일럿이 없습니다",
-      "hint": "AI 에이전트의 반복 작업을 예약하세요. 템플릿을 고르거나 처음부터 시작할 수 있습니다."
-    },
     "no_matches": "일치하는 자동화가 없습니다",
     "retry": "다시 시도"
   },
@@ -26,7 +21,8 @@
     "active": "활성",
     "paused": "일시 중지",
     "paused_runtime_required": "일시 중지됨 — 담당 에이전트에 런타임이 필요합니다",
-    "archived": "보관됨"
+    "archived": "보관됨",
+    "paused_project_archived": "일시 중지됨 — 프로젝트가 보관되었습니다"
   },
   "execution_mode": {
     "create_issue": "태스크 생성",
@@ -66,6 +62,8 @@
   },
   "detail": {
     "not_found": "오토파일럿을 찾을 수 없습니다",
+    "not_found_description": "삭제되었거나 접근 권한이 없을 수 있습니다.",
+    "back_to_list": "모든 오토파일럿",
     "pause_aria": "오토파일럿 일시 중지",
     "activate_aria": "오토파일럿 활성화",
     "paused_runtime_required": "담당 에이전트의 런타임이 없어 자동화가 일시 중지되었습니다. 런타임을 연결한 후 다시 활성화하세요.",
@@ -83,7 +81,6 @@
     "run_blocked_attribution": "실행되지 않음 — 실행의 책임 구성원을 확인할 수 없습니다",
     "run_blocked_already_active": "실행되지 않음 — 최근 실행이 이미 이 건을 처리했습니다",
     "run_blocked_quota_exceeded": "실행되지 않음 — 이 기간의 실행 한도에 도달했습니다",
-    "run_blocked_issue_limit_reached": "실행되지 않음 — 워크스페이스가 태스크 수 한도에 도달했습니다",
     "run_blocked_generic": "실행되지 않음 — 실행이 차단되었습니다",
     "section_triggers": "트리거",
     "section_run_history": "실행 기록",
@@ -118,7 +115,8 @@
       "cancel": "취소",
       "confirm": "삭제",
       "deleting": "삭제하는 중..."
-    }
+    },
+    "paused_project_archived": "프로젝트가 보관되어 자동화가 일시 중지되었습니다. 프로젝트를 복원한 후 다시 활성화하세요."
   },
   "access": {
     "title": "접근 권한 관리",
@@ -150,6 +148,8 @@
   "run": {
     "issue_linked": "태스크 연결됨",
     "view_log": "실행 로그 보기",
+    "stop": "실행 중지",
+    "stop_failed": "실행을 중지하지 못했습니다.",
     "skipped_group": {
       "label": "건너뜀",
       "summary": "건너뛴 실행 {{count}}개"
@@ -183,6 +183,9 @@
     "url_copied": "Webhook URL을 복사했습니다",
     "url_copy_failed": "URL을 복사하지 못했습니다",
     "edit_schedule": "일정 수정",
+    "edit_webhook": "Webhook 수정",
+    "event_filter_summary_all": "모든 이벤트 수락",
+    "event_filter_summary_conditions_other": "조건 {{count}}개",
     "rotate_url": "URL 재발급",
     "rotate_confirm_title": "Webhook URL 재발급",
     "rotate_confirm_description": "현재 URL은 즉시 동작을 멈춥니다. 이 URL을 호출하는 외부 시스템은 새 URL로 업데이트해야 합니다. 계속할까요?",
@@ -246,6 +249,18 @@
       "disabled_invalid_signature": "서명이 유효하지 않아 재실행할 수 없습니다",
       "disabled_rejected": "거부된 전달은 재실행할 수 없습니다",
       "disabled_queued": "아직 대기 중입니다. 처리된 후 재실행하세요"
+    },
+    "ignore": {
+      "title": "무시한 이유",
+      "payload_filtered": "본문 조건 불충족",
+      "event_filtered": "이벤트 또는 동작 불일치",
+      "trigger_disabled": "트리거 비활성화됨",
+      "autopilot_paused": "자동화 일시 중지됨",
+      "autopilot_archived": "자동화 보관됨",
+      "quota_exceeded": "실행 할당량 도달",
+      "actual_value": "실제 값",
+      "missing": "필드 없음",
+      "truncated": "미리보기가 잘렸습니다. 전체 값은 원본 본문에서 확인하세요."
     }
   },
   "add_trigger_dialog": {
@@ -271,6 +286,12 @@
     "submitting": "저장하는 중...",
     "toast_updated": "일정을 수정했습니다",
     "toast_update_failed": "일정 수정에 실패했습니다"
+  },
+  "edit_webhook_dialog": {
+    "title": "Webhook 수정",
+    "label_placeholder": "예: GitHub 풀 리퀘스트",
+    "toast_updated": "Webhook을 수정했습니다",
+    "toast_update_failed": "Webhook 수정에 실패했습니다"
   },
   "dialog": {
     "sr_create": "새 오토파일럿",
@@ -327,12 +348,40 @@
     "webhook_created_done": "완료",
     "event_filter_label": "이벤트 필터",
     "event_filter_docs_link_label": "이벤트 필터 작동 방식 알아보기",
-    "event_filter_event_placeholder": "예: workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "추가",
-    "event_filter_remove_label": "필터 제거",
-    "event_filter_hint": "이 이벤트와 일치하는 Webhook만 처리합니다. 비워 두면 모두 허용합니다.",
+    "event_filter_event_placeholder": "이벤트 (예: pull_request)",
+    "event_filter_actions_placeholder": "액션 (선택)",
+    "event_filter_add_rule": "규칙 추가",
+    "event_filter_event_label": "이벤트",
+    "event_filter_actions_label": "액션",
+    "event_filter_new_rule_label": "새 규칙",
+    "event_filter_condition_label": "조건",
+    "event_filter_error_event_required": "이벤트 이름을 입력하세요.",
+    "event_filter_error_path_required": "Payload 필드를 입력하세요.",
+    "event_filter_error_path_invalid": "필드 이름은 점으로 구분하고 {{path}}자 이내로 입력하세요.",
+    "event_filter_error_value_required": "값을 입력하세요.",
+    "event_filter_error_too_many_values": "값은 최대 {{values}}개입니다.",
+    "event_filter_remove_label": "규칙 삭제",
+    "event_filter_hint": "규칙과 모든 본문 조건에 일치하는 이벤트만 처리합니다. 비워 두면 모든 이벤트를 수락합니다.",
+    "event_filter_condition_remove_label": "조건 제거",
+    "event_filter_condition_add_label": "조건 추가",
+    "event_filter_condition_ops": {
+      "equals": "같음",
+      "not_equals": "같지 않음",
+      "contains": "포함",
+      "in": "다음 중 하나",
+      "exists": "존재"
+    },
+    "event_filter_condition_path_label": "Payload 필드",
+    "event_filter_condition_path_placeholder": "Payload 필드 (예: pull_request.base.ref)",
+    "event_filter_condition_op_label": "연산자",
+    "event_filter_condition_value_label": "값",
+    "event_filter_condition_value_placeholder": "예: main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "대소문자 무시",
     "schedule_multiple_notice": "이 오토파일럿에는 일정이 {{count}}개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
+    "webhook_multiple_notice": "이 오토파일럿에는 Webhook이 여러 개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
+    "webhook_edit_filters": "필터 수정",
+    "webhook_filters_saved_separately": "필터는 따로 저장되며, 여기서 취소해도 되돌려지지 않습니다.",
     "schedule_empty": "일정이 없습니다. 이 오토파일럿은 수동으로 실행할 때만 동작합니다.",
     "schedule_add": "일정 추가",
     "error_title_required": "오토파일럿 이름을 입력하세요.",
@@ -346,7 +395,8 @@
         "label": "실행만",
         "description": "태스크를 만들지 않고 조용히 실행합니다"
       }
-    }
+    },
+    "event_filter_condition_all": "본문이 모든 조건을 충족해야 함"
   },
   "schedule_editor": {
     "time_label": "시간",
@@ -484,7 +534,6 @@
     "select_page": "활성 항목 모두 선택",
     "load_error": "깨우기를 불러오지 못했습니다",
     "loading": "불러오는 중…",
-    "empty": "깨우기 규칙이 없습니다",
     "disable_selected": "선택 항목 끄기",
     "confirm_title": "깨우기 {{count}}개를 끄시겠습니까?",
     "confirm_body": "이후 깨우기를 중지하고 아직 에이전트에게 전달되지 않은 대기 중 실행을 취소합니다. 전달된 실행은 계속되며 실행 로그에서 중지할 수 있습니다.",
@@ -501,7 +550,6 @@
     },
     "target_agent": "깨울 에이전트",
     "empty_filtered": "일치하는 깨우기가 없습니다",
-    "clear_filters": "필터 지우기",
     "batch_success": "깨우기 규칙 {{count}}개를 껐습니다",
     "batch_partial": "{{succeeded}}개를 껐고 {{failed}}개는 실패했습니다. 실패 항목은 선택된 상태로 남아 다시 시도할 수 있습니다.",
     "source": "만든 곳",
@@ -521,6 +569,56 @@
     "banner_view": "보기",
     "create": "깨우기 추가",
     "create_pick_issue": "깨우기를 추가할 태스크 선택",
-    "create_pick_issue_description": "깨우기는 이 태스크에 속하며 태스크가 끝나면 함께 끝납니다."
+    "create_pick_issue_description": "깨우기는 이 태스크에 속하며 태스크가 끝나면 함께 끝납니다.",
+    "intro": {
+      "title": "필요한 순간에 에이전트를 다시 부르세요",
+      "description": "깨우기는 작업에 붙습니다. PR이 병합되거나, 누군가 답하거나, 시간이 되면 에이전트를 다시 불러 이어서 일하게 합니다. 작업이 끝나면 깨우기도 자동으로 멈춥니다.",
+      "slides": {
+        "event": {
+          "title": "일이 생길 때까지 기다리기",
+          "description": "에이전트를 헛돌게 하며 기다릴 필요가 없습니다. 조건이 충족되면 Multica가 자동으로 깨웁니다."
+        },
+        "time": {
+          "title": "시간을 정해도 됩니다",
+          "description": "1회 예약은 ‘내일 오후에 다시 보기’에, 반복은 매일 하는 점검에 알맞습니다."
+        },
+        "ends": {
+          "title": "작업이 끝나면 멈춤",
+          "description": "깨우기는 작업에 속합니다. 작업이 완료되거나 취소되면 자동으로 꺼져 남는 규칙이 없습니다."
+        }
+      },
+      "art": {
+        "issue_inbox": "받은편지함 그룹의 빈 상태",
+        "issue_board": "보드 열 너비 드래그 조절",
+        "issue_paste": "댓글에 이미지 붙여넣기",
+        "reply": "“PR이 병합되었습니다. 문서를 업데이트하고 작업을 닫겠습니다.”",
+        "event_examples": "PR 병합, 새 댓글"
+      }
+    },
+    "defaults": {
+      "title": "하위 태스크가 끝나면",
+      "description": "한 단계가 끝나고 다음 단계가 기다리고 있으면 상위 태스크 담당자를 깨우고, 모든 하위 태스크가 끝나면 한 번 더 깨웁니다. 담당자가 멤버면 받은편지함으로 알립니다.",
+      "badge": "워크스페이스 기본값",
+      "enabled": "기본으로 켜기",
+      "instruction": "기본 지시",
+      "instruction_hint": "깨운 에이전트에게 전달됩니다. 비워 두면 아래 기본 제공 지시를 사용합니다.",
+      "instruction_placeholder": "비워 두면 기본 제공 지시를 사용합니다",
+      "builtin": "기본 제공 지시",
+      "instruction_invalid": "지시는 4,000바이트 이내로 입력하세요.",
+      "save": "저장",
+      "saving": "저장 중…",
+      "save_error": "기본값을 저장하지 못했습니다.",
+      "customized_other": "진행 중인 태스크 {{count}}개가 자체 설정을 사용해 이 기본값을 따르지 않습니다.",
+      "admin_only": "소유자와 관리자만 기본값을 바꿀 수 있습니다.",
+      "load_error": "깨우기 기본값을 불러오지 못했습니다.",
+      "edit_instruction": "기본 지시 편집",
+      "view_instruction": "기본 지시 보기"
+    }
+  },
+  "intro": {
+    "label": "오토파일럿",
+    "title": "에이전트가 제때 알아서 일을 시작하게 하세요",
+    "description": "일정이나 Webhook을 설정하면 실행될 때마다 태스크를 만들어 에이전트에게 맡기거나 에이전트를 바로 실행합니다. 템플릿을 골라 조금만 고치면 됩니다.",
+    "templates": "템플릿으로 시작"
   }
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, type ReactNode } from "react";
-import { Globe, Lock, Users } from "@multica/ui/icons";
+import { ChevronRight, Globe, Lock, Settings2, Users } from "@multica/ui/icons";
+import { Button } from "@multica/ui/components/ui/button";
 import type {
   Agent,
   AgentRuntime,
@@ -24,6 +25,7 @@ import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { CHIP_CLASS } from "./inspector/chip";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
+import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { useExecutionControls } from "./inspector/use-execution-controls";
 import { AgentPerformanceSummary, SuccessRate } from "./tabs/activity-tab";
 
@@ -35,7 +37,7 @@ const ACCESS_ICONS = {
 
 /**
  * The agent page's right panel: what it is and where it runs, with the
- * runtime and model editable in place.
+ * runtime, model, and thinking level editable in place.
  */
 export function AgentPropertiesPanel({
   agent,
@@ -48,6 +50,7 @@ export function AgentPropertiesPanel({
   canEdit,
   onUpdate,
   onEditAccess,
+  onOpenSettings,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
@@ -60,6 +63,7 @@ export function AgentPropertiesPanel({
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   /** Opens the full access form; access is a draft-and-save choice. */
   onEditAccess: () => void;
+  onOpenSettings: () => void;
 }) {
   const { t } = useT("agents");
   const { t: tl } = useT("layout");
@@ -151,15 +155,26 @@ export function AgentPropertiesPanel({
             </Value>
           </ObjectProperty>
         ) : (
-          <ObjectProperty label={t(($) => $.inspector.prop_model)}>
-            <ModelPicker
+          <>
+            <ObjectProperty label={t(($) => $.inspector.prop_model)}>
+              <ModelPicker
+                runtimeId={agent.runtime_id}
+                runtimeOnline={canDiscoverRuntimeModels}
+                value={agent.model ?? ""}
+                canEdit={canEdit}
+                onChange={changeModel}
+              />
+            </ObjectProperty>
+            <ThinkingPropRow
               runtimeId={agent.runtime_id}
               runtimeOnline={canDiscoverRuntimeModels}
-              value={agent.model ?? ""}
+              provider={runtime?.provider ?? ""}
+              model={agent.model ?? ""}
+              value={agent.thinking_level ?? ""}
               canEdit={canEdit}
-              onChange={changeModel}
+              onChange={(thinkingLevel) => update({ thinking_level: thinkingLevel })}
             />
-          </ObjectProperty>
+          </>
         )}
 
         <ObjectProperty label={t(($) => $.columns.access)}>
@@ -198,6 +213,19 @@ export function AgentPropertiesPanel({
           </Value>
         </ObjectProperty>
       </ObjectPanelSection>
+
+      <div className="border-t pt-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start gap-2 px-2"
+          onClick={onOpenSettings}
+        >
+          <Settings2 className="text-muted-foreground" />
+          {t(($) => $.panel.all_settings)}
+          <ChevronRight className="ml-auto text-faint-foreground" />
+        </Button>
+      </div>
 
       <ObjectPanelSection
         title={t(($) => $.tab_body.activity.section_last_30d)}

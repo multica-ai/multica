@@ -24,8 +24,9 @@ import (
 // built without it deliberately carries no pointer at all.
 func platformSkillFixture() SkillContextForEnv {
 	return SkillContextForEnv{
-		Name:    "multica-platform",
-		Content: "---\nname: multica-platform\n---\n\nbody",
+		Name:        "multica-platform",
+		BuiltinName: "multica-platform",
+		Content:     "---\nname: multica-platform\n---\n\nbody",
 	}
 }
 
@@ -69,7 +70,7 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				"`--status todo` starts an agent-assigned child immediately",
 				"`--status backlog` parks it",
 				"`--stage <N>` groups children into ordered stages",
-				"read `references/issues.md` in the `multica-platform` skill",
+				"read `references/sub-issues.md` in the `multica-platform` skill",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -508,7 +509,7 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		// One enumeration, in Instruction Precedence, covering every action
 		// type Agent Identity can forbid. This and workflow step 3 each used to
 		// carry their own list and the two disagreed (MUL-5442).
-		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
+		"The workflow never widens what your Agent Identity allows: when it forbids changing issue status, investigating, implementing, creating issues, updating issues, delegating, or any other action, skip that action.",
 		// MUL-5442 (carried through MUL-6417): the forbids-clause is stated
 		// once on the status-rule header instead of once per status bullet.
 		"skip any status call your Agent Identity forbids",
@@ -526,6 +527,10 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 	}
 
 	for _, banned := range []string{
+		// Read unconditionally, this denied investigating and implementing
+		// even to agents whose identity forbids neither, against step 3's
+		// "complete the task" (MUL-9092).
+		"Never treat this runtime workflow as permission",
 		"4. Run `multica issue status " + issueID + " in_progress`\n",
 		"5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)",
 		"8. When done, run `multica issue status " + issueID + " in_review`\n",
@@ -627,7 +632,7 @@ func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 			for _, banned := range []string{
 				"## Instruction Precedence",
 				"issue workflow below",
-				"Never treat this runtime workflow as permission to change issue status",
+				"The workflow never widens what your Agent Identity allows",
 			} {
 				if strings.Contains(out, banned) {
 					t.Errorf("%s brief must not inherit issue-only precedence text %q\n---\n%s", tc.name, banned, out)
@@ -674,7 +679,8 @@ func TestChatOutputDoesNotRequireIssueComment(t *testing.T) {
 // this rule. Runs both the legacy and slim paths.
 func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 	wantPhrases := []string{
-		"Post exactly ONE comment per run",
+		"Post only your final result, before this turn exits",
+		"one reply per thread when the per-turn message lists several threads",
 		"Do NOT post progress updates",
 	}
 	issueCtxs := map[string]TaskContextForEnv{
@@ -689,6 +695,11 @@ func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 				if !strings.Contains(out, want) {
 					t.Errorf("%s/%s brief missing output rule %q\n---\n%s", label, name, want, out)
 				}
+			}
+			// A multi-thread run is told to post one reply per thread; a
+			// per-run cap of one comment contradicted it (MUL-9092).
+			if strings.Contains(out, "exactly ONE comment per run") {
+				t.Errorf("%s/%s brief still caps a run at one comment\n---\n%s", label, name, out)
 			}
 		}
 		// Chat keeps its own delivery channel; it must not inherit the
@@ -873,6 +884,24 @@ func TestConnectedAppsBlockLivesOutsideBrief(t *testing.T) {
 	})
 	if strings.Contains(out, "## Connected Apps") {
 		t.Errorf("brief must not carry Connected Apps — it is per-run state (MUL-5377)\n---\n%s", out)
+	}
+}
+
+func TestConnectedAppsBlockRunsDirectly(t *testing.T) {
+	t.Parallel()
+	for _, level := range []string{"write", "confirm_writes"} {
+		block := BuildConnectedAppsBlock([]runtimeapps.ConnectedApp{{
+			Provider: "multica", ServerName: "multica_apps", ToolkitSlug: "gmail",
+			AccountScope: "personal", Level: level, AccountStatus: "not_connected",
+		}})
+		for _, want := range []string{"can write", "Allowed calls run immediately", "apps_request_connection", "not connected"} {
+			if !strings.Contains(block, want) {
+				t.Errorf("level %s: missing %q in %s", level, want, block)
+			}
+		}
+		if strings.Contains(block, "confirmation") || strings.Contains(block, "submitted") {
+			t.Errorf("level %s: retired approval instructions in %s", level, block)
+		}
 	}
 }
 
@@ -1087,6 +1116,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}
@@ -1480,6 +1510,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}
@@ -2342,18 +2373,8 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 	}
 }
 
-// TestBriefSkillsListIsNamesOnly pins the shape of the `## Skills` section: an
-// index of invocable names, with no descriptions and no per-provider branch.
-//
-// Descriptions were removed because every runtime CLI already builds its own
-// listing from the SKILL.md frontmatter the daemon writes, so the brief's copy
-// was the same routing signal paid for twice — ~3,100 tokens per brief on a
-// real task, 40% of the whole brief (MUL-5529).
-//
-// The provider branch was removed because its fallback was wrong: it told
-// providers outside a hardcoded list to look in `.agent_context/skills/`, but
-// the only providers that ever reached it — grok and traecli — have their files
-// written to `.grok/skills` and `.traecli/skills` and discover them natively.
+// TestBriefSkillsListIsNamesOnly pins the native-discovery Skills section
+// byte-for-byte. TRAE's file-loading index has separate coverage.
 func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 	t.Parallel()
 
@@ -2370,26 +2391,46 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 		},
 	}
 
-	// grok and traecli are the providers that used to take the removed branch;
-	// the rest are a spread across the native-discovery list.
-	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "traecli", "some-unknown-provider"} {
+	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "some-unknown-provider"} {
 		t.Run(provider, func(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent(provider, ctx)
 
-			if !strings.Contains(out, "- **pr-review**\n") {
-				t.Errorf("brief does not list the skill by slug:\n%s", out)
+			_, section, ok := strings.Cut(out, "## Skills\n\n")
+			if !ok {
+				t.Fatal("brief has no Skills section")
 			}
-			if strings.Contains(out, "Use when reviewing a pull request") {
-				t.Errorf("brief still carries the skill description; the CLI's own listing already has it:\n%s", out)
-			}
-			if strings.Contains(out, ".agent_context/skills/") {
-				t.Errorf("brief still points at the removed fallback path:\n%s", out)
-			}
-			if !strings.Contains(out, "discovered automatically") {
-				t.Errorf("brief lost the native-discovery framing:\n%s", out)
+			section, _, _ = strings.Cut(section, "## Mentions\n\n")
+			const want = "You have the following skills installed (discovered automatically):\n\n- **pr-review**\n\n"
+			if section != want {
+				t.Errorf("native-discovery Skills section changed:\ngot  %q\nwant %q", section, want)
 			}
 		})
+	}
+}
+
+// TestBriefCarriesTheWhenToSplitRule pins the two halves of MUL-8441 that live
+// in the cached brief: the default against splitting a feature into sub-issues,
+// and the step-1 hook that makes reading a sub-issue's parent part of reading
+// the issue. Both must hold without the platform skill installed.
+func TestBriefCarriesTheWhenToSplitRule(t *testing.T) {
+	t.Parallel()
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	for _, want := range []string{
+		"Default to one issue, one PR.",
+		"slice by user-visible behavior, never by layer",
+		"A PR that is large to review is not a reason to split",
+		"When the per-turn message carries a `[Parent issue]` block, this issue is a sub-issue",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("brief lost %q:\n%s", want, out)
+		}
+	}
+	rule := strings.Index(out, "Default to one issue, one PR.")
+	flags := strings.Index(out, "`--status todo` starts an agent-assigned child immediately")
+	if rule < 0 || flags < 0 || rule > flags {
+		t.Errorf("the split rule must come before the sub-issue flags it gates:\n%s", out)
 	}
 }
 
@@ -2400,7 +2441,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {
@@ -2411,7 +2452,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 		{
 			name:   "current backend",
 			skills: []SkillContextForEnv{skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
+			want:   "`references/sub-issues.md` in the `multica-platform` skill",
 		},
 		{
 			name:   "retired legacy skill alone has no pointer",
@@ -2421,7 +2462,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 		{
 			name:   "platform pointer ignores the retired legacy skill",
 			skills: []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
+			want:   "`references/sub-issues.md` in the `multica-platform` skill",
 		},
 		{
 			name:   "neither installed",
@@ -2470,14 +2511,11 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 // gives an agent one name to guess instead of eight. This line is what pays
 // that back, so it must appear whenever the skill does — an agent that cannot
 // find the platform contracts is strictly worse off than before the merge.
-//
-// Naming is by bare name, on the stated assumption that no workspace skill
-// shares a built-in's name (see builtinSlug).
 func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {

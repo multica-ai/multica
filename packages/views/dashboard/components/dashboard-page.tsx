@@ -26,9 +26,11 @@ import {
 } from "@multica/core/dashboard";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
+import { CollectionPageState } from "../../layout/collection-page";
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
 import { useNavigation } from "../../navigation";
+import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import {
   addDaysIso,
   aggregateByWeek,
@@ -153,6 +155,8 @@ export function DashboardPage() {
   const locales = i18n.resolvedLanguage ?? i18n.language;
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  // One scroller for both tabs: the offset restored is the shown tab's.
+  const restoreScrollRef = useRestoredScrollRef("dashboard");
 
   // The tab lives in the URL because the Errors view is the half of this page
   // people paste at each other ("this agent failed 54 times, see for
@@ -513,7 +517,11 @@ export function DashboardPage() {
         </div>
       </PageHeader>
 
-      <div className="flex-1 overflow-y-auto">
+      <div
+        ref={restoreScrollRef}
+        data-tab-scroll-root="dashboard"
+        className="flex-1 overflow-y-auto"
+      >
         <div className="mx-auto max-w-6xl p-6">
           <TabsContent value="usage" className="space-y-5">
             {usageLoading ? (
@@ -642,12 +650,10 @@ function DashboardSkeleton() {
 function DashboardEmpty() {
   const { t } = useT("usage");
   return (
-    <div className="flex flex-col items-center rounded-lg border border-dashed py-12 text-center">
-      <BarChart3 className="h-6 w-6 text-faint-foreground" />
-      <p className="mt-3 text-body font-medium">{t(($) => $.empty.title)}</p>
-      <p className="mt-1 max-w-md text-caption text-muted-foreground">
-        {t(($) => $.empty.body)}
-      </p>
-    </div>
+    <CollectionPageState
+      icon={BarChart3}
+      title={t(($) => $.empty.title)}
+      description={t(($) => $.empty.body)}
+    />
   );
 }

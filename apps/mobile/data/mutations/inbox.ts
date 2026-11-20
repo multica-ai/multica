@@ -4,7 +4,10 @@
  * per Sharing Principles (no runtime imports from @multica/core mutations).
  *
  * Behavioral parity:
- *   - mark-read: flip `read` to true locally; rollback on error; settle invalidate.
+ *   - mark-read: flip `read` to true locally on the item AND on every other
+ *     non-archived row that shares its `issue_id` — the server reads the whole
+ *     issue (MUL-8618), so an assignment under a later comment is read with
+ *     it; rollback on error; settle invalidate.
  *     `onMutate` writes setQueryData BEFORE awaiting cancelQueries — this is
  *     load-bearing for iOS Stack push transitions: when the user taps an
  *     inbox row and we router.push to issue/[id], iOS captures a snapshot of
@@ -67,12 +70,17 @@ export function useMarkInboxRead() {
     onMutate: async (id) => {
       const key = inboxKeys.list(wsId);
       // Synchronous patch FIRST — see the file-level doc comment for why.
-      qc.setQueryData<InboxItem[]>(key, (old) =>
-        old?.map((item) => (item.id === id ? { ...item, read: true } : item)),
-      );
-      // Then the standard cancel + snapshot dance for rollback.
-      await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<InboxItem[]>(key);
+      const issueId = prev?.find((item) => item.id === id)?.issue_id ?? null;
+      qc.setQueryData<InboxItem[]>(key, (old) =>
+        old?.map((item) =>
+          item.id === id || (issueId != null && item.issue_id === issueId && !item.archived)
+            ? { ...item, read: true }
+            : item,
+        ),
+      );
+      // Then the standard cancel for rollback.
+      await qc.cancelQueries({ queryKey: key });
       return { prev, key };
     },
     onError: (_err, _id, ctx) => {

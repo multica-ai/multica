@@ -160,11 +160,15 @@
     "fact_device": "Appareil",
     "fact_runtime": "Runtime",
     "fact_daemon_cli": "CLI du daemon",
-    "fact_daemon_id": "Identifiant du daemon",
+    "fact_daemon_id": "ID du daemon",
     "usage_title": "Consommation",
     "no_agents": "Aucun agent n'est encore associé à ce runtime.",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibilité",
+    "concurrency_title": "Concurrence",
+    "concurrency_none": "Aucune limite",
+    "concurrency_hint": "Nombre maximal d'exécutions simultanées pour tous les agents de ce runtime ({{min}}–{{max}}). Laissez vide pour ne pas limiter.",
+    "toast_concurrency_failed": "Échec de la mise à jour de la limite de concurrence",
     "visibility_label": {
       "private": "Privé",
       "public": "Public",
@@ -384,17 +388,18 @@
     "pending_health_warning": "En attente de synchronisation du daemon",
     "pending_health_error": "Erreur d'enregistrement",
     "pending_health_disabled": "Désactivé",
-    "pending_cli_unknown": "en attente"
+    "pending_cli_unknown": "en attente",
+    "col_rate_limits": "Limites"
   },
   "profiles": {
     "cta": "Ajouter un runtime",
     "add_custom": "Ajouter un runtime personnalisé",
     "this_machine": "cette machine",
     "unassigned_title": "Runtimes personnalisés sans machine",
-    "unassigned_description": "Ces runtimes de l'espace de travail ne sont connectés à aucune machine. Connectez une machine disposant des commandes correspondantes, ou utilisez les actions d'une ligne pour les modifier ou les supprimer.",
+    "unassigned_description": "Reconnectez la machine assignée, ou modifiez un ancien runtime pour lui assigner une machine.",
     "dialog_title": "Runtimes personnalisés",
-    "dialog_description": "Les définitions de runtimes personnalisés valent pour tout l'espace de travail et se synchronisent avec chaque machine connectée. Une machine enregistre le runtime dès que la commande y est disponible.",
-    "create_dialog_description": "Configurez une commande personnalisée depuis {{machine}}. La définition se synchronise dans tout l'espace de travail et ne s'enregistre que sur les machines où cette commande est disponible.",
+    "dialog_description": "Un runtime personnalisé appartient à une seule machine.",
+    "create_dialog_description": "Seule {{machine}} enregistrera cette commande personnalisée.",
     "learn_more": "Voir le guide de configuration",
     "close": "Fermer",
     "add_new": "Nouveau runtime personnalisé",
@@ -432,6 +437,9 @@
       "step_family_hint": "Sélectionnez le CLI compatible avec cette commande.",
       "step_details_label": "Configurez le runtime",
       "step_progress": "Étape {{current}} sur {{total}}",
+      "machine_label": "Machine (facultatif)",
+      "machine_placeholder": "Conserver les machines actuelles",
+      "machine_hint": "Sélectionner une machine supprime les copies inutilisées sur les autres machines.",
       "family_label": "Runtime de base",
       "family_locked_hint": "Le runtime de base ne peut pas être modifié après la création.",
       "display_name_label": "Nom affiché",
@@ -473,7 +481,6 @@
   },
   "usage": {
     "period_label": "Période",
-    "dimension_label": "Dimension",
     "kpi_cost_label": "Coût · {{days}} j",
     "kpi_cost_delta": "{{sign}}{{pct}} % vs préc.",
     "kpi_cache_label": "Économies de cache · {{days}} j",
@@ -481,8 +488,6 @@
     "kpi_tokens_label": "Tokens · {{days}} j",
     "kpi_tokens_hint": "entrée {{input}} · sortie {{output}}",
     "when_title": "Quand ce runtime a dépensé",
-    "when_tab_daily": "Quotidien",
-    "when_tab_weekly": "Hebdomadaire",
     "when_tab_heatmap": "Carte de chaleur",
     "daily_metric_cost": "Coût",
     "daily_metric_tokens": "Tokens",
@@ -518,6 +523,7 @@
     "cost_by_title_model": "Coût par modèle",
     "cost_by_tab_agent": "Par agent",
     "cost_by_tab_model": "Par modèle",
+    "cost_by_label": "Regrouper par",
     "cost_by_caption_agent_one": "{{count}} agent sur ce runtime",
     "cost_by_caption_agent_other": "{{count}} agents sur ce runtime",
     "cost_by_caption_model_one": "{{count}} modèle utilisé",
@@ -668,5 +674,62 @@
       "cancel": "Annuler",
       "done": "Qoder déconnecté"
     }
+  },
+  "intro": {
+    "title": "Donnez à vos agents un ordinateur pour travailler",
+    "description": "Un runtime, c'est là où les agents exécutent vraiment leurs tâches : votre ordinateur, un serveur ou un service cloud.",
+    "slides": {
+      "local": {
+        "title": "Cet ordinateur se connecte tout seul",
+        "description": "Téléchargez l'app de bureau et connectez-vous : Claude Code, Codex et les autres CLI de cet ordinateur apparaissent d'eux-mêmes."
+      },
+      "remote": {
+        "title": "Une autre machine, deux commandes",
+        "description": "Installez la CLI sur un serveur ou un autre ordinateur, puis lancez multica setup pour le connecter."
+      },
+      "cloud": {
+        "title": "Ou un nœud cloud",
+        "description": "Pas envie de gérer des machines ? Créez un nœud cloud hébergé par Multica."
+      }
+    },
+    "art": {
+      "this_computer": "Cet ordinateur · Bureau",
+      "detected": "Harness détectés",
+      "run_there": "À lancer sur cette machine",
+      "connected": "{{name}} connecté à Multica"
+    }
+  },
+  "rate_limits": {
+    "title": "Limites",
+    "caption": "Signalées par la CLI pendant l'exécution des tâches",
+    "updated": "Mis à jour {{ago}}",
+    "empty_title": "Aucune donnée de limite pour l'instant",
+    "empty_hint": "Enregistrées la prochaine fois que ce runtime exécute une tâche. Les comptes à clé API n'ont pas de limites de forfait.",
+    "window_session": "Session",
+    "window_session_hours": "Session de {{hours}} h",
+    "window_weekly": "Hebdomadaire",
+    "window_weekly_opus": "Hebdomadaire · Opus",
+    "window_weekly_sonnet": "Hebdomadaire · Sonnet",
+    "window_generic": "Autre limite",
+    "short_session": "Session",
+    "short_weekly": "Semaine",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "Autre",
+    "used": "{{pct}} % utilisé",
+    "limited": "Limite atteinte",
+    "resets_in": "Réinitialisation dans {{duration}}",
+    "resets_at": "Réinitialisation {{time}}",
+    "reset_since": "Réinitialisée depuis le dernier relevé",
+    "verdict_ahead": "{{pct}} % d'avance sur le rythme · épuisée dans environ {{duration}}",
+    "verdict_on_pace": "Au rythme actuel, tient jusqu'à la réinitialisation",
+    "verdict_limited": "Reprend après la réinitialisation",
+    "credits": "Crédits",
+    "credits_balance": "Reste {{balance}}",
+    "credits_unlimited": "Illimités",
+    "credits_none": "Aucun",
+    "duration_minutes": "{{minutes}} min",
+    "duration_hours": "{{hours}} h {{minutes}} min",
+    "duration_days": "{{days}} j {{hours}} h"
   }
 }

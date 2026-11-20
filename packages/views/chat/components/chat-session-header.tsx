@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Trash2 } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Settings2, Trash2 } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
@@ -31,8 +31,10 @@ import type { Agent, ChatSession } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
+import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { ChatWakeupHeaderButton, useChatWakeups } from "./chat-wakeups";
 
 /**
  * Per-session header for the conversation pane, read as a breadcrumb: the
@@ -60,10 +62,12 @@ export function ChatSessionHeader({
   const { t } = useT("chat");
   const { t: tCommon } = useT("common");
   const wsPaths = useWorkspacePaths();
+  const { push } = useNavigation();
   const updateSession = useUpdateChatSession();
   const deleteSession = useDeleteChatSession();
   const setArchived = useSetChatSessionArchived();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
+  const wakeups = useChatWakeups(session.id);
 
   const isArchived = session.status === "archived";
 
@@ -227,6 +231,8 @@ export function ChatSessionHeader({
         }
         leaf={leaf}
         actions={
+          <div className="flex items-center gap-0.5">
+          <ChatWakeupHeaderButton sessionId={session.id} wakeups={wakeups} />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -244,6 +250,14 @@ export function ChatSessionHeader({
                 <Pencil className="h-4 w-4" />
                 {t(($) => $.header.rename)}
               </DropdownMenuItem>
+              {agent && (
+                <DropdownMenuItem
+                  onClick={() => push(`${wsPaths.agentDetail(agent.id)}?view=general`)}
+                >
+                  <Settings2 className="h-4 w-4" />
+                  {t(($) => $.header.agent_settings)}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               {isArchived ? (
                 <>
@@ -265,6 +279,7 @@ export function ChatSessionHeader({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         }
       />
 

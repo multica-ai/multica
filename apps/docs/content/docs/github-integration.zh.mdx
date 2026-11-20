@@ -17,6 +17,8 @@ GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 
 
 工作区 owner 或 admin 可以完成连接：
 
+新连接还要求 GitHub 侧的安装管理权限：个人安装必须属于授权用户本人；组织安装要求用户对安装覆盖的每个仓库都有 admin 权限。只有读权限或只能管理部分仓库时无法连接。组织安装需先选中至少一个仓库。
+
 <Steps>
 <Step>
 打开 **设置 → 代码**。
@@ -31,6 +33,10 @@ GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 
 安装完成后回到 Multica。
 </Step>
 </Steps>
+
+在 GitHub 一行或**添加仓库** 菜单中选择 **添加账号或组织**，即可连接另一个安装，无需先断开已有连接。每条连接分别显示账号和连接人；仓库选择器可切换账号。**暂停 GitHub 功能** 对工作区内所有连接生效。
+
+如果 GitHub 未返回用户授权，即使 App 已安装或已连接其他工作区，Multica 也无法验证新连接。请重新连接并完成授权；若反复失败，请联系 Multica 运维人员检查 App 的用户授权设置。仅修改仓库范围不一定能完成新连接。
 
 连接状态会显示在同一页面。普通成员可以查看状态，但不能连接、断开或修改开关。
 
@@ -109,7 +115,7 @@ PR 是怎么关联上的，不影响结果：标题、分支名和正文里的 `
 
 只有 PR 事件会触发判断：关联 PR 合并、新增关联或移除关联。重新打开任务后，它不会被改回去，下一个关联 PR 合并时才会。修改这项设置，也不会改动此前已合并的任务。
 
-状态变化会以系统操作写入时间线并列出相关 PR，订阅该任务的成员会收到通知。
+状态变化会以系统操作写入时间线并列出相关 PR，订阅该任务且打开了状态变更通知的成员会收到通知。
 
 ## 多个工作区
 
@@ -121,7 +127,7 @@ PR 是怎么关联上的，不影响结果：标题、分支名和正文里的 `
 
 ## 断开连接
 
-在 **设置 → 代码** 的 GitHub 一行，从 **⋯** 菜单选择 **断开**，只会移除当前 Multica 工作区与该 installation 的关系，不会替你从 GitHub 卸载 App。已有 PR 记录会保留，新的事件不再进入该工作区。
+在 **设置 → 代码** 中，点击目标账号旁的 **断开**。这只移除该安装与当前工作区的连接，其他连接继续接收事件。App 仍安装在 GitHub，已有 PR 记录与关联会保留。
 
 撤销 GitHub 侧的仓库授权，需到个人或组织的 GitHub App installations 页面卸载或调整仓库范围。卸载后，与该 installation 关联的所有 Multica 工作区都会停止接收事件。
 
@@ -139,8 +145,8 @@ Multica Cloud 无需执行本节。自托管需要先创建自己的 GitHub App�
 | 字段 | 值 |
 |---|---|
 | Homepage URL | Multica 前端地址，例如 `https://multica.example.com` |
-| Callback URL | 留空 |
-| Setup URL | `https://<api-host>/api/github/setup`，并启用 **Redirect on update** |
+| Callback URL | `https://<api-host>/api/github/setup` |
+| Request user authorization (OAuth) during installation | 启用 |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 一段长期保存的随机字符串 |
 
@@ -152,13 +158,14 @@ Repository permissions：
 | Pull requests | Read-only |
 | Checks | Read-only；用于显示 CI 状态 |
 | Commit statuses | Read-only；用于汇总 legacy status 形式的 CI |
+| Actions | 可选，Read-only；同一提交上，被同一工作流的新运行取代的已取消运行不再计入 CI 状态 |
 
 订阅以下事件：
 
 - **Pull request**；
 - **Check suite**、**Check run** 和 **Status**，用于触发 CI 与可合并性刷新。
 
-PR 快照通过 Pull requests、Checks 和 Commit statuses 的 REST API 获取，不需要 Contents 权限。
+PR 快照通过 Pull requests、Checks 和 Commit statuses 的 REST API 获取，不需要 Contents 权限。授予可选的 Actions 权限后，还会读取该提交的工作流运行记录；未授予时，即使同一工作流的新运行已通过，被取消的旧运行仍按失败计算。
 
 <Callout type="warning">
 这里需要的是 **Webhook secret**，不是 OAuth Client secret。两边填写的 Webhook secret 不一致时，GitHub delivery 会返回 `401 invalid signature`。
@@ -174,19 +181,21 @@ PR 快照通过 Pull requests、Checks 和 Commit statuses 的 REST API 获取�
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<创建 App 时填写的 webhook secret>
+GITHUB_APP_CLIENT_ID=<Client ID>
+GITHUB_APP_CLIENT_SECRET=<Client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-`GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 缺少任意一个时，连接按钮会被禁用，webhook 接口也会拒绝处理事件。
+新连接需要本节的全部六个 GitHub 变量，包括 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY`。缺少任意一个都会禁用连接按钮；webhook 接入只要求 `GITHUB_WEBHOOK_SECRET`。已有绑定继续工作。部署前，将第一个 Callback URL 设为此端点，并启用安装时 OAuth 授权。启用此选项后，GitHub 不再使用单独的 Setup URL。
 
-PR 卡片要显示 CI 状态与可合并性，还需要下面两个变量，Multica 用它们以 App 身份鉴权并拉取快照：
+新连接以及 PR 卡片的 CI 状态、可合并性还需要以下两个变量。Multica 用只读 metadata token 获取安装的完整仓库列表，并与操作者可管理的仓库列表核对：
 
 ```dotenv
 GITHUB_APP_ID=<GitHub App 的数字 ID>
 GITHUB_APP_PRIVATE_KEY=<完整 PEM 私钥，保留 BEGIN/END 行和换行>
 ```
 
-私钥在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置这两个变量时，PR 照常镜像，任务照常自动关联并在合并时改状态，只是 PR 卡片不显示 CI 或合并状态。
+私钥在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置这两个变量时，连接按钮会被禁用。已有绑定仍通过 webhook 镜像 PR、更新任务，但 PR 卡片不显示 CI 或合并状态。
 
 </Step>
 <Step>
@@ -206,7 +215,7 @@ make migrate-up
 
 ## 常见问题
 
-- **连接按钮不可用**：检查 `GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 是否已进入 API 进程。
+- **连接按钮不可用**：检查以上六个 GitHub 变量、第一个 Callback URL，以及 **Request user authorization (OAuth) during installation**。
 - **Webhook 返回 401**：确认 GitHub App 与 API 使用同一个 Webhook secret，然后在 GitHub 的 **Recent Deliveries** 中重新投递。
 - **PR 没有关联**：检查仓库是否在 App 授权范围内、自动关联是否开启、编号是否属于当前工作区，以及是否有人把它从任务上移除过。
 - **正文写了编号但没关联**：改用 `Closes MUL-123`，或把编号放到分支名、PR 标题中，或者手动关联。

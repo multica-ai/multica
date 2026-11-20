@@ -246,7 +246,7 @@ export function DaemonPanel({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="flex h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
+        className="flex h-[85%] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
         showCloseButton={false}
       >
         {/* Header */}

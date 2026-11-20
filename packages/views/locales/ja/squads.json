@@ -2,7 +2,6 @@
   "page": {
     "title": "スクワッド",
     "new_button": "新規スクワッド",
-    "empty_no_squads": "スクワッドはありません。",
     "empty_no_match": "フィルターに一致するスクワッドはありません。",
     "table": {
       "name": "スカッド",
@@ -28,13 +27,7 @@
     "success": "スカッドをアーカイブしました"
   },
   "name_editor": {
-    "title": "スクワッド名を変更",
-    "placeholder": "スクワッド名",
-    "required": "名前を入力してください",
-    "cancel": "キャンセル",
-    "save": "保存",
-    "saved": "保存しました",
-    "save_failed": "保存できませんでした"
+    "placeholder": "スクワッド名"
   },
   "add_member_dialog": {
     "title": "メンバーを追加",
@@ -54,16 +47,15 @@
     "empty": "役割を追加…",
     "placeholder": "役割（例：レビュアー）"
   },
-  "description_dialog": {
-    "title": "説明を編集",
-    "placeholder_empty": "説明を追加",
-    "cancel": "キャンセル",
-    "responsibility_placeholder": "このスクワッドの担当は何ですか？",
-    "save": "保存"
+  "description_editor": {
+    "empty": "説明を追加",
+    "placeholder": "このスクワッドの担当は何ですか？"
   },
   "members_tab": {
     "section_title": "メンバー",
     "add_member_button": "メンバーを追加",
+    "empty_title": "メンバーはまだいません",
+    "empty_description": "エージェントやメンバーを追加すると、このスクワッドに割り当てたタスクを引き受けます。",
     "create_agent_button": "エージェントを作成",
     "leader_chip": "リーダー",
     "view_agent_tooltip": "エージェントの詳細を開く",
@@ -82,6 +74,8 @@
     "copy_link": "リンクをコピー",
     "link_copied": "リンクをコピーしました",
     "not_found": "スクワッドが見つかりません",
+    "not_found_description": "削除されたか、アクセス権がない可能性があります。",
+    "back_to_list": "すべてのスクワッド",
     "instructions": "指示",
     "edit": "編集",
     "cancel": "キャンセル",
@@ -109,7 +103,8 @@
     "leader_updated": "リーダーを更新しました",
     "leader_update_failed": "リーダーを更新できませんでした",
     "archive_failed": "スクワッドをアーカイブできませんでした",
-    "instructions_saved": "指示を保存しました"
+    "instructions_saved": "指示を保存しました",
+    "update_failed": "保存できませんでした"
   },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",
@@ -129,5 +124,35 @@
     "mine": "自分のスクワッド",
     "all": "すべてのスクワッド"
   },
-  "toolbar": {}
+  "toolbar": {},
+  "intro": {
+    "title": "エージェントをスクワッドにして、チームとして動かす",
+    "description": "タスクをスクワッドに割り当てると、リーダーのエージェントが内容を読み、役割に合うメンバーに次のステップを任せ、目標達成まで追いかけます。やり取りする相手は一つだけです。",
+    "slides": {
+      "route": {
+        "title": "窓口は一つ、振り分けは自動",
+        "description": "リーダーがタスクを読み、次のステップに最適なメンバーをメンションします。動き出すのはそのメンバーだけです。"
+      },
+      "roles": {
+        "title": "役割で分担",
+        "description": "役割の説明で、各メンバーの得意分野をリーダーに伝えます。メンバーはエージェントでも人でも構いません。"
+      },
+      "progress": {
+        "title": "進捗を一か所で",
+        "description": "スクワッドのページに、最近の作業と各メンバーが取り組んでいる内容が表示されます。"
+      }
+    },
+    "art": {
+      "assignee": "担当",
+      "squad_name": "フロントエンドスクワッド",
+      "issue_dark_mode": "設定画面にダークモード切替を追加",
+      "issue_board_columns": "ボードの列幅をドラッグで調整",
+      "issue_inbox_gestures": "モバイルのインボックスでスワイプ操作",
+      "issue_paste_images": "コメントに画像を貼り付け",
+      "delegating": "役割からメンバーを選択中...",
+      "role_frontend": "フロントエンド",
+      "role_testing": "テスト",
+      "role_product": "プロダクト"
+    }
+  }
 }

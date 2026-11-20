@@ -370,6 +370,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			"CUSTOM_FLAG":              "enabled",
 			"UNAUTHORIZED_TOKEN":       "daemon-secret",
 			"MULTICA_TASK_CONFIG_ROOT": "/task/multica-config",
+			"MULTICA_CLI_PATH":         "/task/bin/multica",
 			"MULTICA_SERVER_URL":       "https://task.example",
 			"MULTICA_TOKEN":            "mat_task",
 		}
@@ -385,7 +386,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			t.Fatalf("read config.toml: %v", err)
 		}
 		config := string(data)
-		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_TASK_CONFIG_ROOT", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
+		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_TASK_CONFIG_ROOT", "MULTICA_CLI_PATH", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
 			if !strings.Contains(config, want) {
 				t.Errorf("config.toml missing %q:\n%s", want, config)
 			}
@@ -602,7 +603,7 @@ func TestHermesTaskEnvPassthroughCoversTaskEnvironment(t *testing.T) {
 		}
 		seen[name] = true
 	}
-	env := taskMulticaEnvironment(Task{ID: "task-test", AgentID: "agent-test", WorkspaceID: "workspace-test"},
+	env := taskMulticaEnvironment(Task{ID: "task-test", AgentID: "agent-test", WorkspaceID: "workspace-test", QuickCreatePrompt: "create work"},
 		"hermes", "agent-name", "mat_fixture", "/task/config", "/task/workspaces", "https://task.example", 19514, 3, "/task/tmp")
 	for name := range env {
 		if strings.HasPrefix(name, "MULTICA_") && !seen[name] {
@@ -798,6 +799,9 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "qwen", want: false},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
+		// Droid uses the task AGENTS.md; TestDroidRealAgentsMDCanary verifies
+		// native discovery independently of the optional adapter SystemPrompt.
+		{provider: "droid", want: false},
 	}
 
 	for _, tc := range cases {
@@ -2083,7 +2087,7 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, false, false, slog.Default())
 
 			if reachable != tt.wantReused {
 				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
@@ -2132,7 +2136,7 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 		{name: "managed workdir", provider: "codex", stableStore: true, codexHome: true, rolloutPresent: true},
 		{name: "in-place changed workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, rolloutPresent: true},
 		{name: "in-place same workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, sameWorkdir: true, rolloutPresent: true, wantResume: true},
-		{name: "other provider", provider: "claude", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "other provider", provider: "cursor", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
@@ -2149,7 +2153,7 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 			}
 			store := execenv.CodexSessionStorePath("test", taskCtx)
 			eligible := codexWorktreeResumeEligible(env, store)
-			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, eligible, slog.Default()); got {
+			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, eligible, false, slog.Default()); got {
 				if tt.provider == "codex" && !tt.rolloutPresent {
 					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, t.TempDir(), slog.Default())
 				} else {
@@ -2163,6 +2167,73 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
 			}
 		})
+	}
+}
+
+// Claude Code keys its session store to the cwd, but a continued local
+// worktree runs in a fresh directory every turn (#9731). The gate accepts the
+// resume only when the prior transcript has been migrated into this run's
+// encoded projects directory first; a missing transcript still drops it,
+// fail-closed like the cwd-keyed default.
+func TestGateClaudeResumeAcrossLocalWorktrees(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name        string
+		continued   bool
+		transcript  bool
+		sameWorkdir bool
+		wantResume  bool
+	}{
+		{name: "continued worktree with migrated transcript", continued: true, transcript: true, wantResume: true},
+		{name: "continued worktree without transcript", continued: true},
+		{name: "new forked branch", continued: false, transcript: true},
+		{name: "in-place same workdir", sameWorkdir: true, transcript: true, wantResume: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			prior, work, configDir := t.TempDir(), t.TempDir(), t.TempDir()
+			if tt.sameWorkdir {
+				work = prior
+			}
+			if tt.transcript {
+				projectDir := filepath.Join(configDir, "projects", encodeClaudeCwd(prior))
+				if err := os.MkdirAll(projectDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(projectDir, "session-1.jsonl"), []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: prior}
+			taskCtx := execenv.TaskContextForEnv{AgentID: "agent-1", PriorSessionResumed: true}
+			env := &execenv.Environment{WorkDir: work, LocalWorktree: &execenv.LocalWorktree{Continued: tt.continued}}
+
+			ready := migrateClaudeWorktreeTranscript(env, task.PriorSessionID, env.WorkDir, task.PriorWorkDir, map[string]string{"CLAUDE_CONFIG_DIR": configDir}, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", env.WorkDir, true, false, false, ready, slog.Default())
+
+			if reachable != tt.wantResume {
+				t.Fatalf("reachable = %v, want %v", reachable, tt.wantResume)
+			}
+			if got := task.PriorSessionID != ""; got != tt.wantResume {
+				t.Fatalf("resume=%v, want %v", got, tt.wantResume)
+			}
+			if taskCtx.PriorSessionResumed != tt.wantResume || task.PriorSessionResumeUnavailable == tt.wantResume || taskCtx.PriorSessionResumeUnavailable == tt.wantResume {
+				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
+			}
+		})
+	}
+}
+
+func TestEncodeClaudeCwd(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"/home/user/repo", "-home-user-repo"},
+		{"/tmp/dir with space", "-tmp-dir-with-space"},
+		{"/a/b.c/d", "-a-b-c-d"},
+		{`C:\Users\dev`, "C--Users-dev"},
+	} {
+		if got := encodeClaudeCwd(tt.in); got != tt.want {
+			t.Fatalf("encodeClaudeCwd(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
 
@@ -2197,7 +2268,7 @@ func TestGateHermesResumeToSessionHome(t *testing.T) {
 			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 			got := gateResumeToReachableSession(&task, &taskCtx, "hermes", workDir,
-				sessionHomeReachable("hermes", env, tt.envReused), false, false, slog.Default())
+				sessionHomeReachable("hermes", env, tt.envReused), false, false, false, slog.Default())
 			if got != tt.want || (task.PriorSessionID == "session-1") != tt.want || taskCtx.PriorSessionResumed != tt.want {
 				t.Fatalf("resume = %v, session = %q, resumed = %v; want %v", got, task.PriorSessionID, taskCtx.PriorSessionResumed, tt.want)
 			}
@@ -2259,7 +2330,7 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 			task := Task{PriorSessionID: "session-1", PriorWorkDir: first.WorkDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 			if got := gateResumeToReachableSession(&task, &taskCtx, "hermes", env.WorkDir,
-				sessionHomeReachable("hermes", env, false), false, false, slog.Default()); got != tt.want {
+				sessionHomeReachable("hermes", env, false), false, false, false, slog.Default()); got != tt.want {
 				t.Fatalf("reachable = %v, want %v", got, tt.want)
 			}
 		})
@@ -2290,7 +2361,7 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), false, false, slog.Default())
 
 			if !reachable {
 				t.Fatal("Pi-family session file should remain reachable across workdirs")
@@ -2350,7 +2421,7 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), false, false, slog.Default())
 
 			if reachable {
 				t.Fatalf("%s Pi session was treated as reachable", test.name)
@@ -2521,7 +2592,7 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				task := Task{PriorSessionID: sessionPath, PriorWorkDir: liveDir}
 				taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, false, slog.Default())
+				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, false, false, slog.Default())
 
 				if reachable != wantReachable {
 					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
@@ -3852,7 +3923,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 	// the compat path exists to catch.
 	result := agent.Result{Status: "failed", Error: "exit status 1"}
 
-	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "opencode"}
+	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "droid", "opencode"}
 	for _, provider := range undetectable {
 		t.Run(provider+" retries", func(t *testing.T) {
 			t.Parallel()
@@ -4875,7 +4946,7 @@ func TestEnsureRepoReadyCachedRepoStillRefreshesSettings(t *testing.T) {
 		t.Fatalf("precondition: expected co-author hook enabled before checkout")
 	}
 
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+	if _, err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
 	if got := refreshCalls.Load(); got != 1 {
@@ -4909,7 +4980,7 @@ func TestEnsureRepoReadyTrimsURL(t *testing.T) {
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
 
 	// URL with trailing whitespace should still resolve to the cached repo.
-	if err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  "); err != nil {
+	if _, err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  "); err != nil {
 		t.Fatalf("ensureRepoReady with padded URL: %v", err)
 	}
 	// Even on cache hit we refresh settings once so toggle flips feel live.
@@ -4937,7 +5008,7 @@ func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+	if _, err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
 	if got := refreshCalls.Load(); got != 1 {
@@ -4986,11 +5057,11 @@ func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
 		t.Fatalf("expected repo to be cached after registerTaskRepos, but Lookup returned empty")
 	}
 
-	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
-		t.Fatal("expected project repo to pass workspaceRepoAllowed")
+	if d.resolveWorkspaceRepoURL("ws-1", sourceRepo) != sourceRepo {
+		t.Fatal("expected project repo to resolve to its registered URL")
 	}
 
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+	if _, err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
 	// ensureRepoReady refreshes settings on every call (RFC MUL-2414 §4.8; PR
@@ -5030,7 +5101,7 @@ func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
 		t.Fatalf("refreshWorkspaceRepos: %v", err)
 	}
 
-	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
+	if d.resolveWorkspaceRepoURL("ws-1", sourceRepo) != sourceRepo {
 		t.Fatal("project repo URL was wiped by workspace refresh")
 	}
 }
@@ -5080,7 +5151,7 @@ func TestEnsureRepoReadyReturnsNotConfigured(t *testing.T) {
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	err := d.ensureRepoReady(context.Background(), "ws-1", "git@example.com:team/api.git")
+	_, err := d.ensureRepoReady(context.Background(), "ws-1", "git@example.com:team/api.git")
 	if !errors.Is(err, ErrRepoNotConfigured) {
 		t.Fatalf("expected ErrRepoNotConfigured, got %v", err)
 	}
@@ -5099,7 +5170,7 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
+	_, err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
 	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced: git clone --bare:") {
 		t.Fatalf("expected sync failure error with git's output, got %v", err)
 	}
@@ -5158,7 +5229,7 @@ func TestEnsureRepoReadyKeepsSyncFailureDespiteConcurrentSuccess(t *testing.T) {
 	d.repoCache = cache
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	err := d.ensureRepoReady(context.Background(), "ws-1", repoURL)
+	_, err := d.ensureRepoReady(context.Background(), "ws-1", repoURL)
 	if !cache.raced {
 		t.Fatal("test did not exercise the concurrent sync")
 	}
@@ -5223,7 +5294,8 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			waitCtx := &repoRefreshWaitContext{Context: ctx, waiting: waiting}
-			errCh <- d.ensureRepoReady(waitCtx, "ws-1", sourceRepo)
+			_, err := d.ensureRepoReady(waitCtx, "ws-1", sourceRepo)
+			errCh <- err
 		}()
 	}
 	for range concurrency {
@@ -5704,7 +5776,7 @@ func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, 0)
+	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, newTestTaskSlot(0))
 
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("fail callback calls = %d, want 1", got)
@@ -5746,7 +5818,7 @@ func TestHandleTask_UntrackedRuntimeFailsBackForRetry(t *testing.T) {
 		return TaskResult{}, nil
 	})
 
-	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, 0)
+	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, newTestTaskSlot(0))
 
 	body, _ := failBody.Load().(map[string]any)
 	if body == nil {
@@ -5819,7 +5891,7 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -5922,7 +5994,7 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6580,7 +6652,7 @@ func TestHandleTask_AcksCancelAfterPollCancelled(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6649,7 +6721,7 @@ func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	if got := ackCalls.Load(); got != 1 {
 		t.Fatalf("cancel-ack calls = %d, want 1", got)
