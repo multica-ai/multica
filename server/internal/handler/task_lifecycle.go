@@ -262,6 +262,10 @@ func (h *Handler) rerunIssue(w http.ResponseWriter, r *http.Request, issue db.Is
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonProjectAccessBlocked)
 		return
 	}
+	if reason := issueRunLimitReason(err); reason != "" {
+		h.writeDispatchBlocked(w, http.StatusConflict, reason)
+		return
+	}
 	// Not a dispatch refusal: the issue may well be runnable, and only the named
 	// source is ineligible. It falls through to the 400 below with the
 	// sentinel's own sentence, like the sibling "does not belong to this issue".
