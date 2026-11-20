@@ -289,3 +289,25 @@ func TestDaemonStopForceReportsFailureIfProfileRemainsLocked(t *testing.T) {
 		t.Fatalf("incomplete stop was reported as success: %v", err)
 	}
 }
+
+func TestDaemonStopReportsHeldLockWithoutHealth(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	const profile = "stop-no-health-test"
+	mkProfiles(t, profile)
+	child, release := startStopLockHolder(t, profile, false)
+	serveHealthAs(t, profile, map[string]any{"status": "stopped"})
+
+	err := runDaemonStop(daemonStatusCmdFor(t, profile, ""), nil)
+	if err == nil || !strings.Contains(err.Error(), "profile lock") || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("stop returned %v, want an unresponsive daemon diagnostic", err)
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Wait(); err != nil {
+		t.Fatalf("plain stop unexpectedly terminated the lock holder: %v", err)
+	}
+	if err := runDaemonStop(daemonStatusCmdFor(t, profile, ""), nil); err != nil {
+		t.Fatalf("stop with no health and no lock holder: %v", err)
+	}
+}

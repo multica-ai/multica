@@ -1414,6 +1414,13 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		if profile != "" {
 			label = fmt.Sprintf("Daemon [%s]", profile)
 		}
+		stopped, err := daemonStopComplete(profile)
+		if err != nil {
+			return fmt.Errorf("check daemon profile lock: %w", err)
+		}
+		if !stopped {
+			return fmt.Errorf("%s is not responding to health checks and its profile lock is held. Try multica daemon stop --force for this profile", label)
+		}
 		fmt.Fprintf(os.Stderr, "%s is not running.\n", label)
 		return nil
 	}
