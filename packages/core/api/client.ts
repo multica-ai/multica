@@ -880,6 +880,14 @@ function skillFromImportResult(raw: unknown, endpoint: string): Skill {
 export const CHAT_DRAFT_RESTORE_CAPABILITY = "chat-draft-restore-v1";
 
 /**
+ * Advertised in X-Client-Capabilities on member and invitation lists: without
+ * it the server leaves guest rows out, because clients released before guests
+ * crash on the unknown role. Must stay in sync with
+ * protocol.AppCapabilityWorkspaceGuestsV1.
+ */
+export const WORKSPACE_GUESTS_CAPABILITY = "workspace-guests-v1";
+
+/**
  * Body shared by both unsubscribe endpoints: an omitted target means "the
  * caller", which the server resolves from the request actor.
  */
@@ -4132,7 +4140,9 @@ export class ApiClient {
 
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`);
+    return this.fetch(`/api/workspaces/${workspaceId}/members`, {
+      headers: { "X-Client-Capabilities": WORKSPACE_GUESTS_CAPABILITY },
+    });
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
@@ -4170,7 +4180,9 @@ export class ApiClient {
 
   // Invitations
   async listWorkspaceInvitations(workspaceId: string): Promise<Invitation[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/invitations`);
+    return this.fetch(`/api/workspaces/${workspaceId}/invitations`, {
+      headers: { "X-Client-Capabilities": WORKSPACE_GUESTS_CAPABILITY },
+    });
   }
 
   async revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {

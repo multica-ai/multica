@@ -3,7 +3,7 @@ import { createAuthStore } from "../auth";
 import { setCurrentWorkspace } from "../platform/workspace-storage";
 import { configStore } from "../config";
 import type { StorageAdapter, User } from "../types";
-import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
+import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, WORKSPACE_GUESTS_CAPABILITY, clientErrorMessage } from "./client";
 import { setApiRequestObserver } from "./request-observer";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
@@ -3652,5 +3652,27 @@ describe("ApiClient request observer", () => {
     const events = observe();
     await expect(new ApiClient("https://api.example.test").listMembers("ws-1")).rejects.toThrow();
     expect(events[1]).toMatchObject({ phase: "end", status: null, error: "TypeError: Failed to fetch" });
+  });
+});
+
+// The server hides guest rows from member and invitation lists unless the
+// caller declares it can render the guest role; drop the header and the
+// members page silently loses every guest.
+describe("workspace guest lists", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    ["listMembers", (c: ApiClient) => c.listMembers("ws-1")],
+    ["listWorkspaceInvitations", (c: ApiClient) => c.listWorkspaceInvitations("ws-1")],
+  ])("%s advertises the guest capability", async (_name, call) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("[]", {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await call(new ApiClient("https://api.example.test"));
+
+    const init = fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> };
+    expect(init.headers["X-Client-Capabilities"]).toBe(WORKSPACE_GUESTS_CAPABILITY);
   });
 });
