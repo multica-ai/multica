@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -90,5 +92,59 @@ func TestProjectIssueRunCeilingsUpdate(t *testing.T) {
 	testutil.Call(t, testHandler.GetProject, req).Want(http.StatusOK).JSON(&project)
 	if project.MaxRunsPerIssue == nil || *project.MaxRunsPerIssue != 5 || project.MaxRunsPerAgentPerIssue != nil {
 		t.Fatalf("persisted run limits after clear = %+v", project)
+	}
+}
+
+func TestProjectIssueRunCeilingSerializesAgents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	agentID, runtimeID, _ := createRuntimeGuardAgent(t, t.Context())
+	secondAgentID := dbfx.Agent(t, "Second agent", runtimeID)
+	projectID := dbfx.Project(t, "One run project", testutil.Cols{"max_runs_per_issue": 1})
+	issueID := parseUUID(dbfx.Issue(t, "One remaining slot", testutil.Cols{
+		"assignee_type": "agent", "assignee_id": secondAgentID, "project_id": projectID,
+	}))
+	issue, err := testHandler.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		dbfx.Exec(t, "DELETE FROM agent_task_queue WHERE issue_id = $1", issueID)
+	})
+	first, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback(context.Background())
+	if _, err := first.Exec(ctx, `INSERT INTO agent_task_queue (issue_id, agent_id, runtime_id, status)
+		VALUES ($1, $2, $3, 'queued')`, issueID, agentID, runtimeID); err != nil {
+		t.Fatal(err)
+	}
+
+	second := make(chan error, 1)
+	go func() {
+		_, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, issue)
+		second <- err
+	}()
+	if !waitForWaiterBlockedBy(t, holderBackendPID(t, ctx, first), 5*time.Second) {
+		t.Fatal("second agent did not wait for the first agent's insertion")
+	}
+	if err := first.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-second:
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.ConstraintName != "issue_run_limit" {
+			t.Fatalf("second enqueue: got %v, want issue_run_limit", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if count := dbfx.Count(t, "SELECT count(*) FROM agent_task_queue WHERE issue_id = $1", issueID); count != 1 {
+		t.Fatalf("inserted %d runs, want 1", count)
 	}
 }
