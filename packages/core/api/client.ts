@@ -116,6 +116,7 @@ import type {
   DashboardFailureDaily,
   DashboardFailureByAgent,
   RuntimeUpdate,
+  RuntimeActiveUpdateResponse,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
@@ -573,6 +574,10 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeUpdateSchema,
+  MALFORMED_RUNTIME_UPDATE,
+  RuntimeActiveUpdateResponseSchema,
+  EMPTY_RUNTIME_ACTIVE_UPDATE,
   SkillSchema,
   EMPTY_SKILL,
   SkillSummaryListSchema,
@@ -3166,21 +3171,80 @@ export class ApiClient {
     );
   }
 
+  // CLI update requests drive a polled state machine in the update section,
+  // so every response is validated: a malformed record degrades to an explicit
+  // `failed` (stop polling, show why) instead of an endless spinner.
   async initiateUpdate(
     runtimeId: string,
     targetVersion: string,
   ): Promise<RuntimeUpdate> {
-    return this.fetch(`/api/runtimes/${runtimeId}/update`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update`, {
       method: "POST",
-      body: JSON.stringify({ target_version: targetVersion }),
+      // This client shows a queued update, so the server may queue it while
+      // the machine is busy instead of failing it.
+      body: JSON.stringify({ target_version: targetVersion, queue_when_busy: true }),
     });
+    return parseWithFallback<RuntimeUpdate>(
+      raw,
+      RuntimeUpdateSchema,
+      { ...MALFORMED_RUNTIME_UPDATE, runtime_id: runtimeId, target_version: targetVersion },
+      { endpoint: "POST /api/runtimes/{id}/update" },
+    );
   }
 
   async getUpdateResult(
     runtimeId: string,
     updateId: string,
   ): Promise<RuntimeUpdate> {
-    return this.fetch(`/api/runtimes/${runtimeId}/update/${updateId}`);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/update/${updateId}`,
+    );
+    return parseWithFallback<RuntimeUpdate>(
+      raw,
+      RuntimeUpdateSchema,
+      { ...MALFORMED_RUNTIME_UPDATE, id: updateId, runtime_id: runtimeId },
+      { endpoint: "GET /api/runtimes/{id}/update/{updateId}" },
+    );
+  }
+
+  // The runtime's pending, scheduled or running update, so a queued update
+  // survives a reload and shows for every member who can see it. A server that
+  // predates the endpoint answers 404 or 405 (the path only had POST); both
+  // mean "no active update" rather than an error.
+  async getActiveUpdate(runtimeId: string): Promise<RuntimeUpdate | null> {
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update`);
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 404 || error.status === 405)) {
+        return null;
+      }
+      throw error;
+    }
+    return parseWithFallback<RuntimeActiveUpdateResponse>(
+      raw,
+      RuntimeActiveUpdateResponseSchema,
+      EMPTY_RUNTIME_ACTIVE_UPDATE,
+      { endpoint: "GET /api/runtimes/{id}/update" },
+    ).update;
+  }
+
+  // Cancels a pending or scheduled update. The server answers 409 once
+  // installation has started or the request is already finished.
+  async cancelUpdate(
+    runtimeId: string,
+    updateId: string,
+  ): Promise<RuntimeUpdate> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/update/${updateId}/cancel`,
+      { method: "POST" },
+    );
+    return parseWithFallback<RuntimeUpdate>(
+      raw,
+      RuntimeUpdateSchema,
+      { ...MALFORMED_RUNTIME_UPDATE, id: updateId, runtime_id: runtimeId },
+      { endpoint: "POST /api/runtimes/{id}/update/{updateId}/cancel" },
+    );
   }
 
   // Both discovery endpoints feed a UI state machine (poll while

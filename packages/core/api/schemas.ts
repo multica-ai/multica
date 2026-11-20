@@ -102,6 +102,8 @@ import type {
   PluginSurfaceLaunch,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
+  RuntimeUpdate,
+  RuntimeActiveUpdateResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
   ShareLink,
@@ -4146,6 +4148,49 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   error: "invalid model discovery response",
   created_at: "",
   updated_at: "",
+};
+
+// A CLI update request. `status` stays a plain string so a status added by a
+// newer server still parses; the update section treats an unknown status as
+// "nothing to show" instead of as a failure. `active_tasks` is only sent by
+// daemons that can queue an update, so its absence means "count unknown".
+export const RuntimeUpdateSchema = z.object({
+  id: z.string(),
+  runtime_id: z.string().default(""),
+  status: z.string(),
+  target_version: z.string().default(""),
+  output: z.string().optional(),
+  error: z.string().optional(),
+  scheduled_at: z.string().optional(),
+  active_tasks: z.number().int().nonnegative().optional().catch(undefined),
+  run_started_at: z.string().optional(),
+  cancellable: z.boolean().optional().catch(undefined),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+// Fallback for an unparseable update record. `failed` is the honest choice for
+// a record the client was polling: `pending`/`scheduled` would keep polling a
+// response it cannot read, and the error text says what went wrong.
+export const MALFORMED_RUNTIME_UPDATE: RuntimeUpdate = {
+  id: "",
+  runtime_id: "",
+  status: "failed",
+  target_version: "",
+  error: "invalid update response",
+  created_at: "",
+  updated_at: "",
+};
+
+// The runtime's in-flight update, if any. A malformed `update` degrades to
+// "no active update" through the envelope fallback rather than inventing a
+// failure nobody asked about.
+export const RuntimeActiveUpdateResponseSchema = z.object({
+  update: RuntimeUpdateSchema.nullable().optional().transform((v) => v ?? null),
+}).loose();
+
+export const EMPTY_RUNTIME_ACTIVE_UPDATE: RuntimeActiveUpdateResponse = {
+  update: null,
 };
 
 export const DingTalkInstallationSchema = z.object({

@@ -1,20 +1,42 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Loader2,
   CheckCircle2,
   XCircle,
   ArrowUpCircle,
   Check,
+  Clock,
+  Hourglass,
+  Info,
   Lock,
+  RotateCw,
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
-import { api } from "@multica/core/api";
-import type { RuntimeUpdateStatus } from "@multica/core/types";
-import { useT } from "../../i18n";
+import { cn } from "@multica/ui/lib/utils";
+import { ApiError } from "@multica/core/api";
+import {
+  knownRuntimeUpdateStatus,
+  runtimeActiveUpdateOptions,
+  runtimeUpdateKeys,
+  runtimeUpdateOptions,
+  useCancelRuntimeUpdate,
+  useInitiateRuntimeUpdate,
+} from "@multica/core/runtimes";
+import type { RuntimeUpdate, RuntimeUpdateStatus } from "@multica/core/types";
+import { useLocale, useT } from "../../i18n";
 
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/multica-ai/multica/releases/latest";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// How long a finished update stays on screen before the section returns to
+// the plain version row (by then the restarted daemon reports its version).
+const COMPLETED_DISMISS_MS = 5000;
+
+// Sent as a `failed` result by a busy daemon that cannot queue an update
+// (released before queued updates). Never shown as-is: it is an internal
+// reason, and it is not a failure the user caused.
+const BUSY_ERROR_PREFIX = "runtime update deferred because agent work";
 
 let cachedLatestVersion: string | null = null;
 let cachedAt = 0;
@@ -80,15 +102,29 @@ function isNewer(latest: string, current: string): boolean {
   return false;
 }
 
-const statusConfig: Record<
-  RuntimeUpdateStatus,
-  { icon: typeof Loader2; color: string }
+/** The running daemon already reports the version this update was for. */
+function hasReached(target: string, current: string | null): boolean {
+  if (!current) return false;
+  if (!parseReleaseVersion(target) || !parseReleaseVersion(current)) return false;
+  return !isNewer(target, current);
+}
+
+type ChipStatus = Exclude<RuntimeUpdateStatus, "cancelled">;
+
+const chipConfig: Record<
+  ChipStatus,
+  { icon: typeof Loader2; className: string; spin?: boolean }
 > = {
-  pending: { icon: Loader2, color: "text-muted-foreground" },
-  running: { icon: Loader2, color: "text-info" },
-  completed: { icon: CheckCircle2, color: "text-success" },
-  failed: { icon: XCircle, color: "text-destructive" },
-  timeout: { icon: XCircle, color: "text-warning" },
+  pending: { icon: Loader2, className: "bg-muted text-muted-foreground", spin: true },
+  scheduled: {
+    icon: Hourglass,
+    className: "bg-brand/9 text-brand ring-1 ring-inset ring-brand/22",
+  },
+  running: { icon: Loader2, className: "bg-info/9 text-info", spin: true },
+  completed: { icon: CheckCircle2, className: "bg-success/10 text-success" },
+  failed: { icon: XCircle, className: "bg-destructive/9 text-destructive" },
+  timeout: { icon: XCircle, className: "bg-warning/12 text-warning" },
+  expired: { icon: Clock, className: "bg-muted text-muted-foreground" },
 };
 
 interface UpdateSectionProps {
@@ -112,90 +148,113 @@ export function UpdateSection({
   launchedBy,
 }: UpdateSectionProps) {
   const { t } = useT("runtimes");
+  const locale = useLocale();
+  const qc = useQueryClient();
   const isManaged = launchedBy === "desktop";
+  const commandRuntimeId = isManaged ? null : runtimeId;
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
-  const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
-  const [error, setError] = useState("");
-  const [output, setOutput] = useState("");
-  const [updating, setUpdating] = useState(false);
-  const [targetVersion, setTargetVersion] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [initiateFailed, setInitiateFailed] = useState(false);
 
-  const cleanup = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
+  // The request this section follows: the one this viewer just started, or
+  // the runtime's in-flight one found on mount (so a queued update survives a
+  // reload and shows for every member who can manage the runtime). Once a
+  // request is finished with — cancelled, or completed and acknowledged — it
+  // is dismissed and the plain version row returns.
+  const [startedId, setStartedId] = useState<string | null>(null);
+  const [dismissedId, setDismissedId] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<"failed" | "conflict" | null>(null);
+  const activeQuery = useQuery(runtimeActiveUpdateOptions(commandRuntimeId));
+  const candidateId = startedId ?? activeQuery.data?.id ?? null;
+  const trackedId =
+    candidateId && candidateId !== dismissedId ? candidateId : null;
+  const seed =
+    activeQuery.data && activeQuery.data.id === trackedId
+      ? activeQuery.data
+      : undefined;
+  // The machine's update may have been queued through another of its
+  // runtimes; poll and cancel it through that one.
+  const trackedRuntimeId = seed?.runtime_id || commandRuntimeId;
+  const updateQuery = useQuery({
+    ...runtimeUpdateOptions(trackedRuntimeId, trackedId),
+    initialData: seed,
+  });
+  const update: RuntimeUpdate | null = trackedId
+    ? (updateQuery.data ?? null)
+    : null;
+  const status = knownRuntimeUpdateStatus(update?.status);
 
-  useEffect(() => cleanup, [cleanup]);
+  const initiate = useInitiateRuntimeUpdate(commandRuntimeId);
+  const cancel = useCancelRuntimeUpdate();
 
-  // Fetch latest version on mount.
   useEffect(() => {
     fetchLatestVersion().then(setLatestVersion);
   }, []);
 
-  const markCompleted = useCallback(
-    (message: string) => {
-      setStatus("completed");
-      setOutput(message);
-      setUpdating(false);
-      setTargetVersion(null);
-      cleanup();
-      // Auto-clear status after a few seconds so the UI refreshes to show the
-      // new version from the re-fetched runtime data.
-      setTimeout(() => setStatus(null), 5000);
-    },
-    [cleanup],
-  );
-
+  // Leave the tracked request once there is nothing more to say about it.
   useEffect(() => {
-    if (!updating || !targetVersion || !currentVersion) return;
-    if (!isNewer(targetVersion, currentVersion)) {
-      markCompleted(`Updated to ${targetVersion}`);
+    if (!update) return;
+    if (status === "cancelled" || status === null) {
+      setDismissedId(update.id);
+      return;
     }
-  }, [currentVersion, markCompleted, targetVersion, updating]);
+    if (
+      status !== "failed" &&
+      status !== "timeout" &&
+      status !== "expired" &&
+      hasReached(update.target_version, currentVersion)
+    ) {
+      setDismissedId(update.id);
+      return;
+    }
+    if (status === "completed") {
+      const timer = setTimeout(
+        () => setDismissedId(update.id),
+        COMPLETED_DISMISS_MS,
+      );
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [currentVersion, status, update]);
 
-  const handleUpdate = async () => {
-    if (!latestVersion || !runtimeId) return;
-    cleanup();
-    setUpdating(true);
-    setTargetVersion(latestVersion);
-    setStatus("pending");
-    setError("");
-    setOutput("");
+  const now = useNowWhile(status === "scheduled", 30_000);
 
-    try {
-      const update = await api.initiateUpdate(runtimeId, latestVersion);
-
-      pollRef.current = setInterval(async () => {
-        try {
-          const result = await api.getUpdateResult(runtimeId, update.id);
-          setStatus(result.status as RuntimeUpdateStatus);
-
-          if (result.status === "completed") {
-            markCompleted(
-              result.output ?? `Updated to ${targetVersion ?? latestVersion}`,
-            );
-          } else if (
-            result.status === "failed" ||
-            result.status === "timeout"
-          ) {
-            setError(result.error ?? t(($) => $.update.unknown_error));
-            setUpdating(false);
-            setTargetVersion(null);
-            cleanup();
-          }
-        } catch {
-          // ignore poll errors
+  const handleUpdate = () => {
+    if (!latestVersion || !commandRuntimeId) return;
+    setInitiateFailed(false);
+    initiate.mutateAsync(latestVersion).then(
+      (created) => {
+        setStartedId(created.id || null);
+        setDismissedId(null);
+      },
+      (error: unknown) => {
+        // Someone else already queued one: follow theirs instead.
+        if (error instanceof ApiError && error.status === 409) {
+          setStartedId(null);
+          setDismissedId(null);
+          void qc.invalidateQueries({
+            queryKey: runtimeUpdateKeys.active(commandRuntimeId),
+          });
+          return;
         }
-      }, 2000);
-    } catch {
-      setStatus("failed");
-      setError(t(($) => $.update.initiate_failed));
-      setUpdating(false);
-      setTargetVersion(null);
-    }
+        setInitiateFailed(true);
+      },
+    );
+  };
+
+  const handleCancel = () => {
+    if (!update || !trackedRuntimeId) return;
+    const id = update.id;
+    setCancelError(null);
+    cancel.mutateAsync({ runtimeId: trackedRuntimeId, updateId: id }).then(
+      () => setDismissedId(id),
+      // The update may still start when the machine goes idle, so say the
+      // cancel did not go through. 409: installation started, or the daemon
+      // has finished it; the mutation refetches to show which.
+      (error: unknown) =>
+        setCancelError(
+          error instanceof ApiError && error.status === 409 ? "conflict" : "failed",
+        ),
+    );
   };
 
   const hasUpdate =
@@ -210,14 +269,33 @@ export function UpdateSection({
   const isLocalBuild =
     !!currentVersion && parseReleaseVersion(currentVersion) === null;
 
-  const config = status ? statusConfig[status] : null;
-  const Icon = config?.icon;
-  const isActive = status === "pending" || status === "running";
+  const busyFailure =
+    status === "failed" &&
+    !!update?.error?.startsWith(BUSY_ERROR_PREFIX);
+  const inFlight =
+    status === "pending" ||
+    status === "scheduled" ||
+    status === "running" ||
+    status === "completed";
+  const showsRequest = status !== null && status !== "cancelled";
+  const canStart =
+    !!hasUpdate &&
+    !!commandRuntimeId &&
+    isOnline &&
+    !inFlight &&
+    status !== "failed" &&
+    status !== "timeout" &&
+    !initiateFailed;
+  const chip: ChipStatus | null =
+    showsRequest && !busyFailure ? (status as ChipStatus) : null;
+  const targetVersion = update?.target_version || latestVersion;
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-caption text-muted-foreground">{t(($) => $.update.cli_version_label)}</span>
+    <div className="space-y-2.5">
+      <div className="flex min-h-6 flex-wrap items-center gap-2">
+        <span className="text-caption text-muted-foreground">
+          {t(($) => $.update.cli_version_label)}
+        </span>
         <span className="text-caption font-mono">
           {currentVersion ?? t(($) => $.update.version_unknown)}
         </span>
@@ -231,7 +309,7 @@ export function UpdateSection({
           </span>
         ) : (
           <>
-            {isLocalBuild && !status && (
+            {isLocalBuild && !showsRequest && (
               <span
                 className="inline-flex items-center gap-1 text-caption text-muted-foreground"
                 title={t(($) => $.update.local_build_title)}
@@ -244,22 +322,29 @@ export function UpdateSection({
               !hasUpdate &&
               currentVersion &&
               latestVersion &&
-              !status && (
+              !showsRequest && (
                 <span className="inline-flex items-center gap-1 text-caption text-success">
                   <Check className="h-3 w-3" />
                   {t(($) => $.update.latest)}
                 </span>
               )}
 
-            {hasUpdate && !status && (
+            {(showsRequest || hasUpdate) && targetVersion && (
               <>
                 <span className="text-caption text-muted-foreground">→</span>
                 <span className="text-caption font-mono text-info">
-                  {latestVersion}
+                  {targetVersion}
                 </span>
-                <span className="text-caption text-muted-foreground">{t(($) => $.update.available)}</span>
               </>
             )}
+
+            {hasUpdate && !showsRequest && (
+              <span className="text-caption text-muted-foreground">
+                {t(($) => $.update.available)}
+              </span>
+            )}
+
+            {chip && <StatusChip status={chip} version={targetVersion ?? ""} />}
 
             {hasUpdate && !runtimeId && (
               <span
@@ -271,51 +356,329 @@ export function UpdateSection({
               </span>
             )}
 
-            {hasUpdate && runtimeId && isOnline && !status && (
+            {(status === "pending" || status === "scheduled") &&
+              update?.cancellable !== false && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="ml-auto"
+                  onClick={handleCancel}
+                  disabled={cancel.isPending}
+                  aria-busy={cancel.isPending || undefined}
+                >
+                  {t(($) => $.update.cancel)}
+                </Button>
+              )}
+
+            {canStart && (
               <Button
                 variant="outline"
                 size="xs"
+                className="ml-auto"
                 onClick={handleUpdate}
-                disabled={updating}
+                disabled={initiate.isPending}
+                aria-busy={initiate.isPending || undefined}
               >
-                <ArrowUpCircle className="h-3 w-3" />
+                <ArrowUpCircle />
                 {t(($) => $.update.action)}
               </Button>
             )}
           </>
         )}
-
-        {config && Icon && status && (
-          <span
-            className={`inline-flex items-center gap-1 text-caption ${config.color}`}
-          >
-            <Icon className={`h-3 w-3 ${isActive ? "animate-spin" : ""}`} />
-            {t(($) => $.update.status[status])}
-          </span>
-        )}
       </div>
 
-      {status === "completed" && output && (
-        <div className="rounded-lg border bg-success/5 px-3 py-2">
-          <p className="text-caption text-success">{output}</p>
-        </div>
+      {update &&
+        (status === "scheduled" ||
+          status === "running" ||
+          status === "completed") && (
+          <UpdateTrack
+            update={update}
+            status={status}
+            locale={locale}
+            now={now}
+          />
+        )}
+
+      {status === "expired" && (
+        <NoteBox>{t(($) => $.update.expired_note)}</NoteBox>
       )}
 
-      {(status === "failed" || status === "timeout") && error && (
-        <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
-          <p className="text-caption text-destructive">{error}</p>
-          {status === "failed" && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="mt-1"
-              onClick={handleUpdate}
-            >
-              {t(($) => $.update.retry)}
-            </Button>
-          )}
-        </div>
+      {busyFailure && (
+        <NoteBox action={<RetryButton onClick={handleUpdate} />}>
+          {t(($) => $.update.busy_note)}
+        </NoteBox>
+      )}
+
+      {(status === "failed" || status === "timeout") && !busyFailure && (
+        <ErrorBox onRetry={handleUpdate}>
+          {update?.error || t(($) => $.update.unknown_error)}
+        </ErrorBox>
+      )}
+
+      {cancelError && (status === "pending" || status === "scheduled") && (
+        <ErrorBox onRetry={handleCancel}>
+          {cancelError === "conflict"
+            ? t(($) => $.update.cancel_conflict)
+            : t(($) => $.update.cancel_failed)}
+        </ErrorBox>
+      )}
+
+      {initiateFailed && !showsRequest && (
+        <ErrorBox onRetry={handleUpdate}>
+          {t(($) => $.update.initiate_failed)}
+        </ErrorBox>
       )}
     </div>
   );
+}
+
+function StatusChip({ status, version }: { status: ChipStatus; version: string }) {
+  const { t } = useT("runtimes");
+  const config = chipConfig[status];
+  const Icon = config.icon;
+  const label =
+    status === "completed"
+      ? t(($) => $.update.status.completed, { version })
+      : t(($) => $.update.status[status]);
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5.5 items-center gap-1.5 rounded-md px-2 text-caption font-medium whitespace-nowrap",
+        config.className,
+      )}
+    >
+      <Icon className={cn("size-3", config.spin && "animate-spin")} />
+      {label}
+    </span>
+  );
+}
+
+type StepKind = "done" | "active" | "spinning" | "todo";
+
+function UpdateTrack({
+  update,
+  status,
+  locale,
+  now,
+}: {
+  update: RuntimeUpdate;
+  status: "scheduled" | "running" | "completed";
+  locale: string;
+  now: number;
+}) {
+  const { t } = useT("runtimes");
+  const version = update.target_version;
+  const queuedDetail = formatClock(update.created_at, locale);
+
+  const elapsed = formatElapsed(
+    update.scheduled_at || update.created_at,
+    now,
+    locale,
+  );
+  const waitDetail =
+    typeof update.active_tasks === "number" ? (
+      <span className="inline-flex items-start gap-1.5">
+        <span
+          aria-hidden="true"
+          className="mt-[4.5px] size-1.5 shrink-0 rounded-full bg-success ring-3 ring-success/18"
+        />
+        {t(($) => $.update.steps.wait_detail_with_tasks, {
+          running: update.active_tasks,
+          elapsed,
+        })}
+      </span>
+    ) : (
+      t(($) => $.update.steps.wait_detail, { elapsed })
+    );
+
+  const steps: { kind: StepKind; title: string; detail?: ReactNode }[] =
+    status === "scheduled"
+      ? [
+          { kind: "done", title: t(($) => $.update.steps.queued), detail: queuedDetail },
+          { kind: "active", title: t(($) => $.update.steps.wait), detail: waitDetail },
+          { kind: "todo", title: t(($) => $.update.steps.install, { version }) },
+          { kind: "todo", title: t(($) => $.update.steps.restart) },
+        ]
+      : status === "running"
+        ? [
+            { kind: "done", title: t(($) => $.update.steps.queued), detail: queuedDetail },
+            {
+              kind: "done",
+              title: t(($) => $.update.steps.tasks_finished),
+              detail: formatClock(update.run_started_at, locale),
+            },
+            { kind: "spinning", title: t(($) => $.update.steps.install, { version }) },
+            { kind: "todo", title: t(($) => $.update.steps.restart) },
+          ]
+        : [
+            { kind: "done", title: t(($) => $.update.steps.queued), detail: queuedDetail },
+            {
+              kind: "done",
+              title: t(($) => $.update.steps.tasks_finished),
+              detail: formatClock(update.run_started_at, locale),
+            },
+            {
+              kind: "done",
+              title: t(($) => $.update.steps.install, { version }),
+              detail: formatClock(update.updated_at, locale),
+            },
+            { kind: "spinning", title: t(($) => $.update.steps.restart) },
+          ];
+
+  return (
+    <div className="flex flex-col gap-2.5 rounded-md bg-muted/60 px-3.5 pt-3 pb-2.5 dark:bg-muted/45">
+      <ol className="flex">
+        {steps.map((step, index) => {
+          const last = index === steps.length - 1;
+          return (
+            <li
+              key={index}
+              className={cn(
+                "flex min-w-0 flex-col gap-1.5",
+                last ? "shrink-0" : "flex-1",
+              )}
+              aria-current={step.kind === "active" || step.kind === "spinning" ? "step" : undefined}
+            >
+              <div className="flex items-center gap-1.5">
+                <StepIndicator kind={step.kind} />
+                {!last && (
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "mr-1.5 h-[1.5px] flex-1 rounded-full",
+                      step.kind === "done" ? "bg-brand" : "bg-input",
+                    )}
+                  />
+                )}
+              </div>
+              <span
+                className={cn(
+                  "pr-3 text-caption break-words",
+                  step.kind === "todo"
+                    ? "text-muted-foreground"
+                    : "font-medium text-foreground",
+                )}
+              >
+                {step.title}
+              </span>
+              {step.detail ? (
+                <span className="-mt-1 pr-3 text-micro text-muted-foreground tabular-nums">
+                  {step.detail}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+      {status === "scheduled" && (
+        <p className="flex items-center gap-1.5 border-t pt-2 text-caption text-muted-foreground">
+          <Info className="size-3.5 shrink-0 text-faint-foreground" />
+          {t(($) => $.update.note_no_interrupt)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function StepIndicator({ kind }: { kind: StepKind }) {
+  switch (kind) {
+    case "done":
+      return (
+        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">
+          <Check className="size-2.5 stroke-3" />
+        </span>
+      );
+    case "active":
+      return (
+        <span className="relative flex size-4 shrink-0 items-center justify-center rounded-full ring-[1.5px] ring-brand ring-inset before:absolute before:-inset-1 before:rounded-full before:bg-brand/15">
+          <span className="relative size-1.5 rounded-full bg-brand" />
+        </span>
+      );
+    case "spinning":
+      return <Loader2 className="size-4 shrink-0 animate-spin text-brand" />;
+    case "todo":
+      return (
+        <span className="size-4 shrink-0 rounded-full ring-[1.5px] ring-input ring-inset" />
+      );
+  }
+}
+
+function NoteBox({
+  children,
+  action,
+}: {
+  children: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-md bg-muted/60 py-2 pr-2.5 pl-3 dark:bg-muted/45">
+      <Info className="size-3.5 shrink-0 text-muted-foreground" />
+      <p className="flex-1 text-caption text-foreground">{children}</p>
+      {action}
+    </div>
+  );
+}
+
+function ErrorBox({
+  children,
+  onRetry,
+}: {
+  children: ReactNode;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-md border border-destructive/20 bg-destructive/5 py-2 pr-2.5 pl-3">
+      <p className="mt-0.5 flex-1 text-caption break-words text-destructive">
+        {children}
+      </p>
+      <RetryButton onClick={onRetry} />
+    </div>
+  );
+}
+
+function RetryButton({ onClick }: { onClick: () => void }) {
+  const { t } = useT("runtimes");
+  return (
+    <Button variant="outline" size="xs" onClick={onClick}>
+      <RotateCw />
+      {t(($) => $.update.retry)}
+    </Button>
+  );
+}
+
+/** Re-renders every `intervalMs` while `active`, for elapsed-time labels. */
+function useNowWhile(active: boolean, intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [active, intervalMs]);
+  return now;
+}
+
+function formatClock(iso: string | undefined, locale: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+// "18 min" / "3 hr", localized by Intl so every locale gets its own units.
+function formatElapsed(iso: string, now: number, locale: string): string {
+  const start = new Date(iso).getTime();
+  const minutes = Number.isNaN(start)
+    ? 1
+    : Math.max(1, Math.floor((now - start) / 60_000));
+  const [value, unit] =
+    minutes < 60 ? [minutes, "minute"] : [Math.floor(minutes / 60), "hour"];
+  return new Intl.NumberFormat(locale, {
+    style: "unit",
+    unit,
+    unitDisplay: "short",
+  }).format(value);
 }

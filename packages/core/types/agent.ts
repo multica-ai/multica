@@ -1245,22 +1245,52 @@ export interface DashboardFailureByAgent {
   task_count: number;
 }
 
+// `scheduled` means the daemon was busy and will update on its own once the
+// machine is idle; it stays cancellable until installation starts (`running`).
+// `expired` is a scheduled update that never found an idle moment in 24h.
 export type RuntimeUpdateStatus =
   | "pending"
+  | "scheduled"
   | "running"
   | "completed"
   | "failed"
-  | "timeout";
+  | "timeout"
+  | "cancelled"
+  | "expired";
 
 export interface RuntimeUpdate {
   id: string;
   runtime_id: string;
+  /**
+   * Usually a RuntimeUpdateStatus. A newer server can send a value this client
+   * does not know; consumers must treat anything unrecognised as "nothing to
+   * show" rather than as a failure.
+   */
   status: RuntimeUpdateStatus;
   target_version: string;
   output?: string;
   error?: string;
+  /** When the daemon first deferred the update because it was busy. */
+  scheduled_at?: string;
+  /**
+   * Machine-wide running task count reported by the daemon while scheduled.
+   * Absent for daemons that predate queued updates, which cannot report it.
+   */
+  active_tasks?: number;
+  /** When installation started. */
+  run_started_at?: string;
+  /**
+   * Whether Cancel would succeed now. False while the daemon may be picking
+   * the update up, and for updates started by clients that cannot show a
+   * cancelled one. Absent on older servers.
+   */
+  cancellable?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface RuntimeActiveUpdateResponse {
+  update: RuntimeUpdate | null;
 }
 
 export interface RuntimeModel {

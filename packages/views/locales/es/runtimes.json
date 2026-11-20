@@ -343,14 +343,31 @@
     "available": "disponible",
     "action": "Actualizar",
     "retry": "Reintentar",
+    "cancel": "Cancelar",
+    "cancel_failed": "No se pudo confirmar la cancelación, así que la actualización aún podría ejecutarse. Inténtalo de nuevo.",
+    "cancel_conflict": "No se puede cancelar: la instalación ya ha comenzado.",
     "unknown_error": "Error desconocido",
     "initiate_failed": "No se ha podido iniciar la actualización",
     "status": {
       "pending": "Esperando al daemon...",
+      "scheduled": "Se actualizará en reposo",
       "running": "Actualizando...",
-      "completed": "Actualización completa. El daemon se está reiniciando...",
+      "completed": "Actualizado a {{version}}",
       "failed": "La actualización falló",
-      "timeout": "Tiempo agotado"
+      "timeout": "Tiempo agotado",
+      "expired": "Cola caducada"
+    },
+    "note_no_interrupt": "Las tareas en curso no se interrumpirán.",
+    "expired_note": "Caducó tras esperar 24 horas a que la máquina quedara inactiva.",
+    "busy_note": "La máquina estaba ocupada, así que la actualización no empezó. Vuelve a intentarlo cuando esté inactiva.",
+    "steps": {
+      "queued": "En cola",
+      "wait": "Esperar a que terminen las tareas",
+      "tasks_finished": "Tareas terminadas",
+      "install": "Instalar {{version}}",
+      "restart": "Reiniciar el daemon",
+      "wait_detail_with_tasks": "{{running}} en curso · {{elapsed}}",
+      "wait_detail": "Esperando {{elapsed}}"
     }
   },
   "charts": {

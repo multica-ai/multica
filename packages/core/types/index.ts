@@ -100,6 +100,7 @@ export type {
   DashboardFailureByAgent,
   RuntimeUpdate,
   RuntimeUpdateStatus,
+  RuntimeActiveUpdateResponse,
   RuntimeModel,
   RuntimeModelServiceTier,
   RuntimeModelThinking,
