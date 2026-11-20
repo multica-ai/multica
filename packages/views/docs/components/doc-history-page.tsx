@@ -97,8 +97,18 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                     : ""}
                 </span>
                 <span className="mt-1 block truncate text-caption">
-                  {getActorName(v.authorType, v.authorId)}
+                  {(v.contributors.length > 1
+                    ? v.contributors
+                    : [{ type: v.authorType, id: v.authorId }]
+                  )
+                    .map((c) => getActorName(c.type, c.id))
+                    .join(", ")}
                 </span>
+                {v.message && (
+                  <span className="block truncate text-caption text-muted-foreground">
+                    {v.message}
+                  </span>
+                )}
                 <span className="block text-caption text-muted-foreground">
                   {new Date(v.updatedAt).toLocaleString()}
                 </span>
