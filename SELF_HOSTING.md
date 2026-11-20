@@ -372,6 +372,8 @@ To roll back if an upgrade goes sideways:
 helm -n multica rollback multica
 ```
 
+> **Rolling back after guests exist.** Releases before guests treat a guest as a full member, so once a workspace has a guest or a pending guest invitation, roll back only to a release that includes guest-safe rollback (MUL-9714, the first release containing [#11055](https://github.com/multica-ai/multica/pull/11055)) or later. That release also refuses any member role it does not know, so you can roll back to it from later releases that add roles. Roll back the application only: keep the database schema, and do not run down migrations. The down migration for guests (`699`) deletes the projects recorded on pending guest invitations.
+
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** As of MUL-2957 the `migrate up` command runs an idempotent monthly-slice backfill automatically before applying migration `103`, so a clean upgrade is a single `helm upgrade` + backend rollout. If you are still on a pre-MUL-2957 binary or the auto-hook fails, run the standalone backfill against the same database the chart is using (`kubectl -n multica exec deploy/multica-backend -- ./backfill_task_usage_hourly --sleep-between-slices=2s`), then restart the backend deployment to re-apply migrations. See [Advanced Configuration → Usage Dashboard Rollup](SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup) for the full recovery flow.
 
 ### Tearing down
