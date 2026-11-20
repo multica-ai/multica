@@ -284,3 +284,38 @@ func TestDaemonBackgroundWaitsForShutdownBeforeSpawning(t *testing.T) {
 		t.Fatalf("background child started after %s, before the previous daemon released its lock", elapsed)
 	}
 }
+
+func TestDaemonBackgroundSameProfileNameWithoutLocalPID(t *testing.T) {
+	mkProfiles(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"status":"running","profile":"","pid":12345}`)
+	}))
+	defer server.Close()
+	cmd := &cobra.Command{Use: "start"}
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().Int("health-port", 0, "")
+	port := server.Listener.Addr().(*net.TCPAddr).Port
+	if err := cmd.Flags().Set("health-port", fmt.Sprint(port)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Another local user can serve the same default profile name. With no
+	// matching record, startup should continue to its own auth check.
+	if err := runDaemonBackground(cmd); err == nil || !strings.Contains(err.Error(), "not logged in") {
+		t.Fatalf("start with another user's default profile on the preferred port = %v", err)
+	}
+
+	// A legacy daemon with a local PID file still prevents a duplicate start.
+	if err := os.MkdirAll(daemonDirForProfile(""), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(daemonPIDPathForProfile(""), []byte("12345"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	originalSync := syncDaemonAutostart
+	syncDaemonAutostart = func(string, bool) {}
+	defer func() { syncDaemonAutostart = originalSync }()
+	if err := runDaemonBackground(cmd); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("start with its own legacy daemon = %v", err)
+	}
+}

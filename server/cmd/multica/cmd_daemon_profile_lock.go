@@ -66,7 +66,7 @@ func waitForDaemonProfileRelease(profile string, timeout time.Duration) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			health := checkDaemonHealthOnPort(ctx, port)
 			cancel()
-			if daemonAlive(health) && daemonIdentityMismatch(health, profile, port) == nil {
+			if daemonAlive(health) && daemonIdentityMismatch(health, profile, port) == nil && profileDaemonPIDMatches(profile, port, health) {
 				return fmt.Errorf("daemon %s is already running or starting", describeProfile(profile))
 			}
 			if !warned {

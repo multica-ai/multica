@@ -622,8 +622,8 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	if daemonAlive(health) {
 		// A live daemon on our port that belongs to someone else is a
 		// collision. The foreground child can safely use a fallback port.
-		if err := daemonIdentityMismatch(health, profile, healthPort); err != nil {
-			fmt.Fprintf(os.Stderr, "Preferred health port %d belongs to another profile; trying a fallback port.\n", healthPort)
+		if daemonIdentityMismatch(health, profile, healthPort) != nil || !profileDaemonPIDMatches(profile, healthPort, health) {
+			fmt.Fprintf(os.Stderr, "Preferred health port %d is in use by another daemon; trying a fallback port.\n", healthPort)
 		} else {
 			// Even a no-op start keeps the autostart contract: hint when nothing
 			// is registered, silently refresh an entry Multica owns.
@@ -1208,7 +1208,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	existing := checkDaemonHealthOnPort(probeCtx, port)
 	probeCancel()
-	if daemonAlive(existing) && daemonIdentityMismatch(existing, profile, port) == nil {
+	if daemonAlive(existing) && daemonIdentityMismatch(existing, profile, port) == nil && profileDaemonPIDMatches(profile, port, existing) {
 		return fmt.Errorf("daemon %s is already running or starting", describeProfile(profile))
 	}
 	if err := writeDaemonShutdownResult(profile, daemonShutdownResult{PID: os.Getpid()}); err != nil {
