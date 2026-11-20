@@ -2289,6 +2289,32 @@ describe("ApiClient", () => {
       ).rejects.toMatchObject({ name: "AbortError" });
     });
 
+    it("rejects a refused upload with an ApiError carrying the body's code (MUL-9489)", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: "storage_limit_reached",
+            error: "This workspace has reached its attachment storage limit.",
+            used_bytes: 900,
+            limit_bytes: 1000,
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File(["hi"], "hi.png", { type: "image/png" });
+      const err = await client.uploadFile(file).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({
+        status: 403,
+        message: "This workspace has reached its attachment storage limit.",
+        body: { code: "storage_limit_reached", used_bytes: 900, limit_bytes: 1000 },
+      });
+    });
+
     it("sendChatMessage serialises attachment_ids onto the JSON body when present", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "2026-08-01T00:00:00Z" }), {

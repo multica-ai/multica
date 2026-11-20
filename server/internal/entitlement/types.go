@@ -16,11 +16,14 @@ const (
 	// GateMembers caps a workspace's members. Guests take no slot. It has no
 	// period: the limit is a ceiling on headcount, not a budget that resets.
 	GateMembers GateName = "members"
+	// GateStorageBytes caps the attachment bytes a workspace holds. Like
+	// members it has no period: the limit is what the workspace may hold now.
+	GateStorageBytes GateName = "storage_bytes"
 )
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateAutopilotRuns, GateMembers:
+	case GateAutopilotRuns, GateMembers, GateStorageBytes:
 		return true
 	default:
 		return false

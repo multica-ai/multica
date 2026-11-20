@@ -100,6 +100,7 @@ import {
 } from "../issues/components/pickers/custom-property-picker";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+import { StorageLimitNotice, storageLimitRefusal, type StorageLimitRefusal } from "../billing/storage-limit-notice";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { CopyParentFields } from "./copy-parent-fields";
 
@@ -405,7 +406,10 @@ export function ManualCreatePanel({
     attachments: draftAttachments,
     handleUpload,
     gate,
+    storageRefusal,
+    dismissStorageRefusal,
   } = useIssueCreateUploads("manual", uploadGate, descEditorRef);
+  const [storageCopyRefusal, setStorageCopyRefusal] = useState<StorageLimitRefusal | null>(null);
 
   // Sync field changes to the draft store — manual-only fields to the manual
   // slot, project / priority / due date to the shared slot.
@@ -697,6 +701,13 @@ export function ManualCreatePanel({
       }
       return true;
     } catch (err) {
+      // A sub-issue copies its source attachments; a full workspace refuses
+      // that before creating anything (MUL-9489).
+      const copyRefusal = anchorCommentId ? storageLimitRefusal(err, "") : null;
+      if (copyRefusal) {
+        if (mountedRef.current) setStorageCopyRefusal({ ...copyRefusal, kind: "copy" });
+        return false;
+      }
       const sourceCode = err instanceof ApiError && err.body && typeof err.body === "object"
         ? (err.body as { code?: unknown }).code
         : undefined;
@@ -1059,6 +1070,21 @@ export function ManualCreatePanel({
               />
               {descDragOver && <FileDropOverlay />}
             </div>
+
+            {storageRefusal && (
+              <StorageLimitNotice
+                refusal={storageRefusal}
+                onDismiss={dismissStorageRefusal}
+                className="mx-5 mb-2"
+              />
+            )}
+            {storageCopyRefusal && (
+              <StorageLimitNotice
+                refusal={storageCopyRefusal}
+                onDismiss={() => setStorageCopyRefusal(null)}
+                className="mx-5 mb-2"
+              />
+            )}
 
             {anchorCommentId && (
               <SourceContextPreviewCard

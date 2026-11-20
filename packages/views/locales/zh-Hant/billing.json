@@ -28,6 +28,7 @@
     "actions": {
       "retry": "重試",
       "retry_autopilots": "重試載入自動化用量",
+      "retry_storage": "重試附件儲存空間用量",
       "upgrade_to": "升級到 {{plan}}",
       "switch_to": "切換到 {{plan}}",
       "manage": "管理帳單",
@@ -137,7 +138,10 @@
       "usage_unavailable": "用量暫時不可用",
       "members": "成員",
       "members_pending": "待接受的邀請：{{pending}}",
-      "metering": "時間表、Webhook 和 AI 代理發起的執行計入額度，成員點擊\"立即執行\"不計入。"
+      "metering": "時間表、Webhook 和 AI 代理發起的執行計入額度，成員點擊\"立即執行\"不計入。",
+      "storage": "附件儲存空間",
+      "storage_description": "任務、留言和聊天中的附件。",
+      "storage_label": "附件儲存空間用量"
     },
     "seats": {
       "title": "席位",
@@ -308,5 +312,13 @@
         "after": "到期後既有訪客保留存取權限，邀請新訪客需要 Pro 或 Business。"
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} 沒有上傳",
+    "copy_title": "子任務沒有建立：無法複製來源附件",
+    "admin_body": "附件儲存空間已滿（{{used}} / {{limit}}），既有附件不受影響。",
+    "admin_body_no_figures": "附件儲存空間已滿，既有附件不受影響。",
+    "member_body": "附件儲存空間已滿。請聯絡管理員升級套餐，或刪除不需要的附件。",
+    "dismiss": "關閉"
   }
 }

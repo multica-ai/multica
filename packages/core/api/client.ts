@@ -290,6 +290,7 @@ import type {
   WorkspaceSubscriptionPrices,
   WorkspaceFeatures,
   MemberLimit,
+  StorageUsage,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
@@ -455,6 +456,7 @@ import {
   WorkspaceSubscriptionPricesSchema,
   WorkspaceFeaturesSchema,
   MemberLimitSchema,
+  StorageUsageSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
@@ -2705,6 +2707,18 @@ export class ApiClient {
     );
   }
 
+  // The plan's attachment storage limit (MUL-9489). A response that cannot
+  // be read falls back to no limit: the server still checks every upload.
+  async getStorageUsage(workspaceId: string): Promise<StorageUsage> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/storage-usage`);
+    return parseWithFallback<StorageUsage>(
+      raw,
+      StorageUsageSchema,
+      { action: "off", usedBytes: null, limitBytes: null, reached: null },
+      { endpoint: "GET /api/workspaces/:id/storage-usage" },
+    );
+  }
+
   async getWorkspaceSubscriptionPrices(): Promise<WorkspaceSubscriptionPrices | null> {
     const raw = await this.fetch<unknown>("/api/cloud-subscriptions/prices");
     return parseWithFallback<WorkspaceSubscriptionPrices | null>(
@@ -4398,9 +4412,11 @@ export class ApiClient {
 
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized(credentialUsed);
-      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
+      // An ApiError, so callers can branch on the body's `code` (for example
+      // storage_limit_reached) instead of the message.
+      const { message, body } = await this.parseErrorBody(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+      throw new ApiError(message, res.status, res.statusText, body);
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });

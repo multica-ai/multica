@@ -31,6 +31,11 @@ import {
   listCheckoutHeldInvites,
   memberLimitKeys,
   memberLimitOptions,
+  formatStorageBytes,
+  resolveStorageRow,
+  storageUsageKeys,
+  storageUsageOptions,
+  storageUsageProgress,
   readUpgradeInvite,
   type HeldInvite,
   workspaceSubscriptionPricesOptions,
@@ -340,6 +345,7 @@ function BillingTabContent() {
   // the person to send or discard.
   const [heldInvitesToConfirm, setHeldInvitesToConfirm] = useState<HeldInvite[]>([]);
   const memberLimitQuery = useQuery(memberLimitOptions(wsId));
+  const storageUsageQuery = useQuery(storageUsageOptions(wsId));
 
   useEffect(() => {
     checkoutIntentRef.current = null;
@@ -428,6 +434,17 @@ function BillingTabContent() {
   }, [awaitingHeldCheckoutAt, refetchSummary]);
 
   const entitlements = summaryQuery.data?.entitlement;
+  // A confirmed upgrade or seat purchase changes the storage limit; the
+  // entitlement already carries the new one, and this refreshes the usage
+  // read behind it.
+  const subscriptionVersion = summaryQuery.data?.entitlement.version;
+  const seenSubscriptionVersionRef = useRef(subscriptionVersion);
+  useEffect(() => {
+    const seen = seenSubscriptionVersionRef.current;
+    seenSubscriptionVersionRef.current = subscriptionVersion;
+    if (seen === undefined || subscriptionVersion === undefined || seen === subscriptionVersion) return;
+    void queryClient.invalidateQueries({ queryKey: storageUsageKeys.all(wsId) });
+  }, [queryClient, subscriptionVersion, wsId]);
   // Checkout is done once paid seats are in effect. Neither the plan nor
   // Checkout going away proves it: a trial already reports Business, and a
   // first payment still incomplete also takes Checkout away.
@@ -754,6 +771,11 @@ function BillingTabContent() {
     if (upgradeRequest === "pro" && summary.availableActions.checkout === true) {
       setHeldInvite(held);
       openCheckoutConfirm("pro");
+    } else if (upgradeRequest === "business" && !held && resolvePlanChangeTarget(summary) === "business") {
+      // A full workspace's storage notice (MUL-9489): Pro moves up to Business.
+      handlePlanChangeOpenChange(true, "business");
+    } else if (upgradeRequest === "business" && !held && summary.availableActions.checkout === true) {
+      openCheckoutConfirm("business");
     } else if (held) {
       clearUpgradeInvite(workspaceSlug, held.token);
     }
@@ -1262,6 +1284,11 @@ function BillingTabContent() {
       ? formatDateTime(quotaUsage.resetAt, locale)
       : null;
   const numberFormatter = new Intl.NumberFormat(locale);
+  const storageRow = resolveStorageRow(
+    storageUsageQuery.data,
+    storageUsageQuery.isError,
+    entitlements?.limits.storageBytes,
+  );
   // Members and pending invitations against the plan's member limit, shown
   // whenever Cloud applies one (observed or enforced).
   const memberLimitData = memberLimitQuery.data;
@@ -1971,6 +1998,62 @@ function BillingTabContent() {
               </div>
             )}
           </SettingsRow>
+          {storageRow ? (
+            <SettingsRow
+              label={t(($) => $.workspace.limits.storage)}
+              description={t(($) => $.workspace.limits.storage_description)}
+            >
+              {storageRow.kind === "metered" ? (
+                <div className="w-full max-w-72">
+                  <Progress
+                    value={storageUsageProgress(storageRow.usedBytes, storageRow.limitBytes)}
+                    aria-label={t(($) => $.workspace.limits.storage_label)}
+                  >
+                    <ProgressLabel>
+                      {storageRow.reached
+                        ? t(($) => $.workspace.limits.reached)
+                        : t(($) => $.workspace.limits.current_usage)}
+                    </ProgressLabel>
+                    <ProgressValue>
+                      {() =>
+                        t(($) => $.workspace.limits.usage_total, {
+                          total: formatStorageBytes(storageRow.usedBytes, locale),
+                          limit: formatStorageBytes(storageRow.limitBytes, locale),
+                        })
+                      }
+                    </ProgressValue>
+                  </Progress>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 sm:items-end">
+                  {storageRow.limitBytes !== null ? (
+                    <span className="tabular-nums">
+                      {formatStorageBytes(storageRow.limitBytes, locale)}
+                    </span>
+                  ) : null}
+                  <span className="text-caption text-muted-foreground">
+                    {t(($) => $.workspace.limits.usage_unavailable)}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={t(($) => $.workspace.actions.retry_storage)}
+                    aria-busy={storageUsageQuery.isFetching}
+                    disabled={storageUsageQuery.isFetching}
+                    onClick={() => void storageUsageQuery.refetch()}
+                  >
+                    {storageUsageQuery.isFetching ? (
+                      <Loader2 className="animate-spin motion-reduce:animate-none" />
+                    ) : (
+                      <RefreshCw />
+                    )}
+                    {t(($) => $.workspace.actions.retry)}
+                  </Button>
+                </div>
+              )}
+            </SettingsRow>
+          ) : null}
           {memberLimit ? (
             <SettingsRow label={t(($) => $.workspace.limits.members)}>
               <div className="flex flex-col gap-1 sm:items-end">

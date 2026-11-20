@@ -7,6 +7,7 @@ import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flag
 import type {
   AutopilotQuotaUsage,
   MemberLimit,
+  StorageUsage,
   WorkspaceSubscriptionEntitlements,
   WorkspaceSubscriptionPrices,
   WorkspaceSubscriptionSummary,
@@ -36,6 +37,8 @@ const mocks = vi.hoisted(() => ({
   workspaceId: "workspace-1",
   invalidateQueries: vi.fn(() => Promise.resolve()),
   memberLimit: { action: "off", limit: null, members: null, pendingInvitations: null } as MemberLimit,
+  storageUsage: { action: "off", usedBytes: null, limitBytes: null, reached: null } as StorageUsage,
+  refetchStorage: vi.fn(),
   prices: null as WorkspaceSubscriptionPrices | null,
   pricesLoading: false,
   pricesFetching: false,
@@ -329,8 +332,12 @@ describe("BillingTab", () => {
     });
     localStorage.clear();
     mocks.memberLimit = { action: "off", limit: null, members: null, pendingInvitations: null };
+    mocks.storageUsage = { action: "off", usedBytes: null, limitBytes: null, reached: null };
     mocks.useQuery.mockImplementation((options: unknown) => {
       const queryKey = (options as { queryKey?: readonly unknown[] }).queryKey;
+      if (queryKey?.[0] === "workspace-storage-usage") {
+        return { data: mocks.storageUsage, isPending: false, isError: false, refetch: mocks.refetchStorage };
+      }
       if (queryKey?.[queryKey.length - 1] === "limit") {
         return { data: mocks.memberLimit, isPending: false, isError: false };
       }
@@ -848,6 +855,56 @@ describe("BillingTab", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("shows attachment storage against the plan's limit (MUL-9489)", () => {
+      mocks.storageUsage = { action: "observe", usedBytes: 23_400_000_000, limitBytes: 120_000_000_000, reached: null };
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Attachment storage")).toBeInTheDocument();
+      expect(screen.getByText("Attachments in issues, comments, and chat.")).toBeInTheDocument();
+      expect(screen.getByText("23.4 GB / 120 GB")).toBeInTheDocument();
+    });
+
+    it("reports enforced full storage as reached, and hides storage without a limit", () => {
+      mocks.storageUsage = { action: "enforce", usedBytes: 1_000_000_000, limitBytes: 1_000_000_000, reached: true };
+      const { unmount } = renderWithI18n(<BillingTab />);
+      expect(screen.getByText("1 GB / 1 GB")).toBeInTheDocument();
+      expect(screen.getAllByText("Limit reached").length).toBeGreaterThan(0);
+      unmount();
+
+      mocks.storageUsage = { action: "off", usedBytes: null, limitBytes: null, reached: null };
+      renderWithI18n(<BillingTab />);
+      expect(screen.queryByText("Attachment storage")).not.toBeInTheDocument();
+    });
+
+    it("shows storage usage it could not read as unavailable, with a retry", async () => {
+      const user = userEvent.setup();
+      mocks.refetchStorage.mockReset();
+      mocks.storageUsage = { action: "observe", usedBytes: null, limitBytes: 1_000_000_000, reached: null };
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Attachment storage")).toBeInTheDocument();
+      expect(screen.getByText("1 GB")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Retry attachment storage usage" }));
+      expect(mocks.refetchStorage).toHaveBeenCalledOnce();
+    });
+
+    // After Pro moves to Business (or seats are added) the summary carries
+    // the new limit at once, while the usage read can still hold the old one.
+    it("shows the plan's new storage limit as soon as the subscription changes", () => {
+      mocks.storageUsage = { action: "observe", usedBytes: 12_000_000_000, limitBytes: 30_000_000_000, reached: null };
+      mocks.entitlements.limits = { ...mocks.entitlements.limits, storageBytes: { mode: "limited", limit: 30_000_000_000 } };
+      const { rerender } = renderWithI18n(<BillingTab />);
+      expect(screen.getByText("12 GB / 30 GB")).toBeInTheDocument();
+      mocks.invalidateQueries.mockClear();
+
+      mocks.entitlements.limits = { ...mocks.entitlements.limits, storageBytes: { mode: "limited", limit: 300_000_000_000 } };
+      mocks.entitlements.version = 1;
+      rerender(<BillingTab />);
+
+      expect(screen.getByText("12 GB / 300 GB")).toBeInTheDocument();
+      expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["workspace-storage-usage", expect.any(String)] });
     });
 
     it("shows members and pending invitations against the plan's limit", () => {

@@ -217,6 +217,8 @@ export interface WorkspaceSubscriptionEntitlements {
   seats: number;
   limits: {
     autopilotRuns: WorkspaceEntitlementLimit;
+    /** Attachment storage in bytes (MUL-9489); absent from older Cloud. */
+    storageBytes?: WorkspaceEntitlementLimit | null;
   };
   currentPeriodEnd: string | null;
   snapshotExpiresAt: string | null;
@@ -456,6 +458,20 @@ export interface WorkspaceFeatures {
  * also every self-hosted workspace; the counts are null then. Members and
  * pending invitations both take a slot; guests take none.
  */
+/**
+ * The plan's attachment storage limit (MUL-9489). `off` means no limit
+ * applies, which is also every self-hosted workspace; the figures are null
+ * then. Bytes are counted across every attachment in the workspace.
+ */
+export interface StorageUsage {
+  action: "off" | "observe" | "enforce";
+  /** Null also while a limit applies, when the server could not read usage in time. */
+  usedBytes: number | null;
+  limitBytes: number | null;
+  /** Set only under enforce: observe never refuses an upload. */
+  reached: boolean | null;
+}
+
 export interface MemberLimit {
   action: "off" | "observe" | "enforce";
   limit: number | null;
