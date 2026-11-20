@@ -71,6 +71,8 @@ multica auth status
 multica daemon status
 ```
 
+Pour comparer deux environnements d’exécution, lancez `multica auth status --json` avec le même exécutable, le même profil et le même environnement que la commande en échec. Le JSON indique la version et le commit du CLI, le profil et l’espace de travail sélectionnés, l’origine du serveur, le contexte de tâche gérée et l’état de vérification du jeton. Il omet le jeton, les informations du compte et le corps des réponses du serveur. L’état `verified` du jeton ne confirme pas l’accès à l’espace de travail sélectionné.
+
 Si vous devez seulement vous reconnecter sans écraser le reste de la configuration, exécutez `multica login`. Sur une machine sans navigateur, créez d'abord un jeton d'accès personnel dans les paramètres web, puis saisissez-le avec :
 
 ```bash

@@ -71,6 +71,8 @@ multica auth status
 multica daemon status
 ```
 
+若要比較兩個呼叫環境，請使用與失敗指令相同的執行檔、設定檔和環境執行 `multica auth status --json`。JSON 會回報 CLI 版本與提交、選取的設定檔與工作區、伺服器來源、受管理的任務情境，以及權杖驗證狀態。輸出不包含權杖值、帳戶資訊或伺服器回應本文。權杖狀態為 `verified` 不代表已驗證存取所選工作區的權限。
+
 如果只需要重新登入，不想覆蓋其他配置，執行 `multica login`。沒有瀏覽器的環境可以先在 Web 設定中建立個人訪問令牌，再輸入：
 
 ```bash
