@@ -1179,4 +1179,39 @@ describe("ChatMessageList context window", () => {
     // not steps, so they never inflate this count or render an empty row.
     expect(await screen.findByText("3 steps")).toBeInTheDocument();
   });
+
+  // A turn that called no tools has no process fold to hang the figure on, so
+  // the reader watched it on the status pill and then lost it the moment the
+  // turn settled. The settled figure lives in the turn's meta row instead,
+  // which every turn has.
+  it("keeps the figure on a settled turn that called no tools", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "text", { content: "hi there" }),
+      taskMsg(1, "context", { input: { used_tokens: 30_300, limit_tokens: 258_400 } }),
+    ]);
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[{
+              id: "settled-no-tools",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "hi there",
+              task_id: TASK_ID,
+              created_at: "2026-11-20T00:00:00Z",
+              elapsed_ms: 8000,
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Replied in 8s")).toBeInTheDocument();
+    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.getByText("30.3K/258.4K")).toBeInTheDocument();
+  });
 });

@@ -29,14 +29,24 @@ import {
  */
 export function ContextUsageChip({
   items,
+  usage: reportedUsage,
   className,
 }: {
-  items: readonly ContextEventSource[];
+  /** The run's context events, when this surface has its transcript. */
+  items?: readonly ContextEventSource[];
+  /**
+   * Fallback figure for a surface that has the run but not its transcript —
+   * a historical issue run never fetches its messages. The transcript wins
+   * when it is loaded: it is the same stream the row was written from, only
+   * newer while the run is live.
+   */
+  usage?: ContextUsage;
   className?: string;
 }) {
   const { t } = useT("agents");
-  const usage = useMemo(() => latestContextUsage(items), [items]);
-  const history = useMemo(() => contextUsageHistory(items), [items]);
+  const streamed = useMemo(() => latestContextUsage(items ?? []), [items]);
+  const history = useMemo(() => contextUsageHistory(items ?? []), [items]);
+  const usage = streamed ?? reportedUsage;
 
   if (!usage) return null;
 

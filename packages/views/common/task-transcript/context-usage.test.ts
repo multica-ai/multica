@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TimelineItem } from "./build-timeline";
 import {
   contextUsageHistory,
+  taskContextUsage,
   contextUsagePercent,
   isContextUsageItem,
   latestContextUsage,
@@ -127,5 +128,24 @@ describe("contextUsageHistory", () => {
 
   it("is empty for a run whose runtime reported nothing", () => {
     expect(contextUsageHistory([textItem(1)])).toEqual([]);
+  });
+});
+
+describe("taskContextUsage", () => {
+  it("reads the figure a task row carries", () => {
+    expect(taskContextUsage({ context_usage: { used_tokens: 75_200, limit_tokens: 258_400 } }))
+      .toEqual({ usedTokens: 75_200, limitTokens: 258_400 });
+  });
+
+  it("leaves an unreported window undefined", () => {
+    expect(taskContextUsage({ context_usage: { used_tokens: 75_200 } }))
+      .toEqual({ usedTokens: 75_200, limitTokens: undefined });
+    expect(taskContextUsage({ context_usage: { used_tokens: 75_200, limit_tokens: 0 } }))
+      .toEqual({ usedTokens: 75_200, limitTokens: undefined });
+  });
+
+  it("is undefined when the runtime reported nothing", () => {
+    expect(taskContextUsage({})).toBeUndefined();
+    expect(taskContextUsage({ context_usage: { used_tokens: 0 } })).toBeUndefined();
   });
 });

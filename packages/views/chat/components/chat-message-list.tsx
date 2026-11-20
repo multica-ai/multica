@@ -49,6 +49,7 @@ import {
   buildTimeline,
   ContextUsageChip,
   isContextUsageItem,
+  latestContextUsage,
   readContextEvent,
 } from "../../common/task-transcript";
 import { formatTokens } from "../../runtimes/utils";
@@ -731,7 +732,6 @@ function AssistantMessage({
       {timeline.length > 0 && (
         <TimelineView
           items={timeline}
-          contextItems={taskMessages}
           attachments={message?.attachments}
           phase={phase}
           isStreaming={!message}
@@ -761,6 +761,7 @@ function AssistantMessage({
           <MessageFooter
             message={message}
             timeline={timeline}
+            contextItems={taskMessages}
             isPending={isPending}
             transformContent={transformContent}
           />
@@ -984,11 +985,14 @@ function NoResponseNotice() {
 function MessageFooter({
   message,
   timeline,
+  contextItems,
   isPending,
   transformContent,
 }: {
   message: ChatMessage;
   timeline: ChatTimelineItem[];
+  /** The turn's raw stream, which carries its context observations. */
+  contextItems?: readonly TaskMessagePayload[];
   isPending: boolean;
   transformContent?: (content: string) => string;
 }) {
@@ -997,7 +1001,12 @@ function MessageFooter({
   const isNoResponse = message.message_kind === "no_response";
   const copyContent = extractCopyText(message, timeline, transformContent);
   const showCopy = !isPending && !isNoResponse && copyContent.trim().length > 0;
-  if (message.elapsed_ms == null && !showCopy) return null;
+  // The turn's meta row is where the context figure lives once the turn has
+  // settled — one place for every turn. Putting it on the process fold would
+  // hide it on the turns that have no tool calls to fold, which is exactly
+  // where a reader last saw it on the status pill a second earlier.
+  const contextUsage = latestContextUsage(contextItems ?? []);
+  if (message.elapsed_ms == null && !showCopy && !contextUsage) return null;
   return (
     <div className="flex items-center gap-1.5">
       {message.elapsed_ms != null && (
@@ -1006,6 +1015,7 @@ function MessageFooter({
           elapsedMs={message.elapsed_ms}
         />
       )}
+      <ContextUsageChip items={contextItems} />
       {showCopy && (
         <MessageCopyButton content={copyContent} />
       )}
@@ -1194,7 +1204,6 @@ function FailureBubble({
 
 function TimelineView({
   items,
-  contextItems,
   isStreaming,
   attachments,
   phase = "settled",
@@ -1202,8 +1211,6 @@ function TimelineView({
   sourceId,
 }: {
   items: ChatTimelineItem[];
-  /** Raw stream for the context chip: the occupancy snapshots `items` drops. */
-  contextItems?: readonly TaskMessagePayload[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
   phase?: "streaming" | "settled";
@@ -1219,7 +1226,6 @@ function TimelineView({
           <OuterProcessFold
             key="process"
             items={processItems}
-            contextItems={contextItems}
             isStreaming={false}
             attachments={attachments}
             phase="settled"
@@ -1257,10 +1263,6 @@ function TimelineView({
         <OuterProcessFold
           key="process"
           items={middle}
-          // While the turn streams, the status pill below the list already
-          // carries the live figure; a second identical chip on the fold would
-          // be the same number twice on one screen.
-          contextItems={phase === "settled" ? contextItems : undefined}
           isStreaming={!!isStreaming}
           attachments={attachments}
           phase={phase}
@@ -1284,14 +1286,12 @@ function TimelineView({
 
 function OuterProcessFold({
   items,
-  contextItems,
   isStreaming,
   attachments,
   phase = "settled",
   stepCount,
 }: {
   items: ChatTimelineItem[];
-  contextItems?: readonly TaskMessagePayload[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
   phase?: "streaming" | "settled";
@@ -1313,15 +1313,10 @@ function OuterProcessFold({
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="flex items-center gap-2">
-        <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
-          {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-          <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
-        </CollapsibleTrigger>
-        {/* The turn's own context figure stays readable with the fold closed:
-            it describes the whole turn, not one of its steps. */}
-        <ContextUsageChip items={contextItems ?? []} />
-      </div>
+      <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
+        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
+      </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
           {items.map((item) =>

@@ -631,6 +631,16 @@ type AgentTaskResponse struct {
 	// model call, genuinely has no number, and showing 0 would assert it was
 	// free. omitempty keeps both off the wire.
 	Usage []TaskUsageData `json:"usage,omitempty"`
+	// ContextUsage is how full the model's context window was when this run
+	// last reported it. Unlike Usage it rides the task row itself, so every
+	// surface that lists runs gets it without a second query — which is the
+	// point: a historical collapsed run never fetches its transcript, so the
+	// figure has to be on the row or it cannot be shown outside the dialog.
+	//
+	// nil means the runtime reported nothing, which is NOT "the window was
+	// empty" — most runtimes cannot see a single request's prompt and report
+	// no occupancy at all.
+	ContextUsage *TaskContextUsageData `json:"context_usage,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
@@ -822,6 +832,30 @@ type CoalescedCommentData struct {
 	source db.Comment
 }
 
+// taskContextUsageToResponse reads the stored occupancy off the task row.
+// A row with no occupancy returns nil — the runtime reported nothing, and a
+// zero would assert the window was empty.
+func taskContextUsageToResponse(t db.AgentTaskQueue) *TaskContextUsageData {
+	if !t.ContextUsedTokens.Valid || t.ContextUsedTokens.Int64 <= 0 {
+		return nil
+	}
+	usage := &TaskContextUsageData{UsedTokens: t.ContextUsedTokens.Int64}
+	if t.ContextLimitTokens.Valid && t.ContextLimitTokens.Int64 > 0 {
+		usage.LimitTokens = t.ContextLimitTokens.Int64
+	}
+	return usage
+}
+
+// TaskContextUsageData is a run's latest context-window occupancy.
+//
+// Tokens, never a percentage: LimitTokens is omitted when the runtime did not
+// report a window, and the client must then show the absolute figure alone
+// rather than compute a share of a window nobody measured.
+type TaskContextUsageData struct {
+	UsedTokens  int64 `json:"used_tokens"`
+	LimitTokens int64 `json:"limit_tokens,omitempty"`
+}
+
 // TaskUsageData is one (provider, model) slice of a single run's token usage.
 // Field names match the runtime/dashboard usage rows exactly so the client can
 // feed it to the same `estimateCost` / `estimateCacheSavings` helpers without
@@ -926,6 +960,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		// Task-scoped provenance must not transfer through copied retry context.
 		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
 		CancelledBy:              taskCancellationActorToResponse(t),
+		ContextUsage:             taskContextUsageToResponse(t),
 
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),

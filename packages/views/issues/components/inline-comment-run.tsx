@@ -20,6 +20,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
+import { ContextUsageChip } from "../../common/task-transcript/context-usage-chip";
+import { taskContextUsage } from "../../common/task-transcript/context-usage";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
 import { traceEventSummary, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
@@ -168,10 +170,16 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     </Button>} />
     <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
   </Tooltip>;
+  // How full the model's context window was, without opening the run. A
+  // historical run never loads its transcript, so the figure comes off the
+  // task row; while one is loaded (live, or expanded) the stream is newer and
+  // wins inside the chip.
+  const contextChip = <ContextUsageChip items={data} usage={taskContextUsage(task)} />;
   // Before the agent session starts there is no transcript to open.
   const hasTranscript = !PRE_RUN_STATUSES.includes(task.status);
   if (presentation === "header" && showCommentRunInHeader(run)) {
-    return <span className="inline-flex shrink-0" data-comment-actions data-run-id={task.id}>
+    return <span className="inline-flex shrink-0 items-center gap-1" data-comment-actions data-run-id={task.id}>
+      {contextChip}
       {fullLogButton}
       {transcript}
     </span>;
@@ -222,6 +230,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
         </button>
         <span className={cn("shrink-0 whitespace-nowrap text-label tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
+        {contextChip}
         {hasTranscript && fullLogButton}
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button

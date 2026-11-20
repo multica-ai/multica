@@ -141,3 +141,24 @@ export function contextUsageHistory(
   }
   return out;
 }
+
+/**
+ * The occupancy a task row carries, for surfaces that have the task but not
+ * its transcript — a historical run in the issue timeline never fetches its
+ * messages, so the row is the only source there.
+ *
+ * Returns undefined when the runtime reported nothing, which the chip renders
+ * as no chip at all.
+ */
+export function taskContextUsage(task: {
+  context_usage?: { used_tokens: number; limit_tokens?: number };
+}): ContextUsage | undefined {
+  const reported = task.context_usage;
+  if (!reported || !(reported.used_tokens > 0)) return undefined;
+  return {
+    usedTokens: reported.used_tokens,
+    limitTokens: reported.limit_tokens !== undefined && reported.limit_tokens > 0
+      ? reported.limit_tokens
+      : undefined,
+  };
+}

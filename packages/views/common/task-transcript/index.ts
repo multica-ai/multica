@@ -9,6 +9,7 @@ export {
   isContextUsageItem,
   latestContextUsage,
   readContextEvent,
+  taskContextUsage,
   type ContextEventSource,
   type ContextObservation,
   type ContextUsage,

@@ -516,3 +516,29 @@ describe("InlineCommentRun", () => {
     });
   });
 });
+
+describe("InlineCommentRun context window", () => {
+  // A finished run in the timeline never fetches its transcript, so the figure
+  // has to come off the task row — otherwise it is only readable after opening
+  // the full log, which is what it used to be.
+  it("shows the run's context figure without loading its transcript", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({
+      status: "completed",
+      completed_at: "2026-09-07T00:01:00Z",
+      context_usage: { used_tokens: 75_200, limit_tokens: 258_400 },
+    }));
+
+    expect(await screen.findByText("29%")).toBeInTheDocument();
+    expect(screen.getByText("75.2K/258.4K")).toBeInTheDocument();
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+  });
+
+  it("renders nothing for a run whose runtime reported no occupancy", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    await screen.findByRole("button", { name: /View activity/ });
+    expect(screen.queryByText(/258.4K/)).not.toBeInTheDocument();
+  });
+});

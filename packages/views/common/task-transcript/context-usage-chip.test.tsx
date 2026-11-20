@@ -61,6 +61,22 @@ describe("ContextUsageChip", () => {
     expect(entries[2]).toHaveTextContent("5%");
   });
 
+  it("falls back to the figure a task row carries when no stream is loaded", () => {
+    renderWithI18n(<ContextUsageChip usage={{ usedTokens: 75_200, limitTokens: 258_400 }} />);
+    expect(screen.getByText("29%")).toBeInTheDocument();
+    expect(screen.getByText("75.2K/258.4K")).toBeInTheDocument();
+  });
+
+  it("prefers the loaded stream over the row, which can only be older", () => {
+    renderWithI18n(
+      <ContextUsageChip
+        items={[usage(120_000, "2026-11-20T01:05:00Z")]}
+        usage={{ usedTokens: 10_000, limitTokens: 200_000 }}
+      />,
+    );
+    expect(screen.getByText("60%")).toBeInTheDocument();
+  });
+
   it("stays a plain figure when there is only one observation to show", () => {
     renderWithI18n(<ContextUsageChip items={[usage(10_000, "2026-11-20T01:00:00Z")]} />);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();

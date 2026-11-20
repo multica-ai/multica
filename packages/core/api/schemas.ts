@@ -2494,6 +2494,15 @@ export const AgentTaskSchema = z.object({
   // `.catch(undefined)` collapses a bad array to "no usage recorded", which
   // the UI already renders as an em dash.
   usage: z.array(TaskUsageSchema).optional().catch(undefined),
+  // How full the model's context window was when this run last reported it.
+  // Same independent-degradation rule as the fields above, and the same
+  // reading of absence: the runtime reported nothing, never "the window was
+  // empty". `limit_tokens` is optional on its own — a runtime can report
+  // occupancy without a window, and the UI then shows no percentage.
+  context_usage: z.object({
+    used_tokens: z.number(),
+    limit_tokens: z.number().optional().catch(undefined),
+  }).loose().optional().catch(undefined),
 }).loose();
 
 // Outcome counts are required: every backend that serves this endpoint

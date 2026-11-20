@@ -465,3 +465,54 @@ func TestReportTaskMessagesRejectsOversizedIdempotencyKeyAtomically(t *testing.T
 		t.Fatalf("persisted %d rows before validation failed", n)
 	}
 }
+
+// TestReportTaskMessagesRecordsContextUsage covers the row write that makes the
+// figure readable outside the transcript dialog. Surfaces that list
+// runs never read a historical run's messages, so the occupancy has to land on
+// the task itself — and a later batch carrying only a compaction must not wipe
+// it, because a compaction reports no occupancy of its own.
+func TestReportTaskMessagesRecordsContextUsage(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	taskID := seedBatchTask(t, "context-usage")
+
+	testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{
+		// The daemon sends no prose with these: an older client parses an
+		// unknown type as text and would splice it into the reply.
+		map[string]any{"seq": 1, "type": "context",
+			"input": map[string]any{"used_tokens": 10000, "limit_tokens": 200000}},
+		map[string]any{"seq": 2, "type": "text", "content": "working"},
+		map[string]any{"seq": 3, "type": "context",
+			"input": map[string]any{"used_tokens": 90000, "limit_tokens": 200000}},
+	})).Want(http.StatusOK)
+
+	task, err := testHandler.Queries.GetAgentTask(ctx, util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.ContextUsedTokens.Int64 != 90000 || !task.ContextUsedTokens.Valid {
+		t.Fatalf("used tokens = %+v, want the newest observation (90000)", task.ContextUsedTokens)
+	}
+	if task.ContextLimitTokens.Int64 != 200000 || !task.ContextLimitTokens.Valid {
+		t.Fatalf("limit tokens = %+v, want 200000", task.ContextLimitTokens)
+	}
+	if usage := taskContextUsageToResponse(task); usage == nil ||
+		usage.UsedTokens != 90000 || usage.LimitTokens != 200000 {
+		t.Fatalf("serialized context usage = %+v, want 90000/200000", usage)
+	}
+
+	testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{
+		map[string]any{"seq": 4, "type": "context",
+			"input": map[string]any{"phase": "compacted", "pre_tokens": 90000}},
+	})).Want(http.StatusOK)
+
+	task, err = testHandler.Queries.GetAgentTask(ctx, util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if task.ContextUsedTokens.Int64 != 90000 {
+		t.Fatalf("used tokens after a compaction-only batch = %+v, want 90000 kept", task.ContextUsedTokens)
+	}
+}

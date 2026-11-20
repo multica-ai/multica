@@ -67,7 +67,7 @@ While an agent is working, the issue header also carries a live chip such as "En
 In the execution log you can:
 
 - Click **View transcript** on a row to see the agent's messages, tool calls, and error output. For a run still in progress the transcript keeps streaming while the dialog stays open, and a **Newest first** toggle flips the event order.
-- Read how full the model's context window is in the transcript header, next to the run's cost. A compaction appears as its own step where it happened, so a run that suddenly loses detail explains itself. Click the chip for the run's context history, including each compaction. The same chip sits on a chat turn, next to its step count, and refreshes while the agent works. Runtimes that do not report the figure show no chip.
+- Read how full the model's context window is on the run itself, without opening it: the chip sits on the run's row in the activity timeline, and again in the transcript header next to the run's cost. In chat it rides the status line while the agent works and the turn's "Replied in" row once it finishes. Click a chip with a loaded transcript for the run's context history, including each compaction; a compaction also appears as its own step where it happened, so a run that suddenly loses detail explains itself. Runtimes that do not report the figure show no chip.
 - Stop runs that are queued, starting, waiting for a local directory, or working.
 - Retry a failed or cancelled run.
 
