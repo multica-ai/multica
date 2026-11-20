@@ -50,6 +50,7 @@ import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from ".
 import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
 import {
+  useContextUsageSettingsStore,
   useTranscriptViewStore,
   type TranscriptFilterKey,
   type TranscriptSortDirection,
@@ -485,7 +486,12 @@ export function AgentTranscriptDialog({
 
   // One step per tool call, with its result folded in — see build-steps.ts for
   // why the pairing is positional.
-  const steps = useMemo(() => buildSteps(items), [items]);
+  // Compactions belong to the opt-in context feature: off, they are not steps.
+  const showContext = useContextUsageSettingsStore((state) => state.enabled);
+  const steps = useMemo(
+    () => buildSteps(showContext ? items : items.filter((item) => item.type !== "context")),
+    [items, showContext],
+  );
 
   // A facet reads as what its rows look like: the glyph the rows carry, and the
   // name the rows print. The first step of a kind stands in for the glyph. The

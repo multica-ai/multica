@@ -1228,6 +1228,15 @@ describe("context window", () => {
     expect(screen.getByText("Compacted the context window (180K before)")).toBeInTheDocument();
   });
 
+  it("lists no compaction step while the feature is off", async () => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+    renderDialog(withContext);
+
+    expect(await screen.findByText(/pnpm test/)).toBeInTheDocument();
+    expect(screen.queryByText(/Compacted the context window/)).not.toBeInTheDocument();
+    expect(screen.queryByText("180K/200K")).not.toBeInTheDocument();
+  });
+
   it("renders no chip for a run whose runtime reported no occupancy", () => {
     renderDialog(items);
     expect(screen.queryByText(/\/200K/)).not.toBeInTheDocument();

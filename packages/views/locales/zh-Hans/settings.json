@@ -168,7 +168,7 @@
       "description": "运行占用了多少模型上下文窗口，仅对上报该数据的运行时有效。",
       "enabled": {
         "title": "显示上下文用量",
-        "description": "在聊天每轮和 issue 的运行上显示该数值。不上报的运行时不显示。"
+        "description": "在聊天每轮和 issue 的运行里显示占用数值和上下文压缩。"
       },
       "issue_row": {
         "title": "在 issue 的运行那一行显示",

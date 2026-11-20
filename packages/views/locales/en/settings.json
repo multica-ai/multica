@@ -169,7 +169,7 @@
       "description": "How full the model's context window is, on runs that report it.",
       "enabled": {
         "title": "Show context usage",
-        "description": "Adds the figure to chat turns and issue runs. Runtimes that do not report it show nothing."
+        "description": "Shows the figure and compactions in chat turns and issue runs."
       },
       "issue_row": {
         "title": "Show on the run's row in an issue",

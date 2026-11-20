@@ -1192,6 +1192,15 @@ describe("ChatMessageList context window", () => {
     expect(await screen.findByText("3 steps")).toBeInTheDocument();
   });
 
+  it("hides the compaction and its step while the feature is off", async () => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+    renderWithContext();
+
+    expect(await screen.findByText("2 steps")).toBeInTheDocument();
+    expect(screen.queryByText(/Compacted the context window/)).not.toBeInTheDocument();
+    expect(screen.queryByText("60K/200K")).not.toBeInTheDocument();
+  });
+
   // A turn that called no tools has no process fold to hang the figure on, so
   // the reader watched it on the status pill and then lost it the moment the
   // turn settled. The settled figure lives in the turn's meta row instead,

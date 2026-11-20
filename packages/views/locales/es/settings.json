@@ -169,7 +169,7 @@
       "description": "Cuánta ventana de contexto del modelo ocupa una ejecución, donde el runtime lo informa.",
       "enabled": {
         "title": "Mostrar el uso del contexto",
-        "description": "Añade la cifra a los turnos del chat y a las ejecuciones de una incidencia. Los runtimes que no la informan no muestran nada."
+        "description": "Muestra la cifra y las compactaciones del contexto en los turnos del chat y las ejecuciones de una incidencia."
       },
       "issue_row": {
         "title": "Mostrar en la fila de la ejecución de una incidencia",

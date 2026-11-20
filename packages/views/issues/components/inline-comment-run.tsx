@@ -5,6 +5,7 @@ import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDow
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useContextUsageSettingsStore } from "@multica/core/agents/stores";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
@@ -112,7 +113,12 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, loadTranscript);
   const items = useMemo(() => buildTimeline(data ?? []), [data]);
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
-  const steps = useMemo(() => buildSteps(items), [items]);
+  // Compactions belong to the opt-in context feature: off, they are not steps.
+  const showContext = useContextUsageSettingsStore((state) => state.enabled);
+  const steps = useMemo(
+    () => buildSteps(showContext ? items : items.filter((item) => item.type !== "context")),
+    [items, showContext],
+  );
   const rows = useMemo(() => groupSteps(steps), [steps]);
   // Messages that steered this turn, placed in its step list where it read them.
   const { data: steers = NO_STEERS } = useQuery({

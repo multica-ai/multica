@@ -562,6 +562,20 @@ describe("InlineCommentRun context window", () => {
     expect(screen.queryByText("Error")).not.toBeInTheDocument();
   });
 
+  it("leaves the compaction out of the step list while the feature is off", async () => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Working." },
+      { task_id: id, issue_id: "issue", seq: 2, type: "context",
+        input: { phase: "compacted", pre_tokens: 180_000, trigger: "auto" } },
+    ]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /View activity/ }));
+    expect(await screen.findByText("Working.")).toBeInTheDocument();
+    expect(screen.queryByText(/Compacted the context window/)).not.toBeInTheDocument();
+  });
+
   it("skips a context event it cannot read instead of calling it an error", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([
       { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Working." },

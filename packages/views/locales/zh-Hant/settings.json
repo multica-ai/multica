@@ -168,7 +168,7 @@
       "description": "執行佔用了多少模型上下文視窗，僅對回報該資料的執行階段有效。",
       "enabled": {
         "title": "顯示上下文用量",
-        "description": "在聊天每輪和 issue 的執行上顯示該數值。不回報的執行階段不顯示。"
+        "description": "在聊天每輪和 issue 的執行裡顯示佔用數值和上下文壓縮。"
       },
       "issue_row": {
         "title": "在 issue 的執行那一列顯示",

@@ -37,6 +37,7 @@ import { AttachmentList } from "../../issues/components/comment-card";
 import { PreviewSequenceProvider, collectPreviewSequence } from "../../editor";
 import type { AgentAvailability } from "@multica/core/agents";
 import { resolveFailureReasonKey } from "@multica/core/agents";
+import { useContextUsageSettingsStore } from "@multica/core/agents/stores";
 import type {
   ChatMessage,
   ChatPendingTask,
@@ -685,14 +686,18 @@ function AssistantMessage({
   // Occupancy snapshots are state, not steps: only the newest one is true, so
   // the chip reads them off the raw stream and they never become rows — which
   // also keeps them out of the fold's step count. A compaction stays, because
-  // it happened at that point in the turn.
+  // it happened at that point in the turn — unless the opt-in context feature
+  // is off, which hides compactions too.
+  const showContext = useContextUsageSettingsStore((state) => state.enabled);
   const timeline: ChatTimelineItem[] = useMemo(
     () =>
       transformTimeline(
-        buildTimeline(taskMessages ?? []).filter((item) => !isContextUsageItem(item)),
+        buildTimeline(taskMessages ?? []).filter((item) =>
+          showContext ? !isContextUsageItem(item) : item.type !== "context",
+        ),
         transformContent,
       ),
-    [taskMessages, transformContent],
+    [taskMessages, transformContent, showContext],
   );
 
   // Content is settled once the persisted message exists; until then text is
