@@ -217,6 +217,8 @@ export interface WorkspaceSubscriptionEntitlements {
   seats: number;
   limits: {
     autopilotRuns: WorkspaceEntitlementLimit;
+    /** Attachment storage in bytes (MUL-9489); absent from older Cloud. */
+    storageBytes?: WorkspaceEntitlementLimit | null;
   };
   currentPeriodEnd: string | null;
   snapshotExpiresAt: string | null;
@@ -463,6 +465,7 @@ export interface WorkspaceFeatures {
  */
 export interface StorageUsage {
   action: "off" | "observe" | "enforce";
+  /** Null also while a limit applies, when the server could not read usage in time. */
   usedBytes: number | null;
   limitBytes: number | null;
   /** Set only under enforce: observe never refuses an upload. */

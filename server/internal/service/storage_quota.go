@@ -79,9 +79,9 @@ type StorageQuota struct {
 	now        func() time.Time
 }
 
-// StorageUsage is the storage limit as clients render it. Used and Limit are
-// set only while a limit applies; Reached only under enforce, because observe
-// never refuses an upload.
+// StorageUsage is the storage limit as clients render it. Limit is set only
+// while a limit applies; Used also needs the sum to have been read in time;
+// Reached is set only under enforce, because observe never refuses an upload.
 type StorageUsage struct {
 	Action  entitlement.Action
 	Used    *int64
@@ -148,21 +148,24 @@ func (q StorageQuota) RecordStored(ctx context.Context, workspaceID pgtype.UUID,
 
 // Usage reports the workspace's storage limit and use. Before reporting a
 // full workspace it re-reads Cloud's policy, as Admit does, so a client is not
-// offered an upgrade the workspace already has.
-func (q StorageQuota) Usage(ctx context.Context, workspaceID pgtype.UUID) (StorageUsage, error) {
+// offered an upgrade the workspace already has. A sum that fails or runs past
+// its timeout still reports the limit, with Used and Reached nil, so a client
+// can say usage is unavailable instead of hiding the limit.
+func (q StorageQuota) Usage(ctx context.Context, workspaceID pgtype.UUID) StorageUsage {
 	decision, ok := q.gate(ctx, workspaceID)
 	if !ok {
-		return StorageUsage{Action: entitlement.ActionOff}, nil
+		return StorageUsage{Action: entitlement.ActionOff}
 	}
 	used, err := q.usageSum(ctx, workspaceID)
 	if err != nil {
-		return StorageUsage{}, err
+		limit := gateLimit(decision)
+		return StorageUsage{Action: decision.Gate.Action, Limit: &limit}
 	}
 	if decision.Gate.Action == entitlement.ActionEnforce && used >= gateLimit(decision) {
 		if refresher, isRefresher := q.Entitlements.(entitlement.Refresher); isRefresher {
 			decision = refresher.RefreshGate(ctx, uuid.UUID(workspaceID.Bytes), entitlement.GateStorageBytes)
 			if !storageGateActive(decision) {
-				return StorageUsage{Action: entitlement.ActionOff}, nil
+				return StorageUsage{Action: entitlement.ActionOff}
 			}
 		}
 	}
@@ -172,11 +175,10 @@ func (q StorageQuota) Usage(ctx context.Context, workspaceID pgtype.UUID) (Stora
 		reached := used >= limit
 		out.Reached = &reached
 	}
-	return out, nil
+	return out
 }
 
-// usageSum is the billing page's read: it has no admission to fail open, so
-// it reports an error instead, but it is bounded by the same timeout.
+// usageSum is the billing page's read, bounded by the same timeout.
 func (q StorageQuota) usageSum(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
 	started := time.Now()
 	used, result, err := q.timedSum(ctx, workspaceID)

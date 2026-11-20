@@ -573,7 +573,7 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 	}
 	if copyBytes > 0 {
 		if err := h.storageQuota().Admit(r.Context(), wsUUID, copyBytes, service.StorageSourceSubIssue); err != nil {
-			if !writeStorageLimitReached(w, err) {
+			if !writeStorageLimitReached(w, err, !h.isGuest(r, workspaceID, userID)) {
 				writeError(w, http.StatusInternalServerError, "failed to check attachment storage")
 			}
 			return

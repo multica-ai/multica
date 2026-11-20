@@ -78,8 +78,42 @@ export function formatStorageBytes(bytes: number, locale?: string): string {
 }
 
 /** The share of the limit in use, 0–100, for a progress bar. */
-export function storageUsageProgress(usage: StorageUsage): number {
-  if (usage.usedBytes === null || usage.limitBytes === null) return 0;
-  if (usage.limitBytes === 0) return 100;
-  return Math.min(100, (usage.usedBytes / usage.limitBytes) * 100);
+export function storageUsageProgress(usedBytes: number, limitBytes: number): number {
+  if (limitBytes <= 0) return 100;
+  return Math.min(100, (usedBytes / limitBytes) * 100);
+}
+
+/** The Billing row for attachment storage. */
+export type StorageRow =
+  | { kind: "metered"; usedBytes: number; limitBytes: number; reached: boolean }
+  | { kind: "unavailable"; limitBytes: number | null };
+
+/**
+ * What Billing shows for attachment storage, or null when no limit applies.
+ *
+ * The limit comes from the entitlement snapshot when it has one: it is the
+ * number Cloud just computed for the plan, so a page that has just upgraded
+ * or added seats shows the new limit at once, while the usage read can still
+ * carry a policy cached before the change. Usage that could not be read (a
+ * failed request, or a sum the server gave up on) shows as unavailable.
+ */
+export function resolveStorageRow(
+  usage: StorageUsage | undefined,
+  usageFailed: boolean,
+  entitlementLimit: { mode: string; limit: number | null } | null | undefined,
+): StorageRow | null {
+  const planLimit = entitlementLimit?.mode === "limited" ? entitlementLimit.limit : null;
+  if (usageFailed || !usage) {
+    return usageFailed && planLimit !== null ? { kind: "unavailable", limitBytes: planLimit } : null;
+  }
+  if (usage.action === "off" || usage.limitBytes === null) return null;
+  const limitBytes = planLimit ?? usage.limitBytes;
+  if (usage.usedBytes === null) return { kind: "unavailable", limitBytes };
+  return {
+    kind: "metered",
+    usedBytes: usage.usedBytes,
+    limitBytes,
+    // Only an enforced limit is ever reached; observe never refuses.
+    reached: usage.action === "enforce" && usage.usedBytes >= limitBytes,
+  };
 }

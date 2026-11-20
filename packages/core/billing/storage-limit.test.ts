@@ -6,6 +6,7 @@ import { StorageUsageSchema } from "../api/schemas";
 import type { StorageUsage } from "../types";
 import {
   formatStorageBytes,
+  resolveStorageRow,
   storageLimitReachedFromError,
   storageUsageProgress,
 } from "./storage-limit";
@@ -34,12 +35,12 @@ describe("StorageUsageSchema", () => {
     expect(StorageUsageSchema.parse({ action: "enforce", limit_bytes: "5" })).toEqual(OFF);
   });
 
-  it("treats missing usage of an active limit as zero and a missing reached as false", () => {
+  it("keeps the limit and leaves usage unknown when the server could not read it", () => {
     expect(StorageUsageSchema.parse({ action: "enforce", limit_bytes: 10 })).toEqual({
       action: "enforce",
-      usedBytes: 0,
+      usedBytes: null,
       limitBytes: 10,
-      reached: false,
+      reached: null,
     });
   });
 });
@@ -84,8 +85,58 @@ describe("formatStorageBytes", () => {
 
 describe("storageUsageProgress", () => {
   it("is the share of the limit in use, capped at 100", () => {
-    expect(storageUsageProgress({ action: "observe", usedBytes: 250, limitBytes: 1000, reached: null })).toBe(25);
-    expect(storageUsageProgress({ action: "observe", usedBytes: 2000, limitBytes: 1000, reached: null })).toBe(100);
-    expect(storageUsageProgress(OFF)).toBe(0);
+    expect(storageUsageProgress(250, 1000)).toBe(25);
+    expect(storageUsageProgress(2000, 1000)).toBe(100);
+    expect(storageUsageProgress(0, 0)).toBe(100);
+  });
+});
+
+describe("resolveStorageRow", () => {
+  const usage = (over: Partial<StorageUsage>): StorageUsage => ({
+    action: "enforce",
+    usedBytes: 900,
+    limitBytes: 1000,
+    reached: false,
+    ...over,
+  });
+  const plan = (limit: number) => ({ mode: "limited", limit });
+
+  it("meters usage against the limit, and only an enforced limit is reached", () => {
+    expect(resolveStorageRow(usage({}), false, null)).toEqual({
+      kind: "metered",
+      usedBytes: 900,
+      limitBytes: 1000,
+      reached: false,
+    });
+    expect(resolveStorageRow(usage({ usedBytes: 1000 }), false, null)).toMatchObject({ reached: true });
+    expect(resolveStorageRow(usage({ action: "observe", usedBytes: 5000 }), false, null)).toMatchObject({
+      reached: false,
+    });
+  });
+
+  // Right after an upgrade the usage read can still carry the policy cached
+  // before it; the entitlement has the new limit.
+  it("takes the limit from the plan when the entitlement has one", () => {
+    expect(resolveStorageRow(usage({ usedBytes: 1000 }), false, plan(100_000))).toEqual({
+      kind: "metered",
+      usedBytes: 1000,
+      limitBytes: 100_000,
+      reached: false,
+    });
+  });
+
+  it("shows usage the server could not read, or a failed read, as unavailable", () => {
+    expect(resolveStorageRow(usage({ usedBytes: null, reached: null }), false, null)).toEqual({
+      kind: "unavailable",
+      limitBytes: 1000,
+    });
+    expect(resolveStorageRow(undefined, true, plan(1000))).toEqual({ kind: "unavailable", limitBytes: 1000 });
+  });
+
+  it("shows nothing without a limit", () => {
+    expect(resolveStorageRow(OFF, false, plan(1000))).toBeNull();
+    expect(resolveStorageRow(undefined, false, plan(1000))).toBeNull();
+    // A failed read with no plan limit says nothing about whether one applies.
+    expect(resolveStorageRow(undefined, true, null)).toBeNull();
   });
 });

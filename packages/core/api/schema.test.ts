@@ -1635,6 +1635,32 @@ describe("workspace subscription contract", () => {
     expect(summary?.trial).toBeNull();
   });
 
+  it("reads the storage limit when Cloud sends one, and nothing when it is missing or malformed (MUL-9489)", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const read = async (storage: unknown) => {
+      stubFetchJson({
+        entitlement: { ...entitlement, limits: { ...entitlement.limits, ...(storage === undefined ? {} : { storage_bytes: storage }) } },
+        billing_interval: null,
+        human_members: 3,
+        seat_capacity: null,
+        cancel_at_period_end: false,
+        grace_until: null,
+        has_stripe_customer: false,
+        available_actions: { checkout: true, portal: false, purchase_seats: false, change_plan: false },
+      });
+      return (await client.getWorkspaceSubscriptionSummary())?.entitlement;
+    };
+
+    expect((await read({ mode: "limited", limit: 30_000_000_000 }))?.limits.storageBytes).toEqual({
+      mode: "limited",
+      limit: 30_000_000_000,
+    });
+    expect((await read(undefined))?.limits.storageBytes).toBeNull();
+    const malformed = await read({ mode: "limited", limit: "lots" });
+    expect(malformed?.limits.storageBytes).toBeNull();
+    expect(malformed?.plan).toBe("pro");
+  });
+
   it("reads a plan change that still holds the subscription", async () => {
     stubFetchJson({
       entitlement,

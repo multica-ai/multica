@@ -1417,7 +1417,12 @@ func TestAppendUserMessage_ReplyTargetSenderNullWhenAbsent(t *testing.T) {
 // it, once the attachments are committed (MUL-9489).
 func TestBindMediaRefs_RunsMediaStoredHookAfterCommit(t *testing.T) {
 	var stored []pgtype.UUID
-	SetMediaStoredHook(func(_ context.Context, workspaceID pgtype.UUID) { stored = append(stored, workspaceID) })
+	var deadlines []bool
+	SetMediaStoredHook(func(ctx context.Context, workspaceID pgtype.UUID) {
+		stored = append(stored, workspaceID)
+		_, ok := ctx.Deadline()
+		deadlines = append(deadlines, ok)
+	})
 	t.Cleanup(func() { SetMediaStoredHook(nil) })
 
 	f := newFake()
@@ -1437,6 +1442,10 @@ func TestBindMediaRefs_RunsMediaStoredHookAfterCommit(t *testing.T) {
 	}
 	if len(stored) != 1 || stored[0] != uid(9) {
 		t.Fatalf("hook calls = %+v, want one for the workspace", stored)
+	}
+	// The hook runs on a bounded budget so it cannot hold up the task start.
+	if !deadlines[0] {
+		t.Fatal("hook context has no deadline")
 	}
 	// A bind without media stores nothing and records nothing.
 	if err := s.BindMediaRefs(context.Background(), BindMediaInput{

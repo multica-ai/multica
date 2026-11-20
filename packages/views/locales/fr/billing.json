@@ -28,6 +28,7 @@
     "actions": {
       "retry": "Réessayer",
       "retry_autopilots": "Réessayer le chargement de la consommation des automatisations",
+      "retry_storage": "Réessayer l'utilisation du stockage des pièces jointes",
       "upgrade_to": "Passer à {{plan}}",
       "switch_to": "Basculer vers {{plan}}",
       "manage": "Gérer la facturation",

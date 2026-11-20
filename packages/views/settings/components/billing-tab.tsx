@@ -32,6 +32,8 @@ import {
   memberLimitKeys,
   memberLimitOptions,
   formatStorageBytes,
+  resolveStorageRow,
+  storageUsageKeys,
   storageUsageOptions,
   storageUsageProgress,
   readUpgradeInvite,
@@ -432,6 +434,17 @@ function BillingTabContent() {
   }, [awaitingHeldCheckoutAt, refetchSummary]);
 
   const entitlements = summaryQuery.data?.entitlement;
+  // A confirmed upgrade or seat purchase changes the storage limit; the
+  // entitlement already carries the new one, and this refreshes the usage
+  // read behind it.
+  const subscriptionVersion = summaryQuery.data?.entitlement.version;
+  const seenSubscriptionVersionRef = useRef(subscriptionVersion);
+  useEffect(() => {
+    const seen = seenSubscriptionVersionRef.current;
+    seenSubscriptionVersionRef.current = subscriptionVersion;
+    if (seen === undefined || subscriptionVersion === undefined || seen === subscriptionVersion) return;
+    void queryClient.invalidateQueries({ queryKey: storageUsageKeys.all(wsId) });
+  }, [queryClient, subscriptionVersion, wsId]);
   // Checkout is done once paid seats are in effect. Neither the plan nor
   // Checkout going away proves it: a trial already reports Business, and a
   // first payment still incomplete also takes Checkout away.
@@ -1271,14 +1284,13 @@ function BillingTabContent() {
       ? formatDateTime(quotaUsage.resetAt, locale)
       : null;
   const numberFormatter = new Intl.NumberFormat(locale);
+  const storageRow = resolveStorageRow(
+    storageUsageQuery.data,
+    storageUsageQuery.isError,
+    entitlements?.limits.storageBytes,
+  );
   // Members and pending invitations against the plan's member limit, shown
   // whenever Cloud applies one (observed or enforced).
-  const storageUsageData = storageUsageQuery.data;
-  const storageUsage =
-    (storageUsageData?.action === "observe" || storageUsageData?.action === "enforce") &&
-    storageUsageData.limitBytes !== null
-      ? storageUsageData
-      : null;
   const memberLimitData = memberLimitQuery.data;
   const memberLimit =
     (memberLimitData?.action === "observe" || memberLimitData?.action === "enforce") &&
@@ -1986,31 +1998,60 @@ function BillingTabContent() {
               </div>
             )}
           </SettingsRow>
-          {storageUsage ? (
+          {storageRow ? (
             <SettingsRow
               label={t(($) => $.workspace.limits.storage)}
               description={t(($) => $.workspace.limits.storage_description)}
             >
-              <div className="w-full max-w-72">
-                <Progress
-                  value={storageUsageProgress(storageUsage)}
-                  aria-label={t(($) => $.workspace.limits.storage_label)}
-                >
-                  <ProgressLabel>
-                    {storageUsage.reached
-                      ? t(($) => $.workspace.limits.reached)
-                      : t(($) => $.workspace.limits.current_usage)}
-                  </ProgressLabel>
-                  <ProgressValue>
-                    {() =>
-                      t(($) => $.workspace.limits.usage_total, {
-                        total: formatStorageBytes(storageUsage.usedBytes ?? 0, locale),
-                        limit: formatStorageBytes(storageUsage.limitBytes ?? 0, locale),
-                      })
-                    }
-                  </ProgressValue>
-                </Progress>
-              </div>
+              {storageRow.kind === "metered" ? (
+                <div className="w-full max-w-72">
+                  <Progress
+                    value={storageUsageProgress(storageRow.usedBytes, storageRow.limitBytes)}
+                    aria-label={t(($) => $.workspace.limits.storage_label)}
+                  >
+                    <ProgressLabel>
+                      {storageRow.reached
+                        ? t(($) => $.workspace.limits.reached)
+                        : t(($) => $.workspace.limits.current_usage)}
+                    </ProgressLabel>
+                    <ProgressValue>
+                      {() =>
+                        t(($) => $.workspace.limits.usage_total, {
+                          total: formatStorageBytes(storageRow.usedBytes, locale),
+                          limit: formatStorageBytes(storageRow.limitBytes, locale),
+                        })
+                      }
+                    </ProgressValue>
+                  </Progress>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 sm:items-end">
+                  {storageRow.limitBytes !== null ? (
+                    <span className="tabular-nums">
+                      {formatStorageBytes(storageRow.limitBytes, locale)}
+                    </span>
+                  ) : null}
+                  <span className="text-caption text-muted-foreground">
+                    {t(($) => $.workspace.limits.usage_unavailable)}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={t(($) => $.workspace.actions.retry_storage)}
+                    aria-busy={storageUsageQuery.isFetching}
+                    disabled={storageUsageQuery.isFetching}
+                    onClick={() => void storageUsageQuery.refetch()}
+                  >
+                    {storageUsageQuery.isFetching ? (
+                      <Loader2 className="animate-spin motion-reduce:animate-none" />
+                    ) : (
+                      <RefreshCw />
+                    )}
+                    {t(($) => $.workspace.actions.retry)}
+                  </Button>
+                </div>
+              )}
             </SettingsRow>
           ) : null}
           {memberLimit ? (

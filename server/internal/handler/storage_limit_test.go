@@ -314,3 +314,37 @@ func TestStorageLimitResponseShape(t *testing.T) {
 		t.Fatalf("off usage = %s, err = %v", raw, err)
 	}
 }
+
+// A guest cannot read the workspace's storage usage, so a refusal tells it the
+// storage is full without the figures.
+func TestUploadFileRefusesAGuestWithoutTheFigures(t *testing.T) {
+	workspaceID, _ := storageLimitWorkspace(t, 900)
+	useStorageLimit(t, workspaceID, entitlement.ActionEnforce, 1000)
+	useMockStorage(t)
+	guestID := dbfx.User(t, "Storage guest "+uuid.NewString()[:8], "storage-guest-"+uuid.NewString()[:8]+"@multica.ai")
+	dbfx.Member(t, workspaceID, guestID, "guest")
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "guest.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	part.Write(bytes.Repeat([]byte("x"), 200))
+	writer.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/upload-file", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-User-ID", guestID)
+	req.Header.Set("X-Workspace-ID", workspaceID)
+
+	got := testutil.Call(t, testHandler.UploadFile, req).Want(http.StatusForbidden).Map()
+	if got["code"] != storageLimitReachedCode {
+		t.Fatalf("body = %v, want %s", got, storageLimitReachedCode)
+	}
+	if _, ok := got["used_bytes"]; ok {
+		t.Fatalf("guest refusal carries used_bytes: %v", got)
+	}
+	if _, ok := got["limit_bytes"]; ok {
+		t.Fatalf("guest refusal carries limit_bytes: %v", got)
+	}
+}

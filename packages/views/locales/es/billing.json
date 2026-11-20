@@ -28,6 +28,7 @@
     "actions": {
       "retry": "Reintentar",
       "retry_autopilots": "Reintentar el uso de automatización",
+      "retry_storage": "Reintentar uso del almacenamiento de adjuntos",
       "upgrade_to": "Actualizar a {{plan}}",
       "switch_to": "Cambiar a {{plan}}",
       "manage": "Gestionar facturación",

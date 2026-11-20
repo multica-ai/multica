@@ -3618,6 +3618,9 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
     limits: z
       .object({
         autopilot_runs: WorkspaceEntitlementLimitSchema,
+        // Optional: a Cloud without the storage limit omits it, and a
+        // malformed one must not fail the whole snapshot.
+        storage_bytes: WorkspaceEntitlementLimitSchema.nullable().optional().catch(null),
       })
       .loose(),
     current_period_end: z.string().nullable().optional(),
@@ -3633,6 +3636,7 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
       seats: value.seats,
       limits: {
         autopilotRuns: value.limits.autopilot_runs,
+        storageBytes: value.limits.storage_bytes ?? null,
       },
       currentPeriodEnd: value.current_period_end ?? null,
       snapshotExpiresAt: value.snapshot_expires_at ?? null,
@@ -3929,9 +3933,11 @@ export const StorageUsageSchema = z
         ? { action: "off", usedBytes: null, limitBytes: null, reached: null }
         : {
             action: value.action,
-            usedBytes: value.used_bytes ?? 0,
+            // Missing when the server could not read usage in time.
+            usedBytes: value.used_bytes,
             limitBytes: value.limit_bytes,
-            reached: value.action === "enforce" ? (value.reached ?? false) : null,
+            reached:
+              value.action === "enforce" && value.used_bytes !== null ? (value.reached ?? false) : null,
           },
   );
 

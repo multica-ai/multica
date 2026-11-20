@@ -28,6 +28,7 @@
     "actions": {
       "retry": "다시 시도",
       "retry_autopilots": "자동화 사용량 다시 시도",
+      "retry_storage": "첨부 파일 저장 공간 사용량 다시 시도",
       "upgrade_to": "{{plan}}로 업그레이드",
       "switch_to": "{{plan}}로 전환",
       "manage": "결제 관리",

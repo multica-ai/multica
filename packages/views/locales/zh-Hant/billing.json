@@ -28,6 +28,7 @@
     "actions": {
       "retry": "重試",
       "retry_autopilots": "重試載入自動化用量",
+      "retry_storage": "重試附件儲存空間用量",
       "upgrade_to": "升級到 {{plan}}",
       "switch_to": "切換到 {{plan}}",
       "manage": "管理帳單",

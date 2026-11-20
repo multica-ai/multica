@@ -28,6 +28,7 @@
     "actions": {
       "retry": "重试",
       "retry_autopilots": "重试加载自动化用量",
+      "retry_storage": "重试附件存储用量",
       "upgrade_to": "升级到 {{plan}}",
       "switch_to": "切换到 {{plan}}",
       "manage": "管理账单",

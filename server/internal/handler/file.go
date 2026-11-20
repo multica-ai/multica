@@ -603,7 +603,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		// Every field is validated; check the storage limit before writing
 		// the object, so a refused upload stores nothing.
 		if err := h.storageQuota().Admit(r.Context(), params.WorkspaceID, params.SizeBytes, service.StorageSourceUpload); err != nil {
-			if !writeStorageLimitReached(w, err) {
+			if !writeStorageLimitReached(w, err, !h.isGuest(r, workspaceID, userID)) {
 				writeError(w, http.StatusInternalServerError, "upload failed")
 			}
 			return

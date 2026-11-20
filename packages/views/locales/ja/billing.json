@@ -28,6 +28,7 @@
     "actions": {
       "retry": "再試行",
       "retry_autopilots": "自動化の使用量を再取得",
+      "retry_storage": "添付ファイルの保存容量の使用量を再試行",
       "upgrade_to": "{{plan}} にアップグレード",
       "switch_to": "{{plan}} に切り替え",
       "manage": "請求を管理",

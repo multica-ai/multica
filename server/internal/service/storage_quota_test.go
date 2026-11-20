@@ -70,8 +70,8 @@ func TestStorageQuotaOffReadsNothing(t *testing.T) {
 		t.Fatalf("off admit = %v", err)
 	}
 	q.RecordStored(context.Background(), ws, StorageSourceChannel)
-	if usage, err := q.Usage(context.Background(), ws); err != nil || usage.Action != entitlement.ActionOff || usage.Used != nil {
-		t.Fatalf("off usage = %+v, %v", usage, err)
+	if usage := q.Usage(context.Background(), ws); usage.Action != entitlement.ActionOff || usage.Used != nil {
+		t.Fatalf("off usage = %+v", usage)
 	}
 	if sums.calls != 0 {
 		t.Fatalf("off summed %d times, want none", sums.calls)
@@ -158,8 +158,10 @@ func TestStorageQuotaSumErrorFailsOpen(t *testing.T) {
 	if got := q.Metrics.(*fakeStorageMetrics).sums; len(got) != 1 || got[0] != "upload:error" {
 		t.Fatalf("sum metrics = %+v", got)
 	}
-	if _, err := q.Usage(context.Background(), ws); err == nil {
-		t.Fatal("usage read should report the error")
+	// The billing read keeps the limit and leaves usage unknown.
+	if usage := q.Usage(context.Background(), ws); usage.Action != entitlement.ActionEnforce ||
+		usage.Limit == nil || *usage.Limit != 1 || usage.Used != nil || usage.Reached != nil {
+		t.Fatalf("usage after a failed sum = %+v, want the limit without figures", usage)
 	}
 }
 
@@ -180,5 +182,17 @@ func TestStorageLimitPeriodIsTheUTCMonth(t *testing.T) {
 	start, end := StorageLimitPeriod(time.Date(2026, 11, 30, 23, 0, 0, 0, time.FixedZone("x", -3*3600)))
 	if !start.Equal(time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)) || !end.Equal(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("period = %s..%s", start, end)
+	}
+}
+
+// A sum that runs past its timeout on the billing read reports the limit with
+// usage unknown, rather than failing the whole read.
+func TestStorageQuotaUsageTimeoutKeepsTheLimit(t *testing.T) {
+	q, sums, _, ws := newTestStorageQuota(0, entitlement.ActionObserve, 1000)
+	sums.block = true
+	q.SumTimeout = 20 * time.Millisecond
+	usage := q.Usage(context.Background(), ws)
+	if usage.Action != entitlement.ActionObserve || usage.Limit == nil || *usage.Limit != 1000 || usage.Used != nil {
+		t.Fatalf("usage = %+v, want observe 1000 with usage unknown", usage)
 	}
 }

@@ -28,6 +28,7 @@
     "actions": {
       "retry": "Retry",
       "retry_autopilots": "Retry automation usage",
+      "retry_storage": "Retry attachment storage usage",
       "upgrade_to": "Upgrade to {{plan}}",
       "switch_to": "Switch to {{plan}}",
       "manage": "Manage billing",

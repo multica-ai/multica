@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -921,7 +922,11 @@ func (s *ChatSession) BindMediaRefsWithResult(ctx context.Context, in BindMediaI
 	}
 	if len(in.MediaRefs) > 0 {
 		if hook := mediaStoredHook.Load(); hook != nil {
-			(*hook)(context.WithoutCancel(ctx), in.WorkspaceID)
+			// The bind's caller has a finish budget of its own; the hook only
+			// records, so it gets a short slice of it and gives up quietly.
+			hookCtx, cancel := context.WithTimeout(ctx, mediaStoredHookBudget)
+			(*hook)(hookCtx, in.WorkspaceID)
+			cancel()
 		}
 	}
 	return result, nil
@@ -931,6 +936,10 @@ func (s *ChatSession) BindMediaRefsWithResult(ctx context.Context, in BindMediaI
 // adapter builds its own ChatSession, so the server installs the hook once
 // instead of threading it through each one.
 var mediaStoredHook atomic.Pointer[func(context.Context, pgtype.UUID)]
+
+// mediaStoredHookBudget bounds the hook, so recording storage use cannot hold
+// up the task the channel message is about to start.
+const mediaStoredHookBudget = time.Second
 
 // SetMediaStoredHook installs fn to run after a channel message's media is
 // stored as attachments in a workspace (MUL-9489: the storage limit records,

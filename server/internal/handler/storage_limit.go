@@ -29,25 +29,31 @@ func (h *Handler) storageQuota() service.StorageQuota {
 
 // writeStorageLimitReached answers a refused upload. It is a 403 like a
 // locked paid feature: 413 already means one file over the per-file cap, and
-// a 5xx would invite retries and availability alerts.
-func writeStorageLimitReached(w http.ResponseWriter, err error) bool {
+// a 5xx would invite retries and availability alerts. The workspace's figures
+// are included only for callers who may read storage usage: a guest, who
+// cannot, gets the code and message alone.
+func writeStorageLimitReached(w http.ResponseWriter, err error, withFigures bool) bool {
 	var reached *service.StorageLimitReachedError
 	if !errors.As(err, &reached) {
 		return false
 	}
-	writeJSON(w, http.StatusForbidden, map[string]any{
-		"code":        storageLimitReachedCode,
-		"error":       "This workspace has reached its attachment storage limit. Upgrade the plan or delete attachments you no longer need.",
-		"used_bytes":  reached.Used,
-		"limit_bytes": reached.Limit,
-	})
+	body := map[string]any{
+		"code":  storageLimitReachedCode,
+		"error": "This workspace has reached its attachment storage limit. Upgrade the plan or delete attachments you no longer need.",
+	}
+	if withFigures {
+		body["used_bytes"] = reached.Used
+		body["limit_bytes"] = reached.Limit
+	}
+	writeJSON(w, http.StatusForbidden, body)
 	return true
 }
 
 // StorageUsageResponse is the storage limit as clients render it. action is
-// off when no limit applies, including self-hosted deployments; used_bytes and
-// limit_bytes are present only while a limit applies, and reached only while
-// it is enforced.
+// off when no limit applies, including self-hosted deployments. While a limit
+// applies limit_bytes is present; used_bytes and reached are absent when the
+// usage could not be read in time, and reached is present only under
+// enforce.
 type StorageUsageResponse struct {
 	Action     string `json:"action"`
 	UsedBytes  *int64 `json:"used_bytes,omitempty"`
@@ -67,11 +73,7 @@ func (h *Handler) GetStorageUsage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	usage, err := h.storageQuota().Usage(r.Context(), workspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load storage usage")
-		return
-	}
+	usage := h.storageQuota().Usage(r.Context(), workspaceID)
 	writeJSON(w, http.StatusOK, StorageUsageResponse{
 		Action:     string(usage.Action),
 		UsedBytes:  usage.Used,
