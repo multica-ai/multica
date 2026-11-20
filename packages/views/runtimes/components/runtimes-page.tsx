@@ -490,7 +490,7 @@ export function RuntimesPage({
           count: configuredCloudCount,
           rows: cloudRows,
         },
-      ];
+      ].filter((group) => !narrowed || group.rows.length > 0);
   const rowHref = (row: RuntimeRow) =>
     row.kind === "machine"
       ? paths.runtimeDetail(row.machine.id)

@@ -329,6 +329,7 @@ describe("RuntimesPage", () => {
     expect(screen.queryByText("dev-machine.local")).not.toBeInTheDocument();
     expect(screen.queryByText("Qoder Cloud Agents")).not.toBeInTheDocument();
     expect(screen.queryByText("Cursor Cloud Agents")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cloud services")).not.toBeInTheDocument();
 
     const field = screen.getByRole("textbox", { name: "Search runtimes" });
     await user.clear(field);
