@@ -1,7 +1,12 @@
 import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { DashboardRequestParams } from "../api/client";
-import { reportDashboardHistoryLimit } from "./history-limit";
+import {
+  DashboardHistoryLimitTightenedError,
+  isDashboardHistoryLimitTightened,
+  isStricterHistoryLimit,
+  reportDashboardHistoryLimit,
+} from "./history-limit";
 
 /**
  * The plan's history limit a dashboard query is made under: a day count, null
@@ -108,7 +113,9 @@ type DashboardFetcher<T> = (params: DashboardRequestParams) => Promise<T[]>;
 // the first load is not fetched once under no limit and again under the real
 // one. Each response reports the limit it was served under; one that differs
 // from the limit this query was made under means the plan changed while the
-// page was open, and reportDashboardHistoryLimit refreshes it.
+// page was open, and reportDashboardHistoryLimit refreshes it. A response cut
+// to a stricter limit than its key fails the query rather than caching rows
+// that cover less than the key says.
 function dashboardOptions<T>(
   part: DashboardKeyPart,
   fetcher: DashboardFetcher<T>,
@@ -121,15 +128,32 @@ function dashboardOptions<T>(
   const queryKey = dashboardKey(wsId, part, days, projectId, tz, historyLimit);
   return queryOptions({
     queryKey,
-    queryFn: ({ client }: { client: QueryClient }) =>
-      fetcher({
+    queryFn: async ({ client }: { client: QueryClient }) => {
+      const requestedUnder = historyLimit ?? null;
+      let served: number | null | undefined;
+      const rows = await fetcher({
         days,
         project_id: projectId ?? undefined,
         tz,
-        onHistoryLimit: (served) =>
-          reportDashboardHistoryLimit(client, wsId, historyLimit ?? null, served),
-      }),
+        onHistoryLimit: (limit) => {
+          served = limit;
+        },
+      });
+      if (served !== undefined) {
+        reportDashboardHistoryLimit(client, wsId, requestedUnder, served);
+        // Rows cut to a stricter limit than this key promises must not be
+        // cached under it, or restoring the looser limit would show them.
+        if (served !== null && isStricterHistoryLimit(served, requestedUnder)) {
+          throw new DashboardHistoryLimitTightenedError(requestedUnder, served);
+        }
+      }
+      return rows;
+    },
     enabled: !!wsId && historyLimit !== undefined,
+    // The app default retries once; a tightened limit is not transient, and
+    // the page re-queries under the stricter key on its own.
+    retry: (failureCount: number, error: Error) =>
+      !isDashboardHistoryLimitTightened(error) && failureCount < 1,
     staleTime: STALE_TIME,
     refetchInterval: REFETCH_INTERVAL,
     placeholderData: (previousData: T[] | undefined, previousQuery) =>

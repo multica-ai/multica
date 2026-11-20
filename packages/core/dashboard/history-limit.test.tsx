@@ -162,4 +162,64 @@ describe("useDashboardHistoryLimit", () => {
     // Not a placeholder from the unlimited key.
     expect(result.current.query.isPlaceholderData).toBe(false);
   });
+
+  it("keeps the strictest limit seen until the features read confirms it", async () => {
+    // Pro: 90 days. The plan drops to Free, but replicas disagree for a while:
+    // a response under the new policy (30) arrives, then a late one served
+    // under the old, unlimited policy.
+    const { api, qc, wrapper } = setup(90);
+    const { result } = renderHook(() => useDashboard("ws-1"), { wrapper });
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true));
+    expect(result.current.history.maxDays).toBe(90);
+
+    const servedQueue: (number | null)[] = [30, null];
+    api.getDashboardUsageByAgent.mockImplementation(async (params: DashboardRequestParams) => {
+      params.onHistoryLimit?.(servedQueue.length > 0 ? servedQueue.shift()! : 30);
+      return [];
+    });
+    // Hold the features refresh so only dashboard responses speak.
+    let releaseFeatures: () => void = () => {};
+    api.getWorkspaceFeatures.mockImplementation(
+      () =>
+        new Promise<WorkspaceFeatures>((resolve) => {
+          releaseFeatures = () => resolve(features(30));
+        }),
+    );
+
+    await act(() => qc.refetchQueries({ queryKey: ["dashboard", "ws-1"], type: "active" }));
+    await waitFor(() => expect(result.current.history.maxDays).toBe(30));
+    // The late unlimited response, now under the 30-day key.
+    await act(() => qc.refetchQueries({ queryKey: ["dashboard", "ws-1"], type: "active" }));
+    expect(result.current.history.maxDays).toBe(30);
+
+    act(() => releaseFeatures());
+    await waitFor(() => expect(result.current.history.maxDays).toBe(30));
+  });
+
+  it("never caches rows cut to a stricter limit under the looser key", async () => {
+    const { api, qc, wrapper, setPlanLimit } = setup(90);
+    const { result } = renderHook(() => useDashboard("ws-1"), { wrapper });
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true));
+
+    // The 90-day query is refetched after the downgrade and served cut to 30.
+    setPlanLimit(30);
+    api.getDashboardUsageByAgent.mockImplementation(async (params: DashboardRequestParams) => {
+      params.onHistoryLimit?.(30);
+      return [{ sentinel: "cut-to-30" }] as never;
+    });
+    await act(() => qc.refetchQueries({ queryKey: ["dashboard", "ws-1"], type: "active" }));
+    await waitFor(() => expect(result.current.history.maxDays).toBe(30));
+    const ninetyKey = dashboardUsageByAgentOptions("ws-1", 30, null, "UTC", 90).queryKey;
+    expect(qc.getQueryData(ninetyKey)).not.toEqual([{ sentinel: "cut-to-30" }]);
+
+    // Upgrading back must fetch the 90-day key again, not reuse the cut rows.
+    setPlanLimit(90);
+    api.getDashboardUsageByAgent.mockImplementation(async (params: DashboardRequestParams) => {
+      params.onHistoryLimit?.(90);
+      return [{ sentinel: "full-90" }] as never;
+    });
+    await act(() => qc.invalidateQueries({ queryKey: ["workspace-features", "ws-1"] }));
+    await waitFor(() => expect(result.current.history.maxDays).toBe(90));
+    await waitFor(() => expect(result.current.query.data).toEqual([{ sentinel: "full-90" }]));
+  });
 });

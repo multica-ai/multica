@@ -27,9 +27,41 @@ export interface ObservedDashboardHistoryLimit {
 }
 
 /**
+ * A dashboard response was served under a stricter limit than its query was
+ * made under. Its rows cover less than the query's key promises, so the query
+ * fails instead of caching them; the page has already moved to the stricter
+ * limit's key by then.
+ */
+export class DashboardHistoryLimitTightenedError extends Error {
+  constructor(
+    readonly requestedUnder: number | null,
+    readonly served: number,
+  ) {
+    super(`dashboard history limit tightened from ${requestedUnder ?? "none"} to ${served} days`);
+    this.name = "DashboardHistoryLimitTightenedError";
+  }
+}
+
+export function isDashboardHistoryLimitTightened(error: unknown): boolean {
+  return error instanceof DashboardHistoryLimitTightenedError;
+}
+
+/** Whether `a` allows fewer days than `b`, where null means no limit. */
+export function isStricterHistoryLimit(a: number | null, b: number | null): boolean {
+  if (a === null) return false;
+  return b === null || a < b;
+}
+
+/**
  * Called with the limit each dashboard response was served under.
  * `requestedUnder` is the limit the query was made under; any difference means
  * the client's view of the plan is out of date.
+ *
+ * Until a features read newer than the first such response confirms the plan,
+ * later responses can only tighten what was observed, never loosen it: a
+ * response served under the old, looser policy can still arrive after one
+ * served under the new one, and must not reopen ranges the plan no longer
+ * covers.
  */
 export function reportDashboardHistoryLimit(
   client: QueryClient,
@@ -38,8 +70,13 @@ export function reportDashboardHistoryLimit(
   served: number | null,
 ): void {
   if (served === requestedUnder) return;
-  client.setQueryData<ObservedDashboardHistoryLimit>(dashboardHistoryObservedKey(wsId), {
-    limitDays: served,
+  const key = dashboardHistoryObservedKey(wsId);
+  const previous = client.getQueryData<ObservedDashboardHistoryLimit>(key);
+  const featuresUpdatedAt =
+    client.getQueryState(workspaceFeatureKeys.all(wsId))?.dataUpdatedAt ?? 0;
+  const pending = previous !== undefined && previous.observedAt > featuresUpdatedAt;
+  client.setQueryData<ObservedDashboardHistoryLimit>(key, {
+    limitDays: pending ? minHistoryLimit(previous.limitDays, served) : served,
     observedAt: Date.now(),
   });
   void client.invalidateQueries({ queryKey: workspaceFeatureKeys.all(wsId) });
