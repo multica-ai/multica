@@ -1,5 +1,7 @@
 "use client";
 
+import type { WakeupPausedReason } from "@multica/core/types";
+
 import { Bell, Clock3, Hourglass, ListChecks, RefreshCw, TriangleAlert } from "@multica/ui/icons";
 import type { TimelineEntry, WakeupCondition, WakeupPreview } from "@multica/core/types";
 import { useT } from "../../i18n";
@@ -53,7 +55,7 @@ interface WakeupDetails {
   actor_type?: string;
   actor_id?: string;
   woke?: boolean;
-  reason?: "max_fires" | "loop" | "rate";
+  reason?: WakeupPausedReason;
   limit?: number;
   note?: string;
 }

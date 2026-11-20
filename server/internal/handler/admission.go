@@ -1,10 +1,8 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 )
 
@@ -151,20 +149,5 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "the agent's owner is not a member of this private project"
 	default:
 		return "the run was blocked"
-	}
-}
-
-func issueRunLimitReason(err error) DispatchReasonCode {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
-		return ""
-	}
-	switch pgErr.ConstraintName {
-	case "issue_run_limit":
-		return ReasonIssueRunLimit
-	case "issue_agent_run_limit":
-		return ReasonIssueAgentRunLimit
-	default:
-		return ""
 	}
 }
