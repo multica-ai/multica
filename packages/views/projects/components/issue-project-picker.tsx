@@ -49,16 +49,11 @@ export function IssueProjectPicker({
         toStatus=""
         toProject={pending}
         onCancel={() => setPending(null)}
-        onConfirm={({ stopPreviousRuns, suppressRun }) => {
+        onConfirm={(controls) => {
           const next = pending;
           setPending(null);
           if (next) {
-            onUpdate({
-              project_id: next.id,
-              enter_workflow_step: true,
-              ...(stopPreviousRuns ? { stop_previous_assignee_runs: true } : {}),
-              ...(suppressRun ? { suppress_run: true } : {}),
-            });
+            onUpdate({ project_id: next.id, enter_workflow_step: true, ...controls });
           }
         }}
       />

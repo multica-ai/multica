@@ -607,12 +607,8 @@ func TestMoveIntoHandoffStepWithoutStarting(t *testing.T) {
 	testutil.Call(t, testHandler.MoveIssue, req).Want(http.StatusOK)
 
 	status, assigneeType, assigneeID := issueStatusAndAssignee(t, issueID)
-	if status != "in_progress" || assigneeType != "agent" || assigneeID != agentID {
-		t.Fatalf("issue = %s %s/%s, want in_progress with the column's agent %s", status, assigneeType, assigneeID, agentID)
-	}
-	tasks, err := testHandler.Queries.ListTasksByIssue(context.Background(), util.MustParseUUID(issueID))
-	if err != nil || len(tasks) != 0 {
-		t.Fatalf("tasks = %d (%v), want none", len(tasks), err)
+	if status != "in_progress" || assigneeType != "agent" || assigneeID != agentID || taskCountFor(t, issueID, agentID) != 0 {
+		t.Fatalf("issue = %s %s/%s, want in_progress with the column's agent %s and no run", status, assigneeType, assigneeID, agentID)
 	}
 }
 

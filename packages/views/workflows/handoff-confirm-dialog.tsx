@@ -6,6 +6,7 @@ import { ArrowRight, ChevronDown, ChevronRight, TriangleAlert } from "@multica/u
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { workflowHandoffPreviewOptions } from "@multica/core/issue-workflows";
+import type { UpdateIssueRequest } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -57,7 +58,7 @@ function useDuration() {
  * the issue enters the column it lands on there.
  *
  * When the handler is an agent or squad, "Move without starting" applies the
- * same move and reassignment but starts no run (`suppressRun`).
+ * same move and reassignment but starts no run.
  *
  * When the preview finds no handoff after all (the handler cannot be resolved,
  * or the workflow changed), the move applies without asking.
@@ -75,7 +76,8 @@ export function WorkflowHandoffConfirmDialog({
   toStatus: string;
   toProject?: { id: string; title: string } | null;
   onCancel: () => void;
-  onConfirm: (options: { stopPreviousRuns: boolean; suppressRun: boolean }) => void;
+  /** Receives the control fields to send with the move. */
+  onConfirm: (controls: Pick<UpdateIssueRequest, "stop_previous_assignee_runs" | "suppress_run">) => void;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -101,7 +103,7 @@ export function WorkflowHandoffConfirmDialog({
 
   // Nothing to confirm: apply as an ordinary status change.
   useEffect(() => {
-    if (open && preview && !preview.handoff) onConfirm({ stopPreviousRuns: false, suppressRun: false });
+    if (open && preview && !preview.handoff) onConfirm({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, preview]);
 
@@ -139,9 +141,13 @@ export function WorkflowHandoffConfirmDialog({
     null,
   );
   const prevName = prevType && prevId ? getActorName(prevType, prevId) : "";
-  const stopPreviousRuns = stop && runs.length > 0 && !sameHandler;
   // A member handler starts nothing, so there is no run to hold back.
-  const canSuppressRun = handlerType === "agent" || handlerType === "squad";
+  const handlerRuns = handlerType === "agent" || handlerType === "squad";
+  const confirm = (suppressRun: boolean) =>
+    onConfirm({
+      ...(stop && runs.length > 0 && !sameHandler ? { stop_previous_assignee_runs: true } : {}),
+      ...(suppressRun ? { suppress_run: true } : {}),
+    });
 
   let sentence: ReactNode = null;
   if (preview?.handoff && handlerType && handlerId) {
@@ -149,9 +155,9 @@ export function WorkflowHandoffConfirmDialog({
       sentence = withChips(t(($) => $.workflows.confirm.same_handler_run, { to: TO }), { to: chip(handlerType, handlerId) });
     } else {
       const text =
-        handlerType === "member"
-          ? t(($) => $.workflows.confirm.reassign, { from: FROM, to: TO })
-          : t(($) => $.workflows.confirm.reassign_run, { from: FROM, to: TO });
+        handlerRuns
+          ? t(($) => $.workflows.confirm.reassign_run, { from: FROM, to: TO })
+          : t(($) => $.workflows.confirm.reassign, { from: FROM, to: TO });
       sentence = withChips(text, {
         from: prevType && prevId ? chip(prevType, prevId) : <span className="font-medium">{t(($) => $.workflows.confirm.unassigned)}</span>,
         to: chip(handlerType, handlerId),
@@ -236,19 +242,12 @@ export function WorkflowHandoffConfirmDialog({
           <Button variant="outline" onClick={onCancel}>
             {t(($) => $.workflows.confirm.cancel)}
           </Button>
-          {canSuppressRun && (
-            <Button
-              variant="outline"
-              disabled={isPending || isError}
-              onClick={() => onConfirm({ stopPreviousRuns, suppressRun: true })}
-            >
+          {handlerRuns && (
+            <Button variant="outline" disabled={isPending || isError} onClick={() => confirm(true)}>
               {t(($) => $.workflows.confirm.confirm_no_start)}
             </Button>
           )}
-          <Button
-            disabled={isPending || isError}
-            onClick={() => onConfirm({ stopPreviousRuns, suppressRun: false })}
-          >
+          <Button disabled={isPending || isError} onClick={() => confirm(false)}>
             {toProject
               ? t(($) => $.workflows.confirm.project_confirm, { project: toProject.title })
               : t(($) => $.workflows.confirm.confirm, { status: labelOf(toStatus) })}

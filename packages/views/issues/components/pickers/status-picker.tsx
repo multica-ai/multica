@@ -199,15 +199,10 @@ export function StatusPicker({
         issue={pendingStatus ? issue : null}
         toStatus={pendingStatus ?? ""}
         onCancel={() => setPendingStatus(null)}
-        onConfirm={({ stopPreviousRuns, suppressRun }) => {
+        onConfirm={(controls) => {
           const next = pendingStatus;
           setPendingStatus(null);
-          if (!next) return;
-          onUpdate({
-            status: next,
-            ...(stopPreviousRuns ? { stop_previous_assignee_runs: true } : {}),
-            ...(suppressRun ? { suppress_run: true } : {}),
-          });
+          if (next) onUpdate({ status: next, ...controls });
         }}
       />
     )}
