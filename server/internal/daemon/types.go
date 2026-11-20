@@ -45,12 +45,14 @@ type ProjectResourceData struct {
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
 	// ExecutionPolicy must come from authenticated server state, not metadata.
-	ExecutionPolicy *agent.ExecutionPolicy `json:"execution_policy,omitempty"`
-	ID              string                 `json:"id"`
-	AgentID         string                 `json:"agent_id"`
-	RuntimeID       string                 `json:"runtime_id"`
-	IssueID         string                 `json:"issue_id"`
-	WorkspaceID     string                 `json:"workspace_id"`
+	ExecutionPolicy  *agent.ExecutionPolicy `json:"execution_policy,omitempty"`
+	ID               string                 `json:"id"`
+	AgentID          string                 `json:"agent_id"`
+	RuntimeID        string                 `json:"runtime_id"`
+	IssueID          string                 `json:"issue_id"`
+	IssueTitle       string                 `json:"issue_title,omitempty"`
+	IssueDescription string                 `json:"issue_description,omitempty"`
+	WorkspaceID      string                 `json:"workspace_id"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
@@ -116,10 +118,11 @@ type Task struct {
 	// workspace-visible agent can attribute the request per person. The
 	// agent's effective credentials stay owner-scoped — this is an attested
 	// identity, not a credential. See MUL-2645.
-	InitiatorType  string `json:"initiator_type,omitempty"`
-	InitiatorID    string `json:"initiator_id,omitempty"`
-	InitiatorName  string `json:"initiator_name,omitempty"`
-	InitiatorEmail string `json:"initiator_email,omitempty"`
+	InitiatorType             string `json:"initiator_type,omitempty"`
+	InitiatorID               string `json:"initiator_id,omitempty"`
+	InitiatorName             string `json:"initiator_name,omitempty"`
+	InitiatorEmail            string `json:"initiator_email,omitempty"`
+	InitiatorIsWorkspaceOwner bool   `json:"initiator_is_workspace_owner,omitempty"`
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
 	// agent never sees the daemon's own (often workspace-owner) credential.

@@ -2851,7 +2851,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
-	d.reportTaskResult(ctx, task.ID, result, taskLog)
+	d.reportTaskResultForTask(ctx, task, result, taskLog, true)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -3012,11 +3012,19 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 // the next chat turn to resume there rather than start over and "forget"
 // the conversation.
 func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+	d.reportTaskResultForTask(ctx, Task{ID: taskID}, result, taskLog, false)
+}
+
+func (d *Daemon) reportTaskResultForTask(ctx context.Context, task Task, result TaskResult, taskLog *slog.Logger, captureMemory bool) {
+	taskID := task.ID
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
 		err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
 		if err == nil {
+			if captureMemory {
+				enqueueSharedMemoryCapture(task, result, taskLog)
+			}
 			return
 		}
 		// CompleteTask retries transient errors internally. A transient
@@ -3585,6 +3593,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+	}
+	sharedMemoryFlag := strings.TrimSpace(os.Getenv("MULTICA_SHARED_MEMORY"))
+	if sharedMemoryFlag == "" {
+		sharedMemoryFlag = "1"
+	}
+	agentEnv["MULTICA_SHARED_MEMORY"] = sharedMemoryFlag
+	if memoryRoot := strings.TrimSpace(os.Getenv("MULTICA_MEMORY_ROOT")); memoryRoot != "" {
+		agentEnv["MULTICA_MEMORY_ROOT"] = memoryRoot
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
