@@ -933,6 +933,60 @@ describe("CreateIssueModal", () => {
     expect(mockRecordAssigneePick).not.toHaveBeenCalled();
   });
 
+  it("does not record re-picking the prefilled assignee", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "pick alice" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Same assignee");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledWith("member", "alice"));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
+  });
+
+  it("records a pick made while an earlier create was in flight with that later create", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
+    let resolveCreate!: (v: unknown) => void;
+    mockCreateIssue.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveCreate = resolve; }),
+    );
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "First");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    await act(async () => {
+      resolveCreate({ id: "issue-1", identifier: "TES-1", title: "First", status: "todo", labels: [] });
+    });
+    // The first create submitted the prefilled assignee.
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledTimes(1));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1));
+    expect(mockRecordAssigneePick).toHaveBeenCalledWith("agent", "bot");
+  });
+
+  it("records a hand-picked assignee kept in a reopened draft", async () => {
+    const user = userEvent.setup();
+    const first = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    first.unmount();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Reopened");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1));
+    expect(mockRecordAssigneePick).toHaveBeenCalledWith("agent", "bot");
+  });
+
   it("starts a fresh create from todo without a remembered stage", async () => {
     const user = userEvent.setup();
     const first = renderModal(<CreateIssueModal onClose={vi.fn()} data={{

@@ -51,6 +51,10 @@ export interface IssueCreateManual {
   startDate: string | null;
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;
+  /** The assignee above was picked by hand in this draft rather than
+   *  prefilled. Only such an assignee feeds the picker's local ranking, once
+   *  the issue is created. */
+  assigneePicked?: boolean;
   /** Label IDs chosen in the create dialog. Attached to the issue right after
    *  it is created (the create endpoint takes no labels), so they are kept as
    *  a plain id list rather than full Label objects. */

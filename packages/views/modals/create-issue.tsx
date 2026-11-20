@@ -303,10 +303,9 @@ export function ManualCreatePanel({
     return draft.manual.assigneeId;
   });
   const [assigneeCleared, setAssigneeCleared] = useState(data?.manual_assignee_cleared === true);
-  // Only an assignee picked by hand in this dialog feeds the picker's local
-  // ranking — not a prefilled or remembered default — and only once created.
-  const assigneePickedRef = useRef(false);
   const recordAssigneePick = useRecordAssigneePick();
+  // The hand-picked assignee of the request in flight, recorded on success.
+  const submittedPickRef = useRef<{ type: IssueAssigneeType; id: string } | null>(null);
   const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
     (data?.due_date as string | undefined) ?? draft.shared.dueDate,
@@ -422,9 +421,15 @@ export function ManualCreatePanel({
   const updateStatus = (v: IssueStatus) => { setStatus(v); setManual({ status: v }); };
   const updatePriority = (v: IssuePriority) => { setPriority(v); setShared({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
+    // Re-picking the current assignee is not a new pick; clearing drops it.
+    const changed = type !== assigneeType || id !== assigneeId;
     setAssigneeType(type); setAssigneeId(id);
     setAssigneeCleared(!id);
-    setManual({ assigneeType: type, assigneeId: id });
+    setManual({
+      assigneeType: type,
+      assigneeId: id,
+      ...(changed ? { assigneePicked: !!id } : {}),
+    });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
   const updateParent = (id?: string) => {
@@ -552,6 +557,18 @@ export function ManualCreatePanel({
       const pendingDesc = descEditorRef.current?.flushPendingUpdate?.();
       if (pendingDesc != null) setManual({ description: pendingDesc });
       submittedDraftRef.current = useIssueDraftStore.getState().draft;
+      // Only an assignee picked by hand feeds the picker's ranking, not a
+      // prefilled or remembered one. A prefill from `data` replaces the
+      // draft's assignee in the form, so the draft's pick must match it.
+      const submittedManual = submittedDraftRef.current.manual;
+      submittedPickRef.current =
+        submittedManual.assigneePicked &&
+        assigneeType &&
+        assigneeId &&
+        submittedManual.assigneeType === assigneeType &&
+        submittedManual.assigneeId === assigneeId
+          ? { type: assigneeType, id: assigneeId }
+          : null;
       try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
       const activeAttachmentIds = draftAttachments
@@ -828,10 +845,9 @@ export function ManualCreatePanel({
     }
   },
     onAccepted: () => {
-      if (assigneePickedRef.current && assigneeType && assigneeId) {
-        recordAssigneePick(assigneeType, assigneeId);
-      }
-      assigneePickedRef.current = false;
+      const pick = submittedPickRef.current;
+      if (pick) recordAssigneePick(pick.type, pick.id);
+      submittedPickRef.current = null;
       // Only the assignee persists across independent create sessions.
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
@@ -1151,13 +1167,10 @@ export function ManualCreatePanel({
                 <AssigneePicker
                   assigneeType={assigneeType ?? null}
                   assigneeId={assigneeId ?? null}
-                  onUpdate={(u) => {
-                    assigneePickedRef.current = true;
-                    updateAssignee(
-                      u.assignee_type ?? undefined,
-                      u.assignee_id ?? undefined,
-                    );
-                  }}
+                  onUpdate={(u) => updateAssignee(
+                    u.assignee_type ?? undefined,
+                    u.assignee_id ?? undefined,
+                  )}
                   recordPicks={false}
                   triggerRender={<PillButton />}
                   tooltip={tIssues(($) => $.detail.prop_assignee)}
