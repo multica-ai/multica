@@ -1000,6 +1000,7 @@
     "kind_error": "Ошибка",
     "kind_context": "Контекст",
     "context_chip_title": "Какую часть контекстного окна модели занимает этот запуск",
+    "context_history_title": "История контекста",
     "context_compacted": "Контекстное окно сжато",
     "context_compacted_before": "Контекстное окно сжато ({{tokens}} до сжатия)",
     "group_calls_one": "{{count}} вызов",

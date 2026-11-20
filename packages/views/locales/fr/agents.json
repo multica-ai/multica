@@ -960,6 +960,7 @@
     "kind_error": "Erreur",
     "kind_context": "Contexte",
     "context_chip_title": "Part de la fenêtre de contexte du modèle occupée par cette exécution",
+    "context_history_title": "Historique du contexte",
     "context_compacted": "Fenêtre de contexte compactée",
     "context_compacted_before": "Fenêtre de contexte compactée ({{tokens}} avant)",
     "group_calls_one": "{{count}} appel",

@@ -310,6 +310,16 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				return
 			}
 			if !roleFilter.deliver(p) {
+				// A compaction is the one system message worth reporting: the
+				// conversation continues with detail the agent no longer has,
+				// and nothing else on the surface explains that. It carries no
+				// pre-compaction size, so only the event itself is reported.
+				if p.Type == "compact_boundary" || len(p.CompactBoundary) > 0 {
+					msgStream.send(Message{Type: MessageContext, Context: &ContextInfo{
+						Phase: ContextPhaseCompacted,
+					}})
+					return
+				}
 				b.cfg.Logger.Debug("zcode message.upserted excluded by role discrimination")
 				return
 			}

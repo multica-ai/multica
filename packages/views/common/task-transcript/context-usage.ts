@@ -12,7 +12,17 @@
 // Occupancy is NOT additive: consecutive turns re-send the same conversation,
 // so these values are snapshots and summing them would invent a number.
 
-import type { TimelineItem } from "./build-timeline";
+/**
+ * The shape both surfaces have: a transcript timeline item and a live task
+ * message payload. Declared structurally so the chat panel can read its own
+ * realtime stream with the same functions the run transcript uses — the two
+ * must never disagree about what the figures mean.
+ */
+export interface ContextEventSource {
+  type: string;
+  input?: Record<string, unknown>;
+  created_at?: string;
+}
 
 export interface ContextUsage {
   usedTokens: number;
@@ -48,7 +58,7 @@ function readString(value: unknown): string | undefined {
  * compaction event when it says it is one — the phase is the claim, and the
  * metadata around it is optional.
  */
-export function readContextEvent(item: TimelineItem): ContextEvent | null {
+export function readContextEvent(item: ContextEventSource): ContextEvent | null {
   if (item.type !== "context") return null;
   const input = item.input ?? {};
   if (readString(input.phase) === "compacted") {
@@ -69,7 +79,7 @@ export function readContextEvent(item: TimelineItem): ContextEvent | null {
 }
 
 /** True for rows the timeline drops: a superseded occupancy snapshot. */
-export function isContextUsageItem(item: TimelineItem): boolean {
+export function isContextUsageItem(item: ContextEventSource): boolean {
   return readContextEvent(item)?.kind === "usage";
 }
 
@@ -77,7 +87,9 @@ export function isContextUsageItem(item: TimelineItem): boolean {
  * The run's current occupancy: the newest observation, or undefined when the
  * runtime reported none. Absence means "not reported" — never "empty".
  */
-export function latestContextUsage(items: readonly TimelineItem[]): ContextUsage | undefined {
+export function latestContextUsage(
+  items: readonly ContextEventSource[],
+): ContextUsage | undefined {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
     if (item === undefined) continue;
@@ -105,4 +117,27 @@ export function contextUsagePercent(usage: ContextUsage): number | undefined {
   if (pct <= 0) return 1;
   if (pct >= 100 && usage.usedTokens < limit) return 99;
   return Math.min(100, pct);
+}
+
+/** One entry of the run's context history, in stream order. */
+export type ContextObservation = { at?: string } & ContextEvent;
+
+/**
+ * Every context event the run reported, oldest first.
+ *
+ * The header shows only the newest occupancy, but the history is what answers
+ * "when did it fill up, and what did the compaction cost us" — so it is kept
+ * rather than collapsed. The daemon already throttles the stream to meaningful
+ * changes, so this is the list of changes, not a sample log.
+ */
+export function contextUsageHistory(
+  items: readonly ContextEventSource[],
+): ContextObservation[] {
+  const out: ContextObservation[] = [];
+  for (const item of items) {
+    const event = readContextEvent(item);
+    if (event === null) continue;
+    out.push({ ...event, at: item.created_at });
+  }
+  return out;
 }

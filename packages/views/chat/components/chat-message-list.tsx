@@ -26,6 +26,7 @@ import {
   ArrowUpRight,
   Copy,
   RotateCw,
+  Minimize2,
 } from "@multica/ui/icons";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
@@ -44,7 +45,13 @@ import type {
   TaskMessagePayload,
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { buildTimeline } from "../../common/task-transcript";
+import {
+  buildTimeline,
+  ContextUsageChip,
+  isContextUsageItem,
+  readContextEvent,
+} from "../../common/task-transcript";
+import { formatTokens } from "../../runtimes/utils";
 import { readCommandInput, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
@@ -674,8 +681,16 @@ function AssistantMessage({
   // Memoized on the cache array identity: mergeTaskMessagesBySeq preserves the
   // array reference when a duplicate event arrives, so this recomputes only
   // when a genuinely new message lands.
+  // Occupancy snapshots are state, not steps: only the newest one is true, so
+  // the chip reads them off the raw stream and they never become rows — which
+  // also keeps them out of the fold's step count. A compaction stays, because
+  // it happened at that point in the turn.
   const timeline: ChatTimelineItem[] = useMemo(
-    () => transformTimeline(buildTimeline(taskMessages ?? []), transformContent),
+    () =>
+      transformTimeline(
+        buildTimeline(taskMessages ?? []).filter((item) => !isContextUsageItem(item)),
+        transformContent,
+      ),
     [taskMessages, transformContent],
   );
 
@@ -716,6 +731,7 @@ function AssistantMessage({
       {timeline.length > 0 && (
         <TimelineView
           items={timeline}
+          contextItems={taskMessages}
           attachments={message?.attachments}
           phase={phase}
           isStreaming={!message}
@@ -1178,6 +1194,7 @@ function FailureBubble({
 
 function TimelineView({
   items,
+  contextItems,
   isStreaming,
   attachments,
   phase = "settled",
@@ -1185,6 +1202,8 @@ function TimelineView({
   sourceId,
 }: {
   items: ChatTimelineItem[];
+  /** Raw stream for the context chip: the occupancy snapshots `items` drops. */
+  contextItems?: readonly TaskMessagePayload[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
   phase?: "streaming" | "settled";
@@ -1200,6 +1219,7 @@ function TimelineView({
           <OuterProcessFold
             key="process"
             items={processItems}
+            contextItems={contextItems}
             isStreaming={false}
             attachments={attachments}
             phase="settled"
@@ -1237,6 +1257,10 @@ function TimelineView({
         <OuterProcessFold
           key="process"
           items={middle}
+          // While the turn streams, the status pill below the list already
+          // carries the live figure; a second identical chip on the fold would
+          // be the same number twice on one screen.
+          contextItems={phase === "settled" ? contextItems : undefined}
           isStreaming={!!isStreaming}
           attachments={attachments}
           phase={phase}
@@ -1260,12 +1284,14 @@ function TimelineView({
 
 function OuterProcessFold({
   items,
+  contextItems,
   isStreaming,
   attachments,
   phase = "settled",
   stepCount,
 }: {
   items: ChatTimelineItem[];
+  contextItems?: readonly TaskMessagePayload[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
   phase?: "streaming" | "settled";
@@ -1287,10 +1313,15 @@ function OuterProcessFold({
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
-        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
-      </CollapsibleTrigger>
+      <div className="flex items-center gap-2">
+        <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
+          {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
+        </CollapsibleTrigger>
+        {/* The turn's own context figure stays readable with the fold closed:
+            it describes the whole turn, not one of its steps. */}
+        <ContextUsageChip items={contextItems ?? []} />
+      </div>
       <CollapsibleContent>
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
           {items.map((item) =>
@@ -1348,9 +1379,35 @@ function ItemRow({ item }: { item: ChatTimelineItem }) {
       return <ThinkingRow item={item} />;
     case "error":
       return <ErrorRow item={item} />;
+    case "context":
+      return <ContextRow item={item} />;
     default:
       return null;
   }
+}
+
+/**
+ * A compaction, where it happened. The turn continues with an agent that has
+ * lost detail it had a moment ago, and this row is the only thing on the
+ * surface that says so. Occupancy snapshots never reach here — they are
+ * filtered upstream and read by the chip instead.
+ */
+function ContextRow({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("agents");
+  const event = readContextEvent(item);
+  if (event?.kind !== "compaction") return null;
+  return (
+    <div className="flex items-center gap-1.5 px-1 py-0.5 text-caption text-muted-foreground">
+      <Minimize2 className="size-3 shrink-0" />
+      <span className="truncate">
+        {event.preTokens !== undefined
+          ? t(($) => $.transcript.context_compacted_before, {
+              tokens: formatTokens(event.preTokens),
+            })
+          : t(($) => $.transcript.context_compacted)}
+      </span>
+    </div>
+  );
 }
 
 function ToolCallRow({ item }: { item: ChatTimelineItem }) {

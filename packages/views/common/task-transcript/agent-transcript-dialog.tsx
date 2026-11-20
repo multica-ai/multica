@@ -27,7 +27,6 @@ import {
   Info,
   Coins,
   GitBranch,
-  Gauge,
   Minimize2,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
@@ -83,12 +82,8 @@ import {
 import { buildRunOutcome } from "./run-outcome";
 import { RunTimeline } from "./run-timeline";
 import { ContextReceiptButton } from "./context-receipt";
-import {
-  contextUsagePercent,
-  latestContextUsage,
-  readContextEvent,
-  type ContextUsage,
-} from "./context-usage";
+import { readContextEvent } from "./context-usage";
+import { ContextUsageChip } from "./context-usage-chip";
 import {
   base64ByteLength,
   readImageResult,
@@ -487,11 +482,6 @@ export function AgentTranscriptDialog({
   // One step per tool call, with its result folded in — see build-steps.ts for
   // why the pairing is positional.
   const steps = useMemo(() => buildSteps(items), [items]);
-
-  // How full the window is right now. A snapshot, so it is read off the newest
-  // observation rather than accumulated — and absent entirely for a runtime
-  // that reports none, where the chip does not render at all.
-  const contextUsage = useMemo(() => latestContextUsage(items), [items]);
 
   // A facet reads as what its rows look like: the glyph the rows carry, and the
   // name the rows print. The first step of a kind stands in for the glyph. The
@@ -946,7 +936,7 @@ export function AgentTranscriptDialog({
             {/* How much of the model's context window this run occupies —
                 the figure that explains a compaction, and the one a reader
                 checks before asking for more work in the same session. */}
-            {contextUsage && <ContextUsageChip usage={contextUsage} />}
+            <ContextUsageChip items={items} />
 
             {usage && (
               <span
@@ -1440,33 +1430,6 @@ interface TranscriptRowProps {
   expanded: boolean;
   onToggleGroup: (seq: number) => void;
   onSelect: (seq: number) => void;
-}
-
-/**
- * Context occupancy, as one chip.
- *
- * The percentage is the figure people act on, so it leads; the absolute pair
- * behind it is what makes the percentage checkable. Without a known window
- * there is no percentage at all — a share of a guessed window would read as a
- * measurement.
- */
-function ContextUsageChip({ usage }: { usage: ContextUsage }) {
-  const { t } = useT("agents");
-  const percent = contextUsagePercent(usage);
-  return (
-    <span
-      className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-micro tabular-nums"
-      title={t(($) => $.transcript.context_chip_title)}
-    >
-      <Gauge aria-hidden="true" className="h-3 w-3 text-muted-foreground" />
-      {percent !== undefined && <span className="font-medium">{percent}%</span>}
-      <span className="text-muted-foreground">
-        {usage.limitTokens !== undefined
-          ? `${formatTokens(usage.usedTokens)}/${formatTokens(usage.limitTokens)}`
-          : formatTokens(usage.usedTokens)}
-      </span>
-    </span>
-  );
 }
 
 function TranscriptRow(props: TranscriptRowProps) {

@@ -5,6 +5,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { Attachment, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
+import enAgents from "../../locales/en/agents.json";
 import enChat from "../../locales/en/chat.json";
 import zhHansAgents from "../../locales/zh-Hans/agents.json";
 import zhHansChat from "../../locales/zh-Hans/chat.json";
@@ -50,7 +51,9 @@ vi.mock("react-virtuoso", () => ({
 
 import { ChatMessageList } from "./chat-message-list";
 
-const TEST_RESOURCES = { en: { chat: enChat } };
+// The context chip and the compaction row live in the `agents` namespace: the
+// transcript owns that wording and the chat panel reuses it verbatim.
+const TEST_RESOURCES = { en: { chat: enChat, agents: enAgents } };
 const TASK_ID = "6af44cbe-80ab-4dfe-b07d-bd3cfd588f4d";
 
 function taskMsg(
@@ -1129,5 +1132,51 @@ describe("ChatMessageList onboarding starter cards", () => {
       await screen.findByRole("button", { name: "Get a board up in minutes" }),
     ).toBeEnabled();
     expect(screen.getByRole("button", { name: "Later chip" })).toBeEnabled();
+  });
+});
+
+describe("ChatMessageList context window", () => {
+  const CONTEXT_MESSAGES: TaskMessagePayload[] = [
+    taskMsg(0, "text", { content: "Looking into it. " }),
+    taskMsg(1, "context", { input: { used_tokens: 10_000, limit_tokens: 200_000 } }),
+    taskMsg(2, "tool_use", { tool: "Bash", input: { command: "go test ./..." } }),
+    taskMsg(3, "tool_result", { tool: "Bash", output: "ok" }),
+    taskMsg(4, "context", { input: { phase: "compacted", pre_tokens: 180_000 } }),
+    taskMsg(5, "context", { input: { used_tokens: 60_000, limit_tokens: 200_000 } }),
+  ];
+
+  function renderWithContext() {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), CONTEXT_MESSAGES);
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability={undefined}
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it("shows the turn's current occupancy and the compaction that happened", async () => {
+    renderWithContext();
+
+    // Newest snapshot, not the first and not their sum.
+    expect(await screen.findAllByText("30%")).not.toHaveLength(0);
+    expect(screen.getAllByText("60K/200K")).not.toHaveLength(0);
+    expect(
+      screen.getAllByText("Compacted the context window (180K before)"),
+    ).not.toHaveLength(0);
+  });
+
+  it("does not count occupancy snapshots as steps of the turn", async () => {
+    renderWithContext();
+
+    // tool_use + tool_result + the compaction — the two snapshots are state,
+    // not steps, so they never inflate this count or render an empty row.
+    expect(await screen.findByText("3 steps")).toBeInTheDocument();
   });
 });

@@ -618,13 +618,11 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		if limit == 0 {
 			limit = ClaudeContextWindowTokens(content.Model)
 		}
-		trySend(ch, Message{Type: MessageContext, Context: &ContextInfo{
-			UsedTokens: content.Usage.InputTokens +
-				content.Usage.CacheReadInputTokens +
+		sendContextUsage(ch, content.Model,
+			content.Usage.InputTokens+
+				content.Usage.CacheReadInputTokens+
 				content.Usage.CacheCreationInputTokens,
-			LimitTokens: limit,
-			Model:       content.Model,
-		}})
+			limit)
 	}
 
 	for _, block := range content.Content {

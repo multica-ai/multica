@@ -561,10 +561,20 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 				if separateReasoning && t.Reasoning > 0 {
 					usage.OutputTokens += t.Reasoning
 				}
+				cacheRead, cacheWrite := int64(0), int64(0)
 				if t.Cache != nil {
-					usage.CacheReadTokens += t.Cache.Read
-					usage.CacheWriteTokens += t.Cache.Write
+					cacheRead, cacheWrite = t.Cache.Read, t.Cache.Write
+					usage.CacheReadTokens += cacheRead
+					usage.CacheWriteTokens += cacheWrite
 				}
+				// One step is one model request, so its input plus both cache
+				// classes is the window's occupancy at that point. The totals
+				// above accumulate across steps and are a different quantity.
+				// OpenCode reports no window, so the figure goes out without one.
+				// The event carries no model id, and this scanner is model-
+				// agnostic by design; the figure is about the window, not the
+				// model, so it goes out unlabelled.
+				sendContextUsage(ch, "", t.Input+cacheRead+cacheWrite, 0)
 			}
 			if stepReportedUsage(&event.Part) {
 				stepProducedOutput = true

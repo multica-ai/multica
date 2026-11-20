@@ -447,6 +447,17 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 		u.CacheReadTokens += content.Usage.CacheReadInputTokens
 		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
 		usage[content.Model] = u
+
+		// Same once-per-response guard as the usage above, for the same
+		// reason: every block of one response shares the prompt that produced
+		// it. CodeBuddy reports no context window of its own, and its models
+		// are not Claude's, so the figure goes out without a limit rather
+		// than against a borrowed one.
+		sendContextUsage(ch, content.Model,
+			content.Usage.InputTokens+
+				content.Usage.CacheReadInputTokens+
+				content.Usage.CacheCreationInputTokens,
+			0)
 	}
 
 	for _, block := range content.Content {

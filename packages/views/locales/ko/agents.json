@@ -797,6 +797,7 @@
     "kind_error": "오류",
     "kind_context": "컨텍스트",
     "context_chip_title": "이 실행이 사용 중인 컨텍스트 윈도의 비율",
+    "context_history_title": "컨텍스트 기록",
     "context_compacted": "컨텍스트 윈도를 압축했습니다",
     "context_compacted_before": "컨텍스트 윈도를 압축했습니다(압축 전 {{tokens}})",
     "group_calls_other": "호출 {{count}}회",

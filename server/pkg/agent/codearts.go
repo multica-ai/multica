@@ -441,10 +441,15 @@ func (b *codeartsBackend) processEvents(r io.Reader, ch chan<- Message) codeArts
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
 				usage.OutputTokens += t.Output
+				cacheRead, cacheWrite := int64(0), int64(0)
 				if t.Cache != nil {
-					usage.CacheReadTokens += t.Cache.Read
-					usage.CacheWriteTokens += t.Cache.Write
+					cacheRead, cacheWrite = t.Cache.Read, t.Cache.Write
+					usage.CacheReadTokens += cacheRead
+					usage.CacheWriteTokens += cacheWrite
 				}
+				// One step is one model request, so its prompt — input plus
+				// both cache classes — is the window's occupancy at that point.
+				sendContextUsage(ch, "", t.Input+cacheRead+cacheWrite, 0)
 			}
 			if codeArtsStepReportedUsage(&event.Part) {
 				stepProducedOutput = true

@@ -960,6 +960,7 @@
     "kind_error": "Error",
     "kind_context": "Context",
     "context_chip_title": "How much of the model's context window this run occupies",
+    "context_history_title": "Context history",
     "context_compacted": "Compacted the context window",
     "context_compacted_before": "Compacted the context window ({{tokens}} before)",
     "group_calls_one": "{{count}} call",

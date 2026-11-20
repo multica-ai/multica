@@ -5,6 +5,7 @@ import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import type { AgentAvailability } from "@multica/core/agents";
 import type { ChatPendingTask, TaskMessagePayload } from "@multica/core/types";
+import { ContextUsageChip } from "../../common/task-transcript";
 import { formatElapsedSecs } from "../lib/format";
 import { useT } from "../../i18n";
 
@@ -223,6 +224,11 @@ export function TaskStatusPill({
         </ShimmerText>
         <span className="opacity-70 tabular-nums"> · {formatElapsedSecs(elapsedSecs)}</span>
       </span>
+      {/* Context occupancy, refreshed by the same live stream that drives the
+          stage label. It is the figure that decides whether this turn is worth
+          continuing in the same session, so it belongs where the turn is
+          being watched. */}
+      <ContextUsageChip items={taskMessages} />
     </div>
   );
 }

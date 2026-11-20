@@ -797,6 +797,7 @@
     "kind_error": "エラー",
     "kind_context": "コンテキスト",
     "context_chip_title": "この実行が使用しているコンテキストウィンドウの割合",
+    "context_history_title": "コンテキストの履歴",
     "context_compacted": "コンテキストウィンドウを圧縮しました",
     "context_compacted_before": "コンテキストウィンドウを圧縮しました（圧縮前 {{tokens}}）",
     "group_calls_other": "{{count}} 回の呼び出し",

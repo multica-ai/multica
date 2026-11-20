@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineItem } from "./build-timeline";
 import {
+  contextUsageHistory,
   contextUsagePercent,
   isContextUsageItem,
   latestContextUsage,
@@ -10,6 +11,10 @@ import {
 
 function contextItem(seq: number, input: Record<string, unknown>): TimelineItem {
   return { seq, type: "context", input, content: "Context 1/2" };
+}
+
+function textItem(seq: number): TimelineItem {
+  return { seq, type: "text", content: "hi" };
 }
 
 describe("readContextEvent", () => {
@@ -47,7 +52,7 @@ describe("readContextEvent", () => {
   });
 
   it("ignores other event types and payloads with no usable figure", () => {
-    expect(readContextEvent({ seq: 1, type: "text", content: "hi" })).toBeNull();
+    expect(readContextEvent(textItem(1))).toBeNull();
     expect(readContextEvent(contextItem(1, {}))).toBeNull();
     expect(readContextEvent(contextItem(1, { used_tokens: "many" }))).toBeNull();
   });
@@ -76,7 +81,7 @@ describe("latestContextUsage", () => {
   });
 
   it("is undefined when the runtime reported nothing", () => {
-    expect(latestContextUsage([{ seq: 1, type: "text", content: "hi" }])).toBeUndefined();
+    expect(latestContextUsage([textItem(1)])).toBeUndefined();
   });
 });
 
@@ -100,6 +105,27 @@ describe("isContextUsageItem", () => {
   it("separates superseded snapshots from events worth a row", () => {
     expect(isContextUsageItem(contextItem(1, { used_tokens: 1_000 }))).toBe(true);
     expect(isContextUsageItem(contextItem(2, { phase: "compacted" }))).toBe(false);
-    expect(isContextUsageItem({ seq: 3, type: "text", content: "hi" })).toBe(false);
+    expect(isContextUsageItem(textItem(3))).toBe(false);
+  });
+});
+
+describe("contextUsageHistory", () => {
+  it("keeps every reported change, oldest first, with its time", () => {
+    const items: TimelineItem[] = [
+      { ...contextItem(1, { used_tokens: 10_000, limit_tokens: 200_000 }), created_at: "2026-11-20T01:00:00Z" },
+      textItem(2),
+      { ...contextItem(3, { phase: "compacted", pre_tokens: 180_000 }), created_at: "2026-11-20T01:10:00Z" },
+      { ...contextItem(4, { used_tokens: 40_000, limit_tokens: 200_000 }), created_at: "2026-11-20T01:11:00Z" },
+    ];
+
+    expect(contextUsageHistory(items)).toEqual([
+      { kind: "usage", usedTokens: 10_000, limitTokens: 200_000, model: undefined, at: "2026-11-20T01:00:00Z" },
+      { kind: "compaction", preTokens: 180_000, trigger: undefined, at: "2026-11-20T01:10:00Z" },
+      { kind: "usage", usedTokens: 40_000, limitTokens: 200_000, model: undefined, at: "2026-11-20T01:11:00Z" },
+    ]);
+  });
+
+  it("is empty for a run whose runtime reported nothing", () => {
+    expect(contextUsageHistory([textItem(1)])).toEqual([]);
   });
 });
