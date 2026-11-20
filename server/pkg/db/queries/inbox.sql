@@ -61,11 +61,11 @@ WITH eligible_archived AS MATERIALIZED (
       AND i.recipient_id = $3
       AND i.archived = true
       -- MUL-8472: private projects the caller cannot see.
-      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
-          SELECT 1 FROM issue hidden_issue
-          WHERE hidden_issue.id = i.issue_id
-            AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])
-      ))
+      -- A row without an issue counts as outside any project, which a guest's
+      -- hidden set holds (projectaccess.NoProject), as ListInboxItems does.
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(
+          (SELECT hidden_issue.project_id FROM issue hidden_issue WHERE hidden_issue.id = i.issue_id),
+          '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1
           FROM inbox_item active
@@ -147,8 +147,11 @@ LEFT JOIN LATERAL (
     ORDER BY s.snoozed_until DESC
     LIMIT 1
 ) AS snoozed ON true
+-- A role this build does not know is no membership (see
+-- GetMemberByUserAndWorkspace), so it is sent nothing.
 WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
+      AND role IN ('owner', 'admin', 'member', 'guest')
 )) OR ($2::text = 'agent' AND EXISTS (
     SELECT 1 FROM agent WHERE workspace_id = $1 AND id = $3
 )))
@@ -266,11 +269,10 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')
   AND i.archived = false
   AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
   -- MUL-8472: private projects the caller cannot see.
-  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
-      SELECT 1 FROM issue hidden_issue
-      WHERE hidden_issue.id = i.issue_id
-        AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])
-  ));
+  -- A row without an issue counts as outside any project (see ListInboxItems).
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(
+      (SELECT hidden_issue.project_id FROM issue hidden_issue WHERE hidden_issue.id = i.issue_id),
+      '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])));
 
 -- name: CountUnreadInboxByWorkspace :many
 -- Per-workspace unread inbox counts for a recipient member, matching the
@@ -282,14 +284,15 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')
 -- the switcher dot for a workspace whose inbox the user sees as empty
 -- (MUL-3695). Items without an issue group on their own id. The
 -- member join keeps counts scoped to workspaces the user still belongs to,
--- so a stale item left behind in a workspace the user has since left cannot
--- light the dot.
+-- so a stale item left behind in a workspace the user has since left, or holds
+-- a role this build does not know in, cannot light the dot.
 SELECT newest.workspace_id, count(*) AS count
 FROM (
     SELECT DISTINCT ON (i.workspace_id, COALESCE(i.issue_id, i.id))
         i.workspace_id, i.read
     FROM inbox_item i
     JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+        AND m.role IN ('owner', 'admin', 'member', 'guest')
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
@@ -307,6 +310,13 @@ FROM (
                 WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
             )
       )
+      -- MUL-9420: a guest counts only issues in its own projects, so nothing
+      -- outside a project and nothing in a project it is not a member of.
+      AND (m.role <> 'guest' OR EXISTS (
+          SELECT 1 FROM issue guest_issue
+          JOIN project_member gpm ON gpm.project_id = guest_issue.project_id AND gpm.user_id = i.recipient_id
+          WHERE guest_issue.id = i.issue_id
+      ))
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
