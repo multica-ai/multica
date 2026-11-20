@@ -1,14 +1,14 @@
 ---
 title: メンバーとロール
-description: メンバーを招待し、owner、admin、member の 3 つのロールでワークスペースの権限を管理します。
+description: メンバーやゲストを招待し、それぞれに適したアクセス権を設定します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { RolesDemo } from "@/components/demos/roles-demo";
 
-[ワークスペース](/workspaces)に参加した人は全員メンバーで、各メンバーは `owner`、`admin`、`member` のいずれか 1 つのロールを持ちます。ロールが制御するのはワークスペース設定とチーム管理だけです。タスクの作成やコメントの投稿といった日常のコラボレーションは、すべてのメンバーに開かれています。ワークスペースには[ゲスト](#ゲスト)を追加することもできます。ゲストには共有されたプロジェクトだけが表示されます。
+[ワークスペース](/workspaces)の `owner`、`admin`、`member` はタスクの作成とコメントの投稿ができます。設定やメンバーを管理する権限はロールによって異なります。[ゲスト](#ゲスト)は共有されたプロジェクトでのみ、タスクの閲覧とコメントの投稿ができます。
 
-## 3 つのロール
+## メンバーの管理権限 [#3-つのロール]
 
 | 操作 | owner | admin | member |
 |---|:---:|:---:|:---:|
@@ -24,7 +24,7 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 <RolesDemo />
 
 <Callout type="info">
-ロールは、誰がエージェントを実行できるかを決めません。各エージェントには独自のアクセス範囲（Access）があり、`owner` や `admin` もそれを迂回して、許可されていないエージェントを実行することはできません。詳しくは[エージェント](/agents#権限と-access)を参照してください。
+ゲストはエージェントを実行できません。各エージェントには独自のアクセス範囲（Access）があり、`owner` や `admin` もそれを迂回して、許可されていないエージェントを実行することはできません。詳しくは[エージェント](/agents#権限と-access)を参照してください。
 </Callout>
 
 <Callout type="info">

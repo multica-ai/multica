@@ -1,14 +1,14 @@
 ---
 title: Members and roles
-description: Invite members and manage workspace permissions with the owner, admin, and member roles.
+description: Invite members and guests and choose the right level of access for each person.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { RolesDemo } from "@/components/demos/roles-demo";
 
-Everyone who joins a [workspace](/workspaces) is a member, and each member has one role: `owner`, `admin`, or `member`. Roles only control workspace settings and team management; day-to-day collaboration — creating issues, writing comments — is open to all members. A workspace can also have [guests](#guests), who see only the projects shared with them.
+In a [workspace](/workspaces), `owner`, `admin`, and `member` can create issues and post comments. Their permissions differ when managing settings and people. A [guest](#guests) can read and comment on issues only in projects shared with them.
 
-## The three roles
+## Permissions for owners, admins, and members [#the-three-roles]
 
 | Action | owner | admin | member |
 |---|:---:|:---:|:---:|
@@ -24,7 +24,7 @@ A workspace must always keep at least one `owner`: the last `owner` cannot be de
 <RolesDemo />
 
 <Callout type="info">
-Roles do not decide who can run an agent. Each agent has its own Access scope, and `owner` and `admin` cannot bypass it to run agents they were not granted. See [Agents](/agents#permissions-and-access).
+Guests cannot run agents. Each agent has its own Access scope, and `owner` and `admin` cannot bypass it to run agents they were not granted. See [Agents](/agents#permissions-and-access).
 </Callout>
 
 <Callout type="info">
