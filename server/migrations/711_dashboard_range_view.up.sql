@@ -16,7 +16,7 @@
 --   truncated_count          read past the limit, cut to the limit under enforce
 --
 -- The last_* columns describe the latest read. The scope unique index is built
--- concurrently in 709. No foreign keys (repo rule): workspace deletion removes
+-- concurrently in 712. No foreign keys (repo rule): workspace deletion removes
 -- these rows explicitly.
 CREATE TABLE IF NOT EXISTS dashboard_range_view (
     workspace_id UUID NOT NULL,

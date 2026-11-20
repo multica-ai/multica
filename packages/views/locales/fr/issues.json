@@ -1130,11 +1130,10 @@
     "assignee": {
       "trigger_unassigned": "Non assigné",
       "search_placeholder": "Assigner à...",
+      "recent_group": "Récents",
       "members_group": "Membres",
       "agents_group": "Agents",
-      "squads_group": "Squads",
-      "agent_runtime_required": "Associez un runtime avant d'assigner du travail à cet agent",
-      "squad_runtime_required": "Associez un runtime au chef de ce squad avant d'assigner du travail"
+      "squads_group": "Squads"
     },
     "start_date": {
       "trigger_label": "Date de début",

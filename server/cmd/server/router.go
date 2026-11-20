@@ -485,6 +485,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.Features = entitlementClient
 		h.AutopilotService.Entitlements = entitlementClient
 		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
+		storageQuota := service.StorageQuota{
+			Sums:         queries,
+			Entitlements: entitlementClient,
+			Overages:     service.EntitlementOverages{Queries: queries},
+		}
+		if opts.BusinessMetrics != nil {
+			storageQuota.Metrics = opts.BusinessMetrics
+		}
+		engine.SetMediaStoredHook(func(ctx context.Context, workspaceID pgtype.UUID) {
+			storageQuota.RecordStored(ctx, workspaceID, service.StorageSourceChannel)
+		})
 	}
 	// Cloud Runtime and strict seat capacity are one managed deployment. Reuse
 	// the same base URL so Billing cannot be readable while invitation writes
@@ -1381,6 +1392,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						slog.Error("composio: service init failed; composio integration disabled", "error", serr)
 					} else {
 						h.Composio = svc
+						// Team Apps accounts are a paid feature (MUL-9491): the
+						// callback re-checks it right before writing an account.
+						svc.SetTeamConnectGate(h.TeamAppConnectGate)
 						// Connected Apps v2 (MUL-8516): runs reach their apps
 						// through the Multica gateway, which holds the Composio
 						// key and applies account rules and confirmations.
@@ -1847,6 +1861,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// The plan's member limit for upgrade UI; every admission
 					// is checked on the server regardless.
 					r.Get("/member-limit", h.GetMemberLimit)
+					r.Get("/storage-usage", h.GetStorageUsage)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					// Listing GitHub installations is member-visible so the
@@ -2157,6 +2172,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/plan-changes/preview", h.PreviewCloudWorkspaceSubscriptionPlanChange)
 				r.Post("/plan-changes", h.ChangeCloudWorkspaceSubscriptionPlan)
 				r.Post("/portal-sessions", h.CreateCloudWorkspaceSubscriptionPortal)
+				r.Post("/autopilot-addon/checkout-sessions", h.CreateCloudWorkspaceAutopilotAddonCheckout)
+				r.Get("/autopilot-addon/checkout-sessions/{sessionId}", h.GetCloudWorkspaceAutopilotAddonCheckout)
 			})
 		})
 
@@ -2605,7 +2622,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/rate-limits", h.GetRuntimeRateLimits)
 					r.Get("/activity", h.GetRuntimeTaskActivity)
 					r.Post("/update", h.InitiateUpdate)
+					r.Get("/update", h.GetActiveUpdate)
 					r.Get("/update/{updateId}", h.GetUpdate)
+					r.Post("/update/{updateId}/cancel", h.CancelUpdate)
 					r.Post("/models", h.InitiateListModels)
 					r.Get("/models/{requestId}", h.GetModelListRequest)
 					r.Post("/local-skills", h.InitiateListLocalSkills)

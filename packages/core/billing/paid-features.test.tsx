@@ -140,6 +140,60 @@ describe("WorkspaceFeaturesSchema", () => {
       limits: NO_LIMITS,
     });
     expect(WorkspaceFeaturesSchema.parse({ features: [] })).toEqual({ features: {}, limits: NO_LIMITS });
+    expect(WorkspaceFeaturesSchema.parse({ features: null })).toEqual({ features: {}, limits: NO_LIMITS });
     expect(WorkspaceFeaturesSchema.parse({})).toEqual({ features: {}, limits: NO_LIMITS });
   });
+
+  it("reads the Business access and app features, and one malformed entry does not drop the others", () => {
+    expect(
+      WorkspaceFeaturesSchema.parse({
+        features: {
+          agent_invocation_members: { state: "locked" },
+          runtime_member_sharing: { state: "available" },
+          team_app_accounts: { state: "locked" },
+        },
+      }),
+    ).toEqual({
+      features: {
+        agent_invocation_members: "locked",
+        runtime_member_sharing: "available",
+        team_app_accounts: "locked",
+      },
+      limits: NO_LIMITS,
+    });
+    expect(
+      WorkspaceFeaturesSchema.parse({
+        features: {
+          agent_invocation_members: { state: "trialing" },
+          runtime_member_sharing: null,
+          team_app_accounts: { state: "locked" },
+          private_projects: { state: 1 },
+        },
+      }),
+    ).toEqual({
+      features: {
+        agent_invocation_members: "available",
+        runtime_member_sharing: "available",
+        team_app_accounts: "locked",
+        private_projects: "available",
+      },
+      limits: NO_LIMITS,
+    });
+  });
+});
+
+describe("usePaidFeatureAccess for the Business access and app features", () => {
+  it.each(["agent_invocation_members", "runtime_member_sharing", "team_app_accounts"] as const)(
+    "resolves %s independently of the other features",
+    async (feature) => {
+      const { wrapper } = setup(async () => ({ features: { [feature]: "locked", private_projects: "available" }, limits: NO_LIMITS }));
+      const existing = renderHook(() => usePaidFeatureAccess("ws-1", feature, { hasExistingConfig: true }), { wrapper });
+      const fresh = renderHook(() => usePaidFeatureAccess("ws-1", feature, { hasExistingConfig: false }), { wrapper });
+      const other = renderHook(() => usePaidFeatureAccess("ws-1", "private_projects", { hasExistingConfig: false }), { wrapper });
+      await waitFor(() => expect(existing.result.current.state).toBe("read_only"));
+      expect(existing.result.current).toMatchObject({ canAdd: false, canReduce: true });
+      await waitFor(() => expect(fresh.result.current.state).toBe("unavailable"));
+      await waitFor(() => expect(other.result.current.state).toBe("available"));
+    },
+  );
 });

@@ -5,6 +5,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { Info } from "@multica/ui/icons";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useIsGuest } from "@multica/core/permissions";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
@@ -89,7 +90,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
   // status chips (uploading / failed / interrupted).
   // `gate` widens the editor gate with coordinator-owned placeholders, so a
   // composer reopened over a still-in-flight upload cannot send past it.
-  const { attachments: pendingAttachments, handleUpload, gate } =
+  const { attachments: pendingAttachments, handleUpload, gate, storageRefusal, dismissStorageRefusal } =
     useCommentUploads(draftKey, { issueId }, uploadGate, editorRef);
   const hasAttachments = useMemo(
     () => pendingAttachments.some((a) => contentReferencesAttachment(content, a)) || gate.uploading,
@@ -348,6 +349,9 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
       <VoiceHud voice={voice} />
       <VoiceSetupDialog voice={voice} />
       <VoiceErrorRow voice={voice} className="mx-2 mb-1" />
+      {storageRefusal && (
+        <StorageLimitNotice refusal={storageRefusal} onDismiss={dismissStorageRefusal} className="mx-2 mb-1" />
+      )}
       <ComposerToolbar
         className="px-1.5 pb-1"
         voice={voice}

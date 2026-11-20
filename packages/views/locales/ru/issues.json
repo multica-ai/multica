@@ -1239,11 +1239,10 @@
     "assignee": {
       "trigger_unassigned": "Не назначено",
       "search_placeholder": "Назначить на...",
+      "recent_group": "Недавние",
       "members_group": "Участники",
       "agents_group": "Агенты",
-      "squads_group": "Команды",
-      "agent_runtime_required": "Привяжите среду выполнения, прежде чем назначать работу этому агенту",
-      "squad_runtime_required": "Привяжите среду выполнения к лидеру этой команды, прежде чем назначать работу"
+      "squads_group": "Команды"
     },
     "start_date": {
       "trigger_label": "Дата начала",

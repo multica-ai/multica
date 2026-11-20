@@ -991,6 +991,17 @@ func (h *Handler) workspaceMember(w http.ResponseWriter, r *http.Request, worksp
 	return h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
 }
 
+// cacheMembership records member in the membership cache, which callers
+// read as "a member who is not a guest": the cache holds no role, and a hit
+// skips the guest allowlist (MUL-9420). A guest is therefore never cached and
+// is looked up on every request.
+func (h *Handler) cacheMembership(ctx context.Context, member db.Member) {
+	if projectaccess.IsGuestRole(member.Role) {
+		return
+	}
+	h.MembershipCache.Set(ctx, uuidToString(member.UserID), uuidToString(member.WorkspaceID))
+}
+
 func roleAllowed(role string, roles ...string) bool {
 	for _, candidate := range roles {
 		if role == candidate {
@@ -1327,6 +1338,11 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 	// An item on an issue in a private project the caller cannot see (never
 	// granted, or revoked since it was delivered) answers like a missing one.
 	if !h.requireIssueIDVisible(w, r, workspaceID, item.IssueID, http.StatusNotFound, "inbox item not found") {
+		return db.InboxItem{}, false
+	}
+	// An item without an issue (a doc comment) is outside any project, which
+	// a guest cannot see even when it was delivered before the demotion.
+	if !item.IssueID.Valid && !h.requireProjectVisible(w, r, workspaceID, pgtype.UUID{}, http.StatusNotFound, "inbox item not found") {
 		return db.InboxItem{}, false
 	}
 	return item, true

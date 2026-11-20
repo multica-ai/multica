@@ -608,7 +608,7 @@ function BestMatchGroups({
         trailing={<RowHint>{t(($) => $.types.squad)}</RowHint>}
       />
     );
-    if (best.entry.runnable && target && subject) {
+    if (best.entry.assignable && target && subject) {
       actions.push({
         id: "assign",
         label: t(($) => $.best.assign, { subject, name: squad.name }),

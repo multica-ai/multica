@@ -18,6 +18,12 @@ import {
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  FEATURE_LOCKED_CODE,
+  refreshFeaturesOnLockedError,
+  usePaidFeatureAccess,
+  workspaceFeatureKeys,
+} from "@multica/core/billing";
+import {
   appCatalogOptions,
   appsOverviewOptions,
   connectedAppsKeys,
@@ -46,22 +52,30 @@ type AccountTarget = { scope: AppAccountScope; connection: AppConnection; name: 
  * Which agents use each account is set on the agent. */
 export function AppsSettings() {
   const { t } = useT("settings");
+  const { t: tBilling } = useT("billing");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const navigation = useNavigation();
   const overview = useQuery(appsOverviewOptions(wsId));
   const catalog = useQuery(appCatalogOptions(wsId));
   const restore = useRestoreAppAccess();
+  // Without the paid feature existing team accounts keep working and can be
+  // reauthorized or disconnected; only a team account for a new app is refused.
+  const teamAccess = usePaidFeatureAccess(wsId, "team_app_accounts", {
+    hasExistingConfig: (overview.data?.team ?? []).some((c) => c.status !== "revoked"),
+  });
 
   const [addingScope, setAddingScope] = useState<AppAccountScope | null>(null);
   const [detail, setDetail] = useState<AccountTarget | null>(null);
   const [disconnecting, setDisconnecting] = useState<AccountTarget | null>(null);
 
   // The hosted connect flow returns with `?connected=<slug>` or
-  // `?error=composio_connect_failed`. Consume it once, then drop the params so
-  // a refresh does not toast again.
+  // `?error=composio_connect_failed`, plus `reason=feature_locked` when the
+  // plan refused a team account (older servers send no reason). Consume it
+  // once, then drop the params so a refresh does not toast again.
   const connectedParam = navigation.searchParams.get("connected");
   const errorParam = navigation.searchParams.get("error");
+  const reasonParam = navigation.searchParams.get("reason");
   const consumed = useRef<string | null>(null);
   useEffect(() => {
     const key = connectedParam
@@ -74,12 +88,17 @@ export function AppsSettings() {
     if (connectedParam) {
       toast.success(t(($) => $.connected_apps.toast_connected));
       void qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) });
+    } else if (reasonParam === FEATURE_LOCKED_CODE) {
+      // This tab's view of the plan was stale: refetch so the page switches to
+      // its locked state.
+      toast.error(tBilling(($) => $.paid_feature.locked_error));
+      void qc.invalidateQueries({ queryKey: workspaceFeatureKeys.all(wsId) });
     } else {
       toast.error(t(($) => $.connected_apps.toast_connect_failed));
     }
     const params = new URLSearchParams(navigation.searchParams);
     params.set("tab", "apps");
-    for (const k of ["integration", "connected", "error", "scope"]) params.delete(k);
+    for (const k of ["integration", "connected", "error", "reason", "scope"]) params.delete(k);
     navigation.replace(`${navigation.pathname}?${params.toString()}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectedParam, errorParam]);
@@ -199,6 +218,8 @@ export function AppsSettings() {
           catalog={catalog.data?.apps ?? []}
           catalogLoading={catalog.isLoading}
           catalogError={catalog.isError}
+          teamAccess={teamAccess}
+          onConnectError={(error) => refreshFeaturesOnLockedError(qc, wsId, error)}
         />
       )}
       {detail && (

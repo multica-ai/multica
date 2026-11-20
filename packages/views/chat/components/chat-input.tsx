@@ -32,6 +32,7 @@ import { escapeMarkdownLabel } from "../../editor/utils/escape-markdown-label";
 import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { useT } from "../../i18n";
 import {
   useComposerVoice,
@@ -366,6 +367,8 @@ export function ChatInput({
     attachments: draftAttachments,
     handleUpload,
     gate,
+    storageRefusal,
+    dismissStorageRefusal,
   } = useCoordinatedUploads(uploadBinding, storeUploads, {}, uploadGate, editorRef, {
     resolveUploadTarget: () => makeUploadBinding(editorDraftKeyRef.current),
     liveRegistryKey: `chat:${loadedDraftKey}`,
@@ -895,6 +898,13 @@ export function ChatInput({
         <VoiceHud voice={voice} />
         <VoiceSetupDialog voice={voice} />
         <VoiceErrorRow voice={voice} className="mx-2 mb-1" />
+        {storageRefusal && (
+          <StorageLimitNotice
+            refusal={storageRefusal}
+            onDismiss={dismissStorageRefusal}
+            className="mx-2 mb-1"
+          />
+        )}
         {voice.showStrip && (
           <div className="absolute inset-x-1.5 bottom-1 flex items-center">
             <VoiceStrip voice={voice} />

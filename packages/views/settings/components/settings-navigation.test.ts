@@ -67,6 +67,15 @@ describe("settings location", () => {
     },
   );
 
+  it("lands a team connect refused by the plan on Connected apps", () => {
+    expect(
+      resolve("tab=apps&error=composio_connect_failed&reason=feature_locked&scope=team"),
+    ).toEqual({ tab: "apps", section: null, integration: null });
+    expect(
+      resolve("tab=integrations&error=composio_connect_failed&reason=feature_locked").tab,
+    ).toBe("apps");
+  });
+
   it("passes current pages and anchors through untouched", () => {
     expect(resolve("tab=code&section=pr-sidebar")).toEqual({
       tab: "code",

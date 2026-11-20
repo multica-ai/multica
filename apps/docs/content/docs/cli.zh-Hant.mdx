@@ -283,7 +283,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-env` 系列只在 `agent create` 中可用。之後修改用 `agent env set`，它整體替換原有變數，值寫成 `****` 的鍵保留原值。
 - `agent update --mcp-config null` 清除 MCP 配置。
 - `--custom-args` 是 JSON 陣列，排在啟動引數的最後。選模型用 `--model`，部分工具會拒絕出現在自定義引數裡的 `--model`。
-- 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。
+- 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。在 Multica Cloud 上，Business 包含成員名單。Free 和 Pro 工作區開啟強制後，`agent create` 或 `agent update` 新建名單或往名單裡加人會以 `feature_locked` 拒絕；移除成員、原樣儲存名單、改成 `private` 或 `--public-to-workspace` 仍然可以。
 
 ### AI 代理執行記錄
 

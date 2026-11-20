@@ -1,12 +1,6 @@
 import type { CommentAuthorType, CommentSupplementReceipt, Reaction } from "./comment";
 import type { Attachment } from "./attachment";
 
-export interface AssigneeFrequencyEntry {
-  assignee_type: string;
-  assignee_id: string;
-  frequency: number;
-}
-
 export interface TimelineEntry {
   type: "activity" | "comment";
   id: string;

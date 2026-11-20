@@ -292,7 +292,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-env` 系のフラグは `agent create` にしかありません。後から変えるときは `agent env set` を使います。これは全体を置き換え、値を `****` にしたキーは元の値を保ちます。
 - `agent update --mcp-config null` で MCP 設定を消去します。
 - `--custom-args` は JSON 配列で、起動引数の最後に置かれます。モデルは `--model` で選んでください。カスタム引数の中の `--model` を受け付けないツールもあります。
-- エージェントを呼び出せる人は `--permission-mode` で決めます。`private` は所有者だけ、`public_to` は `--public-to-workspace` または `--public-to-member <user-id>` と組み合わせます。`--visibility private|workspace` は古い書き方で、`--permission-mode` に対応付けられます。両方を指定した場合は `--permission-mode` が優先されます。
+- エージェントを呼び出せる人は `--permission-mode` で決めます。`private` は所有者だけ、`public_to` は `--public-to-workspace` または `--public-to-member <user-id>` と組み合わせます。`--visibility private|workspace` は古い書き方で、`--permission-mode` に対応付けられます。両方を指定した場合は `--permission-mode` が優先されます。Multica Cloud ではメンバーリストは Business に含まれます。Free と Pro で制限が有効な場合、`agent create` や `agent update` でリストを新しく設定したりメンバーを追加したりすると `feature_locked` で拒否されます。メンバーの削除、同じリストの再保存、`private` や `--public-to-workspace` への変更は引き続き行えます。
 
 ## デーモンとランタイム
 

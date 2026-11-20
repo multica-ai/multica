@@ -85,3 +85,10 @@ export {
   type SubIssueRowProperties,
   type SubIssueRowPropertyKey,
 } from "./sub-issue-display-store";
+export {
+  useAssigneePicksStore,
+  selectAssigneePicks,
+  rankAssigneePicks,
+  type AssigneePick,
+  type RankedAssignee,
+} from "./assignee-picks-store";
