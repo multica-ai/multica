@@ -98,6 +98,14 @@ func TestTaskRunFailureReasonPrefersSpecificPreparationSentinels(t *testing.T) {
 				fmt.Errorf("%w: download skill: connection refused", errSkillBundleUnavailable))),
 			want: taskfailure.ReasonSkillBundleUnavailable.String(),
 		},
+		"local worktree repository missing": {
+			err:  asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", execenv.ErrLocalWorktreeRepositoryMissing)),
+			want: taskfailure.ReasonLocalWorktreePrerequisiteMissing.String(),
+		},
+		"local worktree HEAD missing": {
+			err:  asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", execenv.ErrLocalWorktreeHeadMissing)),
+			want: taskfailure.ReasonLocalWorktreePrerequisiteMissing.String(),
+		},
 		"prepare budget exhausted": {
 			err:  fmt.Errorf("%w after 5m0s", errTaskPrepareTimeout),
 			want: taskfailure.ReasonTimeout.String(),
