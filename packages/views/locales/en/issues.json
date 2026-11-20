@@ -1133,9 +1133,7 @@
       "recent_group": "Recent",
       "members_group": "Members",
       "agents_group": "Agents",
-      "squads_group": "Squads",
-      "agent_runtime_required": "Bind a runtime before assigning work to this agent",
-      "squad_runtime_required": "Bind a runtime to this squad's leader before assigning work"
+      "squads_group": "Squads"
     },
     "start_date": {
       "trigger_label": "Start date",

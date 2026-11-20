@@ -1047,9 +1047,7 @@
       "recent_group": "Recientes",
       "members_group": "Miembros",
       "agents_group": "Agentes",
-      "squads_group": "Squads",
-      "agent_runtime_required": "Vincula un runtime antes de asignar trabajo a este agente",
-      "squad_runtime_required": "Vincula un runtime al líder de este squad antes de asignar trabajo"
+      "squads_group": "Squads"
     },
     "start_date": {
       "trigger_label": "Fecha de inicio",
