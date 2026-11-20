@@ -218,7 +218,10 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 // which keeps signing regardless of this capability — so the signature in list
 // payloads was pure cost: raw bytes, a per-attachment RSA sign, and bytes that
 // differ on every read and therefore defeat agent prompt caching.
-const clientCapabilities = "stable_attachment_urls"
+//
+// workspace-guests-v1 keeps guests in workspace member and invitation lists,
+// which the server hides from clients that cannot render the guest role.
+const clientCapabilities = "stable_attachment_urls,workspace-guests-v1"
 
 func (c *APIClient) setHeaders(req *http.Request) {
 	req.Header.Set("X-Client-Capabilities", clientCapabilities)
