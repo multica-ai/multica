@@ -60,15 +60,18 @@ INSERT INTO dashboard_range_view (
     view_count, observed_over_limit_count, degraded_over_limit_count, truncated_count,
     last_limit_days, last_action, last_reason,
     first_viewed_at, last_viewed_at
-) VALUES (
-    $1, (now() AT TIME ZONE 'UTC')::date, $2, $3,
-    1,
-    CASE WHEN $4::text = 'observed' THEN 1 ELSE 0 END,
-    CASE WHEN $4::text = 'degraded' THEN 1 ELSE 0 END,
-    CASE WHEN $4::text = 'truncated' THEN 1 ELSE 0 END,
-    $5, $6, $7,
-    now(), now()
 )
+SELECT
+    w.id, (now() AT TIME ZONE 'UTC')::date, $1, $2,
+    1,
+    CASE WHEN $3::text = 'observed' THEN 1 ELSE 0 END,
+    CASE WHEN $3::text = 'degraded' THEN 1 ELSE 0 END,
+    CASE WHEN $3::text = 'truncated' THEN 1 ELSE 0 END,
+    $4, $5, $6,
+    now(), now()
+FROM workspace w
+WHERE w.id = $7
+FOR KEY SHARE OF w
 ON CONFLICT (workspace_id, day, requested_days, returned_days) DO UPDATE
 SET view_count = dashboard_range_view.view_count + 1,
     observed_over_limit_count = dashboard_range_view.observed_over_limit_count + EXCLUDED.observed_over_limit_count,
@@ -82,28 +85,33 @@ SET view_count = dashboard_range_view.view_count + 1,
 `
 
 type RecordDashboardRangeViewParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 	RequestedDays int32       `json:"requested_days"`
 	ReturnedDays  int32       `json:"returned_days"`
 	Outcome       string      `json:"outcome"`
 	LimitDays     pgtype.Int4 `json:"limit_days"`
 	Action        string      `json:"action"`
 	Reason        string      `json:"reason"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 }
 
 // One dashboard read. outcome is within (inside the limit, or no limit),
 // observed (past the limit, admitted under a configured observe), degraded
 // (past the limit, admitted because a stale enforce was downgraded) or
 // truncated (past the limit, cut to it under enforce).
+//
+// The row is selected from its workspace under FOR KEY SHARE, which conflicts
+// with the FOR UPDATE workspace deletion takes first. A record that runs after
+// the deletion committed finds no workspace and inserts nothing; one that runs
+// first makes the deletion wait and is then removed by it.
 func (q *Queries) RecordDashboardRangeView(ctx context.Context, arg RecordDashboardRangeViewParams) error {
 	_, err := q.db.Exec(ctx, recordDashboardRangeView,
-		arg.WorkspaceID,
 		arg.RequestedDays,
 		arg.ReturnedDays,
 		arg.Outcome,
 		arg.LimitDays,
 		arg.Action,
 		arg.Reason,
+		arg.WorkspaceID,
 	)
 	return err
 }

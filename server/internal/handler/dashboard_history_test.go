@@ -527,3 +527,76 @@ func TestGetWorkspaceFeaturesReportsTheDashboardHistoryLimit(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+// A record that lands after its workspace was deleted must not leave a row
+// behind: the insert reads the workspace under FOR KEY SHARE, so it either
+// waits for the deletion and finds nothing, or runs first and is deleted.
+func TestDashboardRangeViewDoesNotOutliveItsWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	views := service.DashboardRangeViews{Queries: db.New(testPool), RecordTimeout: 10 * time.Second}
+	record := func(workspaceID string) {
+		views.Record(ctx, service.DashboardRangeView{
+			WorkspaceID: parseUUID(workspaceID), RequestedDays: 90, ReturnedDays: 30,
+			Decision: historyDecision(entitlement.ActionEnforce, 30),
+		})
+	}
+	rows := func(workspaceID string) int {
+		return dbfx.Count(t, `SELECT count(*) FROM dashboard_range_view WHERE workspace_id = $1`, workspaceID)
+	}
+	newWorkspace := func(t *testing.T) string {
+		slug := "range-view-" + uuid.NewString()[:8]
+		id := dbfx.Workspace(t, "range view", slug)
+		t.Cleanup(func() {
+			testPool.Exec(ctx, `DELETE FROM dashboard_range_view WHERE workspace_id = $1`, id)
+		})
+		return id
+	}
+
+	t.Run("after the deletion committed", func(t *testing.T) {
+		id := newWorkspace(t)
+		dbfx.Exec(t, `DELETE FROM workspace WHERE id = $1`, id)
+		record(id)
+		if n := rows(id); n != 0 {
+			t.Fatalf("rows = %d for a deleted workspace", n)
+		}
+	})
+
+	t.Run("racing a deletion in progress", func(t *testing.T) {
+		id := newWorkspace(t)
+		tx, err := testPool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer tx.Rollback(ctx)
+		// What DeleteWorkspace takes first.
+		if _, err := tx.Exec(ctx, `SELECT id FROM workspace WHERE id = $1 FOR UPDATE`, id); err != nil {
+			t.Fatalf("lock: %v", err)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			record(id)
+		}()
+		select {
+		case <-done:
+			t.Fatal("the record did not wait for the workspace lock")
+		case <-time.After(300 * time.Millisecond):
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM dashboard_range_view WHERE workspace_id = $1`, id); err != nil {
+			t.Fatalf("delete views: %v", err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, id); err != nil {
+			t.Fatalf("delete workspace: %v", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		<-done
+		if n := rows(id); n != 0 {
+			t.Fatalf("rows = %d after the workspace was deleted", n)
+		}
+	})
+}
