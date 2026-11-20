@@ -267,5 +267,12 @@
     "toast_completed": "“{{name}}” is completed",
     "notice": "This project is archived. It's hidden from project lists and pickers and accepts no new issues; its issues stay readable and editable.",
     "prop_label": "Archived"
+  },
+  "run_limits": {
+    "title": "Run limits",
+    "description": "Leave a field blank for no limit. Retries count toward both limits.",
+    "issue": "Runs per issue",
+    "agent": "Runs per agent on each issue",
+    "save_failed": "Could not save run limits"
   }
 }

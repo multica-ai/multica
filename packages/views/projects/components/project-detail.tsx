@@ -30,6 +30,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { ProjectRunLimits } from "./project-run-limits";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
@@ -452,6 +453,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
           <ProjectWorkflowPropRow project={project} onOpen={openWorkflowSheet} />
+          <ProjectRunLimits key={project.id} project={project} />
           {archived && (
             <PropRow label={t(($) => $.archive.prop_label)}>
               <span className="tabular-nums">{formatRelativeDate(project.archived_at!)}</span>
