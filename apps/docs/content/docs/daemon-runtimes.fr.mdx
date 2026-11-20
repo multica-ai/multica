@@ -219,6 +219,10 @@ Lorsque le propriétaire retire des membres, restreint un runtime public à des 
 
 L'annulation conserve l'historique de discussion et enregistre sur le serveur les données de restauration du brouillon et des pièces jointes. Les versions web et bureau utilisent l'interface de restauration existante ; la version mobile ne propose pas encore cette interface. Une exécution démarrée sans sortie attend l'accusé d'annulation du daemon ou la fin du délai de finalisation du serveur avant de décider si la saisie doit être restaurée. Un daemon connecté reçoit l'annulation lors de sa vérification habituelle. Si l'ordinateur est hors ligne, l'accès côté serveur est tout de même révoqué immédiatement, mais le processus local peut continuer jusqu'à sa reconnexion et à la réception de l'annulation ; le serveur ne peut pas garantir un arrêt à distance immédiat.
 
+### Supprimer un runtime local intégré [#remove-a-runtime]
+
+Sur la page de détail du runtime, ouvrez le menu d’actions et choisissez la suppression du runtime. Si des agents y sont encore liés, vérifiez la liste et confirmez leur dissociation. Leurs instructions, conversations et historiques d’exécution sont conservés. Les exécutions en attente ou en cours sont annulées. Multica met en pause les automatisations actives assignées à ces agents ou aux squads qu’ils dirigent. Liez les agents à un autre runtime avant de leur attribuer de nouvelles tâches. Une fois les agents liés au nouveau runtime, reprenez manuellement les automatisations en pause. Un daemon qui détecte encore l’outil peut l’enregistrer de nouveau.
+
 ## Profils de runtime personnalisés
 
 Si votre équipe utilise un wrapper interne, un exécutable à version figée, ou a besoin d'arguments supplémentaires fixes pour un outil compatible, créez un **profil de runtime personnalisé**.
