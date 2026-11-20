@@ -1,6 +1,12 @@
 package agent
 
-import "regexp"
+import (
+	"maps"
+	"regexp"
+	"strings"
+
+	"github.com/multica-ai/multica/server/pkg/modelid"
+)
 
 // bedrockApplicationInferenceProfileRe matches a Bedrock application
 // inference profile ARN. Unlike foundation-model ARNs and system-defined
@@ -23,10 +29,8 @@ func isBedrockApplicationInferenceProfileARN(model string) bool {
 // response body. Without this, each such run is recorded under the ARN and
 // shows as unpriced on the dashboard.
 //
-// The rename happens only when it is unambiguous: exactly one profile key in
-// the usage, and exactly one served model seen in the run. Any other shape is
-// returned unchanged, so the run stays visibly unpriced rather than wrongly
-// priced. The input map is not modified.
+// The rename requires exactly one profile key and one served model without a
+// matching usage entry. Ambiguous profile usage keeps its original key.
 func resolveBedrockProfileUsage(usage map[string]TokenUsage, served map[string]struct{}) map[string]TokenUsage {
 	profile := ""
 	for model := range usage {
@@ -57,18 +61,18 @@ func resolveBedrockProfileUsage(usage map[string]TokenUsage, served map[string]s
 		return usage
 	}
 
-	resolved := make(map[string]TokenUsage, len(usage))
-	for model, u := range usage {
-		if model == profile {
-			model = target
+	// Background calls can report usage without an assistant message. If
+	// another key already accounts for the observed model, the profile could
+	// belong to a background call on a different model.
+	normalizedTarget := modelid.NormalizeBedrock(strings.ToLower(strings.TrimSpace(target)))
+	for model := range usage {
+		if model != profile && modelid.NormalizeBedrock(strings.ToLower(strings.TrimSpace(model))) == normalizedTarget {
+			return usage
 		}
-		sum := resolved[model]
-		sum.InputTokens += u.InputTokens
-		sum.OutputTokens += u.OutputTokens
-		sum.CacheReadTokens += u.CacheReadTokens
-		sum.CacheWriteTokens += u.CacheWriteTokens
-		sum.CostUSDTicks += u.CostUSDTicks
-		resolved[model] = sum
 	}
+
+	resolved := maps.Clone(usage)
+	resolved[target] = resolved[profile]
+	delete(resolved, profile)
 	return resolved
 }

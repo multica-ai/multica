@@ -9,6 +9,7 @@ import (
 const (
 	testOpusProfileARN   = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123opus"
 	testSonnetProfileARN = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/def456sonnet"
+	testHaikuProfileARN  = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/ghi789haiku"
 )
 
 func TestIsBedrockApplicationInferenceProfileARN(t *testing.T) {
@@ -36,6 +37,7 @@ func TestResolveBedrockProfileUsage(t *testing.T) {
 	t.Parallel()
 	opus := TokenUsage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 30, CacheWriteTokens: 40}
 	sonnet := TokenUsage{InputTokens: 1, OutputTokens: 2, CacheReadTokens: 3, CacheWriteTokens: 4}
+	haiku := TokenUsage{InputTokens: 2, OutputTokens: 3, CacheReadTokens: 4, CacheWriteTokens: 5}
 	served := func(models ...string) map[string]struct{} {
 		set := make(map[string]struct{}, len(models))
 		for _, m := range models {
@@ -62,12 +64,28 @@ func TestResolveBedrockProfileUsage(t *testing.T) {
 			want:   map[string]TokenUsage{"claude-opus-5": opus},
 		},
 		{
-			name:   "profile_merges_into_existing_served_key",
+			name:   "existing_served_key_makes_profile_ambiguous",
 			usage:  map[string]TokenUsage{testOpusProfileARN: opus, "claude-opus-5": sonnet},
 			served: served("claude-opus-5"),
-			want: map[string]TokenUsage{"claude-opus-5": {
-				InputTokens: 11, OutputTokens: 22, CacheReadTokens: 33, CacheWriteTokens: 44,
-			}},
+			want:   map[string]TokenUsage{testOpusProfileARN: opus, "claude-opus-5": sonnet},
+		},
+		{
+			name:   "direct_bedrock_opus_with_haiku_background_profile",
+			usage:  map[string]TokenUsage{"us.anthropic.claude-opus-5": opus, testHaikuProfileARN: haiku},
+			served: served("claude-opus-5"),
+			want:   map[string]TokenUsage{"us.anthropic.claude-opus-5": opus, testHaikuProfileARN: haiku},
+		},
+		{
+			name:   "versioned_bedrock_id_already_accounts_for_served_model",
+			usage:  map[string]TokenUsage{"us.anthropic.claude-sonnet-4-5-20250929-v1:0": sonnet, testHaikuProfileARN: haiku},
+			served: served("claude-sonnet-4-5-20250929"),
+			want:   map[string]TokenUsage{"us.anthropic.claude-sonnet-4-5-20250929-v1:0": sonnet, testHaikuProfileARN: haiku},
+		},
+		{
+			name:   "different_named_usage_key_does_not_account_for_served_model",
+			usage:  map[string]TokenUsage{"us.anthropic.claude-sonnet-5": sonnet, testOpusProfileARN: opus},
+			served: served("claude-opus-5"),
+			want:   map[string]TokenUsage{"us.anthropic.claude-sonnet-5": sonnet, "claude-opus-5": opus},
 		},
 		{
 			name:   "two_served_models_are_ambiguous",
