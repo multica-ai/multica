@@ -309,7 +309,7 @@ func TestBriefOmitsMovesAtTerminalStatuses(t *testing.T) {
 				}
 				for _, want := range []string{
 					"- `" + status + "`   ← current",
-					"Leave the issue at this status.",
+					"Leave the issue at this status unless a member explicitly asks you to reopen it.",
 				} {
 					if !strings.Contains(brief, want) {
 						t.Errorf("terminal brief is missing %q:\n%s", want, brief)

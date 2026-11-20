@@ -727,6 +727,9 @@ type BriefInput struct {
 	MovedBy string
 	// StatusName resolves a catalog key to its display name.
 	StatusName func(key string) string
+	// EffectiveStatus resolves a catalog key to its canonical behavior. With
+	// no resolver, the key itself determines the behavior.
+	EffectiveStatus func(key string) string
 	// HandlerName describes who a step hands off to, e.g. "Sentinel" or
 	// "Lin (project lead)". Empty means the step does not hand off.
 	HandlerName func(step Step) string
@@ -762,7 +765,11 @@ type BriefInput struct {
 func Brief(in BriefInput) string {
 	step, _ := in.Workflow.Step(in.StatusKey)
 	stepMoved := in.BoundStep != "" && in.BoundStep != in.StatusKey
-	terminal := in.StatusKey == issuestatus.Done || in.StatusKey == issuestatus.Cancelled
+	effectiveStatus := in.StatusKey
+	if in.EffectiveStatus != nil {
+		effectiveStatus = in.EffectiveStatus(in.StatusKey)
+	}
+	terminal := effectiveStatus == issuestatus.Done || effectiveStatus == issuestatus.Cancelled
 	name := func(key string) string {
 		if in.StatusName == nil {
 			return key
@@ -793,7 +800,7 @@ func Brief(in BriefInput) string {
 	// An older daemon still states the built-in rules itself, so its brief
 	// keeps the per-step wording rather than add a second in_progress rule.
 	var span handlerlessSpan
-	if !stepMoved && !in.Observer && !in.LegacyRuntimeRules {
+	if !stepMoved && !in.Observer && !in.LegacyRuntimeRules && !terminal {
 		span = in.Workflow.handlerlessSpan(in.StatusKey)
 	}
 	if in.LegacyRuntimeRules && !stepMoved {
@@ -818,9 +825,6 @@ func Brief(in BriefInput) string {
 		}
 		fmt.Fprintf(&b, "%s is at the %q step and %s. You are not its assignee: leave the status to them unless you are explicitly asked to change it.\n",
 			in.IssueIdentifier, name(in.StatusKey), assignee)
-	} else if terminal {
-		fmt.Fprintf(&b, "%s has reached the terminal status %s. Leave the issue at this status.\n",
-			in.IssueIdentifier, statusLabel(name(in.StatusKey), in.StatusKey))
 	} else if span.ok {
 		// A step without a handler is a progress marker, not a stage: naming
 		// it "the step you handle" made agents split one task across columns
@@ -832,7 +836,12 @@ func Brief(in BriefInput) string {
 			b.WriteString("to finish.\n")
 		}
 	} else {
-		fmt.Fprintf(&b, "You are handling the %q step of %s.\n", name(in.StatusKey), in.IssueIdentifier)
+		if terminal {
+			fmt.Fprintf(&b, "%s has reached the terminal status %s. Leave the issue at this status unless a member explicitly asks you to reopen it.\n",
+				in.IssueIdentifier, statusLabel(name(in.StatusKey), in.StatusKey))
+		} else {
+			fmt.Fprintf(&b, "You are handling the %q step of %s.\n", name(in.StatusKey), in.IssueIdentifier)
+		}
 		if instructions := briefText(step.Instructions); instructions != "" {
 			b.WriteString("\nStep instructions:\n")
 			for _, line := range strings.Split(instructions, "\n") {

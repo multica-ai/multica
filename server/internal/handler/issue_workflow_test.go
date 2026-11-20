@@ -1034,6 +1034,49 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 	}
 }
 
+func TestWorkflowBriefOmitsMovesAtCustomTerminalStatuses(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	for _, tc := range []struct{ key, category, instructions string }{
+		{"brief_verified", "done", "Record the release in the project notes."},
+		{"brief_wont_fix", "closed", ""},
+	} {
+		t.Run(tc.category, func(t *testing.T) {
+			status := createTestCustomStatus(t, tc.key, tc.category)
+			workflow := createTestWorkflow(t, "Terminal status "+workflowTestSuffix(), status.Key)
+			draft := map[string]any{}
+			if tc.instructions != "" {
+				draft = handToAgent(agentID, tc.instructions)
+				setWorkflowHandoff(t, workflow.ID, status.Key, draft).Want(http.StatusOK)
+			}
+			draft["status_key"] = status.Key
+			projectID := createWorkflowTestProject(t, "Custom terminal status project")
+			setProjectWorkflow(t, projectID, map[string]any{"workflow_id": workflow.ID}).Want(http.StatusOK)
+			issueID := dbfx.Issue(t, "At a custom terminal status", testutil.Cols{
+				"project_id": projectID, "status": status.Key, "assignee_type": "agent", "assignee_id": agentID,
+			})
+			checkBrief := func(source, brief string) {
+				_, column, _ := strings.Cut(brief, "\n- `"+status.Key+"`")
+				column, _, _ = strings.Cut(column, "\n")
+				if !strings.HasSuffix(column, "   ← current") ||
+					strings.Contains(brief, "Your moves:") || strings.Contains(brief, "multica issue status") {
+					t.Errorf("%s brief should show %q as current without offering moves:\n%s", source, status.Key, brief)
+				}
+				if tc.instructions != "" && !strings.Contains(brief, tc.instructions) {
+					t.Errorf("%s brief dropped the configured instructions:\n%s", source, brief)
+				}
+			}
+			checkBrief("claim", claimBriefForTest(t, issueID, db.AgentTaskQueue{AgentID: parseUUID(agentID)}))
+
+			var preview struct {
+				Brief string `json:"brief"`
+			}
+			req := withURLParam(workflowRequest("POST", "/api/issue-workflows/"+workflow.ID+"/brief", draft), "id", workflow.ID)
+			testutil.Call(t, testHandler.PreviewIssueWorkflowBrief, req).Want(http.StatusOK).JSON(&preview)
+			checkBrief("preview", preview.Brief)
+		})
+	}
+}
+
 func TestClaimExplainsMovedWorkflowStep(t *testing.T) {
 	seedTestCatalog(t)
 	agentID := seededReadyAgentID(t)
