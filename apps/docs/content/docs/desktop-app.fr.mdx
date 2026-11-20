@@ -102,6 +102,8 @@ Les mises à jour sont distribuées par système d'exploitation et par architect
 - sous Linux, la mise à jour automatique ne fonctionne qu'avec `.AppImage` ; mettez à jour `.deb` et `.rpm` en installant un nouveau paquet par-dessus l'ancien ;
 - si la mise à jour automatique échoue, réinstallez de la même façon par-dessus avec le programme d'installation correspondant, disponible sur la page de téléchargement.
 
+Si Desktop se ferme pendant la recherche ou l’installation d’une mise à jour Windows, consultez `%APPDATA%\Multica\updater.log`. Ce journal enregistre la version de Desktop en cours d’exécution et les événements de mise à jour entre les lancements.
+
 ## Se connecter à une instance auto-hébergée
 
 Desktop se connecte par défaut à Multica Cloud. Pour vous connecter à une instance auto-hébergée, créez `desktop.json` dans le répertoire `.multica` de votre répertoire personnel, avec ce contenu :

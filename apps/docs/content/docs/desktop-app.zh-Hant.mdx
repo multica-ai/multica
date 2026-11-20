@@ -102,6 +102,8 @@ Desktop 可以在本機把語音轉成文字，填入聊天、評論、回覆和
 - Linux 上自動更新只對 `.AppImage` 生效，`.deb` 和 `.rpm` 透過下載新安裝包覆蓋安裝；
 - 自動更新失敗時，同樣從下載頁獲取對應安裝包覆蓋安裝。
 
+如果 Desktop 在 Windows 上檢查或套用更新時關閉，請查看 `%APPDATA%\Multica\updater.log`。此日誌會記錄各次啟動時的 Desktop 版本和更新事件。
+
 ## 連線自託管例項
 
 Desktop 預設連線 Multica Cloud。連線自託管例項時，在使用者目錄的 `.multica` 下建立 `desktop.json`，內容如下：
