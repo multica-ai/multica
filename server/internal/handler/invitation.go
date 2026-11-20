@@ -314,9 +314,13 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	resp := make([]InvitationResponse, len(rows))
-	for i, row := range rows {
-		resp[i] = InvitationResponse{
+	includeGuests := clientRendersGuestRole(r)
+	resp := make([]InvitationResponse, 0, len(rows))
+	for _, row := range rows {
+		if projectaccess.IsGuestRole(row.Role) && !includeGuests {
+			continue
+		}
+		resp = append(resp, InvitationResponse{
 			ID:            uuidToString(row.ID),
 			WorkspaceID:   uuidToString(row.WorkspaceID),
 			InviterID:     uuidToString(row.InviterID),
@@ -330,7 +334,7 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 			ExpiresAt:     timestampToString(row.ExpiresAt),
 			InviterName:   row.InviterName,
 			InviterEmail:  row.InviterEmail,
-		}
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
