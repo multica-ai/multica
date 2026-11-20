@@ -249,7 +249,21 @@
     "unavailable": "当前工作区的套餐不包含此功能。",
     "view_plans": "查看套餐",
     "locked_error": "当前工作区的套餐不包含此功能。已有设置继续生效，升级后可以新增。",
-    "upgrade_to_add": "升级套餐"
+    "upgrade_to_add": "升级套餐",
+    "business": "Business",
+    "badge_label": "Business 功能，查看详情",
+    "upgrade_to_business": "升级到 Business",
+    "ask_admin": "请联系工作区管理员升级到 Business。",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "允许指定成员运行智能体是 Business 功能",
+        "description": "\"仅自己\"和\"整个工作区\"在所有套餐中都可以使用。"
+      },
+      "runtime_member_sharing": {
+        "title": "与指定成员共享运行时是 Business 功能",
+        "description": "\"私有\"和\"公开\"在所有套餐中都可以使用。"
+      }
+    }
   },
   "trial": {
     "status": {

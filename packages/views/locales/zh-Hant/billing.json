@@ -249,7 +249,21 @@
     "unavailable": "目前工作區的套餐不包含此功能。",
     "view_plans": "查看套餐",
     "locked_error": "目前工作區的套餐不包含此功能。既有設定繼續生效，升級後可以新增。",
-    "upgrade_to_add": "升級套餐"
+    "upgrade_to_add": "升級套餐",
+    "business": "Business",
+    "badge_label": "Business 功能，查看詳情",
+    "upgrade_to_business": "升級到 Business",
+    "ask_admin": "請聯絡工作區管理員升級到 Business。",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "允許指定成員執行 AI 代理是 Business 功能",
+        "description": "\"僅自己\"和\"整個工作區\"在所有套餐中都可以使用。"
+      },
+      "runtime_member_sharing": {
+        "title": "與指定成員共用執行時是 Business 功能",
+        "description": "\"私有\"和\"公開\"在所有套餐中都可以使用。"
+      }
+    }
   },
   "trial": {
     "status": {

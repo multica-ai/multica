@@ -32,6 +32,8 @@ const TEST_RESOURCES = {
   en: { common: enCommon, agents: enAgents, issues: enIssues, billing: enBilling },
 };
 
+const BADGE = enBilling.paid_feature.badge_label;
+
 const MEMBERS = [
   { user_id: "u1", name: "Alice", role: "member" },
   { user_id: "u2", name: "Bob", role: "member" },
@@ -198,6 +200,7 @@ describe("AccessPicker on a plan without member access (MUL-9491)", () => {
     expect(screen.getByRole("checkbox", { name: /Alice/i })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /Bob/i })).toBeInTheDocument();
     expect(screen.queryByText("View plans")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: BADGE })).not.toBeInTheDocument();
   });
 
   it("disables Specific people for an agent without a member list", () => {
@@ -207,6 +210,14 @@ describe("AccessPicker on a plan without member access (MUL-9491)", () => {
     expect(screen.getByText("Not included in this workspace's plan.")).toBeInTheDocument();
   });
 
+  it("puts a Business badge beside the locked option, outside its label", () => {
+    renderPicker({ membersAccess: { canAdd: false, state: "unavailable" } });
+    const badge = screen.getByRole("button", { name: BADGE });
+    expect(badge).toBeEnabled();
+    // A control inside the label would select the option it explains.
+    expect(badge.closest("label")).toBeNull();
+  });
+
   it("keeps an existing list removable but adds nobody, and requires Only me to drop the last person", () => {
     const { onChange } = renderPicker({
       permissionMode: "public_to",
@@ -214,6 +225,7 @@ describe("AccessPicker on a plan without member access (MUL-9491)", () => {
       membersAccess: { canAdd: false, state: "read_only" },
     });
     expect(screen.getByText("Read-only. Upgrade to edit.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: BADGE })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^Specific people/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /Alice/i })).toBeChecked();
     expect(screen.queryByRole("checkbox", { name: /Bob/i })).not.toBeInTheDocument();
@@ -225,5 +237,38 @@ describe("AccessPicker on a plan without member access (MUL-9491)", () => {
     fireEvent.click(screen.getByRole("radio", { name: /^Only me/i }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onChange).toHaveBeenCalledWith({ permission_mode: "private", invocation_targets: [] });
+  });
+});
+
+describe("AccessPicker with a locked member pool (bulk edit, MUL-9491)", () => {
+  afterEach(() => cleanup());
+
+  it("offers only the pool's people while adding is locked", () => {
+    renderPicker({
+      membersAccess: { canAdd: false, state: "read_only" },
+      lockedMemberPool: ["u1"],
+    });
+    const members = screen.getByRole("radio", { name: /^Specific people/i });
+    expect(members).toBeEnabled();
+    fireEvent.click(members);
+    expect(screen.getByRole("checkbox", { name: /Alice/i })).not.toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: /Bob/i })).not.toBeInTheDocument();
+  });
+
+  it("disables Specific people when the pool is empty", () => {
+    renderPicker({
+      membersAccess: { canAdd: false, state: "unavailable" },
+      lockedMemberPool: [],
+    });
+    expect(screen.getByRole("radio", { name: /^Specific people/i })).toBeDisabled();
+  });
+
+  it("ignores the pool when the plan includes the feature", () => {
+    renderPicker({
+      membersAccess: { canAdd: true, state: "available" },
+      lockedMemberPool: [],
+    });
+    fireEvent.click(screen.getByRole("radio", { name: /^Specific people/i }));
+    expect(screen.getByRole("checkbox", { name: /Bob/i })).toBeInTheDocument();
   });
 });

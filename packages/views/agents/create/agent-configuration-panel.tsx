@@ -20,7 +20,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { PaidFeatureNotice } from "../../billing";
+import { PaidFeatureNotice, PaidFeatureUpgradeBadge } from "../../billing";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useT } from "../../i18n";
 import {
@@ -302,46 +302,60 @@ export function AgentConfigurationPanel({
             role="radiogroup"
             aria-label={t(($) => $.creation_studio.sections.access)}
           >
-            {PERMISSION_SCOPES.map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                role="radio"
-                aria-checked={draft.permissionScope === scope}
-                disabled={
-                  scope === "members" &&
-                  !canAddMembers &&
-                  draft.permissionScope !== "members"
-                }
-                onClick={() => set("permissionScope", scope)}
-                className={cn(
-                  "flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
-                  "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  "disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent",
-                  draft.permissionScope === scope && "bg-muted",
-                )}
-              >
-                <span
-                  className={cn(
-                    "mt-1 flex size-3.5 shrink-0 items-center justify-center rounded-full border",
-                    draft.permissionScope === scope && "border-primary",
-                  )}
-                  aria-hidden="true"
-                >
-                  {draft.permissionScope === scope ? (
-                    <span className="size-1.5 rounded-full bg-primary" />
+            {PERMISSION_SCOPES.map((scope) => {
+              // The badge is a sibling of the radio, not inside it, so it keeps
+              // its own focus and name and never selects the option.
+              const showBadge =
+                scope === "members" && invocationMembers.state === "unavailable";
+              return (
+                <div key={scope} className="relative">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.permissionScope === scope}
+                    disabled={
+                      scope === "members" &&
+                      !canAddMembers &&
+                      draft.permissionScope !== "members"
+                    }
+                    onClick={() => set("permissionScope", scope)}
+                    className={cn(
+                      "flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
+                      "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent",
+                      draft.permissionScope === scope && "bg-muted",
+                      showBadge && "pr-28",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "mt-1 flex size-3.5 shrink-0 items-center justify-center rounded-full border",
+                        draft.permissionScope === scope && "border-primary",
+                      )}
+                      aria-hidden="true"
+                    >
+                      {draft.permissionScope === scope ? (
+                        <span className="size-1.5 rounded-full bg-primary" />
+                      ) : null}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-body font-medium">
+                        {t(($) => $.creation_studio.access[scope].title)}
+                      </span>
+                      <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
+                        {t(($) => $.creation_studio.access[scope].description)}
+                      </span>
+                    </span>
+                  </button>
+                  {showBadge ? (
+                    <PaidFeatureUpgradeBadge
+                      feature="agent_invocation_members"
+                      className="absolute top-3 right-3"
+                    />
                   ) : null}
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-body font-medium">
-                    {t(($) => $.creation_studio.access[scope].title)}
-                  </span>
-                  <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
-                    {t(($) => $.creation_studio.access[scope].description)}
-                  </span>
-                </span>
-              </button>
-            ))}
+                </div>
+              );
+            })}
           </div>
           {invocationMembers.state === "unavailable" ? (
             <PaidFeatureNotice state="unavailable" className="px-5 pb-3" />

@@ -255,7 +255,21 @@
     "unavailable": "Non inclus dans le forfait de cet espace de travail.",
     "view_plans": "Voir les forfaits",
     "locked_error": "Non inclus dans le forfait de l'espace de travail. Les réglages existants restent actifs ; changez de forfait pour en ajouter.",
-    "upgrade_to_add": "Changer de forfait"
+    "upgrade_to_add": "Changer de forfait",
+    "business": "Business",
+    "badge_label": "Fonctionnalité Business. Voir les détails",
+    "upgrade_to_business": "Passer à Business",
+    "ask_admin": "Demandez à un administrateur de l'espace de travail de passer au forfait Business.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "Autoriser des personnes précises à exécuter un agent est une fonctionnalité Business",
+        "description": "\"Moi uniquement\" et \"Tout l'espace de travail\" restent disponibles dans tous les forfaits."
+      },
+      "runtime_member_sharing": {
+        "title": "Partager un environnement avec des membres précis est une fonctionnalité Business",
+        "description": "\"Privé\" et \"Public\" restent disponibles dans tous les forfaits."
+      }
+    }
   },
   "trial": {
     "status": {

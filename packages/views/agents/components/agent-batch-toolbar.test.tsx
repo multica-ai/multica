@@ -8,7 +8,7 @@ import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
 import enBilling from "../../locales/en/billing.json";
 import { ApiError } from "@multica/core/api";
-import type { WorkspaceFeatures } from "@multica/core/types";
+import type { MemberWithUser, WorkspaceFeatures } from "@multica/core/types";
 import { toast } from "sonner";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents, billing: enBilling } };
@@ -105,14 +105,14 @@ function makeRow(
   };
 }
 
-function renderToolbar(rows: AgentListRow[]) {
+function renderToolbar(rows: AgentListRow[], members: MemberWithUser[] = []) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui = (nextRows: AgentListRow[]) => (
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
         <AgentBatchToolbar
           rows={nextRows}
-          members={[]}
+          members={members}
           currentUserId="user-1"
           onClear={() => {}}
         />
@@ -123,6 +123,19 @@ function renderToolbar(rows: AgentListRow[]) {
   return {
     ...view,
     rerenderRows: (nextRows: AgentListRow[]) => view.rerender(ui(nextRows)),
+  };
+}
+
+const MEMBERS = [
+  { user_id: "u-a", name: "Alice", role: "member" },
+  { user_id: "u-b", name: "Bob", role: "member" },
+  { user_id: "u-c", name: "Carol", role: "member" },
+] as unknown as MemberWithUser[];
+
+function specificPeople(...ids: string[]) {
+  return {
+    permission_mode: "public_to" as const,
+    invocation_targets: ids.map((id) => ({ target_type: "member", target_id: id })),
   };
 }
 
@@ -299,13 +312,63 @@ describe("AgentBatchToolbar — plan without member access (MUL-9491)", () => {
     expect(screen.queryByText("View plans")).not.toBeInTheDocument();
   });
 
-  it("disables Specific people in bulk when the plan is locked", async () => {
+  it("disables Specific people in bulk when a selected agent has no member list", async () => {
     featuresSpy.mockResolvedValue({ features: { agent_invocation_members: "locked" } });
-    renderToolbar([makeRow("a", "user-1")]);
+    renderToolbar(
+      [
+        makeRow("a", "user-1", specificPeople("u-a", "u-b")),
+        makeRow("b", "user-1", { permission_mode: "public_to", invocation_targets: [{ target_type: "workspace", target_id: null }] }),
+      ],
+      MEMBERS,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
     expect(await screen.findByText("Not included in this workspace's plan.")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^Specific people/ })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /^Entire workspace/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: enBilling.paid_feature.badge_label })).toBeInTheDocument();
+  });
+
+  it("lets a locked plan bulk-reduce agents that share the same people", async () => {
+    featuresSpy.mockResolvedValue({ features: { agent_invocation_members: "locked" } });
+    renderToolbar(
+      [makeRow("a", "user-1", specificPeople("u-a", "u-b")), makeRow("b", "user-1", specificPeople("u-a", "u-b"))],
+      MEMBERS,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await screen.findByText("Read-only. Upgrade to edit.");
+    const members = screen.getByRole("radio", { name: /^Specific people/ });
+    expect(members).toBeEnabled();
+    fireEvent.click(members);
+    expect(screen.getByRole("checkbox", { name: /Bob/ })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Carol/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Alice/ }));
+    const apply = screen.getByRole("button", { name: "Apply" });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+
+    await waitFor(() => expect(updateAgentSpy).toHaveBeenCalledTimes(2));
+    for (const id of ["a", "b"]) {
+      expect(updateAgentSpy).toHaveBeenCalledWith(id, {
+        permission_mode: "public_to",
+        invocation_targets: [{ target_type: "member", target_id: "u-a" }],
+      });
+    }
+  });
+
+  it("offers only the people every selected agent already has", async () => {
+    featuresSpy.mockResolvedValue({ features: { agent_invocation_members: "locked" } });
+    renderToolbar(
+      [makeRow("a", "user-1", specificPeople("u-a", "u-b")), makeRow("b", "user-1", specificPeople("u-a"))],
+      MEMBERS,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await screen.findByText("Read-only. Upgrade to edit.");
+    const members = screen.getByRole("radio", { name: /^Specific people/ });
+    expect(members).toBeEnabled();
+    fireEvent.click(members);
+    expect(screen.getByRole("checkbox", { name: /Alice/ })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Bob/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Carol/ })).not.toBeInTheDocument();
   });
 
   it("explains a feature_locked refusal and refetches the plan", async () => {

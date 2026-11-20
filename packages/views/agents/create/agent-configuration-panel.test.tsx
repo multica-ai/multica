@@ -8,6 +8,7 @@ import type { ApiClient } from "@multica/core/api/client";
 import { EMPTY_AGENT_DRAFT, type AgentDraft } from "@multica/core/agents";
 import type { MemberWithUser, WorkspaceFeatureState } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
+import enBilling from "../../locales/en/billing.json";
 import { AgentConfigurationPanel } from "./agent-configuration-panel";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
@@ -52,6 +53,8 @@ function renderPanel(draft: Partial<AgentDraft> = {}) {
   return { onChange };
 }
 
+const BADGE = enBilling.paid_feature.badge_label;
+
 function membersOption() {
   return screen.getByRole("radio", { name: /Specific people/ });
 }
@@ -71,6 +74,7 @@ describe("AgentConfigurationPanel member access (MUL-9491)", () => {
     fireEvent.click(membersOption());
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ permissionScope: "members" }));
     expect(screen.queryByText("View plans")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: BADGE })).not.toBeInTheDocument();
   });
 
   it("disables Specific people on a locked plan", async () => {
@@ -80,6 +84,10 @@ describe("AgentConfigurationPanel member access (MUL-9491)", () => {
     expect(membersOption()).toBeDisabled();
     fireEvent.click(membersOption());
     expect(onChange).not.toHaveBeenCalled();
+    // The badge sits beside the option, not inside it.
+    const badge = screen.getByRole("button", { name: BADGE });
+    expect(badge).toBeEnabled();
+    expect(membersOption()).not.toContainElement(badge);
   });
 
   it("lets a draft that already picked people drop them on a locked plan, but not add more", async () => {

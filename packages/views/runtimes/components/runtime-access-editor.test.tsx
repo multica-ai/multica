@@ -59,6 +59,7 @@ function renderEditor(value: AgentRuntime) {
 }
 
 const membersButton = () => screen.getByRole("button", { name: "Members" });
+const BADGE = enBilling.paid_feature.badge_label;
 
 describe("RuntimeAccessEditor member sharing (MUL-9491)", () => {
   beforeEach(() => {
@@ -78,6 +79,7 @@ describe("RuntimeAccessEditor member sharing (MUL-9491)", () => {
     expect(await screen.findByRole("checkbox", { name: "Alice" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Bob" })).toBeInTheDocument();
     expect(screen.queryByText("View plans")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: BADGE })).not.toBeInTheDocument();
   });
 
   it("disables Members for a runtime without a list on a locked plan", async () => {
@@ -85,6 +87,7 @@ describe("RuntimeAccessEditor member sharing (MUL-9491)", () => {
     renderEditor(runtime({ visibility: "public" }));
     expect(await screen.findByText("Not included in this workspace's plan.")).toBeInTheDocument();
     expect(membersButton()).toBeDisabled();
+    expect(screen.getByRole("button", { name: BADGE })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Private" }));
     await waitFor(() => expect(api.updateRuntime).toHaveBeenCalledWith("runtime-1", { visibility: "private", shared_with: [] }));
   });
@@ -93,6 +96,7 @@ describe("RuntimeAccessEditor member sharing (MUL-9491)", () => {
     setFeature("locked");
     renderEditor(runtime({ shared_with: ["u1"] }));
     expect(await screen.findByText("Read-only. Upgrade to edit.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: BADGE })).toBeInTheDocument();
     fireEvent.click(membersButton());
     expect(await screen.findByRole("checkbox", { name: "Alice" })).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Bob" })).not.toBeInTheDocument();

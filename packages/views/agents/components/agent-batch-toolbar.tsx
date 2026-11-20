@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { MemberWithUser } from "@multica/core/types";
 import { api } from "@multica/core/api";
+import { usesInvocationMembers } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   isFeatureLockedError,
@@ -57,10 +58,18 @@ export function AgentBatchToolbar({
   const [accessChange, setAccessChange] = useState<AccessChange | null>(null);
   const [busy, setBusy] = useState(false);
   const paidFeatureError = usePaidFeatureErrorMessage();
-  // A bulk member list is new configuration for every agent it lands on, so a
-  // locked plan disables it outright rather than per agent.
+  const ownedRows = rows.filter((r) => r.isOwnedByMe);
+  // A locked plan still lets every owned agent shrink its own member list. In
+  // bulk that means picking only people all of them already have: any
+  // non-empty subset of that intersection is a reduction for each agent.
+  // Without a common person, a bulk member list would be new configuration
+  // for some agent, so the option stays disabled.
+  const sharedMembers = useMemo(
+    () => sharedInvocationMembers(rows.filter((r) => r.isOwnedByMe)),
+    [rows],
+  );
   const membersAccess = usePaidFeatureAccess(wsId, "agent_invocation_members", {
-    hasExistingConfig: false,
+    hasExistingConfig: sharedMembers.length > 0,
   });
 
   // Must be stable: AccessPicker lists this in the effect that notifies us, so
@@ -81,7 +90,6 @@ export function AgentBatchToolbar({
   }, []);
 
   const allManageable = rows.every((r) => r.canManage);
-  const ownedRows = rows.filter((r) => r.isOwnedByMe);
   const anyOwned = ownedRows.length > 0;
   const anyActive = rows.some((r) => !r.agent.archived_at);
   const anyArchived = rows.some((r) => !!r.agent.archived_at);
@@ -270,6 +278,7 @@ export function AgentBatchToolbar({
             canEdit
             hideFooter
             membersAccess={membersAccess}
+            lockedMemberPool={sharedMembers}
             onReadyChange={handleAccessReadyChange}
           />
           <DialogFooter>
@@ -303,4 +312,21 @@ export function AgentBatchToolbar({
       </Dialog>}
     </>
   );
+}
+
+/** The member targets every given agent already uses; empty when any of them
+ *  has no specific-people list. */
+function sharedInvocationMembers(rows: AgentListRow[]): string[] {
+  let shared: string[] | null = null;
+  for (const { agent } of rows) {
+    if (!usesInvocationMembers(agent.permission_mode, agent.invocation_targets)) return [];
+    const ids = new Set(
+      (agent.invocation_targets ?? []).flatMap((target) =>
+        target.target_type === "member" && target.target_id ? [target.target_id] : [],
+      ),
+    );
+    shared = (shared ?? Array.from(ids)).filter((id) => ids.has(id));
+    if (shared.length === 0) return [];
+  }
+  return shared ?? [];
 }

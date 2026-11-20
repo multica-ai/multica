@@ -23,7 +23,11 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { PaidFeatureNotice, usePaidFeatureErrorMessage } from "../../billing";
+import {
+  PaidFeatureNotice,
+  PaidFeatureUpgradeBadge,
+  usePaidFeatureErrorMessage,
+} from "../../billing";
 import { useT } from "../../i18n";
 import {
   RevokeRuntimeAccessDialog,
@@ -160,6 +164,9 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
             ) : null}
           </PopoverContent>
         </Popover>
+        {memberSharing.state === "read_only" || memberSharing.state === "unavailable" ? (
+          <PaidFeatureUpgradeBadge feature="runtime_member_sharing" className="mx-1" />
+        ) : null}
       </div>
       {current === "members" ? (
         <button
