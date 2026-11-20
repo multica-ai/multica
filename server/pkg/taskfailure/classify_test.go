@@ -672,6 +672,79 @@ func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
 	}
 }
 
+// TestClassifyTokenQuotaIsCapacity pins per-minute token and request quota
+// rejections to the capacity bucket. Gateways answer them with the "token" and
+// "limit" words that rule 1 matches, so they are a rate limit, not a full
+// context window. Explicit overflow wording still lands in context_overflow.
+func TestClassifyTokenQuotaIsCapacity(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want Reason
+	}{
+		{"TPM quota with rate_limit_error body", `API Error: Request rejected (429) · {"type":"error","error":{"type":"rate_limit_error","code":"429003","message":"Token usage exceeds the current model TPM (tokens per minute) limit 1000000. Please reduce the request frequency."}}`, ReasonAgentProviderCapacityOrRateLimit},
+		{"TPM quota without status line", "Token usage exceeds the current model TPM (tokens per minute) limit 4000000", ReasonAgentProviderCapacityOrRateLimit},
+		{"input tokens per minute rate limit", "This request would exceed your organization's rate limit of 30000 input tokens per minute", ReasonAgentProviderCapacityOrRateLimit},
+		{"explicit overflow beats quota wording", "prompt is too long: 250000 tokens > 200000 maximum (tokens per minute limit also reported)", ReasonAgentContextOverflow},
+		{"plain token limit stays overflow", "Hit the token limit for this conversation", ReasonAgentContextOverflow},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Classify(tc.in); got != tc.want {
+				t.Errorf("Classify(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeDaemonReasonUpgradesTokenQuota covers a daemon whose rule 1
+// predates the quota guard: it reports context_overflow for a TPM rejection,
+// and the server relabels it. An explicit overflow keeps its label.
+func TestNormalizeDaemonReasonUpgradesTokenQuota(t *testing.T) {
+	t.Parallel()
+
+	quota := "API Error: Request rejected (429) · Token usage exceeds the current model TPM (tokens per minute) limit 1000000"
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), quota); got != ReasonAgentProviderCapacityOrRateLimit {
+		t.Errorf("NormalizeDaemonReason(context_overflow, TPM quota) = %q, want %q", got, ReasonAgentProviderCapacityOrRateLimit)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "prompt is too long: tokens per minute limit reached"); got != ReasonAgentContextOverflow {
+		t.Errorf("explicit overflow relabelled to %q", got)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "you exceeded the token limit"); got != ReasonAgentContextOverflow {
+		t.Errorf("ordinary token overflow changed to %q", got)
+	}
+}
+
+func TestTokenQuotaRequestSize(t *testing.T) {
+	t.Parallel()
+
+	const oversized = "Request too large for gpt-4o on tokens per min (TPM): Limit 30000, Requested 45000. The input or output tokens must be reduced in order to run successfully."
+	cases := []struct {
+		name string
+		in   string
+		want Reason
+	}{
+		{"Azure token rate limit without per-minute wording", "rate_limit_exceeded: Your requests to gpt-6.1-sol for gpt-6.1-sol in eastus2 have exceeded token rate limit.", ReasonAgentProviderCapacityOrRateLimit},
+		{"temporary TPM exhaustion", "Rate limit reached for gpt-4o on tokens per min (TPM): Limit 30000, Used 29000, Requested 2000. Please try again in 2s.", ReasonAgentProviderCapacityOrRateLimit},
+		{"single request exceeds TPM allowance", oversized, ReasonAgentContextOverflow},
+		{"single request exceeds TPM allowance with HTTP wrapper", "API Error: 429 " + oversized, ReasonAgentContextOverflow},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Classify(tc.in); got != tc.want {
+				t.Errorf("Classify(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), tc.in); got != tc.want {
+				t.Errorf("NormalizeDaemonReason(context_overflow, %q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeDaemonReasonDistinguishesInsufficientBalanceFromRateLimit(t *testing.T) {
 	legacy := ReasonAgentProviderCapacityOrRateLimit.String()
 	for _, tc := range []struct {
