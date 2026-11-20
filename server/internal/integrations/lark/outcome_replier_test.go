@@ -1,6 +1,7 @@
 package lark
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -241,6 +242,59 @@ func TestLarkOutcomeReplierAgentArchivedSendsCard(t *testing.T) {
 	}
 }
 
+func TestFeishuOutboundReplierInvokeDenied(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		region  Region
+		want    string
+		sendErr error
+	}{
+		{name: "Feishu", region: RegionFeishu, want: "请联系智能体所有者"},
+		{name: "Lark", region: RegionLark, want: "ask the agent's owner"},
+		{name: "send failure", region: RegionLark, want: "ask the agent's owner", sendErr: errors.New("lark unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			api := &stubAPIClientWithRecorder{configured: true, textErr: tc.sendErr}
+			replier := &feishuOutboundReplier{replier: NewLarkOutcomeReplier(OutcomeReplierConfig{
+				APIClient:   api,
+				BindingSvc:  &BindingTokenService{},
+				Credentials: stubCredentialsResolver{secret: "test-secret"},
+				Queries:     stubReplierQueries{agent: db.Agent{Name: "Undisclosed Agent"}},
+				AppURL:      "https://multica.test",
+				Logger:      slog.New(slog.NewTextHandler(&logs, nil)),
+			})}
+			msg := channelMessageFromLark(InboundMessage{
+				EventID: "evt_denied", ChatID: "oc_group", ChatType: ChatTypeGroup, MessageID: "om_trigger",
+				ThreadID: "thread", SenderOpenID: "ou_sender", AddressedToBot: true,
+			})
+			inst := engine.ResolvedInstallation{Platform: Installation{Region: string(tc.region)}}
+			replier.Reply(context.Background(), inst, msg, engine.Result{
+				Outcome: engine.OutcomeInvokeDenied, DropReason: engine.DropReasonInvokeDenied,
+			})
+
+			if len(api.textOut) != 1 || len(api.interactiveOut) != 0 || len(api.bindingCalls) != 0 {
+				t.Fatalf("want one text reply only, got text=%d card=%d binding=%d", len(api.textOut), len(api.interactiveOut), len(api.bindingCalls))
+			}
+			got := api.textOut[0]
+			if got.ChatID != "oc_group" || got.ReplyTarget != (ReplyTarget{MessageID: "om_trigger", InThread: true}) {
+				t.Fatalf("notice must reply to the original topic message: %+v", got.ReplyTarget)
+			}
+			if !strings.Contains(got.Text, tc.want) || strings.Contains(got.Text, "Undisclosed Agent") || strings.Contains(got.Text, "ou_sender") {
+				t.Fatalf("want actionable text without sender or agent identity, got %q", got.Text)
+			}
+			if tc.sendErr != nil {
+				for _, want := range []string{"event_id=evt_denied", "message_id=om_trigger", tc.sendErr.Error()} {
+					if !strings.Contains(logs.String(), want) {
+						t.Fatalf("send failure log missing %q: %s", want, &logs)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestLarkOutcomeReplierCommandOutcomesSendGuidance(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -288,10 +342,10 @@ func TestLarkOutcomeReplierIngestedAndDroppedAreSilent(t *testing.T) {
 	})
 	msg := InboundMessage{ChatID: "oc_x"}
 	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeIngested})
-	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeDropped, DropReason: DropReasonDuplicate})
-	if len(stub.interactiveOut) != 0 || len(stub.bindingCalls) != 0 {
-		t.Errorf("Ingested/Dropped should not trigger any APIClient call; got interactive=%d binding=%d",
-			len(stub.interactiveOut), len(stub.bindingCalls))
+	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeDropped, DropReason: DropReason(engine.DropReasonNotAddressedInGroup)})
+	if len(stub.textOut) != 0 || len(stub.interactiveOut) != 0 || len(stub.bindingCalls) != 0 {
+		t.Errorf("Ingested/Dropped should not trigger any APIClient call; got text=%d interactive=%d binding=%d",
+			len(stub.textOut), len(stub.interactiveOut), len(stub.bindingCalls))
 	}
 }
 
