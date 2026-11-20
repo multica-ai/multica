@@ -11,7 +11,7 @@ import {
 } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { useIsGuest } from "@multica/core/permissions";
-import { useAssigneeUsageStore, useRecentIssuesStore } from "@multica/core/issues/stores";
+import { pruneAssigneeUsageWorkspaces, useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useRecentVisitsStore } from "@multica/core/command-bar";
 import { useNavigation } from "../navigation";
 
@@ -47,6 +47,7 @@ const GUEST_SECTIONS = new Set(["inbox", "my-issues", "issues", "projects", "set
 export function useDashboardGuard() {
   const { pathname, replace } = useNavigation();
   const user = useAuthStore((s) => s.user);
+  const userId = user?.id ?? null;
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useCurrentWorkspace();
   const hasOnboarded = useHasOnboarded();
@@ -78,6 +79,7 @@ export function useDashboardGuard() {
   }, [pathname]);
 
   // Drop recent-issues and assignee-usage buckets for workspaces the user no longer belongs to.
+  // Assignee usage is stored per signed-in user, so only that user's copy is pruned.
   // Runs once the workspace list resolves, and again whenever membership
   // changes (workspace deleted, user kicked, user left).
   useEffect(() => {
@@ -85,8 +87,8 @@ export function useDashboardGuard() {
     const activeWsIds = workspaces.map((w) => w.id);
     useRecentIssuesStore.getState().pruneWorkspaces(activeWsIds);
     useRecentVisitsStore.getState().pruneWorkspaces(activeWsIds);
-    useAssigneeUsageStore.getState().pruneWorkspaces(activeWsIds);
-  }, [workspaceListReady, workspaces]);
+    if (userId) pruneAssigneeUsageWorkspaces(userId, activeWsIds);
+  }, [workspaceListReady, workspaces, userId]);
 
   return { user, isLoading, workspace, guestBlocked };
 }

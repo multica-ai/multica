@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentTask, Issue, QuickAction } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { useAssigneeUsageStore } from "@multica/core/issues/stores/assignee-usage-store";
+import { resetAssigneeUsageForTests } from "@multica/core/issues/stores/assignee-usage-store";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
 
@@ -214,7 +214,8 @@ function wrap(ui: React.ReactNode) {
 
 beforeEach(() => {
   // Picks made by one test would otherwise surface in the next one's Recent section.
-  useAssigneeUsageStore.setState({ byWorkspace: {} });
+  localStorage.clear();
+  resetAssigneeUsageForTests();
   platform.desktop = false;
   deletionPolicy.allowed = true;
   mockOpenModal.mockReset();

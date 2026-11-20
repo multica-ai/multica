@@ -14,4 +14,12 @@ export const defaultStorage: StorageAdapter = {
     if (typeof window === "undefined") return [];
     return Object.keys(localStorage);
   },
+  subscribe: (listener) => {
+    if (typeof window === "undefined") return () => {};
+    // Subscribers re-read through getItem, so an event for another storage
+    // area costs a redundant read at most.
+    const onStorage = (event: StorageEvent) => listener(event.key);
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  },
 };

@@ -11,8 +11,8 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   compareAssigneeUsage,
-  selectAssigneeUsage,
-  useAssigneeUsageStore,
+  recordAssigneeUsage,
+  useAssigneeUsage,
 } from "@multica/core/issues/stores/assignee-usage-store";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
@@ -219,8 +219,7 @@ function useAssigneeChoices(filter: string) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
-  const usage = useAssigneeUsageStore(selectAssigneeUsage(wsId));
-  const recordAssignment = useAssigneeUsageStore((s) => s.recordAssignment);
+  const usage = useAssigneeUsage(user?.id ?? null, wsId);
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -283,8 +282,9 @@ function useAssigneeChoices(filter: string) {
     filteredAgents,
     filteredSquads,
     runnableAgentIds,
-    recordAssignment: (type: IssueAssigneeType, id: string) =>
-      recordAssignment(wsId, { type, id }),
+    recordAssignment: (type: IssueAssigneeType, id: string) => {
+      if (user) recordAssigneeUsage(user.id, wsId, { type, id });
+    },
   };
 }
 
@@ -318,9 +318,11 @@ function AssigneeOptions({
   const isSelected = (type: string, id: string) =>
     assigneeType === type && assigneeId === id;
 
+  // Assign first: the Recent count is a convenience and must never stand in
+  // the way of the assignment itself (recording also never throws).
   const pickAssignee = (type: IssueAssigneeType, id: string) => {
-    recordAssignment(type, id);
     onPick({ assignee_type: type, assignee_id: id });
+    recordAssignment(type, id);
   };
 
   const renderMember = (m: MemberWithUser) => (

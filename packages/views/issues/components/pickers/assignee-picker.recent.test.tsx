@@ -1,15 +1,20 @@
 // The assignee picker's Recent section: the user's three most-assigned actors,
-// counted on this device by `useAssigneeUsageStore`. Uses the real store and
-// PropertyPicker so recording and rendering are tested together.
+// counted on this device per signed-in user. Uses the real usage store,
+// localStorage and PropertyPicker so recording and rendering are tested together.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { useAssigneeUsageStore } from "@multica/core/issues/stores";
+import {
+  getAssigneeUsage,
+  recordAssigneeUsage,
+  resetAssigneeUsageForTests,
+} from "@multica/core/issues/stores/assignee-usage-store";
 import enIssues from "../../../locales/en/issues.json";
 import { AssigneePicker } from "./assignee-picker";
 
 const WS_ID = "workspace-1";
+const auth = { userId: "user-1" };
 
 const MEMBERS = [
   { user_id: "user-1", name: "Ada Lovelace", role: "member" },
@@ -31,7 +36,10 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
-vi.mock("@multica/core/auth", () => ({ useAuthStore: () => ({ id: "user-1" }) }));
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (s: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: auth.userId } }),
+}));
 vi.mock("@multica/core/agents", () => ({ isAgentRuntimeBound: () => true }));
 vi.mock("@multica/core/permissions", () => ({
   canAssignAgentToIssue: () => ({ allowed: true }),
@@ -77,8 +85,15 @@ function recentNames() {
 }
 
 beforeEach(() => {
-  useAssigneeUsageStore.setState({ byWorkspace: {} });
+  vi.restoreAllMocks();
+  auth.userId = "user-1";
+  localStorage.clear();
+  resetAssigneeUsageForTests();
 });
+
+const record = (type: "member" | "agent" | "squad", id: string, times = 1) => {
+  for (let i = 0; i < times; i++) recordAssigneeUsage(auth.userId, WS_ID, { type, id });
+};
 
 describe("AssigneePicker Recent section", () => {
   it("is absent when this browser has no assignment history", async () => {
@@ -88,12 +103,11 @@ describe("AssigneePicker Recent section", () => {
   });
 
   it("lists the top three by count, skipping archived actors", async () => {
-    const record = useAssigneeUsageStore.getState().recordAssignment;
-    for (let i = 0; i < 5; i++) record(WS_ID, { type: "agent", id: "agent-2" });
-    for (let i = 0; i < 4; i++) record(WS_ID, { type: "member", id: "user-2" });
-    for (let i = 0; i < 3; i++) record(WS_ID, { type: "squad", id: "squad-1" });
-    for (let i = 0; i < 2; i++) record(WS_ID, { type: "agent", id: "agent-1" });
-    record(WS_ID, { type: "member", id: "user-1" });
+    record("agent", "agent-2", 5);
+    record("member", "user-2", 4);
+    record("squad", "squad-1", 3);
+    record("agent", "agent-1", 2);
+    record("member", "user-1");
 
     renderPicker();
     await screen.findByText("Recent");
@@ -102,7 +116,7 @@ describe("AssigneePicker Recent section", () => {
   });
 
   it("hides while searching", async () => {
-    useAssigneeUsageStore.getState().recordAssignment(WS_ID, { type: "member", id: "user-2" });
+    record("member", "user-2");
     const user = userEvent.setup();
 
     renderPicker();
@@ -137,6 +151,32 @@ describe("AssigneePicker Recent section", () => {
 
     expect(onUpdate).toHaveBeenCalledWith({ assignee_type: null, assignee_id: null });
 
-    expect(useAssigneeUsageStore.getState().byWorkspace[WS_ID]).toBeUndefined();
+    expect(getAssigneeUsage(auth.userId, WS_ID)).toEqual([]);
+  });
+
+  it("still assigns when the browser refuses to save the history", async () => {
+    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    });
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+
+    renderPicker(onUpdate);
+    await user.click(await screen.findByText("Grace Hopper"));
+
+    expect(onUpdate).toHaveBeenCalledWith({ assignee_type: "member", assignee_id: "user-2" });
+  });
+
+  it("does not show one account's history to the next account on this browser", async () => {
+    const user = userEvent.setup();
+
+    const { unmount } = renderPicker();
+    await user.click(await screen.findByText("Grace Hopper"));
+    unmount();
+
+    auth.userId = "user-2";
+    renderPicker();
+    await screen.findByText("Members");
+    expect(screen.queryByText("Recent")).toBeNull();
   });
 });

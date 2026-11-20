@@ -11,8 +11,10 @@ export {
   type RecentIssueEntry,
 } from "./recent-issues-store";
 export {
-  useAssigneeUsageStore,
-  selectAssigneeUsage,
+  useAssigneeUsage,
+  getAssigneeUsage,
+  recordAssigneeUsage,
+  pruneAssigneeUsageWorkspaces,
   compareAssigneeUsage,
   type AssigneeUsageEntry,
 } from "./assignee-usage-store";

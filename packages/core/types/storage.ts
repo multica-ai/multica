@@ -12,4 +12,13 @@ export interface StorageAdapter {
    * answer this synchronously. Callers state what they degrade to without it.
    */
   keys?(): string[];
+  /**
+   * Call `listener` when another browsing context (another tab or window of
+   * the same origin) changes a key; `null` means it cleared everything. Writes
+   * made through this adapter in the current context are not reported.
+   *
+   * Optional for the same reason as `keys`: not every backend can observe
+   * other writers. Callers without it only see their own writes.
+   */
+  subscribe?(listener: (key: string | null) => void): () => void;
 }
