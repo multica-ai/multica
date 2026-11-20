@@ -26,6 +26,7 @@ import {
   Zap,
 } from "@multica/ui/icons";
 import { dispatchReasonCode } from "@multica/core/api";
+import { issueRunLimitLabel } from "../../issues/blocked-trigger-copy";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -229,14 +230,16 @@ export function useIssueCommandGroup(
           run: () => {
             retryRun.mutateAsync(lastTask.id).then(
               () => toast.success(t(($) => $.toast.run_retried)),
-              (e: unknown) =>
+              (e: unknown) => {
+                const reason = dispatchReasonCode(e);
                 toast.error(
-                  dispatchReasonCode(e) === "invocation_not_allowed"
+                  issueRunLimitLabel(reason, tIssues) ?? (reason === "invocation_not_allowed"
                     ? tIssues(($) => $.execution_log.retry_blocked)
                     : e instanceof Error
                       ? e.message
-                      : tIssues(($) => $.execution_log.retry_failed),
-                ),
+                      : tIssues(($) => $.execution_log.retry_failed)),
+                );
+              },
             );
           },
         });

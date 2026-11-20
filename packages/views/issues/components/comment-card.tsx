@@ -38,6 +38,7 @@ import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone,
 import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
+import { issueRunLimitLabel } from "../blocked-trigger-copy";
 import { ReplyInput, type ReplyInputHandle } from "./reply-input";
 import { VirtualThreadRow, shouldVirtualizeThreadRows } from "./virtual-thread-row";
 import { CommentTriggerChips } from "./comment-trigger-chips";
@@ -328,12 +329,13 @@ function TaskCommentRetryButton({
     } catch (e) {
       // Rerun re-checks the operator's invoke permission (MUL-4525); a
       // structured 403 is a permission block, not a transient failure.
+      const reason = dispatchReasonCode(e);
       toast.error(
-        dispatchReasonCode(e) === "invocation_not_allowed"
+        issueRunLimitLabel(reason, t) ?? (reason === "invocation_not_allowed"
           ? t(($) => $.execution_log.retry_blocked)
           : e instanceof Error
             ? e.message
-            : t(($) => $.execution_log.retry_failed),
+            : t(($) => $.execution_log.retry_failed)),
       );
     } finally {
       setRetrying(false);

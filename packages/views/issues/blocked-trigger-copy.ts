@@ -9,6 +9,17 @@ import type { useT } from "../i18n";
 // denied runtime access, and a missing runtime profile.
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
+export function issueRunLimitLabel(reasonCode: string | undefined, t: IssuesT): string | undefined {
+  switch (reasonCode) {
+    case "issue_run_limit":
+      return t(($) => $.comment.trigger_blocked_issue_run_limit);
+    case "issue_agent_run_limit":
+      return t(($) => $.comment.trigger_blocked_issue_agent_run_limit);
+    default:
+      return undefined;
+  }
+}
+
 // Full sentence — for tooltips and other surfaces with room to explain.
 export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
   switch (reasonCode) {
@@ -27,7 +38,7 @@ export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
     case "runtime_access_denied":
       return t(($) => $.comment.trigger_blocked_runtime_access_denied);
     default:
-      return t(($) => $.comment.trigger_blocked_generic);
+      return issueRunLimitLabel(reasonCode, t) ?? t(($) => $.comment.trigger_blocked_generic);
   }
 }
 
@@ -49,6 +60,10 @@ export function blockedShortReasonLabel(reasonCode: string, t: IssuesT): string 
       return t(($) => $.comment.trigger_blocked_short_agent_runtime_required);
     case "runtime_access_denied":
       return t(($) => $.comment.trigger_blocked_short_runtime_access_denied);
+    case "issue_run_limit":
+      return t(($) => $.comment.trigger_blocked_short_issue_run_limit);
+    case "issue_agent_run_limit":
+      return t(($) => $.comment.trigger_blocked_short_issue_agent_run_limit);
     default:
       return t(($) => $.comment.trigger_blocked_short_generic);
   }
