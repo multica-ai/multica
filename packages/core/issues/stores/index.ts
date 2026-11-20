@@ -11,6 +11,12 @@ export {
   type RecentIssueEntry,
 } from "./recent-issues-store";
 export {
+  useAssigneeUsageStore,
+  selectAssigneeUsage,
+  compareAssigneeUsage,
+  type AssigneeUsageEntry,
+} from "./assignee-usage-store";
+export {
   ViewStoreProvider,
   useViewStore,
   useViewStoreApi,

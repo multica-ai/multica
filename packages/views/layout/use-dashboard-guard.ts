@@ -11,7 +11,7 @@ import {
 } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { useIsGuest } from "@multica/core/permissions";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useAssigneeUsageStore, useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useRecentVisitsStore } from "@multica/core/command-bar";
 import { useNavigation } from "../navigation";
 
@@ -77,7 +77,7 @@ export function useDashboardGuard() {
     useNavigationStore.getState().onPathChange(pathname);
   }, [pathname]);
 
-  // Drop recent-issues buckets for workspaces the user no longer belongs to.
+  // Drop recent-issues and assignee-usage buckets for workspaces the user no longer belongs to.
   // Runs once the workspace list resolves, and again whenever membership
   // changes (workspace deleted, user kicked, user left).
   useEffect(() => {
@@ -85,6 +85,7 @@ export function useDashboardGuard() {
     const activeWsIds = workspaces.map((w) => w.id);
     useRecentIssuesStore.getState().pruneWorkspaces(activeWsIds);
     useRecentVisitsStore.getState().pruneWorkspaces(activeWsIds);
+    useAssigneeUsageStore.getState().pruneWorkspaces(activeWsIds);
   }, [workspaceListReady, workspaces]);
 
   return { user, isLoading, workspace, guestBlocked };
