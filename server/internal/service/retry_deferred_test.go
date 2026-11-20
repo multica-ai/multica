@@ -397,11 +397,12 @@ func TestFailTaskDefersUnstartedWorktreePrerequisiteRetry(t *testing.T) {
 			if err != nil || parent.Status != "failed" || parent.FailureReason.String != reason {
 				t.Fatalf("parent status=%q reason=%q error=%v", parent.Status, parent.FailureReason.String, err)
 			}
+			var childID pgtype.UUID
 			var status string
 			var attempt, maxAttempts int32
 			var fireAt time.Time
-			err = pool.QueryRow(ctx, "SELECT status, attempt, max_attempts, fire_at FROM agent_task_queue WHERE parent_task_id=$1", id).
-				Scan(&status, &attempt, &maxAttempts, &fireAt)
+			err = pool.QueryRow(ctx, "SELECT id, status, attempt, max_attempts, fire_at FROM agent_task_queue WHERE parent_task_id=$1", id).
+				Scan(&childID, &status, &attempt, &maxAttempts, &fireAt)
 			if tc.delay == 0 {
 				if !errors.Is(err, pgx.ErrNoRows) {
 					t.Fatalf("retry child must be absent, query result: %v", err)
@@ -413,6 +414,23 @@ func TestFailTaskDefersUnstartedWorktreePrerequisiteRetry(t *testing.T) {
 			}
 			if fireAt.Before(before.Add(tc.delay-time.Second)) || fireAt.After(time.Now().Add(tc.delay+time.Second)) {
 				t.Fatalf("retry due at %v, want a delay of %v", fireAt, tc.delay)
+			}
+			if tc.attempt == 1 {
+				runtimeID := parent.RuntimeID
+				if _, err := pool.Exec(ctx, "UPDATE agent_runtime SET status='online', last_seen_at=now() WHERE id=$1", runtimeID); err != nil {
+					t.Fatal(err)
+				}
+				claimed, err := svc.ClaimTaskForRuntime(ctx, runtimeID)
+				if err != nil || claimed != nil {
+					t.Fatalf("claim before retry is due: got %v, err=%v", claimed, err)
+				}
+				if _, err := pool.Exec(ctx, "UPDATE agent_task_queue SET fire_at=now()-interval '1 second' WHERE id=$1", childID); err != nil {
+					t.Fatal(err)
+				}
+				claimed, err = svc.ClaimTaskForRuntime(ctx, runtimeID)
+				if err != nil || claimed == nil || claimed.ID != childID || claimed.ParentTaskID != id {
+					t.Fatalf("claim after retry is due: got %v, err=%v", claimed, err)
+				}
 			}
 		})
 	}
