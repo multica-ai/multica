@@ -67,7 +67,11 @@ type preparationResponse struct {
 
 // preparationErrorKindOpenclawCLITimeout marks a helper failure caused by the
 // local openclaw CLI missing its deadline (ErrOpenclawCLITimeout).
-const preparationErrorKindOpenclawCLITimeout = "openclaw_cli_timeout"
+const (
+	preparationErrorKindOpenclawCLITimeout             = "openclaw_cli_timeout"
+	preparationErrorKindLocalWorktreeRepositoryMissing = "local_worktree_repository_missing"
+	preparationErrorKindLocalWorktreeHeadMissing       = "local_worktree_head_missing"
+)
 
 // preparationKindError re-attaches a sentinel to an error that crossed the
 // helper boundary as text, so the daemon's classifier sees the same
@@ -84,8 +88,13 @@ func (e *preparationKindError) Unwrap() error { return e.kind }
 // preparationErrorKind names the class of err for the wire, or "" when it has
 // none.
 func preparationErrorKind(err error) string {
-	if errors.Is(err, ErrOpenclawCLITimeout) {
+	switch {
+	case errors.Is(err, ErrOpenclawCLITimeout):
 		return preparationErrorKindOpenclawCLITimeout
+	case errors.Is(err, ErrLocalWorktreeRepositoryMissing):
+		return preparationErrorKindLocalWorktreeRepositoryMissing
+	case errors.Is(err, ErrLocalWorktreeHeadMissing):
+		return preparationErrorKindLocalWorktreeHeadMissing
 	}
 	return ""
 }
@@ -97,6 +106,10 @@ func rehydratePreparationError(message, kind string) error {
 	switch kind {
 	case preparationErrorKindOpenclawCLITimeout:
 		return &preparationKindError{msg: message, kind: ErrOpenclawCLITimeout}
+	case preparationErrorKindLocalWorktreeRepositoryMissing:
+		return &preparationKindError{msg: message, kind: ErrLocalWorktreeRepositoryMissing}
+	case preparationErrorKindLocalWorktreeHeadMissing:
+		return &preparationKindError{msg: message, kind: ErrLocalWorktreeHeadMissing}
 	default:
 		return errors.New(message)
 	}

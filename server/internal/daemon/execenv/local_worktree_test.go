@@ -358,6 +358,40 @@ func TestPrepareLocalWorktreeRejectsRepoWithoutCommits(t *testing.T) {
 	}
 }
 
+func TestPrepareLocalWorktreeAfterRepositoryBecomesReady(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+
+	dir := t.TempDir()
+	params := LocalWorktreeParams{
+		LocalPath: dir,
+		EnvRoot:   t.TempDir(),
+		TaskID:    "11112222-3333-4444-5555-666677778888",
+	}
+	prepare := func() (*LocalWorktree, error) {
+		return PrepareLocalWorktree(params, worktreeTestLogger())
+	}
+
+	if _, err := prepare(); !errors.Is(err, ErrLocalWorktreeRepositoryMissing) {
+		t.Fatalf("before git init: got %v, want a repository prerequisite error", err)
+	}
+	gitRun(t, dir, "init", "-b", "main")
+	if _, err := prepare(); !errors.Is(err, ErrLocalWorktreeHeadMissing) {
+		t.Fatalf("before first commit: got %v, want a HEAD prerequisite error", err)
+	}
+
+	writeFile(t, filepath.Join(dir, "README.md"), "ready")
+	gitRun(t, dir, "add", "README.md")
+	gitRun(t, dir, "-c", "user.name=Worktree Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Initial commit")
+	worktree, err := prepare()
+	if err != nil {
+		t.Fatalf("prepare after first commit: %v", err)
+	}
+	if got := readFile(t, filepath.Join(worktree.WorkDir, "README.md")); got != "ready" {
+		t.Fatalf("worktree content = %q, want initial commit", got)
+	}
+}
+
 // Concurrency is the entire point of the mode: two tasks on one directory must
 // both get a working checkout, with distinct branches, without corrupting git's
 // admin files.
