@@ -478,7 +478,8 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -573,7 +574,7 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 	}
 	if copyBytes > 0 {
 		if err := h.storageQuota().Admit(r.Context(), wsUUID, copyBytes, service.StorageSourceSubIssue); err != nil {
-			if !writeStorageLimitReached(w, err, !h.isGuest(r, workspaceID, userID)) {
+			if !writeStorageLimitReached(w, err, !projectaccess.IsGuestRole(member.Role)) {
 				writeError(w, http.StatusInternalServerError, "failed to check attachment storage")
 			}
 			return
