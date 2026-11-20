@@ -42,13 +42,6 @@ const (
 	// for a deployment. It is a GLOBAL switch. Turning it off leaves existing
 	// doc rows untouched — they simply become unreachable until it is back on.
 	DocsV1 = "docs_v1"
-	// WorkspaceGuests gates inviting guests and turning members into guests
-	// (MUL-9420). On by default, so self-hosted servers have guests. A server
-	// that predates guests treats a guest row as a full member, so a rolling
-	// deploy should run with FF_WORKSPACE_GUESTS=off until every replica
-	// serves this version. Existing guests keep their narrowed access either
-	// way.
-	WorkspaceGuests = "workspace_guests"
 	// DashboardHistory365d offers the 365-day range on the workspace dashboard
 	// (MUL-9490). On by default; FF_DASHBOARD_HISTORY_365D=off hides the range
 	// again if the year-long dashboard queries turn out too slow for a
@@ -112,16 +105,11 @@ func DashboardHistory365dEnabled(ctx context.Context, flags *featureflag.Service
 	return flags.IsEnabled(ctx, DashboardHistory365d, true)
 }
 
-func WorkspaceGuestsEnabled(ctx context.Context, flags *featureflag.Service) bool {
-	return flags.IsEnabled(ctx, WorkspaceGuests, true)
-}
-
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
-	out := make(map[string]bool, len(frontendPublicFlags)+6)
+	out := make(map[string]bool, len(frontendPublicFlags)+5)
 	for _, key := range frontendPublicFlags {
 		out[key] = flags.IsEnabled(ctx, key, false)
 	}
-	out[WorkspaceGuests] = WorkspaceGuestsEnabled(ctx, flags)
 	out[DashboardHistory365d] = DashboardHistory365dEnabled(ctx, flags)
 	out[agentBuilderCompat] = true
 	out[agentSkillTogglesCompat] = true

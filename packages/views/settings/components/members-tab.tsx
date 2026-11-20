@@ -629,7 +629,8 @@ export function MembersTab() {
   const shareableProjects = useShareableProjects(wsId);
   const projectTitles = new Map(shareableProjects.map((project) => [project.id, project.title]));
   const guestCount = members.filter((m) => m.role === "guest").length;
-  // Workspaces that already have guests keep seeing them if the flag goes off.
+  // Workspaces that already have guests keep seeing them where adding guests
+  // is not offered (Cloud before billing launches).
   const showGuestViews = guestsEnabled || guestCount > 0;
   // A guest takes no member slot, so a full workspace still invites guests.
   const inviteLimited = inviteRole !== "guest";
