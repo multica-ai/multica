@@ -87,6 +87,8 @@ export interface Project {
   archived_at?: string | null;
   archived_by_type?: "member" | "agent" | null;
   archived_by_id?: string | null;
+  max_runs_per_issue?: number | null;
+  max_runs_per_agent_per_issue?: number | null;
 }
 
 export interface ArchiveProjectResponse extends Project {
@@ -126,6 +128,8 @@ export interface UpdateProjectRequest {
   // Omit the key to leave the date untouched; send null (or "") to clear it.
   start_date?: string | null;
   due_date?: string | null;
+  max_runs_per_issue?: number | null;
+  max_runs_per_agent_per_issue?: number | null;
 }
 
 export interface ListProjectsResponse {

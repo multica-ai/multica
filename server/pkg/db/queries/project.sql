@@ -64,6 +64,8 @@ UPDATE project SET
     lead_id = CASE WHEN sqlc.arg('lead_id_set')::boolean THEN sqlc.narg('lead_id') ELSE lead_id END,
     start_date = CASE WHEN sqlc.arg('start_date_set')::boolean THEN sqlc.narg('start_date') ELSE start_date END,
     due_date = CASE WHEN sqlc.arg('due_date_set')::boolean THEN sqlc.narg('due_date') ELSE due_date END,
+    max_runs_per_issue = CASE WHEN sqlc.arg('max_runs_per_issue_set')::boolean THEN sqlc.narg('max_runs_per_issue') ELSE max_runs_per_issue END,
+    max_runs_per_agent_per_issue = CASE WHEN sqlc.arg('max_runs_per_agent_per_issue_set')::boolean THEN sqlc.narg('max_runs_per_agent_per_issue') ELSE max_runs_per_agent_per_issue END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
