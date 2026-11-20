@@ -125,7 +125,7 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
-Si `issue comment add` expire ou si la réponse est perdue, le commentaire peut déjà être présent. Une fois le serveur joignable, vérifiez avec `multica issue comment list <issue-id>` avant de réessayer. Pour une réponse, ajoutez `--thread <comment-id>` afin de vérifier le fil concerné. Enregistrez les commentaires importants dans un fichier et utilisez `--content-file` pour conserver le texte si l’envoi échoue.
+Si `issue comment add` expire ou si la réponse est perdue, le commentaire peut déjà être présent. Vérifiez avec `multica issue comment list <issue-id>` avant de renvoyer le commentaire. Pour une réponse, ajoutez `--thread <parent-id> --full` avec le même identifiant que pour `--parent` afin de voir les réponses dans les fils résolus. Si la vérification échoue aussi, conservez le texte et attendez qu’une vérification aboutisse avant de le renvoyer. Utilisez `--content-file` pour envoyer le texte enregistré dans un fichier.
 
 Consulter, arrêter ou relancer une exécution :
 

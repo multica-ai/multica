@@ -2926,7 +2926,8 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		// listing above.
 		body["steer"] = true
 	}
-	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
+	parentID, _ := cmd.Flags().GetString("parent")
+	if parentID != "" {
 		body["parent_id"] = parentID
 	}
 	if len(attachmentIDs) > 0 {
@@ -2935,7 +2936,12 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/comments", body, &result); err != nil {
 		if commentAddDeliveryUncertain(err) {
-			fmt.Fprintf(os.Stderr, "The comment may have been posted. Check `multica issue comment list %s` before retrying.\n", issueRef.Display)
+			checkCommand := "multica issue comment list " + shellQuoteArg(issueRef.Display)
+			if parentID != "" {
+				checkCommand += " --thread " + shellQuoteArg(parentID) + " --full"
+			}
+			fmt.Fprintf(os.Stderr, "The comment may have been posted. Check `%s` in the same workspace before resending. "+
+				"If the check fails, keep the comment text and wait for a successful check before resending.\n", checkCommand)
 		}
 		return fmt.Errorf("add comment: %w", err)
 	}

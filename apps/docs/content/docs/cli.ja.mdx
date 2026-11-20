@@ -125,7 +125,7 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
-`issue comment add` がタイムアウトしたり応答が途切れたりしても、コメントが投稿済みの場合があります。サーバーに再接続できたら、再試行する前に `multica issue comment list <issue-id>` で確認してください。返信の場合は `--thread <comment-id>` を付けて対象のスレッドを確認します。重要なコメントはファイルに保存し、`--content-file` で渡すと、送信に失敗しても本文が残ります。
+`issue comment add` がタイムアウトしたり応答が途切れたりしても、コメントが投稿済みの場合があります。再送する前に `multica issue comment list <issue-id>` で確認してください。返信の場合は、`--parent` と同じ ID を使って `--thread <parent-id> --full` を追加すると、解決済みのスレッドでも返信を確認できます。確認にも失敗した場合は、本文を保存し、確認できるまで再送を待ってください。保存したファイルから送信するには `--content-file` を使います。
 
 1 回の実行のメッセージを表示、実行を停止、または再試行する:
 

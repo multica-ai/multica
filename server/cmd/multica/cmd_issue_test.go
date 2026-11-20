@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -619,18 +620,31 @@ func TestRunIssueCommentAddUploadsAttachmentWithoutIssueID(t *testing.T) {
 }
 
 func TestRunIssueCommentAddChecksDeliveryBeforeRetry(t *testing.T) {
-	const issueID = "11111111-1111-4111-8111-111111111111"
+	const (
+		issueID       = "11111111-1111-4111-8111-111111111111"
+		parentID      = "22222222-2222-4222-8222-222222222222"
+		checkComments = "multica issue comment list " + issueID
+	)
 	for _, tc := range []struct {
 		name     string
 		status   int
 		response string
-		wantHint bool
+		parent   string
+		timeout  bool
+		wantCmd  string
 		wantExit int
 	}{
-		{"lost acknowledgement", http.StatusCreated, "{", true, cli.ExitNetwork},
-		{"connection closes before response", 0, "", true, cli.ExitNetwork},
-		{"gateway error", http.StatusBadGateway, "gateway failed", true, cli.ExitGeneric},
-		{"validation error", http.StatusUnprocessableEntity, "comment rejected", false, cli.ExitValidation},
+		{"lost acknowledgement", http.StatusCreated, "{", "", false, checkComments, cli.ExitNetwork},
+		{"connection closes before response", 0, "", "", false, checkComments, cli.ExitNetwork},
+		{"gateway error", http.StatusBadGateway, "gateway failed", "", false, checkComments, cli.ExitGeneric},
+		{"validation error", http.StatusUnprocessableEntity, "comment rejected", "", false, "", cli.ExitValidation},
+		{
+			name:     "reply times out before response",
+			parent:   parentID,
+			timeout:  true,
+			wantCmd:  checkComments + " --thread " + parentID + " --full",
+			wantExit: cli.ExitNetwork,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts atomic.Int32
@@ -641,6 +655,18 @@ func TestRunIssueCommentAddChecksDeliveryBeforeRetry(t *testing.T) {
 					return
 				}
 				posts.Add(1)
+				if tc.timeout {
+					var posted map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+						t.Errorf("decode comment body: %v", err)
+						return
+					}
+					if posted["parent_id"] != tc.parent {
+						t.Errorf("comment parent_id = %v, want %q", posted["parent_id"], tc.parent)
+					}
+					<-r.Context().Done()
+					return
+				}
 				if tc.status == 0 {
 					conn, _, err := http.NewResponseController(w).Hijack()
 					if err != nil {
@@ -655,8 +681,14 @@ func TestRunIssueCommentAddChecksDeliveryBeforeRetry(t *testing.T) {
 			}))
 			defer srv.Close()
 			setCLITestServerEnv(t, srv.URL)
+			if tc.timeout {
+				t.Setenv("MULTICA_HTTP_TIMEOUT", "400ms")
+			}
 			cmd := newIssueCommentAddTestCmd()
 			if err := cmd.Flags().Set("content", "review verdict"); err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Flags().Set("parent", tc.parent); err != nil {
 				t.Fatal(err)
 			}
 			stderr := captureStderr(t)
@@ -665,11 +697,24 @@ func TestRunIssueCommentAddChecksDeliveryBeforeRetry(t *testing.T) {
 			if err == nil || cli.ExitCodeFor(err) != tc.wantExit {
 				t.Fatalf("comment error = %v, want exit code %d", err, tc.wantExit)
 			}
+			if tc.timeout && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("comment error = %v, want a request timeout", err)
+			}
 			if got := posts.Load(); got != 1 {
 				t.Fatalf("POST count = %d, want 1", got)
 			}
-			if hint := strings.Contains(stderr.read(), "multica issue comment list "+issueID); hint != tc.wantHint {
-				t.Fatalf("read-back hint = %v, want %v. stderr: %s", hint, tc.wantHint, stderr.read())
+			hint := stderr.read()
+			if tc.wantCmd == "" {
+				if hint != "" {
+					t.Fatalf("stderr = %q, want no delivery hint", hint)
+				}
+				return
+			}
+			if !strings.Contains(hint, "`"+tc.wantCmd+"`") {
+				t.Errorf("stderr = %q, want check command %q", hint, tc.wantCmd)
+			}
+			if !strings.Contains(hint, "keep the comment text and wait for a successful check before resending") {
+				t.Errorf("stderr = %q, want instructions for a failed check", hint)
 			}
 		})
 	}
