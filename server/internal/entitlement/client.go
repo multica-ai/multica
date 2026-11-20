@@ -61,6 +61,7 @@ type Client struct {
 var (
 	_ Provider        = (*Client)(nil)
 	_ Refresher       = (*Client)(nil)
+	_ ChangeRefresher = (*Client)(nil)
 	_ FeatureProvider = (*Client)(nil)
 )
 
@@ -129,6 +130,29 @@ func (c *Client) RefreshGate(ctx context.Context, workspaceID uuid.UUID, name Ga
 	entry, refreshed, err := c.refreshShared(ctx, workspaceID, "force:"+workspaceID.String(),
 		func(cached cacheEntry, now time.Time) bool {
 			return cached.hasPolicy && now.Before(cached.freshUntil) && now.Sub(cached.receivedAt) < minForcedRefreshAge
+		})
+	if err != nil {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	reason := ReasonCacheFresh
+	if refreshed {
+		reason = ReasonRefreshed
+	}
+	return c.recordDecision(name, decisionFromEntry(entry, name, reason, false))
+}
+
+// RefreshGateSince fetches the workspace's policy again unless the cached one
+// was received at or after since, then resolves the gate from it. Concurrent
+// callers with the same since share one fetch. When the fetch fails it answers
+// exactly like Gate, from the cache or fail-open.
+func (c *Client) RefreshGateSince(ctx context.Context, workspaceID uuid.UUID, name GateName, since time.Time) Decision {
+	if !c.Enabled() || workspaceID == uuid.Nil || !name.valid() {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	key := fmt.Sprintf("since:%s:%d", workspaceID, since.UnixNano())
+	entry, refreshed, err := c.refreshShared(ctx, workspaceID, key,
+		func(cached cacheEntry, now time.Time) bool {
+			return cached.hasPolicy && now.Before(cached.freshUntil) && !cached.receivedAt.Before(since)
 		})
 	if err != nil {
 		return c.Gate(ctx, workspaceID, name)
@@ -523,7 +547,12 @@ func normalizeFeature(raw json.RawMessage) featureEntry {
 // notification object must never invalidate the enforcement gate and fail open
 // the underlying quota, so it is dropped independently.
 func normalizeNotificationPolicy(wire *wireNotificationPolicy) *NotificationPolicy {
-	if wire == nil || wire.OnRejection != NotificationFirstRejectionPerPeriod {
+	if wire == nil {
+		return nil
+	}
+	switch wire.OnRejection {
+	case NotificationFirstRejectionPerPeriod, NotificationFirstRejectionPerLimit:
+	default:
 		return nil
 	}
 	return &NotificationPolicy{
@@ -545,6 +574,7 @@ func decisionFromEntry(entry cacheEntry, name GateName, reason Reason, stale boo
 		PolicyRevision:      entry.policy.policyRevision,
 		SubscriptionVersion: entry.policy.subscriptionVersion,
 		CloudValidUntil:     entry.policy.cloudValidUntil,
+		ReceivedAt:          entry.receivedAt,
 	}
 }
 

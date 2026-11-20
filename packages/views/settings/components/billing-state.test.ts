@@ -168,7 +168,9 @@ describe("billing subscription state", () => {
         purchaseSeats: false,
         changePlan: false,
         checkPlanChange: false,
+        purchaseAutopilotRuns: false,
       },
+      autopilotAddon: null,
       planChange: null,
       trial: null,
     } satisfies WorkspaceSubscriptionSummary;
@@ -210,7 +212,9 @@ describe("resolvePlanChangeTarget", () => {
       purchaseSeats: true,
       changePlan,
       checkPlanChange: false,
+      purchaseAutopilotRuns: false,
     },
+    autopilotAddon: null,
     planChange: null,
     trial: null,
   });

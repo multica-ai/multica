@@ -48,8 +48,11 @@ WHERE workspace_id = @workspace_id
 RETURNING *;
 
 -- name: MarkAutopilotQuotaRejectionNotified :one
+-- rejection_notified_limit records the limit the notice was sent at, so a
+-- per-limit notification policy can notify again after the limit changes.
 UPDATE autopilot_quota_period
-SET rejection_notified_at = COALESCE(rejection_notified_at, now()),
+SET rejection_notified_at = now(),
+	rejection_notified_limit = sqlc.narg('notified_limit')::bigint,
 	updated_at = now()
 WHERE workspace_id = @workspace_id
 	AND period_start = @period_start
@@ -146,3 +149,12 @@ WHERE r.state = 'reserved'
   )
 ORDER BY r.created_at
 LIMIT @row_limit;
+
+-- name: MarkAutopilotQuotaLimitRaised :exec
+-- Multica confirmed a paid add-on for the workspace. Marks the period the
+-- payment counts in, so an instance about to reject a run there reads the
+-- Cloud policy again first. With no period row yet no run was ever metered or
+-- rejected there, so there is nothing to mark.
+UPDATE autopilot_quota_period
+SET limit_raised_at = now(), updated_at = now()
+WHERE workspace_id = $1 AND period_start <= now() AND period_end > now();

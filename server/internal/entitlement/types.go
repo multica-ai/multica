@@ -39,7 +39,13 @@ const (
 	ActionObserve Action = "observe"
 	ActionEnforce Action = "enforce"
 
+	// NotificationFirstRejectionPerPeriod notifies on the first rejection of
+	// a period only.
 	NotificationFirstRejectionPerPeriod = "first_rejection_per_period"
+	// NotificationFirstRejectionPerLimit notifies on the first rejection for
+	// each limit within a period, so a limit raised by an add-on purchase
+	// re-arms the notice (policy revision 6).
+	NotificationFirstRejectionPerLimit = "first_rejection_per_limit"
 )
 
 type Reason string
@@ -88,6 +94,10 @@ type Decision struct {
 	PolicyRevision      int64
 	SubscriptionVersion int64
 	CloudValidUntil     time.Time
+	// ReceivedAt is when this process received the policy the decision was
+	// read from, on its own clock. It is zero for a fail-open decision that
+	// has no policy behind it.
+	ReceivedAt time.Time
 }
 
 // Provider is the only interface the autopilot consumer
@@ -108,6 +118,15 @@ type Provider interface {
 // A Provider without it rejects on the cached decision.
 type Refresher interface {
 	RefreshGate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
+}
+
+// ChangeRefresher re-reads one gate when the cached policy may predate a
+// change Multica recorded itself, such as a paid add-on purchase confirmed on
+// another API instance. It fetches again unless the cached policy was
+// received at or after since, bypassing the short reuse window RefreshGate
+// applies.
+type ChangeRefresher interface {
+	RefreshGateSince(ctx context.Context, workspaceID uuid.UUID, name GateName, since time.Time) Decision
 }
 
 // FeatureName is a stable paid-feature key. Unlike a GateName it meters

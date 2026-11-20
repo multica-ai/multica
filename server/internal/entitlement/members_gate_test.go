@@ -241,3 +241,50 @@ func TestStorageBytesGateFailsOpenAlone(t *testing.T) {
 		})
 	}
 }
+
+func TestRefreshGateSinceSkipsTheReuseWindowForAnOlderPolicy(t *testing.T) {
+	clock := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	var calls atomic.Int64
+	var limit atomic.Int64
+	limit.Store(10)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		policy := samplePolicy(6, 1, 60, ActionEnforce)
+		gate := policy.Gates[string(GateAutopilotRuns)]
+		value := int(limit.Load())
+		gate.Limit = &value
+		policy.Gates[string(GateAutopilotRuns)] = gate
+		writePolicy(t, w, policy)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+	client.now = func() time.Time { return clock }
+	workspaceID := uuid.New()
+
+	first := client.Gate(context.Background(), workspaceID, GateAutopilotRuns)
+	if first.Gate.Limit == nil || *first.Gate.Limit != 10 || !first.ReceivedAt.Equal(clock) {
+		t.Fatalf("first = %+v; want limit 10 received now", first)
+	}
+	receivedAt := first.ReceivedAt
+
+	// An add-on is bought one second later, inside RefreshGate's reuse window.
+	limit.Store(1010)
+	clock = clock.Add(time.Second)
+	if reused := client.RefreshGate(context.Background(), workspaceID, GateAutopilotRuns); *reused.Gate.Limit != 10 || calls.Load() != 1 {
+		t.Fatalf("RefreshGate = %+v, calls = %d; it reuses a policy this young", reused, calls.Load())
+	}
+	// The cached policy predates the change, so RefreshGateSince fetches anyway.
+	changedAt := receivedAt.Add(500 * time.Millisecond)
+	refreshed := client.RefreshGateSince(context.Background(), workspaceID, GateAutopilotRuns, changedAt)
+	if refreshed.Gate.Limit == nil || *refreshed.Gate.Limit != 1010 || refreshed.Reason != ReasonRefreshed || calls.Load() != 2 {
+		t.Fatalf("RefreshGateSince = %+v, calls = %d; want the new limit", refreshed, calls.Load())
+	}
+	if !refreshed.ReceivedAt.Equal(clock) {
+		t.Fatalf("refreshed ReceivedAt = %v, want %v", refreshed.ReceivedAt, clock)
+	}
+	// A policy received after the change is current: no second fetch.
+	again := client.RefreshGateSince(context.Background(), workspaceID, GateAutopilotRuns, changedAt)
+	if *again.Gate.Limit != 1010 || again.Reason != ReasonCacheFresh || calls.Load() != 2 {
+		t.Fatalf("again = %+v, calls = %d; a policy newer than the change is reused", again, calls.Load())
+	}
+}

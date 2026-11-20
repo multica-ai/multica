@@ -30,6 +30,8 @@ An autopilot is enabled by default after saving. **Run now** executes the full f
 
 On Multica Cloud, a member’s **Run now** uses none of the workspace’s automation quota, even when the quota is exhausted. Scheduled runs, webhook runs, and runs an agent triggers on a member’s behalf count toward the quota.
 
+When the quota runs out, counted runs are skipped until the quota resets at the start of next month. On Pro and Business, an owner or admin can instead buy more runs in **Settings → Billing** ($10 per 1,000 runs, paid on Stripe's checkout page and valid for the current month); on Free, upgrading raises the limit. The owners and admins, and the member who created the autopilot, get an Inbox notice the first time a run is skipped at each limit.
+
 Below is an autopilot whose execution mode is Create issue. Click **Run now**, or skip ahead to the next scheduled time, and watch it create an issue, hand it to the agent, and complete the run.
 
 <AutopilotDemo />

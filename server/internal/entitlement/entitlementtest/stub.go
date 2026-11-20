@@ -5,6 +5,7 @@ package entitlementtest
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/entitlement"
@@ -27,6 +28,7 @@ type Stub struct {
 var (
 	_ entitlement.Provider        = (*Stub)(nil)
 	_ entitlement.Refresher       = (*Stub)(nil)
+	_ entitlement.ChangeRefresher = (*Stub)(nil)
 	_ entitlement.FeatureProvider = (*Stub)(nil)
 )
 
@@ -69,7 +71,13 @@ func (s *Stub) RefreshGate(ctx context.Context, workspaceID uuid.UUID, name enti
 	return s.Gate(ctx, workspaceID, name)
 }
 
-// Refreshes lists every RefreshGate call.
+// RefreshGateSince behaves like RefreshGate: the stub has no receive times,
+// so every call is a forced refresh.
+func (s *Stub) RefreshGateSince(ctx context.Context, workspaceID uuid.UUID, name entitlement.GateName, _ time.Time) entitlement.Decision {
+	return s.RefreshGate(ctx, workspaceID, name)
+}
+
+// Refreshes lists every RefreshGate and RefreshGateSince call.
 func (s *Stub) Refreshes() []Call {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
