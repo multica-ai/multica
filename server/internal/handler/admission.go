@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 )
 
@@ -69,6 +71,8 @@ const (
 	ReasonSelfTriggerSuppressed = dispatch.ReasonSelfTriggerSuppressed
 	ReasonIssueInTriage         = dispatch.ReasonIssueInTriage
 	ReasonProjectAccessBlocked  = dispatch.ReasonProjectAccessBlocked
+	ReasonIssueRunLimit         = dispatch.ReasonIssueRunLimit
+	ReasonIssueAgentRunLimit    = dispatch.ReasonIssueAgentRunLimit
 	ReasonInternalError         = dispatch.ReasonInternalError
 )
 
@@ -139,9 +143,28 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "a run is already active for this target"
 	case ReasonIssueInTriage:
 		return "the issue is in Triage and has no owner to run yet; accept it out of Triage first"
+	case ReasonIssueRunLimit:
+		return "the issue has reached its run limit"
+	case ReasonIssueAgentRunLimit:
+		return "this agent has reached its run limit for the issue"
 	case ReasonProjectAccessBlocked:
 		return "the agent's owner is not a member of this private project"
 	default:
 		return "the run was blocked"
+	}
+}
+
+func issueRunLimitReason(err error) DispatchReasonCode {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		return ""
+	}
+	switch pgErr.ConstraintName {
+	case "issue_run_limit":
+		return ReasonIssueRunLimit
+	case "issue_agent_run_limit":
+		return ReasonIssueAgentRunLimit
+	default:
+		return ""
 	}
 }

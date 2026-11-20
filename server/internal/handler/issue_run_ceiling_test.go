@@ -170,10 +170,13 @@ func TestIssueRunCeilingRerunKeepsPendingTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = testHandler.TaskService.RerunIssue(ctx, issueID, task.ID, task.TriggerCommentID, issue.CreatorID, false, nil)
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "issue_run_limit" {
-		t.Fatalf("rerun: got %v, want issue_run_limit", err)
+	id := uuidToString(issueID)
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+id+"/rerun", map[string]any{
+		"task_id": uuidToString(task.ID),
+	}), "id", id)
+	blocked := testutil.Call(t, testHandler.RerunIssue, req).Want(http.StatusConflict).Map()
+	if blocked["reason_code"] != string(ReasonIssueRunLimit) {
+		t.Fatalf("rerun reason = %v, want %s", blocked["reason_code"], ReasonIssueRunLimit)
 	}
 	stored, err := testHandler.Queries.GetAgentTask(ctx, task.ID)
 	if err != nil || stored.Status != "queued" {
