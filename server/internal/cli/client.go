@@ -816,7 +816,19 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 		c.setHeaders(req)
 	}
 
-	resp, err := c.HTTPClient.Do(req)
+	// Downloads may have a longer caller budget than ordinary API requests.
+	// Keep the shared client unchanged for concurrent requests and preserve
+	// its timeout when the caller has no deadline (or disabled client timeouts).
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok && httpClient.Timeout > 0 {
+		if remaining := time.Until(deadline); remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
 	err = wrapTransport(req, err)
 	if err != nil {
 		return nil, err
