@@ -151,3 +151,5 @@ Deleting a project does not delete its issues: they detach and stay in the works
 ## Run limits
 
 Open **Run limits** in the project’s properties. Set a total per issue, a limit per agent on each issue, or both. Leave a field blank for no limit. Retries count toward both limits. Once a limit is reached, the project rejects additional runs that would exceed it.
+
+If a wakeup tries to start a run at the limit, Multica pauses the wakeup and records the reason in the issue timeline. Raise or clear the limit before turning the wakeup back on.

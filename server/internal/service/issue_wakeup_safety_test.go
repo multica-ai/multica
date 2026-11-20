@@ -229,3 +229,27 @@ func TestCompleteTaskSkipsFallbackCommentOnlyAfterCheckIn(t *testing.T) {
 		t.Fatalf("assignment run posted %d fallback comments, want 1", n)
 	}
 }
+
+func TestWakeupPausesWhenTheIssueRunLimitIsReached(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	project := f.Project(t, "Capped wakeup project", testutil.Cols{"max_runs_per_issue": 1})
+	f.Exec(t, "UPDATE issue SET project_id=$1 WHERE id=$2", project, issue)
+	f.Task(t, agent, testutil.Cols{
+		"issue_id":   issue,
+		"status":     "completed",
+		"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')"),
+	})
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous",
+		EventTypes: []string{"comment.created"}, Instruction: "Answer new comments"})
+	f.Comment(t, util.UUIDToString(issue), "one more")
+	got := wakeTick(t, f, s, w.ID)
+	if got.Enabled || got.PausedReason.String != "issue_run_limit" || got.DisabledAt.Valid {
+		t.Fatalf("rule after refusal: enabled=%t reason=%q disabled_at=%v", got.Enabled, got.PausedReason.String, got.DisabledAt)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("rule started %d runs at the project limit", n)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM activity_log WHERE issue_id=$1 AND action='wakeup_paused' AND details->>'reason'='issue_run_limit'", issue); n != 1 {
+		t.Fatalf("pause timeline entries = %d, want 1", n)
+	}
+}

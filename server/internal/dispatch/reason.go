@@ -11,6 +11,12 @@
 // name, or its owner.
 package dispatch
 
+import (
+	"errors"
+
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
 // ReasonCode is a stable, client-localizable admission/dispatch reason.
 type ReasonCode string
 
@@ -101,3 +107,18 @@ const (
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
 )
+
+func IssueRunLimitReason(err error) ReasonCode {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		return ""
+	}
+	switch pgErr.ConstraintName {
+	case "issue_run_limit":
+		return ReasonIssueRunLimit
+	case "issue_agent_run_limit":
+		return ReasonIssueAgentRunLimit
+	default:
+		return ""
+	}
+}

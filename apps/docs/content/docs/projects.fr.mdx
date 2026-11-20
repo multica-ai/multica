@@ -151,3 +151,5 @@ Supprimer un projet ne supprime pas ses tâches : elles sont détachées et rest
 ## Limites d’exécution
 
 Ouvrez **Limites d’exécution** dans les propriétés du projet. Définissez une limite totale par ticket, une limite par agent et par ticket, ou les deux. Un champ vide signifie qu’aucune limite ne s’applique. Les nouvelles tentatives comptent dans les deux limites. Une fois un plafond atteint, les exécutions qui le dépasseraient sont refusées.
+
+Si un réveil tente de démarrer une exécution alors que la limite est atteinte, Multica suspend le réveil et en indique la raison dans l’activité du ticket. Augmentez ou supprimez la limite avant de réactiver le réveil.

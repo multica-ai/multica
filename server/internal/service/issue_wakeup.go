@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1354,7 +1355,13 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			}
 		}
 		contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_chain": chain})
-		task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true}, IsLeaderTask: pgtype.Bool{Bool: squadID.Valid, Valid: true}, SquadID: squadID, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps})
+		task, err = createWakeupTaskWithSavepoint(ctx, q, tx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true}, IsLeaderTask: pgtype.Bool{Bool: squadID.Valid, Valid: true}, SquadID: squadID, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps})
+	}
+	if reason := dispatch.IssueRunLimitReason(err); reason != "" && !manual {
+		if err := pauseWakeupForRunLimit(ctx, q, w.ID, reason, note); err != nil {
+			return err
+		}
+		return commit()
 	}
 	if err != nil {
 		return err
@@ -1516,4 +1523,33 @@ func (s *IssueWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQu
 		return err
 	}
 	return s.authorizeRun(ctx, s.Tasks.Queries, issue, w.CreatedBy, agent)
+}
+
+// Roll back a refused insert without discarding the wakeup transaction.
+func createWakeupTaskWithSavepoint(ctx context.Context, q *db.Queries, tx pgx.Tx, params db.CreateWakeupTaskParams) (db.AgentTaskQueue, error) {
+	savepoint, err := tx.Begin(ctx)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	defer savepoint.Rollback(ctx)
+	task, err := q.WithTx(savepoint).CreateWakeupTask(ctx, params)
+	if err != nil {
+		if rollbackErr := savepoint.Rollback(ctx); rollbackErr != nil {
+			return db.AgentTaskQueue{}, rollbackErr
+		}
+		return db.AgentTaskQueue{}, err
+	}
+	return task, savepoint.Commit(ctx)
+}
+
+func pauseWakeupForRunLimit(ctx context.Context, q *db.Queries, id pgtype.UUID, reason dispatch.ReasonCode, note func(string, map[string]any) error) error {
+	if err := q.PauseIssueWakeup(ctx, db.PauseIssueWakeupParams{
+		ID: id, PausedReason: pgtype.Text{String: string(reason), Valid: true},
+	}); err != nil {
+		return err
+	}
+	if err := q.DiscardWakeupReceipts(ctx, id); err != nil {
+		return err
+	}
+	return note(wakeupActivityPaused, map[string]any{"reason": reason})
 }

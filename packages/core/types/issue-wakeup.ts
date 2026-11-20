@@ -44,7 +44,7 @@ export interface IssueWakeup {
   paused_reason?: WakeupPausedReason | null;
 }
 
-export type WakeupPausedReason = "max_fires" | "loop" | "rate";
+export type WakeupPausedReason = "max_fires" | "loop" | "rate" | "issue_run_limit" | "issue_agent_run_limit";
 
 /** Structured predicates the platform evaluates (see WakeupCondition in Go). */
 export type WakeupCondition =
