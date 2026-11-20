@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -82,6 +84,48 @@ func TestPiExecuteReportsRefusedResume(t *testing.T) {
 				t.Fatal("ResumeRejectedTransient set for a permanent refusal")
 			}
 		})
+	}
+}
+
+func TestPiExecuteDrainsRefusalWithInheritedStderr(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	sessionPath := filepath.Join(base, "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"type":"session","cwd":"/gone"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	pidFile := filepath.Join(base, "stderr-holder.pid")
+	t.Cleanup(func() {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			return
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err == nil && pid > 1 {
+			if process, err := os.FindProcess(pid); err == nil {
+				_ = process.Kill()
+			}
+		}
+	})
+	fakePath := filepath.Join(base, "pi")
+	writeTestExecutable(t, fakePath, []byte(fmt.Sprintf(`#!/bin/sh
+cat >/dev/null
+sleep 30 >/dev/null &
+printf '%%s\n' "$!" > %q
+printf '%%s\n' %q >&2
+exit 1
+`, pidFile, piResumeRefusedMarker+": /gone")))
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	session, err := backend.Execute(t.Context(), "hello", ExecOptions{ResumeSessionID: sessionPath, Cwd: base, Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	result := waitPiResult(t, session, 3*time.Second)
+	if result.Status != "failed" || !result.ResumeRejected || result.ResumeRejectedTransient {
+		t.Fatalf("result = %+v, want permanent resume refusal", result)
 	}
 }
 
