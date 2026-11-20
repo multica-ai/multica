@@ -81,7 +81,7 @@ Safari 登录成功后仍然停留在登录页。
 ### 交互卡片
 
 <Callout type="warning">
-Multica 会把包含 Markdown 的智能体回复渲染成飞书交互卡片，但目前不会处理卡片上的交互动作。飞书长连接集成只处理 `im.message.receive_v1`；`card.action.trigger` 事件会被确认后丢弃，卡片里的按钮和表单不会到达智能体。请改用文本命令或外部自动化。不要在同一个飞书应用上再开一条长连接：飞书会把每个事件只投递给该应用的其中一条连接，第二条连接会静默分走一部分 `im.message.receive_v1` 事件，导致 Multica 收不到。
+Multica 会把包含 Markdown 的智能体回复渲染成飞书交互卡片，但目前不会处理卡片上的交互动作。飞书长连接集成只处理 `im.message.receive_v1`；`card.action.trigger` 事件会被确认后丢弃，卡片里的按钮和表单不会到达智能体。要与 Multica 智能体交互，请改用文本命令。外部自动化可以发送和处理它自己的卡片，但不会让 Multica 卡片上的按钮生效；如果它使用长连接，必须单独建一个飞书应用，因为飞书会把每个事件只投递给该应用中一条连接，第二条连接会静默分走一部分 `im.message.receive_v1` 事件，导致 Multica 收不到。
 </Callout>
 
 ## 接收智能体生成的图片和文件

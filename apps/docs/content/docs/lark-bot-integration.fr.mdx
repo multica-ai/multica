@@ -81,7 +81,7 @@ La première ligne devient le titre et le reste la description. Envoyer `/issue`
 ### Cartes interactives
 
 <Callout type="warning">
-Multica affiche les réponses de l'agent contenant du Markdown sous forme de cartes interactives Feishu, mais il ne traite pas aujourd'hui les actions de ces cartes. L'intégration Feishu en connexion longue ne gère que `im.message.receive_v1` ; les événements `card.action.trigger` sont acquittés puis ignorés, donc les boutons et formulaires d'une carte n'atteignent jamais l'agent. Utilisez une commande texte ou une automatisation externe. N'ouvrez pas un second client en connexion longue sur la même application Feishu : Feishu ne livre chaque événement qu'à l'une des connexions de l'application, donc ce second client peut silencieusement détourner une partie des événements `im.message.receive_v1` de Multica.
+Multica affiche les réponses de l'agent contenant du Markdown sous forme de cartes interactives Feishu, mais il ne traite pas aujourd'hui les actions de ces cartes. L'intégration Feishu en connexion longue ne gère que `im.message.receive_v1` ; les événements `card.action.trigger` sont acquittés puis ignorés, donc les boutons et formulaires d'une carte n'atteignent jamais l'agent. Pour interagir avec l'agent Multica, envoyez une commande texte. Une automatisation séparée peut envoyer et gérer ses propres cartes, mais elle ne fait pas fonctionner les boutons des cartes de Multica ; si elle utilise une connexion longue, elle doit avoir sa propre application Feishu, car Feishu ne livre chaque événement qu'à l'une des connexions d'une application et une seconde connexion détournerait silencieusement une partie des événements `im.message.receive_v1` de Multica.
 </Callout>
 
 ## Images et fichiers produits par l’agent

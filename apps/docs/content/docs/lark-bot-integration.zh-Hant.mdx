@@ -81,7 +81,7 @@ Safari 登入成功後仍然停留在登入頁。
 ### 互動卡片
 
 <Callout type="warning">
-Multica 會把包含 Markdown 的 AI 代理回覆渲染成飛書互動卡片，但目前不會處理卡片上的互動動作。飛書長連線整合只處理 `im.message.receive_v1`；`card.action.trigger` 事件會被確認後丟棄，卡片裡的按鈕和表單不會到達 AI 代理。請改用文字命令或外部自動化。不要在同一個飛書應用上再開一條長連線：飛書會把每個事件只投遞給該應用的其中一條連線，第二條連線會靜默分走一部分 `im.message.receive_v1` 事件，導致 Multica 收不到。
+Multica 會把包含 Markdown 的 AI 代理回覆渲染成飛書互動卡片，但目前不會處理卡片上的互動動作。飛書長連線整合只處理 `im.message.receive_v1`；`card.action.trigger` 事件會被確認後丟棄，卡片裡的按鈕和表單不會到達 AI 代理。要與 Multica AI 代理互動，請改用文字命令。外部自動化可以傳送和處理它自己的卡片，但不會讓 Multica 卡片上的按鈕生效；如果它使用長連線，必須使用另一個飛書應用，因為飛書會把每個事件只投遞給該應用中的一條連線，第二條連線會靜默分走一部分 `im.message.receive_v1` 事件，導致 Multica 收不到。
 </Callout>
 
 ## 接收 AI 代理生成的圖片和檔案

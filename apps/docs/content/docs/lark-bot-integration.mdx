@@ -81,7 +81,7 @@ The first line becomes the title and the rest becomes the description. Sending `
 ### Interactive cards
 
 <Callout type="warning">
-Multica renders Markdown replies as Feishu interactive cards, but it does not process card actions today. The Feishu long-connection integration handles only `im.message.receive_v1`; `card.action.trigger` events are acknowledged and dropped, so buttons and forms in a card never reach the agent. Use a text command or an external automation instead. Do not run a second long-connection client on the same Feishu app — Feishu delivers each event to only one of the app's connections, so the second client can silently take a share of `im.message.receive_v1` events away from Multica.
+Multica renders Markdown replies as Feishu interactive cards, but it does not process card actions today. The Feishu long-connection integration handles only `im.message.receive_v1`; `card.action.trigger` events are acknowledged and dropped, so buttons and forms in a card never reach the agent. To interact with the Multica agent, send a text command instead. A separate automation can send and handle its own cards, but it does not make the buttons on Multica's cards work; if it uses a long connection, it needs its own Feishu app, because Feishu delivers each event to only one of an app's connections and a second connection would silently take a share of `im.message.receive_v1` events away from Multica.
 </Callout>
 
 ## Images and files from the agent
