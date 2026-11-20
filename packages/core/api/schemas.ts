@@ -2364,6 +2364,26 @@ export const RuntimeRateLimitsResponseSchema = z.object({
   rate_limits: RuntimeRateLimitsSchema.nullable().catch(null),
 }).loose();
 
+export const RuntimeUpdateSchema = z.object({
+  id: z.string(),
+  runtime_id: z.string().default(""),
+  // An unknown future status keeps the card neutral and polling.
+  status: z
+    .enum(["pending", "scheduled", "running", "completed", "failed", "timeout", "cancelled", "expired"])
+    .catch("pending"),
+  target_version: z.string().default(""),
+  output: z.string().optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+  active_tasks: z.number().optional().catch(undefined),
+  cancellable: z.boolean().default(false).catch(false),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ActiveRuntimeUpdateResponseSchema = z.object({
+  update: RuntimeUpdateSchema.nullable().catch(null),
+}).loose();
+
 // Agent task responses. The base object stays loose so daemon/runtime fields
 // can drift while task-list consumers still validate the fields they render.
 
