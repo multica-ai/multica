@@ -389,7 +389,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 		return fetchedPolicy{}, ErrInvalidPolicy
 	}
 	// Unknown gates are ignored for additive compatibility.
-	gates := make(map[GateName]Gate, 2)
+	gates := make(map[GateName]Gate, 3)
 	wireAutopilot, ok := wire.Gates[string(GateAutopilotRuns)]
 	if !ok {
 		return fetchedPolicy{}, ErrInvalidPolicy
@@ -404,7 +404,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 	// Cloud and Multica can deploy in either order and a bad value cannot turn
 	// the autopilot quota off.
 	gateReasons := make(map[GateName]Reason)
-	for _, name := range []GateName{GateMembers} {
+	for _, name := range []GateName{GateMembers, GateDashboardHistoryDays} {
 		if wire.undecodableGates[string(name)] {
 			gates[name] = Gate{Action: ActionOff}
 			gateReasons[name] = ReasonGateInvalid
@@ -461,6 +461,11 @@ func normalizeGate(name GateName, wire wireGate) (Gate, error) {
 		return Gate{}, ErrInvalidPolicy
 	}
 	if name == GateAutopilotRuns && periodFields != 3 {
+		return Gate{}, ErrInvalidPolicy
+	}
+	// A day count: positive, within the product's range, never a period.
+	if name == GateDashboardHistoryDays &&
+		(periodFields != 0 || *wire.Limit < 1 || *wire.Limit > MaxDashboardHistoryDays) {
 		return Gate{}, ErrInvalidPolicy
 	}
 	if periodFields == 3 && (!wire.PeriodStart.Before(*wire.PeriodEnd) || !wire.PeriodStart.Before(*wire.ResetAt)) {
@@ -536,12 +541,14 @@ func decisionFromEntry(entry cacheEntry, name GateName, reason Reason, stale boo
 	if fallback, ok := entry.policy.gateReasons[name]; ok {
 		reason = fallback
 	}
-	if stale && gate.Action == ActionEnforce {
+	downgraded := stale && gate.Action == ActionEnforce
+	if downgraded {
 		gate.Action = ActionObserve
 	}
 	return Decision{
 		Gate:                gate,
 		Reason:              reason,
+		Downgraded:          downgraded,
 		PolicyRevision:      entry.policy.policyRevision,
 		SubscriptionVersion: entry.policy.subscriptionVersion,
 		CloudValidUntil:     entry.policy.cloudValidUntil,
