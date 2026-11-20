@@ -138,6 +138,8 @@
       "usage_unavailable": "El uso no está disponible temporalmente",
       "members": "Miembros",
       "members_pending": "Invitaciones pendientes: {{pending}}",
+      "dashboard_history": "Historial de analítica",
+      "dashboard_history_days": "Últimos {{days}} días",
       "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan."
     },
     "seats": {

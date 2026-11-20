@@ -43,6 +43,7 @@ import type {
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
+  WorkspacePlanLimits,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspacePlanChangePreview,
   ChangeWorkspacePlanResponse,
@@ -3617,6 +3618,9 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
     limits: z
       .object({
         autopilot_runs: WorkspaceEntitlementLimitSchema,
+        // Newer than autopilot_runs: an older Cloud omits it, and a malformed
+        // one only hides its own row.
+        dashboard_history_days: WorkspaceEntitlementLimitSchema.nullable().catch(null).default(null),
       })
       .loose(),
     current_period_end: z.string().nullable().optional(),
@@ -3632,6 +3636,7 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
       seats: value.seats,
       limits: {
         autopilotRuns: value.limits.autopilot_runs,
+        dashboardHistoryDays: value.limits.dashboard_history_days,
       },
       currentPeriodEnd: value.current_period_end ?? null,
       snapshotExpiresAt: value.snapshot_expires_at ?? null,
@@ -3856,16 +3861,48 @@ const WorkspaceSubscriptionPlanPricesSchema = z
 
 // Every paid plan must be priced: a response missing one plan reads as "prices
 // unavailable" as a whole rather than offering one plan without the other.
+// A day count from a newer or malformed Cloud reads as unknown, never as a
+// number: the plan labels it feeds are hints, and a wrong one would point a
+// user at the wrong plan.
+const PlanDaysSchema = z.number().int().positive().nullable().catch(null).default(null);
+
+const WorkspacePlanLimitSchema = z
+  .object({ dashboard_history_days: PlanDaysSchema })
+  .loose()
+  .transform((value) => ({ dashboardHistoryDays: value.dashboard_history_days }));
+
+// Plan limits are optional: an older Cloud does not send them, and a malformed
+// block reads as absent rather than failing the prices themselves.
+const WorkspacePlanLimitsSchema = z
+  .object({
+    free: WorkspacePlanLimitSchema,
+    pro: WorkspacePlanLimitSchema,
+    business: WorkspacePlanLimitSchema,
+  })
+  .loose()
+  .transform(
+    (value): WorkspacePlanLimits => ({
+      free: value.free,
+      pro: value.pro,
+      business: value.business,
+    }),
+  )
+  .nullable()
+  .catch(null)
+  .default(null);
+
 export const WorkspaceSubscriptionPricesSchema = z
   .object({
     pro: WorkspaceSubscriptionPlanPricesSchema,
     business: WorkspaceSubscriptionPlanPricesSchema,
+    plan_limits: WorkspacePlanLimitsSchema,
   })
   .loose()
   .transform(
     (value): WorkspaceSubscriptionPrices => ({
       pro: value.pro,
       business: value.business,
+      planLimits: value.plan_limits,
     }),
   );
 
@@ -3878,14 +3915,25 @@ const WorkspaceFeatureStateSchema = z
   .transform((value): WorkspaceFeatureState => value.state)
   .catch("available" as const);
 
+// A limit that is missing (an older server) or malformed reads as none: the
+// server still cuts every dashboard response to the enforced range.
+const WorkspaceFeatureLimitsSchema = z
+  .object({ dashboard_history_days: PlanDaysSchema })
+  .loose()
+  .transform((value) => ({ dashboardHistoryDays: value.dashboard_history_days }))
+  .catch({ dashboardHistoryDays: null })
+  .default({ dashboardHistoryDays: null });
+
 export const WorkspaceFeaturesSchema = z
   .object({
     features: z.record(z.string(), WorkspaceFeatureStateSchema).catch({}),
+    limits: WorkspaceFeatureLimitsSchema,
   })
   .loose()
   .transform(
     (value): WorkspaceFeatures => ({
       features: value.features as WorkspaceFeatures["features"],
+      limits: value.limits,
     }),
   );
 

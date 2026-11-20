@@ -138,6 +138,8 @@
       "usage_unavailable": "Usage is temporarily unavailable",
       "members": "Members",
       "members_pending": "Pending invitations: {{pending}}",
+      "dashboard_history": "Analytics history",
+      "dashboard_history_days": "Last {{days}} days",
       "metering": "Runs from schedules, webhooks, and agents count. Runs a member starts with Run now don't."
     },
     "seats": {

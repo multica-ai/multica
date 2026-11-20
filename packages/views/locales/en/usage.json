@@ -10,6 +10,16 @@
     "all_projects": "All projects",
     "period_label": "Period"
   },
+  "history_limit": {
+    "note": "Your plan covers the last {{days}} days. Upgrade to see earlier data. Nothing is deleted.",
+    "fell_back": "Your plan covers the last {{days}} days.",
+    "view_plans": "View plans",
+    "locked": "Not included in your plan",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
   "kpi": {
     "cost_label": "Cost · {{days}}D",
     "tokens_label": "Tokens · {{days}}D",

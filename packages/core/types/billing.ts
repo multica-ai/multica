@@ -217,6 +217,8 @@ export interface WorkspaceSubscriptionEntitlements {
   seats: number;
   limits: {
     autopilotRuns: WorkspaceEntitlementLimit;
+    /** Dashboard history range in days. Null when Cloud did not send it. */
+    dashboardHistoryDays?: WorkspaceEntitlementLimit | null;
   };
   currentPeriodEnd: string | null;
   snapshotExpiresAt: string | null;
@@ -324,7 +326,22 @@ export interface WorkspaceSubscriptionPlanPrices {
 export type WorkspaceSubscriptionPrices = Record<
   WorkspaceSubscriptionPaidPlan,
   WorkspaceSubscriptionPlanPrices
->;
+> & {
+  /**
+   * Each plan's limits, from the same configuration Cloud enforces. Null when
+   * Cloud did not send them (an older Cloud) or they could not be read.
+   */
+  planLimits?: WorkspacePlanLimits | null;
+};
+
+export type WorkspacePlanLimitPlan = "free" | WorkspaceSubscriptionPaidPlan;
+
+export interface WorkspacePlanLimit {
+  /** Calendar days the dashboard can read on this plan; null when unknown. */
+  dashboardHistoryDays: number | null;
+}
+
+export type WorkspacePlanLimits = Record<WorkspacePlanLimitPlan, WorkspacePlanLimit>;
 
 export interface CreateWorkspaceSubscriptionCheckoutRequest {
   plan: WorkspaceSubscriptionPaidPlan;
@@ -449,6 +466,16 @@ export type WorkspaceFeatureState = "available" | "locked";
 
 export interface WorkspaceFeatures {
   features: Partial<Record<PaidFeature, WorkspaceFeatureState>>;
+  /** Numeric plan limits the server applies. Null means none is enforced. */
+  limits: WorkspaceFeatureLimits;
+}
+
+export interface WorkspaceFeatureLimits {
+  /**
+   * How many calendar days back the dashboard can read (MUL-9490). Null when
+   * nothing is enforced: off, observed, or self-hosted.
+   */
+  dashboardHistoryDays: number | null;
 }
 
 /**

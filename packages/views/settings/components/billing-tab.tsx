@@ -33,6 +33,7 @@ import {
   memberLimitOptions,
   readUpgradeInvite,
   type HeldInvite,
+  workspaceFeatureKeys,
   workspaceSubscriptionPricesOptions,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
@@ -428,6 +429,10 @@ function BillingTabContent() {
   }, [awaitingHeldCheckoutAt, refetchSummary]);
 
   const entitlements = summaryQuery.data?.entitlement;
+  // Absent from an older Cloud; the row is then left out.
+  const dashboardHistoryLimit = entitlements?.limits.dashboardHistoryDays;
+  const dashboardHistoryDays =
+    dashboardHistoryLimit?.mode === "limited" ? dashboardHistoryLimit.limit : null;
   // Checkout is done once paid seats are in effect. Neither the plan nor
   // Checkout going away proves it: a trial already reports Business, and a
   // first payment still incomplete also takes Checkout away.
@@ -686,8 +691,11 @@ function BillingTabContent() {
       setIsSyncingCheckout(false);
       setSyncTimedOut(false);
       checkoutIntentRef.current = null;
+      // The paid plan is now recorded: re-read the paid features and plan
+      // limits so nothing stays locked under the plan the user just left.
+      void queryClient.invalidateQueries({ queryKey: workspaceFeatureKeys.all(wsId) });
     }
-  }, [isCheckoutConfirmed, isSyncingCheckout]);
+  }, [isCheckoutConfirmed, isSyncingCheckout, queryClient, wsId]);
 
   const sendHeldInvite = (held: HeldInvite) => {
     setHeldInvitesToConfirm([]);
@@ -1971,6 +1979,15 @@ function BillingTabContent() {
               </div>
             )}
           </SettingsRow>
+          {dashboardHistoryDays !== null ? (
+            <SettingsRow label={t(($) => $.workspace.limits.dashboard_history)}>
+              <span className="tabular-nums">
+                {t(($) => $.workspace.limits.dashboard_history_days, {
+                  days: dashboardHistoryDays,
+                })}
+              </span>
+            </SettingsRow>
+          ) : null}
           {memberLimit ? (
             <SettingsRow label={t(($) => $.workspace.limits.members)}>
               <div className="flex flex-col gap-1 sm:items-end">

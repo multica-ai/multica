@@ -32,6 +32,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const NO_LIMITS = { dashboardHistoryDays: null };
+
 describe("resolvePaidFeatureAccess", () => {
   it("maps the server state and the resource's own configuration to a UI state", () => {
     expect(resolvePaidFeatureAccess("available", false)).toBe("available");
@@ -43,7 +45,7 @@ describe("resolvePaidFeatureAccess", () => {
 
 describe("usePaidFeatureAccess", () => {
   it("is read-only for a resource that already uses a locked feature, and never blocks reductions", async () => {
-    const { wrapper } = setup(async () => ({ features: { private_projects: "locked" } }));
+    const { wrapper } = setup(async () => ({ features: { private_projects: "locked" }, limits: NO_LIMITS }));
     const { result } = renderHook(
       () => usePaidFeatureAccess("ws-1", "private_projects", { hasExistingConfig: true }),
       { wrapper },
@@ -55,6 +57,7 @@ describe("usePaidFeatureAccess", () => {
   it("keys the read by workspace", async () => {
     const { api, wrapper } = setup(async (wsId) => ({
       features: { private_projects: wsId === "ws-locked" ? "locked" : "available" },
+      limits: NO_LIMITS,
     }));
     const locked = renderHook(
       () => usePaidFeatureAccess("ws-locked", "private_projects", { hasExistingConfig: false }),
@@ -92,7 +95,7 @@ describe("usePaidFeatureAccess", () => {
   });
 
   it("treats a feature the server did not report as available", async () => {
-    const { wrapper } = setup(async () => ({ features: {} }));
+    const { wrapper } = setup(async () => ({ features: {}, limits: NO_LIMITS }));
     const { result } = renderHook(
       () => usePaidFeatureAccess("ws-1", "private_projects", { hasExistingConfig: true }),
       { wrapper },
@@ -134,8 +137,9 @@ describe("WorkspaceFeaturesSchema", () => {
       }),
     ).toEqual({
       features: { private_projects: "locked", future_feature: "available", broken: "available" },
+      limits: NO_LIMITS,
     });
-    expect(WorkspaceFeaturesSchema.parse({ features: [] })).toEqual({ features: {} });
-    expect(WorkspaceFeaturesSchema.parse({})).toEqual({ features: {} });
+    expect(WorkspaceFeaturesSchema.parse({ features: [] })).toEqual({ features: {}, limits: NO_LIMITS });
+    expect(WorkspaceFeaturesSchema.parse({})).toEqual({ features: {}, limits: NO_LIMITS });
   });
 });

@@ -10,6 +10,16 @@
     "all_projects": "全部项目",
     "period_label": "时间范围"
   },
+  "history_limit": {
+    "note": "当前套餐可以查看最近 {{days}} 天。升级后可以查看更早的数据，数据一直保留。",
+    "fell_back": "当前套餐只能查看最近 {{days}} 天。",
+    "view_plans": "查看套餐",
+    "locked": "当前套餐不包含",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
   "kpi": {
     "cost_label": "费用 · {{days}}天",
     "tokens_label": "Token · {{days}}天",

@@ -138,6 +138,8 @@
       "usage_unavailable": "La consommation est temporairement indisponible",
       "members": "Membres",
       "members_pending": "Invitations en attente : {{pending}}",
+      "dashboard_history": "Historique des statistiques",
+      "dashboard_history_days": "{{days}} derniers jours",
       "metering": "Les exécutions lancées par une planification, un webhook ou un agent sont comptées. Celles qu'un membre lance avec Exécuter maintenant ne le sont pas."
     },
     "seats": {

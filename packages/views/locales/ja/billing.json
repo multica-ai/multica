@@ -137,6 +137,8 @@
       "usage_unavailable": "使用量は一時的に利用できません",
       "members": "メンバー",
       "members_pending": "保留中の招待：{{pending}} 件",
+      "dashboard_history": "分析の表示期間",
+      "dashboard_history_days": "直近 {{days}} 日",
       "metering": "スケジュール、Webhook、エージェントによる実行はカウントされます。メンバーが「今すぐ実行」で開始した実行はカウントされません。"
     },
     "seats": {

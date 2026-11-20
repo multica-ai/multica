@@ -137,6 +137,8 @@
       "usage_unavailable": "用量暂时不可用",
       "members": "成员",
       "members_pending": "待接受的邀请：{{pending}}",
+      "dashboard_history": "统计查看范围",
+      "dashboard_history_days": "最近 {{days}} 天",
       "metering": "时间表、Webhook 和智能体发起的运行计入额度，成员点击\"立即运行\"不计入。"
     },
     "seats": {

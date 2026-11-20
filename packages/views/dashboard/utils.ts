@@ -377,7 +377,15 @@ interface WeekShell {
 // carries the labels and partial-week metadata the chart components consume;
 // downstream aggregators fold their own per-week values onto the matching
 // shell.
-function buildWeekShells(tz: string, weekCount: number): WeekShell[] {
+//
+// `earliestDay` is the first day the plan lets the page read (MUL-9490). The
+// leftmost week it cuts into is partial like the current week: it covers only
+// the days from `earliestDay` on, and the tooltip says how many.
+function buildWeekShells(
+  tz: string,
+  weekCount: number,
+  earliestDay: string | null = null,
+): WeekShell[] {
   const count = Math.max(1, Math.floor(weekCount));
   const today = todayIso(tz);
   const currentWeekStart = weekStartIso(today);
@@ -386,22 +394,31 @@ function buildWeekShells(tz: string, weekCount: number): WeekShell[] {
   for (let i = 0; i < count; i++) {
     const weekStart = addDaysIso(firstWeekStart, i * 7);
     const weekEnd = addDaysIso(weekStart, 6);
-    const partial = today < weekEnd;
-    // Inclusive count of how many days of this week have actually elapsed.
-    // Closed weeks sit at 7; the current week reports 1..6.
-    const clampedToday =
-      today < weekStart ? weekStart : today < weekEnd ? today : weekEnd;
-    const elapsed = Math.min(7, Math.max(1, diffDaysIso(weekStart, clampedToday) + 1));
+    const daysCovered = coveredDaysInWeek(weekStart, weekEnd, today, earliestDay);
     shells.push({
       weekStart,
       weekEnd,
       label: formatShortDate(weekStart),
       rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
-      partial,
-      daysCovered: partial ? elapsed : 7,
+      partial: daysCovered < 7,
+      daysCovered,
     });
   }
   return shells;
+}
+
+// Inclusive count of the week's days that have elapsed and that the plan
+// covers: 7 for a whole week, fewer for the current week or for the leftmost
+// week the plan cuts into.
+export function coveredDaysInWeek(
+  weekStart: string,
+  weekEnd: string,
+  today: string,
+  earliestDay: string | null,
+): number {
+  const from = earliestDay && earliestDay > weekStart ? earliestDay : weekStart;
+  const to = today < weekEnd ? today : weekEnd;
+  return Math.min(7, Math.max(1, diffDaysIso(from, to) + 1));
 }
 
 function diffDaysIso(from: string, to: string): number {
@@ -416,8 +433,9 @@ export function aggregateWeeklyTime(
   rows: DashboardRunTimeDaily[],
   tz: string,
   weekCount: number,
+  earliestDay: string | null = null,
 ): WeeklyTimeData[] {
-  const shells = buildWeekShells(tz, weekCount);
+  const shells = buildWeekShells(tz, weekCount, earliestDay);
   const totals = new Map<string, number>();
   for (const shell of shells) totals.set(shell.weekStart, 0);
   for (const r of rows) {
@@ -432,8 +450,9 @@ export function aggregateWeeklyTasks(
   rows: DashboardRunTimeDaily[],
   tz: string,
   weekCount: number,
+  earliestDay: string | null = null,
 ): WeeklyTasksData[] {
-  const shells = buildWeekShells(tz, weekCount);
+  const shells = buildWeekShells(tz, weekCount, earliestDay);
   const buckets = new Map<
     string,
     { completed: number; failed: number; cancelled: number }
@@ -585,8 +604,9 @@ export function aggregateWeeklyErrors(
   rows: DashboardFailureDaily[],
   tz: string,
   weekCount: number,
+  earliestDay: string | null = null,
 ): WeeklyErrorsData[] {
-  const shells = buildWeekShells(tz, weekCount);
+  const shells = buildWeekShells(tz, weekCount, earliestDay);
   const buckets = new Map<string, FailureClassCounts & FailureBucketTotals>();
   for (const shell of shells) {
     buckets.set(shell.weekStart, { ...emptyClassCounts(), failed: 0, total: 0 });

@@ -9,7 +9,7 @@ import { formatDuration } from "../utils";
 // Period selector — mirrors the runtime detail page so users see the same
 // option set across both dashboards. `dims` declares which chart dimensions
 // each range may be drawn at: 1d / 7d at the weekly grain collapse to a single
-// bar, 180d at the daily grain is 180 unreadable bars.
+// bar, 180d / 365d at the daily grain are hundreds of unreadable bars.
 //
 // 1d semantic: "today" (the natural calendar day from 00:00 in the viewer's
 // timezone), not "the last 24 hours". The `dailyCutoffIso` filter on the page
@@ -20,6 +20,7 @@ export const TIME_RANGES = [
   { label: "30d", days: 30, dims: ["daily", "weekly"] as const },
   { label: "90d", days: 90, dims: ["daily", "weekly"] as const },
   { label: "180d", days: 180, dims: ["weekly"] as const },
+  { label: "365d", days: 365, dims: ["weekly"] as const },
 ] as const;
 
 export type TimeRange = (typeof TIME_RANGES)[number]["days"];
