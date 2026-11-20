@@ -443,7 +443,7 @@ export interface CreateWorkspaceSubscriptionPortalResponse {
  * can be reduced, but nothing can be added. The server enforces on every
  * write; this is only for rendering.
  */
-export type PaidFeature = "private_projects";
+export type PaidFeature = "private_projects" | "guests";
 
 export type WorkspaceFeatureState = "available" | "locked";
 

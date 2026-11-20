@@ -397,7 +397,7 @@ SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at, l.reso
             AND ($1::uuid[] IS NULL OR NOT EXISTS (
                 SELECT 1 FROM issue hidden_issue
                 WHERE hidden_issue.id = x.issue_id
-                  AND hidden_issue.project_id = ANY($1::uuid[])
+                  AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($1::uuid[])
             )))
         WHEN 'agent' THEN (SELECT COUNT(*) FROM agent_to_label x WHERE x.label_id = l.id)
         WHEN 'skill' THEN (SELECT COUNT(*) FROM skill_to_label x WHERE x.label_id = l.id)

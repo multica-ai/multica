@@ -130,6 +130,13 @@ Choisissez le fournisseur et le modèle dans la configuration propre de QwenPaw.
 Exécutez `reasonix setup` et configurez un fournisseur et un modèle par défaut avant de démarrer le daemon.
 
 </Accordion>
+<Accordion title="Qoder CLI / Qoder CN CLI" id="qoder">
+
+Si l'application de bureau Qoder fonctionne mais qu'une exécution locale Multica signale une erreur d'authentification, testez le même modèle avec la CLI Qoder sur la machine du daemon, sous le compte système qui l'exécute. La détection de l'exécutable confirme uniquement que le daemon sait le trouver. La CLI démarre avec l'environnement du daemon et les variables d'environnement configurées pour l'agent. Un identifiant accessible uniquement à l'application de bureau Qoder peut manquer. Si la CLI échoue aussi, connectez-vous depuis la CLI ou terminez la configuration du fournisseur avant de relancer l'exécution Multica.
+
+Un test réussi dans le terminal peut utiliser des identifiants que le shell charge et que le daemon ne reçoit pas. Si votre fournisseur attend une clé ou un jeton dans une variable d'environnement, définissez cette variable dans l'environnement de démarrage du daemon, puis redémarrez-le. Pour les identifiants à privilèges limités, vous pouvez aussi utiliser l'onglet **Environnement** de l'agent. Multica stocke les valeurs ajoutées dans cet onglet [en clair dans la base de données du serveur](/agents-create#variables-denvironnement-et-identifiants).
+
+</Accordion>
 </Accordions>
 
 </Step>

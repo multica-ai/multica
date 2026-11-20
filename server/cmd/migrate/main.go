@@ -153,6 +153,8 @@ var concurrentIndexCleanups = map[string]string{
 	"693_doc_workspace_idx":                                     "doc_workspace_idx",
 	"694_doc_version_workspace_idx":                             "doc_version_workspace_idx",
 	"696_inbox_item_active_shown_idx":                           "idx_inbox_active_shown",
+	"698_autopilot_run_idempotency_key_idx":                     "uq_autopilot_run_idempotency_key",
+	"701_member_search_access_pkey_index":                       "member_search_access_pkey_idx",
 	"671_weixin_account_state_unique_index":                     "weixin_account_state_pkey",
 	"669_weixin_login_session_unique_index":                     "weixin_login_session_pkey",
 	"666_weixin_login_expiry_idx":                               "weixin_login_expiry_idx",

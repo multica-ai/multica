@@ -34,7 +34,7 @@ WITH base AS MATERIALIZED (
       AND ($3::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
           WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY($3::uuid[])
+            AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[])
       ))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
@@ -229,7 +229,7 @@ WITH base AS MATERIALIZED (
       AND ($3::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
           WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY($3::uuid[])
+            AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[])
       ))
       AND ($4::uuid IS NULL OR i.issue_id = $4::uuid
            OR (i.issue_id IS NULL AND i.id = $4::uuid))

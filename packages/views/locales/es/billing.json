@@ -137,7 +137,8 @@
       "resets_at": "Se reinicia el {{date}}",
       "usage_unavailable": "El uso no está disponible temporalmente",
       "members": "Miembros",
-      "members_pending": "Invitaciones pendientes: {{pending}}"
+      "members_pending": "Invitaciones pendientes: {{pending}}",
+      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan."
     },
     "seats": {
       "title": "Puestos",
@@ -313,6 +314,10 @@
       "private_projects": {
         "name": "Proyectos privados",
         "after": "Siguen siendo privados después de la prueba. Sus listas de acceso pasan a solo lectura."
+      },
+      "guests": {
+        "name": "Invitados",
+        "after": "Los invitados actuales conservan su acceso después de la prueba. Para invitar a nuevos invitados necesitas Pro o Business."
       }
     }
   }

@@ -2,19 +2,27 @@
 import { DocTree } from "../docs/components/doc-tree";
 
 import { useEffect, useRef } from "react";
-import type { AppSpaceId } from "@multica/core/paths";
+import { useCurrentWorkspace, type AppSpaceId } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { cn } from "@multica/ui/lib/utils";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import { useAppShell } from "./app-shell-context";
 import { PanelResizeHandle } from "./panel-resize-handle";
 import { AutopilotsPanel } from "./panels/autopilots-panel";
+import { GuestWorkPanel } from "./panels/guest-work-panel";
 import { ChatPeek } from "./panels/list-space-peeks";
 import { LIST_COLUMN_WIDTH_CLASS, NAV_COLUMN_MOTION_CLASS, NAV_PEEK_CLASS } from "./rail-styles";
 import { TeamPanel } from "./panels/team-panel";
 import { KeptRowsRelease, WorkPanel } from "./panels/work-panel";
 
+/** A guest (MUL-9420) sees its own Work panel: only what is shared with it. */
+function WorkSpacePanel() {
+  const guest = useIsGuest(useCurrentWorkspace()?.id);
+  return guest ? <GuestWorkPanel /> : <WorkPanel />;
+}
+
 const PANELS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
-  work: WorkPanel,
+  work: WorkSpacePanel,
   docs: DocTree,
   team: TeamPanel,
   autopilots: AutopilotsPanel,

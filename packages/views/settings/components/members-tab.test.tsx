@@ -46,6 +46,7 @@ vi.mock("@tanstack/react-query", () => ({
     }
     if (key.includes("share-links")) return { data: data.shareLinks };
     if (key.includes("members")) return { data: data.members, isSuccess: true };
+    if (key.includes("projects")) return { data: [] };
     return { data: data.summary };
   },
   useQueryClient: () => ({

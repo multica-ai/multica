@@ -194,6 +194,7 @@ permission checks, so a caller refused by those gets the ordinary error.
 | Feature | Restricted additions | Always allowed |
 | --- | --- | --- |
 | `private_projects` | create a private project; make a project private; add someone who is not a member yet, directly or by making them the lead | remove members; make it workspace-visible; delete or archive; set the lead to an existing member, an agent or nobody; other fields; the owner's recovery join |
+| `guests` | invite a guest; make a member a guest; share another project with a guest | remove a guest; narrow a guest's projects; make a guest a member; accept an invitation sent while the plan included guests |
 
 A stale cached `enforce` is downgraded to `observe` with reason `stale` and
 `Downgraded` set, then to `off`, exactly like gates, so a Cloud outage admits additions rather than

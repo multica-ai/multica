@@ -610,7 +610,8 @@
     "project_directory_path_copied_with_branch": "Chemin du répertoire du projet copié — le travail se trouve sur {{branch}}",
     "workdir_path_copy_failed": "Échec de la copie du chemin du répertoire de travail",
     "workdir_path_unavailable": "Aucun répertoire de travail local — cette tâche n'a pas encore été traitée par un agent local",
-    "pull_requests_empty_title": "Aucune pull request associée."
+    "pull_requests_empty_title": "Aucune pull request associée.",
+    "guest_readonly_note": "Les invités peuvent consulter et commenter, mais pas modifier les propriétés de la tâche."
   },
   "timeline": {
     "loading": "Chargement...",
@@ -789,7 +790,9 @@
     "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé.",
     "reply_action": "Répondre",
     "actions_label": "Actions du commentaire",
-    "create_issue_from_selection": "Créer une sous-tâche à partir de la sélection"
+    "create_issue_from_selection": "Créer une sous-tâche à partir de la sélection",
+    "guest_placeholder": "Répondre… vous pouvez @ mentionner des membres",
+    "guest_hint": "Les invités ne peuvent pas @ mentionner d'agents ni leur assigner de tâches"
   },
   "reply": {
     "recipients_changed": "La cible de la réponse a changé. Vérifiez les destinataires avant de réessayer.",

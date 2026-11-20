@@ -24,6 +24,10 @@ const listMembers = vi.hoisted(() => vi.fn());
 const previewCommentTriggers = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
 
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("sonner", () => ({ toast: { error: toastError } }));
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: { getState: () => ({ user: { id: "user-1" } }) },

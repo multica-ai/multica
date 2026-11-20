@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -170,9 +171,20 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]WorkspaceResponse, len(workspaces))
-	for i, ws := range workspaces {
-		resp[i] = h.workspaceToResponse(db.Workspace{
+	// A task token is bound to one workspace, and Auth stamps that workspace
+	// into X-Workspace-ID. List only that one, so an agent the owner started
+	// in one workspace never sees the owner's other workspaces.
+	boundWorkspaceID := ""
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		boundWorkspaceID = r.Header.Get("X-Workspace-ID")
+	}
+
+	resp := make([]WorkspaceResponse, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if boundWorkspaceID != "" && uuidToString(ws.ID) != boundWorkspaceID {
+			continue
+		}
+		item := h.workspaceToResponse(db.Workspace{
 			ID: ws.ID, Name: ws.Name, Slug: ws.Slug, Description: ws.Description,
 			Settings: ws.Settings, CreatedAt: ws.CreatedAt, UpdatedAt: ws.UpdatedAt,
 			Context: ws.Context, Repos: ws.Repos, IssuePrefix: ws.IssuePrefix,
@@ -181,8 +193,9 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		})
 		if ws.PinnedAt.Valid {
 			pinnedAt := timestampToString(ws.PinnedAt)
-			resp[i].PinnedAt = &pinnedAt
+			item.PinnedAt = &pinnedAt
 		}
+		resp = append(resp, item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -574,6 +587,9 @@ type MemberWithUserResponse struct {
 	Name        string  `json:"name"`
 	Email       string  `json:"email"`
 	AvatarURL   *string `json:"avatar_url"`
+	// ProjectIDs lists a guest's projects. Omitted for other roles, and for
+	// guests when a guest is asking.
+	ProjectIDs []string `json:"project_ids,omitempty"`
 }
 
 func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
@@ -589,9 +605,42 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]MemberWithUserResponse, len(members))
-	for i, m := range members {
-		resp[i] = MemberWithUserResponse{
+	rows, err := h.Queries.ListGuestProjects(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list members")
+		return
+	}
+	guestProjects := map[[16]byte][]string{}
+	for _, row := range rows {
+		guestProjects[row.UserID.Bytes] = append(guestProjects[row.UserID.Bytes], uuidToString(row.ProjectID))
+	}
+	// A guest sees the members, itself, and only those guests it shares a
+	// project with: guests are often outside people who should not learn of
+	// each other. Nobody's projects are listed to a guest.
+	requester, _ := ctxMember(r.Context())
+	requesterIsGuest := projectaccess.IsGuestRole(requester.Role)
+	visibleGuests := map[[16]byte]bool{requester.UserID.Bytes: true}
+	if requesterIsGuest {
+		mine := map[string]bool{}
+		for _, id := range guestProjects[requester.UserID.Bytes] {
+			mine[id] = true
+		}
+		for userID, ids := range guestProjects {
+			for _, id := range ids {
+				if mine[id] {
+					visibleGuests[userID] = true
+					break
+				}
+			}
+		}
+	}
+	resp := make([]MemberWithUserResponse, 0, len(members))
+	for _, m := range members {
+		guest := projectaccess.IsGuestRole(m.Role)
+		if requesterIsGuest && guest && !visibleGuests[m.UserID.Bytes] {
+			continue
+		}
+		item := MemberWithUserResponse{
 			ID:          uuidToString(m.ID),
 			WorkspaceID: uuidToString(m.WorkspaceID),
 			UserID:      uuidToString(m.UserID),
@@ -601,6 +650,10 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 			Email:       m.UserEmail,
 			AvatarURL:   h.resolveAvatarURLPtr(textToPtr(m.UserAvatarUrl)),
 		}
+		if guest && !requesterIsGuest {
+			item.ProjectIDs = guestProjects[m.UserID.Bytes]
+		}
+		resp = append(resp, item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -609,6 +662,8 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 type CreateMemberRequest struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
+	// ProjectIDs are required for a guest and ignored otherwise.
+	ProjectIDs []string `json:"project_ids,omitempty"`
 }
 
 func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
@@ -631,7 +686,7 @@ func normalizeMemberRole(role string) (string, bool) {
 
 	role = strings.TrimSpace(role)
 	switch role {
-	case "owner", "admin", "member":
+	case "owner", "admin", "member", projectaccess.RoleGuest:
 		return role, true
 	default:
 		return "", false
@@ -640,6 +695,8 @@ func normalizeMemberRole(role string) (string, bool) {
 
 type UpdateMemberRequest struct {
 	Role string `json:"role"`
+	// ProjectIDs are required when the member becomes a guest.
+	ProjectIDs []string `json:"project_ids,omitempty"`
 }
 
 func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
@@ -693,12 +750,33 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updatedMember, err := h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
-		ID:   target.ID,
-		Role: role,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update member")
+	wasGuest := projectaccess.IsGuestRole(target.Role)
+	toGuest := projectaccess.IsGuestRole(role)
+	var updatedMember db.Member
+	var guestProjects []pgtype.UUID
+	switch {
+	case toGuest && !wasGuest:
+		var admission featureAdmission
+		if admission, ok = h.requireGuestAddition(w, r, target.WorkspaceID, "make_guest"); !ok {
+			return
+		}
+		if guestProjects, ok = h.parseGuestProjectIDs(w, r, target.WorkspaceID, req.ProjectIDs); !ok {
+			return
+		}
+		updatedMember, ok = h.demoteMemberToGuest(w, r, requester, target, guestProjects)
+		if ok {
+			admission.admitted(r.Context())
+		}
+	case wasGuest && !toGuest:
+		updatedMember, ok = h.promoteGuest(w, r, target, role)
+	default:
+		updatedMember, err = h.updateMemberRoleFrom(r.Context(), target, role)
+		if err != nil {
+			writeMemberUpdateError(w, err)
+			return
+		}
+	}
+	if !ok {
 		return
 	}
 
@@ -710,12 +788,40 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resp := h.memberWithUserResponse(updatedMember, user)
+	if toGuest {
+		resp.ProjectIDs = uuidsToStrings(guestProjects)
+	}
 	userID := requestUserID(r)
 	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
-		"member": h.memberWithUserResponse(updatedMember, user),
+		"member": resp,
 	})
 
-	writeJSON(w, http.StatusOK, h.memberWithUserResponse(updatedMember, user))
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// updateMemberRoleFrom changes a role that neither starts nor ends as guest.
+// The row is locked and must still hold target's role: a concurrent change
+// (say the member became a guest and gave up its seat) is never overwritten
+// by a request decided on the role it had before.
+func (h *Handler) updateMemberRoleFrom(ctx context.Context, target db.Member, role string) (db.Member, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.Member{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if _, err := lockMemberRole(ctx, qtx, target.ID, target.Role); err != nil {
+		return db.Member{}, err
+	}
+	updated, err := qtx.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: target.ID, Role: role})
+	if err != nil {
+		return db.Member{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.Member{}, err
+	}
+	return updated, nil
 }
 
 func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
@@ -1138,7 +1244,14 @@ func lockWorkspaceTaskOwners(ctx context.Context, qtx *db.Queries, workspaceID p
 	return nil
 }
 
+// DeleteWorkspace refuses machine credentials: a task token or cloud node PAT
+// authenticates as its owner, and deleting a workspace takes every issue, doc
+// and agent in it, so only a human may do it.
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	workspaceID := workspaceIDFromURL(r, "id")
 
 	// Defense in depth: the route is already gated by the
@@ -1356,6 +1469,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			// and below; this clears what normal writes logged before.
 			name: "delete search index changes",
 			run:  func() error { return qtx.DeleteWorkspaceSearchIndexChanges(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete search access markers",
+			run:  func() error { return qtx.DeleteWorkspaceMemberSearchAccess(ctx, requester.WorkspaceID) },
 		},
 		// Keep source-context object intents after the workspace row is gone.
 		// They are the durable retry ledger for an upload that began before the
