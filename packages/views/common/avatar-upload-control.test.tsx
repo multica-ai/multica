@@ -64,6 +64,9 @@ vi.mock("./text-avatar-dialog", () => ({
     ) : null,
 }));
 
+// The storage-limit toast has its own tests; here every failure is ordinary.
+vi.mock("../billing/storage-limit-notice", () => ({ useStorageLimitToast: () => () => false }));
+
 import { AvatarUploadControl } from "./avatar-upload-control";
 
 afterEach(() => {

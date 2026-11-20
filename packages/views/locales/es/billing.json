@@ -138,7 +138,10 @@
       "usage_unavailable": "El uso no está disponible temporalmente",
       "members": "Miembros",
       "members_pending": "Invitaciones pendientes: {{pending}}",
-      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan."
+      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan.",
+      "storage": "Almacenamiento de adjuntos",
+      "storage_description": "Adjuntos de incidencias, comentarios y chats.",
+      "storage_label": "Uso del almacenamiento de adjuntos"
     },
     "seats": {
       "title": "Puestos",
@@ -320,5 +323,13 @@
         "after": "Los invitados actuales conservan su acceso después de la prueba. Para invitar a nuevos invitados necesitas Pro o Business."
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} no se subió",
+    "copy_title": "No se creó la subincidencia: no se pudieron copiar sus adjuntos de origen",
+    "admin_body": "El almacenamiento de adjuntos está lleno ({{used}} / {{limit}}). Los adjuntos existentes no se ven afectados.",
+    "admin_body_no_figures": "El almacenamiento de adjuntos está lleno. Los adjuntos existentes no se ven afectados.",
+    "member_body": "El almacenamiento de adjuntos está lleno. Pide a un administrador que actualice el plan o elimina los adjuntos que ya no necesites.",
+    "dismiss": "Cerrar"
   }
 }

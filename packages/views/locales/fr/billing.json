@@ -138,7 +138,10 @@
       "usage_unavailable": "La consommation est temporairement indisponible",
       "members": "Membres",
       "members_pending": "Invitations en attente : {{pending}}",
-      "metering": "Les exécutions lancées par une planification, un webhook ou un agent sont comptées. Celles qu'un membre lance avec Exécuter maintenant ne le sont pas."
+      "metering": "Les exécutions lancées par une planification, un webhook ou un agent sont comptées. Celles qu'un membre lance avec Exécuter maintenant ne le sont pas.",
+      "storage": "Stockage des pièces jointes",
+      "storage_description": "Pièces jointes des tickets, commentaires et discussions.",
+      "storage_label": "Utilisation du stockage des pièces jointes"
     },
     "seats": {
       "title": "Sièges",
@@ -320,5 +323,13 @@
         "after": "Les invités existants gardent leur accès après l'essai. Inviter de nouveaux invités nécessite Pro ou Business."
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} n'a pas été importé",
+    "copy_title": "Le sous-ticket n'a pas été créé : ses pièces jointes sources n'ont pas pu être copiées",
+    "admin_body": "Le stockage des pièces jointes est plein ({{used}} / {{limit}}). Les pièces jointes existantes ne sont pas affectées.",
+    "admin_body_no_figures": "Le stockage des pièces jointes est plein. Les pièces jointes existantes ne sont pas affectées.",
+    "member_body": "Le stockage des pièces jointes est plein. Demandez à un administrateur de changer de forfait, ou supprimez les pièces jointes dont vous n'avez plus besoin.",
+    "dismiss": "Fermer"
   }
 }

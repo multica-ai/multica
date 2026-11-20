@@ -456,6 +456,19 @@ export interface WorkspaceFeatures {
  * also every self-hosted workspace; the counts are null then. Members and
  * pending invitations both take a slot; guests take none.
  */
+/**
+ * The plan's attachment storage limit (MUL-9489). `off` means no limit
+ * applies, which is also every self-hosted workspace; the figures are null
+ * then. Bytes are counted across every attachment in the workspace.
+ */
+export interface StorageUsage {
+  action: "off" | "observe" | "enforce";
+  usedBytes: number | null;
+  limitBytes: number | null;
+  /** Set only under enforce: observe never refuses an upload. */
+  reached: boolean | null;
+}
+
 export interface MemberLimit {
   action: "off" | "observe" | "enforce";
   limit: number | null;

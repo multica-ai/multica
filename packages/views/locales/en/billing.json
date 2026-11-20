@@ -138,7 +138,10 @@
       "usage_unavailable": "Usage is temporarily unavailable",
       "members": "Members",
       "members_pending": "Pending invitations: {{pending}}",
-      "metering": "Runs from schedules, webhooks, and agents count. Runs a member starts with Run now don't."
+      "metering": "Runs from schedules, webhooks, and agents count. Runs a member starts with Run now don't.",
+      "storage": "Attachment storage",
+      "storage_description": "Attachments in issues, comments, and chat.",
+      "storage_label": "Attachment storage usage"
     },
     "seats": {
       "title": "Seats",
@@ -320,5 +323,13 @@
         "after": "Existing guests keep their access after the trial. New guests need Pro or Business."
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} wasn't uploaded",
+    "copy_title": "The sub-issue wasn't created: its source attachments couldn't be copied",
+    "admin_body": "Attachment storage is full ({{used}} / {{limit}}). Existing attachments aren't affected.",
+    "admin_body_no_figures": "Attachment storage is full. Existing attachments aren't affected.",
+    "member_body": "Attachment storage is full. Ask an admin to upgrade the plan, or delete attachments you no longer need.",
+    "dismiss": "Dismiss"
   }
 }

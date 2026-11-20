@@ -31,6 +31,9 @@ import {
   listCheckoutHeldInvites,
   memberLimitKeys,
   memberLimitOptions,
+  formatStorageBytes,
+  storageUsageOptions,
+  storageUsageProgress,
   readUpgradeInvite,
   type HeldInvite,
   workspaceSubscriptionPricesOptions,
@@ -340,6 +343,7 @@ function BillingTabContent() {
   // the person to send or discard.
   const [heldInvitesToConfirm, setHeldInvitesToConfirm] = useState<HeldInvite[]>([]);
   const memberLimitQuery = useQuery(memberLimitOptions(wsId));
+  const storageUsageQuery = useQuery(storageUsageOptions(wsId));
 
   useEffect(() => {
     checkoutIntentRef.current = null;
@@ -754,6 +758,11 @@ function BillingTabContent() {
     if (upgradeRequest === "pro" && summary.availableActions.checkout === true) {
       setHeldInvite(held);
       openCheckoutConfirm("pro");
+    } else if (upgradeRequest === "business" && !held && resolvePlanChangeTarget(summary) === "business") {
+      // A full workspace's storage notice (MUL-9489): Pro moves up to Business.
+      handlePlanChangeOpenChange(true, "business");
+    } else if (upgradeRequest === "business" && !held && summary.availableActions.checkout === true) {
+      openCheckoutConfirm("business");
     } else if (held) {
       clearUpgradeInvite(workspaceSlug, held.token);
     }
@@ -1264,6 +1273,12 @@ function BillingTabContent() {
   const numberFormatter = new Intl.NumberFormat(locale);
   // Members and pending invitations against the plan's member limit, shown
   // whenever Cloud applies one (observed or enforced).
+  const storageUsageData = storageUsageQuery.data;
+  const storageUsage =
+    (storageUsageData?.action === "observe" || storageUsageData?.action === "enforce") &&
+    storageUsageData.limitBytes !== null
+      ? storageUsageData
+      : null;
   const memberLimitData = memberLimitQuery.data;
   const memberLimit =
     (memberLimitData?.action === "observe" || memberLimitData?.action === "enforce") &&
@@ -1971,6 +1986,33 @@ function BillingTabContent() {
               </div>
             )}
           </SettingsRow>
+          {storageUsage ? (
+            <SettingsRow
+              label={t(($) => $.workspace.limits.storage)}
+              description={t(($) => $.workspace.limits.storage_description)}
+            >
+              <div className="w-full max-w-72">
+                <Progress
+                  value={storageUsageProgress(storageUsage)}
+                  aria-label={t(($) => $.workspace.limits.storage_label)}
+                >
+                  <ProgressLabel>
+                    {storageUsage.reached
+                      ? t(($) => $.workspace.limits.reached)
+                      : t(($) => $.workspace.limits.current_usage)}
+                  </ProgressLabel>
+                  <ProgressValue>
+                    {() =>
+                      t(($) => $.workspace.limits.usage_total, {
+                        total: formatStorageBytes(storageUsage.usedBytes ?? 0, locale),
+                        limit: formatStorageBytes(storageUsage.limitBytes ?? 0, locale),
+                      })
+                    }
+                  </ProgressValue>
+                </Progress>
+              </div>
+            </SettingsRow>
+          ) : null}
           {memberLimit ? (
             <SettingsRow label={t(($) => $.workspace.limits.members)}>
               <div className="flex flex-col gap-1 sm:items-end">
