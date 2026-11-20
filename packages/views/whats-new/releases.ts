@@ -1,8 +1,8 @@
-import { AlarmClock, BellOff, CircleDot, Command, Folder, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
+import { AlarmClock, BellOff, CircleDot, Command, Folder, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, UserPlus, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
-import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, PROJECT_FOLDERS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
+import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, GUESTS_HERO, PROJECT_FOLDERS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -45,6 +45,44 @@ export const WHATS_NEW_DECK_SINCE = "0.9.0";
  * reach users only through the Help menu.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
+  {
+    version: "0.11.2",
+    date: "2026-11-20",
+    highlights: [
+      {
+        id: "workspace-guests",
+        icon: UserPlus,
+        hero: GUESTS_HERO,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=members` },
+        copy: {
+          en: {
+            title: "Invite guests to chosen projects",
+            body: "Owners and admins: in Settings → Members, choose Invite member, pick Guest, and select the projects they can access. Guests read and comment without taking a seat; on Multica Cloud, adding guests needs Pro or Business.",
+          },
+          "zh-Hans": {
+            title: "邀请访客参与指定项目",
+            body: "所有者和管理员可在「设置 → 成员」点击「邀请成员」，选择「访客」并勾选可以访问的项目。访客可以查看和评论，不占席位；在 Multica Cloud 上新增访客需要 Pro 或 Business 套餐。",
+          },
+          "zh-Hant": {
+            title: "邀請訪客參與指定專案",
+            body: "所有者和管理員可在「設定 → 成員」點「邀請成員」，選擇「訪客」並勾選可以存取的專案。訪客可以查看和評論，不佔席位；在 Multica Cloud 上新增訪客需要 Pro 或 Business 方案。",
+          },
+          ja: {
+            title: "指定したプロジェクトにゲストを招待",
+            body: "オーナーと管理者は「設定 → メンバー」で「メンバーを招待」を押し、「ゲスト」を選んでアクセスできるプロジェクトを指定します。ゲストは席を使わずに閲覧とコメントができ、Multica Cloud でゲストを追加するには Pro または Business が必要です。",
+          },
+          ko: {
+            title: "지정한 프로젝트에 게스트 초대하기",
+            body: "소유자와 관리자는 '설정 → 멤버'에서 '멤버 초대'를 누르고 '게스트'를 고른 뒤 접근할 프로젝트를 선택하세요. 게스트는 좌석을 쓰지 않고 보고 댓글을 남길 수 있으며, Multica Cloud에서 게스트를 추가하려면 Pro 또는 Business가 필요합니다.",
+          },
+          fr: {
+            title: "Invitez des invités sur des projets choisis",
+            body: "Propriétaires et administrateurs : dans Paramètres → Membres, choisissez Inviter un membre, sélectionnez Invité et les projets accessibles. Les invités consultent et commentent sans occuper de siège ; sur Multica Cloud, en ajouter demande l'offre Pro ou Business.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.11.0",
     date: "2026-11-18",

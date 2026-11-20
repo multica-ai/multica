@@ -26,6 +26,7 @@ import {
   Server,
   Square,
   WeChat,
+  X,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useLocale, useT } from "../i18n";
@@ -613,6 +614,57 @@ function ProjectFoldersArt() {
   );
 }
 
+/* ── Guests: inviting a guest to chosen projects ───────────────────── */
+
+const GUEST_PROJECTS = ["Atlas", "Orbit"];
+
+function GuestsArt() {
+  const { t } = useT("settings");
+  return (
+    <Surface className="top-3 left-6 w-[20rem]">
+      <div className="space-y-2 p-3">
+        <div className="flex items-start gap-2.5 rounded-lg border border-foreground px-3 py-1.5">
+          <span className="mt-0.5 grid size-3.5 shrink-0 place-items-center rounded-full border border-foreground">
+            <span className="size-1.5 rounded-full bg-foreground" />
+          </span>
+          <span className="min-w-0">
+            <span className="flex items-center gap-2 text-label font-medium">
+              {t(($) => $.members.roles.guest.label)}
+              <span className="rounded-sm bg-success/10 px-1.5 text-micro font-medium text-success">
+                {t(($) => $.members.guest_free_tag)}
+              </span>
+            </span>
+            <span className="block truncate text-caption text-muted-foreground">
+              {t(($) => $.members.roles.guest.description)}
+            </span>
+          </span>
+        </div>
+        <div>
+          <span className="text-caption font-medium">{t(($) => $.members.guest_projects_label)}</span>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {GUEST_PROJECTS.map((name) => (
+              <span
+                key={name}
+                className="inline-flex h-6 items-center gap-1 rounded-md bg-muted px-1.5 text-caption font-medium [&_svg]:size-3 [&_svg]:text-muted-foreground"
+              >
+                <FolderKanban />
+                {name}
+                <X />
+              </span>
+            ))}
+            <span className="text-caption text-muted-foreground">{t(($) => $.members.guest_projects_add)}</span>
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <span className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-caption font-medium text-primary-foreground">
+            {t(($) => $.members.invite_guest_button)}
+          </span>
+        </div>
+      </div>
+    </Surface>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
@@ -622,3 +674,4 @@ export const CHAT_WAKEUP_HERO: WhatsNewHero = { ground: "lime", Art: ChatWakeupA
 export const CHAT_STEERING_HERO: WhatsNewHero = { ground: "orange", Art: ChatSteeringArt };
 export const WEIXIN_HERO: WhatsNewHero = { ground: "ice", Art: WeixinArt };
 export const PROJECT_FOLDERS_HERO: WhatsNewHero = { ground: "brand", Art: ProjectFoldersArt };
+export const GUESTS_HERO: WhatsNewHero = { ground: "lime", Art: GuestsArt };
