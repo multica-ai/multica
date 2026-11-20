@@ -11,6 +11,26 @@ import (
 	"testing"
 )
 
+func TestGetJSONReportsIncompleteResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = io.WriteString(w, `{"messages":`)
+	}))
+	t.Cleanup(srv.Close)
+
+	var history map[string]any
+	err := NewAPIClient(srv.URL, "", "").GetJSON(context.Background(), "/api/chat/history", &history)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected truncated body error, got %v", err)
+	}
+	if message := userMessage(err, LangEN); !strings.Contains(message, "response ended before it was complete") {
+		t.Errorf("got %q, want incomplete response guidance", message)
+	}
+	if got := ExitCodeFor(err); got != ExitNetwork {
+		t.Errorf("exit code = %d, want %d", got, ExitNetwork)
+	}
+}
+
 func TestPostJSON(t *testing.T) {
 	type reqBody struct {
 		Name string `json:"name"`
@@ -474,11 +494,14 @@ func TestNormalizeGOOS(t *testing.T) {
 // every other test green while the CLI silently went back to receiving ~800-char
 // signed URLs on every attachment of every list read.
 //
+// The same holds for workspace-guests-v1: without it, guests drop out of the
+// member lists the CLI resolves names from.
+//
 // The exact string is load-bearing: the server matches the token literally
 // (handler.requestHasClientCapability), so it is asserted verbatim rather than
 // through the constant.
 func TestSetHeaders_AdvertisesStableAttachmentURLs(t *testing.T) {
-	const wantCapability = "stable_attachment_urls"
+	const wantCapability = "stable_attachment_urls,workspace-guests-v1"
 
 	// Every verb goes through setHeaders, and an agent's read path is not only
 	// GET (comment add posts, attachment upload multiparts). Cover the shapes

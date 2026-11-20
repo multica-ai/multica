@@ -24,7 +24,7 @@ export const inboxKeys = {
 export function inboxListOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.list(wsId),
-    queryFn: () => api.listInbox(),
+    queryFn: ({ signal }) => api.listInbox(signal),
   });
 }
 
@@ -35,7 +35,7 @@ export function inboxListOptions(wsId: string) {
 export function snoozedInboxOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.snoozed(wsId),
-    queryFn: () => api.listSnoozedInbox(),
+    queryFn: ({ signal }) => api.listSnoozedInbox(signal),
   });
 }
 
@@ -133,7 +133,7 @@ export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (
 export function inboxUnreadSummaryOptions() {
   return queryOptions({
     queryKey: inboxKeys.unreadSummary(),
-    queryFn: () => api.getInboxUnreadSummary(),
+    queryFn: ({ signal }) => api.getInboxUnreadSummary(signal),
     enabled: () => focusManager.isFocused(),
     refetchOnWindowFocus: true,
   });

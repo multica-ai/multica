@@ -82,6 +82,15 @@ Installed desktop clients may talk to newer backends. Preserve response compatib
 - Before pushing a migration, rebase onto the latest `origin/main`, number it as the current highest prefix plus one, and run `go test ./cmd/migrate ./internal/migrations` from `server/`.
 - Conditionally skipped migrations are still recorded in `schema_migrations`. Later DDL touching conditional objects must be idempotent (`IF EXISTS` / `IF NOT EXISTS`); document recovery if the missing object would break runtime behavior.
 
+## Row Lock Order
+
+Task writes and runtime-side paths lock the same `agent`, `agent_runtime`, `workspace`, and `issue` rows; two paths taking a pair in opposite orders with conflicting modes deadlock (MUL-9501).
+
+- Task enqueue order: the `agent` row first, then `lock_task_owner_rows` (migration 284) inside the writing statement takes FOR KEY SHARE on the workspace, issue, and runtime rows. New enqueue paths keep this order.
+- A path that locks `agent_runtime` before `agent` must let that FOR KEY SHARE through. To exclude only UPDATE/DELETE of the runtime, use FOR NO KEY UPDATE (`LockAgentRuntimeForClaimDelivery`, `LockAgentRuntimeForAccessChange`). Use FOR UPDATE (`LockAgentRuntime`) only when new rows must be stopped from referencing the runtime: runtime delete and teardown.
+- A new path that takes these rows in the reverse order ships with a test that forces the interleaving, as `server/internal/handler/chat_send_claim_deadlock_test.go` does.
+- Known, unfixed: runtime delete and teardown (`TeardownRuntime`, the runtime delete handlers, the runtime GC sweeper) take `LockAgentRuntime`, then the agents via `ListUserAgentsByRuntimeForUpdate` — the reverse of enqueue order. It can only deadlock with an enqueue while that runtime is being deleted.
+
 ## Backend UUID Rules
 
 In `server/internal/handler/`, distinguish UUID sources before using them in writes:

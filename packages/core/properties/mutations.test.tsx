@@ -11,6 +11,7 @@ import type { ApiClient } from "../api/client";
 import type { Issue, IssuePropertiesResponse } from "../types";
 import { issueKeys } from "../issues/queries";
 import { useSetIssueProperty } from "./mutations";
+import { propertyKeys } from "./queries";
 
 vi.mock("../hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
@@ -171,6 +172,31 @@ describe("useSetIssueProperty", () => {
     await waitFor(() =>
       expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(true),
     );
+    qc.clear();
+  });
+
+  // Every issue surface observes the plain catalog; refetching it on each
+  // value write made bulk edits fan out into workspace-wide usage scans.
+  it("invalidates only the counted catalog when a value write settles", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const empty = { properties: [], total: 0 };
+    qc.setQueryData(propertyKeys.list("ws-1"), empty);
+    qc.setQueryData(propertyKeys.list("ws-1", true), empty);
+    qc.setQueryData(propertyKeys.withUsage("ws-1"), empty);
+    setApiInstance({
+      setIssueProperty: vi.fn().mockResolvedValue({ properties: { estimate: 3 } }),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(() => useSetIssueProperty(), { wrapper: wrapper(qc) });
+    await act(async () => {
+      await result.current.mutateAsync({ issueId: issue.id, propertyId: "estimate", value: 3 });
+    });
+
+    await waitFor(() =>
+      expect(qc.getQueryState(propertyKeys.withUsage("ws-1"))?.isInvalidated).toBe(true),
+    );
+    expect(qc.getQueryState(propertyKeys.list("ws-1"))?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(propertyKeys.list("ws-1", true))?.isInvalidated).toBe(false);
     qc.clear();
   });
 });

@@ -1394,6 +1394,28 @@ func TestRouter_BareIssueReturnsUsageWithoutCreatingOrResolvingMedia(t *testing.
 	}
 }
 
+func TestRouter_NULOnlyIssueTitleReturnsUsage(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue \x00 \x00 "
+	msg.CommandText = msg.Text
+	msg.Type = channel.MsgTypeImage
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("NUL-only title must return usage, got error: %v", err)
+	}
+	if h.issues.called || h.tasks.calls() != 0 || h.media.calls() != 0 {
+		t.Fatalf("NUL-only title created issue=%v, chat tasks=%d, media resolutions=%d",
+			h.issues.called, h.tasks.calls(), h.media.calls())
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("issue usage result was not delivered: %+v", h.replier.calls())
+	}
+}
+
 func TestRouter_BareIssueWithoutMediaDoesNotRequestMediaResend(t *testing.T) {
 	h := newHarness(t)
 	h.binder.parseIssue = true

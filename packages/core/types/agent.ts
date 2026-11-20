@@ -160,6 +160,7 @@ export type RuntimeProfileVisibility = "workspace" | "private";
 export interface RuntimeProfile {
   id: string;
   workspace_id: string;
+  daemon_id?: string | null;
   display_name: string;
   protocol_family: RuntimeProtocolFamily;
   runtime_type?: RuntimeProfileType;
@@ -178,6 +179,7 @@ export interface RuntimeProfile {
 // Optional fields are omitted entirely when unset (never sent as null/empty)
 // so the server applies its own defaults.
 export interface CreateRuntimeProfileRequest {
+  daemon_id?: string;
   display_name: string;
   protocol_family?: RuntimeProtocolFamily;
   runtime_type?: RuntimeProfileType;
@@ -191,6 +193,7 @@ export interface CreateRuntimeProfileRequest {
 // PATCH body — every field optional; `protocol_family` is intentionally
 // absent because it is immutable.
 export interface UpdateRuntimeProfileRequest {
+  daemon_id?: string;
   display_name?: string;
   command_name?: string;
   description?: string | null;
@@ -1245,10 +1248,15 @@ export interface DashboardFailureByAgent {
 
 export type RuntimeUpdateStatus =
   | "pending"
+  // The daemon is busy and installs once its last agent task finishes.
+  | "scheduled"
   | "running"
   | "completed"
   | "failed"
-  | "timeout";
+  | "timeout"
+  | "cancelled"
+  // The machine did not become idle within 24 hours.
+  | "expired";
 
 export interface RuntimeUpdate {
   id: string;
@@ -1257,6 +1265,10 @@ export interface RuntimeUpdate {
   target_version: string;
   output?: string;
   error?: string;
+  /** Agent tasks the daemon is waiting for while `scheduled`. */
+  active_tasks?: number;
+  /** True until installation starts. */
+  cancellable: boolean;
   created_at: string;
   updated_at: string;
 }

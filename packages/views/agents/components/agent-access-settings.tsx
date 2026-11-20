@@ -1,6 +1,9 @@
 "use client";
 
 import type { Agent, MemberWithUser } from "@multica/core/types";
+import { usesInvocationMembers } from "@multica/core/agents";
+import { usePaidFeatureAccess } from "@multica/core/billing";
+import { useWorkspaceId } from "@multica/core/hooks";
 import {
   SettingsCard,
   SettingsSection,
@@ -22,6 +25,10 @@ export function AgentAccessSettings({
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
 }) {
   const { t } = useT("agents");
+  const wsId = useWorkspaceId();
+  const membersAccess = usePaidFeatureAccess(wsId, "agent_invocation_members", {
+    hasExistingConfig: usesInvocationMembers(agent.permission_mode, agent.invocation_targets),
+  });
 
   return (
     <SettingsSection
@@ -41,6 +48,7 @@ export function AgentAccessSettings({
             (agent.composio_toolkit_allowlist ?? []).length > 0
           }
           onDirtyChange={onDirtyChange}
+          membersAccess={membersAccess}
           onChange={(next) => onUpdate(agent.id, next)}
         />
       </SettingsCard>

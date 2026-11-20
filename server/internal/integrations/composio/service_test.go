@@ -707,6 +707,13 @@ func TestCallbackRedirect(t *testing.T) {
 	}
 	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion", WorkspaceID: "w"}, true); got != "https://multica.ai/settings?connected=notion&scope=team&tab=apps" {
 		t.Errorf("team redirect = %q", got)
+	}	// A plan refusal keeps the ordinary failure fields, so older pages still
+	// report a failure, and adds the reason for pages that show the upgrade.
+	if got := svc.CallbackRedirectFailure(CallbackResult{ToolkitSlug: "notion", WorkspaceID: "w"}, CallbackFeatureLockedReason); got != "https://multica.ai/settings?error=composio_connect_failed&reason=feature_locked&scope=team&tab=apps" {
+		t.Errorf("refused team redirect = %q", got)
+	}
+	if got := svc.CallbackRedirectFailure(CallbackResult{ToolkitSlug: "notion", ReturnTo: "/acme/issues/MUL-1"}, CallbackFeatureLockedReason); got != "https://multica.ai/acme/issues/MUL-1?app_connect_error=notion&app_connect_error_reason=feature_locked" {
+		t.Errorf("refused return redirect = %q", got)
 	}
 }
 

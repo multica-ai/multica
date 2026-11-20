@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { setApiInstance } from "@multica/core/api";
+import { ApiError, setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import type { Project, MemberWithUser } from "@multica/core/types";
+import type { Project, MemberWithUser, WorkspaceFeatureState } from "@multica/core/types";
 import { EMPTY_PROJECT } from "@multica/core/api/schemas";
 import { renderWithI18n } from "../../test/i18n";
 import { ProjectAccessControl, ProjectAccessDraftPicker } from "./project-access";
@@ -14,6 +14,8 @@ const state = vi.hoisted(() => ({ viewer: "owner" }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("@multica/core/auth", () => ({ useAuthStore: Object.assign((selector: (s: { user: { id: string } }) => unknown) => selector({ user: { id: state.viewer } }), { getState: () => ({ user: { id: state.viewer } }) }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span aria-hidden="true" /> }));
+vi.mock("../../navigation", async (importOriginal) => ({ ...(await importOriginal<object>()), AppLink: ({ href, children, ...props }: React.ComponentProps<"a"> & { href: string }) => <a href={href} {...props}>{children}</a> }));
+vi.mock("@multica/core/paths", async (importOriginal) => ({ ...(await importOriginal<object>()), useWorkspacePaths: () => ({ settings: () => "/acme/settings" }) }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Lead" }) }));
 
 const members: MemberWithUser[] = [
@@ -28,10 +30,16 @@ let qc: QueryClient;
 let ids: string[];
 // Who the server names as the project's access manager.
 let managerId: string | null;
-let api: { listMembers: ReturnType<typeof vi.fn>; listAgents: ReturnType<typeof vi.fn>; getProjectMembers: ReturnType<typeof vi.fn>; addProjectMembers: ReturnType<typeof vi.fn>; removeProjectMember: ReturnType<typeof vi.fn>; updateProject: ReturnType<typeof vi.fn> };
+// The workspace's private_projects state as the server reports it.
+let privateProjects: WorkspaceFeatureState;
+let api: { getWorkspaceFeatures: ReturnType<typeof vi.fn>; listMembers: ReturnType<typeof vi.fn>; listAgents: ReturnType<typeof vi.fn>; getProjectMembers: ReturnType<typeof vi.fn>; addProjectMembers: ReturnType<typeof vi.fn>; removeProjectMember: ReturnType<typeof vi.fn>; updateProject: ReturnType<typeof vi.fn> };
 
 function renderControl(value: Project = project) {
   return renderWithI18n(<QueryClientProvider client={qc}><ProjectAccessControl project={value} /></QueryClientProvider>);
+}
+
+function renderDraft(props: Omit<Parameters<typeof ProjectAccessDraftPicker>[0], "members">) {
+  return renderWithI18n(<QueryClientProvider client={qc}><ProjectAccessDraftPicker members={members} {...props} /></QueryClientProvider>);
 }
 
 beforeEach(() => {
@@ -39,8 +47,10 @@ beforeEach(() => {
   qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   ids = ["owner", "lead", "member"];
   managerId = "lead";
+  privateProjects = "available";
   const response = () => ({ members: members.filter((m) => ids.includes(m.user_id)).map((m) => ({ ...m, project_id: "p1" })), total: ids.length, manager_id: managerId });
   api = {
+    getWorkspaceFeatures: vi.fn().mockImplementation(async () => ({ features: { private_projects: privateProjects } })),
     listMembers: vi.fn().mockResolvedValue(members),
     listAgents: vi.fn().mockResolvedValue([]),
     getProjectMembers: vi.fn().mockImplementation(async () => response()),
@@ -246,13 +256,13 @@ it("names no lead for a project that turns private without one, and keeps whoeve
 
 it("shows who will manage a new private project: a person named lead, otherwise its creator", async () => {
   const user = userEvent.setup();
-  const { unmount } = renderWithI18n(<ProjectAccessDraftPicker visibility="private" memberIds={["member"]} leadId="lead" members={members} onChange={vi.fn()} />);
+  const { unmount } = renderDraft({ visibility: "private", memberIds: ["member"], leadId: "lead", onChange: vi.fn() });
   await user.click(screen.getByRole("button", { name: "Access" }));
   let row = (await screen.findByText("lead@test")).parentElement!.parentElement!;
   expect(within(row).getByText("Lead · Manages access")).toBeVisible();
   unmount();
 
-  renderWithI18n(<ProjectAccessDraftPicker visibility="private" memberIds={["member"]} members={members} onChange={vi.fn()} />);
+  renderDraft({ visibility: "private", memberIds: ["member"], onChange: vi.fn() });
   await user.click(screen.getByRole("button", { name: "Access" }));
   row = (await screen.findByText("owner@test")).parentElement!.parentElement!;
   expect(within(row).getByText("Manages access")).toBeVisible();
@@ -262,10 +272,70 @@ it("shows who will manage a new private project: a person named lead, otherwise 
 it("keeps new-project access in the draft until the project is created", async () => {
   const changed = vi.fn();
   const user = userEvent.setup();
-  renderWithI18n(<ProjectAccessDraftPicker visibility="workspace" memberIds={[]} leadId="lead" members={members} onChange={changed} />);
+  renderDraft({ visibility: "workspace", memberIds: [], leadId: "lead", onChange: changed });
   await user.click(screen.getByRole("button", { name: "Access" }));
   await user.click(screen.getByRole("radio", { name: "Project members only" }));
   expect(changed).toHaveBeenCalledWith("private", ["owner", "lead"]);
   expect(api.updateProject).not.toHaveBeenCalled();
   expect(api.addProjectMembers).not.toHaveBeenCalled();
+});
+
+// MUL-9482: a workspace whose plan lacks private projects keeps every existing
+// private project working; only adding to one is withheld.
+it("keeps an existing private project read-only to additions when the plan lacks the feature", async () => {
+  privateProjects = "locked";
+  const user = userEvent.setup();
+  renderControl();
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  await screen.findByText("member@test");
+  expect(await screen.findByText(/Read-only\. Upgrade to edit\./)).toBeVisible();
+  expect(screen.getByRole("link", { name: "View plans" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Add workspace member" })).not.toBeInTheDocument();
+  // Reductions stay available: removing someone and making it public.
+  await user.click(screen.getByRole("button", { name: "Remove Member" }));
+  await waitFor(() => expect(api.removeProjectMember).toHaveBeenCalledWith("p1", "member"));
+  expect(screen.getByRole("radio", { name: "Entire workspace" })).toBeEnabled();
+});
+
+it("offers no way to make a workspace project private when the plan lacks the feature", async () => {
+  privateProjects = "locked";
+  const user = userEvent.setup();
+  renderControl({ ...project, visibility: "workspace" });
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  expect(await screen.findByText(/Not included in this workspace's plan\./)).toBeVisible();
+  expect(screen.getByRole("radio", { name: "Project members only" })).toBeDisabled();
+  expect(screen.queryByText(/Read-only/)).not.toBeInTheDocument();
+});
+
+it("shows no plan notice while the feature is available", async () => {
+  const user = userEvent.setup();
+  renderControl();
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  await screen.findByRole("button", { name: "Add workspace member" });
+  expect(screen.queryByText(/Read-only/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "View plans" })).not.toBeInTheDocument();
+});
+
+it("explains a plan refusal from the server and switches the dialog to read-only", async () => {
+  api.addProjectMembers.mockImplementation(async () => {
+    privateProjects = "locked";
+    throw new ApiError("forbidden", 403, "Forbidden", { code: "feature_locked", feature: "private_projects" });
+  });
+  const user = userEvent.setup();
+  renderControl();
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  await user.click(await screen.findByRole("button", { name: "Add workspace member" }));
+  await user.click(await screen.findByText("outside@test"));
+  expect(await screen.findByText(/isn't included in the workspace's plan/)).toBeVisible();
+  expect(await screen.findByText(/Read-only\. Upgrade to edit\./)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Add workspace member" })).not.toBeInTheDocument();
+});
+
+it("does not offer a new private project when the plan lacks the feature", async () => {
+  privateProjects = "locked";
+  const user = userEvent.setup();
+  renderDraft({ visibility: "workspace", memberIds: [], onChange: vi.fn() });
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  expect(await screen.findByText(/Not included in this workspace's plan\./)).toBeVisible();
+  expect(screen.getByRole("radio", { name: "Project members only" })).toBeDisabled();
 });

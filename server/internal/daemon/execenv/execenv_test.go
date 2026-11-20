@@ -1329,6 +1329,8 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 	}{
 		{"claude", "CLAUDE.md"},
 		{"codex", "AGENTS.md"},
+		{"codebuddy", "CODEBUDDY.md"},
+		{"antigravity", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
 		{"codearts", "AGENTS.md"},
 		{"hermes", "AGENTS.md"},
@@ -1347,6 +1349,26 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				t.Fatalf("read %s: %v", tc.file, err)
 			}
 			s := string(data)
+			providerPins := []string{
+				"no background-completion wakeup",
+				"whatever a tool response promises",
+				"Never background-and-yield",
+			}
+			if tc.name == "antigravity" {
+				// Its model subturn can end while the same agy process waits.
+				// Detached processes and the shared CI contract stay restricted.
+				providerPins = []string{
+					"completion notifications in the same process",
+					"yield the model subturn while waiting",
+					"without polling `manage_task` or task logs",
+					"have no such wakeup",
+				}
+			}
+			for _, want := range providerPins {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing provider boundary %q", tc.name, want)
+				}
+			}
 			for _, want := range []string{
 				"## Background Task Safety",
 				// MUL-5442 judgment rewrite (owner-authorized pin renegotiation): the
@@ -1360,12 +1382,9 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// What stays pinned: the fact, each boundary, each exception, and
 				// the handoff triple — the things an agent cannot infer.
 				"any run-owned work still active is orphaned",
-				"no background-completion wakeup",
-				"whatever a tool response promises",
-				"Never background-and-yield",
+				"standing by",
 				"foreground tool calls that block",
 				"run unobservable work synchronously",
-				"standing by",
 				"are not run-owned: do not wait",
 				// The full compound ban, not its first item — MUL-5223 made this a
 				// non-derivable boundary, so no member may be silently dropped.

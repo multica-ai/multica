@@ -75,6 +75,9 @@ catalogs:
     entities:
       specifier: ^6.0.1
       version: 6.0.1
+    eslint:
+      specifier: ^9.0.0
+      version: 9.39.4
     eslint-plugin-i18next:
       specifier: ^6.1.4
       version: 6.1.4
@@ -248,6 +251,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: '@typescript/typescript6@6.0.2'
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.0
 
   apps/desktop:
     dependencies:
@@ -284,6 +290,9 @@ importers:
       '@multica/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@multica/ee':
+        specifier: workspace:*
+        version: link:../../packages/ee
       '@multica/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -738,6 +747,9 @@ importers:
       '@multica/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@multica/ee':
+        specifier: workspace:*
+        version: link:../../packages/ee
       '@multica/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -890,6 +902,88 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(@typescript/typescript6@6.0.2))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.0))
+
+  packages/ee:
+    dependencies:
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@multica/views':
+        specifier: workspace:*
+        version: link:../views
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.96.2(react@19.2.3)
+      i18next:
+        specifier: 'catalog:'
+        version: 26.0.8(@typescript/typescript6@6.0.2)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.3(react@19.2.3)
+      react-i18next:
+        specifier: 'catalog:'
+        version: 17.0.6(@typescript/typescript6@6.0.2)(i18next@26.0.8(@typescript/typescript6@6.0.2))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      sonner:
+        specifier: 'catalog:'
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
+      zustand:
+        specifier: 'catalog:'
+        version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
+    devDependencies:
+      '@multica/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@multica/vitest-setup':
+        specifier: workspace:*
+        version: link:../vitest-setup
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@testing-library/user-event':
+        specifier: 'catalog:'
+        version: 14.6.1(@testing-library/dom@10.4.1)
+      '@types/react':
+        specifier: ^19.2.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.2.0
+        version: 19.2.3(@types/react@19.2.14)
+      '@typescript/native':
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 6.0.1(babel-plugin-react-compiler@1.0.0)(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.1))
+      eslint:
+        specifier: 'catalog:'
+        version: 9.39.4(jiti@2.7.0)
+      eslint-plugin-i18next:
+        specifier: 'catalog:'
+        version: 6.1.4
+      jsdom:
+        specifier: 'catalog:'
+        version: 29.0.1(@noble/hashes@1.8.0)
+      typescript:
+        specifier: 'catalog:'
+        version: '@typescript/typescript6@6.0.2'
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(@typescript/typescript6@6.0.2))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.1))
 
   packages/eslint-config:
     dependencies:
@@ -1321,7 +1415,7 @@ importers:
         specifier: 'catalog:'
         version: 6.0.1(babel-plugin-react-compiler@1.0.0)(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.0))
       eslint:
-        specifier: ^9.0.0
+        specifier: 'catalog:'
         version: 9.39.4(jiti@2.7.0)
       eslint-plugin-i18next:
         specifier: 'catalog:'
@@ -12251,9 +12345,6 @@ packages:
   zod@4.3.6:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
-
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
@@ -18730,8 +18821,8 @@ snapshots:
       '@babel/parser': 7.29.2
       eslint: 9.39.4(jiti@1.21.7)
       hermes-parser: 0.25.1
-      zod: 4.4.3
-      zod-validation-error: 4.0.2(zod@4.4.3)
+      zod: 4.6.7
+      zod-validation-error: 4.0.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -20540,7 +20631,7 @@ snapshots:
       tinyglobby: 0.2.17
       unbash: 4.0.10
       yaml: 2.9.0
-      zod: 4.4.3
+      zod: 4.6.7
 
   lan-network@0.2.1: {}
 
@@ -25012,15 +25103,13 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
-  zod-validation-error@4.0.2(zod@4.4.3):
+  zod-validation-error@4.0.2(zod@4.6.7):
     dependencies:
-      zod: 4.4.3
+      zod: 4.6.7
 
   zod@3.25.76: {}
 
   zod@4.3.6: {}
-
-  zod@4.4.3: {}
 
   zod@4.6.7: {}
 

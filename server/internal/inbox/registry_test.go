@@ -29,7 +29,7 @@ func TestMutedGroupSplit(t *testing.T) {
 		{"muted mentions still delivers new_comment", map[string]string{"mentions": "muted"}, "new_comment", false},
 		{"both muted drops both", map[string]string{"comments": "muted", "mentions": "muted"}, "mentioned", true},
 
-		// Absent key means the default "all" — preferences are stored sparse,
+		// Absent key means the group's default — preferences are stored sparse,
 		// which is why existing `{"comments":"muted"}` rows need no migration.
 		{"empty prefs delivers mentions", map[string]string{}, "mentioned", false},
 		{"empty prefs delivers comments", map[string]string{}, "new_comment", false},
@@ -55,6 +55,63 @@ func TestMutedGroupSplit(t *testing.T) {
 					tc.prefs, tc.notifType, got, tc.want)
 			}
 		})
+	}
+}
+
+// Status changes start muted: a member without a stored choice, or without a
+// row at all, hears them only after turning them on (MUL-9449).
+func TestStatusChangesMutedByDefault(t *testing.T) {
+	cases := []struct {
+		name  string
+		prefs map[string]string
+		want  bool
+	}{
+		{"no row", nil, true},
+		{"row without the key", map[string]string{"comments": "muted"}, true},
+		{"turned on", map[string]string{"status_changes": "all"}, false},
+		{"turned off", map[string]string{"status_changes": "muted"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Muted(tc.prefs, "status_changed"); got != tc.want {
+				t.Fatalf("Muted(%v, status_changed) = %v, want %v", tc.prefs, got, tc.want)
+			}
+		})
+	}
+	if Muted(nil, "new_comment") || Muted(nil, "issue_assigned") {
+		t.Fatal("only status changes are muted by default")
+	}
+}
+
+// The preferences API reports the default-muted groups so a client that
+// predates the default renders their switches off.
+func TestWithDefaults(t *testing.T) {
+	if got := WithDefaults(nil); len(got) != 1 || got["status_changes"] != "muted" {
+		t.Fatalf("WithDefaults(nil) = %v, want only status_changes muted", got)
+	}
+	stored := map[string]string{"status_changes": "all", "comments": "muted"}
+	got := WithDefaults(stored)
+	if got["status_changes"] != "all" || got["comments"] != "muted" || len(got) != 2 {
+		t.Fatalf("WithDefaults(%v) = %v, stored values must win", stored, got)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("WithDefaults modified its argument: %v", stored)
+	}
+}
+
+// The replace-all write path keeps an omitted default-muted group on, as the
+// clients that use it mean, and leaves explicit values alone.
+func TestWithLegacyDefaults(t *testing.T) {
+	if got := WithLegacyDefaults(map[string]string{}); len(got) != 1 || got["status_changes"] != "all" {
+		t.Fatalf("WithLegacyDefaults({}) = %v, want status_changes all", got)
+	}
+	sent := map[string]string{"status_changes": "muted", "comments": "muted"}
+	got := WithLegacyDefaults(sent)
+	if got["status_changes"] != "muted" || got["comments"] != "muted" || len(got) != 2 {
+		t.Fatalf("WithLegacyDefaults(%v) = %v, sent values must win", sent, got)
+	}
+	if len(sent) != 2 {
+		t.Fatalf("WithLegacyDefaults modified its argument: %v", sent)
 	}
 }
 

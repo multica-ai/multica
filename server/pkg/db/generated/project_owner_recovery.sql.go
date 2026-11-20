@@ -60,7 +60,7 @@ func (q *Queries) ListPrivateProjectMembers(ctx context.Context, workspaceID pgt
 
 const listPrivateProjects = `-- name: ListPrivateProjects :many
 
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id FROM project
 WHERE workspace_id = $1 AND visibility = 'private'
 ORDER BY created_at DESC, id DESC
 `
@@ -101,6 +101,7 @@ func (q *Queries) ListPrivateProjects(ctx context.Context, workspaceID pgtype.UU
 			&i.ArchivedAt,
 			&i.ArchivedByType,
 			&i.ArchivedByID,
+			&i.FolderID,
 		); err != nil {
 			return nil, err
 		}

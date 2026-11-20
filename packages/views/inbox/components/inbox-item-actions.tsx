@@ -7,6 +7,7 @@ import type { RowActionItem } from "../../common/row-actions-menu";
 import { useIntentNavigate } from "../../navigation";
 import { useT } from "../../i18n";
 import type { InboxView } from "./inbox-view";
+import { inboxIssueRef } from "./inbox-display";
 
 /** Row-level actions the menus invoke, all keyed by inbox item id. */
 export interface InboxRowActions {
@@ -50,7 +51,7 @@ export function useInboxItemActions(
 
   const issueHref =
     slug && item.issue_id
-      ? paths.workspace(slug).issueDetail(item.issue_id)
+      ? paths.workspace(slug).issueDetail(inboxIssueRef(item, item.issue_id))
       : null;
   const isArchivedView = view === "archived";
 

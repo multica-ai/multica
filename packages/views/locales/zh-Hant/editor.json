@@ -102,6 +102,8 @@
   "mention": {
     "group_users": "使用者",
     "group_issues": "任務",
+    "group_projects": "專案",
+    "group_docs": "文件",
     "all_members": "所有成員",
     "agent_badge": "AI 代理",
     "squad_badge": "小隊",
@@ -226,5 +228,31 @@
       "later": "稍後再說",
       "start": "開始口述"
     }
+  },
+  "block_menu": {
+    "label": "插入內容",
+    "blocks": {
+      "paragraph": "正文",
+      "heading1": "標題 1",
+      "heading2": "標題 2",
+      "heading3": "標題 3",
+      "bulletList": "無序列表",
+      "orderedList": "有序列表",
+      "taskList": "待辦列表",
+      "blockquote": "引用",
+      "codeBlock": "程式碼區塊",
+      "mermaid": "Mermaid 圖表",
+      "table": "表格",
+      "divider": "分隔線",
+      "image": "圖片",
+      "file": "檔案"
+    }
+  },
+  "block_handle": {
+    "add": "在下方新增",
+    "options": "拖曳以移動，點擊開啟選單",
+    "turn_into": "轉換為",
+    "duplicate": "建立副本",
+    "delete": "刪除"
   }
 }

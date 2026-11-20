@@ -717,10 +717,14 @@ export interface UpdateMeRequest {
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;
+  /** Required for a guest: the projects it can access. */
+  project_ids?: string[];
 }
 
 export interface UpdateMemberRequest {
   role: MemberRole;
+  /** Required when the member becomes a guest. */
+  project_ids?: string[];
 }
 
 // Personal Access Tokens

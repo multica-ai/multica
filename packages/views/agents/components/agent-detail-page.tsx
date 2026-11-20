@@ -29,6 +29,7 @@ import {
 import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { refreshFeaturesOnLockedError } from "@multica/core/billing";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -80,6 +81,7 @@ import {
 } from "../../layout/object-page";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { usePaidFeatureErrorMessage } from "../../billing";
 import { availabilityConfig } from "../presence";
 import {
   AgentAdvancedSettings,
@@ -121,6 +123,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const currentUser = useAuthStore((s) => s.user);
 
   const {
@@ -289,11 +292,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           );
         }
         void qc.invalidateQueries({ queryKey });
-        toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
+        refreshFeaturesOnLockedError(qc, wsId, e);
+        toast.error(paidFeatureError(e, e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast)));
         throw e;
       }
     },
-    [qc, t, wsId],
+    [paidFeatureError, qc, t, wsId],
   );
 
   const handleArchive = async (id: string) => {

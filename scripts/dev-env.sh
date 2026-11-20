@@ -6,6 +6,7 @@
 #   make status                  # what is running, and is it mine
 #   make list                    # every environment on this machine
 #   make down                    # stop the processes, keep the data
+#   make down C=daemon           # stop only some components
 #   make destroy                 # stop, then delete database + profile + slot
 #
 # Three rules the old flow got wrong, and why they are here:
@@ -631,17 +632,59 @@ api_identity_matches() {
   [ "$launched_at" = 0 ] || api_started_after "$health" "$launched_at"
 }
 
+# `go run` compiles the api once, at launch, so a later edit never reaches it,
+# and an uncommitted edit leaves the commit /health reports unchanged.
+# `start_api` records "<launcher pid> <fingerprint>" for the api it launched,
+# and an api of the current commit is current only when both still match.
+api_build_file() { printf '%s/api.build' "$STATE_DIR"; }
+
+stream_sha256() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | awk '{print $1}'
+}
+
+# Hashes everything in server/ that differs from HEAD: the diff of tracked
+# files, plus the paths and contents of untracked files that are not ignored.
+api_source_fingerprint() {
+  local dir=${DIR:-$REPO_ROOT} untracked
+  untracked="$(git -C "$dir" ls-files --others --exclude-standard -- server 2>/dev/null || true)"
+  {
+    git -C "$dir" diff --no-ext-diff --no-textconv --binary HEAD -- server 2>/dev/null || true
+    if [ -n "$untracked" ]; then
+      printf '%s\n' "$untracked"
+      printf '%s\n' "$untracked" | git -C "$dir" hash-object --stdin-paths 2>/dev/null || true
+    fi
+  } | stream_sha256
+}
+
+# Prints why the api, already matched on commit, was not launched from the
+# server/ sources the checkout has now, or nothing when it was.
+api_stale_reason() {
+  local recorded launcher
+  recorded="$(cat "$(api_build_file)" 2>/dev/null || true)"
+  launcher="$(component_pid api || true)"
+  if [ -z "$recorded" ] || [ "${recorded%% *}" != "$launcher" ]; then
+    printf 'has no recorded source fingerprint, so it may predate uncommitted server/ changes'
+  elif [ "${recorded#* }" != "$(api_source_fingerprint)" ]; then
+    printf 'was compiled before server/ changed (uncommitted changes differ)'
+  fi
+  return 0
+}
+
 start_api() {
-  local launched_at health waited=0 expected_commit
+  local launched_at health waited=0 expected_commit fingerprint reason
   expected_commit="$(checkout_commit)"
   if health="$(health_json)" && [ -n "$health" ] && component_pid api >/dev/null; then
     if api_identity_matches "$health" "$expected_commit"; then
-      record_component_listener api "$BACKEND_PORT" >/dev/null \
-        || die "The API listener changed while its identity was being verified. Refusing to reuse it."
-      ok "api already running on :$BACKEND_PORT (pid $(json_field "$health" pid), commit $expected_commit)"
-      return 0
-    fi
-    if health_belongs_to_api "$health"; then
+      reason="$(api_stale_reason)"
+      if [ -z "$reason" ]; then
+        record_component_listener api "$BACKEND_PORT" >/dev/null \
+          || die "The API listener changed while its identity was being verified. Refusing to reuse it."
+        ok "api already running on :$BACKEND_PORT (pid $(json_field "$health" pid), commit $expected_commit)"
+        return 0
+      fi
+      warn "api on :$BACKEND_PORT (pid $(json_field "$health" pid)) $reason; restarting it."
+      stop_component api
+    elif health_belongs_to_api "$health"; then
       warn "api on :$BACKEND_PORT is ours but not commit $expected_commit; restarting it."
       stop_component api
     else
@@ -654,7 +697,11 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
   fi
 
   launched_at="$(now_epoch)"
+  # Taken before the compile starts, so an edit made while it runs reads as
+  # stale next time instead of being assumed compiled in.
+  fingerprint="$(api_source_fingerprint)"
   launch_detached api make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE"
+  printf '%s %s\n' "$(cat "$(pid_file api)")" "$fingerprint" > "$(api_build_file)"
   info "api launching (pid $(cat "$(pid_file api)")), log: $(log_file api)"
 
   while [ "$waited" -lt 300 ]; do
@@ -852,12 +899,53 @@ ensure_fixture_issues() {
   ok "seeded 2 issues in workspace $WORKSPACE_SLUG"
 }
 
+daemon_status_json() {
+  "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
+    "$MULTICA_BIN" daemon status --profile "$PROFILE" --output json 2>/dev/null || true
+}
+
+# A running daemon keeps executing the binary it was started from, and
+# `daemon start` is a no-op while one is up, so rebuilding alone never reaches
+# it. Uncommitted edits change the binary but not the commit it reports, so
+# `start_daemon` records "<pid> <sha256 of the binary>" for the daemon it
+# started, and a daemon is current only when both match.
+daemon_build_file() { printf '%s/daemon.build' "$STATE_DIR"; }
+
+file_sha256() {
+  { shasum -a 256 "$1" 2>/dev/null || sha256sum "$1" 2>/dev/null; } | awk '{print $1}' || true
+}
+
+short_commit() {
+  [ -n "$1" ] && [ "$1" != unknown ] || { printf 'unknown'; return 0; }
+  git -C "$DIR" rev-parse --short "$1" 2>/dev/null || printf '%.10s' "$1"
+}
+
+# Prints why the daemon in a `daemon status` payload is not running this
+# checkout's current build, or nothing when it is.
+daemon_stale_reason() {
+  local status=$1 expected_commit=$2 bin_hash=$3 running_commit pid recorded
+  running_commit="$(json_field "$status" cli_commit || true)"
+  pid="$(json_field "$status" pid || true)"
+  if [ "$running_commit" != "$expected_commit" ]; then
+    printf 'runs commit %s, checkout is at %s' \
+      "$(short_commit "$running_commit")" "$(short_commit "$expected_commit")"
+    return 0
+  fi
+  recorded="$(cat "$(daemon_build_file)" 2>/dev/null || true)"
+  if [ "${recorded%% *}" != "$pid" ]; then
+    printf 'was not started from %s by make up' "$MULTICA_BIN"
+  elif [ "${recorded#* }" != "$bin_hash" ]; then
+    printf 'runs an older build of commit %s (uncommitted changes differ)' "$(short_commit "$running_commit")"
+  fi
+  return 0
+}
+
 # Under a daemon-task marker the CLI refuses daemon commands for every profile
 # except one this registry assigns to an environment, reached without the task's
 # identity and pointed at that environment's API — exactly how CLEAN_ENV and
 # the profile written above launch it (server/cmd/multica/dev_env_profile.go).
 start_daemon() {
-  local status state build_commit
+  local status state pid build_commit bin_hash reason active
 
   # Built, never `go run`: the daemon records its own executable path at startup
   # and re-execs it as the execution-environment helper for every task. Under
@@ -867,12 +955,35 @@ start_daemon() {
   info "Building $MULTICA_BIN (a go run daemon would fail every task later)."
   build_commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
   (cd "$REPO_ROOT/server" && go build -ldflags "-X main.buildCommit=$build_commit" -o bin/multica ./cmd/multica) || die "Failed to build the multica CLI."
+  bin_hash="$(file_sha256 "$MULTICA_BIN")"
+
+  status="$(daemon_status_json)"
+  state="$(json_field "$status" status || true)"
+  if [ "$state" = running ] || [ "$state" = starting ]; then
+    pid="$(json_field "$status" pid || echo '?')"
+    reason="$(daemon_stale_reason "$status" "$build_commit" "$bin_hash")"
+    if [ -z "$reason" ] && [ "$state" = running ]; then
+      ok "daemon already running for profile $PROFILE (pid $pid, commit $(short_commit "$build_commit"))"
+      return 0
+    fi
+    if [ -n "$reason" ]; then
+      active="$(json_field "$status" active_task_count || echo 0)"
+      if [ "$active" -gt 0 ] 2>/dev/null; then
+        warn "daemon pid $pid $reason; restarting it (interrupts $active active task(s))."
+      else
+        warn "daemon pid $pid $reason; restarting it."
+      fi
+      "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
+        "$MULTICA_BIN" daemon stop --force --profile "$PROFILE" >/dev/null 2>&1 \
+        || die "Could not stop the stale daemon pid $pid for profile $PROFILE. Log: $PROFILE_DIR/daemon.log"
+      rm -f "$(daemon_build_file)"
+    fi
+  fi
 
   "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
     "$MULTICA_BIN" daemon start --profile "$PROFILE" 2>&1 | sed 's/^/    /' || true
 
-  status="$("${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
-    "$MULTICA_BIN" daemon status --profile "$PROFILE" --output json 2>/dev/null || true)"
+  status="$(daemon_status_json)"
   state="$(json_field "$status" status || echo unknown)"
   # `daemon status` reports "stopped" plus port_conflict when the daemon
   # answering this profile's health port belongs to another profile, so a
@@ -883,7 +994,12 @@ start_daemon() {
     fi
     die "Daemon is '$state' after start. Log: $PROFILE_DIR/daemon.log"
   fi
-  ok "daemon running for profile $PROFILE (pid $(json_field "$status" pid || echo '?'))"
+  pid="$(json_field "$status" pid || echo '?')"
+  if [ "$(json_field "$status" cli_commit || true)" != "$build_commit" ]; then
+    die "Daemon pid $pid reports commit $(short_commit "$(json_field "$status" cli_commit || true)") after start, not $(short_commit "$build_commit"). Run 'make down C=daemon' and retry."
+  fi
+  printf '%s %s\n' "$pid" "$bin_hash" > "$(daemon_build_file)"
+  ok "daemon running for profile $PROFILE (pid $pid, commit $(short_commit "$build_commit"))"
 }
 
 start_desktop() {
@@ -1152,11 +1268,17 @@ stop_component() {
 component_state() {
   case "$1" in
     api)
-      local health expected_commit reported_commit
+      local health expected_commit reported_commit reason
       health="$(health_json || true)"
       expected_commit="$(checkout_commit)"
       reported_commit="$(json_field "$health" commit || true)"
       if [ -n "$health" ] && api_identity_matches "$health" "$expected_commit"; then
+        reason="$(api_stale_reason)"
+        if [ -n "$reason" ]; then
+          printf 'stale|http://localhost:%s|pid %s %s; run make up to restart' "$BACKEND_PORT" \
+            "$(json_field "$health" pid || echo '?')" "$reason"
+          return 0
+        fi
         printf 'running|http://localhost:%s|pid %s commit %s started %s' "$BACKEND_PORT" \
           "$(json_field "$health" pid || echo '?')" \
           "$reported_commit" \
@@ -1191,12 +1313,27 @@ component_state() {
       fi
       ;;
     daemon)
-      local status state
+      local status state pid running_commit reason
       if [ -x "$MULTICA_BIN" ]; then
-        status="$("${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
-          "$MULTICA_BIN" daemon status --profile "$PROFILE" --output json 2>/dev/null || true)"
+        status="$(daemon_status_json)"
         state="$(json_field "$status" status || echo stopped)"
-        printf '%s|%s|pid %s' "$state" "$PROFILE" "$(json_field "$status" pid || echo '-')"
+        pid="$(json_field "$status" pid || echo '-')"
+        if [ "$state" != running ] && [ "$state" != starting ]; then
+          printf '%s|%s|pid %s' "$state" "$PROFILE" "$pid"
+          return 0
+        fi
+        running_commit="$(json_field "$status" cli_commit || true)"
+        # Measured against server/bin/multica as it is now: an edit that has
+        # not been rebuilt yet shows up only once `make up` compiles it.
+        reason="$(daemon_stale_reason "$status" \
+          "$(git -C "$DIR" rev-parse HEAD 2>/dev/null || printf 'unknown')" \
+          "$(file_sha256 "$MULTICA_BIN")")"
+        if [ -n "$reason" ]; then
+          printf 'stale|%s|pid %s %s; run make up C=daemon to restart' "$PROFILE" "$pid" "$reason"
+        else
+          printf '%s|%s|pid %s commit %s up %s' "$state" "$PROFILE" "$pid" \
+            "$(short_commit "$running_commit")" "$(json_field "$status" uptime || echo '?')"
+        fi
       else
         printf 'stopped|%s|not built' "$PROFILE"
       fi
@@ -1569,7 +1706,11 @@ cmd_down() {
     case " $ALL_COMPONENTS " in *" $comp "*) ;; *) die "Unknown component '$comp'. Valid: $ALL_COMPONENTS" ;; esac
     stop_component "$comp"
   done
-  printf '\n%s✓ %s stopped.%s Database, profile and slot kept — `make up` restarts in seconds.\n' "$C_GREEN" "$NAME" "$C_OFF"
+  if [ "$requested" = "$ALL_COMPONENTS" ]; then
+    printf '\n%s✓ %s stopped.%s Database, profile and slot kept — `make up` restarts in seconds.\n' "$C_GREEN" "$NAME" "$C_OFF"
+  else
+    printf '\n%s✓ %s: stopped %s.%s Other components were left as they were — `make status` shows them.\n' "$C_GREEN" "$NAME" "$requested" "$C_OFF"
+  fi
 }
 
 cmd_destroy() {
@@ -1821,13 +1962,14 @@ Components: api (Go backend), web (Next.js), daemon (agent daemon),
 desktop (Electron). Anything selected implies api.
 
 Every environment has an onboarded workspace with two issues, signed in
-through its CLI profile; scripts/dev-fixtures.mjs adds chat, Agent Builder and
-wide-markdown issue content. desktop starts signed in. --cdp exposes a Chrome
+through its CLI profile; scripts/dev-fixtures.mjs adds chat, Agent Builder,
+wide-markdown issue content and a running agent task. desktop starts signed in. --cdp exposes a Chrome
 DevTools Protocol port (printed by up and status --json) for Playwright's
 connectOverCDP; the port is kept for later runs until --no-cdp.
 
-down keeps the database, the CLI profile and the allocated slot.
-destroy consumes them.
+down keeps the database, the CLI profile and the allocated slot; with
+--components (make down C=daemon) it stops only those and leaves the rest
+running. destroy consumes them and always acts on the whole environment.
 EOF
 }
 

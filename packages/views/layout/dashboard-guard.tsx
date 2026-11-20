@@ -23,9 +23,9 @@ export function DashboardGuard({
   children,
   loadingFallback = null,
 }: DashboardGuardProps) {
-  const { user, isLoading, workspace } = useDashboardGuard();
+  const { user, isLoading, workspace, guestBlocked } = useDashboardGuard();
 
-  if (isLoading || !workspace) return <>{loadingFallback}</>;
+  if (isLoading || !workspace || guestBlocked) return <>{loadingFallback}</>;
   if (!user) return null;
 
   return <>{children}</>;

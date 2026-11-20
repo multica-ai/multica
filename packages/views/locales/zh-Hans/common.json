@@ -14,7 +14,8 @@
     "upload_image": "上传图片",
     "emoji_label": "表情",
     "more_emojis": "更多表情…",
-    "emoji_loading": "加载中…"
+    "emoji_loading": "加载中…",
+    "text_icon": "文字图标"
   },
   "avatar_crop": {
     "title": "编辑头像",
@@ -28,6 +29,14 @@
     "uploading": "上传中…",
     "loading": "加载中…",
     "load_failed": "图片加载失败"
+  },
+  "text_avatar": {
+    "title": "文字图标",
+    "preview": "预览",
+    "text_label": "文字",
+    "text_hint": "1–2 个字，字母、数字、汉字都可以，多出的会截掉。",
+    "color_label": "颜色",
+    "render_failed": "图标生成失败，请重试。"
   },
   "color_picker": {
     "saturation": "饱和度与明度",

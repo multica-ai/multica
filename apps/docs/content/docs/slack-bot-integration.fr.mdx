@@ -1,12 +1,12 @@
 ---
 title: Bot Slack
-description: Créez un bot Slack pour un agent et utilisez-le dans les messages directs, les canaux et les commandes /issue, /new et /clear.
+description: Créez un bot Slack pour un agent et utilisez-le dans les messages directs, les canaux et les commandes @Multica /help, /issue, /new et /clear.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica utilise votre propre application Slack. Une fois la connexion établie, les membres de l'équipe peuvent envoyer des messages directs au bot, le @mentionner dans un canal, utiliser `/issue` pour créer des tâches, `/new` pour démarrer une nouvelle discussion Multica ou `/clear` pour réinitialiser le contexte de l'agent dans la discussion en cours.
+Multica utilise votre propre application Slack. Une fois la connexion établie, les membres de l'équipe peuvent envoyer des messages directs au bot, le @mentionner dans un canal, utiliser `@Multica /help` pour afficher les commandes, utiliser `/issue` pour créer des tâches, `/new` pour démarrer une nouvelle discussion Multica ou `/clear` pour réinitialiser le contexte de l'agent dans la discussion en cours.
 
 Une application Slack correspond à un agent Multica. Pour connecter plusieurs agents, créez une application distincte pour chacun.
 
@@ -75,7 +75,7 @@ settings:
   token_rotation_enabled: false
 ```
 
-Avant de créer l'application, vous pouvez remplacer les deux occurrences de `Multica` par le nom de l'agent. Ne supprimez aucune portée ni aucun événement du manifeste, sinon les messages directs, les mentions dans les canaux, les réponses, `/issue`, `/new` ou `/clear` risquent de ne plus fonctionner.
+Avant de créer l'application, vous pouvez remplacer les deux occurrences de `Multica` par le nom de l'agent. Ne supprimez aucune portée ni aucun événement du manifeste, sinon les messages directs, les mentions dans les canaux, les réponses, `@Multica /help`, `/issue`, `/new` ou `/clear` risquent de ne plus fonctionner.
 
 <Callout type="warning">
 Les noms des commandes slash Slack sont globaux à l'espace de travail. Si une autre application installée utilise déjà `/new` ou `/clear`, Slack rejette la commande en conflit lorsque vous créez ou mettez à jour l'application. Résolvez le conflit, ou envoyez la forme message `@Multica /new [message]` ou `@Multica /clear [message]` pour contourner l'interception des commandes slash natives.
@@ -150,6 +150,12 @@ Joignez des fichiers à un message direct, ou à un message de canal qui @mentio
 
 Cela nécessite la portée `files:read` : si l'application a été installée avant la prise en charge des pièces jointes, consultez la note de l'étape 1. Chaque fichier doit faire 20 Mio au maximum, et un message peut en contenir 10 au plus. Les fichiers plus volumineux, encore en cours d'envoi ou hébergés hors de Slack (un lien Google Drive ou Dropbox, par exemple) sont ignorés ; le texte du message parvient tout de même à l'agent.
 
+### Afficher les commandes avec `@Multica /help`
+
+Envoyez `@Multica /help` dans un message direct, un canal ou un fil pour afficher `@Multica /help`, `@Multica /new [message]`, `@Multica /clear [message]` et `@Multica /issue <titre>` (les lignes suivantes servent de description). Multica répond directement sans créer de discussion ni d'exécution et sans changer la discussion active.
+
+Le manifeste par défaut enregistre uniquement `/issue`, `/new` et `/clear` comme commandes slash natives. `@Multica /help` ne nécessite aucune modification du manifeste ni réinstallation. La commande native `/issue <description>` demande à l'agent de créer une tâche à partir de votre description.
+
 ### Créer des tâches avec `/issue`
 
 Dans un canal ou un message direct, saisissez :
@@ -204,6 +210,7 @@ Les liens d'association de compte utilisent `MULTICA_APP_URL`, ou `FRONTEND_ORIG
 - **L'application ne peut pas être vérifiée** : vérifiez que le manifeste inclut `users:read`, puis réinstallez l'application après avoir mis à jour les permissions.
 - **Aucun point d'entrée pour les messages directs** : vérifiez que `app_home.messages_tab_enabled` vaut `true`.
 - **Aucune réponse dans un canal** : vérifiez que le bot a été invité dans le canal et que le message le @mentionne.
+- **`/help` ne parvient pas à Multica** : envoyez `@Multica /help` ; le manifeste par défaut ne déclare pas de commande native `/help`.
 - **`/issue`, `/new` ou `/clear` n'existe pas** : vérifiez que le manifeste inclut les trois commandes slash et la portée `commands`, puis réinstallez l'application. Si Slack indique que `/new` ou `/clear` est déjà pris, utilisez la forme message `@Multica` ou résolvez d'abord le conflit de commandes au niveau de l'espace de travail.
 - **Les fichiers ne parviennent pas à l'agent** : vérifiez que le manifeste inclut `files:read` et que l'application a été réinstallée après l'ajout de cette portée, et que le fichier fait 20 Mio au maximum.
 - **Le bot ne s'exécute pas** : vérifiez si l'agent est archivé et si le [runtime](/daemon-runtimes) qu'il utilise est en ligne.

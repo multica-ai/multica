@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { cn } from "@multica/ui/lib/utils";
 
 /**
@@ -10,6 +11,7 @@ import { cn } from "@multica/ui/lib/utils";
 export function CollectionNameCell({
   icon,
   title,
+  titleTooltip,
   badges,
   description,
   trailing,
@@ -18,23 +20,29 @@ export function CollectionNameCell({
 }: {
   icon?: ReactNode;
   title: ReactNode;
+  titleTooltip?: string;
   badges?: ReactNode;
   description?: ReactNode;
   trailing?: ReactNode;
   muted?: boolean;
   className?: string;
 }) {
+  const label = (
+    <span
+      className={cn(
+        "min-w-0 truncate font-medium",
+        muted && "text-muted-foreground",
+      )}
+    >
+      {title}
+    </span>
+  );
   return (
     <span className={cn("flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap", className)}>
       {icon}
-      <span
-        className={cn(
-          "min-w-0 truncate font-medium",
-          muted && "text-muted-foreground",
-        )}
-      >
-        {title}
-      </span>
+      {titleTooltip ? (
+        <TruncatedTooltip content={titleTooltip}>{label}</TruncatedTooltip>
+      ) : label}
       {badges}
       {description ? (
         <span className="min-w-0 flex-1 basis-0 truncate text-muted-foreground">

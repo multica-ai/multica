@@ -3,7 +3,7 @@
 import { create } from "zustand";
 
 /** Cards that slide into the bottom-right corner, which holds one at a time. */
-export type CornerCard = "whats-new" | "star";
+export type CornerCard = "whats-new" | "star" | "trial";
 
 interface SessionPromptStore {
   /**

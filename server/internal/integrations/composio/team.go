@@ -15,6 +15,19 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// ErrTeamConnectRefused is returned by a TeamConnectGate, and then by
+// CompleteCallback, when the workspace may not add the team account.
+var ErrTeamConnectRefused = errors.New("composio: team account not included in the workspace's plan")
+
+// TeamConnectGate decides, when a completed handshake is about to write a team
+// account, whether the workspace may add it. It returns ErrTeamConnectRefused
+// to refuse, or admitted, which runs once the account is written. The handler
+// supplies it; nil admits every account, as on a self-hosted deployment.
+type TeamConnectGate func(ctx context.Context, workspaceID pgtype.UUID, toolkitSlug string) (admitted func(context.Context), err error)
+
+// SetTeamConnectGate installs the gate. Call it before serving requests.
+func (s *Service) SetTeamConnectGate(gate TeamConnectGate) { s.teamConnectGate = gate }
+
 // ErrTeamAccountsUnavailable is returned when the configured SDK or store
 // cannot serve team accounts or tool execution (test fakes that predate them).
 var ErrTeamAccountsUnavailable = errors.New("composio: team accounts unavailable")
@@ -136,6 +149,19 @@ func (s *Service) completeTeamCallback(ctx context.Context, claims stateClaims, 
 	if err := s.verifyAccountOwnership(ctx, connectedAccountID, claims.UserID, claims.AuthConfigID); err != nil {
 		return err
 	}
+	admitted := func(context.Context) {}
+	if s.teamConnectGate != nil {
+		gateAdmitted, err := s.teamConnectGate(ctx, workspaceID, claims.ToolkitSlug)
+		if err != nil {
+			// Keep the existing connection and drop the account Composio just
+			// created, so it holds no grant Multica does not track.
+			if errors.Is(err, ErrTeamConnectRefused) {
+				s.revokeUpstream(ctx, connectedAccountID)
+			}
+			return err
+		}
+		admitted = gateAdmitted
+	}
 	row, err := store.UpsertWorkspaceComposioConnection(ctx, db.UpsertWorkspaceComposioConnectionParams{
 		WorkspaceID:        workspaceID,
 		ToolkitSlug:        claims.ToolkitSlug,
@@ -158,6 +184,7 @@ func (s *Service) completeTeamCallback(ctx context.Context, claims stateClaims, 
 	for _, old := range replaced {
 		s.revokeUpstream(ctx, old.ConnectedAccountID)
 	}
+	admitted(ctx)
 	return nil
 }
 

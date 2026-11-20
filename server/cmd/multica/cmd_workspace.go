@@ -22,6 +22,7 @@ var workspaceCmd = &cobra.Command{
 var workspaceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all workspaces you belong to",
+	Long:  "List all workspaces you belong to. In an agent run, only the workspace the run belongs to is listed; the owner's other workspaces are left out.",
 	RunE:  runWorkspaceList,
 }
 

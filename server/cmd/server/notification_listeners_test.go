@@ -8,6 +8,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -25,6 +26,32 @@ func createNotificationMember(t *testing.T, email string) string {
 	return id
 }
 
+// setNotificationPref merges one preference into a member's stored row and
+// deletes the row when the test ends.
+func setNotificationPref(t *testing.T, userID, key, value string) {
+	t.Helper()
+	workspaceFixture(t).Exec(t, `
+		INSERT INTO notification_preference (workspace_id, user_id, preferences)
+		VALUES ($1, $2, jsonb_build_object($3::text, $4::text))
+		ON CONFLICT (workspace_id, user_id) DO UPDATE
+		SET preferences = notification_preference.preferences || EXCLUDED.preferences
+	`, testWorkspaceID, userID, key, value)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM notification_preference WHERE workspace_id = $1 AND user_id = $2`,
+			testWorkspaceID, userID)
+	})
+}
+
+// enableStatusChanges turns on status change notifications, which are muted
+// by default, for tests about where a status change is routed.
+func enableStatusChanges(t *testing.T, userIDs ...string) {
+	t.Helper()
+	for _, id := range userIDs {
+		setNotificationPref(t, id, "status_changes", "all")
+	}
+}
+
 // inboxItemsForRecipient returns all non-archived inbox items for a given recipient.
 func inboxItemsForRecipient(t *testing.T, queries *db.Queries, recipientID string) []db.ListInboxItemsRow {
 	t.Helper()
@@ -32,6 +59,7 @@ func inboxItemsForRecipient(t *testing.T, queries *db.Queries, recipientID strin
 		WorkspaceID:   util.MustParseUUID(testWorkspaceID),
 		RecipientType: "member",
 		RecipientID:   util.MustParseUUID(recipientID),
+		RowLimit:      inbox.ActiveLimit,
 	})
 	if err != nil {
 		t.Fatalf("ListInboxItems: %v", err)
@@ -261,6 +289,7 @@ func TestNotification_StatusChanged(t *testing.T) {
 	sub2Email := "notif-sub2-status@multica.ai"
 	sub2ID := createNotificationMember(t, sub2Email)
 	t.Cleanup(func() { cleanupTestUser(t, sub2Email) })
+	enableStatusChanges(t, sub1ID, sub2ID)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() {
@@ -327,19 +356,32 @@ func TestNotification_StatusChanged(t *testing.T) {
 	}
 }
 
-// TestNotification_StatusChanged_Muted verifies that status_changes="muted"
-// prevents a new Inbox row without affecting other subscribers.
+// TestNotification_StatusChanged_Muted verifies that status changes are muted
+// by default (MUL-9449): only a member who turned them on gets a row, and an
+// explicit "muted" still drops it.
 func TestNotification_StatusChanged_Muted(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
+	defaultEmail := "notif-default-status@multica.ai"
+	defaultID := createNotificationMember(t, defaultEmail)
+	t.Cleanup(func() { cleanupTestUser(t, defaultEmail) })
+
 	mutedEmail := "notif-muted-status@multica.ai"
 	mutedID := createNotificationMember(t, mutedEmail)
 	t.Cleanup(func() { cleanupTestUser(t, mutedEmail) })
+	setNotificationPref(t, mutedID, "status_changes", "muted")
 
-	normalEmail := "notif-normal-status@multica.ai"
-	normalID := createNotificationMember(t, normalEmail)
-	t.Cleanup(func() { cleanupTestUser(t, normalEmail) })
+	// A stored row without the key still applies the default.
+	otherPrefEmail := "notif-other-pref-status@multica.ai"
+	otherPrefID := createNotificationMember(t, otherPrefEmail)
+	t.Cleanup(func() { cleanupTestUser(t, otherPrefEmail) })
+	setNotificationPref(t, otherPrefID, "comments", "muted")
+
+	optedInEmail := "notif-opted-in-status@multica.ai"
+	optedInID := createNotificationMember(t, optedInEmail)
+	t.Cleanup(func() { cleanupTestUser(t, optedInEmail) })
+	enableStatusChanges(t, optedInID)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() {
@@ -347,42 +389,24 @@ func TestNotification_StatusChanged_Muted(t *testing.T) {
 		cleanupTestIssue(t, issueID)
 	})
 
-	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO notification_preference (workspace_id, user_id, preferences)
-		VALUES ($1, $2, '{"status_changes":"muted"}'::jsonb)
-	`, testWorkspaceID, mutedID); err != nil {
-		t.Fatalf("seed muted notification preference: %v", err)
+	for _, id := range []string{defaultID, mutedID, otherPrefID, optedInID} {
+		addTestSubscriber(t, issueID, "member", id, "commenter")
 	}
 
-	addTestSubscriber(t, issueID, "member", mutedID, "commenter")
-	addTestSubscriber(t, issueID, "member", normalID, "commenter")
+	publishStatusChange(bus, issueID, "in_progress", "todo")
 
-	bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
-		WorkspaceID: testWorkspaceID,
-		ActorType:   "member",
-		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
-				ID:          issueID,
-				WorkspaceID: testWorkspaceID,
-				Title:       "muted status test issue",
-				Status:      "in_progress",
-				Priority:    "medium",
-				CreatorType: "member",
-				CreatorID:   testUserID,
-			},
-			"assignee_changed": false,
-			"status_changed":   true,
-			"prev_status":      "todo",
-		},
-	})
-
-	if items := inboxItemsForRecipient(t, queries, mutedID); len(items) != 0 {
-		t.Fatalf("expected muted subscriber to receive 0 items, got %d", len(items))
-	}
-	if items := inboxItemsForRecipient(t, queries, normalID); len(items) != 1 {
-		t.Fatalf("expected normal subscriber to receive 1 item, got %d", len(items))
+	for name, c := range map[string]struct {
+		id   string
+		want int
+	}{
+		"default":         {defaultID, 0},
+		"muted":           {mutedID, 0},
+		"other pref only": {otherPrefID, 0},
+		"opted in":        {optedInID, 1},
+	} {
+		if got := len(inboxItemsForRecipient(t, queries, c.id)); got != c.want {
+			t.Errorf("%s subscriber: %d inbox items, want %d", name, got, c.want)
+		}
 	}
 }
 
@@ -1074,6 +1098,7 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 	parentSubEmail := "notif-parent-sub-status@multica.ai"
 	parentSubID := createNotificationMember(t, parentSubEmail)
 	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
+	enableStatusChanges(t, parentSubID)
 
 	parentID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() {
@@ -1421,6 +1446,7 @@ func TestNotification_StatusChange_DoneArchivesIssueInbox(t *testing.T) {
 	subEmail := "notif-done-archive-sub@multica.ai"
 	subID := createNotificationMember(t, subEmail)
 	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
+	enableStatusChanges(t, subID)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() {

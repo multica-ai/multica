@@ -41,7 +41,7 @@ vi.mock("@multica/core/workspace/queries", () => ({
 }));
 
 vi.mock("@multica/core/properties", () => ({
-  propertyListOptions: (wsId: string) => ({ queryKey: ["properties", wsId] }),
+  propertyUsageListOptions: (wsId: string) => ({ queryKey: ["properties", wsId, "with-usage"] }),
   useCreateProperty: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateProperty: () => ({ mutate: vi.fn(), isPending: false }),
 }));

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -240,7 +241,7 @@ describe("agent messaging channels", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("gives an agent owner Lark and DingTalk, with admin-only platforms labelled", async () => {
+  it("gives an agent owner Feishu, DingTalk and WeChat, with admin-only platforms labelled", async () => {
     state.role = "member";
     show(<AgentChannelsSection agent={agent} />);
     await waitFor(() =>
@@ -257,6 +258,9 @@ describe("agent messaging channels", () => {
     ).toBeEnabled();
     expect(
       within(dialog).getByRole("button", { name: /^DingTalk$/ }),
+    ).toBeEnabled();
+    expect(
+      within(dialog).getByRole("button", { name: /^WeChat$/ }),
     ).toBeEnabled();
     expect(
       within(dialog).getByRole("button", { name: /Slack Ask an admin/ }),
@@ -348,6 +352,7 @@ describe("agent messaging channels", () => {
   it.each(["lark", "slack", "dingtalk", "wecom", "telegram", "weixin"] as const)(
     "confirms %s disconnect and preserves the connection on failure",
     async (channel) => {
+      if (channel === "weixin") state.role = "member";
       const methods = {
         lark: ["listLarkInstallations", "deleteLarkInstallation"],
         slack: ["listSlackInstallations", "deleteSlackInstallation"],
@@ -396,7 +401,8 @@ const platformName = {
 } as const;
 
 describe("shared connection dialog", () => {
-  it("starts and cancels a WeChat QR login for the selected agent", async () => {
+  it("shows the WeChat QR to the agent owner and cancels it on close", async () => {
+    state.role = "member";
     const login = {
       id: "login-1",
       status: "wait",
@@ -406,25 +412,37 @@ describe("shared connection dialog", () => {
     vi.mocked(api.beginWeixinLogin).mockResolvedValue(login);
     vi.mocked(api.pollWeixinLogin).mockResolvedValue(login);
     vi.mocked(api.cancelWeixinLogin).mockResolvedValue(undefined);
-    show(
-      <ChannelConnectDialog
-        agents={[agent]}
-        initialAgent={agent}
-        initialChannel="weixin"
-        open
-        onOpenChange={vi.fn()}
-      />,
-    );
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return (
+        <ChannelConnectDialog
+          agents={[agent]}
+          initialAgent={agent}
+          initialChannel="weixin"
+          open={open}
+          onOpenChange={setOpen}
+        />
+      );
+    }
+    show(<Harness />);
     const platform = await screen.findByRole("button", { name: "WeChat" });
     await waitFor(() => expect(platform).toBeEnabled());
     fireEvent.click(platform);
-    fireEvent.click(await screen.findByRole("button", { name: "Connect WeChat" }));
-    expect(await screen.findByTitle("WeChat connection QR code")).toBeInTheDocument();
+    const qr = await screen.findByTitle("WeChat connection QR code");
     expect(api.beginWeixinLogin).toHaveBeenCalledWith("ws-1", agent.id);
-    const qrDialog = screen.getByRole("dialog", { name: "Connect WeChat to Mika" });
-    fireEvent.click(within(qrDialog).getAllByRole("button", { name: "Close" })[0]!);
-    await waitFor(() => expect(api.cancelWeixinLogin).toHaveBeenCalledWith("ws-1", login.id));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Connect WeChat to Mika" })).toBeNull());
+    expect(screen.queryByRole("button", { name: "Connect WeChat" })).toBeNull();
+    const guide = screen.getByRole("button", { name: "Setup guide" });
+    expect(
+      qr.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    fireEvent.click(guide);
+    expect(state.open).toHaveBeenCalledWith(
+      "https://multica.ai/docs/weixin-bot-integration",
+    );
+    // The footer's Close; the header's icon button shares the name.
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]!);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api.cancelWeixinLogin).toHaveBeenCalledWith("ws-1", login.id);
   });
 
   it("offers only Feishu for new connections while international Lark is disabled", async () => {

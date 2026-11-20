@@ -3,7 +3,10 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
+import { docTreeOptions } from "@multica/core/docs";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { useFeatureEnabled } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { BUILTIN_VIEW_KEYS, type BuiltinViewKey } from "@multica/core/issue-views/sidebar-views";
@@ -12,6 +15,7 @@ import type { IssueView } from "@multica/core/api/schemas";
 import type {
   Autopilot,
   ChatSession,
+  DocSummary,
   MemberWithUser,
   SkillSummary,
   Workspace,
@@ -38,12 +42,27 @@ export interface ObjectHits {
   autopilots: Scored<Autopilot>[];
   chats: Scored<ChatSession>[];
   skills: Scored<SkillSummary>[];
+  docs: Scored<PaletteDoc>[];
   workspaces: Scored<Workspace>[];
+}
+
+/** A doc and the folder it sits in, shown as the row's detail. */
+export interface PaletteDoc {
+  doc: DocSummary;
+  folder: string | null;
+  /** Excerpt around a content match, from server search. */
+  snippet?: string;
+  /**
+   * A server row answering an earlier query: still painted so the list does
+   * not flicker while the next request is in flight, but not selectable.
+   */
+  stale?: boolean;
 }
 
 const EMPTY_AUTOPILOTS: Autopilot[] = [];
 const EMPTY_CHATS: ChatSession[] = [];
 const EMPTY_SKILLS: SkillSummary[] = [];
+const EMPTY_DOC_TREE = { folders: [], docs: [] };
 const EMPTY_VIEWS: IssueView[] = [];
 const EMPTY_WORKSPACES: Workspace[] = [];
 
@@ -83,7 +102,10 @@ function viewScore(view: PaletteView, query: string): number {
  * the palette does not otherwise need (views, autopilots, chats, skills) load
  * only once the user types.
  */
-export function useObjectSearch(query: string, open: boolean): ObjectHits & { directory: ReturnType<typeof useActorDirectory> } {
+export function useObjectSearch(
+  query: string,
+  open: boolean,
+): ObjectHits & { directory: ReturnType<typeof useActorDirectory>; docFolders: ReadonlyMap<string, string> } {
   const wsId = useWorkspaceId();
   const directory = useActorDirectory(open);
   const typing = open && query.length > 0;
@@ -92,6 +114,19 @@ export function useObjectSearch(query: string, open: boolean): ObjectHits & { di
   const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery({ ...autopilotListOptions(wsId), enabled: typing });
   const { data: chats = EMPTY_CHATS } = useQuery({ ...chatSessionsOptions(wsId), enabled: typing });
   const { data: skills = EMPTY_SKILLS } = useQuery({ ...skillListOptions(wsId), enabled: typing });
+  const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
+  const { data: cachedDocTree = EMPTY_DOC_TREE } = useQuery({
+    ...docTreeOptions(wsId),
+    enabled: typing && !!wsId && docsEnabled,
+  });
+  const docTree = docsEnabled ? cachedDocTree : EMPTY_DOC_TREE;
+  const docFolders = useMemo(() => new Map(docTree.folders.map((f) => [f.id, f.title])), [docTree]);
+  const docs = useMemo<PaletteDoc[]>(() => {
+    const folders = docFolders;
+    return docTree.docs
+      .filter((doc) => doc.title.trim() !== "")
+      .map((doc) => ({ doc, folder: doc.folderId ? (folders.get(doc.folderId) ?? null) : null }));
+  }, [docFolders, docTree]);
   // Account-level cache entry the sidebar's workspace switcher already
   // holds, so the Workspaces group adds no request of its own.
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
@@ -106,7 +141,7 @@ export function useObjectSearch(query: string, open: boolean): ObjectHits & { di
 
   const hits = useMemo<ObjectHits>(() => {
     if (!query) {
-      return { agents: [], squads: [], members: [], views: [], autopilots: [], chats: [], skills: [], workspaces: [] };
+      return { agents: [], squads: [], members: [], views: [], autopilots: [], chats: [], skills: [], docs: [], workspaces: [] };
     }
     return {
       agents: rank(directory.agents, (e) => scoreText(e.agent.name, query), 8),
@@ -124,6 +159,7 @@ export function useObjectSearch(query: string, open: boolean): ObjectHits & { di
         5,
       ),
       skills: rank(skills, (s) => scoreText(s.name, query), 5),
+      docs: rank(docs, (d) => scoreText(d.doc.title, query), 6),
       // The current workspace is never a switch target, so a single-workspace
       // user never sees the group. Ties keep the server's created_at order,
       // the same order as the sidebar switcher.
@@ -133,7 +169,7 @@ export function useObjectSearch(query: string, open: boolean): ObjectHits & { di
         50,
       ),
     };
-  }, [autopilots, chats, directory, query, skills, views, workspaces, wsId]);
+  }, [autopilots, chats, directory, docs, query, skills, views, workspaces, wsId]);
 
-  return { ...hits, directory };
+  return { ...hits, directory, docFolders };
 }

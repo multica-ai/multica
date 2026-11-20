@@ -114,6 +114,8 @@
   "mention": {
     "group_users": "Пользователи",
     "group_issues": "Задачи",
+    "group_projects": "Проекты",
+    "group_docs": "Документы",
     "all_members": "Все участники",
     "agent_badge": "Агент",
     "squad_badge": "Команда",
@@ -238,5 +240,31 @@
       "later": "Не сейчас",
       "start": "Начать диктовку"
     }
+  },
+  "block_menu": {
+    "label": "Вставить блок",
+    "blocks": {
+      "paragraph": "Текст",
+      "heading1": "Заголовок 1",
+      "heading2": "Заголовок 2",
+      "heading3": "Заголовок 3",
+      "bulletList": "Маркированный список",
+      "orderedList": "Нумерованный список",
+      "taskList": "Список задач",
+      "blockquote": "Цитата",
+      "codeBlock": "Блок кода",
+      "mermaid": "Диаграмма Mermaid",
+      "table": "Таблица",
+      "divider": "Разделитель",
+      "image": "Изображение",
+      "file": "Файл"
+    }
+  },
+  "block_handle": {
+    "add": "Добавить ниже",
+    "options": "Перетащите для перемещения, нажмите для меню",
+    "turn_into": "Преобразовать в",
+    "duplicate": "Дублировать",
+    "delete": "Удалить"
   }
 }

@@ -13,9 +13,14 @@ import (
 // plugin-compatibility.ts in packages/boot/app-boot/src.
 var dshCoreCompatibilityRefusal = regexp.MustCompile(`^[^\r\n]*: disabling profile plugin [^\r\n]+: Plugin (@deepseek-ai/dsh-(?:agent|session|tools|llm))@([0-9][0-9A-Za-z.+-]{0,79}) is incompatible with dsh ([0-9][0-9A-Za-z.+-]{0,79}): requirements `)
 
-func dshCoreCompatibilitySummary(stderr string) string {
+// DSH v0.2.1-rc.5 reports this when profile loading skips the bundled bridge
+// at the plugin peer-requirement check. Match the bridge in both positions;
+// a skipped unrelated plugin is not evidence that the Multica bridge failed.
+var dshBridgeCompatibilityRefusal = regexp.MustCompile(`^dsh(?:\.exe)?: skipping profile bundle "@multica-ai/dsh-runtime": Error: Plugin (@multica-ai/dsh-runtime)@([0-9][0-9A-Za-z.+-]{0,79}) is incompatible with dsh ([0-9][0-9A-Za-z.+-]{0,79}): requirements `)
+
+func dshCompatibilitySummary(stderr string, refusal *regexp.Regexp) string {
 	for _, line := range strings.Split(stderr, "\n") {
-		if match := dshCoreCompatibilityRefusal.FindStringSubmatch(strings.TrimSpace(line)); match != nil {
+		if match := refusal.FindStringSubmatch(strings.TrimSpace(line)); match != nil {
 			return dshDiagnosticOutput([]byte(fmt.Sprintf("%s@%s is incompatible with DSH %s", match[1], match[2], match[3])))
 		}
 	}

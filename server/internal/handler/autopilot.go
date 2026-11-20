@@ -2445,7 +2445,11 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	if idempotencyKey == "" {
 		idempotencyKey = service.NewRequestIdempotencyKey()
 	}
-	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManualWithKey(r.Context(), autopilot, pgtype.UUID{}, nil, invokerUserID, idempotencyKey)
+	startedBy := service.ManualRunStartedByMember
+	if actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID); actorType == "agent" {
+		startedBy = service.ManualRunStartedByAgent
+	}
+	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManualWithKey(r.Context(), autopilot, pgtype.UUID{}, nil, invokerUserID, idempotencyKey, startedBy)
 	if err != nil {
 		var quotaErr *service.AutopilotQuotaExceededError
 		if errors.As(err, &quotaErr) {

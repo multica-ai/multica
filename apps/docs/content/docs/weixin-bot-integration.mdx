@@ -7,8 +7,8 @@ Multica connects to WeChat's iLink Bot service using the protocol implemented by
 
 ## Connect
 
-1. Sign in as a workspace owner or admin. Open an agent, choose **Add messaging channel** under **Messaging**, select **WeChat**, then select **Connect WeChat**.
-2. Scan the QR code with **your own** WeChat account and confirm on your phone. If WeChat requests a numeric verification code, enter it in the dialog.
+1. Open an agent you own, or any agent if you are a workspace owner or admin. Choose **Add messaging channel** under **Messaging**, then select **WeChat**. The QR code appears right away.
+2. Scan the QR code with **your own** WeChat account and confirm on your phone. If WeChat requests a numeric verification code, enter it in the dialog. Once connected, the dialog closes and WeChat appears under the agent's **Messaging**.
 3. Send a new private message to the bot in WeChat. The agent needs an online runtime to execute work.
 
 The account that scans is linked to the Multica user who opened this dialog. Its messages execute with that user's workspace permissions. Do not share the QR code or ask someone else to scan it. Other WeChat accounts and group messages are not accepted.
@@ -23,6 +23,7 @@ The QR code in this illustration is a test fixture, not a live authorization cod
 
 - Text messages continue the same Multica chat. Final answers return to WeChat in plain text; long answers are split into Unicode-safe messages. There is no streaming message editing.
 - While the agent works, Multica renews WeChat's typing indicator when available. It stops after completion, failure, or cancellation. A failed renewal is retried at the next five-second interval. Missing typing permission or a failed indicator request does not interrupt messages or replies.
+- `/help` lists available commands without starting an agent run or changing the current chat.
 - `/new [message]` starts a new Multica chat. `/clear [message]` resets agent-visible context in the current chat. `/issue <title>` creates an issue assigned to the connected agent.
 - With object storage configured, incoming images, files, video, and untranscribed voice notes are attached to the Multica chat. Voice transcription supplied by WeChat is used as text; Multica does not add a speech-to-text service or convert SILK audio.
 - Files attached to an agent's final answer return to WeChat. Supported images and MP4 video use native media messages; other formats, including audio, use file messages. Each transfer is limited to **20 MiB** by this adapter. A failed outgoing file transfer produces a notice; the file remains in Multica.
@@ -34,7 +35,7 @@ Under heavy load, a WeChat reply notification may be skipped; the answer remains
 
 ## Disconnect
 
-Use **Manage WeChat → Disconnect** in the agent's **Messaging** section. New messages stop reaching the agent and the saved reply context is removed. Multica chat history remains available. An explicit iLink authorization-expired response also disables the connection and shows an expired-authorization notice; reconnect by scanning a new QR code. Reauthorizing an existing connection to the same agent preserves its chat and receive cursor. When a bot is already connected to another agent in this workspace, the connection dialog names that agent so you can disconnect it there first; other workspaces' agent identities remain private.
+Use **Manage WeChat → Disconnect** in the agent's **Messaging** section. New messages stop reaching the agent and the saved reply context is removed. Multica chat history remains available. An explicit iLink authorization-expired response also disables the connection and shows an expired-authorization notice; reconnect by scanning a new QR code. Reauthorizing an existing connection to the same agent preserves its chat and receive cursor. When a bot is already connected to another agent in this workspace, the connection dialog names that agent if you can manage it, so you can disconnect it there first; other workspaces' agent identities remain private.
 
 ![Connected WeChat account in workspace messaging settings](/images/docs/weixin/connected.png)
 

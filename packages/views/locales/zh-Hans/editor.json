@@ -102,6 +102,8 @@
   "mention": {
     "group_users": "用户",
     "group_issues": "任务",
+    "group_projects": "项目",
+    "group_docs": "文档",
     "all_members": "所有成员",
     "agent_badge": "智能体",
     "squad_badge": "小队",
@@ -226,5 +228,31 @@
       "later": "以后再说",
       "start": "开始口述"
     }
+  },
+  "block_menu": {
+    "label": "插入内容",
+    "blocks": {
+      "paragraph": "正文",
+      "heading1": "标题 1",
+      "heading2": "标题 2",
+      "heading3": "标题 3",
+      "bulletList": "无序列表",
+      "orderedList": "有序列表",
+      "taskList": "待办列表",
+      "blockquote": "引用",
+      "codeBlock": "代码块",
+      "mermaid": "Mermaid 图表",
+      "table": "表格",
+      "divider": "分割线",
+      "image": "图片",
+      "file": "文件"
+    }
+  },
+  "block_handle": {
+    "add": "在下方添加",
+    "options": "拖动以移动，点击打开菜单",
+    "turn_into": "转换为",
+    "duplicate": "创建副本",
+    "delete": "删除"
   }
 }

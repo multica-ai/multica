@@ -234,6 +234,25 @@ multica issue wakeup runs MUL-123 <wakeup-id>
 
 Creating one from a terminal as a member requires `--agent-id`; an agent creating one inside its own run wakes itself by default.
 
+## Chat wakeups [#chat-wakeups]
+
+Only an agent inside a chat run can use `chat wakeup`; the current conversation is implicit. These commands do not accept a session ID and cannot be used from an ordinary member terminal or an issue run. See [Follow up later](/chat#follow-up-later) for the user controls.
+
+```bash
+multica chat wakeup create --title "Review ready" \
+  --until-issue MUL-123 --state in_review --expires-in 48h \
+  --instruction "Summarize the result in this conversation"
+multica chat wakeup create --title "Check back in two hours" \
+  --after 2h --instruction "Remind the user to review the result"
+multica chat wakeup list
+```
+
+Use exactly one `--until-*` condition, `--at` / `--after`, or `--every`. Creation and update require `--title` and `--instruction` (or `--instruction-file`). `update` replaces the configuration and restarts relative deadlines; it cannot switch a wakeup between a condition, a reminder, and a check. Conditions and checks default to 24 hours and allow at most 7 days via `--expires-in` or `--expires-at`; reminders allow at most 30 days and do not accept expiry flags. Checks run at least 10 minutes apart, and the deadline may allow at most 100 checks: `--every 10m` with the default 24 hours would be 144 checks and is rejected, so use a longer interval or an earlier deadline such as `--expires-in 16h`.
+
+Conditions support `--until-issue` with `--state` or `--status`, `--until-children-done` with optional `--stage`, `--until-pr`, `--until-run`, and `--until-reply` with optional `--from <user-id>`. A PR condition uses a GitHub PR mirrored in this workspace: `owner/repo#N[:merged|closed|checks]`. `checks` waits for checks to finish on the current head, whether they pass or fail. A `checks` condition can be created only when the server reads CI status from GitHub; a self-hosted server needs `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` (see [GitHub integration](/github-integration)). An already-finished check result at creation is recorded as a baseline and does not immediately wake the agent.
+
+Use `list`, `get <id>`, or `cancel <id>` to inspect or cancel a wakeup. During a periodic check, `checkin <id> --note "..."` records a quiet update without sending a reply; `finish <id>` ends the check when its goal is met. The final deadline turn must report back and cannot check in quietly.
+
 ## Agents and skills
 
 ```bash
@@ -273,7 +292,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - The `--custom-env` flags exist only on `agent create`. Change variables later with `agent env set`, which replaces the whole set; keys whose value is `****` keep their existing value.
 - `agent update --mcp-config null` clears the MCP configuration.
 - `--custom-args` is a JSON array placed at the end of the launch arguments. Choose the model with `--model`; some tools reject `--model` inside custom arguments.
-- `--permission-mode` controls who can invoke the agent: `private` for the owner only, or `public_to` with `--public-to-workspace` or `--public-to-member <user-id>`. `--visibility private|workspace` is the older form and maps onto `--permission-mode`; when both are given, `--permission-mode` wins.
+- `--permission-mode` controls who can invoke the agent: `private` for the owner only, or `public_to` with `--public-to-workspace` or `--public-to-member <user-id>`. `--visibility private|workspace` is the older form and maps onto `--permission-mode`; when both are given, `--permission-mode` wins. On Multica Cloud, member lists are included in Business. On Free and Pro with the restriction enforced, `agent create` or `agent update` that gives an agent a member list or adds someone to it is refused with `feature_locked`; removing members, re-saving the same list, and switching to `private` or `--public-to-workspace` still work.
 
 ### Agent run history
 
@@ -313,7 +332,7 @@ multica runtime profile create --display-name "Internal Claude wrapper" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app.
+`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app. `runtime profile create` binds the profile to this machine by default; use `--daemon-id <id>` to select another registered local machine. Bind an older, unscoped profile with `multica runtime profile update <profile-id> --daemon-id <id>`.
 
 Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active runs.
 
@@ -361,6 +380,20 @@ Use `--event-filters-file` on `autopilot trigger-add` or `trigger-update` to con
 ]
 ```
 
+Each row may also include `conditions`, using the same payload-field rules as the app. For example, this row accepts only non-draft pull requests targeting `main`:
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+Each rule supports up to 20 conditions. A field path can contain at most 256 characters, and an `in` list can contain at most 100 values. Creating or updating a trigger with an oversized condition returns HTTP 400.
+
 This accepts PR review submissions and all push events. Omitting `actions` or using an empty actions array accepts every action for that event.
 
 ```bash
@@ -386,7 +419,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | Create, update, assign, and search issues; manage comments, subscribers, labels, properties, wakeups, the timeline, and runs |
 | `project` | Manage projects, their resources, and the workflow they use |
-| `inbox` | Read your notifications without changing read status |
+| `inbox` | Read and manage your notifications: list, mark read, archive, snooze |
 | `workflow` | Manage issue workflows: statuses and who handles each one |
 | `issue-status` | Manage the workspace status catalog: statuses, their color, and their icon |
 | `label`, `property` | Manage workspace labels and custom properties |
@@ -511,11 +544,11 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `env get/set <agent-id>` | Read and write custom environment variables (agent owner or workspace owner/admin; every read is recorded) | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`; replaces the whole set, and keys whose value is `****` keep their existing value |
 | | `skills list/set/add <agent-id>` | Manage attached skills | `--skill-ids` (`set` replaces the full list, `add` appends) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assign workspace MCP servers to this agent | Take the server id from `workspace mcp list`. A library entry does nothing until it is added here; `disable` stops sending it without dropping the assignment |
-| `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--agent`, `--mode` (all required), `--description`, `--issue-title-template`, `--project`, `--subscriber` (repeatable) |
+| `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--mode` (both required), exactly one of `--agent` / `--squad` / `--squad-id` (required), `--description`, `--issue-title-template`, `--project`, `--subscriber` (repeatable) |
 | | `trigger <id>` | Trigger a run manually | |
 | | `runs <id>` | View run history | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | `trigger-add`: `--kind` (`schedule` or `webhook`), `--cron`, `--timezone` (default UTC), `--label` |
-| `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace | `create`: `--name`, `--slug` (both required), `--issue-prefix`, `--description`, `--context` / `--context-stdin`; `update` changes the same fields except the slug |
+| `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace; in an agent run, `list` shows only its own workspace | `create`: `--name`, `--slug` (both required), `--issue-prefix`, `--description`, `--context` / `--context-stdin`; `update` changes the same fields except the slug |
 | | `mcp list/add/update/remove` | Manage the workspace's MCP server library | Writes are owner/admin. A server added here is assigned to no agent — give it to one with `multica agent mcp add`. `list` shows names and transports only; the stored entry is write-only and never returned. `--server-config-file` / `--server-config-stdin` keep tokens out of shell history |
 | | `member list/invite <email>` | View members, send invites | `invite`: `--role` (member or admin, default member) |
 | `repo` | `list/add/remove/checkout` | Manage workspace repositories and check them out locally | `--url` (repeatable); `checkout`: `--ref` |
@@ -528,7 +561,15 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `member list/add/set-role/remove` | Manage squad members | |
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
 | `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
-| `inbox` | `list` | [Read your active notifications](/inbox) without marking them read | `--project`, `--type`, `--output` (`table` or `json`); filters apply locally |
+| | `wakeup create/list/get/update/cancel/finish/checkin` | Manage follow-ups in the current chat run; see [Chat wakeups](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
+| `inbox` | `list` | [List your notifications](/inbox) without marking them read; `--archived` or `--snoozed` lists those instead | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` or `json`); `--archived` reads every page |
+| | `count` | Unread count in this workspace and in each of your workspaces; an agent run sees only its own workspace | `--output` |
+| | `read [<id>...]` | Mark notifications read, the whole issue for each; or every notification on one issue, or all | `--issue`, `--all` (needs `--yes`) |
+| | `unread <id>...` | Mark notifications unread | |
+| | `archive [<id>...]` | Archive notifications, the whole issue for each; or in bulk | `--all`, `--read`, `--completed` (each needs `--yes`) |
+| | `unarchive <id>...` | Restore archived notifications | |
+| | `snooze <id>...` | Take each notification's issue out of the inbox until a time | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
+| | `unsnooze <id>...` | Bring snoozed issues back now | |
 
 ### Runtime
 

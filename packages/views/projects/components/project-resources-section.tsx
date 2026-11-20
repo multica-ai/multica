@@ -361,9 +361,8 @@ function AddRepositoryPanel({
 
   // Someone who wants a branch copies it out of the address bar, so a pasted
   // .../tree/<branch> URL is split into its two halves rather than stored
-  // whole as a clone URL that does not exist. A pasted pair always wins the
-  // branch field: it only shows while a URL is present, so a value already in
-  // it came from the previous URL rather than from something typed ahead.
+  // whole as a clone URL that does not exist. Changing the URL also replaces
+  // the branch field, so a plain clone URL cannot inherit the previous ref.
   const handleQueryChange = (next: string) => {
     if (!looksLikeRepoUrl(next)) {
       setQuery(next);
@@ -372,7 +371,7 @@ function AddRepositoryPanel({
     }
     const split = splitGithubUrlRef(next);
     setQuery(split.url);
-    if (split.ref) setRef(split.ref);
+    setRef(split.ref ?? "");
   };
 
   const submitUrl = async () => {

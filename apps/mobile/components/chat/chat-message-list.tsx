@@ -77,7 +77,7 @@ interface Props {
 }
 
 export function ChatMessageList({
-  messages,
+  messages: allMessages,
   loading,
   hasSessions,
   agent,
@@ -93,6 +93,12 @@ export function ChatMessageList({
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to the list cells / bubble long-press wrappers normally.
   const selectingId = useChatSelectStore((s) => s.selectingId);
+  // A wakeup turn's input is the runtime's, not a message the person wrote;
+  // its content is withheld, so it would render as an empty bubble.
+  const messages = useMemo(
+    () => allMessages.filter((m) => m.message_kind !== "wakeup"),
+    [allMessages],
+  );
 
   // Every image in this session, in message order (MUL-5752), so tapping one
   // opens the lightbox at its position and a swipe walks the rest.
