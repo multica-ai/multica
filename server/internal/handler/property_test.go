@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/multica-ai/multica/server/internal/issueproperty"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -264,7 +265,7 @@ func TestListPropertiesUsageCount(t *testing.T) {
 		defs = append(defs, db.IssueProperty{ID: parseUUID(uuid.NewString())})
 	}
 	defs = append(defs, db.IssueProperty{ID: parseUUID(propB.ID)}, db.IssueProperty{ID: parseUUID(unused.ID)})
-	usage, err := testHandler.countPropertyUsage(context.Background(), parseUUID(testWorkspaceID), defs)
+	usage, err := testHandler.countPropertyUsage(context.Background(), parseUUID(testWorkspaceID), projectaccess.Hidden{}, defs)
 	if err != nil {
 		t.Fatalf("countPropertyUsage across scans: %v", err)
 	}
@@ -544,7 +545,7 @@ func TestPropertyUsageReadsBagsNoMoreThanPerDefinitionScans(t *testing.T) {
 		for i, key := range keys {
 			defs[i] = db.IssueProperty{ID: parseUUID(key)}
 		}
-		query, args := propertyUsageQuery(parseUUID(ws), defs)
+		query, args := propertyUsageQuery(parseUUID(ws), projectaccess.Hidden{}, defs)
 		counts := make([]int64, len(keys))
 		dest := make([]any, len(keys))
 		for i := range counts {
