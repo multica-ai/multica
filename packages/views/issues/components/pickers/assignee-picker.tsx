@@ -110,7 +110,7 @@ function AssigneePickerImpl({
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const [filter, setFilter] = useState("");
-  const choices = useAssigneeChoices(filter);
+  const choices = useAssigneeChoices(filter, open);
   const { getActorName } = useActorName();
 
   const triggerLabel =
@@ -199,13 +199,18 @@ export function AssigneePickerPanel({
   );
 }
 
-function useAssigneeChoices(filter: string) {
+/** `open` gates the frequency query so a picker that stays mounted while
+ *  closed revalidates stale counts each time it opens, not only on mount. */
+function useAssigneeChoices(filter: string, open = true) {
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
-  const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
+  const { data: frequency = [] } = useQuery({
+    ...assigneeFrequencyOptions(wsId),
+    enabled: open,
+  });
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
