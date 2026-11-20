@@ -97,7 +97,7 @@ Authenticate using a personal access token directly. Useful for headless environ
 multica auth status
 ```
 
-Shows your current server, user, and token validity.
+Shows your current server and user when the token can be verified. If verification fails, check the reported error before signing in again.
 
 ### Logout
 
