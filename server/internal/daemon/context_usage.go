@@ -1,9 +1,6 @@
 package daemon
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -84,70 +81,4 @@ func contextEventInput(info agent.ContextInfo) map[string]any {
 		input["trigger"] = info.Trigger
 	}
 	return input
-}
-
-// formatContextEvent renders an observation as one line of English prose.
-// Clients localize from the structured payload; this is the fallback reading
-// and what a copied transcript shows.
-func formatContextEvent(info agent.ContextInfo) string {
-	if info.Phase == agent.ContextPhaseCompacted {
-		parts := []string{"Context compacted"}
-		if info.PreTokens > 0 {
-			parts = append(parts, fmt.Sprintf("%s before", formatTokenCount(info.PreTokens)))
-		}
-		if info.Trigger != "" {
-			parts = append(parts, info.Trigger)
-		}
-		if len(parts) == 1 {
-			return parts[0]
-		}
-		return parts[0] + " (" + strings.Join(parts[1:], ", ") + ")"
-	}
-	if info.LimitTokens > 0 {
-		return fmt.Sprintf("Context %s/%s (%d%%)",
-			formatTokenCount(info.UsedTokens),
-			formatTokenCount(info.LimitTokens),
-			contextUsagePercent(info.UsedTokens, info.LimitTokens),
-		)
-	}
-	return fmt.Sprintf("Context %s", formatTokenCount(info.UsedTokens))
-}
-
-// contextUsagePercent rounds toward the nearest whole percent, and never
-// rounds a non-empty window down to 0% or a non-full one up to 100%: the two
-// extremes are read as states ("fresh", "out of room"), not as figures.
-func contextUsagePercent(used, limit int64) int64 {
-	if limit <= 0 || used <= 0 {
-		return 0
-	}
-	pct := (used*100 + limit/2) / limit
-	if pct <= 0 {
-		return 1
-	}
-	if pct >= 100 && used < limit {
-		return 99
-	}
-	if pct > 100 {
-		return 100
-	}
-	return pct
-}
-
-// formatTokenCount abbreviates to one decimal place from 1K up, which is where
-// every figure in a context window lands. Whole thousands drop the decimal so
-// a declared window reads as "200K", not "200.0K".
-func formatTokenCount(tokens int64) string {
-	switch {
-	case tokens >= 1_000_000:
-		return trimTokenDecimal(float64(tokens)/1_000_000) + "M"
-	case tokens >= 1_000:
-		return trimTokenDecimal(float64(tokens)/1_000) + "K"
-	default:
-		return fmt.Sprintf("%d", tokens)
-	}
-}
-
-func trimTokenDecimal(value float64) string {
-	s := fmt.Sprintf("%.1f", value)
-	return strings.TrimSuffix(s, ".0")
 }

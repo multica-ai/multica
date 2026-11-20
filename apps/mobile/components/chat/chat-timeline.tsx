@@ -39,7 +39,9 @@ interface Props {
 }
 
 export function ChatTimeline({ items, isStreaming = false }: Props) {
-  const processSteps = items.filter((i) => i.type !== "text");
+  // Context-window observations are not steps (web keeps them out of the
+  // count too); mobile does not render the usage chip yet.
+  const processSteps = items.filter((i) => i.type !== "text" && i.type !== "context");
   const { t } = useT("chat");
   if (processSteps.length === 0) return null;
 

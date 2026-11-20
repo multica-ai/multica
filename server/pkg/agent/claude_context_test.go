@@ -59,8 +59,10 @@ func TestClaudeAssistantReportsContextOccupancy(t *testing.T) {
 	if events[0].UsedTokens != 103_000 {
 		t.Fatalf("used = %d, want 103000", events[0].UsedTokens)
 	}
-	if events[0].LimitTokens != 200_000 {
-		t.Fatalf("limit = %d, want the model's default window", events[0].LimitTokens)
+	// No configured model means no established window. The stream's base
+	// model id must not stand in for it: it drops a `[1m]` modifier.
+	if events[0].LimitTokens != 0 {
+		t.Fatalf("limit = %d, want none without a configured model", events[0].LimitTokens)
 	}
 	if events[0].Phase != ContextPhaseUsage {
 		t.Fatalf("phase = %q, want a plain usage observation", events[0].Phase)

@@ -40,6 +40,15 @@ function message(seq: number, type: TaskMessagePayload["type"], content?: string
 }
 
 describe("historical run transcript", () => {
+  it("drops context-window observations so they neither render nor split text", () => {
+    const items = buildRunTranscript([
+      message(1, "text", "Hello "),
+      { ...message(2, "context"), input: { used_tokens: 12_000, limit_tokens: 200_000 } },
+      message(3, "text", "world"),
+    ]);
+    expect(items.map((item) => [item.type, item.content])).toEqual([["text", "Hello world"]]);
+  });
+
   it("pairs parallel same-name calls by ID when results finish in reverse order", () => {
     const callA = { ...message(1, "tool_use"), tool: "Bash", call_id: "A", input: { command: "test A" } };
     const callB = { ...message(2, "tool_use"), tool: "Bash", call_id: "B", input: { command: "test B" } };

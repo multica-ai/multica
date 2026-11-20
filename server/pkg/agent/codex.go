@@ -4021,7 +4021,6 @@ func codexPlainInputTokens(inputTokens, cacheReadTokens, cacheWriteTokens int64)
 	)
 }
 
-// codexInt64 returns the first non-zero int64 value from the map for the given keys.
 // codexStringField reads a string member, or "" when absent or another type.
 func codexStringField(m map[string]any, key string) string {
 	s, _ := m[key].(string)
@@ -4040,6 +4039,7 @@ func codexContextWindowFromV2(params, tokenUsage map[string]any) int64 {
 	return codexInt64(tokenUsage, "contextWindow", "modelContextWindow", "model_context_window")
 }
 
+// codexInt64 returns the first non-zero int64 value from the map for the given keys.
 func codexInt64(m map[string]any, keys ...string) int64 {
 	for _, key := range keys {
 		switch v := m[key].(type) {

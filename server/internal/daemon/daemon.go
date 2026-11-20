@@ -10650,11 +10650,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					batch = append(batch, TaskMessageData{
 						Seq:  int(s),
 						Type: "context",
-						// Content carries the same figures as prose so a
-						// surface that knows nothing of this type — an older
-						// client, a copied transcript — still reads what
-						// happened instead of showing an empty row.
-						Content:   formatContextEvent(info),
+						// Content stays empty on purpose. Clients that predate
+						// this type (installed desktop builds, mobile) parse an
+						// unknown type as "text" and merge adjacent text rows,
+						// so any prose here would be spliced into the agent's
+						// reply. The figures live in Input only.
 						Input:     contextEventInput(info),
 						CreatedAt: observedAt,
 					})

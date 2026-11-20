@@ -37,7 +37,7 @@ package agent
 //	opencode_acp and copilot read usage from a session export / event log
 //	after the fact, so there is no live request to attribute a figure to.
 //
-//	amp, antigravity, devin, droid, dsh, kimi, muse, qwen and reasonix report
+//	amp, antigravity, droid, dsh, kimi, muse, qwen and reasonix report
 //	usage in shapes whose per-request meaning has not been verified. Adding one
 //	is a few lines at its own accumulation point — the plumbing below, the
 //	daemon's throttle and both surfaces are provider-agnostic.

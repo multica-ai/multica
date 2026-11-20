@@ -574,9 +574,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 //
 // contextLimit is the window resolved from the configured model, or 0 when
 // that id carried none (an alias such as "sonnet", or no model at all). The
-// stream's own model id is the fallback, and it is only a fallback: it reports
-// the base model and therefore loses Claude Code's `[1m]` modifier, so trusting
-// it over the configured id would quietly measure a 1M-token run against 200K.
+// stream's own model id is deliberately not consulted: it reports the base
+// model and so loses Claude Code's `[1m]` modifier, which would measure a
+// 1M-token run (an alias or the CLI default can select one) against 200K.
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}, contextLimit int64) assistantTurn {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
@@ -614,15 +614,11 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		// Subagents are excluded above (ParentToolUseID), and that matters
 		// twice over here — their prompt is a different conversation, so its
 		// size says nothing about the main session's window.
-		limit := contextLimit
-		if limit == 0 {
-			limit = ClaudeContextWindowTokens(content.Model)
-		}
 		sendContextUsage(ch, content.Model,
 			content.Usage.InputTokens+
 				content.Usage.CacheReadInputTokens+
 				content.Usage.CacheCreationInputTokens,
-			limit)
+			contextLimit)
 	}
 
 	for _, block := range content.Content {

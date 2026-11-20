@@ -87,68 +87,6 @@ func TestContextUsageReporterSkipsEmptyObservations(t *testing.T) {
 	}
 }
 
-func TestFormatContextEvent(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name string
-		info agent.ContextInfo
-		want string
-	}{
-		{
-			name: "usage with window",
-			info: agent.ContextInfo{UsedTokens: 112_400, LimitTokens: 200_000},
-			want: "Context 112.4K/200K (56%)",
-		},
-		{
-			name: "usage without window",
-			info: agent.ContextInfo{UsedTokens: 112_400},
-			want: "Context 112.4K",
-		},
-		{
-			name: "million window",
-			info: agent.ContextInfo{UsedTokens: 250_000, LimitTokens: 1_000_000},
-			want: "Context 250K/1M (25%)",
-		},
-		{
-			name: "compaction with metadata",
-			info: agent.ContextInfo{Phase: agent.ContextPhaseCompacted, PreTokens: 184_000, Trigger: "auto"},
-			want: "Context compacted (184K before, auto)",
-		},
-		{
-			name: "compaction without metadata",
-			info: agent.ContextInfo{Phase: agent.ContextPhaseCompacted},
-			want: "Context compacted",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := formatContextEvent(tc.info); got != tc.want {
-				t.Fatalf("formatContextEvent() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestContextUsagePercentKeepsExtremesHonest(t *testing.T) {
-	t.Parallel()
-
-	// A non-empty window never reads as 0%, and a window with room left never
-	// reads as 100%: both extremes are states, not rounded figures.
-	if got := contextUsagePercent(100, 200_000); got != 1 {
-		t.Fatalf("a tiny non-empty window = %d%%, want 1%%", got)
-	}
-	if got := contextUsagePercent(199_999, 200_000); got != 99 {
-		t.Fatalf("an almost-full window = %d%%, want 99%%", got)
-	}
-	if got := contextUsagePercent(200_000, 200_000); got != 100 {
-		t.Fatalf("a full window = %d%%, want 100%%", got)
-	}
-	if got := contextUsagePercent(10_000, 0); got != 0 {
-		t.Fatalf("no window = %d%%, want 0%%", got)
-	}
-}
-
 func TestContextEventInputOmitsUnreportedFields(t *testing.T) {
 	t.Parallel()
 
