@@ -1130,6 +1130,7 @@
     "assignee": {
       "trigger_unassigned": "Unassigned",
       "search_placeholder": "Assign to...",
+      "recent_group": "Recent",
       "members_group": "Members",
       "agents_group": "Agents",
       "squads_group": "Squads",

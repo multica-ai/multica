@@ -1044,6 +1044,7 @@
     "assignee": {
       "trigger_unassigned": "Sin asignar",
       "search_placeholder": "Asignar a...",
+      "recent_group": "Recientes",
       "members_group": "Miembros",
       "agents_group": "Agentes",
       "squads_group": "Squads",
