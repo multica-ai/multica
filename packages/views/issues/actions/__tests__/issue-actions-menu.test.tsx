@@ -6,6 +6,7 @@ import type { AgentTask, Issue, QuickAction } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
+import { useAssigneePicksStore } from "@multica/core/issues/stores/assignee-picks-store";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
@@ -56,10 +57,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
   squadListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "squads"],
-    queryFn: () => Promise.resolve([]),
-  }),
-  assigneeFrequencyOptions: () => ({
-    queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
   }),
 }));
@@ -212,6 +209,8 @@ function wrap(ui: React.ReactNode) {
 }
 
 beforeEach(() => {
+  // Picks persist in a real store; keep one test's picks out of the next's Recent.
+  useAssigneePicksStore.setState({ byScope: {} });
   platform.desktop = false;
   deletionPolicy.allowed = true;
   mockOpenModal.mockReset();

@@ -57,6 +57,7 @@ import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
+import { useRecordAssigneePick } from "../issues/components/pickers/assignee-picker";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
@@ -302,6 +303,9 @@ export function ManualCreatePanel({
     return draft.manual.assigneeId;
   });
   const [assigneeCleared, setAssigneeCleared] = useState(data?.manual_assignee_cleared === true);
+  const recordAssigneePick = useRecordAssigneePick();
+  // The draft's pending hand pick that the request in flight submits.
+  const submittedPickRef = useRef<IssueCreateDraft["manual"]["assigneePick"]>(undefined);
   const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
     (data?.due_date as string | undefined) ?? draft.shared.dueDate,
@@ -417,9 +421,15 @@ export function ManualCreatePanel({
   const updateStatus = (v: IssueStatus) => { setStatus(v); setManual({ status: v }); };
   const updatePriority = (v: IssuePriority) => { setPriority(v); setShared({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
+    // Re-picking the current assignee is not a new pick; clearing drops it.
+    const changed = type !== assigneeType || id !== assigneeId;
     setAssigneeType(type); setAssigneeId(id);
     setAssigneeCleared(!id);
-    setManual({ assigneeType: type, assigneeId: id });
+    setManual({
+      assigneeType: type,
+      assigneeId: id,
+      ...(changed ? { assigneePick: type && id ? { type, id } : undefined } : {}),
+    });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
   const updateParent = (id?: string) => {
@@ -547,6 +557,13 @@ export function ManualCreatePanel({
       const pendingDesc = descEditorRef.current?.flushPendingUpdate?.();
       if (pendingDesc != null) setManual({ description: pendingDesc });
       submittedDraftRef.current = useIssueDraftStore.getState().draft;
+      // Only a hand pick of the submitted assignee feeds the picker's
+      // ranking; a prefilled or remembered assignee never matches one.
+      const pendingPick = submittedDraftRef.current.manual.assigneePick;
+      submittedPickRef.current =
+        pendingPick?.type === assigneeType && pendingPick?.id === assigneeId
+          ? pendingPick
+          : undefined;
       try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
       const activeAttachmentIds = draftAttachments
@@ -823,6 +840,9 @@ export function ManualCreatePanel({
     }
   },
     onAccepted: () => {
+      const pick = submittedPickRef.current;
+      if (pick) recordAssigneePick(pick.type, pick.id);
+      submittedPickRef.current = undefined;
       // Only the assignee persists across independent create sessions.
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
@@ -837,6 +857,11 @@ export function ManualCreatePanel({
       const untouched =
         useIssueDraftStore.getState().draft === submittedDraftRef.current;
       if (untouched) clearDraft();
+      // A kept draft must not count the same pick again on its next create;
+      // a newer pick made during the request stays.
+      else if (pick && useIssueDraftStore.getState().draft.manual.assigneePick === pick) {
+        setManual({ assigneePick: undefined });
+      }
       if (!mountedRef.current || !untouched) return;
       if (keepOpen) {
         resetForNextIssue();
@@ -1146,6 +1171,7 @@ export function ManualCreatePanel({
                     u.assignee_type ?? undefined,
                     u.assignee_id ?? undefined,
                   )}
+                  recordPicks={false}
                   triggerRender={<PillButton />}
                   tooltip={tIssues(($) => $.detail.prop_assignee)}
                   align="start"
