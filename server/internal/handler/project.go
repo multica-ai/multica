@@ -771,6 +771,10 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	_, params.DueDateSet = rawFields["due_date"]
 	_, params.MaxRunsPerIssueSet = rawFields["max_runs_per_issue"]
 	_, params.MaxRunsPerAgentPerIssueSet = rawFields["max_runs_per_agent_per_issue"]
+	if (params.MaxRunsPerIssueSet || params.MaxRunsPerAgentPerIssueSet) && isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "only human actors can change project run limits")
+		return
+	}
 	if req.MaxRunsPerIssue != nil {
 		if *req.MaxRunsPerIssue <= 0 {
 			writeError(w, http.StatusBadRequest, "max_runs_per_issue must be positive")

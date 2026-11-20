@@ -87,6 +87,11 @@ func TestProjectIssueRunCeilingsUpdate(t *testing.T) {
 		t.Fatalf("configured run limits = %+v", project)
 	}
 	update(map[string]any{"max_runs_per_issue": 0}).Want(http.StatusBadRequest)
+	for _, actorSource := range []string{"task_token", "cloud_pat"} {
+		req := withURLParam(newRequest(http.MethodPut, url, map[string]any{"max_runs_per_issue": nil}), "id", projectID)
+		req.Header.Set("X-Actor-Source", actorSource)
+		testutil.Call(t, testHandler.UpdateProject, req).Want(http.StatusForbidden)
+	}
 	update(map[string]any{"max_runs_per_agent_per_issue": nil}).Want(http.StatusOK)
 	req := withURLParam(newRequest(http.MethodGet, url, nil), "id", projectID)
 	testutil.Call(t, testHandler.GetProject, req).Want(http.StatusOK).JSON(&project)
