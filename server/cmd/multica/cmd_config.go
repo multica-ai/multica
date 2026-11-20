@@ -36,6 +36,9 @@ var configSetSupportedKeys = []string{
 	"runtime_name",
 	"workspaces_root",
 	"max_concurrent_tasks",
+	"daemon_log_max_size_mb",
+	"daemon_log_max_backups",
+	"daemon_log_max_age_days",
 	"poll_interval",
 	"ws_claim_poll_interval",
 	"heartbeat_interval",
@@ -55,6 +58,7 @@ var configSetCmd = &cobra.Command{
 	Long: "Supported keys: " +
 		"server_url, app_url, workspace_id, " +
 		"device_name, runtime_name, workspaces_root, max_concurrent_tasks, poll_interval, ws_claim_poll_interval, " +
+		"daemon_log_max_size_mb, daemon_log_max_backups, daemon_log_max_age_days, " +
 		"heartbeat_interval, agent_timeout, agent_idle_watchdog, agent_tool_watchdog, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
 		"disable_auto_update, auto_update_check_interval, disable_auto_reload.\n\n" +
@@ -65,6 +69,9 @@ var configSetCmd = &cobra.Command{
 		"--flag / env counterparts and are read by `daemon start` when " +
 		"neither the flag nor the env var is set. " +
 		"Precedence: --flag > MULTICA_… env > config.json > built-in default. " +
+		"The daemon_log_max_size_mb, daemon_log_max_backups, and daemon_log_max_age_days keys " +
+		"take positive integers (MB, files, and days). Valid MULTICA_DAEMON_LOG_MAX_* env values " +
+		"override them; invalid env values fall back to config.json, then defaults (20 MB, 5 files, 30 days). " +
 		"Duration keys take a Go duration (e.g. '10s', '500ms', '1m30s'); " +
 		"most keys require a positive value, while agent_timeout, agent_idle_watchdog, " +
 		"and agent_tool_watchdog also accept '0s' to disable their limit. " +
@@ -104,6 +111,9 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "runtime_name:", valueOrDefault(cfg.RuntimeName, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "workspaces_root:", valueOrDefault(cfg.WorkspacesRoot, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "max_concurrent_tasks:", intOrDefault(cfg.MaxConcurrentTasks, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "daemon_log_max_size_mb:", intOrDefault(cfg.DaemonLogMaxSizeMB, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "daemon_log_max_backups:", intOrDefault(cfg.DaemonLogMaxBackups, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "daemon_log_max_age_days:", intOrDefault(cfg.DaemonLogMaxAgeDays, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "poll_interval:", valueOrDefault(cfg.PollInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "ws_claim_poll_interval:", valueOrDefault(cfg.WSClaimPollInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "heartbeat_interval:", valueOrDefault(cfg.HeartbeatInterval, "(not set)"))
@@ -160,6 +170,12 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 	switch key {
 	case "server_url":
 		cfg.ServerURL = value
+	case "daemon_log_max_size_mb":
+		return assignDaemonLogInt(&cfg.DaemonLogMaxSizeMB, key, value, maxDaemonLogSizeMB)
+	case "daemon_log_max_backups":
+		return assignDaemonLogInt(&cfg.DaemonLogMaxBackups, key, value, maxDaemonLogBackups)
+	case "daemon_log_max_age_days":
+		return assignDaemonLogInt(&cfg.DaemonLogMaxAgeDays, key, value, maxDaemonLogAgeDays)
 	case "app_url":
 		cfg.AppURL = value
 	case "workspace_id":
@@ -268,6 +284,19 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 	default:
 		return fmt.Errorf("unknown config key %q (supported: %s)", key, joinKeys(configSetSupportedKeys))
 	}
+	return nil
+}
+
+func assignDaemonLogInt(dst *int, key, value string, max int64) error {
+	if value == "" {
+		*dst = 0
+		return nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n <= 0 || int64(n) > max {
+		return fmt.Errorf("%s must be a positive integer <= %d; use `config set %s \"\"` to clear it", key, max, key)
+	}
+	*dst = n
 	return nil
 }
 

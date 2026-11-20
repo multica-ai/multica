@@ -299,13 +299,13 @@ The daemon periodically cleans up run directories, repository caches, session re
 
 When the daemon runs in the background (not attached to a terminal), it writes logs to `~/.multica/daemon.log`, or `~/.multica/profiles/<name>/daemon.log` for a named profile, rotating by size and compressing rotated files with gzip.
 
-| Variable | Default | Description |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | Size in MB at which `daemon.log` rotates |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | Maximum number of rotated files kept |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | Days rotated files are kept |
+| Variable | Profile key | Default | Description |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | Size in MB at which `daemon.log` rotates |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | Maximum number of rotated files kept |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | Days rotated files are kept |
 
-All three take a positive integer; `0`, a negative number, or an unparsable value falls back to the default rather than meaning "unlimited". A rotated file is deleted as soon as either the count or the age limit is reached. Crash output goes to `daemon.err.log` in the same directory, which is renamed to `daemon.err.log.1` at startup once it exceeds 5 MB.
+All three accept positive integers. Set the profile keys with `multica --profile dev config set <key> <value>`; `config show` displays the saved values. Pass `""` to clear a key. Changes apply on the next daemon start or restart. Valid environment values override the saved profile; unset, blank, zero, negative, malformed or overflowing values fall back to a valid profile value, then the defaults above. Size and age values must also fit their byte and duration conversions; `config set` rejects invalid values. Retention cannot be disabled with zero. A rotated file is deleted as soon as either the count or the age limit is reached. Crash output goes to `daemon.err.log` in the same directory, which is renamed to `daemon.err.log.1` at startup once it exceeds 5 MB.
 
 ### Per-tool paths, models, and arguments
 
