@@ -170,7 +170,7 @@ multica issue runs <issue-id>
 
 如果 Grok 在終端機中執行正常，但在 Multica 桌面版中逾時，請檢查終端機是否匯出了代理環境變數。在 macOS 上，本機守護程式和 Grok 程序會繼承啟動它們的程序的環境變數。從 Dock 啟動桌面版時，應用程式不會讀取 shell 匯出的變數，也不會將 macOS「網路」中的代理設定轉換為環境變數。
 
-如果只有一個代理需要透過 proxy 連線，請在該代理的[環境變數](/agents-create)中加入 Grok 所需的代理變數。例如，本機 HTTP 代理可使用 `HTTPS_PROXY=http://127.0.0.1:7897`，請換成實際的代理位址。如果 Multica 部署在本機，請將需要直接連線的主機加入 `NO_PROXY`，例如 `localhost,127.0.0.1,::1`。啟動一次新的 Grok 執行以套用變更。這些設定適用於代理程序。如果守護程式本身也需要代理，請另外設定其啟動環境。
+如果只有一名 AI 代理需要透過網路代理連線，請在該 AI 代理的[環境變數](/agents-create)中加入 Grok 所需的代理變數。例如，本機 HTTP 代理可使用 `HTTPS_PROXY=http://127.0.0.1:7897`，請換成實際的代理位址。如果 Multica 部署在本機，請將需要直接連線的主機加入 `NO_PROXY`，例如 `localhost,127.0.0.1,::1`。啟動一次新的 Grok 執行以套用變更。這些設定適用於 AI 代理程序。如果守護程式本身也需要代理，請另外設定其啟動環境。
 
 </Accordion>
 <Accordion title="升級 CLI 後 macOS 上的執行卡住" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
