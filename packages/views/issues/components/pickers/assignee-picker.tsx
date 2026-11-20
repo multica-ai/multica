@@ -283,7 +283,7 @@ function useAssigneeChoices(filter: string) {
     filteredSquads,
     runnableAgentIds,
     recordAssignment: (type: IssueAssigneeType, id: string) => {
-      if (user) recordAssigneeUsage(user.id, wsId, { type, id });
+      if (user) void recordAssigneeUsage(user.id, wsId, { type, id });
     },
   };
 }

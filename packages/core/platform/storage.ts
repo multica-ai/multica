@@ -22,4 +22,21 @@ export const defaultStorage: StorageAdapter = {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   },
+  update: async (key, updater) => {
+    if (typeof window === "undefined") return;
+    const run = () => {
+      const next = updater(localStorage.getItem(key));
+      if (next !== null) localStorage.setItem(key, next);
+    };
+    // localStorage itself gives no cross-tab atomicity: two renderer
+    // processes can each read before either writes. A Web Lock named after
+    // the key serializes every update to it across the origin. Without Web
+    // Locks (very old browsers) the read and write still run back to back.
+    const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+    if (!locks) {
+      run();
+      return;
+    }
+    await locks.request(`multica_storage:${key}`, run);
+  },
 };

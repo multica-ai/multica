@@ -21,4 +21,14 @@ export interface StorageAdapter {
    * other writers. Callers without it only see their own writes.
    */
   subscribe?(listener: (key: string | null) => void): () => void;
+  /**
+   * Read-modify-write `key` as one step that no other tab or window of the
+   * same origin can interleave with. `updater` gets the current value and
+   * returns the value to store, or `null` to leave the key as it is. Rejects
+   * if the write fails (for example, the quota is exceeded).
+   *
+   * Optional: callers without it fall back to `getItem` + `setItem`, which is
+   * only atomic within the current context.
+   */
+  update?(key: string, updater: (current: string | null) => string | null): Promise<void>;
 }

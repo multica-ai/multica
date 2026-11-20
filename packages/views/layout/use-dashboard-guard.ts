@@ -87,7 +87,7 @@ export function useDashboardGuard() {
     const activeWsIds = workspaces.map((w) => w.id);
     useRecentIssuesStore.getState().pruneWorkspaces(activeWsIds);
     useRecentVisitsStore.getState().pruneWorkspaces(activeWsIds);
-    if (userId) pruneAssigneeUsageWorkspaces(userId, activeWsIds);
+    if (userId) void pruneAssigneeUsageWorkspaces(userId, activeWsIds);
   }, [workspaceListReady, workspaces, userId]);
 
   return { user, isLoading, workspace, guestBlocked };
