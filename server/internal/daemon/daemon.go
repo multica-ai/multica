@@ -6430,7 +6430,8 @@ func withoutWorktreePreserved(err error) error {
 //
 //  1. The project_resource JSON is structurally broken — fail the task fast.
 //  2. The path fails validation (missing, not a directory, no R/W, system
-//     blacklist) — fail the task fast with a user-facing reason.
+//     blacklist) — fail the task fast with a user-facing reason; a missing
+//     directory gets its own local_directory_missing reason.
 //  3. The mutex is held by another task — call MarkTaskWaitingLocalDirectory
 //     so the row flips to waiting_local_directory while we block on the
 //     lock, returning execution capacity during the wait. Reacquire capacity
@@ -6475,11 +6476,15 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	}
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
+		failureReason := "local_directory_error"
+		if errors.Is(err, errLocalDirectoryMissing) {
+			failureReason = taskfailure.ReasonLocalDirectoryMissing.String()
+		}
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			failureReason: failureReason,
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}

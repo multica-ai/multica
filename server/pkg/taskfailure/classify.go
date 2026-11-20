@@ -769,8 +769,23 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	if isAgentSideReason(reason) && hasAnyPrefix(lowerError, legacyEnvironmentPrepareWitnesses...) {
 		return ReasonEnvironmentPrepareFailed
 	}
+	// MUL-9665: a daemon predating ReasonLocalDirectoryMissing reports a
+	// deleted or moved project folder as the generic local_directory_error,
+	// which tells the user nothing about what to fix.
+	if reason == legacyLocalDirectoryReason && strings.HasPrefix(lowerError, legacyLocalDirectoryMissingPrefix) {
+		return ReasonLocalDirectoryMissing
+	}
 	return Reason(reason)
 }
+
+// legacyLocalDirectoryReason is the daemon's catchall for local_directory
+// failures. It sits outside the canonical taxonomy, so it has no constant.
+const legacyLocalDirectoryReason = "local_directory_error"
+
+// legacyLocalDirectoryMissingPrefix opens the error an older daemon's
+// validateLocalPath returns when the linked directory is gone. Compared
+// lowercased, like every witness here.
+const legacyLocalDirectoryMissingPrefix = "local_directory: path does not exist:"
 
 // containsAll reports whether s contains every one of the supplied substrings.
 // Used where a single phrase would be ambiguous and only the combination

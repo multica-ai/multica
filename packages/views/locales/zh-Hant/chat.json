@@ -82,6 +82,7 @@
       "skill_bundle_unavailable": "沒能下載到 AI 代理的 skill，這次回覆沒有啟動。通常是網路連線問題，請重試。",
       "runtime_cli_timeout": "本機 OpenClaw CLI 沒能在超時時間內響應，這次執行沒有啟動。這是本地啟動超時，不是網路問題——除非 CLI 變快或調大超時（MULTICA_OPENCLAW_CLI_TIMEOUT），否則重試也不會成功。",
       "environment_prepare_failed": "執行 AI 代理的那臺機器沒能把這次執行準備好，任務沒有啟動。下方的原始錯誤會說明是哪一步失敗——常見的是磁碟空間、權限、目錄仍被佔用，或本地配置讀不出來。與 AI 代理和模型廠商無關。",
+      "local_directory_missing": "這個專案關聯的本地資料夾在執行 AI 代理的那臺機器上已不存在，任務沒有啟動。恢復這個資料夾後再試；如果要換一個資料夾，需要在那臺機器的桌面端開啟專案的「資源 → 本地資料夾」重新關聯，瀏覽器裡無法選擇資料夾。",
       "provider_network": "與模型服務的連線中斷，回覆沒能完成。檢查網路後重試。",
       "provider_auth_or_access": "AI 代理的模型帳號登入已失效。重新登入後再試。",
       "provider_quota_limit": "AI 代理的模型帳號額度已用盡。充值或更換帳號後再試。",
