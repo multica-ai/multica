@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2, RotateCcw } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api, dispatchReasonCode } from "@multica/core/api";
+import { issueRunLimitLabel } from "../blocked-trigger-copy";
 import type { AgentTask } from "@multica/core/types";
 import {
   Tooltip,
@@ -36,12 +37,13 @@ export function RetryRunButton({ task, issueId }: { task: AgentTask; issueId: st
       // A rerun is re-gated on the operator's invoke permission (MUL-4525): a
       // structured 403 means the agent can't be triggered, not a transient
       // failure — localize it instead of echoing the server's generic message.
+      const reason = dispatchReasonCode(e);
       toast.error(
-        dispatchReasonCode(e) === "invocation_not_allowed"
+        issueRunLimitLabel(reason, t) ?? (reason === "invocation_not_allowed"
           ? t(($) => $.execution_log.retry_blocked)
           : e instanceof Error
             ? e.message
-            : t(($) => $.execution_log.retry_failed),
+            : t(($) => $.execution_log.retry_failed)),
       );
     } finally {
       // Reset on both success and failure: the row stays mounted (its task.id

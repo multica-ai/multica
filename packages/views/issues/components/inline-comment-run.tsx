@@ -12,6 +12,7 @@ import { useCancelIssueRun, useRetryIssueRun } from "@multica/core/issues/mutati
 import { issueTimelineOptions } from "@multica/core/issues/queries";
 import { commentSupplementReceipts } from "@multica/core/issues/run-steering";
 import { dispatchReasonCode } from "@multica/core/api";
+import { issueRunLimitLabel } from "../blocked-trigger-copy";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
@@ -226,9 +227,14 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button
           size="xs" variant="outline" className={cn(showIdentity && "@max-[32rem]/run:size-6 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}
-          onClick={() => retry.mutate(task.id, { onError: (error) => toast.error(
-            dispatchReasonCode(error) === "invocation_not_allowed" ? t(($) => $.execution_log.retry_blocked) : t(($) => $.execution_log.retry_failed),
-          ) })}>
+          onClick={() => {
+            void retry.mutateAsync(task.id).catch((error: unknown) => {
+              const reason = dispatchReasonCode(error);
+              toast.error(issueRunLimitLabel(reason, t) ?? (
+                reason === "invocation_not_allowed" ? t(($) => $.execution_log.retry_blocked) : t(($) => $.execution_log.retry_failed)
+              ));
+            });
+          }}>
           <RotateCcw /><span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{t(($) => $.execution_log.retry_task_tooltip)}</span>
         </Button>}
       </div>
