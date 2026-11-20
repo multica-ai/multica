@@ -21,6 +21,7 @@ import { useFormatRelativeDate, useProjectPriorityLabels, useProjectStatusLabels
 import { ProjectAccessControl } from "./project-access";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { ProjectLeadPicker } from "./project-lead-picker";
+import { ProjectRunLimits } from "./project-run-limits";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 
 const PROPERTY_TRIGGER =
@@ -139,6 +140,7 @@ export function ProjectPropertiesPanel({
         <ObjectProperty label={tIssues(($) => $.workflows.project.label)}>
           {field(<ProjectWorkflowControl project={project} onOpen={onOpenWorkflow} />)}
         </ObjectProperty>
+        {!readOnly && <ProjectRunLimits key={project.id} project={project} />}
         {project.archived_at && (
           <ObjectProperty label={t(($) => $.archive.prop_label)}>
             <span className="tabular-nums">{formatRelativeDate(project.archived_at)}</span>

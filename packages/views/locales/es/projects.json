@@ -307,5 +307,12 @@
     "toast_completed": "«{{name}}» está completado",
     "notice": "Este proyecto está archivado. No aparece en las listas ni en los selectores de proyectos y no acepta tareas nuevas; sus tareas se pueden seguir viendo y editando.",
     "prop_label": "Archivado"
+  },
+  "run_limits": {
+    "title": "Límites de ejecuciones",
+    "description": "Deja el campo vacío para no aplicar un límite. Los reintentos cuentan para ambos límites.",
+    "issue": "Ejecuciones por incidencia",
+    "agent": "Ejecuciones por agente en cada incidencia",
+    "save_failed": "No se pudieron guardar los límites"
   }
 }
