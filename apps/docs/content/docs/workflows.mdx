@@ -74,6 +74,8 @@ When you create an issue in a project without picking an assignee, and its statu
 
 When the previous assignee is an agent with a run underway or waiting to start, the confirmation adds an option to stop or cancel it, selected by default. Leave it selected unless you want both agents working at once; the comments and work it already saved are kept.
 
+To hand the issue to an agent without starting it yet, choose **Move without starting**. The issue moves to the step and its handler becomes the assignee, but no run starts until you rerun it.
+
 **When done, move to** and **If rejected, send back to** tell the agent where to move the issue next. A run finishing does not move the issue by itself: the member or agent handling the step updates its status. When an agent moves the issue into the next step, that step's handoff runs just as it would for a member.
 
 You can see the handoff and its instructions in the issue's timeline. Open the workflow menu on the project board to view the full flow.

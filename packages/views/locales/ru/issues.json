@@ -1949,6 +1949,7 @@
       "queued_hint": "Если не отменить запуск, {{name}} начнёт работать над этой задачей позже.",
       "brief_toggle": "Что получит {{name}}",
       "confirm": "Переместить в {{status}}",
+      "confirm_no_start": "Переместить без запуска",
       "cancel": "Отмена",
       "minutes_one": "{{count}} минута",
       "minutes_other": "{{count}} минуты",

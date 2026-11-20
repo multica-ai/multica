@@ -593,6 +593,29 @@ func TestStatusChangeHandsOffOnDefaultProject(t *testing.T) {
 	}
 }
 
+// TestMoveIntoHandoffStepWithoutStarting covers "Move without starting" on a
+// board drag: the move hands the issue to the step's agent but queues no run.
+func TestMoveIntoHandoffStepWithoutStarting(t *testing.T) {
+	seedTestCatalog(t)
+	agentID := seededReadyAgentID(t)
+	projectID := deliveryProject(t, "Workflow move without starting", agentID)
+	issueID := dbfx.Issue(t, "move me quietly", testutil.Cols{"project_id": projectID, "status": "todo"})
+
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/move", map[string]any{
+		"status": "in_progress", "suppress_run": true, "before_id": nil, "after_id": nil,
+	}), "id", issueID)
+	testutil.Call(t, testHandler.MoveIssue, req).Want(http.StatusOK)
+
+	status, assigneeType, assigneeID := issueStatusAndAssignee(t, issueID)
+	if status != "in_progress" || assigneeType != "agent" || assigneeID != agentID {
+		t.Fatalf("issue = %s %s/%s, want in_progress with the column's agent %s", status, assigneeType, assigneeID, agentID)
+	}
+	tasks, err := testHandler.Queries.ListTasksByIssue(context.Background(), util.MustParseUUID(issueID))
+	if err != nil || len(tasks) != 0 {
+		t.Fatalf("tasks = %d (%v), want none", len(tasks), err)
+	}
+}
+
 func TestSetWorkflowHandoffValidatesAndClears(t *testing.T) {
 	seedTestCatalog(t)
 	agentID := seededReadyAgentID(t)

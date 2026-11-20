@@ -952,7 +952,7 @@ function BoardViewImpl({
       issue={pendingHandoff?.issue ?? null}
       toStatus={pendingHandoff?.status ?? ""}
       onCancel={() => setPendingHandoff(null)}
-      onConfirm={({ stopPreviousRuns }) => {
+      onConfirm={({ stopPreviousRuns, suppressRun }) => {
         const pending = pendingHandoff;
         setPendingHandoff(null);
         if (!pending) return;
@@ -962,6 +962,7 @@ function BoardViewImpl({
             ...pending.updates,
             ...pending.anchors,
             ...(stopPreviousRuns ? { stop_previous_assignee_runs: true } : {}),
+            ...(suppressRun ? { suppress_run: true } : {}),
           },
           beginSettle(),
         );

@@ -56,6 +56,9 @@ function useDuration() {
  * With `toProject` it confirms moving the issue into that project instead:
  * the issue enters the column it lands on there.
  *
+ * When the handler is an agent or squad, "Move without starting" applies the
+ * same move and reassignment but starts no run (`suppressRun`).
+ *
  * When the preview finds no handoff after all (the handler cannot be resolved,
  * or the workflow changed), the move applies without asking.
  */
@@ -72,7 +75,7 @@ export function WorkflowHandoffConfirmDialog({
   toStatus: string;
   toProject?: { id: string; title: string } | null;
   onCancel: () => void;
-  onConfirm: (options: { stopPreviousRuns: boolean }) => void;
+  onConfirm: (options: { stopPreviousRuns: boolean; suppressRun: boolean }) => void;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -98,7 +101,7 @@ export function WorkflowHandoffConfirmDialog({
 
   // Nothing to confirm: apply as an ordinary status change.
   useEffect(() => {
-    if (open && preview && !preview.handoff) onConfirm({ stopPreviousRuns: false });
+    if (open && preview && !preview.handoff) onConfirm({ stopPreviousRuns: false, suppressRun: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, preview]);
 
@@ -136,6 +139,9 @@ export function WorkflowHandoffConfirmDialog({
     null,
   );
   const prevName = prevType && prevId ? getActorName(prevType, prevId) : "";
+  const stopPreviousRuns = stop && runs.length > 0 && !sameHandler;
+  // A member handler starts nothing, so there is no run to hold back.
+  const canSuppressRun = handlerType === "agent" || handlerType === "squad";
 
   let sentence: ReactNode = null;
   if (preview?.handoff && handlerType && handlerId) {
@@ -230,9 +236,18 @@ export function WorkflowHandoffConfirmDialog({
           <Button variant="outline" onClick={onCancel}>
             {t(($) => $.workflows.confirm.cancel)}
           </Button>
+          {canSuppressRun && (
+            <Button
+              variant="outline"
+              disabled={isPending || isError}
+              onClick={() => onConfirm({ stopPreviousRuns, suppressRun: true })}
+            >
+              {t(($) => $.workflows.confirm.confirm_no_start)}
+            </Button>
+          )}
           <Button
             disabled={isPending || isError}
-            onClick={() => onConfirm({ stopPreviousRuns: stop && runs.length > 0 && !sameHandler })}
+            onClick={() => onConfirm({ stopPreviousRuns, suppressRun: false })}
           >
             {toProject
               ? t(($) => $.workflows.confirm.project_confirm, { project: toProject.title })

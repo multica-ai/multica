@@ -1793,6 +1793,7 @@
       "queued_hint": "Si no la cancelas, {{name}} empezará más tarde en esta tarea.",
       "brief_toggle": "Lo que recibe {{name}}",
       "confirm": "Mover a {{status}}",
+      "confirm_no_start": "Mover sin empezar",
       "cancel": "Cancelar",
       "minutes_one": "{{count}} minuto",
       "minutes_other": "{{count}} minutos",

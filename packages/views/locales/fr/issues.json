@@ -1800,6 +1800,7 @@
       "queued_hint": "Sans annulation, {{name}} commencera quand même cette tâche plus tard.",
       "brief_toggle": "Ce que reçoit {{name}}",
       "confirm": "Déplacer vers {{status}}",
+      "confirm_no_start": "Déplacer sans démarrer",
       "cancel": "Annuler",
       "minutes_one": "{{count}} minute",
       "minutes_other": "{{count}} minutes",

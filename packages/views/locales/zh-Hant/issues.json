@@ -1725,6 +1725,7 @@
       "queued_hint": "不取消的話，{{name}} 之後仍會開始處理這個任務。",
       "brief_toggle": "{{name}} 會收到的說明",
       "confirm": "移到{{status}}",
+      "confirm_no_start": "移動但不開始",
       "cancel": "取消",
       "minutes_other": "{{count}} 分鐘",
       "hours_other": "{{count}} 小時",

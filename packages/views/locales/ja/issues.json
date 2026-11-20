@@ -1725,6 +1725,7 @@
       "queued_hint": "キャンセルしない場合、{{name}} は後でこのタスクの処理を始めます。",
       "brief_toggle": "{{name}} が受け取る説明",
       "confirm": "{{status}}に移動",
+      "confirm_no_start": "開始せずに移動",
       "cancel": "キャンセル",
       "minutes_other": "{{count}} 分",
       "hours_other": "{{count}} 時間",

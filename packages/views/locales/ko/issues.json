@@ -1725,6 +1725,7 @@
       "queued_hint": "취소하지 않으면 {{name}}이(가) 나중에 이 태스크 처리를 시작합니다.",
       "brief_toggle": "{{name}}이(가) 받는 설명",
       "confirm": "{{status}}(으)로 이동",
+      "confirm_no_start": "시작하지 않고 이동",
       "cancel": "취소",
       "minutes_other": "{{count}}분",
       "hours_other": "{{count}}시간",

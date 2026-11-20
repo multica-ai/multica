@@ -77,7 +77,7 @@ describe("WorkflowHandoffConfirmDialog (MUL-7420)", () => {
     expect(previewWorkflowHandoff).toHaveBeenCalledWith("issue-1", "code_review");
 
     fireEvent.click(screen.getByRole("button", { name: "Move to Code review" }));
-    expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: true });
+    expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: true, suppressRun: false });
   });
 
   it("keeps the previous run when the stop box is cleared", async () => {
@@ -85,7 +85,14 @@ describe("WorkflowHandoffConfirmDialog (MUL-7420)", () => {
     const { onConfirm } = renderDialog();
     fireEvent.click(await screen.findByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Move to Code review" }));
-    expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: false });
+    expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: false, suppressRun: false });
+  });
+
+  it("moves without starting the handler's run, still stopping the previous one", async () => {
+    previewWorkflowHandoff.mockResolvedValue(handoff);
+    const { onConfirm } = renderDialog();
+    fireEvent.click(await screen.findByRole("button", { name: "Move without starting" }));
+    expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: true, suppressRun: true });
   });
 
   it.each(["queued", "deferred"])("words a %s run as waiting and cancels it", async (status) => {
@@ -99,13 +106,13 @@ describe("WorkflowHandoffConfirmDialog (MUL-7420)", () => {
     expect(screen.queryByText(/still running/)).toBeNull();
     expect(screen.getByText(/Cancel Forge’s queued run/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Move to Code review" }));
-    expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: true });
+    expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: true, suppressRun: false });
   });
 
   it("applies without asking when the server finds no handoff", async () => {
     previewWorkflowHandoff.mockResolvedValue({ ...handoff, handoff: false, handler_type: null, handler_id: null });
     const { onConfirm } = renderDialog();
-    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: false }));
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: false, suppressRun: false }));
     expect(screen.queryByText(/Move MUL-8121/)).toBeNull();
   });
 });

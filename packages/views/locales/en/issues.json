@@ -1800,6 +1800,7 @@
       "queued_hint": "If you don’t cancel it, {{name}} still starts on this issue later.",
       "brief_toggle": "What {{name}} receives",
       "confirm": "Move to {{status}}",
+      "confirm_no_start": "Move without starting",
       "cancel": "Cancel",
       "minutes_one": "{{count}} minute",
       "minutes_other": "{{count}} minutes",
