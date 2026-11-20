@@ -98,6 +98,12 @@ const (
 	// alive for as long as it can possibly stay unfinished. Reads end it
 	// earlier through applyUpdateTimeout.
 	updateActiveRetention = updateScheduledTimeout + updateStoreRetention
+	// updateInstallLease is how long after it started an install may still be
+	// running although the server stopped waiting for its result (the installer
+	// has no time limit of its own). Until the daemon reports how it ended, or
+	// this passes, the machine takes no other update: a second one would be
+	// installed right after the first, possibly to another version.
+	updateInstallLease = time.Hour
 )
 
 // updateReofferInterval is how often an unfinished queued request is offered
@@ -123,11 +129,12 @@ type updateError struct{ msg string }
 func (e *updateError) Error() string { return e.msg }
 
 type UpdateStore interface {
-	// Create starts a request for runtimeID unless its machine already has an
-	// unfinished one (errUpdateInProgress).
+	// Create starts a request for runtimeID unless another request holds its
+	// machine (errUpdateInProgress; see updateHoldsMachine).
 	Create(ctx context.Context, runtimeID, machineKey, targetVersion, initiatorUserID string, queueWhenBusy bool) (*UpdateRequest, error)
 	Get(ctx context.Context, id string) (*UpdateRequest, error)
-	// GetActive returns the machine's unfinished request, or nil.
+	// GetActive returns the request holding the machine (see
+	// updateHoldsMachine), or nil.
 	GetActive(ctx context.Context, machineKey string) (*UpdateRequest, error)
 	// HasPending reports whether a request is due to be offered to the daemon.
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
@@ -167,6 +174,22 @@ func updateRequestTerminal(status UpdateStatus) bool {
 		return true
 	}
 	return false
+}
+
+// updateHoldsMachine is whether req still keeps other updates off its machine:
+// it is unfinished, or it timed out while an install it started may still be
+// running.
+func updateHoldsMachine(req *UpdateRequest, now time.Time) bool {
+	if !updateRequestTerminal(req.Status) {
+		return true
+	}
+	return updateInstallUnsettled(req) && now.Before(req.RunStartedAt.Add(updateInstallLease))
+}
+
+// updateInstallUnsettled is a request that timed out after its install
+// started, so how the install ended is unknown.
+func updateInstallUnsettled(req *UpdateRequest) bool {
+	return req.Status == UpdateTimeout && req.RunStartedAt != nil
 }
 
 // updateRequestWaiting is a request the daemon has not started yet.
@@ -241,7 +264,7 @@ func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
 	case UpdateRunning:
 		if req.RunStartedAt != nil && now.Sub(*req.RunStartedAt) > updateRunningTimeout {
 			req.Status = UpdateTimeout
-			req.Error = "update did not complete within 150 seconds"
+			req.Error = "update did not report back within 150 seconds; it may still be installing, so the machine takes another update once it reports or after an hour"
 			req.UpdatedAt = now
 			return true
 		}
@@ -288,9 +311,11 @@ func transitionToCancelled(req *UpdateRequest, now time.Time) error {
 }
 
 // transitionToResult records a terminal daemon report. Reports for a request
-// that already ended are ignored rather than rewriting its outcome.
+// that already ended are ignored rather than rewriting its outcome, except for
+// an install that timed out: the late report says how it actually ended, and
+// frees the machine.
 func transitionToResult(req *UpdateRequest, status UpdateStatus, output, errMsg string, now time.Time) {
-	if updateRequestTerminal(req.Status) {
+	if updateRequestTerminal(req.Status) && !updateInstallUnsettled(req) {
 		return
 	}
 	req.Status = status
@@ -322,7 +347,7 @@ func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, machineKey, t
 	now := time.Now()
 	for id, req := range s.requests {
 		s.applyTimeoutLocked(req, now)
-		if updateRequestTerminal(req.Status) && now.Sub(req.UpdatedAt) > updateStoreRetention {
+		if !updateHoldsMachine(req, now) && now.Sub(req.UpdatedAt) > updateStoreRetention {
 			delete(s.requests, id)
 		}
 	}
@@ -330,7 +355,7 @@ func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, machineKey, t
 		machineKey = "runtime:" + runtimeID
 	}
 	for _, req := range s.requests {
-		if !updateRequestTerminal(req.Status) && req.MachineKey == machineKey {
+		if req.MachineKey == machineKey && updateHoldsMachine(req, now) {
 			return nil, errUpdateInProgress
 		}
 	}
@@ -377,7 +402,7 @@ func (s *InMemoryUpdateStore) GetActive(_ context.Context, machineKey string) (*
 	now := time.Now()
 	for _, req := range s.requests {
 		s.applyTimeoutLocked(req, now)
-		if machineKey != "" && req.MachineKey == machineKey && !updateRequestTerminal(req.Status) {
+		if machineKey != "" && req.MachineKey == machineKey && updateHoldsMachine(req, now) {
 			return cloneUpdateRequest(req), nil
 		}
 	}
@@ -594,7 +619,7 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	writeUpdate(w, update)
 }
 
-// GetActiveUpdate returns the unfinished update on the runtime's machine, so a
+// GetActiveUpdate returns the update holding the runtime's machine, so a
 // queued update stays visible across reloads and to everyone who can manage
 // it. The returned request's runtime_id is the one to poll and cancel through:
 // it can be another runtime of the same machine, in another workspace.
@@ -629,10 +654,11 @@ func (h *Handler) GetActiveUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"update": update})
 }
 
-// canSeeUpdate applies the same rule as polling the update through the runtime
-// it was started on: its initiator, or someone who can manage that runtime —
-// both judged by the caller's current membership in that runtime's workspace.
-// rt is the runtime the caller asked through, already authorized.
+// canSeeUpdate is whether the caller can currently manage the runtime the
+// update was started on, judged by their membership in that runtime's
+// workspace. rt is the runtime the caller asked through, already authorized.
+// Unlike polling a known update ID, being its initiator is not enough: these
+// lookups lead to cancelling it.
 func (h *Handler) canSeeUpdate(ctx context.Context, update *UpdateRequest, rt db.AgentRuntime, member db.Member) (bool, error) {
 	target := rt
 	if update.RuntimeID != uuidToString(rt.ID) {
@@ -661,7 +687,7 @@ func (h *Handler) canSeeUpdate(ctx context.Context, update *UpdateRequest, rt db
 		}
 		target = other
 	}
-	return canEditRuntime(member, target) || update.InitiatorUserID == uuidToString(member.UserID), nil
+	return canEditRuntime(member, target), nil
 }
 
 // CancelUpdate stops a queued update that has not started installing yet.
@@ -683,8 +709,8 @@ func (h *Handler) CancelUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "update not found")
 		return
 	}
-	if !canEditRuntime(member, rt) && existing.InitiatorUserID != uuidToString(member.UserID) {
-		writeError(w, http.StatusForbidden, "only runtime owners, workspace admins, and the update initiator can cancel this update")
+	if !canEditRuntime(member, rt) {
+		writeError(w, http.StatusForbidden, "only runtime owners and workspace admins can cancel this update")
 		return
 	}
 

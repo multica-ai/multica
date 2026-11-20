@@ -506,33 +506,46 @@ func TestActiveUpdateFollowsTheCallerIntoTheMachinesOtherWorkspace(t *testing.T)
 	}
 }
 
-// The rule in the other workspace is the one that applies there: a plain
-// member who did not start the update does not see it, and neither does a
-// caller who left that workspace.
+// The rule in the other workspace is the one that applies there: only someone
+// who can manage that runtime now sees the update or cancels it. Having
+// started it is not enough once that right is gone (demoted, or left).
 func TestActiveUpdateInTheMachinesOtherWorkspaceNeedsAccessThere(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 	store := withUpdateStore(t)
-	other := secondWorkspace(t, "member")
+	other := secondWorkspace(t, "admin")
 	owner, daemonID, runtimes := machineFixture(t, "xwsdeny", other, testWorkspaceID)
 	runtimeInOther, runtimeHere := runtimes[0], runtimes[1]
 
-	if _, err := store.Create(ctx, runtimeInOther, "daemon:"+owner+":"+daemonID, "v1.2.3", owner, true); err != nil {
+	queued, err := store.Create(ctx, runtimeInOther, "daemon:"+owner+":"+daemonID, "v1.2.3", testUserID, true)
+	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if active := getActiveUpdate(t, runtimeHere); active != nil {
-		t.Fatalf("active = %+v; a plain member there who did not start it must not see it", active)
+	if active := getActiveUpdate(t, runtimeHere); active == nil || active.ID != queued.ID {
+		t.Fatalf("active = %+v; an admin there must see it", active)
 	}
 
-	// The initiator sees it while a member there, and not after leaving.
-	store = withUpdateStore(t)
-	if _, err := store.Create(ctx, runtimeInOther, "daemon:"+owner+":"+daemonID, "v1.2.3", testUserID, true); err != nil {
-		t.Fatalf("create: %v", err)
+	if _, err := testPool.Exec(ctx, `UPDATE member SET role = 'member' WHERE workspace_id = $1 AND user_id = $2`, other, testUserID); err != nil {
+		t.Fatalf("demote: %v", err)
+	}
+	if active := getActiveUpdate(t, runtimeHere); active != nil {
+		t.Fatalf("active = %+v; the initiator was demoted to a plain member there", active)
+	}
+	cancelReq := withURLParams(newRequest(http.MethodPost, "/api/runtimes/"+runtimeInOther+"/update/"+queued.ID+"/cancel", nil),
+		"runtimeId", runtimeInOther, "updateId", queued.ID)
+	w := httptest.NewRecorder()
+	testHandler.CancelUpdate(w, cancelReq)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("cancel by the demoted initiator = %d, want 403: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := testPool.Exec(ctx, `UPDATE member SET role = 'admin' WHERE workspace_id = $1 AND user_id = $2`, other, testUserID); err != nil {
+		t.Fatalf("promote: %v", err)
 	}
 	if active := getActiveUpdate(t, runtimeHere); active == nil {
-		t.Fatal("the initiator lost sight of its update")
+		t.Fatal("an admin there lost sight of the update")
 	}
 	if _, err := testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, other, testUserID); err != nil {
 		t.Fatalf("leave workspace: %v", err)

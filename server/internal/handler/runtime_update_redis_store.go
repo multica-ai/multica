@@ -21,8 +21,9 @@ import (
 //   - req:<id>          the request record
 //   - offers:<runtime>  sorted set of the runtime's undelivered or re-offered
 //     requests, scored by the next offer time (unix ms)
-//   - machine:<key>     the machine's unfinished request ID (see
-//     updateMachineKey); the one-update-per-machine guard
+//   - machine:<key>     the ID of the request holding the machine (see
+//     updateMachineKey and updateHoldsMachine); the one-update-per-machine
+//     guard
 //
 // Every change to a record is a compare-and-set against the bytes the change
 // was computed from (updateCASScript), and the same script keeps the offer
@@ -45,11 +46,19 @@ func updateOffersKey(runtimeID string) string       { return updateOffersPrefix 
 func updateMachineSlotKey(machineKey string) string { return updateMachineSlotPrefix + machineKey }
 func updateTTLMillis(d time.Duration) int64         { return d.Milliseconds() }
 func updateOfferScore(t time.Time) string           { return strconv.FormatInt(t.UnixMilli(), 10) }
-func updateRetentionFor(req *UpdateRequest) time.Duration {
-	if updateRequestTerminal(req.Status) {
+
+// updateRetentionFor is how long a record (and the machine slot, while it
+// holds one) is kept: as long as it can hold the machine, plus the time a
+// finished request stays readable.
+func updateRetentionFor(req *UpdateRequest, now time.Time) time.Duration {
+	switch {
+	case !updateRequestTerminal(req.Status):
+		return updateActiveRetention
+	case updateHoldsMachine(req, now):
+		return req.RunStartedAt.Add(updateInstallLease).Sub(now) + updateStoreRetention
+	default:
 		return updateStoreRetention
 	}
-	return updateActiveRetention
 }
 
 // updateCreateScript takes the machine slot and writes the request and its
@@ -68,27 +77,25 @@ return 1
 `)
 
 // updateCASScript replaces a request record only if it still holds the bytes
-// the caller read. A terminal record releases the machine slot (if it still
-// names this request) and leaves the offer queue; an unfinished one keeps the
-// slot alive as long as itself and moves its offer as told.
+// the caller read. A record that no longer holds the machine releases the
+// machine slot (if it still names this request); one that does keeps the slot
+// alive as long as itself. A terminal record leaves the offer queue; an
+// unfinished one moves its offer as told.
 //
 // KEYS: request, machine slot, offers.
-// ARGV: expected record, new record, ttl ms, id, terminal ("1"/"0"),
-// offer ("keep", "remove", or a score).
+// ARGV: expected record, new record, ttl ms, id, holds machine ("1"/"0"),
+// offer ("keep", "remove", or a score; terminal records pass "remove").
 var updateCASScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then
     return 0
 end
 redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
-if ARGV[5] == '1' then
-    if redis.call('GET', KEYS[2]) == ARGV[4] then
+if redis.call('GET', KEYS[2]) == ARGV[4] then
+    if ARGV[5] == '1' then
+        redis.call('PEXPIRE', KEYS[2], ARGV[3])
+    else
         redis.call('DEL', KEYS[2])
     end
-    redis.call('ZREM', KEYS[3], ARGV[4])
-    return 1
-end
-if redis.call('GET', KEYS[2]) == ARGV[4] then
-    redis.call('PEXPIRE', KEYS[2], ARGV[3])
 end
 if ARGV[6] == 'remove' then
     redis.call('ZREM', KEYS[3], ARGV[4])
@@ -122,8 +129,8 @@ func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, machineKey, ta
 
 	// A request that should have timed out still holds the slot until
 	// something reads it; reading it here ends it and frees the slot.
-	if err := s.settleSlot(ctx, slotKey); err != nil {
-		return nil, err
+	if _, err := s.settleSlot(ctx, slotKey); err != nil {
+		return nil, fmt.Errorf("reserve active update: %w", err)
 	}
 
 	now := time.Now()
@@ -155,26 +162,29 @@ func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, machineKey, ta
 	return req, nil
 }
 
-// settleSlot reads the request holding a machine slot so a timed-out one ends
-// (which releases the slot), and drops a slot whose request is gone.
-func (s *RedisUpdateStore) settleSlot(ctx context.Context, slotKey string) error {
+// settleSlot reads the request in a machine slot, which applies its timeouts,
+// and releases the slot unless the request still holds the machine (an
+// install lease can lapse without any write). It returns the request when it
+// does.
+func (s *RedisUpdateStore) settleSlot(ctx context.Context, slotKey string) (*UpdateRequest, error) {
 	id, err := s.rdb.Get(ctx, slotKey).Result()
 	if errors.Is(err, redis.Nil) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return fmt.Errorf("reserve active update: %w", err)
+		return nil, fmt.Errorf("read machine slot: %w", err)
 	}
 	req, err := s.Get(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if req == nil {
-		if err := deleteIfValueScript.Run(ctx, s.rdb, []string{slotKey}, id).Err(); err != nil {
-			return fmt.Errorf("reserve active update: %w", err)
-		}
+	if req != nil && updateHoldsMachine(req, time.Now()) {
+		return req, nil
 	}
-	return nil
+	if err := deleteIfValueScript.Run(ctx, s.rdb, []string{slotKey}, id).Err(); err != nil {
+		return nil, fmt.Errorf("release machine slot: %w", err)
+	}
+	return nil, nil
 }
 
 func (s *RedisUpdateStore) Get(ctx context.Context, id string) (*UpdateRequest, error) {
@@ -187,26 +197,7 @@ func (s *RedisUpdateStore) GetActive(ctx context.Context, machineKey string) (*U
 	if machineKey == "" {
 		return nil, nil
 	}
-	slotKey := updateMachineSlotKey(machineKey)
-	id, err := s.rdb.Get(ctx, slotKey).Result()
-	if errors.Is(err, redis.Nil) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get active update: %w", err)
-	}
-	req, err := s.Get(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if req == nil {
-		_ = deleteIfValueScript.Run(ctx, s.rdb, []string{slotKey}, id).Err()
-		return nil, nil
-	}
-	if updateRequestTerminal(req.Status) {
-		return nil, nil
-	}
-	return req, nil
+	return s.settleSlot(ctx, updateMachineSlotKey(machineKey))
 }
 
 // mutate reads a request, applies timeouts and fn, and writes the result back
@@ -244,13 +235,16 @@ func (s *RedisUpdateStore) mutate(ctx context.Context, id string, fn func(*Updat
 		if string(data) == raw && offer == "keep" {
 			return req, fnErr
 		}
-		terminal := "0"
 		if updateRequestTerminal(req.Status) {
-			terminal = "1"
+			offer = "remove"
+		}
+		holds := "0"
+		if updateHoldsMachine(req, now) {
+			holds = "1"
 		}
 		ok, err := updateCASScript.Run(ctx, s.rdb,
 			[]string{updateKey(id), updateMachineSlotKey(req.MachineKey), updateOffersKey(req.RuntimeID)},
-			raw, data, updateTTLMillis(updateRetentionFor(req)), id, terminal, offer,
+			raw, data, updateTTLMillis(updateRetentionFor(req, now)), id, holds, offer,
 		).Int64()
 		if err != nil {
 			return nil, fmt.Errorf("persist update request: %w", err)

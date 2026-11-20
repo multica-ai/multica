@@ -235,7 +235,7 @@ func editRedisUpdate(t *testing.T, store *RedisUpdateStore, id string, fn func(*
 	if err != nil {
 		t.Fatalf("edit: encode %s: %v", id, err)
 	}
-	if err := store.rdb.Set(ctx, updateKey(id), data, updateRetentionFor(req)).Err(); err != nil {
+	if err := store.rdb.Set(ctx, updateKey(id), data, updateRetentionFor(req, time.Now())).Err(); err != nil {
 		t.Fatalf("edit: store %s: %v", id, err)
 	}
 }

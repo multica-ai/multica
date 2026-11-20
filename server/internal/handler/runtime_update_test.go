@@ -61,7 +61,7 @@ func updateStoreHarnesses(t *testing.T) []updateStoreHarness {
 			if err != nil {
 				t.Fatalf("edit: encode %s: %v", id, err)
 			}
-			if err := rs.rdb.Set(ctx, updateKey(id), data, updateRetentionFor(req)).Err(); err != nil {
+			if err := rs.rdb.Set(ctx, updateKey(id), data, updateRetentionFor(req, time.Now())).Err(); err != nil {
 				t.Fatalf("edit: store %s: %v", id, err)
 			}
 		},
@@ -411,7 +411,11 @@ func TestUpdateStore_ScheduledUpdateExpiresAfter24Hours(t *testing.T) {
 	}
 }
 
-func TestUpdateStore_RunningRequestTimesOut(t *testing.T) {
+// An install that does not report back in time shows as a timeout, but it may
+// still be running (the installer has no time limit), so the machine takes no
+// other update until the daemon reports how it ended or the install lease
+// passes. Otherwise a second update would be installed right after it.
+func TestUpdateStore_TimedOutInstallKeepsTheMachineUntilItReports(t *testing.T) {
 	for _, h := range updateStoreHarnesses(t) {
 		t.Run(h.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -427,7 +431,58 @@ func TestUpdateStore_RunningRequestTimesOut(t *testing.T) {
 			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdateTimeout || got.Error == "" {
 				t.Fatalf("timed out = %+v", got)
 			}
-			mustCreateUpdate(t, h.store, "rt-timeout")
+			if _, err := h.store.Create(ctx, "rt-timeout-other", req.MachineKey, "v1.2.4", "user-1", true); !errors.Is(err, errUpdateInProgress) {
+				t.Fatalf("create while the timed-out install may still run = %v, want errUpdateInProgress", err)
+			}
+			if active, err := h.store.GetActive(ctx, req.MachineKey); err != nil || active == nil || active.ID != req.ID {
+				t.Fatalf("active = %+v, %v; want the timed-out install", active, err)
+			}
+			for _, deferrable := range []bool{true, false} {
+				if got, err := h.store.PopPending(ctx, "rt-timeout", deferrable); err != nil || got != nil {
+					t.Fatalf("offer of a timed-out install = %+v, %v; want none", got, err)
+				}
+			}
+
+			// The late report settles it and frees the machine.
+			if err := h.store.Complete(ctx, req.ID, "Updated to v1.2.3"); err != nil {
+				t.Fatalf("late complete: %v", err)
+			}
+			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdateCompleted {
+				t.Fatalf("status after the late report = %s, want completed", got.Status)
+			}
+			if _, err := h.store.Create(ctx, "rt-timeout-other", req.MachineKey, "v1.2.4", "user-1", true); err != nil {
+				t.Fatalf("create after the install reported: %v", err)
+			}
+		})
+	}
+}
+
+// Without any report, the machine is freed once the install lease passes.
+func TestUpdateStore_TimedOutInstallFreesTheMachineAfterTheLease(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			req := mustCreateUpdate(t, h.store, "rt-lease")
+			if _, err := h.store.MarkRunning(ctx, req.ID); err != nil {
+				t.Fatalf("mark running: %v", err)
+			}
+			h.edit(t, req.ID, func(r *UpdateRequest) {
+				aged := time.Now().Add(-(updateRunningTimeout + time.Second))
+				r.RunStartedAt = &aged
+			})
+			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdateTimeout {
+				t.Fatalf("status = %s, want timeout", got.Status)
+			}
+			h.edit(t, req.ID, func(r *UpdateRequest) {
+				aged := time.Now().Add(-(updateInstallLease + time.Second))
+				r.RunStartedAt = &aged
+			})
+			if active, err := h.store.GetActive(ctx, req.MachineKey); err != nil || active != nil {
+				t.Fatalf("active after the lease = %+v, %v; want none", active, err)
+			}
+			if _, err := h.store.Create(ctx, "rt-lease-other", req.MachineKey, "v1.2.4", "user-1", true); err != nil {
+				t.Fatalf("create after the install lease: %v", err)
+			}
 		})
 	}
 }
