@@ -146,12 +146,12 @@ export function useDocDraft(doc: Doc) {
   };
   saveRef.current = save;
   useEffect(() => {
-    if (!dirty || status !== "saved") return;
+    if (!draft || !dirty || status !== "saved") return;
     const timer = setTimeout(() => {
-      void save();
+      void saveRef.current();
     }, 1500);
     return () => clearTimeout(timer);
-  });
+  }, [draft, dirty, status]);
   const change = (patch: Partial<Pick<DocDraft, "title" | "content">>) => {
     if (!inScope()) return;
     const current =
