@@ -93,10 +93,39 @@ function matchesAttachmentURL(
   return embeddedStable !== "" && normalizeUri(embeddedStable) === normalizeUri(attachmentStable);
 }
 
+function relativeFilenameFromURL(rawURL: string): string | undefined {
+  const clean = rawURL.trim();
+  // Reject site-relative ("/foo"), protocol-relative ("//foo"), query/fragment
+  // URLs, and any URI with a scheme ("http:", "https:", "data:", "blob:",
+  // "file:", "mention:", etc.) or Windows drive letter ("C:\foo").
+  if (
+    !clean ||
+    clean.startsWith("/") ||
+    clean.startsWith("\\") ||
+    clean.includes("?") ||
+    clean.includes("#") ||
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(clean)
+  ) {
+    return undefined;
+  }
+  let decoded = clean;
+  try {
+    decoded = decodeURIComponent(clean);
+  } catch {
+    // Keep raw string when percent-encoding is malformed.
+  }
+  const normalized = decoded.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
+  const segments = normalized.split("/");
+  if (segments.some((seg) => seg === "" || seg === "." || seg === "..")) {
+    return undefined;
+  }
+  return segments[segments.length - 1];
+}
+
 /**
  * Resolve a URL embedded in a markdown body back to its attachment record.
  *
- * Two fallbacks, in order — the same pair `AttachmentDownloadProvider` uses
+ * Three fallbacks, in order — the same chain `AttachmentDownloadProvider` uses
  * (and now shares with this module so a URL can never resolve to one record
  * for the download click and another for the sequence):
  *
@@ -105,6 +134,9 @@ function matchesAttachmentURL(
  *      incidental query / fragment.
  *   2. full-URL equality against `url` / `download_url` / `markdown_url`, for
  *      legacy bodies and CDN markdown that never got the stable shape.
+ *   3. relative filename equality against `filename`, for bodies written
+ *      before upload where the author referenced an attached file by its
+ *      local relative filename (e.g. `![alt](shot.png)` with `--attachment shot.png`).
  */
 export function matchAttachmentByURL(
   url: string,
@@ -116,12 +148,22 @@ export function matchAttachmentByURL(
     const byId = attachments.find((a) => a.id === idFromUrl);
     if (byId) return byId;
   }
-  return attachments.find(
+  const byFullUrl = attachments.find(
     (a) =>
       matchesAttachmentURL(url, a.url) ||
       matchesAttachmentURL(url, a.download_url) ||
       matchesAttachmentURL(url, a.markdown_url),
   );
+  if (byFullUrl) return byFullUrl;
+
+  const relFilename = relativeFilenameFromURL(url);
+  if (relFilename) {
+    const matches = attachments.filter(
+      (a) => Boolean(a.filename) && a.filename === relFilename,
+    );
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -138,15 +180,23 @@ export function selectStandaloneAttachments(
 ): Attachment[] {
   if (!attachments?.length) return [];
   if (!content) return [...attachments];
+  const inlineResolvedIds = new Set<string>();
+  for (const ref of extractInlineRefs(content)) {
+    const matched = matchAttachmentByURL(ref.url, attachments);
+    if (matched) inlineResolvedIds.add(matched.id);
+  }
+  const isReferenced = (att: Attachment): boolean =>
+    inlineResolvedIds.has(att.id) || contentReferencesAttachment(content, att);
+
   return attachments.filter((a) => {
-    if (contentReferencesAttachment(content, a)) return false;
+    if (isReferenced(a)) return false;
     const hasSiblingInContent = attachments.some(
       (other) =>
         other.id !== a.id &&
         other.filename === a.filename &&
         other.content_type === a.content_type &&
         other.size_bytes === a.size_bytes &&
-        contentReferencesAttachment(content, other),
+        isReferenced(other),
     );
     return !hasSiblingInContent;
   });
