@@ -328,11 +328,10 @@ WHERE i.workspace_id = $1
   AND i.archived = false
   AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
   -- MUL-8472: private projects the caller cannot see.
-  AND ($4::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
-      SELECT 1 FROM issue hidden_issue
-      WHERE hidden_issue.id = i.issue_id
-        AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])
-  ))
+  -- A row without an issue counts as outside any project (see ListInboxItems).
+  AND ($4::uuid[] IS NULL OR NOT (COALESCE(
+      (SELECT hidden_issue.project_id FROM issue hidden_issue WHERE hidden_issue.id = i.issue_id),
+      '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])))
 `
 
 type CountUnreadInboxParams struct {
@@ -378,6 +377,13 @@ FROM (
                 WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
             )
       )
+      -- MUL-9420: a guest counts only issues in its own projects, so nothing
+      -- outside a project and nothing in a project it is not a member of.
+      AND (m.role <> 'guest' OR EXISTS (
+          SELECT 1 FROM issue guest_issue
+          JOIN project_member gpm ON gpm.project_id = guest_issue.project_id AND gpm.user_id = i.recipient_id
+          WHERE guest_issue.id = i.issue_id
+      ))
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
@@ -716,11 +722,11 @@ WITH eligible_archived AS MATERIALIZED (
       AND i.recipient_id = $3
       AND i.archived = true
       -- MUL-8472: private projects the caller cannot see.
-      AND ($4::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
-          SELECT 1 FROM issue hidden_issue
-          WHERE hidden_issue.id = i.issue_id
-            AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])
-      ))
+      -- A row without an issue counts as outside any project, which a guest's
+      -- hidden set holds (projectaccess.NoProject), as ListInboxItems does.
+      AND ($4::uuid[] IS NULL OR NOT (COALESCE(
+          (SELECT hidden_issue.project_id FROM issue hidden_issue WHERE hidden_issue.id = i.issue_id),
+          '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1
           FROM inbox_item active

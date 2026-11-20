@@ -391,10 +391,12 @@ func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) 
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at,
+       m.role
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
+  AND m.role IN ('owner', 'admin', 'member', 'guest')
 ORDER BY m.pinned_at DESC NULLS LAST, w.created_at ASC
 `
 
@@ -413,8 +415,11 @@ type ListWorkspacesRow struct {
 	AvatarUrl             pgtype.Text        `json:"avatar_url"`
 	AttributionFailClosed bool               `json:"attribution_fail_closed"`
 	PinnedAt              pgtype.Timestamptz `json:"pinned_at"`
+	Role                  string             `json:"role"`
 }
 
+// The role narrows what a guest is shown (workspaceResponseFor). A role this
+// build does not know is no membership (see GetMemberByUserAndWorkspace).
 func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListWorkspacesRow, error) {
 	rows, err := q.db.Query(ctx, listWorkspaces, userID)
 	if err != nil {
@@ -439,6 +444,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Lis
 			&i.AvatarUrl,
 			&i.AttributionFailClosed,
 			&i.PinnedAt,
+			&i.Role,
 		); err != nil {
 			return nil, err
 		}

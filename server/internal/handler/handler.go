@@ -1329,5 +1329,10 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 	if !h.requireIssueIDVisible(w, r, workspaceID, item.IssueID, http.StatusNotFound, "inbox item not found") {
 		return db.InboxItem{}, false
 	}
+	// An item without an issue (a doc comment) is outside any project, which
+	// a guest cannot see even when it was delivered before the demotion.
+	if !item.IssueID.Valid && !h.requireProjectVisible(w, r, workspaceID, pgtype.UUID{}, http.StatusNotFound, "inbox item not found") {
+		return db.InboxItem{}, false
+	}
 	return item, true
 }
