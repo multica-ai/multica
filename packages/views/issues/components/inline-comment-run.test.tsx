@@ -534,6 +534,22 @@ describe("InlineCommentRun context window", () => {
     expect(api.listTaskMessages).not.toHaveBeenCalled();
   });
 
+  // A compaction is a step of the run, and the run's step list has its own
+  // renderer: before this it fell through to the error branch and read
+  // "Error" under an alert icon.
+  it("names a compaction in the run's step list", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Working." },
+      { task_id: id, issue_id: "issue", seq: 2, type: "context",
+        input: { phase: "compacted", pre_tokens: 180_000, trigger: "auto" } },
+    ]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /View activity/ }));
+    expect(await screen.findByText("Compacted the context window (180K before)")).toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+  });
+
   it("renders nothing for a run whose runtime reported no occupancy", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([]);
     setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));

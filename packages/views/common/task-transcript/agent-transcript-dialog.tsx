@@ -203,6 +203,10 @@ function stepFilterKey(step: TraceStep): TranscriptFilterKey {
 /** Lowercased haystack for the in-run search. Outputs are clipped: a match
  *  past 4KB of command output is not one anybody is scanning for. */
 function stepHaystack(step: TraceStep): string {
+  if (step.kind === "context") {
+    // The figures are the only text a context event has; its content is empty.
+    return JSON.stringify(step.item.input ?? {}).toLowerCase();
+  }
   if (step.kind !== "call") return (step.item.content ?? "").toLowerCase();
   const input = step.call?.input ? JSON.stringify(step.call.input) : "";
   return `${step.tool} ${input} ${(step.result?.output ?? "").slice(0, 4000)}`.toLowerCase();

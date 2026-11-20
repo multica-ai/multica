@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "@multica/ui/icons";
+import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, Loader2, MessageSquare, Minimize2, RotateCcw, ScrollText, Square, Terminal } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -21,7 +21,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { ContextUsageChip } from "../../common/task-transcript/context-usage-chip";
-import { taskContextUsage } from "../../common/task-transcript/context-usage";
+import { readContextEvent, taskContextUsage } from "../../common/task-transcript/context-usage";
+import { formatTokens } from "../../runtimes/utils";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
 import { traceEventSummary, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
@@ -339,6 +340,9 @@ function InlineSteer({ steer }: { steer: DeliveredSteer }) {
 
 function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; formatText: (text: string) => string }) {
   const { t } = useT("issues");
+  // A compaction is worded by the transcript, which owns this vocabulary on
+  // every surface; the run's own namespace has no copy of it.
+  const { t: tAgents } = useT("agents");
   const [open, setOpen] = useState(false);
   const disclosure = useRunDisclosureMotion(open);
   const [limit, setLimit] = useState(12);
@@ -347,7 +351,12 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
   const call = isCallStep(row);
   const pending = call && live && !row.result;
   const error = !grouped && !call && row.kind === "error";
-  const Icon = grouped || call ? Terminal : row.kind === "text" ? MessageSquare : row.kind === "thinking" ? Brain : AlertCircle;
+  const context = !grouped && !call && row.kind === "context" ? readContextEvent(row.item) : null;
+  const Icon = grouped || call ? Terminal
+    : row.kind === "text" ? MessageSquare
+    : row.kind === "thinking" ? Brain
+    : row.kind === "context" ? Minimize2
+    : AlertCircle;
   const previewCall = grouped ? row.steps[0] : call ? row : undefined;
   const toolSummary = previewCall
     ? redactSecrets(traceToolArgSummary(previewCall.call?.input, { formatText }) || (previewCall.result ? traceEventSummary(previewCall.result, { formatText }) : ""))
@@ -357,6 +366,10 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
     : grouped ? toolSummary ? `${row.tool} · ${toolSummary}` : row.tool
     : row.kind === "text" ? traceEventSummary({ ...row.item, content: redactSecrets(formatText(row.item.content ?? "")) }) || t(($) => $.inline_run.message)
     : row.kind === "thinking" ? thinkingPreview(row.item.content, formatText) || t(($) => $.inline_run.thinking)
+    : context?.kind === "compaction"
+      ? context.preTokens !== undefined
+        ? tAgents(($) => $.transcript.context_compacted_before, { tokens: formatTokens(context.preTokens) })
+        : tAgents(($) => $.transcript.context_compacted)
     : t(($) => $.inline_run.error);
   return <details className="min-w-0 text-caption" onToggle={onToggle}>
     <TruncatedTooltip content={summary}>
