@@ -67,6 +67,32 @@ var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered"
 // idling — which is why it is a sentinel rather than a bare string: exactly one
 // caller is allowed to make an exception to it, and only for the one situation
 // where the daemon knows the answer is on its way. See
+// listStartupWorkspaces retries transient workspace reads inside the same
+// startup request budget. Registration still runs only once after the read.
+func (d *Daemon) listStartupWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
+	const maxRetries = 3
+	for attempt := 0; ; attempt++ {
+		workspaces, err := d.client.ListWorkspaces(ctx)
+		if err == nil || attempt == maxRetries || !isStartupWorkspaceRetryable(err) {
+			return workspaces, err
+		}
+		d.logger.Debug("retrying startup workspace list", "attempt", attempt+2)
+		if err := retrySleep(ctx, time.Second<<attempt); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func isStartupWorkspaceRetryable(err error) bool {
+	var response *requestError
+	if errors.As(err, &response) {
+		return response.StatusCode >= 500 ||
+			(response.Path == "/api/daemon/workspaces" && response.StatusCode == http.StatusForbidden && response.Body == "")
+	}
+	var transportError *url.Error
+	return errors.As(err, &transportError)
+}
+
 // startupMayProceedWithoutRuntimes.
 var errNoWorkspaceRuntimesRegistered = errors.New("failed to register runtimes")
 
@@ -4174,7 +4200,7 @@ const DefaultTokenRenewalInterval = 3 * 24 * time.Hour
 // register runtimes once one appears.
 func (d *Daemon) preflightAuth(ctx context.Context) error {
 	d.tryRenewToken(ctx)
-	err := d.syncWorkspacesFromAPI(ctx, false)
+	err := d.syncWorkspaces(ctx, false, d.listStartupWorkspaces)
 	if d.startupMayProceedWithoutRuntimes(err) {
 		d.logger.Warn("starting with no runtimes registered: an automatic DSH runtime profile install is still running; " +
 			"the runtime registers when it finishes")
@@ -4387,13 +4413,17 @@ func workspaceSyncBackoff(base time.Duration, consecutiveFailures int) time.Dura
 // pass false and make no runtime-profile requests. Workspaces the user has
 // left are cleaned up.
 func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bool) error {
+	return d.syncWorkspaces(ctx, reconcileProfiles, d.client.ListWorkspaces)
+}
+
+func (d *Daemon) syncWorkspaces(ctx context.Context, reconcileProfiles bool, listWorkspaces func(context.Context) ([]WorkspaceInfo, error)) error {
 	d.reloading.Lock()
 	defer d.reloading.Unlock()
 
 	apiCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	workspaces, err := d.client.ListWorkspaces(apiCtx)
+	workspaces, err := listWorkspaces(apiCtx)
 	if err != nil {
 		return fmt.Errorf("list workspaces: %w", err)
 	}
