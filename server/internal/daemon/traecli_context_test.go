@@ -3,7 +3,9 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -70,7 +72,15 @@ func newTraeBriefTest(t *testing.T) (*Daemon, Task, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/context-receipt") {
+			var payload struct{ Receipt ContextReceipt }
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("decode context receipt: %v", err)
+			} else if err := os.WriteFile(filepath.Join(capture, "runtime-version"), []byte(payload.Receipt.RuntimeVersion), 0o600); err != nil {
+				t.Errorf("capture runtime version: %v", err)
+			}
+		}
 		_, _ = io.WriteString(w, `{}`)
 	}))
 	t.Cleanup(srv.Close)
@@ -177,6 +187,7 @@ func TestRunTaskTraeRuntimeBriefInPlaceIssue(t *testing.T) {
 
 func TestRunTaskTraeRuntimeBriefRetargetedAlias(t *testing.T) {
 	d, task, capture := newTraeBriefTest(t)
+	registeredVersion := d.agentVersion("traecli")
 	alias := d.cfg.Agents["traecli"].Path
 	legacy := filepath.Join(filepath.Dir(alias), "trae-cli")
 	writeTraeBriefTestCLI(t, legacy, traeLegacyVersionReceipt)
@@ -196,6 +207,59 @@ func TestRunTaskTraeRuntimeBriefRetargetedAlias(t *testing.T) {
 	}
 	if prompt := readTraeBriefPrompt(t, capture, "initial"); !strings.Contains(prompt, traeBriefCanary) {
 		t.Error("legacy Trae must receive its rule inline after the alias is retargeted")
+	}
+	if version := readTraeBriefCapture(t, capture, "runtime-version"); version != registeredVersion {
+		t.Errorf("reported version = %q, want registered version %q", version, registeredVersion)
+	}
+}
+
+func TestRunTaskTraeRuntimeBriefUnverifiedLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		shim bool
+	}{
+		{name: "failed probe"},
+		{name: "name-dispatching shim", shim: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, task, capture := newTraeBriefTest(t)
+			registeredVersion := d.agentVersion("traecli")
+			alias := d.cfg.Agents["traecli"].Path
+			if tc.shim {
+				dispatcher := filepath.Join(filepath.Dir(alias), "mise")
+				writeTraeBriefTestCLI(t, dispatcher, traePublicVersionReceipt)
+				if err := os.Remove(alias); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(dispatcher, alias); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			originalDetect := detectAgentVersion
+			t.Cleanup(func() { detectAgentVersion = originalDetect })
+			detectAgentVersion = func(_ context.Context, cmd agent.Command) (string, error) {
+				if tc.shim {
+					t.Errorf("unexpected version probe for name-dispatching shim: %q", cmd.Path)
+				}
+				return "", errors.New("version probe failed")
+			}
+
+			result, err := d.runTask(t.Context(), task, "traecli", 0, d.logger)
+			if err != nil || result.Status != "completed" {
+				t.Fatalf("Trae run = %+v, error = %v", result, err)
+			}
+			launched, _, _ := strings.Cut(readTraeBriefCapture(t, capture, "initial.launch"), "\n")
+			if launched != alias {
+				t.Errorf("launched %q, want configured entrypoint %q", launched, alias)
+			}
+			if prompt := readTraeBriefPrompt(t, capture, "initial"); !strings.Contains(prompt, traeBriefCanary) {
+				t.Error("an unverified TraeX launch must receive its rule inline")
+			}
+			if version := readTraeBriefCapture(t, capture, "runtime-version"); version != registeredVersion {
+				t.Errorf("reported version = %q, want registered version %q", version, registeredVersion)
+			}
+		})
 	}
 }
 

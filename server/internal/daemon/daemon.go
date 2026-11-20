@@ -9223,9 +9223,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var traeFileDelivery bool
 	if provider == "traecli" && !env.LocalDirectory && agent.TraeLoadsProjectInstructions(resolvedVersion) {
 		target, version := probeTraeLaunchVersion(ctx, entry.Path, profileFixedArgs)
-		resolvedVersion = version
 		if agent.TraeLoadsProjectInstructions(version) {
-			entry.Path = target
+			entry.Path, resolvedVersion = target, version
 			traeFileDelivery = true
 		}
 	}

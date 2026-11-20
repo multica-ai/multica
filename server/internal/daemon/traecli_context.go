@@ -14,7 +14,9 @@ func probeTraeLaunchVersion(ctx context.Context, executable string, prefix []str
 		return "", ""
 	}
 	target, err := canonicalPath(path)
-	if err != nil {
+	// A name-dispatching shim can pick a different executable in the task's
+	// working directory than it would in the isolated probe directory.
+	if err != nil || isNameDispatchingAgentShim(target) {
 		return "", ""
 	}
 	version, err := detectAgentVersion(ctx, agent.NewCommand(target, prefix).ForVersionProbe("traecli"))

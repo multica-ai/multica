@@ -953,6 +953,17 @@ func canonicalExecutablePath(path string) string {
 	return abs
 }
 
+func isNameDispatchingAgentShim(path string) bool {
+	if runtime.GOOS == "windows" {
+		// These managers use wrappers or trampolines on Windows.
+		return false
+	}
+	base := strings.ToLower(filepath.Base(path))
+	// Vite Plus's shared "vp" dispatcher also selects the package from argv[0].
+	// Keep these exact matches limited to confirmed name-dispatching symlinks.
+	return base == "volta-shim" || base == "vp" || base == "mise"
+}
+
 func isExecutableFile(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
