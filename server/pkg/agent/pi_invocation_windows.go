@@ -9,13 +9,14 @@ import (
 	"strings"
 )
 
-// platformPiInvocation rewrites pi.cmd → PowerShell -Command pi.ps1 on
-// Windows. -Command with @args is the only route that preserves stdin bytes:
+// platformPiInvocation rewrites a Pi-family .cmd launcher to its matching
+// .ps1 script on Windows. -Command with @args preserves stdin bytes:
 // -File re-encodes stdin under the console ANSI codepage, destroying
 // non-ASCII input (#7355). It also avoids cmd.exe %* re-tokenisation (#3306).
 // powerShellLookup and rewriteCmdToPS1 are defined in cursor_invocation_windows.go.
 func platformPiInvocation(lookedUp string, args []string, logger *slog.Logger) (string, []string, bool) {
-	return rewriteCmdToPS1Command("pi", lookedUp, args, logger)
+	toolName := strings.TrimSuffix(filepath.Base(lookedUp), filepath.Ext(lookedUp))
+	return rewriteCmdToPS1Command(toolName, lookedUp, args, logger)
 }
 
 func rewriteCmdToPS1Command(toolName, lookedUp string, args []string, logger *slog.Logger) (string, []string, bool) {
