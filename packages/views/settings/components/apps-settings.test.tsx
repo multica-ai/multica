@@ -3,12 +3,20 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { workspaceFeatureKeys } from "@multica/core/billing";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { AppsOverview } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 import enBilling from "../../locales/en/billing.json";
+import { toast } from "sonner";
 import { AppsSettings } from "./apps-settings";
+
+const nav = vi.hoisted(() => ({
+  searchParams: new URLSearchParams(),
+  pathname: "/acme/settings",
+  replace: vi.fn(),
+}));
 
 vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
@@ -22,9 +30,10 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Admin" }) }));
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ searchParams: new URLSearchParams() }),
+  useNavigation: () => nav,
   AppLink: ({ href, children, ...props }: React.ComponentProps<"a"> & { href: string }) => <a href={href} {...props}>{children}</a>,
 }));
 
@@ -49,6 +58,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  nav.searchParams = new URLSearchParams();
   vi.clearAllMocks();
   delete (window as { desktopAPI?: unknown }).desktopAPI;
 });
@@ -148,4 +158,25 @@ it("passes the plan's team account access to the connect dialog", async () => {
   expect(await within(dialog).findByText("Read-only. Upgrade to edit.")).toBeVisible();
   expect(within(dialog).getByRole("button", { name: "Reconnect" })).toBeEnabled();
   expect(within(dialog).getByRole("link", { name: "Upgrade to add" })).toBeVisible();
+});
+
+it("explains a team connect refused by the plan and refetches the plan", async () => {
+  nav.searchParams = new URLSearchParams(
+    "tab=apps&error=composio_connect_failed&reason=feature_locked&scope=team",
+  );
+  const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+  renderSettings();
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(enBilling.paid_feature.locked_error));
+  expect(toast.error).not.toHaveBeenCalledWith(enSettings.connected_apps.toast_connect_failed);
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceFeatureKeys.all("ws-1") });
+  invalidate.mockRestore();
+  expect(nav.replace).toHaveBeenCalledWith("/acme/settings?tab=apps");
+});
+
+it("keeps the generic retry message when an older server sends no reason", async () => {
+  nav.searchParams = new URLSearchParams("tab=integrations&error=composio_connect_failed");
+  renderSettings();
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(enSettings.connected_apps.toast_connect_failed));
+  expect(toast.error).not.toHaveBeenCalledWith(enBilling.paid_feature.locked_error);
+  expect(nav.replace).toHaveBeenCalledWith("/acme/settings?tab=apps");
 });

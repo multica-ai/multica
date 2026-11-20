@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
@@ -222,6 +223,30 @@ func TestTeamAppAccountsCallbackRechecksBeforeWriting(t *testing.T) {
 			t.Fatalf("refused account not revoked upstream: %v", fake.revoked)
 		}
 		wantAttempts(t, entitlement.FeatureTeamAppAccounts, featureAttemptCounts{enforced: 1, lastOperation: "connect_team_account"})
+	})
+
+	// Over HTTP the refusal reaches the page as a plan refusal, so it can
+	// show the upgrade prompt instead of asking for a retry (an older page
+	// still sees the ordinary failure fields).
+	t.Run("refused over HTTP", func(t *testing.T) {
+		clearTeamAccounts(t)
+		state := begin(t)
+		usePaidFeatureOn(t, &h, entitlement.FeatureTeamAppAccounts, enforced())
+		h.Composio = svc
+		withComposioMCPAppsFlag(t, &h, true)
+		q := url.Values{"state": {state}, "status": {"success"}, "connected_account_id": {"ca_refused_http"}}
+		resp := testutil.Call(t, h.ComposioCallback, httptest.NewRequest(http.MethodGet, "/api/integrations/composio/callback?"+q.Encode(), nil)).Want(http.StatusFound)
+		loc, err := url.Parse(resp.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse redirect: %v", err)
+		}
+		got := loc.Query()
+		if got.Get("error") != "composio_connect_failed" || got.Get("reason") != "feature_locked" || got.Get("scope") != "team" {
+			t.Fatalf("redirect = %s, want the failure with reason feature_locked", loc)
+		}
+		if rows := teamAccountRows(t); len(rows) != 0 {
+			t.Fatalf("refused connect wrote %v", rows)
+		}
 	})
 
 	t.Run("reauthorization", func(t *testing.T) {
