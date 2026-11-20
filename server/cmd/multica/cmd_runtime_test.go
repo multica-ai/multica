@@ -431,3 +431,52 @@ func TestRuntimeUpdateWaitFailedJSONStillPrintsBody(t *testing.T) {
 		t.Fatalf("stdout = %#v, want the failed update object", got)
 	}
 }
+
+func TestRuntimeUpdateWaitStopsWhenQueued(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "scheduled"})
+	defer srv.Close()
+
+	err := runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	if err == nil {
+		t.Fatal("queued update returned nil; it has not been installed")
+	}
+	if !strings.Contains(err.Error(), "queued") || !strings.Contains(err.Error(), "upd-1") {
+		t.Fatalf("error = %q, want it to say the update is queued", err.Error())
+	}
+}
+
+func TestRuntimeUpdateWaitCancelledReturnsError(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "cancelled"})
+	defer srv.Close()
+
+	err := runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("error = %v, want the cancelled status", err)
+	}
+}
+
+func TestRuntimeUpdateAsksServerToQueueWhenBusy(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "upd-1", "status": "pending"})
+	}))
+	defer srv.Close()
+
+	cmd := newRuntimeUpdateTestCmd(srv.URL, "json")
+	_ = cmd.Flags().Set("wait", "false")
+	if _, err := captureRuntimeStdout(t, func() error {
+		return runRuntimeUpdate(cmd, []string{"rt-1"})
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if body["queue_when_busy"] != true {
+		t.Fatalf("request body = %v; this CLI handles a queued update and must say so", body)
+	}
+}

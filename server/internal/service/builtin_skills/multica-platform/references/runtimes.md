@@ -50,7 +50,11 @@ actual charges. This correction applies to new runs, not historical usage rows.
 
 `runtime update` and `runtime delete` are writes. Starting a runtime update is
 limited to its owner or a workspace owner/admin; the original initiator may keep
-polling that specific in-flight request if their admin role changes.
+polling that specific in-flight request if their admin role changes. When agent
+work is running on the machine, the update is queued (`status: scheduled`) and
+starts on its own once the machine is idle; it can be cancelled until it starts
+and expires after 24 hours. `--wait` stops at that point and exits non-zero —
+the update has not been installed yet, and that is not a failure.
 
 `runtime delete` removes a runtime registration; if active agents are still
 bound, it refuses unless the user explicitly passes `--cascade`, which unbinds

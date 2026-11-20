@@ -317,7 +317,7 @@ multica runtime profile create --display-name "사내 Claude 래퍼" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart`는 현재 profile이 로그인할 때 시작되도록 등록합니다. 플랫폼별 차이는 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 참고하세요. `runtime usage`는 기본적으로 90일을 집계하며 `--days`는 최대 365입니다. `runtime update`는 해당 컴퓨터의 데몬이 CLI를 지정한 버전으로 업데이트하게 하고, `--wait`를 붙이면 업데이트가 끝날 때까지 기다립니다. 업데이트 실패, 업데이트 시간 초과 또는 대기 자체의 시간 초과 시 종료 코드는 0이 아닙니다. `runtime profile create`는 호환 도구를 `--runtime-type`으로 지정합니다(예전 `--protocol-family`도 쓸 수 있음). 고정 인수는 현재 웹 앱에서만 설정할 수 있습니다. `runtime profile create`는 기본적으로 현재 컴퓨터에 연결합니다. 다른 등록된 로컬 컴퓨터를 선택하려면 `--daemon-id <id>`를 지정하세요. 기존 설정은 `multica runtime profile update <profile-id> --daemon-id <id>`로 컴퓨터에 연결할 수 있습니다.
+`daemon autostart`는 현재 profile이 로그인할 때 시작되도록 등록합니다. 플랫폼별 차이는 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 참고하세요. `runtime usage`는 기본적으로 90일을 집계하며 `--days`는 최대 365입니다. `runtime update`는 해당 컴퓨터의 데몬이 CLI를 지정한 버전으로 업데이트하게 하고, `--wait`를 붙이면 업데이트가 끝날 때까지 기다립니다. 업데이트 실패, 업데이트 시간 초과 또는 대기 자체의 시간 초과 시 종료 코드는 0이 아닙니다. 해당 컴퓨터에서 에이전트 작업이 실행 중이면 업데이트는 대기열에 들어갑니다. 컴퓨터가 유휴 상태가 되면 자동으로 시작되고, 시작 전까지 런타임 페이지에서 취소할 수 있으며, 24시간 안에 시작되지 않으면 만료됩니다. 이 경우 `--wait`는 대기를 멈추고 0이 아닌 코드로 종료합니다. 대기열에 넣으려면 그 컴퓨터의 데몬이 대기열을 지원하는 CLI 릴리스여야 합니다. 그보다 오래된 데몬은 바쁠 때 이전처럼 업데이트를 실패 처리합니다. `runtime profile create`는 호환 도구를 `--runtime-type`으로 지정합니다(예전 `--protocol-family`도 쓸 수 있음). 고정 인수는 현재 웹 앱에서만 설정할 수 있습니다. `runtime profile create`는 기본적으로 현재 컴퓨터에 연결합니다. 다른 등록된 로컬 컴퓨터를 선택하려면 `--daemon-id <id>`를 지정하세요. 기존 설정은 `multica runtime profile update <profile-id> --daemon-id <id>`로 컴퓨터에 연결할 수 있습니다.
 
 활성 에이전트가 계속 연결된 런타임을 삭제하면 명령이 기본적으로 거부됩니다. `multica runtime delete <id> --cascade`는 에이전트의 런타임 연결을 해제하고 설정과 기록을 보존하며 활성 실행을 취소합니다.
 
