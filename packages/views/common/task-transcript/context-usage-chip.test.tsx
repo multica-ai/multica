@@ -2,7 +2,11 @@
 
 import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  useContextUsageSettingsStore,
+} from "@multica/core/agents/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { ContextUsageChip } from "./context-usage-chip";
 import type { ContextEventSource } from "./context-usage";
@@ -13,6 +17,12 @@ function usage(used: number, at: string, limit = 200_000): ContextEventSource {
 
 beforeEach(() => {
   cleanup();
+  // The feature ships off; every case below is about what it shows once on.
+  useContextUsageSettingsStore.setState({ enabled: true, showOnIssueRow: true });
+});
+
+afterEach(() => {
+  useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
 });
 
 describe("ContextUsageChip", () => {
@@ -80,5 +90,27 @@ describe("ContextUsageChip", () => {
   it("stays a plain figure when there is only one observation to show", () => {
     renderWithI18n(<ContextUsageChip items={[usage(10_000, "2026-11-20T01:00:00Z")]} />);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+});
+
+describe("ContextUsageChip settings", () => {
+  it("renders nothing at all until the feature is turned on", () => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+    const { container } = renderWithI18n(
+      <ContextUsageChip items={[usage(120_000, "2026-11-20T01:05:00Z")]} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("drops only the issue row when its own switch is off", () => {
+    useContextUsageSettingsStore.setState({ enabled: true, showOnIssueRow: false });
+    const items = [usage(120_000, "2026-11-20T01:05:00Z")];
+
+    const row = renderWithI18n(<ContextUsageChip items={items} surface="issue_row" />);
+    expect(row.container).toBeEmptyDOMElement();
+    cleanup();
+
+    renderWithI18n(<ContextUsageChip items={items} />);
+    expect(screen.getByText("60%")).toBeInTheDocument();
   });
 });

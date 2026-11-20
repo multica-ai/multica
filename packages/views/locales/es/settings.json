@@ -164,6 +164,18 @@
     "sticky_comment_bar": {
       "title": "Fijar la barra de comentarios abajo"
     },
+    "context_usage": {
+      "title": "Uso del contexto",
+      "description": "Cuánta ventana de contexto del modelo ocupa una ejecución, donde el runtime lo informa.",
+      "enabled": {
+        "title": "Mostrar el uso del contexto",
+        "description": "Añade la cifra a los turnos del chat y a las ejecuciones de una incidencia. Los runtimes que no la informan no muestran nada."
+      },
+      "issue_row": {
+        "title": "Mostrar en la fila de la ejecución de una incidencia",
+        "description": "Si se desactiva, la cifra se queda dentro de la ejecución: la transcripción y los pasos desplegados."
+      }
+    },
     "running_agent_reply": {
       "title": "Al responder a un agente en ejecución",
       "steer": "Añadir a la ejecución actual",

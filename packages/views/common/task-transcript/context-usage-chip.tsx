@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { Gauge, Minimize2 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
+import { useContextUsageSettingsStore } from "@multica/core/agents/stores";
 import { useLocale, useT } from "../../i18n";
 import { formatTokens } from "../../runtimes/utils";
 import {
@@ -30,6 +31,7 @@ import {
 export function ContextUsageChip({
   items,
   usage: reportedUsage,
+  surface,
   className,
 }: {
   /** The run's context events, when this surface has its transcript. */
@@ -41,13 +43,25 @@ export function ContextUsageChip({
    * newer while the run is live.
    */
   usage?: ContextUsage;
+  /**
+   * `issue_row` is the figure on a run's row in an issue timeline, which has
+   * its own switch under the feature's own: someone can keep it inside the
+   * run and off the row.
+   */
+  surface?: "issue_row";
   className?: string;
 }) {
   const { t } = useT("agents");
+  // Off by default, so every surface reads the switch here rather than at each
+  // call site, where one could forget and leak the feature.
+  const enabled = useContextUsageSettingsStore((state) => state.enabled);
+  const showOnIssueRow = useContextUsageSettingsStore((state) => state.showOnIssueRow);
   const streamed = useMemo(() => latestContextUsage(items ?? []), [items]);
   const history = useMemo(() => contextUsageHistory(items ?? []), [items]);
   const usage = streamed ?? reportedUsage;
 
+  if (!enabled) return null;
+  if (surface === "issue_row" && !showOnIssueRow) return null;
   if (!usage) return null;
 
   // One observation and nothing else is the figure itself — a popover that

@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
+import {
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  useContextUsageSettingsStore,
+} from "@multica/core/agents/stores";
 import type { Attachment, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enAgents from "../../locales/en/agents.json";
@@ -1136,6 +1140,14 @@ describe("ChatMessageList onboarding starter cards", () => {
 });
 
 describe("ChatMessageList context window", () => {
+  // The feature ships off; these cases describe chat with it on.
+  beforeEach(() => {
+    useContextUsageSettingsStore.setState({ enabled: true, showOnIssueRow: true });
+  });
+  afterEach(() => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+  });
+
   const CONTEXT_MESSAGES: TaskMessagePayload[] = [
     taskMsg(0, "text", { content: "Looking into it. " }),
     taskMsg(1, "context", { input: { used_tokens: 10_000, limit_tokens: 200_000 } }),

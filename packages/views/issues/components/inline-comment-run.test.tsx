@@ -6,6 +6,10 @@ import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
 import { issueKeys } from "@multica/core/issues/queries";
+import {
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  useContextUsageSettingsStore,
+} from "@multica/core/agents/stores";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
@@ -518,6 +522,14 @@ describe("InlineCommentRun", () => {
 });
 
 describe("InlineCommentRun context window", () => {
+  // Off by default; these cases describe an issue run with it on.
+  beforeEach(() => {
+    useContextUsageSettingsStore.setState({ enabled: true, showOnIssueRow: true });
+  });
+  afterEach(() => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+  });
+
   // A finished run in the timeline never fetches its transcript, so the figure
   // has to come off the task row — otherwise it is only readable after opening
   // the full log, which is what it used to be.
@@ -560,6 +572,20 @@ describe("InlineCommentRun context window", () => {
     fireEvent.click(await screen.findByRole("button", { name: /View activity/ }));
     expect(await screen.findByText("Working.")).toBeInTheDocument();
     expect(screen.queryByText("Error")).not.toBeInTheDocument();
+  });
+
+  it("puts the full-log entry before the figure on the run's row", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({
+      status: "completed",
+      completed_at: "2026-09-07T00:01:00Z",
+      context_usage: { used_tokens: 75_200, limit_tokens: 258_400 },
+    }));
+
+    const fullLog = await screen.findByRole("button", { name: "Open full log" });
+    const figure = screen.getByText("29%");
+    expect(fullLog.compareDocumentPosition(figure) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
   });
 
   it("renders nothing for a run whose runtime reported no occupancy", async () => {

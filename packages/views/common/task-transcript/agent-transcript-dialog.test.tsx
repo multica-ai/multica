@@ -7,7 +7,11 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { api } from "@multica/core/api";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { AgentRuntime, AgentTask } from "@multica/core/types/agent";
-import { useTranscriptViewStore } from "@multica/core/agents/stores";
+import {
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  useContextUsageSettingsStore,
+  useTranscriptViewStore,
+} from "@multica/core/agents/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
@@ -1195,6 +1199,14 @@ describe("tool output completeness", () => {
 });
 
 describe("context window", () => {
+  // Off by default; these cases describe the surface with it on.
+  beforeEach(() => {
+    useContextUsageSettingsStore.setState({ enabled: true, showOnIssueRow: true });
+  });
+  afterEach(() => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+  });
+
   const withContext: TimelineItem[] = [
     { seq: 1, type: "context", input: { used_tokens: 10_000, limit_tokens: 200_000 } },
     { seq: 2, type: "tool_use", tool: "terminal", input: { command: "pnpm test" } },

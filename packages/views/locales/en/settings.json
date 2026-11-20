@@ -164,6 +164,18 @@
     "sticky_comment_bar": {
       "title": "Pin comment bar to bottom"
     },
+    "context_usage": {
+      "title": "Context usage",
+      "description": "How full the model's context window is, on runs that report it.",
+      "enabled": {
+        "title": "Show context usage",
+        "description": "Adds the figure to chat turns and issue runs. Runtimes that do not report it show nothing."
+      },
+      "issue_row": {
+        "title": "Show on the run's row in an issue",
+        "description": "Off keeps it inside the run — the transcript and the expanded steps."
+      }
+    },
     "running_agent_reply": {
       "title": "When replying to a running agent",
       "steer": "Add to current run",

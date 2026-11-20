@@ -164,6 +164,18 @@
     "sticky_comment_bar": {
       "title": "Épingler la barre de commentaire en bas"
     },
+    "context_usage": {
+      "title": "Utilisation du contexte",
+      "description": "Part de la fenêtre de contexte du modèle occupée par une exécution, là où le runtime la rapporte.",
+      "enabled": {
+        "title": "Afficher l'utilisation du contexte",
+        "description": "Ajoute la valeur aux tours de conversation et aux exécutions d'une tâche. Les runtimes qui ne la rapportent pas n'affichent rien."
+      },
+      "issue_row": {
+        "title": "Afficher sur la ligne de l'exécution dans une tâche",
+        "description": "Désactivé, la valeur reste dans l'exécution — la transcription et les étapes dépliées."
+      }
+    },
     "running_agent_reply": {
       "title": "En répondant à un agent en cours d'exécution",
       "steer": "Ajouter à l'exécution en cours",

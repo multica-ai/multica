@@ -180,8 +180,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const hasTranscript = !PRE_RUN_STATUSES.includes(task.status);
   if (presentation === "header" && showCommentRunInHeader(run)) {
     return <span className="inline-flex shrink-0 items-center gap-1" data-comment-actions data-run-id={task.id}>
-      <ContextUsageChip items={data} usage={contextUsage} />
       {fullLogButton}
+      <ContextUsageChip items={data} usage={contextUsage} surface="issue_row" />
       {transcript}
     </span>;
   }
@@ -231,9 +231,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
         </button>
         <span className={cn("shrink-0 whitespace-nowrap text-label tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
-        {/* Yields the narrow row to identity like the elapsed time beside it. */}
-        <ContextUsageChip items={data} usage={contextUsage} className={cn(showIdentity && !active && "@max-[32rem]/run:hidden")} />
         {hasTranscript && fullLogButton}
+        {/* Yields the narrow row to identity like the elapsed time beside it. */}
+        <ContextUsageChip items={data} usage={contextUsage} surface="issue_row" className={cn(showIdentity && !active && "@max-[32rem]/run:hidden")} />
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button
           size="xs" variant="outline" className={cn(showIdentity && "@max-[32rem]/run:size-6 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}
