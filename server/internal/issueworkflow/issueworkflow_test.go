@@ -292,6 +292,34 @@ func TestBriefNamesStepCommandsAndHandlers(t *testing.T) {
 	}
 }
 
+func TestBriefOmitsMovesAtTerminalStatuses(t *testing.T) {
+	for _, status := range []string{"done", "cancelled"} {
+		for _, legacy := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/legacy=%v", status, legacy), func(t *testing.T) {
+				brief := Brief(BriefInput{
+					Workflow:           blockedOnlyDefault(),
+					StatusKey:          status,
+					IssueIdentifier:    "MUL-7",
+					LegacyRuntimeRules: legacy,
+				})
+				for _, unwanted := range []string{"Your moves:", "multica issue status", "Before your run ends, either run one of them"} {
+					if strings.Contains(brief, unwanted) {
+						t.Fatalf("terminal brief carries %q:\n%s", unwanted, brief)
+					}
+				}
+				for _, want := range []string{
+					"- `" + status + "`   ← current",
+					"Leave the issue at this status unless a member explicitly asks you to reopen it.",
+				} {
+					if !strings.Contains(brief, want) {
+						t.Errorf("terminal brief is missing %q:\n%s", want, brief)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestBriefForMovedStep(t *testing.T) {
 	for _, current := range []string{"implement", "todo"} {
 		for _, observer := range []bool{false, true} {

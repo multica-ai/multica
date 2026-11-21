@@ -268,6 +268,9 @@ func (h *Handler) workflowBriefInput(ctx context.Context, issue db.Issue, def is
 		StatusName: func(key string) string {
 			return resolver.Name(ctx, h.Queries, key)
 		},
+		EffectiveStatus: func(key string) string {
+			return resolver.Effective(ctx, h.Queries, key)
+		},
 		HandlerName: func(step issueworkflow.Step) string {
 			if !step.HandsOff() {
 				return ""

@@ -1347,6 +1347,9 @@ func (h *Handler) PreviewIssueWorkflowBrief(w http.ResponseWriter, r *http.Reque
 		StatusName: func(key string) string {
 			return resolver.Name(ctx, h.Queries, key)
 		},
+		EffectiveStatus: func(key string) string {
+			return resolver.Effective(ctx, h.Queries, key)
+		},
 		HandlerName: func(s issueworkflow.Step) string {
 			switch s.Handler.Type {
 			case issueworkflow.HandlerAgent, issueworkflow.HandlerSquad, issueworkflow.HandlerMember:
