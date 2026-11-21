@@ -199,6 +199,10 @@ vi.mock("../../editor", async () => ({
     children,
   usePreviewSequence: () => ({ openAt: () => false }),
   collectPreviewSequence: () => [],
+  // The real provider is plain context; attachment-thumbnail.test.tsx covers it.
+  ...(await vi.importActual<typeof import("../../editor/image-thumbnails-context")>(
+    "../../editor/image-thumbnails-context",
+  )),
   // Comment attachments render as their filename — the viewer and file cards
   // have their own suites.
   AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) =>
