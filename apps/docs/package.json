@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "typegen": "next typegen",
     "test": "vitest run",
     "mdx": "fumadocs-mdx",
     "postinstall": "fumadocs-mdx"

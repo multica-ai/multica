@@ -19,8 +19,7 @@
  * environment's web port, not a free one, because the API accepts realtime
  * WebSockets only from FRONTEND_ORIGIN; on any other port /ws is refused
  * with 403. So the dev web server is stopped for the duration and started
- * again afterwards, also on Ctrl-C and when the command fails. The build
- * rewrites apps/web/next-env.d.ts, which is restored after it.
+ * again afterwards, also on Ctrl-C and when the command fails.
  *
  * With a command after `--`, the command runs once the server answers, with
  * WEB_PROD_URL set to it, and its exit code becomes this script's. Without
@@ -31,13 +30,12 @@
  * the daemon ends that environment once its web port stops answering.
  */
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"]).toString().trim();
 const webDir = join(repoRoot, "apps", "web");
 const devEnv = join(repoRoot, "scripts", "dev-env.sh");
-const nextEnvFile = join(webDir, "next-env.d.ts");
 
 const argv = process.argv.slice(2);
 const separator = argv.indexOf("--");
@@ -93,23 +91,18 @@ function listenerPid(port) {
 }
 
 async function build(track) {
-  const original = readFileSync(nextEnvFile);
   log("building apps/web for production (same-origin API)");
-  try {
-    // REMOTE_API_URL is a runtime setting: at build time it breaks
-    // prerendering. Empty rather than unset, so next.config.ts's dotenv
-    // does not read it back from the root .env.
-    const buildEnv = { ...env, NEXT_PUBLIC_API_URL: "", NEXT_PUBLIC_WS_URL: "", REMOTE_API_URL: "", NEXT_TELEMETRY_DISABLED: "1" };
-    const builder = spawn("pnpm", ["--filter", "@multica/web", "build"], { cwd: repoRoot, env: buildEnv, stdio: "inherit" });
-    track(builder);
-    const code = await new Promise((done) => {
-      builder.on("error", () => done(127));
-      builder.on("exit", (exitCode, signal) => done(signal ? 1 : exitCode ?? 1));
-    });
-    if (code !== 0) throw new Error("the web build failed");
-  } finally {
-    writeFileSync(nextEnvFile, original);
-  }
+  // REMOTE_API_URL is a runtime setting: at build time it breaks
+  // prerendering. Empty rather than unset, so next.config.ts's dotenv
+  // does not read it back from the root .env.
+  const buildEnv = { ...env, NEXT_PUBLIC_API_URL: "", NEXT_PUBLIC_WS_URL: "", REMOTE_API_URL: "", NEXT_TELEMETRY_DISABLED: "1" };
+  const builder = spawn("pnpm", ["--filter", "@multica/web", "build"], { cwd: repoRoot, env: buildEnv, stdio: "inherit" });
+  track(builder);
+  const code = await new Promise((done) => {
+    builder.on("error", () => done(127));
+    builder.on("exit", (exitCode, signal) => done(signal ? 1 : exitCode ?? 1));
+  });
+  if (code !== 0) throw new Error("the web build failed");
 }
 
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
