@@ -244,6 +244,8 @@ func TestCheckMinVersion(t *testing.T) {
 		{"opencode", "1.1.53", true},
 		{"opencode", "1.1.49", true},
 		{"opencode", "0.15.0", true},
+		{"san", "san version 1.25.4", false},
+		{"san", "san version 1.25.3", true},
 		{"unknown", "1.0.0", false},
 	}
 	for _, tt := range tests {

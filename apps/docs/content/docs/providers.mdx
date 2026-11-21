@@ -39,6 +39,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| San | `san` | ✓ | ✓ | — | — |
 | Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
 | Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
@@ -77,7 +78,7 @@ Devin's picker lists the model choices advertised by its ACP session. Choose a c
 
 Devin reads `WINDSURF_API_KEY` when set, otherwise the login saved by `devin auth login`; unknown ACP auth methods do not block that stored login. Model discovery uses the daemon user's credentials: a key set only in an agent's custom environment is unavailable to the runtime model picker. An empty session model list prompts you to check those credentials and your team's model allowlist. Multica preserves Devin's configured session mode rather than raising permissions. If it defaults to `plan`, switch to an editing mode in Devin before dispatching work that must change files.
 
-QwenPaw, MiniMax Code, and ZeroClaw are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list for these tools is expected and does not mean the runtime is offline.
+QwenPaw, MiniMax Code, ZeroClaw, and San are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list for these tools is expected and does not mean the runtime is offline.
 
 For Antigravity, use the model picker to select the exact reasoning variant shown by `agy models`, including any suffix. Multica has no separate **Thinking** setting for Antigravity. If you pass `--effort` in custom arguments, Antigravity checks whether it can be combined with the selected model.
 

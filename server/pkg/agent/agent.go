@@ -452,6 +452,7 @@ var SupportedTypes = []string{
 	"zeroclaw",
 	"museapp",
 	"zcode",
+	"san",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -571,6 +572,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &museappBackend{cfg: cfg}, nil
 	case "zcode":
 		return &zcodeBackend{cfg: cfg}, nil
+	case "san":
+		return &sanBackend{cfg: cfg}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
@@ -624,6 +627,7 @@ var launchHeaders = map[string]string{
 	"zeroclaw":    "zeroclaw acp",
 	"museapp":     "museapp (remote receptionist)",
 	"zcode":       "zcode app-server",
+	"san":         "san acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

@@ -179,6 +179,7 @@ var (
 		"qwen":          "qwen",
 		"droid":         "droid",
 		"amp":           "amp",
+		"san":           "san",
 		"traecli":       "traecli",
 		"other":         "other",
 	}
