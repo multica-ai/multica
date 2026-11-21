@@ -19,7 +19,7 @@
 --   - Proxy settings: embedded pages load directly in a sandboxed iframe;
 --     Multica does not proxy content or bypass a site's framing policy.
 --
--- The scope/position index lives in migration 618 so its CONCURRENTLY build
+-- The scope/position index lives in migration 719 so its CONCURRENTLY build
 -- remains a separate single-statement migration.
 CREATE TABLE workspace_link (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

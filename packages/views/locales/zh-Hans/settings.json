@@ -26,7 +26,7 @@
     "failed": "无法保存修改，请重试。",
     "fallback": "部分网站通过 X-Frame-Options 或 frame-ancestors 禁止内嵌。如果页面无法加载，请在新标签页中打开。",
     "open": "新标签页打开",
-    "loading": "正在加载链接…",
+    "loading": "正在加载链接...",
     "not_found": "找不到链接",
     "load_failed": "无法加载链接。"
   },

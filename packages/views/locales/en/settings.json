@@ -26,7 +26,7 @@
     "failed": "Could not save changes. Try again.",
     "fallback": "Some sites block embedded pages with X-Frame-Options or frame-ancestors. Open the link in a new tab if it does not load.",
     "open": "Open in new tab",
-    "loading": "Loading links…",
+    "loading": "Loading links...",
     "not_found": "Link not found",
     "load_failed": "Could not load links."
   },
