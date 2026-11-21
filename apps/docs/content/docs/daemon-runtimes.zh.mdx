@@ -159,11 +159,11 @@ CodeBuddy、Kimi CLI 和 Pi 启动时会自己加载用户级配置，并与 Mul
 
 ### Cursor 的 MCP 登录 [#cursor-mcp-login]
 
-Cursor 按项目目录保存 MCP 的 OAuth 登录，而每次运行都有自己的目录。因此 daemon 会在运行时所在电脑上为每个 Cursor 智能体保留一份登录文件，即 Multica 配置目录下的 `cursor-mcp-auth/<agent-id>/mcp-auth.json`，并让每次运行都链接到它。对 Mobbin 这样的服务登录一次，这个智能体之后在这台电脑上的运行都能用。它和你自己各个 Cursor 项目里的登录分开，运行不会把你那边挤下线。这个智能体在这台电脑上的所有运行都会用到它，包括其他成员触发的运行。
+Cursor 按项目目录保存 MCP 的 OAuth 登录，而每次运行都有自己的目录。因此 daemon 会在运行时所在电脑上为每个 Cursor 智能体保留一份登录文件，即 Multica 配置目录下的 `cursor-mcp-auth/<agent-id>/mcp-auth.json`，并给每次运行一份它的副本。daemon 每隔几秒以及运行结束时，会把 Cursor 对副本的改动合并回智能体的登录文件，所以一次运行刷新的 token，这个智能体之后的运行也能拿到。对 Mobbin 这样的服务登录一次，这个智能体之后在这台电脑上的运行都能用。它和你自己各个 Cursor 项目里的登录分开，运行不会把你那边挤下线。这个智能体在这台电脑上的所有运行都会用到它，包括其他成员触发的运行。
 
-智能体有 MCP 配置时，每次运行都有自己的 Cursor 数据目录，运行在那里的 `mcp-auth.json` 就是这个链接。没有 MCP 配置时，运行使用你自己的 Cursor 数据目录（`~/.cursor`，或 daemon 的 `CURSOR_DATA_DIR`）和其中配置的 MCP 服务；daemon 只把 Cursor 在 `projects/` 下为运行目录保存的 `mcp-auth.json` 链接到智能体的登录文件。运行的目录被清理时，这个链接会一并删除。
+智能体有 MCP 配置时，每次运行都有自己的 Cursor 数据目录，运行在那里的 `mcp-auth.json` 就是这份副本。没有 MCP 配置时，运行使用你自己的 Cursor 数据目录（`~/.cursor`，或 daemon 的 `CURSOR_DATA_DIR`）和其中配置的 MCP 服务；daemon 只把 Cursor 在 `projects/` 下为运行目录保存的 `mcp-auth.json` 换成智能体登录文件的副本。运行的目录被清理时，这份副本会一并删除。
 
-没有 MCP 配置时，有两种运行不做链接，因为它们对应的 Cursor 项目你自己也在用，链接会替换掉你在那里的登录：在项目本地目录里原地工作的运行，以及目录外层套着一个 git 仓库的运行，例如主目录下的 dotfiles 仓库（Cursor 会把这个仓库当作项目）。这些运行使用 Cursor 在该目录下已有的登录，运行记录里也不会给出登录命令；需要时自己在该目录里执行 `cursor-agent mcp login <server>` 登录。
+没有 MCP 配置时，有两种运行不放副本，因为它们对应的 Cursor 项目你自己也在用，副本会替换掉你在那里的登录：在项目本地目录里原地工作的运行，以及目录外层套着一个 git 仓库的运行，例如主目录下的 dotfiles 仓库（Cursor 会把这个仓库当作项目）。这些运行使用 Cursor 在该目录下已有的登录，运行记录里也不会给出登录命令；需要时自己在该目录里执行 `cursor-agent mcp login <server>` 登录。
 
 如果某个服务仍需登录，运行记录里会写明是哪个服务，并给出要在运行时所在电脑上执行的命令。有 MCP 配置的智能体，例如：
 
@@ -179,7 +179,7 @@ cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~
 
 两种命令都在登录文件旁边一个单独保留的登录目录里执行，所以运行自己的目录被清理后也仍然可用。
 
-登录从这个智能体的下一次运行开始生效，当前这次运行用不上。如果想改用你自己的登录文件，在智能体的环境变量里把 `CURSOR_MCP_AUTH_SOURCE` 设为某个 `mcp-auth.json` 的绝对路径，或包含它的 Cursor 项目目录；它优先于按智能体保留的文件。同一个智能体的两次运行如果恰好同时刷新同一个 token，仍可能把对方挤下线，出现时重新登录即可。
+登录从这个智能体的下一次运行开始生效，那次运行开始前会从登录目录取回这份登录；当前这次运行用不上。如果想改用你自己的登录文件，在智能体的环境变量里把 `CURSOR_MCP_AUTH_SOURCE` 设为某个 `mcp-auth.json` 的绝对路径，或包含它的 Cursor 项目目录；它优先于按智能体保留的文件。同一个智能体的两次运行如果恰好同时刷新同一个 token，仍可能把对方挤下线，出现时重新登录即可。
 
 ## 清理与保留 [#cleanup]
 

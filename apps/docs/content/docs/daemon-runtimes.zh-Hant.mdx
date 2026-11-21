@@ -159,11 +159,11 @@ CodeBuddy、Kimi CLI 和 Pi 啟動時會自己載入使用者級配置，並與 
 
 ### Cursor 的 MCP 登入 [#cursor-mcp-login]
 
-Cursor 依專案目錄保存 MCP 的 OAuth 登入，而每次執行都有自己的目錄。因此 daemon 會在執行環境所在電腦上為每個 Cursor AI 代理保留一份登入檔，即 Multica 設定目錄下的 `cursor-mcp-auth/<agent-id>/mcp-auth.json`，並讓每次執行都連結到它。對 Mobbin 這類服務登入一次，這個 AI 代理之後在這台電腦上的執行都能使用。它和你自己各個 Cursor 專案裡的登入分開，執行不會讓你那邊被登出。這個 AI 代理在這台電腦上的所有執行都會用到它，包括其他成員觸發的執行。
+Cursor 依專案目錄保存 MCP 的 OAuth 登入，而每次執行都有自己的目錄。因此 daemon 會在執行環境所在電腦上為每個 Cursor AI 代理保留一份登入檔，即 Multica 設定目錄下的 `cursor-mcp-auth/<agent-id>/mcp-auth.json`，並給每次執行一份它的副本。daemon 每隔幾秒以及執行結束時，會把 Cursor 對副本的改動合併回 AI 代理的登入檔，所以一次執行重新整理的 token，這個 AI 代理之後的執行也能拿到。對 Mobbin 這類服務登入一次，這個 AI 代理之後在這台電腦上的執行都能使用。它和你自己各個 Cursor 專案裡的登入分開，執行不會讓你那邊被登出。這個 AI 代理在這台電腦上的所有執行都會用到它，包括其他成員觸發的執行。
 
-AI 代理有 MCP 設定時，每次執行都有自己的 Cursor 資料目錄，執行在那裡的 `mcp-auth.json` 就是這個連結。沒有 MCP 設定時，執行使用你自己的 Cursor 資料目錄（`~/.cursor`，或 daemon 的 `CURSOR_DATA_DIR`）和其中設定的 MCP 服務；daemon 只把 Cursor 在 `projects/` 下為執行目錄保存的 `mcp-auth.json` 連結到 AI 代理的登入檔。執行的目錄被清理時，這個連結會一併刪除。
+AI 代理有 MCP 設定時，每次執行都有自己的 Cursor 資料目錄，執行在那裡的 `mcp-auth.json` 就是這份副本。沒有 MCP 設定時，執行使用你自己的 Cursor 資料目錄（`~/.cursor`，或 daemon 的 `CURSOR_DATA_DIR`）和其中設定的 MCP 服務；daemon 只把 Cursor 在 `projects/` 下為執行目錄保存的 `mcp-auth.json` 換成 AI 代理登入檔的副本。執行的目錄被清理時，這份副本會一併刪除。
 
-沒有 MCP 設定時，有兩種執行不做連結，因為它們對應的 Cursor 專案你自己也在用，連結會取代你在那裡的登入：在專案本機目錄裡原地工作的執行，以及目錄外層套著一個 git 儲存庫的執行，例如主目錄下的 dotfiles 儲存庫（Cursor 會把這個儲存庫當作專案）。這些執行使用 Cursor 在該目錄下已有的登入，執行紀錄裡也不會提供登入指令；需要時自己在該目錄裡執行 `cursor-agent mcp login <server>` 登入。
+沒有 MCP 設定時，有兩種執行不放副本，因為它們對應的 Cursor 專案你自己也在用，副本會取代你在那裡的登入：在專案本機目錄裡原地工作的執行，以及目錄外層套著一個 git 儲存庫的執行，例如主目錄下的 dotfiles 儲存庫（Cursor 會把這個儲存庫當作專案）。這些執行使用 Cursor 在該目錄下已有的登入，執行紀錄裡也不會提供登入指令；需要時自己在該目錄裡執行 `cursor-agent mcp login <server>` 登入。
 
 如果某個服務仍需登入，執行紀錄裡會寫明是哪個服務，並提供要在執行環境所在電腦上執行的指令。有 MCP 設定的 AI 代理，例如：
 
@@ -179,7 +179,7 @@ cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~
 
 兩種指令都在登入檔旁邊一個單獨保留的登入目錄裡執行，所以執行自己的目錄被清理後也仍然可用。
 
-登入從這個 AI 代理的下一次執行開始生效，目前這次執行用不上。如果想改用你自己的登入檔，在 AI 代理的環境變數裡把 `CURSOR_MCP_AUTH_SOURCE` 設為某個 `mcp-auth.json` 的絕對路徑，或包含它的 Cursor 專案目錄；它優先於依 AI 代理保留的檔案。同一個 AI 代理的兩次執行如果剛好同時重新整理同一個 token，仍可能讓對方被登出，發生時重新登入即可。
+登入從這個 AI 代理的下一次執行開始生效，那次執行開始前會從登入目錄取回這份登入；目前這次執行用不上。如果想改用你自己的登入檔，在 AI 代理的環境變數裡把 `CURSOR_MCP_AUTH_SOURCE` 設為某個 `mcp-auth.json` 的絕對路徑，或包含它的 Cursor 專案目錄；它優先於依 AI 代理保留的檔案。同一個 AI 代理的兩次執行如果剛好同時重新整理同一個 token，仍可能讓對方被登出，發生時重新登入即可。
 
 ## 清理與保留 [#cleanup]
 
