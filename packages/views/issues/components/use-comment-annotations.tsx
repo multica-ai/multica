@@ -336,7 +336,7 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
               source.revision !== undefined && editing.sourceRevision !== undefined && source.revision !== editing.sourceRevision)}
             canSave={editingExisting || annotations.length < MAX_REPLY_ANNOTATIONS}
             onChange={(note) => {
-              if (dismissedRef.current) return;
+              if (dismissedRef.current || submittingRef.current) return;
               const nextAnnotation = { ...editing, note };
               const store = useCommentDraftStore.getState();
               if (note.trim()) store.setPendingAnnotation(draftKey, { annotation: nextAnnotation, existing: editingExisting });
