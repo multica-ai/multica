@@ -112,17 +112,19 @@ describe("RouteDataPrefetch", () => {
     expect(prefetched).toHaveLength(0);
   });
 
-  it("fetches an issue at once from its link, and what its page fills in once the pointer settles", async () => {
+  it("fetches a hovered issue once the pointer rests, and what its page fills in after", async () => {
     renderLinks();
     fireEvent.mouseEnter(screen.getByText("Issue by identifier"));
+    await vi.advanceTimersByTimeAsync(39);
+    expect(fetched).toHaveLength(0);
 
+    await vi.advanceTimersByTimeAsync(1);
     expect(fetched).toEqual([[...issueKeys.detail("ws-1", "MUL-7")]]);
-    await vi.advanceTimersByTimeAsync(0);
     // The page resolves the identifier, then keys everything else by UUID.
     expect(qc.getQueryData(issueKeys.detail("ws-1", ISSUE_ID))).toMatchObject({ id: ISSUE_ID });
     expect(prefetched).toHaveLength(0);
 
-    await vi.advanceTimersByTimeAsync(80);
+    await vi.advanceTimersByTimeAsync(40);
     expect(keys()).toEqual(
       expect.arrayContaining([
         JSON.stringify(issueKeys.timeline(ISSUE_ID)),
@@ -132,25 +134,46 @@ describe("RouteDataPrefetch", () => {
     expect(keys()).not.toContain(JSON.stringify(issueKeys.timeline("MUL-7")));
   });
 
-  it("fills in only the issue the pointer stops on", async () => {
+  it("fetches a focused issue at once", async () => {
+    renderLinks();
+    fireEvent.focus(screen.getByText("Issue by id"));
+
+    expect(fetched).toEqual([[...issueKeys.detail("ws-1", ISSUE_ID)]]);
+    await vi.advanceTimersByTimeAsync(80);
+    expect(keys()).toContain(JSON.stringify(issueKeys.timeline(ISSUE_ID)));
+  });
+
+  it("fetches nothing for issues a sweeping pointer only crosses", async () => {
     renderLinks();
     fireEvent.mouseEnter(screen.getByText("Issue by id"));
-    await vi.advanceTimersByTimeAsync(40);
+    await vi.advanceTimersByTimeAsync(20);
     fireEvent.mouseEnter(screen.getByText("Other issue"));
     await vi.advanceTimersByTimeAsync(80);
 
-    expect(fetched).toEqual([
-      [...issueKeys.detail("ws-1", ISSUE_ID)],
-      [...issueKeys.detail("ws-1", OTHER_ID)],
-    ]);
+    expect(fetched).toEqual([[...issueKeys.detail("ws-1", OTHER_ID)]]);
     expect(keys()).toContain(JSON.stringify(issueKeys.timeline(OTHER_ID)));
     expect(keys().some((key) => key.includes(ISSUE_ID))).toBe(false);
+  });
+
+  it("drops what has not started when the pointer leaves or moves to another link", async () => {
+    renderLinks();
+    fireEvent.mouseEnter(screen.getByText("Issue by id"));
+    await vi.advanceTimersByTimeAsync(50);
+    fireEvent.mouseLeave(screen.getByText("Issue by id"));
+    fireEvent.mouseEnter(screen.getByText("Other issue"));
+    await vi.advanceTimersByTimeAsync(20);
+    fireEvent.mouseEnter(screen.getByText("Settings"));
+    await vi.advanceTimersByTimeAsync(200);
+
+    // The first issue was rested on long enough to fetch, not to fill in.
+    expect(fetched).toEqual([[...issueKeys.detail("ws-1", ISSUE_ID)]]);
+    expect(prefetched).toHaveLength(0);
   });
 
   it("fetches a guest only the issue", async () => {
     renderLinks({ wsId: "ws-1", guest: true });
     fireEvent.mouseEnter(screen.getByText("Issue by id"));
-    await vi.advanceTimersByTimeAsync(80);
+    await vi.advanceTimersByTimeAsync(200);
 
     expect(fetched).toEqual([[...issueKeys.detail("ws-1", ISSUE_ID)]]);
     expect(keys().some((key) => key.includes(ISSUE_ID))).toBe(false);
@@ -159,7 +182,7 @@ describe("RouteDataPrefetch", () => {
   it("leaves pages under an issue alone", async () => {
     renderLinks();
     fireEvent.mouseEnter(screen.getByText("Deliverable"));
-    await vi.advanceTimersByTimeAsync(80);
+    await vi.advanceTimersByTimeAsync(200);
 
     expect(fetched).toHaveLength(0);
     expect(prefetched).toHaveLength(0);

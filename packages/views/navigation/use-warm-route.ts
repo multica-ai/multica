@@ -18,6 +18,8 @@ export function useWarmRoute(kind: string, href: string | null | undefined) {
   useEffect(() => {
     if (!href || !prefetch || warmed.has(kind)) return;
     const warm = () => {
+      // Every list of a kind mounted in one commit scheduled its own warm-up.
+      if (warmed.has(kind)) return;
       warmed.add(kind);
       prefetch(href);
     };

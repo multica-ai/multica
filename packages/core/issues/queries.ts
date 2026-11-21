@@ -675,12 +675,26 @@ export function issueTimelineOptions(issueId: string) {
 }
 
 /**
+ * The issue a link names by UUID or identifier, also cached under its UUID,
+ * the key the issue page reads it by once an identifier URL has resolved
+ * through the identifier-keyed entry (`useCanonicalIssue`).
+ */
+export async function fetchIssueByRef(qc: QueryClient, wsId: string, ref: string): Promise<Issue> {
+  const issue = await qc.fetchQuery(issueDetailOptions(wsId, ref));
+  if (issue.id !== ref) {
+    qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) => old ?? issue);
+  }
+  return issue;
+}
+
+/**
  * Warm what the issue page holds its first paint and a comment landing on: the
  * issue, its timeline, its runs and its sub-issues, so opening it renders from
- * cache instead of waiting on a request chain. All four are keyed by UUID and
- * fetched in parallel; `identifier` mirrors the issue under the key an
- * identifier URL resolves through (`useCanonicalIssue`), so that hop is cached
- * too. prefetchQuery honours each query's staleTime: a warm entry costs nothing.
+ * cache instead of waiting on a request chain. All four are fetched in
+ * parallel. With an `identifier`, the issue is fetched under the key an
+ * identifier URL resolves through and mirrored to its UUID, so a link to that
+ * URL warming the same issue shares the request. prefetchQuery honours each
+ * query's staleTime: a warm entry costs nothing.
  */
 export async function prefetchIssuePage(
   qc: QueryClient,
@@ -689,15 +703,13 @@ export async function prefetchIssuePage(
   identifier?: string | null,
 ): Promise<void> {
   await Promise.all([
-    qc.prefetchQuery(issueDetailOptions(wsId, issueId)),
+    identifier
+      ? fetchIssueByRef(qc, wsId, identifier).catch(() => undefined)
+      : qc.prefetchQuery(issueDetailOptions(wsId, issueId)),
     qc.prefetchQuery(issueTimelineOptions(issueId)),
     qc.prefetchQuery(issueTasksOptions(issueId)),
     qc.prefetchQuery(childIssuesOptions(wsId, issueId)),
   ]);
-  const issue = qc.getQueryData<Issue>(issueKeys.detail(wsId, issueId));
-  if (identifier && issue) {
-    qc.setQueryData<Issue>(issueKeys.detail(wsId, identifier), (old) => old ?? issue);
-  }
 }
 
 export function issueCommentThreadOptions(issueId: string, commentId: string) {

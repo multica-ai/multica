@@ -43,6 +43,20 @@ describe("useWarmRoute", () => {
     expect(prefetch).toHaveBeenCalledTimes(1);
   });
 
+  it("warms once when several lists of a kind mount together", () => {
+    const prefetch = vi.fn();
+    renderHook(
+      () => {
+        useWarmRoute("issue-d", "/acme/issues/MUL-1");
+        useWarmRoute("issue-d", "/acme/issues/MUL-2");
+      },
+      { wrapper: wrapper(prefetch) },
+    );
+    vi.advanceTimersByTime(3000);
+    expect(prefetch).toHaveBeenCalledTimes(1);
+    expect(prefetch).toHaveBeenCalledWith("/acme/issues/MUL-1");
+  });
+
   it("keeps waiting while there is no page to warm", () => {
     const prefetch = vi.fn();
     const { rerender } = renderHook(({ href }: { href: string | null }) => useWarmRoute("issue-b", href), {
