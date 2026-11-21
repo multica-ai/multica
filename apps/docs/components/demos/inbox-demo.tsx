@@ -562,21 +562,21 @@ function RowAvatar({ name, agent }: { name: string; agent: boolean }) {
   );
 }
 
-/** A control in the Inbox bar; its label gives way when the bar is narrow. */
+/** A control in the Inbox bar; unless `pinned`, its label gives way when the bar is narrow. */
 function BarButton({
   icon,
   label,
   shortcut,
   muted = true,
+  pinned = false,
   onClick,
-  children,
 }: {
   icon: ReactNode;
   label: string;
   shortcut?: string;
   muted?: boolean;
+  pinned?: boolean;
   onClick?: () => void;
-  children?: ReactNode;
 }) {
   return (
     <Button
@@ -590,9 +590,9 @@ function BarButton({
       className={cn("shrink-0 gap-1 px-1.5 disabled:opacity-100 [&_svg]:size-3.5", muted && "text-muted-foreground")}
     >
       {icon}
-      <span className="@max-[26rem]/bar:hidden">{children ?? label}</span>
+      <span className={cn(!pinned && "@max-[30rem]/bar:hidden")}>{label}</span>
       {shortcut && (
-        <kbd className="rounded border bg-muted px-1 font-mono text-[0.625rem] leading-4 text-muted-foreground @max-[22rem]/bar:hidden">
+        <kbd className="rounded border bg-muted px-1 font-mono text-[0.625rem] leading-4 text-muted-foreground @max-[24rem]/bar:hidden">
           {shortcut}
         </kbd>
       )}
@@ -631,7 +631,7 @@ function InboxBar({
       <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
       <BarButton icon={<AlarmClock />} label={copy.snooze} shortcut="H" />
       <CoachMark active={coach} side="bottom" align="end" ringClassName="rounded-md">
-        <BarButton icon={<Archive />} label={copy.archive} shortcut="E" onClick={coach ? onArchive : undefined} />
+        <BarButton icon={<Archive />} label={copy.archive} shortcut="E" pinned onClick={coach ? onArchive : undefined} />
       </CoachMark>
     </div>
   );
