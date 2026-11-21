@@ -163,7 +163,11 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking"}}\n' "$id"
       ;;
     *'"method":"session/resume"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking"}}\n' "$id"
+      if [ -n "$KIMI_RESUME_REPORTED_LEVEL" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking","configOptions":[{"type":"select","id":"thinking","category":"thought_level","currentValue":"%s"}]}}\n' "$id" "$KIMI_RESUME_REPORTED_LEVEL"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking"}}\n' "$id"
+      fi
       ;;
     *'"method":"session/set_model"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
@@ -192,11 +196,15 @@ done
 `
 }
 
-func runKimiThinkingTest(t *testing.T, fakePath string, env map[string]string, opts ExecOptions) Result {
+func runKimiThinkingTest(t *testing.T, fakePath string, env map[string]string, opts ExecOptions, loggers ...*slog.Logger) Result {
 	t.Helper()
+	logger := slog.Default()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
 	backend, err := New("kimi", Config{
 		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
+		Logger:         logger,
 		Env:            env,
 	})
 	if err != nil {
@@ -388,13 +396,17 @@ func TestKimiBackendSetsThinkingLevelOnResumedSession(t *testing.T) {
 	}
 }
 
-// TestKimiBackendOmitsThinkingConfigOnResumedSessionWhenUnset states the known
-// gap deliberately rather than leaving it undefined: with no configured level,
-// the backend sends nothing, so a resumed session keeps the level its previous
-// turn set. Switching an agent back to "Follow CLI config" therefore does not
-// clear a level already applied to a live session. Changing that means
-// deciding what "follow the CLI config" resolves to on the wire, which is
-// tracked separately; until then this test is what makes the behaviour visible.
+// TestKimiBackendOmitsThinkingConfigOnResumedSessionWhenUnset pins the settled
+// semantics of an empty thinking level: Multica imposes nothing — on a fresh
+// session that resolves to the CLI's own config; on a resumed session it means
+// the session keeps whatever level it already has, possibly one an earlier
+// turn set explicitly, because ACP has no unset semantics (verified on 0.34.0:
+// null, "", "default", "unset", and a missing value are all rejected with
+// -32602). Truly restoring "follow the CLI config" on a live session would
+// need reset semantics on the kimi-code side, which is deliberately out of
+// scope for this change. The backend only observes: it logs the level the
+// resume response reports (see the companion log test below), and sends
+// nothing, so a resumed session keeps the level its previous turn set.
 func TestKimiBackendOmitsThinkingConfigOnResumedSessionWhenUnset(t *testing.T) {
 	t.Parallel()
 	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
@@ -411,6 +423,51 @@ func TestKimiBackendOmitsThinkingConfigOnResumedSessionWhenUnset(t *testing.T) {
 	wantOrder := []string{"initialize", "session/resume", "session/prompt"}
 	if methods := recordedKimiMethods(t, recordPath); !reflect.DeepEqual(methods, wantOrder) {
 		t.Fatalf("ACP method order = %v, want %v", methods, wantOrder)
+	}
+}
+
+// TestKimiBackendLogsReportedThinkingLevelOnResumeWhenUnset asserts the
+// observable half of the settled semantics: with no configured level, a resume
+// that reports a thinking option is logged as a snapshot (reported, not the
+// final prompt-time value), no set_config_option is sent, and a resume that
+// reports nothing stays silent.
+func TestKimiBackendLogsReportedThinkingLevelOnResumeWhenUnset(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE":         recordPath,
+		"KIMI_RESUME_REPORTED_LEVEL": "high",
+	}, ExecOptions{ResumeSessionID: "ses_thinking"}, logger)
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+
+	wantOrder := []string{"initialize", "session/resume", "session/prompt"}
+	if methods := recordedKimiMethods(t, recordPath); !reflect.DeepEqual(methods, wantOrder) {
+		t.Fatalf("ACP method order = %v, want %v (no set_config_option)", methods, wantOrder)
+	}
+	if !strings.Contains(logBuf.String(), "kimi resume reported thinking level") {
+		t.Fatalf("reported level not logged: %s", logBuf.String())
+	}
+	if !strings.Contains(logBuf.String(), "level=high") {
+		t.Fatalf("reported level value not logged as high: %s", logBuf.String())
+	}
+
+	logBuf.Reset()
+	result = runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE": recordPath,
+	}, ExecOptions{ResumeSessionID: "ses_thinking"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	if strings.Contains(logBuf.String(), "kimi resume reported thinking level") {
+		t.Fatalf("resume without thinking option must stay silent, got log: %s", logBuf.String())
 	}
 }
 
