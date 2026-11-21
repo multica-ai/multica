@@ -229,6 +229,10 @@ Hermes のタスクとチャットの実行では、会話の永続ディレク�
 
 Multica は実行ごとにホーム内のスキルと派生設定を更新します。モデルプロバイダーの認証は保持し、管理下の実行ではメッセージングアダプターと HTTP の受信口を無効にします。ホストの Gateway 状態、ログ、セッション、cron ジョブは隔離されます。実行終了時にはその実行の Gateway を停止し、次の実行が専用の実行環境を使えるようにします。
 
+### Claude Code のセッション名 [#claude-session-names]
+
+組み込みの Claude Code ランタイム（2.1.94 以降）で新しいセッションを開始すると、Multica はタスクのタイトルを Claude Code の履歴に表示するセッション名として使用します。既存のセッションや明示的に指定した名前はそのまま保持されます。
+
 ### Codex のネイティブメモリとサブエージェント [#codex-memory]
 
 デーモンが管理する Codex の実行では、Codex のネイティブメモリが既定でオフになります。このマシンや以前の実行のメモリが別のワークスペースに持ち込まれないようにするためです。設定はその実行専用の `CODEX_HOME/config.toml` にだけ書かれ（`features.memories`、`memories.generate_memories`、`memories.use_memories` をすべて `false`）、`~/.codex/config.toml` は変更されません。ネイティブメモリを残したい場合は、デーモンの環境で `MULTICA_CODEX_MEMORY=1` を設定します。

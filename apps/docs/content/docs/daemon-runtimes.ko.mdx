@@ -229,6 +229,10 @@ Hermes의 태스크 및 채팅 실행은 대화의 영구 디렉터리를 격리
 
 Multica는 실행마다 홈의 스킬과 파생 설정을 갱신합니다. 모델 제공업체의 인증은 유지하고, 관리되는 실행의 메시징 어댑터와 HTTP 수신 기능은 비활성화합니다. 호스트의 Gateway 상태, 로그, 세션, cron 작업은 격리됩니다. 실행이 끝나면 해당 실행의 Gateway를 중지하여 다음 실행이 자체 실행 환경을 사용하도록 합니다.
 
+### Claude Code 세션 이름 [#claude-session-names]
+
+기본 제공 Claude Code 런타임(2.1.94 이상)에서 새 세션을 시작하면 Multica가 작업 제목을 Claude Code 기록의 세션 이름으로 사용합니다. 기존 세션의 이름과 명시적으로 설정한 이름은 유지됩니다.
+
 ### Codex 기본 메모리와 하위 에이전트 [#codex-memory]
 
 데몬이 관리하는 Codex 실행에서는 Codex 기본 메모리가 기본적으로 꺼집니다. 이 컴퓨터나 이전 실행의 메모리가 다른 워크스페이스로 넘어가지 않게 하기 위해서입니다. 설정은 해당 실행 전용 `CODEX_HOME/config.toml`에만 기록되고(`features.memories`, `memories.generate_memories`, `memories.use_memories` 모두 `false`), `~/.codex/config.toml`은 바뀌지 않습니다. 기본 메모리를 유지하려면 데몬 환경에 `MULTICA_CODEX_MEMORY=1`을 설정하세요.

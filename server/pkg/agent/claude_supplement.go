@@ -29,14 +29,15 @@ var claudeSupplementEvents = []string{"UserPromptSubmit", "PreToolUse", "PostToo
 // only explicit skills need initialization.
 // Wire contract: anthropics/claude-agent-sdk-python, _internal/query.py.
 type claudeSupplementSession struct {
-	ctx         context.Context
-	mu          sync.Mutex
-	active      bool
-	started     bool
-	ended       bool
-	pending     []*claudeSupplementInput
-	initialized chan error
-	commands    map[string]bool
+	ctx          context.Context
+	mu           sync.Mutex
+	active       bool
+	started      bool
+	ended        bool
+	pending      []*claudeSupplementInput
+	initialized  chan error
+	commands     map[string]bool
+	sessionTitle string
 }
 
 type claudeSupplementInput struct {
@@ -50,7 +51,7 @@ func newClaudeSupplementSession(ctx context.Context) *claudeSupplementSession {
 	return &claudeSupplementSession{ctx: ctx, initialized: make(chan error, 1)}
 }
 
-func (s *claudeSupplementSession) initialize(w io.Writer, timeout time.Duration, installHooks bool) error {
+func (s *claudeSupplementSession) initialize(w io.Writer, timeout time.Duration, installHooks, installTitleHook bool) error {
 	if timeout <= 0 {
 		timeout = claudeSupplementHandshakeTimeout
 	}
@@ -61,6 +62,9 @@ func (s *claudeSupplementSession) initialize(w io.Writer, timeout time.Duration,
 		for _, event := range claudeSupplementEvents {
 			hooks[event] = []any{map[string]any{"hookCallbackIds": []string{"multica-supplement-" + event}}}
 		}
+	}
+	if installTitleHook && !installHooks {
+		hooks["UserPromptSubmit"] = []any{map[string]any{"hookCallbackIds": []string{"multica-supplement-UserPromptSubmit"}}}
 	}
 	if err := writeClaudeFrame(w, map[string]any{
 		"type": "control_request", "request_id": claudeSupplementInitializeID,
@@ -226,13 +230,22 @@ func (s *claudeSupplementSession) prepareHook(msg claudeSDKMessage) (func(io.Wri
 		}
 		s.pending = nil
 		s.active = req.Input.Event != "Stop" || len(delivered) > 0
+		hookOutput := map[string]any{}
+		if req.Input.Event == "UserPromptSubmit" && s.sessionTitle != "" {
+			hookOutput["sessionTitle"] = s.sessionTitle
+			s.sessionTitle = ""
+		}
 		if len(delivered) > 0 {
 			text := strings.Join(texts, "\n\n")
 			if req.Input.Event == "Stop" {
 				output = map[string]any{"decision": "block", "reason": text}
 			} else {
-				output["hookSpecificOutput"] = map[string]any{"hookEventName": req.Input.Event, "additionalContext": text}
+				hookOutput["additionalContext"] = text
 			}
+		}
+		if len(hookOutput) > 0 {
+			hookOutput["hookEventName"] = req.Input.Event
+			output["hookSpecificOutput"] = hookOutput
 		}
 	}
 	frame := map[string]any{

@@ -1448,3 +1448,85 @@ func TestClaudeExecuteReportsRateLimits(t *testing.T) {
 		t.Fatal("rate_limit_event did not reach OnRateLimits")
 	}
 }
+
+func TestClaudeSessionTitleEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name, version, title, resume string
+		extra, custom, prefix        []string
+		builtin, want                bool
+	}{
+		{name: "supported new session", version: "2.1.94 (Claude Code)", title: " - Review issue ", builtin: true, want: true},
+		{name: "existing session", version: "2.1.110", title: "Review issue", resume: "session-id", builtin: true},
+		{name: "manual name", version: "2.1.110", title: "Review issue", builtin: true, custom: []string{"-n", "Manual"}},
+		{name: "extra name", version: "2.1.110", title: "Review issue", builtin: true, extra: []string{"--name=Manual"}},
+		{name: "prefix name", version: "2.1.110", title: "Review issue", builtin: true, prefix: []string{"--name", "Manual"}},
+		{name: "older version", version: "2.1.93", title: "Review issue", builtin: true},
+		{name: "unknown version", title: "Review issue", builtin: true},
+		{name: "custom runtime", version: "2.1.110", title: "Review issue"},
+		{name: "blank title", version: "2.1.110", title: " ", builtin: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := claudeBackend{cfg: Config{CLIVersion: tc.version, BuiltinRuntime: tc.builtin, LaunchPrefix: tc.prefix}}
+			opts := ExecOptions{ThreadName: tc.title, ResumeSessionID: tc.resume, ExtraArgs: tc.extra, CustomArgs: tc.custom}
+			args := buildClaudeArgs(opts, nil)
+			want := ""
+			if tc.want {
+				want = strings.TrimSpace(tc.title)
+			}
+			if got := backend.sessionTitle(opts, args); got != want {
+				t.Fatalf("session title = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestClaudeExecuteSendsSessionTitleOverStdin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+set -eu
+for arg do
+  case "$arg" in *"Fixture title"*) exit 10 ;; esac
+done
+IFS= read -r init
+case "$init" in *'"UserPromptSubmit"'*) ;; *) exit 11 ;; esac
+case "$init" in *'"Stop"'*|*"Fixture title"*) exit 12 ;; esac
+case "$TITLE_INIT" in
+  success)
+    printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"multica-supplement-initialize","response":{}}}'
+    ;;
+  reject)
+    printf '%s\n' '{"type":"control_response","response":{"subtype":"error","request_id":"multica-supplement-initialize","error":"unsupported"}}'
+    ;;
+esac
+IFS= read -r prompt
+case "$prompt" in *'"type":"user"'*) ;; *) exit 13 ;; esac
+if [ "$TITLE_INIT" = success ]; then
+printf '%s\n' '{"type":"control_request","request_id":"title-hook","request":{"subtype":"hook_callback","callback_id":"multica-supplement-UserPromptSubmit","input":{"hook_event_name":"UserPromptSubmit"}}}'
+IFS= read -r reply
+case "$reply" in *'"sessionTitle":"Fixture title"'*) ;; *) exit 14 ;; esac
+fi
+printf '%s\n' '{"type":"result","subtype":"success","result":"fixture completed"}'
+`))
+	for _, mode := range []string{"success", "reject", "timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			backend := &claudeBackend{cfg: Config{
+				ExecutablePath: fakePath, BuiltinRuntime: true, CLIVersion: "2.1.110",
+				Logger: slog.Default(), Env: map[string]string{"IS_SANDBOX": "1", "TITLE_INIT": mode},
+			}}
+			session, err := backend.Execute(t.Context(), "original prompt", ExecOptions{
+				ThreadName: "Fixture title", Timeout: 5 * time.Second, HandshakeTimeout: 500 * time.Millisecond,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range session.Messages {
+			}
+			if result := <-session.Result; result.Status != "completed" || result.Output != "fixture completed" {
+				t.Fatalf("result = %+v", result)
+			}
+		})
+	}
+}
