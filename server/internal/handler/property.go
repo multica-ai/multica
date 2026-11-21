@@ -760,6 +760,10 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	expectedRevision, ok := parseIssueExpectedRevision(w, r)
+	if !ok {
+		return
+	}
 
 	// Validation and write share the property advisory lock with definition
 	// updates: the value written is guaranteed to reference the definition
@@ -800,10 +804,11 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		updated, err = q.SetIssuePropertyValue(r.Context(), db.SetIssuePropertyValueParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			Key:         uuidToString(def.ID),
-			Value:       value,
+			ID:               issue.ID,
+			WorkspaceID:      issue.WorkspaceID,
+			ExpectedRevision: expectedRevision,
+			Key:              uuidToString(def.ID),
+			Value:            value,
 		})
 		if err != nil {
 			if isCheckViolation(err) {
@@ -814,6 +819,10 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if expectedRevision.Valid && errors.Is(err, pgx.ErrNoRows) {
+			h.writeCurrentIssueRevisionConflict(w, r, issue, expectedRevision.Int64)
+			return
+		}
 		if errors.Is(err, errClientRejected) {
 			writeError(w, httpStatus, httpMsg)
 			return
@@ -850,6 +859,10 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	expectedRevision, ok := parseIssueExpectedRevision(w, r)
+	if !ok {
+		return
+	}
 
 	// Deleting a value is allowed even for archived definitions — cleanup
 	// must never be blocked. Unknown property ids only need to belong to the
@@ -866,12 +879,17 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.Issue, error) {
 		return q.DeleteIssuePropertyValue(r.Context(), db.DeleteIssuePropertyValueParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			Key:         uuidToString(propertyID),
+			ID:               issue.ID,
+			WorkspaceID:      issue.WorkspaceID,
+			ExpectedRevision: expectedRevision,
+			Key:              uuidToString(propertyID),
 		})
 	})
 	if err != nil {
+		if expectedRevision.Valid && errors.Is(err, pgx.ErrNoRows) {
+			h.writeCurrentIssueRevisionConflict(w, r, issue, expectedRevision.Int64)
+			return
+		}
 		slog.Warn("DeleteIssuePropertyValue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
 		writeError(w, http.StatusInternalServerError, "failed to unset property")
 		return

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -47,11 +48,12 @@ const (
 )
 
 type batchIssueResult struct {
-	IssueID    string `json:"issue_id"`
-	Identifier string `json:"identifier,omitempty"`
-	Outcome    string `json:"outcome"`
-	Code       string `json:"code,omitempty"`
-	Message    string `json:"message,omitempty"`
+	IssueRevision int64  `json:"issue_revision,omitempty"`
+	IssueID       string `json:"issue_id"`
+	Identifier    string `json:"identifier,omitempty"`
+	Outcome       string `json:"outcome"`
+	Code          string `json:"code,omitempty"`
+	Message       string `json:"message,omitempty"`
 	// RunOutcome is set on an updated item whose write could have started a
 	// run; see IssueRunOutcome.
 	RunOutcome *IssueRunOutcome `json:"run_outcome,omitempty"`
@@ -271,6 +273,7 @@ func (h *Handler) writeBatchIssue(ctx context.Context, workspaceID pgtype.UUID, 
 		return out, err
 	}
 
+	conditional := params != nil && params.ExpectedRevision.Valid
 	var cancelled []db.AgentTaskQueue
 	if params != nil {
 		out.issue, cancelled, err = updateIssueStoppingWakeups(ctx, q, *params)
@@ -279,16 +282,22 @@ func (h *Handler) writeBatchIssue(ctx context.Context, workspaceID pgtype.UUID, 
 		}
 	}
 	if labels != nil {
-		if out.labelsChanged, err = applyBatchLabelPlan(ctx, q, prev, labels); err != nil {
+		if out.labelsChanged, err = applyBatchLabelPlan(ctx, q, prev, labels, conditional); err != nil {
 			return out, err
 		}
 	}
 	if properties != nil {
-		if out.propertiesChanged, err = applyBatchPropertyPlan(ctx, q, prev, properties); err != nil {
+		if out.propertiesChanged, err = applyBatchPropertyPlan(ctx, q, prev, properties, conditional); err != nil {
 			return out, err
 		}
 	}
 	if out.labelsChanged || out.propertiesChanged {
+		if conditional && out.issue.Revision == prev.Revision {
+			out.issue, err = q.AdvanceConditionalBatchRevision(ctx, db.AdvanceConditionalBatchRevisionParams{ID: prev.ID, WorkspaceID: workspaceID, ExpectedRevision: params.ExpectedRevision.Int64})
+			if err != nil {
+				return out, err
+			}
+		}
 		if out.issue, err = q.GetIssue(ctx, prev.ID); err != nil {
 			return out, err
 		}
@@ -300,7 +309,7 @@ func (h *Handler) writeBatchIssue(ctx context.Context, workspaceID pgtype.UUID, 
 	return out, nil
 }
 
-func applyBatchLabelPlan(ctx context.Context, q *db.Queries, issue db.Issue, plan *batchLabelPlan) (bool, error) {
+func applyBatchLabelPlan(ctx context.Context, q *db.Queries, issue db.Issue, plan *batchLabelPlan, deferRevision bool) (bool, error) {
 	remove := plan.remove
 	if plan.clear {
 		current, err := q.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
@@ -320,14 +329,14 @@ func applyBatchLabelPlan(ctx context.Context, q *db.Queries, issue db.Issue, pla
 	}
 	changed := false
 	for _, id := range remove {
-		row, err := q.DetachLabelFromIssue(ctx, db.DetachLabelFromIssueParams{IssueID: issue.ID, LabelID: id, WorkspaceID: issue.WorkspaceID})
+		row, err := q.DetachLabelFromIssue(ctx, db.DetachLabelFromIssueParams{IssueID: issue.ID, LabelID: id, WorkspaceID: issue.WorkspaceID, DeferRevisionBump: deferRevision})
 		if err != nil {
 			return false, err
 		}
 		changed = changed || row.Changed
 	}
 	for _, id := range plan.add {
-		row, err := q.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{IssueID: issue.ID, LabelID: id, WorkspaceID: issue.WorkspaceID})
+		row, err := q.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{IssueID: issue.ID, LabelID: id, WorkspaceID: issue.WorkspaceID, DeferRevisionBump: deferRevision})
 		if err != nil {
 			return false, err
 		}
@@ -336,19 +345,19 @@ func applyBatchLabelPlan(ctx context.Context, q *db.Queries, issue db.Issue, pla
 	return changed, nil
 }
 
-func applyBatchPropertyPlan(ctx context.Context, q *db.Queries, issue db.Issue, plan *batchPropertyPlan) (bool, error) {
+func applyBatchPropertyPlan(ctx context.Context, q *db.Queries, issue db.Issue, plan *batchPropertyPlan, deferRevision bool) (bool, error) {
 	// Value writes bump the revision only when the stored value changes.
 	current, err := q.GetIssue(ctx, issue.ID)
 	if err != nil {
 		return false, err
 	}
-	revision := current.Revision
+	properties := current.Properties
 	changed := false
 	note := func(updated db.Issue) {
-		if updated.Revision != revision {
+		if !bytes.Equal(updated.Properties, properties) {
 			changed = true
 		}
-		revision = updated.Revision
+		properties = updated.Properties
 	}
 
 	for _, s := range plan.set {
@@ -367,10 +376,11 @@ func applyBatchPropertyPlan(ctx context.Context, q *db.Queries, issue db.Issue, 
 			return false, &batchSkipError{code: "invalid_value", message: fmt.Sprintf("property %q: %s", def.Name, err.Error())}
 		}
 		updated, err := q.SetIssuePropertyValue(ctx, db.SetIssuePropertyValueParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			Key:         uuidToString(def.ID),
-			Value:       value,
+			ID:                issue.ID,
+			WorkspaceID:       issue.WorkspaceID,
+			Key:               uuidToString(def.ID),
+			Value:             value,
+			DeferRevisionBump: deferRevision,
 		})
 		if err != nil {
 			if isCheckViolation(err) {
@@ -382,9 +392,10 @@ func applyBatchPropertyPlan(ctx context.Context, q *db.Queries, issue db.Issue, 
 	}
 	for _, id := range plan.unset {
 		updated, err := q.DeleteIssuePropertyValue(ctx, db.DeleteIssuePropertyValueParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			Key:         uuidToString(id),
+			ID:                issue.ID,
+			WorkspaceID:       issue.WorkspaceID,
+			Key:               uuidToString(id),
+			DeferRevisionBump: deferRevision,
 		})
 		if err != nil {
 			return false, err

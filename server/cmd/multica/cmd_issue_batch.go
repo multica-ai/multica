@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -38,7 +39,8 @@ var issueBatchUpdateCmd = &cobra.Command{
 		"removes every label first, so --clear-labels --add-label X replaces the set.\n" +
 		"Custom properties: --property Name=Value sets a value (same forms as\n" +
 		"`issue create --property`); --unset-property Name clears it.\n\n" +
-		"--dry-run runs every check and prints the same rows without writing anything.",
+		"--dry-run runs every check and prints the same rows without writing anything.\n" +
+		"--expected-revision protects exactly one issue, including atomic label-set replacements; select --output json for its final revision.",
 	RunE: runIssueBatchUpdate,
 }
 
@@ -50,6 +52,7 @@ func init() {
 
 func addIssueBatchUpdateFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
+	registerIssueExpectedRevisionFlag(cmd)
 	f.Bool("ids-stdin", false, "Read issue ids from stdin, one per line (in addition to arguments)")
 	f.String("status", "", "New status")
 	f.String("priority", "", "New priority")
@@ -72,11 +75,12 @@ func addIssueBatchUpdateFlags(cmd *cobra.Command) {
 }
 
 type issueBatchResult struct {
-	IssueID    string `json:"issue_id"`
-	Identifier string `json:"identifier,omitempty"`
-	Outcome    string `json:"outcome"`
-	Code       string `json:"code,omitempty"`
-	Message    string `json:"message,omitempty"`
+	IssueRevision int64  `json:"issue_revision,omitempty"`
+	IssueID       string `json:"issue_id"`
+	Identifier    string `json:"identifier,omitempty"`
+	Outcome       string `json:"outcome"`
+	Code          string `json:"code,omitempty"`
+	Message       string `json:"message,omitempty"`
 	// RunOutcome is kept so --output json passes it through.
 	RunOutcome *issueRunOutcome `json:"run_outcome,omitempty"`
 }
@@ -290,10 +294,19 @@ func resolveIssueBatchLabels(ctx context.Context, client *cli.APIClient, candida
 }
 
 func runIssueBatchUpdate(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
+
 	refs, err := collectIssueBatchArgs(cmd, args, os.Stdin)
 	if err != nil {
 		return err
 	}
+	if expectedRevision > 0 && len(refs) != 1 {
+		return errors.New("--expected-revision requires exactly one issue; read each issue revision and update separately")
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -322,20 +335,25 @@ func runIssueBatchUpdate(cmd *cobra.Command, args []string) error {
 		ids = append(ids, resolved.ID)
 	}
 
+	path := "/api/issues/batch-update"
+	if expectedRevision > 0 {
+		path = "/api/issues/conditional-batch-update?expected_revision=" + strconv.FormatInt(expectedRevision, 10)
+	}
+
 	var combined issueBatchResponse
 	for start := 0; start < len(ids); start += issueBatchChunkSize {
 		end := min(start+issueBatchChunkSize, len(ids))
 		body["issue_ids"] = ids[start:end]
 		var resp issueBatchResponse
 		ctx, cancel := cli.APIContext(context.Background())
-		err := client.PostJSON(ctx, "/api/issues/batch-update", body, &resp)
+		err := client.PostJSON(ctx, path, body, &resp)
 		cancel()
 		if err != nil {
 			if start > 0 {
 				printIssueBatchResults(cmd, combined)
 				return fmt.Errorf("batch update stopped after %d of %d issues: %w", start, len(ids), err)
 			}
-			return fmt.Errorf("batch update: %w", err)
+			return issueMutationError(cmd, "batch update", err)
 		}
 		if resp.Results == nil {
 			return errors.New("the server did not return per-issue results; update the server before using `issue batch update`")

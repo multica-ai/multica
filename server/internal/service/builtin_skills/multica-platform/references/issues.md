@@ -7,6 +7,7 @@ Product contracts the runtime brief does not fully encode.
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
 - [Status changes have server side effects](#status-changes-have-server-side-effects)
 - [Who else is running right now](#who-else-is-running-right-now)
+- [Conditional issue writes](issue-revisions.md)
 - [Sub-issues and stages](#sub-issues-and-stages)
 - [Charts and files in a comment](#charts-and-files-in-a-comment)
 - [Incorrect to correct](#incorrect-to-correct)

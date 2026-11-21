@@ -724,6 +724,50 @@ multica issue update <id> --attachment revised.png
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
 `--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
 
+### Conditional Issue Writes
+
+Read an issue's `revision` with `issue get --output json`, then pass
+`--expected-revision <n>` to `issue update`, `status`, `assign`, `reorder`,
+`metadata set/delete`, `property set/unset`, or `label add/remove`:
+
+```bash
+multica issue update <id> --title "Reconciled title" --expected-revision 7 --output json
+multica issue metadata set <id> --key state --value ready --expected-revision 8 --output json
+```
+
+The server compares and writes atomically. A state-changing match advances the
+issue revision once. A matching no-op preserves its revision but still checks
+the precondition. A stale request changes no protected state or revision. Two
+state-changing conditional writers using the same starting revision cannot both
+succeed.
+
+Successful main issue writes return `revision`. Conditional metadata, property,
+and label writes return `issue_revision` alongside their values, directly from
+the mutation response. A conflict with `--output json` emits a JSON object with
+`code: "revision_conflict"`, `expected_revision`, and `actual_revision` to stdout
+and exits nonzero. Re-read and reconcile before retrying; the CLI does not retry
+stale writes automatically.
+
+Omitting the flag preserves existing request/output and no-op behavior.
+All conditional write commands require an updated server with the
+conditional mutation routes; older servers reject them without an unconditional
+fallback. `issue update` rejects combining the precondition with `--attachment`
+or `--pr-auto-complete`, whose separate mutations cannot share its atomic write.
+Description text supplied through a file remains supported. Comment edits use
+comment revisions, and this option does not add conditional comment appends.
+
+### Conditional combined issue changes
+
+`multica issue batch update <id> --clear-labels --add-label <label-id> --expected-revision 7 --output json`
+protects an atomic label-set replacement or a combined field/property/label
+change. A scalar revision requires exactly one issue; multiple arguments fail
+before any requests. The result row returns its final `issue_revision`.
+A state-changing conditional batch advances the revision once for the whole
+transaction. Read that returned value before the next write. Use JSON output
+for returned revisions; table output preserves its existing presentation.
+All conditional write commands use protected routes that older servers reject,
+without retrying an unconditional mutation.
+
 ### Delete Issue
 
 ```bash

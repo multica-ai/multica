@@ -752,12 +752,14 @@ GROUP BY parent_issue_id;
 -- issue first so this is also the tenant check. A no-op, a missing issue, or
 -- a workspace mismatch returns no rows; callers that must distinguish those
 -- cases need a separate workspace-scoped read.
+-- A stale precondition also returns no rows; callers reload the current revision.
 UPDATE issue SET
     metadata = jsonb_set(metadata, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb),
     revision = revision + 1,
     last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
     updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('expected_revision')::bigint IS NULL OR revision = sqlc.narg('expected_revision')::bigint)
   AND metadata -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb
 RETURNING id, workspace_id, metadata, revision;
 
@@ -770,6 +772,7 @@ UPDATE issue SET
     last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
     updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('expected_revision')::bigint IS NULL OR revision = sqlc.narg('expected_revision')::bigint)
   AND metadata ? sqlc.arg('key')::text
 RETURNING id, workspace_id, metadata, revision;
 
@@ -793,3 +796,15 @@ WHERE t.id = sqlc.arg(origin_id)::uuid
   AND t.originator_source = 'direct_human'
   AND (sqlc.arg(origin_type)::text = 'quick_create'
        OR (sqlc.arg(origin_type)::text = 'agent_create' AND t.trigger_evidence_kind = 'chat'));
+
+-- name: AdvanceConditionalBatchRevision :one
+-- The caller holds the issue owner lock. Conditional combined mutations defer
+-- subresource increments and advance the issue exactly once before commit.
+UPDATE issue
+SET revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
+    updated_at = now()
+WHERE id = sqlc.arg('id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND revision = sqlc.arg('expected_revision')::bigint
+RETURNING *;

@@ -118,25 +118,34 @@ func (q *Queries) CreateIssueProperty(ctx context.Context, arg CreateIssueProper
 const deleteIssuePropertyValue = `-- name: DeleteIssuePropertyValue :one
 UPDATE issue
 SET properties = properties - $1::text,
-    revision = revision + CASE WHEN properties ? $1::text THEN 1 ELSE 0 END,
+    revision = revision + CASE WHEN NOT $2::bool AND properties ? $1::text THEN 1 ELSE 0 END,
     last_activity_at = CASE
         WHEN properties ? $1::text
         THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
         ELSE last_activity_at
     END,
     updated_at = CASE WHEN properties ? $1::text THEN now() ELSE updated_at END
-WHERE id = $2::uuid AND workspace_id = $3::uuid
+WHERE id = $3::uuid AND workspace_id = $4::uuid
+  AND ($5::bigint IS NULL OR revision = $5::bigint)
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, requester_user_id
 `
 
 type DeleteIssuePropertyValueParams struct {
-	Key         string      `json:"key"`
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Key               string      `json:"key"`
+	DeferRevisionBump bool        `json:"defer_revision_bump"`
+	ID                pgtype.UUID `json:"id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	ExpectedRevision  pgtype.Int8 `json:"expected_revision"`
 }
 
 func (q *Queries) DeleteIssuePropertyValue(ctx context.Context, arg DeleteIssuePropertyValueParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, deleteIssuePropertyValue, arg.Key, arg.ID, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, deleteIssuePropertyValue,
+		arg.Key,
+		arg.DeferRevisionBump,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.ExpectedRevision,
+	)
 	var i Issue
 	err := row.Scan(
 		&i.ID,
@@ -255,22 +264,25 @@ func (q *Queries) ListIssueProperties(ctx context.Context, arg ListIssueProperti
 const setIssuePropertyValue = `-- name: SetIssuePropertyValue :one
 UPDATE issue
 SET properties = jsonb_set(properties, ARRAY[$1::text], $2::jsonb, true),
-    revision = revision + CASE WHEN properties -> $1::text IS DISTINCT FROM $2::jsonb THEN 1 ELSE 0 END,
+    revision = revision + CASE WHEN NOT $3::bool AND properties -> $1::text IS DISTINCT FROM $2::jsonb THEN 1 ELSE 0 END,
     last_activity_at = CASE
         WHEN properties -> $1::text IS DISTINCT FROM $2::jsonb
         THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
         ELSE last_activity_at
     END,
     updated_at = CASE WHEN properties -> $1::text IS DISTINCT FROM $2::jsonb THEN now() ELSE updated_at END
-WHERE id = $3::uuid AND workspace_id = $4::uuid
+WHERE id = $4::uuid AND workspace_id = $5::uuid
+  AND ($6::bigint IS NULL OR revision = $6::bigint)
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, requester_user_id
 `
 
 type SetIssuePropertyValueParams struct {
-	Key         string      `json:"key"`
-	Value       []byte      `json:"value"`
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Key               string      `json:"key"`
+	Value             []byte      `json:"value"`
+	DeferRevisionBump bool        `json:"defer_revision_bump"`
+	ID                pgtype.UUID `json:"id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	ExpectedRevision  pgtype.Int8 `json:"expected_revision"`
 }
 
 // Single-key atomic write: concurrent writers on different property keys
@@ -280,8 +292,10 @@ func (q *Queries) SetIssuePropertyValue(ctx context.Context, arg SetIssuePropert
 	row := q.db.QueryRow(ctx, setIssuePropertyValue,
 		arg.Key,
 		arg.Value,
+		arg.DeferRevisionBump,
 		arg.ID,
 		arg.WorkspaceID,
+		arg.ExpectedRevision,
 	)
 	var i Issue
 	err := row.Scan(

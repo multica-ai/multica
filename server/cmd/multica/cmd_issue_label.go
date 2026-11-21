@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -45,6 +46,8 @@ func init() {
 	issueLabelCmd.AddCommand(issueLabelRemoveCmd)
 
 	issueLabelListCmd.Flags().String("output", "table", "Output format: table or json")
+	registerIssueExpectedRevisionFlag(issueLabelAddCmd)
+	registerIssueExpectedRevisionFlag(issueLabelRemoveCmd)
 	issueLabelAddCmd.Flags().String("output", "table", "Output format: table or json")
 	issueLabelRemoveCmd.Flags().String("output", "table", "Output format: table or json")
 	issueLabelListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -84,6 +87,10 @@ func runIssueLabelList(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueLabelAdd(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -102,8 +109,11 @@ func runIssueLabelAdd(cmd *cobra.Command, args []string) error {
 
 	body := map[string]any{"label_id": labelRef.ID}
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/labels", body, &result); err != nil {
-		return fmt.Errorf("attach label: %w", err)
+	if err := client.PostJSON(ctx, issueMutationPath(issueRef.ID, "/labels", expectedRevision), body, &result); err != nil {
+		return issueMutationError(cmd, "attach label", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); expectedRevision > 0 && output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
 	}
 	labelsRaw, ok := result["labels"].([]any)
 
@@ -125,6 +135,10 @@ func runIssueLabelAdd(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueLabelRemove(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -141,8 +155,24 @@ func runIssueLabelRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve label: %w", err)
 	}
 
+	if expectedRevision > 0 {
+		var result map[string]any
+		if err := client.DeleteJSONResponse(ctx, issueMutationPath(issueRef.ID, "/labels/"+url.PathEscape(labelRef.ID), expectedRevision), &result); err != nil {
+			return issueMutationError(cmd, "detach label", err)
+		}
+		if output, _ := cmd.Flags().GetString("output"); output == "json" {
+			return cli.PrintJSON(os.Stdout, result)
+		}
+		if labels, ok := result["labels"].([]any); ok {
+			fullID, _ := cmd.Flags().GetBool("full-id")
+			printLabelTable(labels, fullID)
+		} else {
+			fmt.Fprintln(os.Stdout, "Label detached.")
+		}
+		return nil
+	}
 	if err := client.DeleteJSON(ctx, "/api/issues/"+issueRef.ID+"/labels/"+labelRef.ID); err != nil {
-		return fmt.Errorf("detach label: %w", err)
+		return issueMutationError(cmd, "detach label", err)
 	}
 
 	// Follow up with the current label list so the user sees the result.

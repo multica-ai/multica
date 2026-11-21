@@ -726,11 +726,13 @@ func init() {
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
+	issueUpdateCmd.Flags().Int64(expectedRevisionFlag, 0, "Optimistic-concurrency precondition: only apply if the issue is still at this revision (from `issue get`), else fail with a revision conflict")
 	issueUpdateCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID) and cancel it; --status, if given, must be cancelled, and description/attachment changes must go in a separate update")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
+	issueStatusCmd.Flags().Int64(expectedRevisionFlag, 0, "Optimistic-concurrency precondition: only apply if the issue is still at this revision (from `issue get`), else fail with a revision conflict")
 	issueStatusCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID); the status must be cancelled")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -747,6 +749,7 @@ func init() {
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
 	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
+	issueAssignCmd.Flags().Int64(expectedRevisionFlag, 0, "Optimistic-concurrency precondition: only apply if the issue is still at this revision (from `issue get`), else fail with a revision conflict")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment list
@@ -1963,6 +1966,10 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	prAutoCompleteDisabled, err := issuePRAutoCompleteFlag(cmd)
 	if err != nil {
 		return err
@@ -1970,6 +1977,12 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	attachmentPaths, err := issueAttachmentPaths(cmd)
 	if err != nil {
 		return err
+	}
+	if expectedRevision > 0 && len(attachmentPaths) > 0 {
+		return fmt.Errorf("--expected-revision cannot be combined with --attachment: uploads happen before the conditional issue write")
+	}
+	if expectedRevision > 0 && prAutoCompleteDisabled != nil {
+		return fmt.Errorf("--expected-revision cannot be combined with --pr-auto-complete: PR automation is a separate write")
 	}
 	noStart, _ := cmd.Flags().GetBool("no-start")
 	statusChanged := cmd.Flags().Changed("status")
@@ -2144,14 +2157,17 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if noStart && len(body) > 0 {
 		body["suppress_run"] = true
 	}
+	if expectedRevision > 0 {
+		body["expected_revision"] = expectedRevision
+	}
 
 	var result map[string]any
 	if len(body) > 0 {
-		if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+		if err := client.PutJSON(ctx, issueMutationPath(issueRef.ID, "", expectedRevision), body, &result); err != nil {
 			if len(attachmentIDs) > 0 {
 				return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
 			}
-			return fmt.Errorf("update issue: %w", err)
+			return issueMutationError(cmd, "update issue", err)
 		}
 	} else {
 		// Keep issue update's response shape without issuing an empty update.
@@ -2193,6 +2209,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueAssign(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	toName, _ := cmd.Flags().GetString("to")
 	unassign, _ := cmd.Flags().GetBool("unassign")
 	noStart, _ := cmd.Flags().GetBool("no-start")
@@ -2242,9 +2262,13 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if expectedRevision > 0 {
+		body["expected_revision"] = expectedRevision
+	}
+
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
-		return fmt.Errorf("assign issue: %w", err)
+	if err := client.PutJSON(ctx, issueMutationPath(issueRef.ID, "", expectedRevision), body, &result); err != nil {
+		return issueMutationError(cmd, "assign issue", err)
 	}
 
 	if unassign {
@@ -2262,6 +2286,10 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueStatus(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	id := args[0]
 	status := args[1]
 	noStart, _ := cmd.Flags().GetBool("no-start")
@@ -2298,9 +2326,12 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	if noStart {
 		body["suppress_run"] = true
 	}
+	if expectedRevision > 0 {
+		body["expected_revision"] = expectedRevision
+	}
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
-		return fmt.Errorf("update status: %w", err)
+	if err := client.PutJSON(ctx, issueMutationPath(issueRef.ID, "", expectedRevision), body, &result); err != nil {
+		return issueMutationError(cmd, "update status", err)
 	}
 
 	if duplicateOf != "" {
@@ -2369,6 +2400,7 @@ func recordedDuplicateOf(result map[string]any, ref string) (string, error) {
 // — it hides the sibling target flags once one of them is set. It is shared with
 // the command's tests so they exercise the exact flag-group wiring that ships.
 func registerIssueReorderFlags(cmd *cobra.Command) {
+	registerIssueExpectedRevisionFlag(cmd)
 	cmd.Flags().String("before", "", "Place the issue directly above this issue (same column)")
 	cmd.Flags().String("after", "", "Place the issue directly below this issue (same column)")
 	cmd.Flags().Bool("top", false, "Move the issue to the top of its status column")
@@ -2386,6 +2418,10 @@ func registerIssueReorderFlags(cmd *cobra.Command) {
 // (status) is left untouched, so cross-column moves still go through
 // `issue status`.
 func runIssueReorder(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	before, _ := cmd.Flags().GetString("before")
 	after, _ := cmd.Flags().GetString("after")
 	top, _ := cmd.Flags().GetBool("top")
@@ -2474,6 +2510,7 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 	// Build the column order with the target removed, plus a lookup of every
 	// position in the column (the target's own included, for the no-op check).
 	positions := make(map[string]float64, len(column))
+	positions[issueRef.ID] = floatVal(target, "position")
 	ordered := make([]string, 0, len(column))
 	for _, raw := range column {
 		id := strVal(raw, "id")
@@ -2492,8 +2529,10 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 		if relative {
 			return reorderTargetNotInColumnError(ctx, client, otherRef, targetDisplay, status)
 		}
-		fmt.Fprintf(os.Stderr, "Issue %s is the only issue in the %s column; nothing to reorder.\n", targetDisplay, status)
-		return issueReorderOutput(cmd, target)
+		if expectedRevision == 0 {
+			fmt.Fprintf(os.Stderr, "Issue %s is the only issue in the %s column; nothing to reorder.\n", targetDisplay, status)
+			return issueReorderOutput(cmd, target)
+		}
 	}
 
 	insertIdx := 0
@@ -2521,14 +2560,18 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 
 	currentPos := positions[issueRef.ID]
 	newPos := computeReorderPosition(reordered, issueRef.ID, positions, currentPos)
-	if newPos == currentPos {
+	if newPos == currentPos && expectedRevision == 0 {
 		fmt.Fprintf(os.Stderr, "Issue %s is already in that position.\n", targetDisplay)
 		return issueReorderOutput(cmd, target)
 	}
 
+	body := map[string]any{"position": newPos}
+	if expectedRevision > 0 {
+		body["expected_revision"] = expectedRevision
+	}
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), map[string]any{"position": newPos}, &result); err != nil {
-		return fmt.Errorf("reorder issue: %w", err)
+	if err := client.PutJSON(ctx, issueMutationPath(issueRef.ID, "", expectedRevision), body, &result); err != nil {
+		return issueMutationError(cmd, "reorder issue", err)
 	}
 	fmt.Fprintf(os.Stderr, "Issue %s reordered.\n", issueDisplayKey(result))
 	return issueReorderOutput(cmd, result)
