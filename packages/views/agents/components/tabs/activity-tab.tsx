@@ -30,7 +30,7 @@ import {
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef, type IssueRouteRef } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton, type TimelineItem } from "../../../common/task-transcript";
@@ -556,7 +556,7 @@ function useTaskRowModel(task: AgentTask) {
     cfg,
     hasIssue,
     issue,
-    issueRef: issue?.identifier || task.issue_identifier || task.issue_id,
+    issueRef: issueRouteRef({ id: task.issue_id, identifier: issue?.identifier || task.issue_identifier }),
     title,
     SourceIcon,
     sourceLabel,
@@ -592,7 +592,7 @@ function TaskTitle({ task, title }: { task: AgentTask; title: string }) {
   );
 }
 
-function OpenIssueIconLink({ issueRef }: { issueRef: string }) {
+function OpenIssueIconLink({ issueRef }: { issueRef: IssueRouteRef }) {
   const { t } = useT("agents");
   const paths = useWorkspacePaths();
   return (

@@ -28,7 +28,7 @@ const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
 // The active list as a read that failed before anything loaded, and is
 // possibly being tried again.
 const activeFailure = { failed: false, retrying: false, refetch: vi.fn() };
-const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn() }));
+const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn(), getQueryData: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
   useQueryClient: () => queryClient,
@@ -64,6 +64,7 @@ vi.mock("@multica/core/hooks", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
     issueDetail: (id: string) => `/acme/issues/${id}`,

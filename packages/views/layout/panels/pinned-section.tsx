@@ -24,7 +24,7 @@ import { pinListOptions } from "@multica/core/pins/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { useIssueUnread } from "@multica/core/issues/unread";
-import { useWorkspacePaths, type WorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import type { Issue, PinnedItem } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { IssueActionsContextMenu } from "../../issues/actions";
@@ -49,10 +49,6 @@ import {
 // Stable empty default: an inline `= []` on useQuery is a new reference every
 // render while the query is disabled, which re-fires the sync effect below.
 const EMPTY_PINS: PinnedItem[] = [];
-
-function pinHref(p: WorkspacePaths, pin: PinnedItem): string {
-  return pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id);
-}
 
 /**
  * Pin list state for the Issues panel. Lifted out of the section so the
@@ -100,7 +96,7 @@ export function usePanelPins(
   const isPinActive = (pin: PinnedItem) =>
     pin.item_type === "issue"
       ? pin.item_id === currentIssueId
-      : isPathWithin(pathname, pinHref(p, pin));
+      : isPathWithin(pathname, p.projectDetail(pin.item_id));
   // A collapsed section shows no rows, so it must not keep the tree unlit.
   const pinnedCollapsed = useSidebarTreeStore((s) => s.pinnedCollapsed);
   const isActivePinnedRoute = !pinnedCollapsed && displayed.some(isPinActive);
@@ -123,7 +119,6 @@ type PanelPins = ReturnType<typeof usePanelPins>;
 
 export function PinnedSection({ pins, wsId }: { pins: PanelPins; wsId: string }) {
   const { t } = useT("layout");
-  const p = useWorkspacePaths();
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -179,7 +174,6 @@ export function PinnedSection({ pins, wsId }: { pins: PanelPins; wsId: string })
               <PinRow
                 key={pin.id}
                 pin={pin}
-                href={pinHref(p, pin)}
                 active={isPinActive(pin)}
                 onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                 wsId={wsId}
@@ -316,13 +310,11 @@ function SortablePinItem({
  */
 function PinRow({
   pin,
-  href,
   active,
   onUnpin,
   wsId,
 }: {
   pin: PinnedItem;
-  href: string;
   active: boolean;
   onUnpin: () => void;
   wsId: string;
@@ -356,7 +348,7 @@ function PinRow({
     return (
       <SortablePinItem
         pin={pin}
-        href={unreadIssueHref(p.issueDetail(issue.identifier), unread)}
+        href={unreadIssueHref(p.issueDetail(issueRouteRef(issue)), unread)}
         onUnpin={onUnpin}
         label={issue.title}
         active={active}
@@ -383,7 +375,7 @@ function PinRow({
   return (
     <SortablePinItem
       pin={pin}
-      href={href}
+      href={p.projectDetail(pin.item_id)}
       onUnpin={onUnpin}
       label={project.title}
       active={active}

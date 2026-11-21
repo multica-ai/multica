@@ -23,6 +23,7 @@ import {
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
+import { cachedIssueRouteRef } from "@multica/core/issues/canonical-id";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -403,7 +404,7 @@ export function InboxPage() {
       setSelectedKey("");
       return;
     }
-    replace(wsPaths.issueDetail(selectedKey));
+    replace(wsPaths.issueDetail(cachedIssueRouteRef(queryClient, wsId, selectedKey)));
   }, [
     viewLoading,
     viewError,
@@ -415,6 +416,7 @@ export function InboxPage() {
     replace,
     wsPaths,
     wsId,
+    queryClient,
     setSelectedKey,
   ]);
 

@@ -9,7 +9,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useIsGuest } from "@multica/core/permissions";
 import { useQuery } from "@tanstack/react-query";
@@ -281,7 +281,7 @@ function IssueSurfaceContent({
     [clientFilter, controller.issues],
   );
   const firstIssue = issues[0] ?? tableLoadedIssues[0];
-  useWarmRoute("issue", firstIssue ? paths.issueDetail(firstIssue.identifier) : null);
+  useWarmRoute("issue", firstIssue ? paths.issueDetail(issueRouteRef(firstIssue)) : null);
   const swimlaneIssues = useMemo(
     () =>
       clientFilter

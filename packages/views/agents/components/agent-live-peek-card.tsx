@@ -5,7 +5,7 @@ import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/ac
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef, type IssueRouteRef } from "@multica/core/paths";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
@@ -174,7 +174,7 @@ function CurrentIssueRow({
   issueId: string | null;
   label: string;
   emptyLabel: string;
-  issueHref: (ref: string) => string;
+  issueHref: (ref: IssueRouteRef) => string;
 }) {
   // Lazy issue detail — only enabled while the card is mounted AND we have
   // a running issue id. snapshot already gives us the id; this hook just
@@ -191,7 +191,7 @@ function CurrentIssueRow({
         issue ? (
           <TruncatedTooltip content={`${issue.identifier} ${issue.title}`}>
             <AppLink
-              href={issueHref(issue.identifier)}
+              href={issueHref(issueRouteRef(issue))}
               className="min-w-0 truncate text-brand hover:underline"
             >
               <span className="mr-1 font-mono text-micro">{issue.identifier}</span>

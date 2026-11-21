@@ -16,7 +16,7 @@ import { SIDEBAR_FIRST_PAGE, SIDEBAR_PAGE_STEP, type SidebarIssuesRequest } from
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { issueUnreadTarget, useIssueUnread } from "@multica/core/issues/unread";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { AgentTask, Issue, IssueUnread } from "@multica/core/types";
 import { AppLink, useWarmRoute } from "../../navigation";
@@ -343,7 +343,7 @@ export function SidebarIssueList({
     placeholderData: keepPreviousData,
   });
   const listed = params ? (query.data?.issues ?? EMPTY_ISSUES) : EMPTY_ISSUES;
-  useWarmRoute("issue", listed[0] ? p.issueDetail(listed[0].identifier) : null);
+  useWarmRoute("issue", listed[0] ? p.issueDetail(issueRouteRef(listed[0])) : null);
   const total = params ? (query.data?.total ?? 0) : 0;
   // The list no longer carries a kept issue; the detail cache follows its
   // edits, and dropping it on delete ends the keep.
@@ -409,7 +409,7 @@ export function SidebarIssueList({
               <SidebarIssueRow
                 wsId={wsId}
                 issue={issue}
-                href={p.issueDetail(issue.identifier)}
+                href={p.issueDetail(issueRouteRef(issue))}
                 active={issue.id === activeIssueId}
                 locating={locating && issue.id === activeIssueId}
                 statusColor={statusCatalog.colorOf(issue.status)}

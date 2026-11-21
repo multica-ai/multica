@@ -60,13 +60,14 @@ function renderPage(snoozed: SnoozedInboxIssue[]) {
     hash: "",
     getShareableUrl: (path) => path,
   };
-  return renderWithI18n(
+  renderWithI18n(
     <QueryClientProvider client={client}>
       <NavigationProvider value={nav}>
         <SnoozedInboxPage />
       </NavigationProvider>
     </QueryClientProvider>,
   );
+  return nav;
 }
 
 beforeEach(() => {
@@ -89,6 +90,20 @@ describe("SnoozedInboxPage", () => {
     renderPage([entry("issue-1", new Date(Date.now() + HOUR))]);
     fireEvent.click(screen.getByRole("button", { name: /Bring back now/ }));
     expect(state.unsnooze).toHaveBeenCalledWith({ id: "item-issue-1" });
+  });
+
+  // A UUID address is rewritten to the identifier once the issue loads, which
+  // mounts the issue page a second time on web.
+  it("opens an issue at its identifier", () => {
+    const nav = renderPage([{ ...entry("issue-1", new Date(Date.now() + HOUR)), issue_identifier: "MUL-41" }]);
+    fireEvent.click(screen.getByText("Issue issue-1"));
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/MUL-41");
+  });
+
+  it("takes the identifier from the loaded issue when the server sent none", () => {
+    const nav = renderPage([entry("issue-2", new Date(Date.now() + HOUR))]);
+    fireEvent.click(screen.getByText("Issue issue-2"));
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/MUL-2");
   });
 
   it("says when nothing is snoozed", () => {
