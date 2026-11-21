@@ -97,8 +97,7 @@ Cliquez sur une ligne pour ouvrir sa tâche au commentaire ou à la demande d'ap
 Une tâche ouverte depuis la boîte de réception affiche les actions de la boîte de réception dans son en-tête :
 
 - **Reporter** (`H`) retire la tâche de votre boîte de réception jusqu'à l'heure choisie et ouvre la suivante. Voir « Reporter une tâche » ci-dessous.
-- **Marquer comme terminé** passe la tâche en `done`, archive la notification et ouvre la suivante. La notification est archivée même si **Archiver les tâches que vous terminez** est désactivé. L'action est proposée tant que la tâche n'est ni terminée ni annulée.
-- **Archiver** (`E`) archive la notification et ouvre la suivante. L'archivage ne modifie ni ne supprime la tâche.
+- **Archiver** (`E`) archive la notification et ouvre la suivante. L'archivage ne modifie ni ne supprime la tâche. Pour clore la tâche, changez plutôt son statut ; si **Archiver les tâches que vous terminez** est activé, sa notification est archivée elle aussi.
 - **Se désabonner et archiver** (`⇧E`) est proposé sur les tâches qui ne sont pas les vôtres : assignées ni à vous, ni à un agent qui vous appartient. L'action vous désabonne de la tâche, archive la notification et ouvre la suivante. Les mises à jour ordinaires n'arrivent plus dans votre boîte de réception, mais les @mentions, si. Sur une tâche avec des sous-tâches, vous choisissez entre cette tâche seulement et cette tâche avec toutes ses sous-tâches. Pour cette tâche seulement, la confirmation propose **Annuler**, qui rétablit l'abonnement tel qu'il était. Le désabonnement des sous-tâches ne s'annule pas ici ; réabonnez-vous depuis la page de la tâche. La même action se trouve dans la carte au survol et dans le menu contextuel d'une ligne.
 
 La suivante est la ligne suivante que la section affiche avec ses filtres actuels : vous parcourez ainsi la boîte de réception sans revenir à la liste.
@@ -139,7 +138,7 @@ Lire une notification ne la retire pas. Une ligne quitte la boîte de réception
 
 Les fenêtres ouvertes retirent aussitôt une ligne archivée, sauf celle que vous avez ouverte. Quand sa notification quitte la boîte de réception autrement (vous passez la tâche à `done` depuis son statut, une autre fenêtre l'archive, ou une modification la sort des filtres de la section), la ligne reste en surbrillance à sa place et l'en-tête de la tâche indique ce qui s'est passé. **Annuler** fait revenir la notification, et **Suivante** (ou `E`) ouvre la ligne suivante. La ligne disparaît dès que vous passez à autre chose.
 
-Quand vous retirez vous-même la ligne ouverte, depuis l'en-tête de la tâche, sa ligne, la carte de survol ou une action groupée qui l'inclut, c'est la ligne suivante qui s'ouvre. S'il n'en reste aucune, la tâche reste ouverte. L'archivage, le passage à terminé et les actions groupées proposent **Annuler**, qui fait revenir les notifications sans changer le statut de la tâche.
+Quand vous retirez vous-même la ligne ouverte, depuis l'en-tête de la tâche, sa ligne, la carte de survol ou une action groupée qui l'inclut, c'est la ligne suivante qui s'ouvre. S'il n'en reste aucune, la tâche reste ouverte. L'archivage et les actions groupées proposent **Annuler**, qui fait revenir les notifications sans changer le statut de la tâche.
 
 Une notification ultérieure sur la tâche revient dans la boîte de réception.
 

@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "알림을 불러오는 중…",
     "empty": "알림이 없습니다",
-    "mark_done_tooltip": "완료로 표시",
     "archive_tooltip": "보관",
     "time": {
       "just_now": "방금 전",
@@ -155,7 +154,6 @@
     "mark_read_failed": "읽음 표시를 하지 못했습니다",
     "mark_unread_failed": "읽지 않음 표시를 하지 못했습니다",
     "archive_failed": "보관하지 못했습니다",
-    "mark_done_failed": "완료 표시를 하지 못했습니다",
     "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",
     "archive_all_failed": "모두 보관하지 못했습니다",
     "archive_all_read_failed": "읽은 항목을 보관하지 못했습니다",

@@ -2,7 +2,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Archive, ChevronDown, CircleCheck } from "@multica/ui/icons";
+import { AlarmClock, Archive, ChevronDown } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -35,29 +35,21 @@ import { useLocale, useT } from "../../i18n";
 
 /**
  * The Inbox's actions in the header of an issue opened from the Work panel's
- * Inbox section, while the section still lists it. Marking it done,
- * snoozing, archiving or unsubscribing opens the next notification the
- * section lists, so the Inbox can be worked through without leaving the page.
+ * Inbox section, while the section still lists it. Snoozing, archiving or
+ * unsubscribing opens the next notification the section lists, so the Inbox
+ * can be worked through without leaving the page.
  *
- * Once its notification leaves the Inbox on its own (the issue reached Done,
- * another window archived it), the section keeps the row in place and this
- * says so instead, with an undo and the way on to the next notification.
+ * These act on the notification only. The issue's status is changed from its
+ * own status control; once its notification leaves the Inbox on its own (the
+ * issue reached Done, another window archived it), the section keeps the row
+ * in place and this says so instead, with an undo and the way on to the next
+ * notification.
  *
  * A snoozed issue shows when it comes back instead, wherever it is opened,
  * with the way to bring it back now or change the time.
- *
- * `onMarkDone` sets the issue done and calls back once that is saved; it is
- * offered while the issue is not done or closed.
  */
-export function IssueInboxActions({
-  issueId,
-  onMarkDone,
-}: {
-  issueId: string;
-  onMarkDone?: (onSaved: () => void) => void;
-}) {
+export function IssueInboxActions({ issueId }: { issueId: string }) {
   const { t } = useT("inbox");
-  const { t: tIssues } = useT("issues");
   const wsId = useWorkspaceId();
   const { fromInbox } = useSidebarInboxIssue(wsId, issueId);
   const { rows, kept } = useFilteredInboxRows(wsId, issueId, fromInbox);
@@ -93,18 +85,6 @@ export function IssueInboxActions({
     if (!item) return;
     snooze(item, until);
     leave(issueId, next);
-  };
-
-  // Done archives the issue's notifications on the server; archiving here as
-  // well confirms it with an undo, which restores the notification and leaves
-  // the issue done. Until the status is saved the row stays, so a write that
-  // fails or never happens leaves it as it was.
-  const markDone = () => {
-    if (!item || !onMarkDone) return;
-    onMarkDone(() => {
-      void archiveWithUndo(item.id, issueId);
-      leave(issueId, next);
-    });
   };
 
   const moveOn = () => leave(issueId, next);
@@ -168,16 +148,6 @@ export function IssueInboxActions({
   return (
     <>
       <UnsubscribeArchiveButton issueId={issueId} userId={item.recipient_id} onConfirm={unsubscribeItem} />
-      {onMarkDone && (
-        <IconButton
-          label={tIssues(($) => $.detail.mark_done_tooltip)}
-          tooltipSide="bottom"
-          className="text-muted-foreground"
-          onClick={markDone}
-        >
-          <CircleCheck />
-        </IconButton>
-      )}
       <InboxSnoozeMenu
         open={snoozeOpen}
         onOpenChange={setSnoozeOpen}

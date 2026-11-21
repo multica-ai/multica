@@ -209,7 +209,7 @@ function renderPanel(
         {/* Each desktop tab mounts its own page. */}
         {desktop && pathname.startsWith("/acme/issues/") && (
           <div data-testid="issue-header">
-            <IssueInboxActions key={pathname} issueId={pathname.split("/").at(-1)!} onMarkDone={() => {}} />
+            <IssueInboxActions key={pathname} issueId={pathname.split("/").at(-1)!} />
           </div>
         )}
         {sheetOpen && spaceForPath(pathname) === "work" && <WorkPanel />}

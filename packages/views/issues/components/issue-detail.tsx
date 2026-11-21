@@ -25,15 +25,12 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CircleCheck,
   FileQuestion,
   Loader2,
   Lock,
   Milestone,
   MoreHorizontal,
   PanelRight,
-  Pin,
-  PinOff,
   Plus,
   SlidersHorizontal,
   Tag,
@@ -1251,11 +1248,11 @@ function SubIssueDisplayPopover({
 interface IssueDetailProps {
   issueId: string;
   onDelete?: () => void;
-  /** Called after the issue is marked as done via the toolbar button. */
-  onDone?: () => void;
+  /** The Inbox page's Archive in the header: archives the open notification. */
+  onArchive?: () => void;
   /**
-   * The Inbox's "unsubscribe & archive", shown next to Done on issues that
-   * are not the viewer's own. Only read alongside `onDone`.
+   * The Inbox's "unsubscribe & archive", shown next to Archive on issues that
+   * are not the viewer's own. Only read alongside `onArchive`.
    */
   onUnsubscribeArchive?: (scope: InboxUnsubscribeScope) => void;
   defaultSidebarOpen?: boolean;
@@ -1517,7 +1514,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightRequestPending = false, onHighlightLanded, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightRequestPending = false, onHighlightLanded, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -3005,8 +3002,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
-  // The inbox passes `onDone` and owns archive and restore there.
-  const archivedInboxItemId = useArchivedInboxItemId(id, !onDone);
+  // The inbox passes `onArchive` and owns archive and restore there.
+  const archivedInboxItemId = useArchivedInboxItemId(id, !onArchive);
   const pageMenu = useIssuePageMenu();
 
   // Labels live in their own query (not on the issue body) — fetch the count
@@ -3860,47 +3857,20 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 It self-hides when no agent is active. */}
             {!guest && <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />}
             {!guest && <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />}
-            {!onDone && !isPeek && (
-              <IssueInboxActions
-                issueId={id}
-                onMarkDone={
-                  issueBehavesAsAny(issue, ["done", "closed"])
-                    ? undefined
-                    : (onSaved) => handleUpdateField({ status: "done" }, { onSuccess: onSaved })
-                }
-              />
-            )}
-            {onDone && onUnsubscribeArchive && (
+            {!onArchive && !isPeek && <IssueInboxActions issueId={id} />}
+            {onArchive && onUnsubscribeArchive && (
               <UnsubscribeArchiveButton issueId={id} userId={user?.id} onConfirm={onUnsubscribeArchive} />
             )}
-            {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
-              <IconButton
-                label={t(($) => $.detail.mark_done_tooltip)}
-                tooltipSide="bottom"
-                className="text-muted-foreground"
-                onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
-              >
-                <CircleCheck />
-              </IconButton>
-            )}
-            {onDone && issueBehavesAs(issue, "done") && (
+            {onArchive && (
               <IconButton
                 label={t(($) => $.detail.archive_tooltip)}
                 tooltipSide="bottom"
                 className="text-muted-foreground"
-                onClick={() => { onDone(); }}
+                onClick={onArchive}
               >
                 <Archive />
               </IconButton>
             )}
-            <IconButton
-              label={actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
-              tooltipSide="bottom"
-              className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
-              onClick={actions.togglePin}
-            >
-              {actions.isPinned ? <PinOff /> : <Pin />}
-            </IconButton>
             {!guest && <IssueDetailActionsDropdown
               issue={issue}
               locateInSidebar={!isPeek}

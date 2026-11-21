@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "正在載入通知…",
     "empty": "暫無通知",
-    "mark_done_tooltip": "標為已完成",
     "archive_tooltip": "歸檔",
     "time": {
       "just_now": "剛剛",
@@ -155,7 +154,6 @@
     "mark_read_failed": "標為已讀失敗",
     "mark_unread_failed": "標為未讀失敗",
     "archive_failed": "歸檔失敗",
-    "mark_done_failed": "標為已完成失敗",
     "mark_all_read_failed": "全部標為已讀失敗",
     "archive_all_failed": "歸檔全部失敗",
     "archive_all_read_failed": "歸檔已讀失敗",

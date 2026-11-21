@@ -48,7 +48,6 @@ type Copy = {
   selectPrompt: string;
   markRead: string;
   markUnread: string;
-  markDone: string;
   archive: string;
   archivedToast: string;
   runFailed: string;
@@ -60,7 +59,7 @@ type Copy = {
   captions: Record<Phase, string>;
 };
 
-type Phase = "idle" | "start" | "opened" | "archived" | "done" | "menu" | "archivedView";
+type Phase = "idle" | "start" | "opened" | "archived" | "archivedAgain" | "menu" | "archivedView";
 
 const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
   en: {
@@ -113,7 +112,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     selectPrompt: "Open a notification from the Inbox",
     markRead: "Mark as read",
     markUnread: "Mark as unread",
-    markDone: "Mark as done",
     archive: "Archive",
     archivedToast: "Notification archived",
     runFailed: "Run failed",
@@ -127,8 +125,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       opened:
         "The issue opened at the comment. The notification turned read and stayed in the list. When you're done with it, click Archive (E).",
       archived:
-        "The row left the Inbox and the next notification opened: the draft is in. Click Mark as done to finish the issue.",
-      done: "You marked the issue done, so its notification was archived and the next one opened. Archived notifications are in the section's ⋯ menu. Click ⋯.",
+        "The row left the Inbox and the next notification opened: the draft is in. Once you've read it, archive this one too (E). Archiving never changes the issue's status.",
+      archivedAgain:
+        "That notification left too and the next one opened. The draft stays In Review until you change the issue's Status. Archived notifications are in the section's ⋯ menu. Click ⋯.",
       menu: "The ⋯ menu holds View archived and the bulk actions. Click View archived.",
       archivedView:
         "Archived notifications keep their read state, and you can unarchive any of them here. Use Replay to watch again.",
@@ -184,7 +183,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     selectPrompt: "从收件箱打开一条通知",
     markRead: "标为已读",
     markUnread: "标为未读",
-    markDone: "标记为已完成",
     archive: "归档",
     archivedToast: "已归档通知",
     runFailed: "运行失败",
@@ -196,8 +194,8 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       idle: "和你有关的通知在工作面板的最上方。",
       start: "三条未读通知。打开有人 @你 的那一条。",
       opened: "任务打开并定位到那条评论。通知变为已读，但仍留在列表里。处理完点\"归档\"（E）。",
-      archived: "这一行离开了收件箱，下一条通知自动打开：初稿到了。点\"标记为已完成\"结束这个任务。",
-      done: "你把任务标记为已完成，这条通知随之归档，下一条自动打开。已归档的通知在分区的 ⋯ 菜单里。点 ⋯。",
+      archived: "这一行离开了收件箱，下一条通知自动打开：初稿到了。看完也点\"归档\"（E）。归档不会改变任务的状态。",
+      archivedAgain: "这条通知也归档了，下一条自动打开。初稿仍是审核中，直到你在任务的\"状态\"里修改。已归档的通知在分区的 ⋯ 菜单里。点 ⋯。",
       menu: "⋯ 菜单里有\"查看已归档\"和批量操作。点\"查看已归档\"。",
       archivedView: "已归档的通知保留已读状态，可以在这里取消归档。点右上角可以重新演示。",
     },
@@ -252,7 +250,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     selectPrompt: "從收件箱開啟一條通知",
     markRead: "標為已讀",
     markUnread: "標為未讀",
-    markDone: "標記為已完成",
     archive: "歸檔",
     archivedToast: "已歸檔通知",
     runFailed: "執行失敗",
@@ -264,8 +261,8 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       idle: "和你有關的通知在工作面板的最上方。",
       start: "三條未讀通知。開啟有人 @你 的那一條。",
       opened: "任務開啟並定位到那條評論。通知變為已讀，但仍留在列表裡。處理完點\"歸檔\"（E）。",
-      archived: "這一列離開了收件箱，下一條通知自動開啟：初稿到了。點\"標記為已完成\"結束這個任務。",
-      done: "你把任務標記為已完成，這條通知隨之歸檔，下一條自動開啟。已歸檔的通知在分區的 ⋯ 選單裡。點 ⋯。",
+      archived: "這一列離開了收件箱，下一條通知自動開啟：初稿到了。看完也點\"歸檔\"（E）。歸檔不會改變任務的狀態。",
+      archivedAgain: "這條通知也歸檔了，下一條自動開啟。初稿仍是審查中，直到你在任務的\"狀態\"裡修改。已歸檔的通知在分區的 ⋯ 選單裡。點 ⋯。",
       menu: "⋯ 選單裡有\"查看已歸檔\"和批次操作。點\"查看已歸檔\"。",
       archivedView: "已歸檔的通知保留已讀狀態，可以在這裡取消歸檔。點右上角可以重新播放。",
     },
@@ -320,7 +317,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     selectPrompt: "インボックスから通知を開いてください",
     markRead: "既読にする",
     markUnread: "未読にする",
-    markDone: "完了にする",
     archive: "アーカイブ",
     archivedToast: "通知をアーカイブしました",
     runFailed: "実行失敗",
@@ -340,8 +336,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       opened:
         "タスクがそのコメントの位置で開きました。通知は既読になりましたが、リストには残っています。対応が済んだら「アーカイブ」（E）をクリックします。",
       archived:
-        "行がインボックスから外れ、次の通知が開きました。初稿が届いています。「完了にする」をクリックしてタスクを終えます。",
-      done: "タスクを完了にしたので通知はアーカイブされ、次の通知が開きました。アーカイブした通知はセクションの ⋯ メニューから見られます。⋯ をクリックします。",
+        "行がインボックスから外れ、次の通知が開きました。初稿が届いています。読んだらこれも「アーカイブ」（E）します。アーカイブしてもタスクのステータスは変わりません。",
+      archivedAgain:
+        "この通知もアーカイブされ、次の通知が開きました。タスクの「ステータス」を変えるまで、初稿はレビュー中のままです。アーカイブした通知はセクションの ⋯ メニューから見られます。⋯ をクリックします。",
       menu: "⋯ メニューには「アーカイブ済みを表示」と一括操作があります。「アーカイブ済みを表示」をクリックします。",
       archivedView: "アーカイブした通知は既読のまま残り、ここからアーカイブを解除できます。「もう一度」で最初から見られます。",
     },
@@ -396,7 +393,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     selectPrompt: "인박스에서 알림을 여세요",
     markRead: "읽음으로 표시",
     markUnread: "읽지 않음으로 표시",
-    markDone: "완료로 표시",
     archive: "보관",
     archivedToast: "알림을 보관했습니다",
     runFailed: "실행 실패함",
@@ -409,8 +405,10 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       start: "읽지 않은 알림이 3개 있습니다. 누군가 나를 멘션한 알림을 여세요.",
       opened:
         "태스크가 그 댓글 위치에서 열렸습니다. 알림은 읽음이 되었지만 목록에 그대로 남아 있습니다. 처리가 끝나면 '보관'(E)을 클릭하세요.",
-      archived: "행이 인박스에서 빠지고 다음 알림이 열렸습니다. 초안이 도착했습니다. '완료로 표시'를 클릭해 태스크를 끝내세요.",
-      done: "완료로 표시해서 알림이 보관되고 다음 알림이 열렸습니다. 보관된 알림은 섹션의 ⋯ 메뉴에서 볼 수 있습니다. ⋯을 클릭하세요.",
+      archived:
+        "행이 인박스에서 빠지고 다음 알림이 열렸습니다. 초안이 도착했습니다. 읽고 나면 이것도 '보관'(E)하세요. 보관해도 태스크의 상태는 바뀌지 않습니다.",
+      archivedAgain:
+        "이 알림도 보관되고 다음 알림이 열렸습니다. 태스크의 '상태'를 바꾸기 전까지 초안은 리뷰 중으로 남습니다. 보관된 알림은 섹션의 ⋯ 메뉴에서 볼 수 있습니다. ⋯을 클릭하세요.",
       menu: "⋯ 메뉴에는 '보관된 알림 보기'와 일괄 작업이 있습니다. '보관된 알림 보기'를 클릭하세요.",
       archivedView: "보관된 알림은 읽음 상태를 유지하고, 여기서 보관을 해제할 수 있습니다. '다시 보기'로 다시 볼 수 있습니다.",
     },
@@ -465,7 +463,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     selectPrompt: "Ouvrez une notification depuis la boîte de réception",
     markRead: "Marquer comme lu",
     markUnread: "Marquer comme non lu",
-    markDone: "Marquer comme terminé",
     archive: "Archiver",
     archivedToast: "Notification archivée",
     runFailed: "Exécution en échec",
@@ -485,8 +482,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       opened:
         "La tâche s'est ouverte au commentaire. La notification est devenue lue et reste dans la liste. Une fois qu'elle est traitée, cliquez sur Archiver (E).",
       archived:
-        "La ligne a quitté la boîte de réception et la notification suivante s'est ouverte : le premier jet est arrivé. Cliquez sur Marquer comme terminé pour clore la tâche.",
-      done: "Vous avez marqué la tâche comme terminée : sa notification a été archivée et la suivante s'est ouverte. Les notifications archivées sont dans le menu ⋯ de la section. Cliquez sur ⋯.",
+        "La ligne a quitté la boîte de réception et la notification suivante s'est ouverte : le premier jet est arrivé. Une fois lu, archivez-le aussi (E). Archiver ne change jamais le statut de la tâche.",
+      archivedAgain:
+        "Cette notification est partie à son tour et la suivante s'est ouverte. Le premier jet reste En relecture tant que vous ne changez pas le Statut de la tâche. Les notifications archivées sont dans le menu ⋯ de la section. Cliquez sur ⋯.",
       menu: "Le menu ⋯ regroupe Voir les archivées et les actions groupées. Cliquez sur Voir les archivées.",
       archivedView:
         "Les notifications archivées gardent leur état de lecture et peuvent être désarchivées ici. Utilisez Rejouer pour revoir la démo.",
@@ -501,7 +499,7 @@ const ARCHIVED: Record<Step, NoticeId[]> = {
   start: [],
   opened: [],
   archived: ["mention"],
-  done: ["mention", "draft"],
+  archivedAgain: ["mention", "draft"],
   menu: ["mention", "draft"],
   archivedView: ["mention", "draft"],
 };
@@ -509,7 +507,7 @@ const READ: Record<Step, NoticeId[]> = {
   start: ["assigned"],
   opened: ["assigned", "mention"],
   archived: ["assigned", "mention", "draft"],
-  done: ["assigned", "mention", "draft", "failed"],
+  archivedAgain: ["assigned", "mention", "draft", "failed"],
   menu: ["assigned", "mention", "draft", "failed"],
   archivedView: ["assigned", "mention", "draft", "failed"],
 };
@@ -517,26 +515,25 @@ const OPEN: Record<Step, NoticeId | null> = {
   start: null,
   opened: "mention",
   archived: "draft",
-  done: "failed",
+  archivedAgain: "failed",
   menu: "failed",
   archivedView: null,
 };
 
-type Status = "todo" | "in_progress" | "in_review" | "done";
+type Status = "todo" | "in_progress" | "in_review";
 
-function statusOf(id: NoticeId, step: Step): Status {
-  if (id === "draft") return ARCHIVED[step].includes("draft") ? "done" : "in_review";
+function statusOf(id: NoticeId): Status {
+  if (id === "draft") return "in_review";
   return id === "failed" ? "in_progress" : "todo";
 }
 
 /** Leads a row the way the issue's status icon does in the product. */
 function DemoStatus({ status }: { status: Status }) {
-  const Icon = { todo: Circle, in_progress: CircleDashed, in_review: CircleDot, done: CircleCheck }[status];
+  const Icon = { todo: Circle, in_progress: CircleDashed, in_review: CircleDot }[status];
   const color = {
     todo: "text-muted-foreground",
     in_progress: "text-warning",
     in_review: "text-success",
-    done: "text-info",
   }[status];
   return <Icon aria-hidden className={cn("size-3.5 shrink-0", color)} />;
 }
@@ -605,12 +602,12 @@ export function InboxDemo() {
           <SlidersHorizontal className="size-3.5" />
         </span>
         <span className="relative">
-          <CoachMark active={visible && phase === "done"} quiet ringClassName="rounded-md">
+          <CoachMark active={visible && phase === "archivedAgain"} quiet ringClassName="rounded-md">
             <button
               type="button"
               aria-label={t.menuLabel}
               aria-expanded={phase === "menu"}
-              disabled={phase !== "done"}
+              disabled={phase !== "archivedAgain"}
               onClick={() => setPhase("menu")}
               className={cn(
                 "flex size-5 items-center justify-center rounded-md text-faint-foreground",
@@ -664,7 +661,7 @@ export function InboxDemo() {
                   )}
                 >
                   <span className="mt-[3px] flex shrink-0">
-                    <DemoStatus status={statusOf(notice.id, phase)} />
+                    <DemoStatus status={statusOf(notice.id)} />
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="flex min-w-0 items-center gap-2 leading-5">
@@ -714,10 +711,11 @@ export function InboxDemo() {
           <HeaderAction label={isRead(selected.id) ? t.markUnread : t.markRead} coach={false}>
             {isRead(selected.id) ? <CircleDot /> : <Check />}
           </HeaderAction>
-          <HeaderAction label={t.markDone} coach={phase === "archived"} onClick={() => setPhase("done")}>
-            <CircleCheck />
-          </HeaderAction>
-          <HeaderAction label={`${t.archive} (E)`} coach={phase === "opened"} onClick={() => setPhase("archived")}>
+          <HeaderAction
+            label={`${t.archive} (E)`}
+            coach={phase === "opened" || phase === "archived"}
+            onClick={() => setPhase(phase === "opened" ? "archived" : "archivedAgain")}
+          >
             <Archive />
           </HeaderAction>
         </span>
@@ -755,7 +753,7 @@ export function InboxDemo() {
           .map((notice) => (
             <li key={notice.id} className="m-0 flex items-start gap-2 rounded-md px-2 py-1.5">
               <span className="mt-[3px] flex shrink-0">
-                <DemoStatus status={statusOf(notice.id, phase)} />
+                <DemoStatus status={statusOf(notice.id)} />
               </span>
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-body leading-5 text-muted-foreground">{notice.title}</span>
