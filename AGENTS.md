@@ -123,6 +123,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Import icons from `@multica/ui/icons`; no icon library is installed. If the icon you need is missing, draw it by following `.agents/skills/multica-icons/SKILL.md`. Do not substitute an inline SVG or an emoji. Rewrite icon imports in `ui:add` output before committing. Exception: proportional-width optical keycap glyphs live exclusively in `KBD_GLYPHS` inside `packages/ui/components/ui/kbd.tsx` and are only for `<Kbd>`.
 - Use shared semantic tokens in `packages/ui/styles/`. Typography uses the role-named `--text-*` scale in `packages/ui/styles/tokens.css`, not Tailwind's default size ramp.
 - Selected states remain identifiable on hover. Handle overflow, long text, and scrolling deliberately; avoid unnecessary local state and dividers.
+- Issue links use the identifier (`MUL-123`): `paths.issueDetail` takes an `IssueRouteRef` from `issueRouteRef(issue)`. With only a UUID, use `useIssueRouteRef` (or `cachedIssueRouteRef` in event handlers). A UUID URL is rewritten to the identifier after load, which mounts the issue page a second time on web.
 
 ## Testing
 

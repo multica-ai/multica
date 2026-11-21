@@ -94,7 +94,7 @@ import {
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyListOptions } from "@multica/core/properties";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
 import {
   agentListOptions,
@@ -2233,7 +2233,7 @@ export function TableView({
       // middle clicks open tabs. Callbacks without an event (keyboard
       // affordances) count as plain clicks.
       intentNavigate(
-        paths.issueDetail(issue.identifier),
+        paths.issueDetail(issueRouteRef(issue)),
         event ? resolveClickIntent(event) : "push",
         issue.identifier,
       );

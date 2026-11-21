@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo } from "react";
 import { useIssueOpeningStore, type IssueOpenMode } from "@multica/core/issues/stores/issue-opening-store";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import type { Issue } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 
@@ -167,7 +167,7 @@ export function useIssuePeekClick() {
       // Shift+Click in preview mode opens the full page in place. Left alone,
       // a link would hand Shift to the browser — a new window on web.
       event.preventDefault();
-      push(paths.issueDetail(issue.identifier));
+      push(paths.issueDetail(issueRouteRef(issue)));
       return true;
     }
     return false;

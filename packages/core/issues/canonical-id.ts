@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { issueRouteRef, type IssueRouteRef } from "../paths/paths";
 import type { Issue } from "../types";
 import { issueDetailOptions, issueKeys } from "./queries";
 import { useIssueReadState } from "./read-state";
@@ -17,9 +18,15 @@ export function isIssueUuid(value: string): boolean {
  * issue page rewrites a UUID address to the identifier after load, and on web
  * that rewrite mounts the page a second time.
  */
-export function useIssueRouteRef(wsId: string, issueId: string): string {
+export function useIssueRouteRef(wsId: string, issueId: string): IssueRouteRef {
   const { data } = useQuery({ ...issueDetailOptions(wsId, issueId), enabled: false });
-  return data?.identifier || issueId;
+  return issueRouteRef({ id: issueId, identifier: data?.identifier });
+}
+
+/** `useIssueRouteRef` for event handlers: reads the cache once, without subscribing. */
+export function cachedIssueRouteRef(qc: QueryClient, wsId: string, issueId: string): IssueRouteRef {
+  const data = qc.getQueryData<Issue>(issueKeys.detail(wsId, issueId));
+  return issueRouteRef({ id: issueId, identifier: data?.identifier });
 }
 
 /** An issue cached under its UUID whose identifier is `identifier`. */

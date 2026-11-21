@@ -18,7 +18,7 @@ import { CalendarClock, CalendarDays } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { CardControl } from "../../common/card-control";
 import { PropertyIcon } from "../../common/property-icon";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -420,7 +420,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         }
       >
         <AppLink
-          href={p.issueDetail(issue.identifier)}
+          href={p.issueDetail(issueRouteRef(issue))}
           newTabTitle={issue.identifier}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
           {...peekLinkProps}

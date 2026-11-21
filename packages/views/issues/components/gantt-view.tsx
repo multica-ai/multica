@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -369,7 +369,7 @@ function ScheduledRow({
         {/* Sticky label cell — it also carries the peeked mark, since its
             opaque background covers the row's own. */}
         <AppLink
-          href={p.issueDetail(issue.identifier)}
+          href={p.issueDetail(issueRouteRef(issue))}
           newTabTitle={issue.identifier}
           className={cn(
             "sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-body min-w-0",
@@ -411,7 +411,7 @@ function ScheduledRow({
               <TooltipTrigger
                 render={
                   <AppLink
-                    href={p.issueDetail(issue.identifier)}
+                    href={p.issueDetail(issueRouteRef(issue))}
                     newTabTitle={issue.identifier}
                     {...peekLinkProps}
                     className={cn(

@@ -152,7 +152,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useIssueReadState } from "@multica/core/issues/read-state";
 import { useIssueRouteRef } from "@multica/core/issues/canonical-id";
 import { useAuthStore } from "@multica/core/auth";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -1052,7 +1052,7 @@ function SubIssueRow({
           }
         />
         <AppLink
-          href={paths.issueDetail(child.identifier)}
+          href={paths.issueDetail(issueRouteRef(child))}
           className="flex min-w-0 flex-1 items-center gap-2.5"
         >
           <span className="text-caption text-muted-foreground tabular-nums shrink-0">
@@ -2952,7 +2952,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
 
   // Identifier form, like the issue's own copy link: a pasted link should say
   // which issue it points at.
-  const copyDeliverableLink = useCopyDeliverableLink(issue?.identifier ?? id);
+  const copyDeliverableLink = useCopyDeliverableLink(issueRouteRef({ id, identifier: issue?.identifier }));
   const describeDeliverable = useDeliverableDetails({
     files: deliverableFiles,
     commentById,
@@ -3525,7 +3525,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
           {parentIssueOpen && <div className="px-2">
             <div className="flex items-center gap-0.5 rounded-md px-2 hover:bg-accent/50 transition-colors group">
               <AppLink
-                href={paths.issueDetail(parentIssue.identifier)}
+                href={paths.issueDetail(issueRouteRef(parentIssue))}
                 className="flex flex-1 min-w-0 items-center gap-1.5 py-2 text-label"
               >
                 <StatusIcon
@@ -3569,7 +3569,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             {sidebarChildIssues.map((child) => (
               <li key={child.id}>
                 <AppLink
-                  href={paths.issueDetail(child.identifier)}
+                  href={paths.issueDetail(issueRouteRef(child))}
                   title={`${child.identifier} ${child.title}`}
                   aria-label={`${child.identifier} ${child.title}, ${resolveStatusLabel(child.status)}`}
                   className="group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-2 text-label transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -3799,7 +3799,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   // panel. The workspace name is intentionally absent — "all issues" is a view,
   // not a container.
   const breadcrumbSegments: BreadcrumbSegment[] = parentIssue
-    ? [{ href: paths.issueDetail(parentIssue.identifier), label: parentIssue.identifier }]
+    ? [{ href: paths.issueDetail(issueRouteRef(parentIssue)), label: parentIssue.identifier }]
     : breadcrumbProject
       ? [
           {
@@ -3862,7 +3862,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             // Below the trigger, since the header sits at the top of the page.
             <TruncatedTooltip content={headerLeafLabel} side="bottom">
               <AppLink
-                href={paths.issueDetail(issue.identifier)}
+                href={paths.issueDetail(issueRouteRef(issue))}
                 className="flex min-w-0 transition-opacity hover:opacity-80"
               >
                 <span className="truncate font-medium text-foreground">
@@ -4075,7 +4075,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
 
           {parentIssue && !issue.source_context && (
             <AppLink
-              href={paths.issueDetail(parentIssue.identifier)}
+              href={paths.issueDetail(issueRouteRef(parentIssue))}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
               <span className="shrink-0">{t(($) => $.detail.sub_issue_of)}</span>

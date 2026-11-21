@@ -6,6 +6,7 @@ import { IssueMentionCard } from "../../issues/components/issue-mention-card";
 import { ProjectMentionCard } from "../../projects/components/project-mention-card";
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}`, projectDetail: (id: string) => `/acme/projects/${id}` }),
 }));
 vi.mock("../../issues/components/issue-chip", () => ({

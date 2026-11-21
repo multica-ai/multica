@@ -8,7 +8,7 @@ import {
   type DeliverableFile,
 } from "@multica/core/attachments/deliverables";
 import { issueTimelineOptions } from "@multica/core/issues/queries";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, type IssueRouteRef } from "@multica/core/paths";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../../navigation";
 import { useT } from "../../../i18n";
@@ -25,7 +25,7 @@ import { useOpenAttachment } from "./use-open-attachment";
  * UUID. Returns undefined without one, so callers render no button.
  */
 export function useCopyDeliverableLink(
-  issueRef: string | undefined,
+  issueRef: IssueRouteRef | undefined,
 ): ((filename: string) => void) | undefined {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
