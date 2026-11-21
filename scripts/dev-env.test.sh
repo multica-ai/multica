@@ -19,6 +19,7 @@ fake_bin="$tmp_dir/bin"
 mkdir -p "$fake_bin"
 cat > "$fake_bin/psql" <<'EOF'
 #!/usr/bin/env bash
+[ -z "${PSQL_LOG:-}" ] || printf '%s\n' "$*" >> "$PSQL_LOG"
 case " $* " in
   *" DROP DATABASE "*) [ "${FAIL_DROP:-0}" != 1 ] ;;
   *) printf '1\n' ;;
@@ -897,7 +898,7 @@ status=0
 (
   # shellcheck disable=SC1090
   source "$root_dir/scripts/dev-env.sh"
-  BACKEND_PORT=18080 MULTICA_BIN="$fake_checkout/server/bin/multica" DIR="$fake_checkout"
+  OFFSET=0 BACKEND_PORT=18080 MULTICA_BIN="$fake_checkout/server/bin/multica" DIR="$fake_checkout"
   stop_desktop_daemon
 ) > "$out" 2>&1 || status=$?
 [ "$status" -ne 0 ] || fail "stop_desktop_daemon trusted a stop that left the daemon running"
@@ -918,6 +919,114 @@ dev_env destroy desktop-profile-906 --yes > "$out" 2>&1 \
   || { sed 's/^/  /' "$out" >&2; fail "retrying destroy after the daemon could be stopped failed"; }
 ! kill -0 "$desktop_daemon" 2>/dev/null || fail "Desktop's daemon is still running after destroy"
 [ ! -d "$desktop_profile_dir" ] || fail "destroy left Desktop's CLI profile behind"
+
+# ---------------------------------------------------------------------------
+# A slot is one backend port and one database name derived from its offset.
+# `make` exports PORT=8080, POSTGRES_DB=multica and their DATABASE_URL before
+# this script runs, so an env file that lacks those keys used to register the
+# shared backend and database, and destroy then dropped `multica`.
+# ---------------------------------------------------------------------------
+assert_slot_identity() (
+  local expected=$1
+  shift
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  local problem
+  problem="$(slot_identity_problem "$@")"
+  case "$expected" in
+    ok) [ -z "$problem" ] || fail "slot_identity_problem $* = '$problem', want none" ;;
+    *) case "$problem" in *"$expected"*) ;; *) fail "slot_identity_problem $* = '$problem', want '$expected'" ;; esac ;;
+  esac
+)
+slot_url() { printf 'postgres://multica:multica@localhost:5432/%s?sslmode=disable' "$1"; }
+assert_slot_identity ok 283 18363 multica_multica_283 "$(slot_url multica_multica_283)"
+assert_slot_identity ok 790 18870 multica_mul_8357_team_790 "$(slot_url multica_mul_8357_team_790)"
+assert_slot_identity ok 0 18080 multica_env_0 "$(slot_url multica_env_0)"
+assert_slot_identity "outside the slot range" -10000 8080 multica "$(slot_url multica)"
+assert_slot_identity "outside the slot range" 1920 20000 multica_x_1920 "$(slot_url multica_x_1920)"
+assert_slot_identity "not slot 283's port 18363" 283 8080 multica_multica_283 "$(slot_url multica_multica_283)"
+assert_slot_identity "database multica is not slot 283's" 283 18363 multica "$(slot_url multica)"
+assert_slot_identity "is not slot 5's" 5 18085 multica_foo_15 "$(slot_url multica_foo_15)"
+assert_slot_identity "DATABASE_URL points at database multica" 283 18363 multica_multica_283 "$(slot_url multica)"
+
+oneline_bin="$tmp_dir/oneline-bin"
+mkdir -p "$oneline_bin"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$oneline_bin/go"
+chmod +x "$oneline_bin/go"
+
+# Runs `up` in a fresh checkout whose .env holds one flag, with the values
+# `make` exports. The stub `go` fails the migration, which comes right after
+# the environment is registered, so nothing is started.
+oneline_up() (
+  local checkout=$1
+  shift
+  rm -rf "$checkout"
+  mkdir -p "$checkout/scripts"
+  cp "$root_dir/scripts/dev-env.sh" "$root_dir/scripts/local-env.sh" "$checkout/scripts/"
+  printf 'FF_DOCS_V1=true\n' > "$checkout/.env"
+  export MULTICA_DEV_HOME="$tmp_dir/dev-$(basename "$checkout")" MULTICA_DEV_TMPDIR="$tmp_dir/dev-tmp"
+  export PATH="$oneline_bin:$PATH"
+  export PORT=8080 FRONTEND_PORT=3000 POSTGRES_DB=multica MULTICA_PUBLIC_URL=http://localhost:8080
+  export DATABASE_URL="$(slot_url multica)"
+  for assignment in "$@"; do export "${assignment?}"; done
+  bash "$checkout/scripts/dev-env.sh" up --components api --ephemeral
+)
+
+oneline_checkout="$tmp_dir/oneline-checkout"
+status=0
+oneline_up "$oneline_checkout" > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] && grep -Fq "Migrations failed" "$out" \
+  || { sed 's/^/  /' "$out" >&2; fail "up with a one-line .env did not register and reach the migration"; }
+(
+  # shellcheck disable=SC1090
+  . "$tmp_dir"/dev-oneline-checkout/envs/*/manifest.env
+  [ "$BACKEND_PORT" = $((18080 + OFFSET)) ] || fail "one-line .env registered backend $BACKEND_PORT for slot $OFFSET"
+  [ "$DB_NAME" = "multica_oneline_checkout_$OFFSET" ] || fail "one-line .env registered database $DB_NAME"
+  [ "$DATABASE_URL" = "$(slot_url "$DB_NAME")" ] || fail "one-line .env registered DATABASE_URL $DATABASE_URL"
+  for line in FF_DOCS_V1=true "PORT=$BACKEND_PORT" "FRONTEND_PORT=$FRONTEND_PORT" "POSTGRES_DB=$DB_NAME" \
+    "DATABASE_URL=$DATABASE_URL" "MULTICA_PUBLIC_URL=http://localhost:$BACKEND_PORT"; do
+    grep -Fqx "$line" "$oneline_checkout/.env" || fail "the rewritten .env lacks the line $line"
+  done
+  psql_log="$tmp_dir/psql-oneline.log"
+  MULTICA_DEV_HOME="$tmp_dir/dev-oneline-checkout" PSQL_LOG="$psql_log" \
+    bash "$oneline_checkout/scripts/dev-env.sh" destroy "$NAME" --yes > "$out" 2>&1 \
+    || { sed 's/^/  /' "$out" >&2; fail "destroying the one-line .env environment failed"; }
+  grep -Fq "DROP DATABASE IF EXISTS \"$DB_NAME\"" "$psql_log" || fail "destroy did not drop the slot database"
+)
+
+# A setting the rewrite does not own can still win when the file is loaded
+# back; `up` must refuse rather than register the shared port.
+status=0
+oneline_up "$tmp_dir/override-checkout" BACKEND_PORT=8080 > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "up registered an environment while BACKEND_PORT=8080 overrode the slot"
+require_contains "$out" "still resolves to: PORT=8080"
+if ls "$tmp_dir"/dev-override-checkout/envs/*/manifest.env >/dev/null 2>&1; then
+  fail "up wrote a manifest although the slot did not take effect"
+fi
+
+# A manifest that names the shared backend and database is never acted on:
+# destroy keeps `multica`, Desktop's 8080 profile and its daemon, and the
+# manifest so the leftover stays visible.
+write_manifest "poisoned-907" "$fake_checkout" 907
+printf 'BACKEND_PORT=8080\nDB_NAME=multica\nDATABASE_URL=%s\n' "$(slot_url multica)" \
+  >> "$MULTICA_DEV_HOME/envs/poisoned-907/manifest.env"
+shared_profile_dir="$MULTICA_DEV_PROFILES_HOME/desktop-localhost-8080"
+mkdir -p "$shared_profile_dir"
+shared_daemon="$(sleep 60 > /dev/null 2>&1 & printf '%s' "$!")"
+printf '%s\n' "$shared_daemon" > "$shared_profile_dir/daemon.pid"
+psql_log="$tmp_dir/psql-poisoned.log"
+status=0
+PSQL_LOG="$psql_log" dev_env destroy poisoned-907 --yes > "$out" 2>&1 || status=$?
+kill -0 "$shared_daemon" 2>/dev/null || fail "destroy stopped the daemon of Desktop's shared 8080 profile"
+kill "$shared_daemon" 2>/dev/null || true
+[ "$status" -ne 0 ] || fail "destroy reported success while refusing to drop the shared database"
+! grep -Fq "DROP DATABASE" "$psql_log" 2>/dev/null || fail "destroy dropped a database that is not the slot's: $(cat "$psql_log")"
+require_contains "$out" "refusing to drop database multica"
+require_contains "$out" "refusing to remove Desktop's CLI profile desktop-localhost-8080"
+require_contains "$out" "left Desktop's daemon for profile desktop-localhost-8080 alone"
+[ -d "$shared_profile_dir" ] || fail "destroy removed Desktop's shared 8080 profile"
+[ -f "$MULTICA_DEV_HOME/envs/poisoned-907/manifest.env" ] || fail "destroy discarded the poisoned manifest"
+rm -rf "$MULTICA_DEV_HOME/envs/poisoned-907" "$shared_profile_dir"
 
 # ---------------------------------------------------------------------------
 # Unknown names and components fail loudly instead of doing something else.

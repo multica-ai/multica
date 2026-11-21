@@ -286,6 +286,44 @@ desktop_daemon_profile() {
   printf 'desktop-localhost-%s' "$BACKEND_PORT"
 }
 
+# A slot owns one backend port and one database name, both derived from its
+# offset, and destroy deletes by those names. Anything else in a manifest (the
+# shared 8080 backend, the default `multica` database) belongs to someone else.
+valid_offset() {
+  case "$1" in ""|*[!0-9]*|0?*) return 1 ;; esac
+  [ "$1" -lt 1000 ]
+}
+
+slot_backend_port_ok() {
+  valid_offset "$2" && [ "$1" = "$((18080 + $2))" ]
+}
+
+slot_database_name_ok() {
+  local db=$1 offset=$2 slug
+  valid_offset "$offset" || return 1
+  case "$db" in multica_*_"$offset") ;; *) return 1 ;; esac
+  slug="${db#multica_}"
+  slug="${slug%_"$offset"}"
+  case "$slug" in ""|*[!a-z0-9_]*) return 1 ;; esac
+}
+
+# Prints why OFFSET/PORT/DB/DATABASE_URL do not describe one slot, or nothing.
+slot_identity_problem() {
+  local offset=$1 port=$2 db=$3 url=$4 url_db
+  if ! valid_offset "$offset"; then
+    printf 'backend port %s is outside the slot range 18080-19079' "$port"
+  elif ! slot_backend_port_ok "$port" "$offset"; then
+    printf "backend port %s is not slot %s's port %s" "$port" "$offset" "$((18080 + offset))"
+  elif ! slot_database_name_ok "$db" "$offset"; then
+    printf "database %s is not slot %s's (multica_<slug>_%s)" "$db" "$offset" "$offset"
+  else
+    url_db="$(database_url_name "$url")"
+    [ "$url_db" = "$db" ] \
+      || printf 'DATABASE_URL points at database %s, not %s' "${url_db:-<none>}" "$db"
+  fi
+  return 0
+}
+
 # Chrome's conventional 9222 is left to whatever a human launches by hand.
 CDP_PORT_BASE=9223
 
@@ -405,25 +443,50 @@ ensure_dev_code() {
   info "Set MULTICA_DEV_VERIFICATION_CODE=$DEV_CODE_DEFAULT in $1 (ignored when APP_ENV=production)."
 }
 
-rewrite_env_ports() {
-  local file="$REPO_ROOT/$1" offset=$2 backend=$3 frontend=$4 db=$5 tmp database_url escaped_database_url
-  database_url="$(database_url_with_name "${DATABASE_URL:-}" "$db")" \
-    || die "DATABASE_URL is not a valid PostgreSQL URL: ${DATABASE_URL:-<unset>}"
-  escaped_database_url="$(printf '%s' "$database_url" | sed 's/[\\&|]/\\&/g')"
+set_env_value() {
+  local file=$1 tmp
   tmp="$(mktemp)"
-  sed \
-    -e "s|^PORT=.*|PORT=${backend}|" \
-    -e "s|^FRONTEND_PORT=.*|FRONTEND_PORT=${frontend}|" \
-    -e "s|^FRONTEND_ORIGIN=.*|FRONTEND_ORIGIN=http://localhost:${frontend}|" \
-    -e "s|^POSTGRES_DB=.*|POSTGRES_DB=${db}|" \
-    -e "s|^DATABASE_URL=.*|DATABASE_URL=${escaped_database_url}|" \
-    -e "s|^MULTICA_SERVER_URL=.*|MULTICA_SERVER_URL=ws://localhost:${backend}/ws|" \
-    -e "s|^MULTICA_PUBLIC_URL=.*|MULTICA_PUBLIC_URL=http://localhost:${backend}|" \
-    -e "s|^MULTICA_APP_URL=.*|MULTICA_APP_URL=http://localhost:${frontend}|" \
-    -e "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://localhost:${backend}|" \
-    -e "s|^NEXT_PUBLIC_WS_URL=.*|NEXT_PUBLIC_WS_URL=ws://localhost:${backend}/ws|" \
-    "$file" > "$tmp"
+  ENV_KEY="$2" ENV_VALUE="$3" awk '
+    BEGIN { key = ENVIRON["ENV_KEY"] "="; line = key ENVIRON["ENV_VALUE"] }
+    index($0, key) == 1 { print line; found = 1; next }
+    { print }
+    END { if (!found) print line }
+  ' "$file" > "$tmp"
   mv "$tmp" "$file"
+}
+
+# A key the file lacks is appended, not skipped: `make` has already exported
+# its own defaults for all of these (PORT=8080, POSTGRES_DB=multica, ...), and
+# sourcing a file without the key leaves those in force.
+rewrite_env_ports() {
+  local file="$REPO_ROOT/$1" offset=$2 backend=$3 frontend=$4 db=$5 database_url base_url
+  base_url="${DATABASE_URL:-postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@localhost:${POSTGRES_PORT:-5432}/postgres?sslmode=disable}"
+  database_url="$(database_url_with_name "$base_url" "$db")" \
+    || die "DATABASE_URL is not a valid PostgreSQL URL: $base_url"
+  set_env_value "$file" PORT "$backend"
+  set_env_value "$file" FRONTEND_PORT "$frontend"
+  set_env_value "$file" FRONTEND_ORIGIN "http://localhost:${frontend}"
+  set_env_value "$file" POSTGRES_DB "$db"
+  set_env_value "$file" DATABASE_URL "$database_url"
+  set_env_value "$file" MULTICA_SERVER_URL "ws://localhost:${backend}/ws"
+  set_env_value "$file" MULTICA_PUBLIC_URL "http://localhost:${backend}"
+  set_env_value "$file" MULTICA_APP_URL "http://localhost:${frontend}"
+  set_env_value "$file" NEXT_PUBLIC_API_URL "http://localhost:${backend}"
+  set_env_value "$file" NEXT_PUBLIC_WS_URL "ws://localhost:${backend}/ws"
+}
+
+# Run after the rewritten file is loaded back. Something outside the keys
+# rewrite_env_ports owns (BACKEND_PORT outranks PORT in local-env.sh) can still
+# win, and registering then would hand destroy the shared backend and database.
+verify_env_ports() {
+  local file=$1 backend=$2 frontend=$3 db=$4 problems="" url_db
+  url_db="$(database_url_name "${DATABASE_URL:-}")"
+  [ "$PORT" = "$backend" ] || problems="$problems PORT=$PORT"
+  [ "$FRONTEND_PORT" = "$frontend" ] || problems="$problems FRONTEND_PORT=$FRONTEND_PORT"
+  [ "$POSTGRES_DB" = "$db" ] || problems="$problems POSTGRES_DB=$POSTGRES_DB"
+  [ "$url_db" = "$db" ] || problems="$problems DATABASE_URL->${url_db:-<none>}"
+  [ -z "$problems" ] \
+    || die "Allocated backend $backend, frontend $frontend, database $db, but $file still resolves to:$problems. Remove the overriding setting (BACKEND_PORT, API_PORT or SERVER_PORT in $file or the shell) and run make up again."
 }
 
 # ---------------------------------------------------------------- database ---
@@ -443,6 +506,13 @@ database_url_with_name() {
     url.pathname = "/" + process.argv[2];
     process.stdout.write(url.toString());
   ' "$1" "$2" 2>/dev/null
+}
+
+database_url_name() {
+  node -e '
+    const url = new URL(process.argv[1]);
+    process.stdout.write(decodeURIComponent(url.pathname.replace(/^\//, "")));
+  ' "$1" 2>/dev/null || true
 }
 
 # Diagnoses the failure mode this whole script exists to make impossible:
@@ -1244,6 +1314,10 @@ stop_desktop_daemon() {
   profile="$(desktop_daemon_profile)"
   pid="$(cat "$DEV_PROFILES_HOME/$profile/daemon.pid" 2>/dev/null || true)"
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+  if ! slot_backend_port_ok "$BACKEND_PORT" "${OFFSET:-}"; then
+    warn "left Desktop's daemon for profile $profile alone: :$BACKEND_PORT is not slot ${OFFSET:-?}'s backend port"
+    return 0
+  fi
   bin="$MULTICA_BIN"
   [ -x "$bin" ] || bin="$DIR/apps/desktop/resources/bin/multica"
   if [ -x "$bin" ] && "${CLEAN_ENV[@]}" "$bin" daemon stop --force --profile "$profile" >/dev/null 2>&1 \
@@ -1731,6 +1805,7 @@ cmd_up() {
     candidate_renderer="$(renderer_port_for_offset "$offset")"
     candidate_collab="$(collab_port_for_offset "$offset")"
     if [ "$PORT" -lt 18080 ] || [ "$FRONTEND_PORT" -ne $((13000 + offset)) ] \
+      || [ -n "$(slot_identity_problem "$offset" "$PORT" "$POSTGRES_DB" "${DATABASE_URL:-}")" ] \
       || offset_registered "$offset" || ! port_free "$PORT" \
       || ! port_free "$FRONTEND_PORT" || ! port_free "$candidate_renderer" \
       || ! port_free "$candidate_collab"; then
@@ -1742,8 +1817,13 @@ cmd_up() {
       local new_db="multica_$(slugify "$(basename "$REPO_ROOT")")_${offset}"
       rewrite_env_ports "$ENV_FILE" "$offset" "$new_backend" "$new_frontend" "$new_db"
       load_env_file "$ENV_FILE"
+      verify_env_ports "$ENV_FILE" "$new_backend" "$new_frontend" "$new_db"
       info "Allocated slot $offset — backend $new_backend, frontend $new_frontend, database $new_db"
     fi
+    local identity_problem
+    identity_problem="$(slot_identity_problem "$offset" "$PORT" "$POSTGRES_DB" "${DATABASE_URL:-}")"
+    [ -z "$identity_problem" ] \
+      || die "Refusing to register an environment for $ENV_FILE: $identity_problem. destroy would delete what the manifest names."
 
     NAME="${name:-$(slugify "$(basename "$REPO_ROOT")")-${offset}}"
     require_env_name "$NAME"
@@ -1887,7 +1967,10 @@ cmd_destroy() {
     fi
   done
 
-  if command -v psql >/dev/null 2>&1; then
+  if ! slot_database_name_ok "$DB_NAME" "$OFFSET"; then
+    warn "refusing to drop database $DB_NAME: it is not slot $OFFSET's database (multica_<slug>_$OFFSET)"
+    failures=$((failures + 1))
+  elif command -v psql >/dev/null 2>&1; then
     admin_url="$(admin_database_url "$DATABASE_URL")"
     if PGCONNECT_TIMEOUT=3 psql "$admin_url" -tAc 'SELECT 1' >/dev/null 2>&1; then
       if psql "$admin_url" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$DB_NAME\" WITH (FORCE)" >/dev/null; then
@@ -1937,7 +2020,12 @@ cmd_destroy() {
   # The profile holds the daemon's pid and config, which a retried destroy
   # needs to stop it; keep it until Desktop and its daemon are confirmed gone.
   desktop_profile_dir="$DEV_PROFILES_HOME/$(desktop_daemon_profile)"
-  if [ "$desktop_stopped" != 1 ]; then
+  if ! slot_backend_port_ok "$BACKEND_PORT" "$OFFSET"; then
+    if [ -d "$desktop_profile_dir" ]; then
+      warn "refusing to remove Desktop's CLI profile $(desktop_daemon_profile): :$BACKEND_PORT is not slot $OFFSET's backend port"
+      failures=$((failures + 1))
+    fi
+  elif [ "$desktop_stopped" != 1 ]; then
     [ ! -d "$desktop_profile_dir" ] \
       || warn "kept Desktop's CLI profile $(desktop_daemon_profile) for the retry"
   elif [ -d "$desktop_profile_dir" ]; then
