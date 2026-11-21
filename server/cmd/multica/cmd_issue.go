@@ -223,10 +223,17 @@ var issueCmd = &cobra.Command{
 	Short: "Work with issues",
 }
 
+const issueTimestampHelp = "Issue JSON timestamps created_at and updated_at use RFC3339; last_activity_at\n" +
+	"is nullable and may include fractional seconds. A trailing Z means UTC, not\n" +
+	"local time: 2026-10-30T13:15:22Z = 2026-10-30T21:15:22+08:00. Parse the\n" +
+	"offset and compare instants when checking age; do not strip Z or compare\n" +
+	"against a timezone-free local clock. start_date and due_date are calendar\n" +
+	"dates (YYYY-MM-DD), not timestamps."
+
 var issueListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List issues in the workspace",
-	Long: "List issues in the workspace.\n\n" +
+	Long: "List issues in the workspace.\n\n" + issueTimestampHelp + "\n\n" +
 		"--property filters by a custom property, one member per flag. \"Name=Value\" is\n" +
 		"equality; the value is an option name or id (select, multi_select), true or\n" +
 		"false (checkbox), a member name, email or id (actor types), one list entry\n" +
@@ -245,6 +252,7 @@ var issueListCmd = &cobra.Command{
 var issueGetCmd = &cobra.Command{
 	Use:   "get <id>",
 	Short: "Get issue details",
+	Long:  "Get issue details.\n\n" + issueTimestampHelp,
 	Args:  exactArgs(1),
 	RunE:  runIssueGet,
 }
