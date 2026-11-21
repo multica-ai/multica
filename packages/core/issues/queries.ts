@@ -193,9 +193,6 @@ export const issueKeys = {
   /** PREFIX — the picker hook appends a signature of the prospective write. */
   issueTriggerPreview: (signature: string) =>
     [...issueKeys.issueTriggerPreviewAll(), signature] as const,
-  reactionsAll: () => ["issues", "reactions"] as const,
-  reactions: (issueId: string) =>
-    [...issueKeys.reactionsAll(), issueId] as const,
   subscribersAll: () => ["issues", "subscribers"] as const,
   subscribers: (issueId: string) =>
     [...issueKeys.subscribersAll(), issueId] as const,
@@ -721,16 +718,6 @@ export function issueCommentThreadOptions(issueId: string, commentId: string) {
         throw new Error("Comment not found in thread");
       }
       return comments;
-    },
-  });
-}
-
-export function issueReactionsOptions(issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.reactions(issueId),
-    queryFn: async () => {
-      const issue = await api.getIssue(issueId);
-      return issue.reactions ?? [];
     },
   });
 }

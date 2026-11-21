@@ -59,9 +59,12 @@ import { sortTimelineEntriesAsc } from "./timeline-sort";
 import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
 import { configStore } from "../config";
 import {
+  addReactionToList,
   onIssueAuxiliaryRevision,
   invalidateIssueOwnerProjections,
+  patchIssueReactions,
   reconcileIssueFullSnapshotRevision,
+  removeReactionFromList,
 } from "./ws-updaters";
 
 // Shared mutation variable types — used by both mutation hooks and
@@ -1167,11 +1170,15 @@ export function useToggleIssueReaction(issueId: string) {
       }
       return api.addIssueReaction(issueId, emoji);
     },
-    onSuccess: (reaction) => {
-      onIssueAuxiliaryRevision(qc, wsId, issueId, reaction?.issue_revision);
+    onSuccess: (reaction, { existing }) => {
+      if (reaction) {
+        patchIssueReactions(qc, wsId, issueId, addReactionToList(reaction), reaction.issue_revision);
+      } else if (existing) {
+        patchIssueReactions(qc, wsId, issueId, removeReactionFromList(existing));
+      }
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
+    onError: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId), exact: true });
     },
   });
 }
