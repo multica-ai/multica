@@ -79,7 +79,6 @@ vi.mock("motion/react", () => ({
       className?: string;
     }) => <div className={className}>{children}</div>,
   },
-  useReducedMotion: () => true,
 }));
 
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";

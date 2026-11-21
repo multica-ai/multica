@@ -39,6 +39,8 @@ type piBackend struct {
 	// changing concurrent executions through package-global state.
 	turnErrorGrace time.Duration
 	terminateGrace time.Duration
+	// Tests inject unsupported kernels per backend without changing global state.
+	cleanupPreflight func() error
 }
 
 var (
@@ -372,6 +374,13 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	if err != nil {
 		return nil, fmt.Errorf("%s executable not found at %q: %w", label, execName, err)
 	}
+	checkCleanup := b.cleanupPreflight
+	if checkCleanup == nil {
+		checkCleanup = checkPiCleanupSupport
+	}
+	if err := checkCleanup(); err != nil {
+		return nil, fmt.Errorf("%s process cleanup unavailable before start: %w", label, err)
+	}
 
 	rpcMode := label == "pi" && opts.EnableTaskSupplement
 	timeout := opts.Timeout
@@ -445,6 +454,16 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		args = buildOmpArgs(sessionPath, sessionDir, opts, b.cfg.Logger)
 	} else {
 		args = buildPiArgs(sessionPath, opts, b.cfg.Logger)
+	}
+	// Pi natively expands a leading "/skill:<name> " in session.prompt, which
+	// is exactly where both delivery modes land the task text (stdin in print
+	// mode, a prompt command in RPC mode). omp shares this backend but never
+	// command-dispatches the stdin prompt, and a custom runtime profile only
+	// promises the JSON protocol, not the vendor binary's skill grammar — an
+	// unexpanded token would reach the model as literal text. Both keep the
+	// fallback prompt; only the built-in pi binary earns the native one.
+	if label == "pi" && b.cfg.BuiltinRuntime && opts.SkillInvocation != nil {
+		prompt = opts.SkillInvocation.piSkillPrompt(opts.PiSkillPaths, b.cfg.LaunchPrefix, opts.ExtraArgs, opts.CustomArgs)
 	}
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(processCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	// The joined cleanup below owns TERM, escalation and pipe release.
@@ -1235,7 +1254,9 @@ func buildPiArgsFor(label, sessionPath string, opts ExecOptions, logger *slog.Lo
 	// SystemPrompt is intentionally not forwarded as --append-system-prompt:
 	// Pi loads the per-task AGENTS.md the daemon writes into the workdir, so
 	// inlining the same runtime brief would duplicate it on every turn.
-	// Verified against Pi 0.67.2 (MUL-5392).
+	// Pi 0.67.2 was verified by the MUL-5392 canary. For the author-reported
+	// Pi 1.5.2 in-band evidence (GitHub #10713) and upstream contract, see
+	// providerNeedsInlineSystemPrompt's evidence ledger.
 	args = append(args, filterPiCustomArgs(opts.CustomArgs, logger)...)
 	// The extension is explicit, so Pi loads it without trusting the project.
 	// It stays after custom args so the managed path cannot be mistaken for the

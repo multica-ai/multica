@@ -59,6 +59,7 @@ import type {
 import { useDragSettle } from "./use-drag-settle";
 import { useIssuePeekActions } from "../surface/peek-context";
 import { useBoardDragPan } from "./use-board-drag-pan";
+import { useRestoredScrollRef } from "../../platform";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -588,6 +589,16 @@ function BoardViewImpl({
   // #6700: drag empty board background with the left button to pan horizontally
   // (Trello/Linear). Card drags start on `[data-board-card]` and are ignored.
   const pan = useBoardDragPan<HTMLDivElement>();
+  // Tab-session scroll restoration (MUL-4741) for the horizontal column
+  // strip; each column's own vertical offset is restored by BoardColumn.
+  const restoreScrollRef = useRestoredScrollRef("board");
+  const attachScroller = useCallback(
+    (el: HTMLDivElement | null) => {
+      pan.ref.current = el;
+      restoreScrollRef(el);
+    },
+    [pan.ref, restoreScrollRef],
+  );
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
@@ -836,13 +847,14 @@ function BoardViewImpl({
       onDragCancel={handleDragCancel}
     >
       <div
-        ref={pan.ref}
+        ref={attachScroller}
         onPointerDown={pan.onPointerDown}
         onPointerMove={pan.onPointerMove}
         onPointerUp={pan.onPointerUp}
         onPointerCancel={pan.onPointerCancel}
         onLostPointerCapture={pan.onLostPointerCapture}
         data-board-scroller=""
+        data-tab-scroll-root="board"
         className={cn(
           "flex flex-1 min-h-0 gap-4 overflow-x-auto p-2",
           // While a side peek is open, a trailing spacer as wide as the panel

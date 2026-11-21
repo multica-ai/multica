@@ -56,6 +56,11 @@ vi.mock("../../navigation", () => ({
     onMouseEnter: () => {},
   }),
 }));
+vi.mock("./system-wakeup-defaults", () => ({
+  SystemWakeupDefaults: ({ onShowCustomized }: { onShowCustomized: () => void }) => (
+    <button onClick={onShowCustomized}>Issues with their own setting</button>
+  ),
+}));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../common/task-transcript", () => ({
   TranscriptButton: () => <button>Transcript</button>,
@@ -191,7 +196,7 @@ it("confirms batch consequences and retains only failed selections for retry", a
   );
   fireEvent.click(screen.getByRole("button", { name: "Turn off selected" }));
   expect(
-    screen.getByText(/Dispatched runs will continue/),
+    screen.getByText(/Runs already in progress will continue/),
   ).toBeVisible();
   expect(disable).not.toHaveBeenCalled();
   fireEvent.click(
@@ -221,7 +226,7 @@ it("loads more in bounded pages and resets paging and selection on scope changes
     screen.getByRole("checkbox", { name: "Select DEV-a, Agent a" }),
   );
   // The scope is the header's title; its menu carries the counts.
-  await user.click(screen.getByRole("button", { name: "Waiting or executing" }));
+  await user.click(screen.getByRole("button", { name: "Waiting or running" }));
   await user.click(await screen.findByRole("menuitemradio", { name: /All wakeups\s*60/ }));
   await waitFor(() =>
     expect(queries.at(-1)).toMatchObject({
@@ -264,7 +269,7 @@ it("opens the shared prompt editor from a manageable row without loading all pro
   vi.mocked(api.editIssueWakeupInstruction).mockResolvedValue(undefined);
   second.can_manage = false;
   mount();
-  const buttons = await screen.findAllByRole("button", { name: "Edit prompt" });
+  const buttons = await screen.findAllByRole("button", { name: "Edit instructions" });
   expect(buttons[1]).toBeDisabled();
   expect(api.listIssueWakeups).not.toHaveBeenCalled();
   if (!buttons[0]) throw new Error("Missing edit button");
@@ -332,6 +337,15 @@ it("filters by source from the header's filter menu and resets it", async () => 
   expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
 });
 
+it("shows every system rule, turned-off ones included, from the default's customized count", async () => {
+  mount();
+  await screen.findByRole("row", { name: /Issue a/ });
+  fireEvent.click(screen.getByRole("button", { name: "Issues with their own setting" }));
+  await waitFor(() =>
+    expect(queries.at(-1)).toMatchObject({ scope: "all", kind: "all", source: "system", agent_id: "", offset: 0 }),
+  );
+});
+
 it("starts a new wakeup from the header", async () => {
   const user = userEvent.setup();
   mount();
@@ -383,4 +397,34 @@ it("opens the create form for the picked issue", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+it("introduces wakeups when the workspace has none yet", async () => {
+  const user = userEvent.setup();
+  list.mockResolvedValue({
+    items: [],
+    total: 0,
+    counts: { all: 0, active: 0, paused: 0, disabled: 0, ended: 0 },
+    agents: [],
+  });
+  mount();
+  const intro = await screen.findByRole("region", { name: "Bring agents back at the right moment" });
+  expect(within(intro).getByRole("link", { name: /Read the docs/ })).toHaveAttribute(
+    "href",
+    "https://multica.ai/docs/issue-wakeups",
+  );
+  await user.click(within(intro).getByRole("button", { name: "New wakeup" }));
+  expect(await screen.findByRole("dialog", { name: "Pick issue" })).toBeVisible();
+});
+
+it("keeps the empty list when only the current scope has no wakeups", async () => {
+  list.mockResolvedValue({
+    items: [],
+    total: 0,
+    counts: { all: 2, active: 0, paused: 0, disabled: 0, ended: 2 },
+    agents: [],
+  });
+  mount();
+  expect(await screen.findByText("No matching wakeups")).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Bring agents back at the right moment" })).toBeNull();
 });

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { IssueView } from "../api/schemas";
-import { defaultSidebarViewOrder, reorderSidebarViewOrder, resolveSidebarViewItems } from "./sidebar-views";
+import {
+  defaultSidebarViewOrder,
+  migrateSidebarViewOrder,
+  reorderSidebarViewOrder,
+  resolveSidebarViewItems,
+  withLaterBuiltins,
+} from "./sidebar-views";
 
 const view = (id: string, owner_id: string): IssueView => ({
   id,
@@ -20,12 +26,14 @@ const view = (id: string, owner_id: string): IssueView => ({
 });
 
 describe("defaultSidebarViewOrder", () => {
-  it("lists built-ins, own views, then previously pinned views once", () => {
+  it("lists every built-in, own views, then previously pinned views once", () => {
     const views = [view("a", "me"), view("b", "other"), view("c", "other")];
     expect(defaultSidebarViewOrder(views, "me", ["c", "a"])).toEqual([
-      "builtin:my_issues",
-      "builtin:my_agents",
       "builtin:all_issues",
+      "builtin:my_work",
+      "builtin:working",
+      "builtin:subscribed",
+      "builtin:snoozed",
       "view:a",
       "view:c",
     ]);
@@ -41,16 +49,74 @@ describe("resolveSidebarViewItems", () => {
     expect(items.map((item) => item.id)).toEqual(["view:b", "builtin:all_issues"]);
     expect(items[1]).toMatchObject({ kind: "builtin", key: "all_issues" });
   });
+
+  it("drops built-ins that no longer exist", () => {
+    const items = resolveSidebarViewItems(["builtin:unread", "builtin:subscribed"], []);
+    expect(items).toEqual([{ id: "builtin:subscribed", kind: "builtin", key: "subscribed" }]);
+  });
+});
+
+describe("migrateSidebarViewOrder", () => {
+  it("turns My issues and My agents into My work, followed by the new built-ins, and drops Unread", () => {
+    expect(
+      migrateSidebarViewOrder([
+        "view:a",
+        "builtin:my_issues",
+        "builtin:all_issues",
+        "builtin:my_agents",
+        "builtin:unread",
+        "view:b",
+      ]),
+    ).toEqual([
+      "view:a",
+      "builtin:my_work",
+      "builtin:working",
+      "builtin:subscribed",
+      "builtin:all_issues",
+      "view:b",
+    ]);
+  });
+
+  it("keeps a removed My issues removed, and leaves today's orders alone", () => {
+    expect(migrateSidebarViewOrder(["builtin:all_issues", "builtin:unread"])).toEqual(["builtin:all_issues"]);
+    const current = ["builtin:subscribed", "view:a"];
+    expect(migrateSidebarViewOrder(current)).toEqual(current);
+  });
+});
+
+describe("withLaterBuiltins", () => {
+  it("adds Snoozed after Subscribed to an order saved before it existed", () => {
+    expect(withLaterBuiltins(["builtin:subscribed", "view:a"], [])).toEqual([
+      "builtin:subscribed",
+      "builtin:snoozed",
+      "view:a",
+    ]);
+  });
+
+  it("puts it after the last built-in when Subscribed was removed", () => {
+    expect(withLaterBuiltins(["view:a", "builtin:my_work", "view:b"], [])).toEqual([
+      "view:a",
+      "builtin:my_work",
+      "builtin:snoozed",
+      "view:b",
+    ]);
+  });
+
+  it("leaves an order that holds it, or hid it, alone", () => {
+    const moved = ["builtin:snoozed", "builtin:subscribed"];
+    expect(withLaterBuiltins(moved, [])).toEqual(moved);
+    expect(withLaterBuiltins(["builtin:subscribed"], ["builtin:snoozed"])).toEqual(["builtin:subscribed"]);
+  });
 });
 
 describe("reorderSidebarViewOrder", () => {
   it("moves visible ids and keeps unresolved ones in their slots", () => {
     expect(
       reorderSidebarViewOrder(
-        ["builtin:my_issues", "view:loading", "view:a", "builtin:all_issues"],
-        ["builtin:all_issues", "builtin:my_issues", "view:a"],
+        ["builtin:my_work", "view:loading", "view:a", "builtin:all_issues"],
+        ["builtin:all_issues", "builtin:my_work", "view:a"],
       ),
-    ).toEqual(["builtin:all_issues", "view:loading", "builtin:my_issues", "view:a"]);
+    ).toEqual(["builtin:all_issues", "view:loading", "builtin:my_work", "view:a"]);
   });
 
   it("appends visible ids the stored order did not have", () => {

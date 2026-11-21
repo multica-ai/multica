@@ -4,6 +4,7 @@ import { useEffect, useMemo, type ReactNode } from "react";
 import {
   ScrollRestorationProvider,
   type ScrollRestorationAdapter,
+  type ScrollRestorationEntry,
 } from "@multica/views/platform";
 
 /**
@@ -27,7 +28,7 @@ import {
  * tabs are real tabs), reset on full reload where the browser's own
  * restoration takes over.
  */
-const savedOffsets = new Map<string, { top: number; height: number }>();
+const savedOffsets = new Map<string, ScrollRestorationEntry>();
 
 /**
  * Generic view-state entries (the desktop memento's second cargo — e.g.
@@ -70,12 +71,18 @@ export function WebScrollRestorationProvider({
         if (performance.now() < suppressed) return;
         suppressedUntil.delete(key);
       }
-      if (el.scrollTop <= 0) {
-        // Back at the top is the default state — a stale offset would
+      const { scrollTop: top, scrollLeft: left } = el;
+      if (top <= 0 && left <= 0) {
+        // Back at the origin is the default state — a stale offset would
         // otherwise resurrect on the next visit.
         savedOffsets.delete(key);
       } else {
-        savedOffsets.set(key, { top: el.scrollTop, height: el.scrollHeight });
+        savedOffsets.set(
+          key,
+          left > 0
+            ? { top, height: el.scrollHeight, left }
+            : { top, height: el.scrollHeight },
+        );
       }
     };
     // Scroll events don't bubble, but they do propagate on the capture

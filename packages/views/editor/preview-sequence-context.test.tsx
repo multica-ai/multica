@@ -10,16 +10,21 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 
-const { downloadMock, getBaseUrlMock, toastErrorMock } = vi.hoisted(() => ({
+const { downloadMock, getBaseUrlMock, getAttachmentMock, toastErrorMock } = vi.hoisted(() => ({
   downloadMock: vi.fn(),
   getBaseUrlMock: vi.fn(() => ""),
+  getAttachmentMock: vi.fn(),
   toastErrorMock: vi.fn(),
 }));
 
 vi.mock("../platform", () => ({ openExternal: vi.fn() }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { getBaseUrl: getBaseUrlMock, getAttachmentTextContent: vi.fn() },
+  api: {
+    getBaseUrl: getBaseUrlMock,
+    getAttachmentTextContent: vi.fn(),
+    getAttachment: getAttachmentMock,
+  },
   PreviewTooLargeError: class extends Error {},
   PreviewUnsupportedError: class extends Error {},
 }));
@@ -172,6 +177,9 @@ function nextButton(): HTMLButtonElement {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Navigation tests use successful metadata; retry behavior belongs to the
+  // streamed-media tests, rather than delaying keyboard and paging assertions.
+  getAttachmentMock.mockImplementation(async (id: string) => imageAttachment(Number(id[0])));
 });
 
 describe("PreviewSequenceProvider", () => {
@@ -312,7 +320,7 @@ describe("PreviewSequenceProvider", () => {
     expectCounter("3 / 3");
   });
 
-  it("skips a broken image and says so", () => {
+  it("skips a broken image and says so", async () => {
     render(
       <PreviewSequenceProvider items={sequenceOf(THREE)}>
         <Opener openKey={THREE[0]!.id} />
@@ -326,8 +334,13 @@ describe("PreviewSequenceProvider", () => {
     });
     expectCounter("2 / 3");
 
+    const image = await waitFor(() => {
+      const image = screen.getByRole("dialog").querySelector("img");
+      expect(image).not.toBeNull();
+      return image!;
+    });
     act(() => {
-      fireEvent.error(screen.getByRole("dialog").querySelector("img")!);
+      fireEvent.error(image);
     });
 
     // Kept moving the way the reader was going, and the dead frame is now out
@@ -340,7 +353,63 @@ describe("PreviewSequenceProvider", () => {
     expectCounter("1 / 3");
   });
 
-  it("pages onto files that are not images", () => {
+  it("stays on a file opened by name when it fails, and says so on the stage", async () => {
+    function PinnedOpener() {
+      const sequence = usePreviewSequence();
+      return (
+        <button type="button" onClick={() => sequence.openAt(THREE[1]!.id, { stayOnError: true })}>
+          open
+        </button>
+      );
+    }
+    render(
+      <PreviewSequenceProvider items={sequenceOf(THREE)}>
+        <PinnedOpener />
+      </PreviewSequenceProvider>,
+    );
+    act(() => {
+      fireEvent.click(screen.getByText("open"));
+    });
+    expectCounter("2 / 3");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("dialog").querySelector("img")?.getAttribute("src"),
+      ).toBe(THREE[1]!.download_url),
+    );
+
+    act(() => {
+      fireEvent.error(screen.getByRole("dialog").querySelector("img")!);
+    });
+
+    // Not swapped for a neighbour: same position, same title, no broken frame,
+    // a visible failure with a way to download, and no "skipped it" toast.
+    expectCounter("2 / 3");
+    expect(screen.getByRole("dialog", { name: THREE[1]!.filename })).toBeInTheDocument();
+    expect(screen.getByRole("dialog").querySelector("img")).toBeNull();
+    // The stage shows the failure with its own download button, beside the
+    // top bar's (this file renders without translations, so match structure).
+    expect(screen.getAllByRole("button", { name: "Download" })).toHaveLength(2);
+    expect(toastErrorMock).not.toHaveBeenCalled();
+
+    // Moving on is still the reader's call, and a later failure skips as usual.
+    act(() => {
+      fireEvent.click(nextButton());
+    });
+    expectCounter("3 / 3");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("dialog").querySelector("img")?.getAttribute("src"),
+      ).toBe(THREE[2]!.download_url),
+    );
+    act(() => {
+      fireEvent.error(screen.getByRole("dialog").querySelector("img")!);
+    });
+    expectCounter("1 / 3");
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("pages onto files that are not images", async () => {
     const mixed = [
       imageAttachment(1),
       fileAttachment(2, "spec.pdf", "application/pdf"),
@@ -359,16 +428,18 @@ describe("PreviewSequenceProvider", () => {
       fireEvent.click(nextButton());
     });
     expectCounter("2 / 3");
-    expect(screen.getByTitle("spec.pdf").tagName).toBe("IFRAME");
+    expect((await screen.findByTitle("spec.pdf")).tagName).toBe("IFRAME");
 
     act(() => {
       fireEvent.click(nextButton());
     });
     expectCounter("3 / 3");
-    expect(screen.getByRole("dialog").querySelector("img")).not.toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").querySelector("img")).not.toBeNull(),
+    );
   });
 
-  it("leaves the arrow keys to a focused video", () => {
+  it("leaves the arrow keys to a focused video", async () => {
     const mixed = [
       fileAttachment(1, "demo.mp4", "video/mp4"),
       imageAttachment(2),
@@ -382,7 +453,11 @@ describe("PreviewSequenceProvider", () => {
       fireEvent.click(screen.getByText("open"));
     });
 
-    const video = screen.getByRole("dialog").querySelector("video")!;
+    const video = await waitFor(() => {
+      const el = screen.getByRole("dialog").querySelector("video");
+      expect(el).not.toBeNull();
+      return el!;
+    });
     act(() => {
       fireEvent.keyDown(video, { key: "ArrowRight" });
     });
@@ -397,7 +472,7 @@ describe("PreviewSequenceProvider", () => {
 
   // Review of #8763: the panel is reused across kinds, so the frame it held
   // for a PDF must never reach the image canvas while the next image decodes.
-  it("shows the image itself, not the previous file, while it decodes", () => {
+  it("shows the image itself, not the previous file, while it decodes", async () => {
     const restoreDecode = stubDecode(() => new Promise<void>(() => {}));
     try {
       const mixed = [
@@ -417,8 +492,10 @@ describe("PreviewSequenceProvider", () => {
         fireEvent.click(nextButton());
       });
 
-      const image = screen.getByRole("dialog").querySelector("img")!;
-      expect(image.getAttribute("src")).toBe(mixed[1]!.download_url);
+      await waitFor(() =>
+        expect(
+          screen.getByRole("dialog").querySelector("img")?.getAttribute("src")).toBe(mixed[1]!.download_url),
+      );
       expectCounter("2 / 3");
       expect(nextButton()).not.toBeDisabled();
       expect(toastErrorMock).not.toHaveBeenCalled();
@@ -443,7 +520,11 @@ describe("PreviewSequenceProvider", () => {
       act(() => {
         fireEvent.click(screen.getByText("open"));
       });
-      await act(async () => {});
+      await waitFor(() =>
+        expect(
+          screen.getByRole("dialog").querySelector("img")?.getAttribute("src"),
+        ).toBe(first.download_url),
+      );
       act(() => {
         fireEvent.click(nextButton());
       });
@@ -564,6 +645,54 @@ describe("host details", () => {
     });
     expect(onSelect).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("copies a link from the top bar and stays open", () => {
+    const onSelect = vi.fn();
+    render(
+      <PreviewSequenceProvider
+        items={sequenceOf(THREE)}
+        describeItem={(item) =>
+          item.key === THREE[0]!.id
+            ? { copyLink: { label: "Copy link to latest version", onSelect } }
+            : undefined
+        }
+      >
+        <Opener openKey={THREE[0]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    openFirst();
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy link to latest version" }));
+    });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    // A file the host has no link for shows no button.
+    act(() => {
+      fireEvent.click(nextButton());
+    });
+    expect(screen.queryByRole("button", { name: "Copy link to latest version" })).toBeNull();
+  });
+
+  it("reports when the viewer has finished closing, not when it moves", async () => {
+    const onClosed = vi.fn();
+    render(
+      <PreviewSequenceProvider items={sequenceOf(THREE)} onClosed={onClosed}>
+        <Opener openKey={THREE[0]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    openFirst();
+    act(() => {
+      fireEvent.click(nextButton());
+    });
+    expect(onClosed).not.toHaveBeenCalled();
+
+    act(() => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
   });
 
   it("hands the overview the file on screen when G is pressed", async () => {

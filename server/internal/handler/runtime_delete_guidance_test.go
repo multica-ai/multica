@@ -97,6 +97,52 @@ func TestDeleteAgentRuntime_OfflineProfileInstanceRefusalPointsAtAutoCleanup(t *
 	}
 }
 
+func TestDeleteAgentRuntime_LegacyProfileExplainsMachineBinding(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID, profileID := createProfileBackedRuntime(t, context.Background(), "Legacy machine guidance")
+	dbfx.Exec(t, `UPDATE runtime_profile SET daemon_id = NULL WHERE id = $1`, profileID)
+	dbfx.Exec(t, `UPDATE agent_runtime SET status = 'offline' WHERE id = $1`, runtimeID)
+	req := withURLParam(newRequest("DELETE", "/", nil), "runtimeId", runtimeID)
+	w := httptest.NewRecorder()
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status=%d: %s", w.Code, w.Body.String())
+	}
+	body := decodeConflict(t, w)
+	msg := conflictMessage(t, body)
+	if !strings.Contains(msg, "choose the machine") || strings.Contains(msg, "automatically after") {
+		t.Fatalf("incorrect legacy guidance: %s", msg)
+	}
+	if body["requires_machine_binding"] != true || body["auto_cleanup_after_days"] != float64(0) {
+		t.Fatalf("cleanup contract=%v", body)
+	}
+}
+
+func TestDeleteAgentRuntime_OtherMembersLegacyCopyExplainsAutoCleanup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID, profileID := createProfileBackedRuntime(t, context.Background(), "Legacy other member")
+	creator := dbfx.User(t, "Another creator", "legacy-creator-"+profileID+"@example.com")
+	dbfx.Exec(t, `UPDATE runtime_profile SET daemon_id = NULL, created_by = $2 WHERE id = $1`, profileID, creator)
+	dbfx.Exec(t, `UPDATE agent_runtime SET status = 'offline' WHERE id = $1`, runtimeID)
+	req := withURLParam(newRequest("DELETE", "/", nil), "runtimeId", runtimeID)
+	w := httptest.NewRecorder()
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status=%d: %s", w.Code, w.Body.String())
+	}
+	body := decodeConflict(t, w)
+	if msg := conflictMessage(t, body); !strings.Contains(msg, "automatically after") {
+		t.Fatalf("other member copy must remain eligible for automatic cleanup: %s", msg)
+	}
+	if body["requires_machine_binding"] == true || body["auto_cleanup_after_days"] != float64(service.OfflineRuntimeTTLDays()) {
+		t.Fatalf("cleanup contract=%v", body)
+	}
+}
+
 // Online is the one case where waiting is not the answer — the daemon would
 // re-register the row immediately. The refusal has to say so instead of
 // promising a cleanup that will not happen.
@@ -631,8 +677,9 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 	}
 }
 
-// Retention GC needs both no bound agents AND no unfinished task. An agent
-// rebound to another machine can leave a deferred run pinned to the old
+// Retention GC needs both no bound agents AND no unfinished task. A rebind
+// moves the agent's pending runs along, but a run enqueued concurrently with
+// the rebind, or left from before that move existed, can still sit on the old
 // runtime, so "no agents bound" alone is not a cleanup promise this server can
 // keep. Regression contributed by review.
 func TestDeleteAgentRuntime_OfflineInstanceWithUnfinishedTaskDoesNotPromiseCleanup(t *testing.T) {
@@ -643,10 +690,6 @@ func TestDeleteAgentRuntime_OfflineInstanceWithUnfinishedTaskDoesNotPromiseClean
 	runtimeID, _ := createProfileBackedRuntime(t, ctx, "Review Retired Host")
 	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Review Moved Agent")
 	issueID := dbfx.Issue(t, "Review deferred task")
-	taskID := dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id": runtimeID, "issue_id": issueID, "status": "deferred",
-		"fire_at": testutil.Raw("now() + interval '30 days'"),
-	})
 	targetID := newTestRuntime(t, "Review New Host", "online")
 	w := httptest.NewRecorder()
 	testHandler.UpdateAgent(w, withURLParam(newRequest("PATCH", "/api/agents/"+agentID,
@@ -654,6 +697,10 @@ func TestDeleteAgentRuntime_OfflineInstanceWithUnfinishedTaskDoesNotPromiseClean
 	if w.Code != http.StatusOK {
 		t.Fatalf("rebind: %d %s", w.Code, w.Body.String())
 	}
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID, "issue_id": issueID, "status": "deferred",
+		"fire_at": testutil.Raw("now() + interval '30 days'"),
+	})
 	dbfx.Exec(t, `UPDATE agent_runtime SET status='offline', last_seen_at=now()-interval '8 days' WHERE id=$1`, runtimeID)
 	var taskRuntime, taskStatus string
 	dbfx.QueryRow(t, `SELECT runtime_id::text, status FROM agent_task_queue WHERE id=$1`, taskID).Scan(&taskRuntime, &taskStatus)

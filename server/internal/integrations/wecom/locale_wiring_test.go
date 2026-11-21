@@ -98,6 +98,7 @@ func TestReplierNoticesReadTheAskersLanguage(t *testing.T) {
 				res  engine.Result
 				want string
 			}{
+				{"help", engine.Result{Outcome: engine.OutcomeHelp}, want.Help},
 				{"offline", engine.Result{Outcome: engine.OutcomeAgentOffline}, want.AgentOffline},
 				{"archived", engine.Result{Outcome: engine.OutcomeAgentArchived}, want.AgentArchived},
 				{"invoke denied", engine.Result{Outcome: engine.OutcomeInvokeDenied}, want.InvokeDenied},
@@ -208,6 +209,40 @@ func TestInvokeDeniedFromAGroupReadsTheSendersLanguage(t *testing.T) {
 	}
 	if got, want := sentMarkdown(t, conn, 0), copyPacks[LocaleEn].InvokeDenied; got != want {
 		t.Fatalf("refusal = %q, want the sender's language %q", got, want)
+	}
+}
+
+// TestInvokeDeniedAsksTheRoomWhenTheUserMustMessageFirst — being bound does
+// not mean the member has ever written to the bot in their 1:1, and until they
+// have WeCom refuses the private refusal (846607). The room then gets the same
+// token-less ask an unbound member gets, in the room's language, and nothing
+// that says the agent was refused to them.
+func TestInvokeDeniedAsksTheRoomWhenTheUserMustMessageFirst(t *testing.T) {
+	t.Parallel()
+	reg := newSendersRegistry()
+	inst := engine.ResolvedInstallation{ID: mustTestUUID(t)}
+	conn := &recordingConn{refuseTo: "T-asker", refuseCode: errcodeUserMustMessageFirst}
+	reg.set(inst.ID, conn.autoAck(newWSSender(conn, nil)))
+	r := NewOutboundReplier(OutboundReplierConfig{
+		Senders:   reg,
+		Languages: languagesFor("en"),
+		AppURL:    "https://multica.example",
+	})
+	msg := channel.InboundMessage{Source: channel.Source{
+		ChatID:   "GROUP_CHAT",
+		ChatType: channel.ChatTypeGroup,
+		SenderID: "T-asker",
+	}}
+	r.Reply(context.Background(), inst, msg, engine.Result{Outcome: engine.OutcomeInvokeDenied})
+
+	if n := len(conn.sendFrames()); n != 2 {
+		t.Fatalf("expected 2 frames (refused private notice + room ask), got %d", n)
+	}
+	if got := conn.sendBody(t, 1)["chatid"]; got != "GROUP_CHAT" {
+		t.Fatalf("second frame went to %v, want the room", got)
+	}
+	if got, want := sentMarkdown(t, conn, 1), copyFor(deploymentLocale()).MessageMeFirst; got != want {
+		t.Fatalf("room line = %q, want the room's-language ask %q", got, want)
 	}
 }
 

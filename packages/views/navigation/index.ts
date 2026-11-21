@@ -18,4 +18,5 @@ export { useAppOrigin } from "./use-app-origin";
 export { useRowLink, rowLinkInteractiveProps } from "./use-row-link";
 export { useIntentNavigate } from "./use-intent-navigate";
 export { useBackOrReplace } from "./use-back-or-replace";
+export { useHeldUntilArrival } from "./use-held-until-arrival";
 export type { NavigationAdapter } from "./types";

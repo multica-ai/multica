@@ -2,13 +2,14 @@
 
 import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
-import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import type { BatchIssueLabelOps, Issue, UpdateIssueRequest } from "@multica/core/types";
 import { errorCode } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useBatchUpdateIssues, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { runConfirmIntent } from "../issues/actions/run-confirm-gate";
+import { useBatchResultToast } from "../issues/components/batch-result-toast";
 import { useT } from "../i18n";
 import type { IssueTarget } from "./types";
 
@@ -37,25 +38,19 @@ export function useIssueTargetWriter(target: IssueTarget) {
   const openModal = useModalStore((s) => s.open);
   const issues = useMemo(() => targetIssues(target), [target]);
 
+  const { report, reportError } = useBatchResultToast();
   const applyBatch = useCallback(
-    async (updates: Partial<UpdateIssueRequest>) => {
+    async (updates: Partial<UpdateIssueRequest>, labels?: BatchIssueLabelOps, successMessage?: string) => {
       if (target.kind !== "batch") return;
       const ids = issues.map((issue) => issue.id);
-      const count = ids.length;
       try {
-        const { updated } = await batchUpdate.mutateAsync({ ids, updates });
-        if (updated < count) {
-          toast.warning(t(($) => $.batch.update_partial, { updated, count }));
-        } else {
-          toast.success(t(($) => $.batch.update_success, { count }));
-        }
+        const response = await batchUpdate.mutateAsync({ ids, updates, labels });
+        report(response, ids.length, { successMessage });
       } catch (err) {
-        toast.error(
-          err instanceof Error && err.message ? err.message : t(($) => $.batch.update_failed),
-        );
+        reportError(err);
       }
     },
-    [batchUpdate, issues, t, target.kind],
+    [batchUpdate, issues, report, reportError, target.kind],
   );
 
   const applySingle = useCallback(
@@ -115,5 +110,11 @@ export function useIssueTargetWriter(target: IssueTarget) {
     [apply, issues, openModal, target.kind],
   );
 
-  return { issues, apply, assign };
+  /** Label add / remove across a selection, as one batch write. */
+  const applyLabels = useCallback(
+    (labels: BatchIssueLabelOps, successMessage: string) => void applyBatch({}, labels, successMessage),
+    [applyBatch],
+  );
+
+  return { issues, apply, assign, applyLabels };
 }

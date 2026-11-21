@@ -18,14 +18,14 @@
     "headline_line2": "하나의",
     "headline_emphasis": "워크스페이스에서.",
     "lede": "동료에게 일을 맡기듯 태스크를 할당하세요. 에이전트가 이를 맡고, 상태를 업데이트하고, 끝나면 댓글을 남깁니다.",
-    "lede_web": "데스크톱에는 런타임이 포함되어 있어 따로 설치할 게 없습니다. 웹에서 계속하려면 내 CLI를 연결하세요.",
+    "lede_web": "데스크톱 앱에는 로컬 런타임이 포함되어 있어 별도의 CLI 설정이 필요 없습니다. 직접 CLI를 연결하려면 웹에서 계속하세요.",
     "download_desktop": "데스크톱 다운로드",
     "continue_on_web": "웹에서 계속",
     "start_exploring": "둘러보기 시작",
     "skip_existing": "이미 해봤습니다",
     "illustration": {
       "card1_actor_name": "나",
-      "card1_actor_initial": "N",
+      "card1_actor_initial": "나",
       "card1_body_prefix": " 짧은 출시 글 초안 작성해 줄래? ",
       "card1_body_suffix": "의 인터뷰 결과를 참고해줘.",
       "card1_mention_content": "@콘텐츠 에이전트",
@@ -222,7 +222,7 @@
   },
   "errors": {
     "skip_failed": "온보딩을 마치지 못했습니다",
-    "guide_failed": "런타임 안내 태스크를 만들지 못했습니다. 다시 시도해 주세요.",
+    "guide_failed": "설정 가이드를 만들 수 없습니다. 다시 시도해 주세요.",
     "mika_setup_failed": "Mika 워크스페이스를 시작하지 못했습니다"
   },
   "mika_intro": {

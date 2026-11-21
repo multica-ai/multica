@@ -529,6 +529,44 @@ func TestExecuteTool_Success(t *testing.T) {
 	}
 }
 
+func TestExecuteTool_ArgumentsOnWire(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{name: "empty", args: map[string]any{}, want: `{}`},
+		{name: "nil", want: `{}`},
+		{name: "nonempty", args: map[string]any{"pageSize": 1}, want: `{"pageSize":1}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/tools/execute/GOOGLE_ANALYTICS_LIST_ACCOUNT_SUMMARIES" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				var wire map[string]json.RawMessage
+				readJSON(t, r, &wire)
+				if got := string(wire["arguments"]); got != tt.want {
+					t.Errorf("arguments on wire = %q, want %s; body = %s", got, tt.want, wire)
+				}
+				writeJSON(t, w, http.StatusOK, map[string]any{"successful": true})
+			})
+			resp, err := c.ExecuteTool(context.Background(), "GOOGLE_ANALYTICS_LIST_ACCOUNT_SUMMARIES", composio.ExecuteToolRequest{
+				Arguments:          tt.args,
+				ConnectedAccountID: "ca_selected",
+				UserID:             "ws_team",
+				Version:            "20261027_00",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !resp.Successful {
+				t.Errorf("unexpected response: %+v", resp)
+			}
+		})
+	}
+}
+
 // TestExecuteToolRequest_VersionSerialization locks in the json tag for the
 // Version field — GPT-Boy's review against PR #4603 caught that the field
 // used to serialize as `toolkit_versions`, which is not a v3.1 wire key.

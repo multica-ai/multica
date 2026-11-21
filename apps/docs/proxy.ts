@@ -45,12 +45,11 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // Run on every path except static/api and root metadata routes. Includes
-  // the bare `/` root so `/docs/` lands on the English home. `sitemap.xml`
-  // and `robots.txt` MUST be excluded — they're not under `[lang]/`, so
-  // routing them through the locale rewrite would 404 the sitemap that
-  // robots.txt advertises to crawlers.
+  // the bare `/` root so `/docs/` lands on the English home. Metadata routes
+  // such as `icon.svg` are not under `[lang]/` and must bypass locale routing
+  // so browsers and crawlers can fetch the original resources.
   matcher: [
-    "/((?!api|_next/static|_next/image|images|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api|_next/static|_next/image|images|favicon.ico|icon\\.svg$|sitemap.xml|robots.txt).*)",
     "/",
   ],
 };

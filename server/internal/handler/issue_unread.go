@@ -10,11 +10,14 @@ import (
 
 // IssueUnreadResponse is an issue with an agent result the caller has not seen
 // yet. outcome is completed | failed, or manual when the caller marked it
-// unread themselves; agent_id is null for manual.
+// unread themselves; agent_id and task_id are null for manual. comment_id is
+// the last comment that run left on the issue, null when it left none.
 type IssueUnreadResponse struct {
 	IssueID   string  `json:"issue_id"`
 	Outcome   string  `json:"outcome"`
 	AgentID   *string `json:"agent_id"`
+	TaskID    *string `json:"task_id"`
+	CommentID *string `json:"comment_id"`
 	CreatedAt string  `json:"created_at"`
 }
 
@@ -32,10 +35,15 @@ func (h *Handler) ListIssueUnread(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
 	params := db.ListIssueUnreadParams{
-		WorkspaceID: wsUUID,
-		UserID:      parseUUID(userID),
-		PageLimit:   int32(issueUnreadPageSize + 1),
+		WorkspaceID:      wsUUID,
+		UserID:           parseUUID(userID),
+		PageLimit:        int32(issueUnreadPageSize + 1),
+		HiddenProjectIds: hidden.Param(),
 	}
 	if cursor := r.URL.Query().Get("cursor"); cursor != "" {
 		params.BeforeCreatedAt, params.BeforeIssueID = parseTranscriptCursor(cursor)
@@ -64,6 +72,8 @@ func (h *Handler) ListIssueUnread(w http.ResponseWriter, r *http.Request) {
 			IssueID:   uuidToString(row.IssueID),
 			Outcome:   row.Outcome,
 			AgentID:   uuidToPtr(row.AgentID),
+			TaskID:    uuidToPtr(row.TaskID),
+			CommentID: uuidToPtr(row.CommentID),
 			CreatedAt: timestampToString(row.CreatedAt),
 		}
 	}

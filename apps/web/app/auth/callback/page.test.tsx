@@ -396,21 +396,21 @@ describe("CallbackPage", () => {
     }
   });
 
-  it("falls through to normal web flow when state contains invalid cli_callback", async () => {
-    mockSearchParams.set("state", "cli_callback:https://evil.com/callback");
-    mockLoginWithGoogle.mockResolvedValue(makeUser());
-    mockListWorkspaces.mockResolvedValue([]);
-    mockListMyInvitations.mockResolvedValue([]);
-
+  it.each([
+    "cli_callback:https://evil.com/callback",
+    "cli_callback:http://198.18.0.1:46233/callback",
+    "platform:desktop,cli_callback:http://198.18.0.1:46233/callback",
+    "cli_callback:",
+    "cli_callback:%broken",
+    "cli_callback:http://localhost:46233/callback,cli_state:%broken",
+  ])("blocks an invalid CLI OAuth handoff without logging into the web: %s", async (state) => {
+    const { api: mockedApi } = await import("@multica/core/api");
+    mockSearchParams.set("state", state);
     renderCallback();
-
-    await waitFor(() => {
-      // Normal web flow: loginWithGoogle is called (not googleLogin)
-      expect(mockLoginWithGoogle).toHaveBeenCalled();
-    });
-    await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
-    });
+    expect(await screen.findByText("CLI authorization incomplete")).toBeInTheDocument();
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+    expect(mockedApi.googleLogin).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it("redirects to CLI callback even when state also contains platform:desktop", async () => {

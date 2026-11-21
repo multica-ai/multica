@@ -58,6 +58,10 @@ export function ModelPicker({
     runtimeModelsOptions(runtimeOnline ? runtimeId : null),
   );
   const supported = modelsQuery.data?.supported ?? true;
+  const discoveryError =
+    modelsQuery.error instanceof Error
+      ? modelsQuery.error.message.trim() || null
+      : null;
   // Memoise the model list so every downstream useMemo gets a stable
   // reference; `?? []` would mint a fresh array on every render and
   // invalidate filters needlessly.
@@ -253,11 +257,30 @@ export function ModelPicker({
           </PickerItem>
         ))}
 
-      {!modelsQuery.isLoading && filtered.length === 0 && !canCreate && (
-        <p className="px-3 py-3 text-center text-caption text-muted-foreground">
-          {t(($) => $.pickers.model_empty)}
-        </p>
+      {!modelsQuery.isLoading && modelsQuery.isError && (
+        <div role="alert" className="px-3 py-3 text-caption text-muted-foreground">
+          <p className="font-medium text-foreground">
+            {t(($) => $.pickers.model_discovery_failed_title)}
+          </p>
+          {discoveryError && (
+            <p className="mt-1 whitespace-pre-wrap break-words select-text">
+              {discoveryError}
+            </p>
+          )}
+          <p className="mt-1.5">
+            {t(($) => $.pickers.model_discovery_failed_hint)}
+          </p>
+        </div>
       )}
+
+      {!modelsQuery.isLoading &&
+        !modelsQuery.isError &&
+        filtered.length === 0 &&
+        !canCreate && (
+          <p className="px-3 py-3 text-center text-caption text-muted-foreground">
+            {t(($) => $.pickers.model_empty)}
+          </p>
+        )}
 
       {!modelsQuery.isLoading && (
         <UnavailableModelsNote

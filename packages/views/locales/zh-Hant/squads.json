@@ -2,8 +2,6 @@
   "page": {
     "title": "小隊",
     "new_button": "新建小隊",
-    "empty_no_squads": "還沒有小隊",
-    "empty_description": "把 AI 代理和成員編成小隊，任務可以直接交給整個小隊。",
     "empty_no_match": "沒有匹配篩選條件的小隊。",
     "table": {
       "name": "小隊",
@@ -29,13 +27,7 @@
     "success": "已歸檔小隊"
   },
   "name_editor": {
-    "title": "重新命名小隊",
-    "placeholder": "小隊名稱",
-    "required": "名稱不能為空",
-    "cancel": "取消",
-    "save": "儲存",
-    "saved": "已儲存",
-    "save_failed": "儲存失敗"
+    "placeholder": "小隊名稱"
   },
   "add_member_dialog": {
     "title": "新增成員",
@@ -55,12 +47,9 @@
     "empty": "新增角色…",
     "placeholder": "角色（例如：審查者）"
   },
-  "description_dialog": {
-    "title": "編輯描述",
-    "placeholder_empty": "新增描述",
-    "cancel": "取消",
-    "responsibility_placeholder": "這個小隊負責什麼？",
-    "save": "儲存"
+  "description_editor": {
+    "empty": "新增描述",
+    "placeholder": "這個小隊負責什麼？"
   },
   "members_tab": {
     "section_title": "成員",
@@ -114,11 +103,12 @@
     "leader_updated": "隊長已更新",
     "leader_update_failed": "更新隊長失敗",
     "archive_failed": "歸檔小隊失敗",
-    "instructions_saved": "指引已儲存"
+    "instructions_saved": "指引已儲存",
+    "update_failed": "儲存失敗"
   },
   "profile_card": {
     "unavailable": "小隊不可用",
-    "detail_link": "詳情 →",
+    "detail_link": "檢視詳情 →",
     "archived": "已歸檔",
     "member_count_other": "{{count}} 名成員",
     "members_section": "成員",
@@ -134,5 +124,34 @@
     "mine": "我的小隊",
     "all": "全部小隊"
   },
-  "toolbar": {}
+  "intro": {
+    "title": "讓 AI 代理組隊，像團隊一樣做事",
+    "description": "把任務交給小隊，隊長 AI 代理會讀懂需求，依成員的角色分派下一步，並追蹤到目標完成。你只需要對接一個入口。",
+    "slides": {
+      "route": {
+        "title": "一個入口，自動分派",
+        "description": "隊長讀懂任務後，@ 最適合下一步的成員。只有被點名的成員會開始工作。"
+      },
+      "roles": {
+        "title": "依角色分工",
+        "description": "角色描述告訴隊長每位成員擅長什麼。成員可以是 AI 代理，也可以是人。"
+      },
+      "progress": {
+        "title": "進展集中在一處",
+        "description": "小隊詳情頁列出近期的任務，以及每位成員正在做什麼。"
+      }
+    },
+    "art": {
+      "assignee": "負責人",
+      "squad_name": "前端小隊",
+      "issue_dark_mode": "設定頁支援深色模式切換",
+      "issue_board_columns": "看板欄寬可拖曳調整",
+      "issue_inbox_gestures": "行動版收件箱手勢",
+      "issue_paste_images": "留言支援貼上圖片",
+      "delegating": "依角色挑選成員...",
+      "role_frontend": "前端",
+      "role_testing": "測試",
+      "role_product": "產品"
+    }
+  }
 }

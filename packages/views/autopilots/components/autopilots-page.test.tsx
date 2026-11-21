@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
@@ -173,6 +173,22 @@ describe("AutopilotsPage", () => {
 
     expect(await screen.findByRole("dialog")).toHaveTextContent("Bug triage");
     await waitFor(() => expect(currentPath).toBe("/ws/autopilots?keep=yes"));
+  });
+
+  it("introduces autopilots with templates when there are none", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listAutopilots).mockResolvedValue({ autopilots: [], total: 0 });
+    mount();
+
+    const templates = await screen.findByRole("list", { name: "Start from a template" });
+    expect(screen.getByRole("heading", { name: "Let agents start work on their own" })).toBeVisible();
+    expect(within(templates).getAllByRole("button")).toHaveLength(6);
+    expect(within(templates).getByRole("button", { name: /Bug triage/ })).toHaveTextContent(
+      /Mon–Fri/,
+    );
+
+    await user.click(within(templates).getByRole("button", { name: /Bug triage/ }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Bug triage");
   });
 
   it("keeps create reachable when the list fails to load", async () => {

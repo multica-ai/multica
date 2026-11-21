@@ -5,6 +5,8 @@ import {
   Check,
   Copy,
   Crown,
+  Eye,
+  FolderOpen,
   Link,
   Loader2,
   Mail,
@@ -28,6 +30,7 @@ import type {
   ShareLink,
   WorkspaceSeatPurchasePreview,
 } from "@multica/core/types";
+import { cn } from "@multica/ui/lib/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -41,6 +44,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -62,24 +66,36 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  clearUpgradeInvitesFor,
+  isMemberLimitFull,
+  isMemberLimitReachedError,
+  memberLimitKeys,
+  memberLimitOptions,
+  readUpgradeInvite,
+  saveUpgradeInvite,
+  type UpgradeInvite,
   usePreviewWorkspaceSeatPurchase,
+  refreshFeaturesOnLockedError,
+  usePaidFeatureAccess,
   usePurchaseWorkspaceSeats,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureEnabled } from "@multica/core/config";
-import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
+import {
+  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  WORKSPACE_GUESTS_FLAG,
+} from "@multica/core/feature-flags";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   invitationListOptions,
@@ -98,6 +114,8 @@ import {
 } from "./settings-layout";
 import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { formatStripeMinorAmount } from "./billing-format";
+import { PaidFeatureNotice, usePaidFeatureErrorMessage } from "../../billing";
+import { GuestProjectsDialog, GuestProjectsField, useShareableProjects } from "./guest-projects";
 import {
   isSingleSeatInvitePreview,
   purchasedSeatIsReadyForInvitation,
@@ -109,12 +127,25 @@ import {
 
 const SEAT_PURCHASE_CONFIRM_TIMEOUT_MS = 2 * 60_000;
 
-type MembersView = "members" | "invitations" | "links";
+// Sending a held invitation right after its upgrade retries a member-limit
+// refusal this many times, this far apart: past the server's five-second
+// bound on re-reading Cloud's policy.
+const HELD_INVITE_RETRIES = 2;
+const HELD_INVITE_RETRY_MS = 6_000;
 
+// Catches typos before an upgrade buys a seat for the invitation.
+const INVITE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// "members" lists everyone; with guests on, "seated" and "guests" split it.
+type MembersView = "members" | "seated" | "guests" | "invitations" | "links";
+
+// A seat bought to invite someone, or to turn a guest into a member.
 type InviteSeatPurchase = {
   workspaceId: string;
   email: string;
   role: MemberRole;
+  projectIds?: string[];
+  promote?: { memberId: string; name: string };
   preview: WorkspaceSeatPurchasePreview;
   idempotencyKey: string;
   phase: "review" | "purchasing" | "waiting" | "inviting" | "error";
@@ -134,6 +165,7 @@ const ROLE_ICONS: Record<MemberRole, typeof Crown> = {
   owner: Crown,
   admin: Shield,
   member: User,
+  guest: Eye,
 };
 
 // Builds the shareable URL for a share-link invite. Prefers the navigation
@@ -168,6 +200,11 @@ function useRoleLabels() {
       description: t(($) => $.members.roles.member.description),
       icon: ROLE_ICONS.member,
     },
+    guest: {
+      label: t(($) => $.members.roles.guest.label),
+      description: t(($) => $.members.roles.guest.description),
+      icon: ROLE_ICONS.guest,
+    },
   } as const;
 }
 
@@ -175,21 +212,29 @@ function MemberRow({
   member,
   canManage,
   canManageOwners,
+  guestsEnabled,
+  projectNames,
   ownerCount,
   isSelf,
   busy,
   onRoleChange,
+  onManageProjects,
   onRemove,
 }: {
   member: MemberWithUser;
   canManage: boolean;
   canManageOwners: boolean;
+  /** Whether a member can be turned into a guest. */
+  guestsEnabled: boolean;
+  /** A guest's projects, shown beside its name. */
+  projectNames: string[];
   /** Total number of owners in this workspace — needed to gate demoting the
    *  last owner per `workspace.go:497-507`. */
   ownerCount: number;
   isSelf: boolean;
   busy: boolean;
   onRoleChange: (role: MemberRole) => void;
+  onManageProjects: () => void;
   onRemove: () => void;
 }) {
   const { t } = useT("settings");
@@ -200,7 +245,15 @@ function MemberRow({
   const canEditRole = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
   const canRemove = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
   const isLastOwner = member.role === "owner" && ownerCount <= 1;
+  const isGuest = member.role === "guest";
   const showMenu = canEditRole || canRemove;
+  // A guest becomes a member or admin first; ownership is not handed over
+  // in the same step.
+  const roleOptions = (Object.keys(roleConfig) as MemberRole[]).filter(
+    (role) =>
+      (role !== "owner" || (canManageOwners && !isGuest)) &&
+      (role !== "guest" || guestsEnabled || isGuest),
+  );
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -212,6 +265,11 @@ function MemberRow({
             <Badge variant="secondary" className="shrink-0">
               {t(($) => $.members.you)}
             </Badge>
+          ) : null}
+          {isGuest && projectNames.length > 0 ? (
+            <span className="truncate text-caption text-muted-foreground">
+              {projectNames.join(t(($) => $.members.list_separator))}
+            </span>
           ) : null}
         </div>
         <div className="truncate text-caption text-muted-foreground">{member.email}</div>
@@ -240,51 +298,56 @@ function MemberRow({
               </IconButton>
             }
           />
-          <DropdownMenuContent align="end" className="w-auto">
+          <DropdownMenuContent align="end" className="w-60">
             {canEditRole && (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <Shield className="h-3.5 w-3.5" />
-                  {t(($) => $.members.change_role)}
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-auto">
-                  {(Object.entries(roleConfig) as [MemberRole, (typeof roleConfig)[MemberRole]][]).map(
-                    ([role, config]) => {
-                      if (role === "owner" && !canManageOwners) return null;
-                      const Icon = config.icon;
-                      const wouldDemoteLastOwner =
-                        isLastOwner && role !== "owner";
-                      return (
-                        <DropdownMenuItem
-                          key={role}
-                          onClick={() =>
-                            wouldDemoteLastOwner ? undefined : onRoleChange(role)
-                          }
-                          disabled={wouldDemoteLastOwner}
-                          title={
-                            wouldDemoteLastOwner
-                              ? t(($) => $.members.cannot_demote_last_owner_title)
-                              : undefined
-                          }
-                        >
-                          <Icon className="h-3.5 w-3.5" />
-                          <div className="flex flex-col">
-                            <span>{config.label}</span>
-                            <span className="text-caption text-muted-foreground font-normal">
-                              {wouldDemoteLastOwner
-                                ? t(($) => $.members.cannot_demote_last_owner)
-                                : config.description}
-                            </span>
-                          </div>
-                          {member.role === role && (
-                            <Check className="ml-auto size-3.5 text-muted-foreground" />
-                          )}
-                        </DropdownMenuItem>
-                      );
-                    }
-                  )}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t(($) => $.members.change_role)}</DropdownMenuLabel>
+                {roleOptions.map((role) => {
+                  const Icon = roleConfig[role].icon;
+                  const current = member.role === role;
+                  const wouldDemoteLastOwner = isLastOwner && role !== "owner";
+                  // Moving across the guest line takes or frees a seat.
+                  const seatHint =
+                    isGuest && role === "member"
+                      ? t(($) => $.members.takes_seat)
+                      : !isGuest && role === "guest"
+                        ? t(($) => $.members.frees_seat)
+                        : null;
+                  return (
+                    <DropdownMenuItem
+                      key={role}
+                      onClick={() => {
+                        if (!current && !wouldDemoteLastOwner) onRoleChange(role);
+                      }}
+                      disabled={wouldDemoteLastOwner}
+                      title={
+                        wouldDemoteLastOwner
+                          ? t(($) => $.members.cannot_demote_last_owner_title)
+                          : roleConfig[role].description
+                      }
+                    >
+                      {current ? <Check className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}
+                      <span>
+                        {isGuest && role === "member"
+                          ? t(($) => $.members.make_member)
+                          : roleConfig[role].label}
+                      </span>
+                      {seatHint ? (
+                        <span className="ml-auto pl-3 text-caption text-muted-foreground">{seatHint}</span>
+                      ) : null}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuGroup>
+            )}
+            {canEditRole && isGuest && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={onManageProjects}>
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  {t(($) => $.members.manage_projects)}
+                </DropdownMenuItem>
+              </>
             )}
             {canEditRole && canRemove && <DropdownMenuSeparator />}
             {canRemove && (
@@ -379,7 +442,7 @@ function ShareLinkRow({
           <span>{t(($) => $.members.share_link_uses, { used: link.use_count, max: link.max_uses ?? "∞" })}</span>
           {link.expires_at && <span>· {t(($) => $.members.share_link_expires, { date: new Date(link.expires_at).toLocaleDateString(locale) })}</span>}
         </div>
-        <TruncatedTooltip content={joinUrl}>
+        <TruncatedTooltip content={joinUrl} focusable>
           <div
             className="truncate font-mono text-caption text-muted-foreground"
           >
@@ -419,8 +482,13 @@ export function MembersTab() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const navigation = useOptionalNavigation();
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
+  const memberListQuery = useQuery(memberListOptions(wsId));
+  const invitationListQuery = useQuery(invitationListOptions(wsId));
+  const members = memberListQuery.data ?? [];
+  const invitations = invitationListQuery.data ?? [];
+  // An upgrade buys a seat for the invitation, so it waits until both lists
+  // have loaded and the invitation is known to be sendable.
+  const inviteChecksReady = memberListQuery.isSuccess && invitationListQuery.isSuccess;
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [shareLinkOpen, setShareLinkOpen] = useState(false);
@@ -428,7 +496,10 @@ export function MembersTab() {
     navigation?.searchParams ?? new URLSearchParams(),
   ).section;
   const urlView: MembersView =
-    requestedView === "invitations" || requestedView === "links"
+    requestedView === "invitations" ||
+    requestedView === "links" ||
+    requestedView === "seated" ||
+    requestedView === "guests"
       ? requestedView
       : "members";
   const [localView, setLocalView] = useState<MembersView>(urlView);
@@ -449,6 +520,12 @@ export function MembersTab() {
   const [memberQuery, setMemberQuery] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
+  const [inviteProjects, setInviteProjects] = useState<string[]>([]);
+  // Turning a member into a guest, or changing a guest's projects.
+  const [projectsDialog, setProjectsDialog] = useState<{
+    member: MemberWithUser;
+    mode: "demote" | "edit";
+  } | null>(null);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteSeatPurchase, setInviteSeatPurchase] =
     useState<InviteSeatPurchase | null>(null);
@@ -463,6 +540,7 @@ export function MembersTab() {
     title: string;
     description: string;
     variant?: "destructive";
+    actionLabel?: string;
     onConfirm: () => Promise<void>;
   } | null>(null);
   const previewSeatPurchase = usePreviewWorkspaceSeatPurchase();
@@ -481,41 +559,109 @@ export function MembersTab() {
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
 
   // The Team panel's invite button links here with `?invite=1`; it waits for
-  // the member list so only managers get the dialog.
-  const inviteRequested = navigation?.searchParams.has("invite") ?? false;
+  // the member list so only managers get the dialog. Billing links back with
+  // `?invite=resume&held_invite=<token>` once the upgrade started for that
+  // held invitation has gone through, and the invitation is sent.
+  const inviteRequest = navigation?.searchParams.get("invite") ?? null;
+  const heldInviteToken = navigation?.searchParams.get("held_invite") ?? null;
   useEffect(() => {
-    if (!inviteRequested || !navigation || !currentMember) return;
-    if (canManageWorkspace) setInviteOpen(true);
+    if (inviteRequest === null || !navigation || !currentMember || !workspace) return;
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("invite");
+    params.delete("held_invite");
     navigation.replace(`${navigation.pathname}?${params}`);
+    if (!canManageWorkspace) return;
+    const held: UpgradeInvite | null =
+      inviteRequest === "resume" && heldInviteToken
+        ? readUpgradeInvite(workspace.slug, heldInviteToken)
+        : null;
+    setInviteOpen(true);
+    if (!held) return;
+    setInviteEmail(held.email);
+    setInviteRole(held.role);
+    // The held invitation is consumed only once it has been sent; if sending
+    // still fails it stays prefilled here and held for another try.
+    void qc
+      .invalidateQueries({ queryKey: memberLimitKeys.all(wsId) })
+      .then(() => inviteMember(held.email, held.role, { retryLimitRefusals: HELD_INVITE_RETRIES }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume the intent once the role is known
-  }, [inviteRequested, currentMember?.role]);
+  }, [inviteRequest, heldInviteToken, currentMember?.role, workspace?.slug]);
   const isOwner = currentMember?.role === "owner";
   const ownerCount = members.filter((m) => m.role === "owner").length;
   // Only owners/admins may list share links; skip the request for plain
   // members (the server would 403) once the current member's role is known.
   const { data: shareLinks = [] } = useQuery(shareLinkListOptions(wsId, canManageWorkspace));
   const billingEnabled = useFeatureEnabled(BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG, false);
-  const seats = useQuery({
+  const subscriptionSummary = useQuery({
     ...workspaceSubscriptionSummaryOptions(wsId),
     enabled: billingEnabled && canManageWorkspace,
-  }).data?.seatCapacity;
+  }).data;
+  const seats = subscriptionSummary?.seatCapacity;
+  const memberLimit = useQuery({
+    ...memberLimitOptions(wsId),
+    enabled: canManageWorkspace,
+  }).data;
+  // Only an enforced limit is shown; an observed one admits everyone.
+  const enforcedMemberLimit =
+    memberLimit?.action === "enforce" && memberLimit.limit !== null
+      ? {
+          used: (memberLimit.members ?? 0) + (memberLimit.pendingInvitations ?? 0),
+          limit: memberLimit.limit,
+          pending: memberLimit.pendingInvitations ?? 0,
+        }
+      : null;
+  const inviteBlockedByMemberLimit = isMemberLimitFull(memberLimit);
+  // Upgrading needs Billing; without it a full workspace can only free a slot.
+  // A lapsed subscription (past due beyond grace) cannot start a new
+  // checkout: it is restored in Billing, not upgraded.
+  const subscriptionNeedsAttention =
+    inviteBlockedByMemberLimit &&
+    billingEnabled &&
+    subscriptionSummary?.availableActions.checkout === false;
+  const canUpgradeForInvite =
+    inviteBlockedByMemberLimit && billingEnabled && !subscriptionNeedsAttention;
+  const guestsEnabled = useFeatureEnabled(WORKSPACE_GUESTS_FLAG, false);
+  // Guests are a paid feature: a plan without them keeps its existing guests
+  // (they can be removed, narrowed or made members) but adds no new ones.
+  const guestAccess = usePaidFeatureAccess(wsId, "guests", { hasExistingConfig: false });
+  const canAddGuests = guestsEnabled && guestAccess.canAdd;
+  const paidFeatureError = usePaidFeatureErrorMessage();
+  const shareableProjects = useShareableProjects(wsId);
+  const projectTitles = new Map(shareableProjects.map((project) => [project.id, project.title]));
+  const guestCount = members.filter((m) => m.role === "guest").length;
+  // Workspaces that already have guests keep seeing them where adding guests
+  // is not offered (Cloud before billing launches).
+  const showGuestViews = guestsEnabled || guestCount > 0;
+  // A guest takes no member slot, so a full workspace still invites guests.
+  const inviteLimited = inviteRole !== "guest";
+  const inviteFull = inviteLimited && inviteBlockedByMemberLimit;
+  const inviteNeedsAttention = inviteLimited && subscriptionNeedsAttention;
+  const inviteCanUpgrade = inviteLimited && canUpgradeForInvite;
+  const guestInviteMissingProjects = inviteRole === "guest" && inviteProjects.length === 0;
   const needle = memberQuery.trim().toLocaleLowerCase();
-  const visibleMembers = needle
-    ? members.filter(
-        (m) =>
-          m.name.toLocaleLowerCase().includes(needle) ||
-          m.email.toLocaleLowerCase().includes(needle),
-      )
-    : members;
+  const peopleView = showGuestViews && (view === "seated" || view === "guests") ? view : "members";
+  const visibleMembers = members.filter(
+    (m) =>
+      (peopleView !== "seated" || m.role !== "guest") &&
+      (peopleView !== "guests" || m.role === "guest") &&
+      (!needle ||
+        m.name.toLocaleLowerCase().includes(needle) ||
+        m.email.toLocaleLowerCase().includes(needle)),
+  );
 
   const sendInvitation = useCallback(
-    async (email: string, role: MemberRole) => {
+    async (email: string, role: MemberRole, projectIds?: string[]) => {
       if (!workspace) return;
-      await api.createMember(workspace.id, { email, role });
+      await api.createMember(
+        workspace.id,
+        role === "guest" ? { email, role, project_ids: projectIds } : { email, role },
+      );
+      // The invitation is out, however it was sent (directly, after an
+      // upgrade, or after buying a seat): nothing held for it still waits.
+      clearUpgradeInvitesFor(workspace.slug, email);
       setInviteEmail("");
       setInviteRole("member");
+      setInviteProjects([]);
       await qc.invalidateQueries({
         queryKey: workspaceKeys.invitations(wsId),
       });
@@ -524,95 +670,193 @@ export function MembersTab() {
     [qc, t, workspace, wsId],
   );
 
-  const handleInviteMember = async () => {
-    if (!workspace) return;
-    const email = inviteEmail.trim();
-    const role = inviteRole;
+  const changeRole = useCallback(
+    async (memberId: string, role: MemberRole, projectIds?: string[]) => {
+      if (!workspace) return;
+      await api.updateMember(
+        workspace.id,
+        memberId,
+        role === "guest" ? { role, project_ids: projectIds } : { role },
+      );
+      await qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+      // Crossing the guest line takes or frees a member slot.
+      void qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
+      toast.success(t(($) => $.members.toast_role_updated));
+    },
+    [qc, t, workspace, wsId],
+  );
+
+  /**
+   * Handles a refusal for lack of a seat, from an invitation or from turning a
+   * guest into a member: offers to buy one when the workspace is full.
+   * Returns false when the error is not about seats.
+   */
+  const handleSeatRefusal = async (
+    e: unknown,
+    request: Pick<InviteSeatPurchase, "email" | "role" | "projectIds" | "promote">,
+  ): Promise<boolean> => {
+    if (!workspace) return true;
+    const code = errorCode(e);
+    const capacityFailure = seatInvitationCapacityFailure(code);
+    if (code === "seat_capacity_overcommitted") {
+      try {
+        const summary = await qc.fetchQuery({
+          ...workspaceSubscriptionSummaryOptions(wsId),
+          staleTime: 0,
+        });
+        const capacity = summary?.seatCapacity;
+        toast.error(
+          billingT(($) => $.workspace.seats.members_over_capacity_title),
+          capacity
+            ? {
+                description: billingT(
+                  ($) => $.workspace.seats.occupancy_over_capacity_description,
+                  {
+                    // Cloud refuses on used + reserved, so pending
+                    // invitations have to appear here: the most common
+                    // trigger is a first ledger snapshot whose member count
+                    // alone still fits inside the purchased seats.
+                    occupied: capacity.used + capacity.reserved,
+                    purchased: capacity.purchased,
+                    members: capacity.used,
+                    reserved: capacity.reserved,
+                  },
+                ),
+              }
+            : undefined,
+        );
+      } catch {
+        toast.error(
+          billingT(($) => $.workspace.seats.members_over_capacity_title),
+        );
+      }
+      return true;
+    }
+    if (capacityFailure === "full") {
+      try {
+        const preview = await previewSeatPurchase.mutateAsync({
+          additionalSeats: 1,
+        });
+        if (!isSingleSeatInvitePreview(preview)) {
+          toast.error(
+            billingT(($) => $.workspace.seat_purchase.preview_unreadable),
+          );
+          return true;
+        }
+        // Hand over to the purchase confirmation rather than stacking a
+        // second modal on the invite dialog.
+        setInviteOpen(false);
+        setInviteSeatPurchase({
+          workspaceId: workspace.id,
+          ...request,
+          preview,
+          idempotencyKey: createSeatPurchaseKey(workspace.id),
+          phase: "review",
+        });
+        dispatchedInvitePurchaseKey.current = null;
+      } catch (previewError) {
+        toast.error(
+          errorCode(previewError) === "seat_purchase_in_progress"
+            ? billingT(($) => $.workspace.seat_purchase.in_progress)
+            : billingT(($) => $.workspace.seat_purchase.preview_failed),
+        );
+      }
+      return true;
+    }
+    if (capacityFailure === "unavailable") {
+      toast.error(t(($) => $.members.toast_seat_capacity_unavailable));
+      return true;
+    }
+    if (capacityFailure === "rate_limited") {
+      toast.error(t(($) => $.members.toast_seat_capacity_rate_limited));
+      return true;
+    }
+    return false;
+  };
+
+  // Resolves true once the invitation is sent. retryLimitRefusals retries a
+  // member-limit refusal after HELD_INVITE_RETRY_MS: right after an upgrade
+  // the server may still hold the Free policy it re-read moments before.
+  const inviteMember = async (
+    email: string,
+    role: MemberRole,
+    {
+      projectIds,
+      retryLimitRefusals = 0,
+    }: { projectIds?: string[]; retryLimitRefusals?: number } = {},
+  ): Promise<boolean> => {
+    if (!workspace) return false;
     setInviteLoading(true);
     try {
-      await sendInvitation(email, role);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await sendInvitation(email, role, projectIds);
+          break;
+        } catch (retryable) {
+          if (!isMemberLimitReachedError(retryable) || attempt >= retryLimitRefusals) throw retryable;
+          await new Promise((resolve) => setTimeout(resolve, HELD_INVITE_RETRY_MS));
+        }
+      }
       setInviteOpen(false);
+      void qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
+      return true;
     } catch (e) {
-      const code = errorCode(e);
-      const capacityFailure = seatInvitationCapacityFailure(code);
-      if (code === "seat_capacity_overcommitted") {
-        try {
-          const summary = await qc.fetchQuery({
-            ...workspaceSubscriptionSummaryOptions(wsId),
-            staleTime: 0,
-          });
-          const capacity = summary?.seatCapacity;
-          toast.error(
-            billingT(($) => $.workspace.seats.members_over_capacity_title),
-            capacity
-              ? {
-                  description: billingT(
-                    ($) => $.workspace.seats.occupancy_over_capacity_description,
-                    {
-                      // Cloud refuses on used + reserved, so pending
-                      // invitations have to appear here: the most common
-                      // trigger is a first ledger snapshot whose member count
-                      // alone still fits inside the purchased seats.
-                      occupied: capacity.used + capacity.reserved,
-                      purchased: capacity.purchased,
-                      members: capacity.used,
-                      reserved: capacity.reserved,
-                    },
-                  ),
-                }
-              : undefined,
-          );
-        } catch {
-          toast.error(
-            billingT(($) => $.workspace.seats.members_over_capacity_title),
-          );
-        }
-        return;
+      if (isMemberLimitReachedError(e)) {
+        // The limit filled up after this dialog last read it. Refetch so the
+        // dialog switches to its full state and offers the upgrade.
+        await qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
+        toast.error(t(($) => $.members.toast_member_limit_reached));
+        return false;
       }
-      if (capacityFailure === "full") {
-        try {
-          const preview = await previewSeatPurchase.mutateAsync({
-            additionalSeats: 1,
-          });
-          if (!isSingleSeatInvitePreview(preview)) {
-            toast.error(
-              billingT(($) => $.workspace.seat_purchase.preview_unreadable),
-            );
-            return;
-          }
-          // Hand over to the purchase confirmation rather than stacking a
-          // second modal on the invite dialog.
-          setInviteOpen(false);
-          setInviteSeatPurchase({
-            workspaceId: workspace.id,
-            email,
-            role,
-            preview,
-            idempotencyKey: createSeatPurchaseKey(workspace.id),
-            phase: "review",
-          });
-          dispatchedInvitePurchaseKey.current = null;
-        } catch (previewError) {
-          toast.error(
-            errorCode(previewError) === "seat_purchase_in_progress"
-              ? billingT(($) => $.workspace.seat_purchase.in_progress)
-              : billingT(($) => $.workspace.seat_purchase.preview_failed),
-          );
-        }
-        return;
-      }
-      if (capacityFailure === "unavailable") {
-        toast.error(t(($) => $.members.toast_seat_capacity_unavailable));
-        return;
-      }
-      if (capacityFailure === "rate_limited") {
-        toast.error(t(($) => $.members.toast_seat_capacity_rate_limited));
-        return;
-      }
-      toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_failed));
+      if (await handleSeatRefusal(e, { email, role, projectIds })) return false;
+      refreshFeaturesOnLockedError(qc, wsId, e);
+      toast.error(
+        paidFeatureError(e, e instanceof Error ? e.message : t(($) => $.members.toast_invitation_failed)),
+      );
+      return false;
     } finally {
       setInviteLoading(false);
     }
+  };
+
+  const handleInviteMember = () =>
+    inviteMember(inviteEmail.trim(), inviteRole, {
+      projectIds: inviteRole === "guest" ? inviteProjects : undefined,
+    });
+
+  // Why an invitation could not be sent even after paying, checked before
+  // the upgrade buys a seat for it. The server re-checks on send.
+  const upgradeInviteProblem = (email: string): string | null => {
+    if (!inviteChecksReady) {
+      return t(($) => $.members.toast_invite_check_unavailable);
+    }
+    const normalized = email.toLowerCase();
+    if (!INVITE_EMAIL_PATTERN.test(normalized)) {
+      return t(($) => $.members.toast_invalid_email);
+    }
+    if (members.some((m) => m.email.toLowerCase() === normalized)) {
+      return t(($) => $.members.toast_already_member, { email });
+    }
+    if (invitations.some((inv) => inv.invitee_email.toLowerCase() === normalized)) {
+      return t(($) => $.members.toast_invitation_pending, { email });
+    }
+    return null;
+  };
+
+  // The workspace is full: hold the invitation while Billing runs checkout
+  // for Pro, which sends it once the new plan is confirmed.
+  const handleUpgradeAndInvite = () => {
+    if (!workspace || !navigation) return;
+    const email = inviteEmail.trim();
+    const problem = upgradeInviteProblem(email);
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    const token = saveUpgradeInvite(workspace.slug, { email, role: inviteRole });
+    setInviteOpen(false);
+    const href = settingsHref(navigation.pathname, navigation.searchParams, "billing");
+    navigation.push(`${href}&upgrade=pro&held_invite=${encodeURIComponent(token)}`);
   };
 
   const handlePurchaseSeatAndInvite = async () => {
@@ -714,7 +958,9 @@ export function MembersTab() {
 
     dispatchedInvitePurchaseKey.current = purchase.idempotencyKey;
     setInviteSeatPurchase({ ...purchase, phase: "inviting" });
-    void sendInvitation(purchase.email, purchase.role)
+    void (purchase.promote
+      ? changeRole(purchase.promote.memberId, purchase.role)
+      : sendInvitation(purchase.email, purchase.role, purchase.projectIds))
       .then(() => setInviteSeatPurchase(null))
       .catch((error) => {
         const code = errorCode(error);
@@ -748,6 +994,7 @@ export function MembersTab() {
     seatPurchaseSummary.data,
     seatPurchaseSummary.dataUpdatedAt,
     sendInvitation,
+    changeRole,
     t,
     wsId,
   ]);
@@ -781,11 +1028,14 @@ export function MembersTab() {
       title: t(($) => $.members.revoke_invitation_title),
       description: t(($) => $.members.revoke_invitation_description, { email: invitation.invitee_email }),
       variant: "destructive",
+      actionLabel: t(($) => $.members.revoke_invitation_confirm),
       onConfirm: async () => {
         setInvitationActionId(invitation.id);
         try {
           await api.revokeInvitation(workspace.id, invitation.id);
           qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+          // A revoked invitation frees its member slot.
+          qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
           toast.success(t(($) => $.members.toast_invitation_revoked));
         } catch (e) {
           toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_revoke_failed));
@@ -796,17 +1046,68 @@ export function MembersTab() {
     });
   };
 
-  const handleRoleChange = async (memberId: string, role: MemberRole) => {
-    if (!workspace) return;
-    setMemberActionId(memberId);
+  const applyRoleChange = async (member: MemberWithUser, role: MemberRole) => {
+    setMemberActionId(member.id);
     try {
-      await api.updateMember(workspace.id, memberId, { role });
-      qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-      toast.success(t(($) => $.members.toast_role_updated));
+      await changeRole(member.id, role);
     } catch (e) {
+      const promoting = member.role === "guest";
+      if (promoting && isMemberLimitReachedError(e)) {
+        // A member takes a slot on a plan that caps them; a guest does not.
+        void qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
+        toast.error(t(($) => $.members.toast_member_limit_reached));
+        return;
+      }
+      if (
+        promoting &&
+        (await handleSeatRefusal(e, {
+          email: member.email,
+          role,
+          promote: { memberId: member.id, name: member.name },
+        }))
+      ) {
+        return;
+      }
       toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_role_failed));
     } finally {
       setMemberActionId(null);
+    }
+  };
+
+  const handleRoleChange = (member: MemberWithUser, role: MemberRole) => {
+    if (!workspace) return;
+    if (role === "guest") {
+      // A guest needs projects to see, so demotion goes through the picker.
+      setProjectsDialog({ member, mode: "demote" });
+      return;
+    }
+    if (member.role === "guest") {
+      setConfirmAction({
+        title: t(($) => $.members.make_member_title, { name: member.name }),
+        description: t(($) => $.members.make_member_description, { name: member.name }),
+        actionLabel: role === "member" ? t(($) => $.members.make_member) : roleConfig[role].label,
+        onConfirm: () => applyRoleChange(member, role),
+      });
+      return;
+    }
+    void applyRoleChange(member, role);
+  };
+
+  const handleProjectsConfirm = async (projectIds: string[]) => {
+    if (!workspace || !projectsDialog) return;
+    const { member, mode } = projectsDialog;
+    try {
+      if (mode === "demote") {
+        await changeRole(member.id, "guest", projectIds);
+      } else {
+        await api.setMemberProjects(workspace.id, member.id, projectIds);
+        await qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+        toast.success(t(($) => $.members.toast_projects_updated));
+      }
+      setProjectsDialog(null);
+    } catch (e) {
+      refreshFeaturesOnLockedError(qc, wsId, e);
+      toast.error(paidFeatureError(e, e instanceof Error ? e.message : t(($) => $.members.toast_role_failed)));
     }
   };
 
@@ -816,6 +1117,7 @@ export function MembersTab() {
       title: t(($) => $.members.remove_member_title, { name: member.name }),
       description: t(($) => $.members.remove_member_description, { name: member.name, workspace: workspace.name }),
       variant: "destructive",
+      actionLabel: t(($) => $.members.remove_member_confirm),
       onConfirm: async () => {
         setMemberActionId(member.id);
         try {
@@ -896,14 +1198,31 @@ export function MembersTab() {
     { value: "720", label: t(($) => $.members.expiry_30d) },
     { value: "0", label: t(($) => $.members.expiry_never) },
   ];
+  const inviteRoles: MemberRole[] = guestsEnabled ? ["member", "admin", "guest"] : ["member", "admin"];
+  const guestInviteLocked = inviteRole === "guest" && !canAddGuests;
   const views: { value: MembersView; label: string; count: number }[] = [
-    { value: "members", label: t(($) => $.members.members_label), count: members.length },
+    {
+      value: "members",
+      label: showGuestViews ? t(($) => $.members.all_label) : t(($) => $.members.members_label),
+      count: members.length,
+    },
+    ...(showGuestViews
+      ? [
+          {
+            value: "seated" as const,
+            label: t(($) => $.members.members_label),
+            count: members.length - guestCount,
+          },
+          { value: "guests" as const, label: t(($) => $.members.guests_label), count: guestCount },
+        ]
+      : []),
     { value: "invitations", label: t(($) => $.members.pending_label), count: invitations.length },
     ...(canManageWorkspace
       ? [{ value: "links" as const, label: t(($) => $.members.share_links_label), count: shareLinks.length }]
       : []),
   ];
   const activeView = views.some((item) => item.value === view) ? view : "members";
+  const isPeopleView = activeView === "members" || activeView === "seated" || activeView === "guests";
 
   return (
     <SettingsTab
@@ -930,6 +1249,14 @@ export function MembersTab() {
             onChange={setView}
           />
           <div className="flex min-w-0 items-center gap-3">
+            {enforcedMemberLimit && !seats ? (
+              <span className="shrink-0 text-caption text-muted-foreground tabular-nums">
+                {t(($) => $.members.member_limit_usage, {
+                  used: enforcedMemberLimit.used,
+                  limit: enforcedMemberLimit.limit,
+                })}
+              </span>
+            ) : null}
             {seats && billingEnabled ? (
               <span className="shrink-0 text-caption text-muted-foreground">
                 {t(($) => $.members.seats_used, {
@@ -937,6 +1264,12 @@ export function MembersTab() {
                   purchased: seats.purchased,
                 })}
                 {" · "}
+                {guestCount > 0 ? (
+                  <>
+                    {t(($) => $.members.guest_count, { count: guestCount })}
+                    {" · "}
+                  </>
+                ) : null}
                 <AppLink
                   href={
                     navigation
@@ -948,8 +1281,12 @@ export function MembersTab() {
                   {t(($) => $.members.manage_seats)}
                 </AppLink>
               </span>
+            ) : guestCount > 0 ? (
+              <span className="shrink-0 text-caption text-muted-foreground">
+                {t(($) => $.members.guest_count, { count: guestCount })}
+              </span>
             ) : null}
-            {activeView === "members" ? (
+            {isPeopleView ? (
               <div className="relative w-full sm:w-56">
                 <Search
                   aria-hidden="true"
@@ -973,7 +1310,7 @@ export function MembersTab() {
           </div>
         </div>
 
-        {activeView === "members" ? (
+        {isPeopleView ? (
           visibleMembers.length > 0 ? (
             <SettingsCard>
               {visibleMembers.map((m) => (
@@ -982,10 +1319,13 @@ export function MembersTab() {
                     member={m}
                     canManage={canManageWorkspace}
                     canManageOwners={isOwner}
+                    guestsEnabled={canAddGuests}
+                    projectNames={(m.project_ids ?? []).flatMap((id) => projectTitles.get(id) ?? [])}
                     ownerCount={ownerCount}
                     isSelf={m.user_id === user?.id}
                     busy={memberActionId === m.id}
-                    onRoleChange={(role) => handleRoleChange(m.id, role)}
+                    onRoleChange={(role) => handleRoleChange(m, role)}
+                    onManageProjects={() => setProjectsDialog({ member: m, mode: "edit" })}
                     onRemove={() => handleRemoveMember(m)}
                   />
                 </div>
@@ -1046,7 +1386,9 @@ export function MembersTab() {
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (inviteEmail.trim()) void handleInviteMember();
+              if (!inviteEmail.trim() || guestInviteMissingProjects || guestInviteLocked) return;
+              if (inviteCanUpgrade) handleUpgradeAndInvite();
+              else if (!inviteFull) void handleInviteMember();
             }}
           >
             <div className="space-y-1.5">
@@ -1063,46 +1405,133 @@ export function MembersTab() {
                 autoFocus
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="invite-role">{t(($) => $.members.role_label)}</Label>
-              <Select
-                items={roleItems}
-                value={inviteRole}
-                onValueChange={(value) => setInviteRole(value as MemberRole)}
-              >
-                <SelectTrigger id="invite-role" className="w-full">
-                  <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {roleItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      <span className="flex flex-col">
-                        <span>{item.label}</span>
-                        <span className="text-caption text-muted-foreground">
-                          {roleConfig[item.value].description}
-                        </span>
+            <fieldset className="space-y-1.5">
+              <legend className="mb-1.5 text-body leading-none font-medium">
+                {t(($) => $.members.role_label)}
+              </legend>
+              <div className="space-y-2">
+                {inviteRoles.map((role) => (
+                  <label
+                    key={role}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+                      inviteRole === role
+                        ? "border-foreground"
+                        : "border-border hover:bg-surface-hover",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="invite-role"
+                      value={role}
+                      checked={inviteRole === role}
+                      onChange={() => setInviteRole(role)}
+                      className="mt-0.5 size-3.5 shrink-0 accent-foreground"
+                    />
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2 text-body font-medium">
+                        {roleConfig[role].label}
+                        {role === "guest" ? (
+                          <Badge variant="secondary" className="bg-success/10 text-success">
+                            {t(($) => $.members.guest_free_tag)}
+                          </Badge>
+                        ) : null}
                       </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setInviteOpen(false)}
-                disabled={inviteLoading}
-              >
-                {t(($) => $.members.confirm_cancel)}
-              </Button>
-              <Button
-                type="submit"
-                disabled={inviteLoading || !inviteEmail.trim()}
-                aria-busy={inviteLoading || undefined}
-              >
-                {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}
-              </Button>
+                      <span className="block text-caption text-muted-foreground">
+                        {roleConfig[role].description}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            {inviteRole === "guest" && guestAccess.state === "unavailable" ? (
+              <PaidFeatureNotice state="unavailable" />
+            ) : inviteRole === "guest" ? (
+              <GuestProjectsField
+                id="invite-guest-projects"
+                projects={shareableProjects}
+                value={inviteProjects}
+                onChange={setInviteProjects}
+              />
+            ) : null}
+            {inviteFull && enforcedMemberLimit ? (
+              <Alert>
+                <Users aria-hidden="true" />
+                <AlertTitle>
+                  {t(($) => $.members.member_limit_full_title, { limit: enforcedMemberLimit.limit })}
+                </AlertTitle>
+                <AlertDescription>
+                  {!billingEnabled
+                    ? t(($) => $.members.member_limit_full_description_no_upgrade)
+                    : subscriptionNeedsAttention
+                      ? t(($) => $.members.member_limit_full_description_billing)
+                      : enforcedMemberLimit.pending > 0
+                      ? t(($) => $.members.member_limit_full_description_pending, {
+                          pending: enforcedMemberLimit.pending,
+                        })
+                      : t(($) => $.members.member_limit_full_description)}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            <DialogFooter className={enforcedMemberLimit ? "sm:items-center sm:justify-between" : undefined}>
+              {enforcedMemberLimit ? (
+                <span className="text-caption text-muted-foreground tabular-nums">
+                  {t(($) => $.members.member_limit_usage, {
+                    used: enforcedMemberLimit.used,
+                    limit: enforcedMemberLimit.limit,
+                  })}
+                </span>
+              ) : null}
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setInviteOpen(false)}
+                  disabled={inviteLoading}
+                >
+                  {t(($) => $.members.confirm_cancel)}
+                </Button>
+                {inviteNeedsAttention ? (
+                  <Button
+                    type="button"
+                    disabled={!navigation}
+                    onClick={() => {
+                      if (!navigation) return;
+                      setInviteOpen(false);
+                      navigation.push(settingsHref(navigation.pathname, navigation.searchParams, "billing"));
+                    }}
+                  >
+                    {t(($) => $.members.open_billing)}
+                  </Button>
+                ) : inviteCanUpgrade ? (
+                  <Button
+                    type="button"
+                    disabled={inviteLoading || !inviteEmail.trim() || !navigation || !inviteChecksReady}
+                    onClick={handleUpgradeAndInvite}
+                  >
+                    {t(($) => $.members.upgrade_and_invite)}
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    disabled={
+                      inviteLoading ||
+                      !inviteEmail.trim() ||
+                      inviteFull ||
+                      guestInviteMissingProjects ||
+                      guestInviteLocked
+                    }
+                    aria-busy={inviteLoading || undefined}
+                  >
+                    {inviteLoading
+                      ? t(($) => $.members.inviting)
+                      : inviteRole === "guest"
+                        ? t(($) => $.members.invite_guest_button)
+                        : t(($) => $.members.invite_button)}
+                  </Button>
+                )}
+              </div>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -1200,13 +1629,19 @@ export function MembersTab() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t(($) => $.members.seat_purchase_title)}
+              {inviteSeatPurchase?.promote
+                ? t(($) => $.members.make_member_title, { name: inviteSeatPurchase.promote.name })
+                : t(($) => $.members.seat_purchase_title)}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {inviteSeatPurchase?.phase === "review"
-                ? t(($) => $.members.seat_purchase_description, {
-                    email: inviteSeatPurchase.email,
-                  })
+                ? inviteSeatPurchase.promote
+                  ? t(($) => $.members.make_member_seat_description, {
+                      name: inviteSeatPurchase.promote.name,
+                    })
+                  : t(($) => $.members.seat_purchase_description, {
+                      email: inviteSeatPurchase.email,
+                    })
                 : inviteSeatPurchase?.phase === "error"
                   ? inviteSeatPurchase.error
                   : t(($) => $.members.seat_purchase_waiting)}
@@ -1261,7 +1696,9 @@ export function MembersTab() {
             <div className="flex items-center gap-2 text-body text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               {inviteSeatPurchase.phase === "inviting"
-                ? t(($) => $.members.inviting)
+                ? inviteSeatPurchase.promote
+                  ? t(($) => $.members.making_member)
+                  : t(($) => $.members.inviting)
                 : t(($) => $.members.seat_purchase_waiting)}
             </div>
           )}
@@ -1280,7 +1717,9 @@ export function MembersTab() {
                   void handlePurchaseSeatAndInvite();
                 }}
               >
-                {t(($) => $.members.purchase_seat_and_invite)}
+                {inviteSeatPurchase.promote
+                  ? t(($) => $.members.purchase_seat_and_make_member)
+                  : t(($) => $.members.purchase_seat_and_invite)}
               </AlertDialogAction>
             )}
             {inviteSeatPurchase?.phase === "error" &&
@@ -1298,6 +1737,31 @@ export function MembersTab() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <GuestProjectsDialog
+        open={projectsDialog !== null}
+        title={
+          projectsDialog?.mode === "demote"
+            ? t(($) => $.members.make_guest_title, { name: projectsDialog.member.name })
+            : t(($) => $.members.manage_projects_title, { name: projectsDialog?.member.name ?? "" })
+        }
+        description={
+          projectsDialog?.mode === "demote"
+            ? t(($) => $.members.make_guest_description, { name: projectsDialog.member.name })
+            : undefined
+        }
+        confirmLabel={
+          projectsDialog?.mode === "demote"
+            ? t(($) => $.members.make_guest_button)
+            : t(($) => $.members.save_projects)
+        }
+        projects={shareableProjects}
+        initial={projectsDialog?.member.project_ids ?? []}
+        onOpenChange={(open) => {
+          if (!open) setProjectsDialog(null);
+        }}
+        onConfirm={handleProjectsConfirm}
+      />
+
       <AlertDialog open={!!confirmAction} onOpenChange={(v) => { if (!v) setConfirmAction(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1313,7 +1777,7 @@ export function MembersTab() {
                 setConfirmAction(null);
               }}
             >
-              {t(($) => $.members.confirm_action)}
+              {confirmAction?.actionLabel ?? t(($) => $.members.confirm_action)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

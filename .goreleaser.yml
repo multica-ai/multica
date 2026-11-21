@@ -3,6 +3,9 @@ version: 2
 project_name: multica
 
 release:
+  # Keep stable update clients on the previous complete release until the
+  # shared promotion workflow has verified every platform's artifacts.
+  make_latest: false
   # GitHub rejects duplicate asset names with 422. On a same-tag rerun,
   # replace only the matching CLI artifact and retry the upload; unrelated
   # release assets (for example manually published macOS builds) stay intact.
@@ -64,12 +67,11 @@ checksum:
   name_template: "checksums.txt"
 
 changelog:
+  use: github
+  # Only author logins should create contributor mentions, not product syntax
+  # such as @all in commit subjects. Keep every commit so all authors get credit.
+  format: '{{ .SHA }} {{ replace .Message "@" "@<!-- -->" }}{{ if .Logins }} ({{ .Logins | englishJoin }}){{ end }}'
   sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
 
 brews:
   - name: multica

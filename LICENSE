@@ -8,6 +8,10 @@ Part I and Part II together constitute the "Multica License". Neither part
 grants any rights on its own. Condition 3 states how the two parts fit
 together and what must be delivered when you redistribute.
 
+The Multica License does not apply to the files in the `server/ee/` and
+`packages/ee/` directories. Those files are governed by the commercial
+license in the LICENSE file of each directory.
+
 ------------------------------------------------------------------------
 
                        Part I — Additional Conditions

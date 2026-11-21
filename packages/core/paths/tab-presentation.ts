@@ -16,7 +16,7 @@
  * loaded yet renders a stable type icon and a type label, never a wrong or
  * empty identity, and never borrows the Issues icon.
  */
-import type { IssueStatus, IssueStatusCategory } from "../types";
+import type { Issue, IssueStatus, IssueStatusCategory } from "../types";
 import { issueStatusCategory } from "../issues/status-category";
 import {
   WORKSPACE_PAGES,
@@ -46,6 +46,8 @@ export type TabLabelKey =
   | "agent"
   | "member"
   | "squad"
+  | "doc"
+  | "docFolder"
   | "skill"
   | "machine"
   | "runtime"
@@ -79,12 +81,14 @@ export type InboxSelectionData =
  * pending (type-label + type-icon) presentation.
  */
 export interface TabEntityData {
-  issue?: { identifier: string; title: string; status: IssueStatus };
+  issue?: Pick<Issue, "identifier" | "title" | "status" | "status_category">;
   project?: { icon: string | null; title: string };
   autopilot?: { title: string };
   /** Resolved display name for an actor subject. */
   actorName?: string;
   skill?: { name: string };
+  doc?: {title: string};
+  docFolder?: {title: string};
   machine?: { name: string };
   runtime?: { name: string };
   /** Resolved chat session title (already includes the "New chat" fallback). */
@@ -187,6 +191,10 @@ export function resolveTabPresentation(
         visual: { kind: "actor", actorType: subject.actorType, id: subject.id },
         title: textOr(data.actorName, ACTOR_LABEL[subject.actorType]),
       };
+    case "doc":
+      return { visual: { kind: "icon", icon: "FileText" }, title: textOr(data.doc?.title, "doc") };
+    case "docFolder":
+      return { visual: { kind: "icon", icon: "FolderKanban" }, title: textOr(data.docFolder?.title, "docFolder") };
     case "skill":
       return {
         visual: { kind: "icon", icon: "BookOpenText" },

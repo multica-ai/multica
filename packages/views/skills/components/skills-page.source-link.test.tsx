@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
     sortField: "name",
     sortDirection: "asc" as string,
     hiddenColumns: [] as string[],
+    search: "",
+    setSearch: vi.fn(),
     filters: {
       usage: [] as string[],
       origins: [] as string[],

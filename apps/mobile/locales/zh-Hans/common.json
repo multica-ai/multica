@@ -49,7 +49,5 @@
     "hours_ago_other": "{{count}} 小时前",
     "days_ago_other": "{{count}} 天前",
     "weeks_ago_other": "{{count}} 周前"
-  },
-  "states.empty": "暂无内容",
-  "states.error": "出现错误"
+  }
 }

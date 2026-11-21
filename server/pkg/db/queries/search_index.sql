@@ -7,20 +7,33 @@
 -- than this snapshot and reaches the client through the change log. The byte
 -- totals let the client reject a workspace too large for its memory budget
 -- before downloading it; octet_length reads the stored length, so TOASTed
--- bodies are not decompressed.
-WITH ws AS (SELECT @workspace_id::uuid AS id)
+-- bodies are not decompressed. Rows in hidden_project_ids are left out, as
+-- the snapshot leaves them out.
+WITH ws AS (SELECT @workspace_id::uuid AS id, sqlc.narg('hidden_project_ids')::uuid[] AS hidden),
+visible_issue AS (
+    SELECT i.id, i.title, i.description FROM issue i, ws
+    WHERE i.workspace_id = ws.id
+      AND (ws.hidden IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(ws.hidden)))
+),
+visible_comment AS (
+    SELECT c.content FROM comment c
+    JOIN visible_issue vi ON vi.id = c.issue_id, ws
+    WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL
+),
+visible_project AS (
+    SELECT p.title, p.description FROM project p, ws
+    WHERE p.workspace_id = ws.id AND (ws.hidden IS NULL OR NOT (p.id = ANY(ws.hidden)))
+)
 SELECT
     pg_current_snapshot()::text AS snapshot,
-    (SELECT count(*) FROM issue i, ws WHERE i.workspace_id = ws.id)::bigint AS issue_count,
-    (SELECT COALESCE(sum(octet_length(i.title) + COALESCE(octet_length(i.description), 0)), 0)
-        FROM issue i, ws WHERE i.workspace_id = ws.id)::bigint AS issue_bytes,
-    (SELECT count(*) FROM comment c, ws
-        WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL)::bigint AS comment_count,
-    (SELECT COALESCE(sum(octet_length(c.content)), 0) FROM comment c, ws
-        WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL)::bigint AS comment_bytes,
-    (SELECT count(*) FROM project p, ws WHERE p.workspace_id = ws.id)::bigint AS project_count,
-    (SELECT COALESCE(sum(octet_length(p.title) + COALESCE(octet_length(p.description), 0)), 0)
-        FROM project p, ws WHERE p.workspace_id = ws.id)::bigint AS project_bytes;
+    (SELECT count(*) FROM visible_issue)::bigint AS issue_count,
+    (SELECT COALESCE(sum(octet_length(title) + COALESCE(octet_length(description), 0)), 0)
+        FROM visible_issue)::bigint AS issue_bytes,
+    (SELECT count(*) FROM visible_comment)::bigint AS comment_count,
+    (SELECT COALESCE(sum(octet_length(content)), 0) FROM visible_comment)::bigint AS comment_bytes,
+    (SELECT count(*) FROM visible_project)::bigint AS project_count,
+    (SELECT COALESCE(sum(octet_length(title) + COALESCE(octet_length(description), 0)), 0)
+        FROM visible_project)::bigint AS project_bytes;
 
 -- name: GetSearchIndexCurrentSnapshot :one
 SELECT pg_current_snapshot()::text AS snapshot;
@@ -112,3 +125,26 @@ SELECT count(*)::bigint AS deleted_count FROM deleted;
 
 -- name: DeleteWorkspaceSearchIndexChanges :exec
 DELETE FROM search_index_change WHERE workspace_id = $1;
+
+-- name: MarkSearchAccessChanged :exec
+-- Records that this transaction changed what the user can see in the
+-- workspace without rewriting the content (MUL-9420), so local search copies
+-- built before it are rebuilt.
+INSERT INTO member_search_access (workspace_id, user_id, changed_xid, changed_at)
+VALUES (@workspace_id, @user_id, pg_current_xact_id(), now())
+ON CONFLICT (workspace_id, user_id) DO UPDATE
+    SET changed_xid = EXCLUDED.changed_xid,
+        changed_at = EXCLUDED.changed_at;
+
+-- name: SearchAccessChangedAfter :one
+-- Whether the user's access in the workspace was changed by a transaction the
+-- since snapshot does not include.
+SELECT EXISTS (
+    SELECT 1 FROM member_search_access
+    WHERE workspace_id = @workspace_id
+      AND user_id = @user_id
+      AND NOT pg_visible_in_snapshot(changed_xid, (@since_snapshot::text)::pg_snapshot)
+)::bool AS changed;
+
+-- name: DeleteWorkspaceMemberSearchAccess :exec
+DELETE FROM member_search_access WHERE workspace_id = $1;

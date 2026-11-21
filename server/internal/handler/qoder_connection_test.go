@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -285,29 +286,49 @@ func TestQoderStepLeaseReleasesDatabaseConnection(t *testing.T) {
 	testutil.Call(t, testHandler.StopQoderConnection, vcsHandlerRequest("POST", "/qoder/stop", nil, "")).Want(200)
 }
 
+func TestQoderSquadQuickCreate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := dbfx.Runtime(t, "Qoder squad quick-create", testutil.Cols{"provider": "qoder_cloud"})
+	leaderID := dbfx.Agent(t, "Qoder squad leader", runtimeID, testutil.Cols{"runtime_config": `{"qoder_agent_id":"agent_1"}`})
+	squadID := dbfx.Squad(t, "Qoder quick-create squad", leaderID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE agent_id=$1`, leaderID)
+
+	var response QuickCreateIssueResponse
+	testutil.Call(t, testHandler.QuickCreateIssue, newRequest(http.MethodPost, "/api/issues/quick-create", map[string]any{
+		"squad_id": squadID, "prompt": "Add a settings page",
+	})).Want(http.StatusAccepted).JSON(&response)
+
+	var agentID string
+	var raw []byte
+	dbfx.QueryRow(t, `SELECT agent_id::text, context FROM agent_task_queue WHERE id=$1`, response.TaskID).Scan(&agentID, &raw)
+	var qc service.QuickCreateContext
+	if err := json.Unmarshal(raw, &qc); err != nil {
+		t.Fatal(err)
+	}
+	if agentID != leaderID || qc.SquadID != squadID {
+		t.Fatalf("quick-create must route to the Qoder leader and retain the squad: agent=%s context=%+v", agentID, qc)
+	}
+
+	testutil.Call(t, testHandler.QuickCreateIssue, newRequest(http.MethodPost, "/api/issues/quick-create", map[string]any{
+		"squad_id": squadID, "prompt": "Read the screenshot", "attachment_ids": []string{"019ec09d-6222-722b-bdfa-427b105d80be"},
+	})).Want(http.StatusUnprocessableEntity)
+}
+
 func TestQoderQuickCreateLimits(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 	qoderID := parseUUID(dbfx.Runtime(t, "Qoder quick-create limits runtime", testutil.Cols{"provider": "qoder_cloud", "runtime_mode": "cloud", "metadata": `{}`}))
-	for _, tc := range []struct {
-		name               string
-		squad, attachments bool
-		want               string
-	}{
-		{"squad", true, false, "lead a squad"},
-		{"attachments", false, true, "attachments"},
-	} {
-		status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", qoderID, tc.squad, tc.attachments)
-		if status != http.StatusUnprocessableEntity || payload["code"] != "agent_unavailable" || !strings.Contains(payload["reason"].(string), tc.want) {
-			t.Fatalf("%s: Qoder quick-create should be rejected, got %d: %v", tc.name, status, payload)
-		}
+	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", qoderID, true); status != http.StatusUnprocessableEntity || payload["code"] != "agent_unavailable" || !strings.Contains(payload["reason"].(string), "attachments") {
+		t.Fatalf("Qoder quick-create attachments should be rejected, got %d: %v", status, payload)
 	}
-	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", qoderID, false, false); status != 0 {
+	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", qoderID, false); status != 0 {
 		t.Fatalf("plain Qoder quick-create should be accepted, got %d: %v", status, payload)
 	}
-	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", parseUUID(testRuntimeID), true, true); status != 0 {
+	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", parseUUID(testRuntimeID), true); status != 0 {
 		t.Fatalf("daemon runtime should be accepted, got %d: %v", status, payload)
 	}
 }

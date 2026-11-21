@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { RuntimeModel } from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
-import { PropRow } from "../../../common/prop-row";
+import { ObjectProperty } from "../../../layout/object-page";
 import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
 import { ThinkingPicker } from "./thinking-picker";
@@ -14,7 +14,7 @@ import {
 } from "./model-capability";
 
 /**
- * Thinking row for the agent inspector. Hidden when the active model has
+ * Thinking row for the agent properties panel. Hidden when the active model has
  * no `supported_levels` advertised AND nothing is persisted, so providers
  * that don't expose reasoning never surface an empty row. If the agent
  * already has a `thinking_level` saved (model swap into a non-thinking
@@ -26,9 +26,9 @@ import {
  * state honestly.
  *
  * Reuses the shared runtime-models query so it hits the same 60s cache
- * as the model picker; no extra round-trip on the inspector's hot path.
+ * as the model picker; no extra round-trip on the panel's hot path.
  * The sibling ModelPicker mounts unconditionally next to this row, so
- * the shared query subscription is established by the inspector mount
+ * the shared query subscription is established by the panel mount
  * itself — returning null here does NOT cancel discovery.
  */
 export function ThinkingPropRow({
@@ -61,7 +61,7 @@ export function ThinkingPropRow({
   if (levels.length === 0 && !value) return null;
 
   return (
-    <PropRow label={t(($) => $.inspector.prop_thinking)} interactive={false}>
+    <ObjectProperty label={t(($) => $.inspector.prop_thinking)}>
       <ThinkingPicker
         value={value}
         levels={levels}
@@ -69,7 +69,7 @@ export function ThinkingPropRow({
         allowClear={levels.length === 0 || !thinkingLevelRequiredForProvider(provider)}
         onChange={onChange}
       />
-    </PropRow>
+    </ObjectProperty>
   );
 }
 

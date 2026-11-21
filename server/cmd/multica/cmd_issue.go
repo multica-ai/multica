@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,10 +30,8 @@ import (
 // flag, and a `--<name>-file <path>` flag, mirroring the existing `--content`
 // / `--content-stdin` pattern. It returns the resolved string and an error
 // when more than one source is set, or when stdin/file is requested but
-// produces no body. Inline flag values are passed through
-// util.UnescapeBackslashEscapes so bash-double-quoted `\n` becomes a real
-// newline; stdin and file bodies are returned verbatim so literal backslashes
-// survive intact.
+// produces no body. Inline values are preserved exactly as received from the
+// shell. Stdin and file bodies retain their content except for one trailing LF.
 //
 // The `-file` source exists for Windows agents: piping HEREDOC content to
 // `--<name>-stdin` from Windows PowerShell silently drops non-ASCII bytes
@@ -89,7 +88,7 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 	if inline == "" {
 		return "", false, nil
 	}
-	return util.UnescapeBackslashEscapes(inline), true, nil
+	return inline, true, nil
 }
 
 // ensureFileFlagWithinWorkdir fails closed when a --<name>-file path resolves
@@ -256,6 +255,26 @@ var issuePullRequestsCmd = &cobra.Command{
 	Short:   "List pull requests linked to an issue",
 	Args:    exactArgs(1),
 	RunE:    runIssuePullRequests,
+}
+
+var issuePullRequestsLinkCmd = &cobra.Command{
+	Use:   "link <issue> <pr-url>",
+	Short: "Link a pull request to an issue",
+	Long: `Link a pull request to an issue by its URL, for a PR whose title or branch
+does not mention the issue key. The PR must already be synced from a connected
+repository. Linking also undoes an earlier unlink of the same PR.`,
+	Args: exactArgs(2),
+	RunE: runIssuePullRequestsLink,
+}
+
+var issuePullRequestsUnlinkCmd = &cobra.Command{
+	Use:   "unlink <issue> <pr>",
+	Short: "Unlink a pull request from an issue",
+	Long: `Remove a pull request from an issue. <pr> is the PR's URL, its number (42 or #42),
+or its id from "multica issue pull-requests <issue> --output json". The choice is
+remembered, so later activity on the PR does not link it again; "link" restores it.`,
+	Args: exactArgs(2),
+	RunE: runIssuePullRequestsUnlink,
 }
 
 var issueChildrenCmd = &cobra.Command{
@@ -543,7 +562,7 @@ var validIssueSortColumns = []string{
 var validIssueFields = []string{
 	"id", "workspace_id", "number", "identifier", "title", "description",
 	"status", "status_category", "status_name", "priority", "assignee_type",
-	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
+	"assignee_id", "creator_type", "creator_id", "requester_id", "parent_issue_id",
 	"duplicate_of", "project_id", "position", "stage", "start_date", "due_date", "created_at",
 	"updated_at", "revision", "last_activity_at", "metadata", "properties",
 	"labels",
@@ -609,6 +628,7 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueDeleteCmd)
 	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
@@ -639,6 +659,8 @@ func init() {
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member, agent, or squad; fuzzy match)")
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
+	issueListCmd.Flags().String("updated-since", "", "Include issues updated at or after this RFC3339 timestamp; requires --updated-until (keep both bounds fixed across pages)")
+	issueListCmd.Flags().String("updated-until", "", "Include issues updated before this RFC3339 timestamp; requires --updated-since")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" or as a comparison such as "Score>=3", "Ship Date<2026-01-01" or "Notes~=review" (repeatable, one member per flag; quote it so the shell does not read < and > as redirection). Name is a property name (case-insensitive) or its UUID; a name containing =, <, >, ! or ~ has to be given by UUID. Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id. Repeating a property matches ANY of its members; different properties must ALL match. The per-type value forms and comparisons are in the command description above.`)
 	issueListCmd.Flags().Int("limit", 50, fmt.Sprintf("Page size, 1 to %d (the server returns at most %d issues per request; use --offset to page through more)", issueListMaxPageSize, issueListMaxPageSize))
@@ -654,18 +676,23 @@ func init() {
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
+	issuePullRequestsCmd.AddCommand(issuePullRequestsLinkCmd)
+	issuePullRequestsCmd.AddCommand(issuePullRequestsUnlinkCmd)
+	issuePullRequestsLinkCmd.Flags().String("output", "table", "Output format: table or json")
+	issuePullRequestsUnlinkCmd.Flags().String("output", "table", "Output format: table or json")
 
 	issueChildrenCmd.Flags().String("output", "table", "Output format: table or json")
 	issueChildrenCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 
 	// issue create
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
-	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
+	issueCreateCmd.Flags().String("description", "", "Issue description (preserves literal text. Use --description-stdin or --description-file for multi-line input)")
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
 	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
+	issueCreateCmd.Flags().String("pr-auto-complete", "", "Change status when linked PRs merge: on or off (saved atomically on supported servers)")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().Bool("assignee-picker", false, "Assign to the agent or squad selected in Quick Create (requires quick-create task context; mutually exclusive with --assignee and --assignee-id)")
@@ -676,19 +703,20 @@ func init() {
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
-	issueCreateCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
+	issueCreateCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page. To place it inline instead, reference the same path in the description (e.g. ![shot](./a.png)); that link is rewritten to the uploaded file")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
 	issueCreateCmd.Flags().StringArray("property", nil, `Set a custom property atomically with creation as "Name=Value" (repeatable, one distinct property per flag). Multi-value properties use comma-separated values; multi_text/multi_url also accept JSON arrays (required for commas in entries or values starting with "["). Property and option/member names are case-insensitive; UUIDs are accepted. Filter-only __none__, >=, <=, and != forms are rejected.`)
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
-	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
+	issueUpdateCmd.Flags().String("description", "", "New description (preserves literal text. Use --description-stdin or --description-file for multi-line input)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
-	issueUpdateCmd.Flags().StringArray("attachment", nil, "Local file path to attach (one literal path per flag; repeat --attachment for multiple files); references are appended to the end of the description")
+	issueUpdateCmd.Flags().StringArray("attachment", nil, "Local file path to attach (one literal path per flag; repeat --attachment for multiple files); references are appended to the end of the description, except where the description already links the same path (e.g. ![shot](./a.png)), which is rewritten to the uploaded file in place")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
+	issueUpdateCmd.Flags().String("pr-auto-complete", "", "Change status when linked PRs merge: on or off (on takes effect at the next PR event)")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
@@ -705,6 +733,11 @@ func init() {
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID); the status must be cancelled")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue delete
+	issueDeleteCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
+	issueDeleteCmd.Flags().Bool("dry-run", false, "List what would be deleted without deleting")
+	issueDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -753,18 +786,18 @@ func init() {
 	issueRunMessagesCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
 
 	// issue comment add
-	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
+	issueCommentAddCmd.Flags().String("content", "", "Comment content (preserves literal text. Use --content-stdin or --content-file for multi-line input)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
-	issueCommentAddCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
+	issueCommentAddCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). To show an image at a specific spot, reference the same path in the content (e.g. ![shot](./a.png)); that link is rewritten to the uploaded file before posting. Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
 	issueCommentAddCmd.Flags().StringSlice("steer", nil, "Run ID (full UUID or short prefix) whose in-progress turn should receive this comment instead of a follow-up run (repeatable)")
 	issueCommentAddCmd.Flags().Bool("steer-active", false, "Add this comment to the running turn of every agent on this issue you may steer, and of any other recipient that is running")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment update
-	issueCommentUpdateCmd.Flags().String("content", "", "New comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
+	issueCommentUpdateCmd.Flags().String("content", "", "New comment content (preserves literal text. Use --content-stdin or --content-file for multi-line input)")
 	issueCommentUpdateCmd.Flags().Bool("content-stdin", false, "Read new comment content from stdin (preserves multi-line content verbatim)")
 	issueCommentUpdateCmd.Flags().String("content-file", "", "Read new comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCommentUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --content-file to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
@@ -778,6 +811,7 @@ func init() {
 	// issue search
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
 	issueSearchCmd.Flags().Bool("include-closed", false, "Include done and cancelled issues")
+	issueSearchCmd.Flags().String("project", "", "Filter by project ID")
 	issueSearchCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue subscriber list
@@ -826,6 +860,27 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 
 	params := url.Values{}
 	params.Set("workspace_id", client.WorkspaceID)
+	since, _ := cmd.Flags().GetString("updated-since")
+	until, _ := cmd.Flags().GetString("updated-until")
+	if cmd.Flags().Changed("updated-since") != cmd.Flags().Changed("updated-until") {
+		return fmt.Errorf("--updated-since and --updated-until must be set together")
+	}
+	if cmd.Flags().Changed("updated-since") {
+		start, err := time.Parse(time.RFC3339Nano, since)
+		if err != nil {
+			return fmt.Errorf("invalid --updated-since; expected an RFC3339 timestamp: %w", err)
+		}
+		end, err := time.Parse(time.RFC3339Nano, until)
+		if err != nil {
+			return fmt.Errorf("invalid --updated-until; expected an RFC3339 timestamp: %w", err)
+		}
+		if !start.Before(end) {
+			return fmt.Errorf("--updated-since must be before --updated-until")
+		}
+		params.Set("date_field", "updated_at")
+		params.Set("date_start", since)
+		params.Set("date_end", until)
+	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		params.Set("status", v)
 	}
@@ -912,23 +967,12 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		params.Set("direction", d)
 	}
 
-	var fields []string
-	if v, _ := cmd.Flags().GetString("fields"); v != "" {
-		valid := make(map[string]bool, len(validIssueFields))
-		for _, f := range validIssueFields {
-			valid[f] = true
-		}
-		keepsProperties := false
-		for _, f := range strings.Split(v, ",") {
-			f = strings.TrimSpace(f)
-			if !valid[f] {
-				return fmt.Errorf("invalid --fields value %q; valid values: %s", f, strings.Join(validIssueFields, ", "))
-			}
-			if f == "properties" {
-				keepsProperties = true
-			}
-			fields = append(fields, f)
-		}
+	fields, err := parseIssueFieldsFlag(cmd)
+	if err != nil {
+		return err
+	}
+	if len(fields) > 0 {
+		keepsProperties := slices.Contains(fields, "properties")
 		// --fields without `properties` deletes the very key
 		// --resolve-properties rewrites, so the pair would either cost two
 		// requests for output nobody sees or leave the flag silently doing
@@ -1003,6 +1047,33 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
+	printIssueListTable(ctx, client, issuesRaw, fullID)
+	// Page footer on stderr so stdout stays a plain table. It speaks whenever
+	// there is more or the page was offset, and stays silent for a short
+	// first page. "of N" appears only while total is trusted, so the line
+	// never claims a page is the whole list beside a pointer to the next one.
+	switch {
+	case returned == 0 && offset > 0:
+		if totalTrusted {
+			fmt.Fprintf(os.Stderr, "No issues at --offset %d (%d total).\n", offset, int(total))
+		} else {
+			fmt.Fprintf(os.Stderr, "No issues at --offset %d.\n", offset)
+		}
+	case hasMore || offset > 0:
+		line := fmt.Sprintf("Showing issues %d-%d.", offset+1, offset+returned)
+		if totalTrusted {
+			line = fmt.Sprintf("Showing %d-%d of %d issues.", offset+1, offset+returned, int(total))
+		}
+		if hasMore {
+			line += fmt.Sprintf(" Next page: --offset %d", offset+returned)
+		}
+		fmt.Fprintln(os.Stderr, line)
+	}
+	return nil
+}
+
+// printIssueListTable prints issue rows in the `issue list` table layout.
+func printIssueListTable(ctx context.Context, client *cli.APIClient, issuesRaw []any, fullID bool) {
 	headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "START DATE", "DUE DATE"}
 	if fullID {
 		headers = []string{"KEY", "ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "START DATE", "DUE DATE"}
@@ -1047,28 +1118,6 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		rows = append(rows, row)
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
-	// Page footer on stderr so stdout stays a plain table. It speaks whenever
-	// there is more or the page was offset, and stays silent for a short
-	// first page. "of N" appears only while total is trusted, so the line
-	// never claims a page is the whole list beside a pointer to the next one.
-	switch {
-	case returned == 0 && offset > 0:
-		if totalTrusted {
-			fmt.Fprintf(os.Stderr, "No issues at --offset %d (%d total).\n", offset, int(total))
-		} else {
-			fmt.Fprintf(os.Stderr, "No issues at --offset %d.\n", offset)
-		}
-	case hasMore || offset > 0:
-		line := fmt.Sprintf("Showing issues %d-%d.", offset+1, offset+returned)
-		if totalTrusted {
-			line = fmt.Sprintf("Showing %d-%d of %d issues.", offset+1, offset+returned, int(total))
-		}
-		if hasMore {
-			line += fmt.Sprintf(" Next page: --offset %d", offset+returned)
-		}
-		fmt.Fprintln(os.Stderr, line)
-	}
-	return nil
 }
 
 func runIssuePullRequests(cmd *cobra.Command, args []string) error {
@@ -1086,10 +1135,19 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 	}
 
 	var result map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/pull-requests", &result); err != nil {
+	if err := client.GetJSON(ctx, issuePullRequestsPath(issueRef.ID), &result); err != nil {
 		return fmt.Errorf("list issue pull requests: %w", err)
 	}
+	return printIssuePullRequestsResult(cmd, result)
+}
 
+func issuePullRequestsPath(issueID string) string {
+	return "/api/issues/" + url.PathEscape(issueID) + "/pull-requests"
+}
+
+// printIssuePullRequestsResult prints the issue's pull request list, which is
+// also what link and unlink return, so every subcommand shows the result.
+func printIssuePullRequestsResult(cmd *cobra.Command, result map[string]any) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
@@ -1097,7 +1155,155 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 
 	prs, _ := result["pull_requests"].([]any)
 	printIssuePullRequestsTable(normalizePullRequestList(prs))
+	if autoComplete, ok := result["auto_complete"].(map[string]any); ok {
+		printIssuePRAutoComplete(autoComplete)
+	}
 	return nil
+}
+
+func runIssuePullRequestsLink(cmd *cobra.Command, args []string) error {
+	ref := strings.TrimSpace(args[1])
+	if ref == "" {
+		return fmt.Errorf("pull request URL is required")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	// The endpoint also accepts the id of a PR this workspace mirrors, which
+	// is how an unlinked PR (still listed by its id) is restored.
+	body := map[string]string{"url": ref}
+	if uuidRegexp.MatchString(ref) {
+		body = map[string]string{"pull_request_id": strings.ToLower(ref)}
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, issuePullRequestsPath(issueRef.ID), body, &result); err != nil {
+		if isUnsyncedPullRequestError(err) {
+			// The generic not-found message would send the user hunting for a
+			// wrong ID; the PR is simply not mirrored here yet.
+			return fmt.Errorf("pull request %s is not in this workspace yet: it can be linked once its repository is connected to Multica and the PR has synced", ref)
+		}
+		return fmt.Errorf("link pull request: %w", err)
+	}
+	return printIssuePullRequestsResult(cmd, result)
+}
+
+func runIssuePullRequestsUnlink(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	// The endpoint takes the PR's id; find it among the issue's linked PRs so
+	// a URL or number works too.
+	var listed map[string]any
+	if err := client.GetJSON(ctx, issuePullRequestsPath(issueRef.ID), &listed); err != nil {
+		return fmt.Errorf("list issue pull requests: %w", err)
+	}
+	prs, _ := listed["pull_requests"].([]any)
+	prID, err := matchLinkedPullRequest(normalizePullRequestList(prs), args[1])
+	if err != nil {
+		return fmt.Errorf("%w; see \"multica issue pull-requests %s\"", err, args[0])
+	}
+
+	var result map[string]any
+	if err := client.DeleteJSONResponse(ctx, issuePullRequestsPath(issueRef.ID)+"/"+url.PathEscape(prID), &result); err != nil {
+		return fmt.Errorf("unlink pull request: %w", err)
+	}
+	return printIssuePullRequestsResult(cmd, result)
+}
+
+func isUnsyncedPullRequestError(err error) bool {
+	var httpErr *cli.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound &&
+		strings.Contains(httpErr.Body, "pull request not found")
+}
+
+// matchLinkedPullRequest finds the id of the linked PR that ref names: its id,
+// its URL (any trailing /files, query or fragment ignored), or its number. A
+// number shared by PRs from different repositories is ambiguous.
+func matchLinkedPullRequest(prs []map[string]any, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("pull request is required")
+	}
+	if uuidRegexp.MatchString(ref) {
+		for _, pr := range prs {
+			if strings.EqualFold(strVal(pr, "id"), ref) {
+				return strVal(pr, "id"), nil
+			}
+		}
+		return "", fmt.Errorf("pull request %s is not linked to this issue", ref)
+	}
+	if number := strings.TrimPrefix(ref, "#"); isAllDigits(number) {
+		var matches []map[string]any
+		for _, pr := range prs {
+			if strVal(pr, "number") == number {
+				matches = append(matches, pr)
+			}
+		}
+		switch len(matches) {
+		case 1:
+			return strVal(matches[0], "id"), nil
+		case 0:
+			return "", fmt.Errorf("no linked pull request has number %s", number)
+		default:
+			urls := make([]string, 0, len(matches))
+			for _, pr := range matches {
+				urls = append(urls, pullRequestURL(pr))
+			}
+			return "", fmt.Errorf("pull request number %s matches %d linked PRs (%s); pass its URL instead", number, len(matches), strings.Join(urls, ", "))
+		}
+	}
+	want := canonicalPullRequestURL(ref)
+	for _, pr := range prs {
+		if want != "" && canonicalPullRequestURL(pullRequestURL(pr)) == want {
+			return strVal(pr, "id"), nil
+		}
+	}
+	return "", fmt.Errorf("pull request %s is not linked to this issue", ref)
+}
+
+var pullRequestURLPathPattern = regexp.MustCompile(`^(.+?/(?:pull|pulls|merge_requests)/\d+)(?:[/?#].*)?$`)
+
+// canonicalPullRequestURL reduces a PR URL to host and path up to the PR
+// number, lowercased, so a pasted ".../pull/42/files" matches the stored URL.
+func canonicalPullRequestURL(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	raw = strings.TrimPrefix(strings.TrimPrefix(raw, "https://"), "http://")
+	if m := pullRequestURLPathPattern.FindStringSubmatch(raw); m != nil {
+		return m[1]
+	}
+	return strings.TrimRight(raw, "/")
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizePullRequestList(raw []any) []map[string]any {
@@ -1505,6 +1711,10 @@ func pickIssueCreateAssignee(ctx context.Context, client *cli.APIClient, cmd *co
 }
 
 func runIssueCreate(cmd *cobra.Command, _ []string) error {
+	prAutoCompleteDisabled, err := issuePRAutoCompleteFlag(cmd)
+	if err != nil {
+		return err
+	}
 	title, _ := cmd.Flags().GetString("title")
 	if title == "" {
 		return fmt.Errorf("--title is required")
@@ -1540,6 +1750,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	body := map[string]any{"title": title}
+	if prAutoCompleteDisabled != nil {
+		body["pr_auto_complete_disabled"] = *prAutoCompleteDisabled
+	}
 	propertyFlags, _ := cmd.Flags().GetStringArray("property")
 	var createProperties map[string]json.RawMessage
 	if len(propertyFlags) > 0 {
@@ -1563,8 +1776,8 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if hasDesc {
-		if err := guardLocalPathLinks(desc, "issue description",
-			"Deliver the file itself with `multica issue create --attachment <path>` (repeatable) and drop the link."); err != nil {
+		if err := guardLocalPathLinks(previewAttachmentLinks(desc, attachments), "issue description",
+			"Deliver the file itself with `multica issue create --attachment <path>` (repeatable); a link or image whose target is that same path is rewritten to the uploaded file and renders in place. Otherwise drop the link."); err != nil {
 			return err
 		}
 	}
@@ -1582,7 +1795,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["parent_issue_id"] = parent.ID
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
-		project, err := resolveProjectID(ctx, client, v)
+		resolveProject := resolveProjectIDForNewWork
+		if _, ok := body["parent_issue_id"]; ok {
+			// A sub-issue may stay in its parent's archived project; the server checks that.
+			resolveProject = resolveProjectID
+		}
+		project, err := resolveProject(ctx, client, v)
 		if err != nil {
 			return fmt.Errorf("resolve project: %w", err)
 		}
@@ -1661,6 +1879,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		attachmentIDs = appendUniqueStrings(attachmentIDs, result.ID)
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
+	desc = applyAttachmentLinks(os.Stderr, desc, "issue description", pending, uploaded)
 	desc = appendAttachmentReferences(desc, uploaded)
 	if hasDesc || len(uploaded) > 0 {
 		body["description"] = desc
@@ -1675,6 +1894,11 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			return errors.New(msg)
 		}
 		return fmt.Errorf("create issue: %w", err)
+	}
+	if prAutoCompleteDisabled != nil {
+		if err := confirmCreatedIssuePRAutoComplete(ctx, client, result, *prAutoCompleteDisabled); err != nil {
+			return err
+		}
 	}
 	if err := verifyIssueCreateProperties(createProperties, result); err != nil {
 		return fmt.Errorf("issue %s was created, but the server did not confirm its custom properties; review it before retrying: %w", issueDisplayKey(result), err)
@@ -1739,6 +1963,10 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
+	prAutoCompleteDisabled, err := issuePRAutoCompleteFlag(cmd)
+	if err != nil {
+		return err
+	}
 	attachmentPaths, err := issueAttachmentPaths(cmd)
 	if err != nil {
 		return err
@@ -1792,13 +2020,14 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("title")
 		body["title"] = v
 	}
-	if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-stdin") || cmd.Flags().Changed("description-file") {
+	useDescriptionStdin, _ := cmd.Flags().GetBool("description-stdin")
+	if cmd.Flags().Changed("description") || useDescriptionStdin || cmd.Flags().Changed("description-file") {
 		desc, _, err := resolveTextFlag(cmd, "description")
 		if err != nil {
 			return err
 		}
-		if err := guardLocalPathLinks(desc, "issue description",
-			"Attach the file with `multica issue update <issue-id> --attachment <path>` and drop the local-path link."); err != nil {
+		if err := guardLocalPathLinks(previewAttachmentLinks(desc, attachmentPaths), "issue description",
+			"Attach the file with `multica issue update <issue-id> --attachment <path>`; a link or image whose target is that same path is rewritten to the uploaded file and renders in place. Otherwise drop the local-path link."); err != nil {
 			return err
 		}
 		body["description"] = desc
@@ -1814,6 +2043,8 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if v == "" {
 			body["project_id"] = nil
 		} else {
+			// Naming the issue's current archived project is an ordinary edit;
+			// the server refuses only a move into one (409 project_archived).
 			project, err := resolveProjectID(ctx, client, v)
 			if err != nil {
 				return fmt.Errorf("resolve project: %w", err)
@@ -1870,7 +2101,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		body["position"] = v
 	}
 
-	if len(body) == 0 && len(attachmentPaths) == 0 {
+	if len(body) == 0 && len(attachmentPaths) == 0 && prAutoCompleteDisabled == nil {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
 	}
 	// Validate every path before any upload so an invalid later path cannot
@@ -1879,7 +2110,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(body) == 0 && len(pending) == 0 {
+	if len(body) == 0 && len(pending) == 0 && prAutoCompleteDisabled == nil {
 		return fmt.Errorf("no local attachments to update; --attachment accepts file paths, not URLs")
 	}
 	desc, changed := body["description"].(string)
@@ -1906,25 +2137,44 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 	if len(attachmentRefs) > 0 {
+		desc = applyAttachmentLinks(os.Stderr, desc, "issue description", pending, attachmentRefs)
 		body["description"] = appendAttachmentReferences(desc, attachmentRefs)
 		body["attachment_ids"] = attachmentIDs
 	}
-	if noStart {
+	if noStart && len(body) > 0 {
 		body["suppress_run"] = true
 	}
 
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
-		if len(attachmentIDs) > 0 {
-			return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
+	if len(body) > 0 {
+		if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+			if len(attachmentIDs) > 0 {
+				return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
+			}
+			return fmt.Errorf("update issue: %w", err)
 		}
-		return fmt.Errorf("update issue: %w", err)
+	} else {
+		// Keep issue update's response shape without issuing an empty update.
+		result, err = fetchIssue(ctx, client, issueRef.ID)
+		if err != nil {
+			return err
+		}
 	}
 	if duplicateOf != "" {
 		if _, err := recordedDuplicateOf(result, duplicateOf); err != nil {
 			return err
 		}
 	}
+	if prAutoCompleteDisabled != nil {
+		if err := setIssuePRAutoComplete(ctx, client, issueRef.ID, *prAutoCompleteDisabled); err != nil {
+			if len(body) > 0 {
+				return fmt.Errorf("issue %s fields were updated, but PR auto-complete was not confirmed; retry with issue update %s --pr-auto-complete %s: %w", issueRef.ID, issueRef.ID, prAutoCompleteValue(*prAutoCompleteDisabled), err)
+			}
+			return err
+		}
+		result["pr_auto_complete_disabled"] = *prAutoCompleteDisabled
+	}
+	reportIssueRunOutcome(os.Stderr, result, noStart)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
@@ -2002,6 +2252,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "Issue %s assigned to %s.\n", issueDisplayKey(result), displayTarget)
 	}
+	reportIssueRunOutcome(os.Stderr, result, noStart)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
@@ -2061,6 +2312,7 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "Issue %s status changed to %s.\n", issueDisplayKey(result), status)
 	}
+	reportIssueRunOutcome(os.Stderr, result, noStart)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
@@ -2598,8 +2850,12 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	if !hasContent {
 		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
 	}
-	if err := guardLocalPathLinks(content, "comment body",
-		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` (repeatable) and drop the link."); err != nil {
+	attachments, err := issueAttachmentPaths(cmd)
+	if err != nil {
+		return err
+	}
+	if err := guardLocalPathLinks(previewAttachmentLinks(content, attachments), "comment body",
+		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` (repeatable); a link or image whose target is that same path is rewritten to the uploaded file and renders in place. Otherwise drop the link."); err != nil {
 		return err
 	}
 
@@ -2610,10 +2866,6 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 
 	// Use a longer timeout when attachments are present (file uploads can be slow).
 	timeout := cli.APITimeout()
-	attachments, err := issueAttachmentPaths(cmd)
-	if err != nil {
-		return err
-	}
 	steerInputs, _ := cmd.Flags().GetStringSlice("steer")
 	steerActive, _ := cmd.Flags().GetBool("steer-active")
 	if (len(steerInputs) > 0 || steerActive) && len(attachments) > 0 {
@@ -2647,14 +2899,18 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	var attachmentIDs []string
+	uploaded := make([]cli.AttachmentResponse, 0, len(pending))
 	for _, att := range pending {
-		id, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID)
+		// Comment attachments are linked by the comment request; upload them unbound first.
+		result, uploadErr := client.UploadIssueAttachment(ctx, att.data, att.path, "")
 		if uploadErr != nil {
 			return fmt.Errorf("upload attachment %s: %w", att.path, uploadErr)
 		}
-		attachmentIDs = append(attachmentIDs, id)
+		attachmentIDs = append(attachmentIDs, result.ID)
+		uploaded = append(uploaded, result)
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
+	content = applyAttachmentLinks(os.Stderr, content, "comment body", pending, uploaded)
 
 	body := map[string]any{"content": content}
 	if len(steerTargets) > 0 {
@@ -3169,6 +3425,18 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 	if v, _ := cmd.Flags().GetBool("include-closed"); v {
 		params.Set("include_closed", "true")
 	}
+	if projectInput, _ := cmd.Flags().GetString("project"); projectInput != "" {
+		if client.WorkspaceID == "" {
+			if _, err := requireWorkspaceID(cmd); err != nil {
+				return err
+			}
+		}
+		project, err := resolveProjectID(ctx, client, projectInput)
+		if err != nil {
+			return err
+		}
+		params.Set("project_id", project.ID)
+	}
 
 	path := "/api/issues/search?" + params.Encode()
 
@@ -3675,6 +3943,24 @@ func formatAssignee(issue map[string]any, actors actorDisplayLookup) string {
 		return ""
 	}
 	return actors.actor(aType, aID)
+}
+
+// parseIssueFieldsFlag validates --fields against validIssueFields; nil
+// means the flag was not given.
+func parseIssueFieldsFlag(cmd *cobra.Command) ([]string, error) {
+	v, _ := cmd.Flags().GetString("fields")
+	if v == "" {
+		return nil, nil
+	}
+	var fields []string
+	for _, f := range strings.Split(v, ",") {
+		f = strings.TrimSpace(f)
+		if !slices.Contains(validIssueFields, f) {
+			return nil, fmt.Errorf("invalid --fields value %q; valid values: %s", f, strings.Join(validIssueFields, ", "))
+		}
+		fields = append(fields, f)
+	}
+	return fields, nil
 }
 
 // filterIssueFields keeps only the requested top-level keys on each issue,

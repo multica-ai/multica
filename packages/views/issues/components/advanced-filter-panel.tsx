@@ -57,6 +57,7 @@ import {
 } from "@multica/core/issues/stores/filter-operators";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { isImeComposing } from "@multica/core/utils";
 import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
@@ -302,7 +303,7 @@ function TypedValueInput({
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}
       onKeyDown={(event) => {
-        if (event.key === "Enter") commit();
+        if (event.key === "Enter" && !isImeComposing(event)) commit();
       }}
       className="h-7 min-w-0 flex-1 rounded-md px-2 text-caption md:text-caption"
     />

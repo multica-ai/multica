@@ -34,6 +34,10 @@ type event struct {
 		Credits *float64 `json:"credits"`
 	} `json:"model_usage"`
 	TotalCredits *float64 `json:"total_credits"`
+	// Set on agent.artifact_delivered.
+	FileID           string `json:"file_id"`
+	OriginalFilename string `json:"original_filename"`
+	Size             int64  `json:"size"`
 }
 
 func (e event) text() string {
@@ -109,6 +113,10 @@ func (b *Bridge) events(ctx context.Context, r *run) error {
 		case "session.usage":
 			if e.TotalCredits != nil {
 				r.setSessionCredits(*e.TotalCredits)
+			}
+		case "agent.artifact_delivered":
+			if r.Reply != nil {
+				r.Reply.add(e)
 			}
 		case "agent.message":
 			msg["type"] = "text"

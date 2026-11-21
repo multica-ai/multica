@@ -25,22 +25,83 @@ const CANDIDATES: readonly CellDelimiter[] = [",", ";", "\t"];
 /**
  * The delimiter a `.csv` file actually uses. Spreadsheets in locales with a
  * decimal comma export `;`, and a mislabeled TSV is common. Read off the first
- * record: whichever candidate splits it most wins, a comma on ties.
+ * logical record under each candidate. Prefer well-formed quoting, then the
+ * most fields, with candidate order breaking ties. If every interpretation
+ * with separators has malformed quotes, keep the parser's lenient behavior.
+ * Track all candidates in one pass without allocating parsed fields.
  */
 export function sniffDelimiter(text: string): CellDelimiter {
-  let end = text.search(/\r|\n/);
-  if (end < 0) end = text.length;
-  const firstLine = text.slice(0, end);
-  let best: CellDelimiter = ",";
-  let bestCount = 0;
-  for (const candidate of CANDIDATES) {
-    const count = firstLine.split(candidate).length - 1;
-    if (count > bestCount) {
-      best = candidate;
-      bestCount = count;
+  const candidates = CANDIDATES.map((delimiter) => ({
+    delimiter,
+    count: 0,
+    quoted: false,
+    fieldStart: true,
+    afterQuote: false,
+    escapedQuote: false,
+    wellFormed: true,
+    done: false,
+  }));
+  let remaining = candidates.length;
+  for (let i = text.charCodeAt(0) === 0xfeff ? 1 : 0; i < text.length; i += 1) {
+    const char = text[i];
+    for (const candidate of candidates) {
+      if (candidate.done) continue;
+      if (candidate.quoted) {
+        if (candidate.escapedQuote) {
+          candidate.escapedQuote = false;
+        } else if (char === '"') {
+          if (text[i + 1] === '"') candidate.escapedQuote = true;
+          else {
+            candidate.quoted = false;
+            candidate.afterQuote = true;
+          }
+        }
+        continue;
+      }
+      if (char === candidate.delimiter) {
+        candidate.count += 1;
+        candidate.fieldStart = true;
+        candidate.afterQuote = false;
+      } else if (char === "\r" || char === "\n") {
+        candidate.done = true;
+        remaining -= 1;
+      } else if (char === '"' && candidate.fieldStart) {
+        candidate.quoted = true;
+        candidate.fieldStart = false;
+      } else {
+        if (char === '"' || candidate.afterQuote) candidate.wellFormed = false;
+        candidate.fieldStart = false;
+      }
+    }
+    if (remaining === 0) break;
+    if (candidates.every((candidate) => candidate.done || candidate.quoted)) {
+      // Only a quote can change any remaining interpretation. Skip the quoted
+      // content together, including a large body after an unterminated quote.
+      const nextQuote = text.indexOf('"', i + 1);
+      if (nextQuote < 0) break;
+      i = nextQuote - 1;
     }
   }
-  return best;
+
+  let best: CellDelimiter = ",";
+  let bestCount = 0;
+  let bestWellFormed: CellDelimiter = ",";
+  let bestWellFormedCount = 0;
+  for (const candidate of candidates) {
+    if (candidate.count > bestCount) {
+      best = candidate.delimiter;
+      bestCount = candidate.count;
+    }
+    if (
+      candidate.wellFormed &&
+      !candidate.quoted &&
+      candidate.count > bestWellFormedCount
+    ) {
+      bestWellFormed = candidate.delimiter;
+      bestWellFormedCount = candidate.count;
+    }
+  }
+  return bestWellFormedCount > 0 ? bestWellFormed : best;
 }
 
 export function parseDelimited(text: string, delimiter: CellDelimiter): string[][] {

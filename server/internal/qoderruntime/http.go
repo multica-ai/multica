@@ -63,8 +63,9 @@ func (a *api) call(ctx context.Context, method, path string, in, out any) error 
 	return a.do(ctx, method, path, "application/json", body, out)
 }
 
-// upload posts one file as multipart/form-data under the "file" field.
-func (a *api) upload(ctx context.Context, path, name string, data []byte, out any) error {
+// upload posts one file as multipart/form-data under the "file" field, with
+// its name and any extra form fields.
+func (a *api) upload(ctx context.Context, path, name string, data []byte, fields map[string]string, out any) error {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
 	part, err := w.CreateFormFile("file", name)
@@ -76,6 +77,11 @@ func (a *api) upload(ctx context.Context, path, name string, data []byte, out an
 	}
 	if err := w.WriteField("name", name); err != nil {
 		return err
+	}
+	for k, v := range fields {
+		if err := w.WriteField(k, v); err != nil {
+			return err
+		}
 	}
 	if err := w.Close(); err != nil {
 		return err
