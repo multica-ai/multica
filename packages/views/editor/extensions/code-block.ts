@@ -1,6 +1,7 @@
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import type { Editor } from "@tiptap/core";
+import { NodeSelection, Plugin, PluginKey, Selection, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { createLowlight } from "lowlight";
 
@@ -98,7 +99,76 @@ export function splitFenceInfo(info: string | null | undefined): {
   };
 }
 
+/**
+ * Languages whose block renders in place — a preview in the shared dynamic
+ * block frame — instead of as highlighted code (MUL-7649, MUL-9760).
+ */
+export function isDynamicBlockLanguage(language: unknown): language is "html" | "mermaid" {
+  return language === "html" || language === "mermaid";
+}
+
+/**
+ * Transaction meta: the position of the dynamic block whose source should
+ * open. The NodeView at that position switches to its source view.
+ */
+export const OPEN_BLOCK_SOURCE_META = "multica:openBlockSource";
+
+/**
+ * Up or Down from the edge of a textblock onto a dynamic block that shows its
+ * preview selects that block whole. Left to the browser, the caret would skip
+ * the block going up and land in its hidden source going down. Mirrors
+ * ProseMirror's own vertical block motion (moveSelectionBlock).
+ */
+function selectPreviewedBlock(editor: Editor, typeName: string, dir: 1 | -1): boolean {
+  const { state, view } = editor;
+  const { selection } = state;
+  if (!(selection instanceof TextSelection) || !selection.empty) return false;
+  const $side = selection.$head;
+  if (!$side.depth || !view.endOfTextblock(dir < 0 ? "up" : "down")) return false;
+  const next = Selection.findFrom(state.doc.resolve(dir > 0 ? $side.after() : $side.before()), dir);
+  if (!(next instanceof TextSelection)) return false;
+  const block = next.$head.parent;
+  if (block.type.name !== typeName || !isDynamicBlockLanguage(block.attrs.language)) return false;
+  const pos = next.$head.before();
+  const dom = view.nodeDOM(pos);
+  if (!(dom instanceof HTMLElement) || !dom.querySelector('[data-dynamic-block-view="preview"]')) return false;
+  view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, pos)).scrollIntoView());
+  return true;
+}
+
 export const CodeBlockExtension = CodeBlockLowlight.extend({
+  addKeyboardShortcuts() {
+    const inherited = this.parent?.() ?? {};
+    return {
+      ...inherited,
+      ArrowUp: (props) =>
+        selectPreviewedBlock(props.editor, this.name, -1) || (inherited.ArrowUp?.(props) ?? false),
+      ArrowDown: (props) =>
+        selectPreviewedBlock(props.editor, this.name, 1) || (inherited.ArrowDown?.(props) ?? false),
+      // A previewed dynamic block is selected as a whole (its NodeView keeps
+      // the caret out of the hidden source); Enter opens the source with the
+      // caret at its start.
+      Enter: (props) => {
+        const { editor } = props;
+        const { selection } = editor.state;
+        if (
+          editor.isEditable &&
+          selection instanceof NodeSelection &&
+          selection.node.type.name === this.name &&
+          isDynamicBlockLanguage(selection.node.attrs.language)
+        ) {
+          const pos = selection.from;
+          return editor.commands.command(({ tr }) => {
+            tr.setSelection(TextSelection.create(tr.doc, pos + 1))
+              .setMeta(OPEN_BLOCK_SOURCE_META, pos)
+              .scrollIntoView();
+            return true;
+          });
+        }
+        return inherited.Enter?.(props) ?? false;
+      },
+    };
+  },
   addProseMirrorPlugins() {
     // Drops the stock plugin, and ours when an extension of this one calls
     // back into it. Plugin keys are runtime strings ProseMirror leaves out of

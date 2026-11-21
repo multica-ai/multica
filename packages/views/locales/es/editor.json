@@ -128,8 +128,6 @@
   "code_block": {
     "html_preview": "Vista previa HTML",
     "copy_code": "Copiar código",
-    "show_preview": "Mostrar vista previa",
-    "show_source": "Ver código fuente",
     "fullscreen": "Pantalla completa",
     "close_preview": "Cerrar"
   },
@@ -174,7 +172,10 @@
     "error_mermaid": "No se ha podido dibujar este diagrama",
     "error_at_line": "{{message}} (línea {{line}})",
     "view_source": "Ver fuente",
-    "copy_error": "Copiar error"
+    "copy_error": "Copiar error",
+    "title": "Título",
+    "rename": "Cambiar nombre",
+    "add_title": "Añadir título"
   },
   "table": {
     "reset_widths": "Restablecer anchos",
