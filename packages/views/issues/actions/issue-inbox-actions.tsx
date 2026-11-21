@@ -26,6 +26,7 @@ import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-
 import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
 import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
 import { useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
+import { useMoveOnAfterAutoArchive } from "../../inbox/components/use-move-on-after-auto-archive";
 import {
   useArchiveInboxWithUndo,
   useLeaveInboxRow,
@@ -87,6 +88,7 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
   };
 
   const moveOn = () => leave(issueId, next);
+  useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
 
   const archiveRef = useRef<(() => void) | null>(null);
   const snoozeRef = useRef<(() => void) | null>(null);

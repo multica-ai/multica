@@ -850,8 +850,34 @@
       "manual_label": "手動歸檔",
       "manual_description": "在側欄列上或通知詳情頂部點歸檔",
       "manual_value": "隨時",
-      "done_label": "自動歸檔我完成的任務",
-      "done_description": "你把任務改為「已完成」或「已取消」類狀態時，它的通知自動歸檔。別人完成的任務會留在收件箱。",
+      "auto_label": "自動歸檔我處理過的任務",
+      "auto_description": "只算你自己的操作。歸檔後有新動態，會重新進收件箱。",
+      "auto_presets": {
+        "never": "從不",
+        "completed": "完成任務時",
+        "handled": "回覆、改狀態或轉交後",
+        "custom": "自訂",
+        "custom_item": "自訂..."
+      },
+      "auto_recommended": "推薦",
+      "auto_groups": {
+        "settle": "處理",
+        "tidy": "整理"
+      },
+      "auto_actions": {
+        "completed": "完成",
+        "comment": "回覆",
+        "status": "改狀態",
+        "assignee": "轉交",
+        "priority": "改優先級",
+        "project": "改專案",
+        "dates": "改日期",
+        "labels": "改標籤"
+      },
+      "after_label": "歸檔後",
+      "after_description": "正在看的通知被自動歸檔時。手動歸檔（E）照舊打開下一條。",
+      "after_stay": "停在目前任務",
+      "after_next": "打開下一條",
       "archived_label": "已歸檔的通知",
       "archived_description": "可以在這裡找回並取消歸檔",
       "archived_action": "查看已歸檔"

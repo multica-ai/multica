@@ -850,8 +850,34 @@
       "manual_label": "手动归档",
       "manual_description": "在侧边栏行上或通知详情顶部点归档",
       "manual_value": "随时",
-      "done_label": "自动归档我完成的任务",
-      "done_description": "你把任务改为\"已完成\"或\"已取消\"类状态时，它的通知自动归档。别人完成的任务会留在收件箱。",
+      "auto_label": "自动归档我处理过的任务",
+      "auto_description": "只算你自己的操作。归档后有新动态，会重新进收件箱。",
+      "auto_presets": {
+        "never": "从不",
+        "completed": "完成任务时",
+        "handled": "回复、改状态或转交后",
+        "custom": "自定义",
+        "custom_item": "自定义..."
+      },
+      "auto_recommended": "推荐",
+      "auto_groups": {
+        "settle": "处理",
+        "tidy": "整理"
+      },
+      "auto_actions": {
+        "completed": "完成",
+        "comment": "回复",
+        "status": "改状态",
+        "assignee": "转交",
+        "priority": "改优先级",
+        "project": "改项目",
+        "dates": "改日期",
+        "labels": "改标签"
+      },
+      "after_label": "归档后",
+      "after_description": "正在看的通知被自动归档时。手动归档（E）照旧打开下一条。",
+      "after_stay": "停在当前任务",
+      "after_next": "打开下一条",
       "archived_label": "已归档的通知",
       "archived_description": "可以在这里找回并取消归档",
       "archived_action": "查看已归档"

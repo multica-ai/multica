@@ -850,8 +850,34 @@
       "manual_label": "직접 보관",
       "manual_description": "사이드바의 행이나 알림 상단에서",
       "manual_value": "언제든지",
-      "done_label": "내가 완료한 태스크 보관",
-      "done_description": "태스크를 완료 또는 취소 계열 상태로 바꾸면 그 알림은 보관됩니다. 다른 사람이 완료한 태스크는 인박스에 남습니다.",
+      "auto_label": "내가 처리한 태스크 보관",
+      "auto_description": "내 동작만 해당됩니다. 새 알림이 오면 태스크가 다시 돌아옵니다.",
+      "auto_presets": {
+        "never": "안 함",
+        "completed": "완료했을 때",
+        "handled": "답글, 상태 변경, 담당자 변경 후",
+        "custom": "사용자 지정",
+        "custom_item": "사용자 지정..."
+      },
+      "auto_recommended": "추천",
+      "auto_groups": {
+        "settle": "처리",
+        "tidy": "정리"
+      },
+      "auto_actions": {
+        "completed": "완료",
+        "comment": "답글",
+        "status": "상태 변경",
+        "assignee": "담당자 변경",
+        "priority": "우선순위 변경",
+        "project": "프로젝트 변경",
+        "dates": "날짜 변경",
+        "labels": "라벨 변경"
+      },
+      "after_label": "보관한 뒤",
+      "after_description": "보고 있는 알림이 이렇게 보관될 때. 직접 보관(E)하면 지금처럼 다음 알림을 엽니다.",
+      "after_stay": "이 태스크에 머무르기",
+      "after_next": "다음 알림 열기",
       "archived_label": "보관된 알림",
       "archived_description": "여기서 다시 찾고 보관을 해제할 수 있습니다",
       "archived_action": "보관된 알림 보기"
