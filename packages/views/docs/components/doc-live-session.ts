@@ -61,16 +61,17 @@ interface LiveInfo {
   value?: DocCollabTicket;
 }
 
+/** Tickets are personal, so answers are kept per user like sessions are. */
 const liveInfos = new Map<string, LiveInfo>();
-const infoKey = (collabUrl: string, docId: string) => `${collabUrl}\n${docId}`;
+const infoKey = (collabUrl: string, docId: string, userId: string) => `${collabUrl}\n${docId}\n${userId}`;
 
 /**
  * Asks for the doc's ticket and saved state, unless a recent answer is on
  * hand or on its way. Also opens the shared socket of a server known to edit
  * live, so it is up by the time the doc joins.
  */
-export function prefetchDocLive(collabUrl: string, docId: string): Promise<DocCollabTicket> {
-  const key = infoKey(collabUrl, docId);
+export function prefetchDocLive(collabUrl: string, docId: string, userId: string): Promise<DocCollabTicket> {
+  const key = infoKey(collabUrl, docId, userId);
   const cached = liveInfos.get(key);
   if (cached && Date.now() - cached.at < LIVE_INFO_MAX_AGE_MS) return cached.promise;
   const info: LiveInfo = { at: Date.now(), promise: Promise.resolve({ enabled: false }) };
@@ -93,21 +94,25 @@ export function prefetchDocLive(collabUrl: string, docId: string): Promise<DocCo
     },
   );
   liveInfos.set(key, info);
+  // A hovered doc that is never opened must not hold its state for good.
+  setTimeout(() => {
+    if (liveInfos.get(key) === info) liveInfos.delete(key);
+  }, LIVE_INFO_MAX_AGE_MS);
   if (liveEditingOn.has(collabUrl)) warmSocket(collabUrl);
   return info.promise;
 }
 
 /** The answer of a recent `prefetchDocLive`, if it has arrived. */
-export function peekDocLive(collabUrl: string, docId: string): DocCollabTicket | undefined {
-  const info = liveInfos.get(infoKey(collabUrl, docId));
+export function peekDocLive(collabUrl: string, docId: string, userId: string): DocCollabTicket | undefined {
+  const info = liveInfos.get(infoKey(collabUrl, docId, userId));
   return info && Date.now() - info.at < LIVE_INFO_MAX_AGE_MS ? info.value : undefined;
 }
 
 /** Takes the answer for a session about to start: its state describes the
  *  doc only until the session moves on, so it is used once. */
-function takeDocLive(collabUrl: string, docId: string): LiveTicket | undefined {
-  const value = peekDocLive(collabUrl, docId);
-  liveInfos.delete(infoKey(collabUrl, docId));
+function takeDocLive(collabUrl: string, docId: string, userId: string): LiveTicket | undefined {
+  const value = peekDocLive(collabUrl, docId, userId);
+  liveInfos.delete(infoKey(collabUrl, docId, userId));
   return value?.enabled ? value : undefined;
 }
 
@@ -292,6 +297,9 @@ export class DocSession {
     if (this.keep) clearTimeout(this.keep);
     this.keep = null;
     this.users++;
+    // Fields such as the editor's user can only be set on a present state.
+    const awareness = this.provider.awareness;
+    if (awareness && awareness.getLocalState() === null) awareness.setLocalState({});
   }
 
   /** @internal Reports whether the session is now kept for later. */
@@ -302,6 +310,8 @@ export class DocSession {
       this.destroy();
       return false;
     }
+    // Nobody is on the page any more, so others stop seeing this tab in it.
+    this.provider.awareness?.setLocalState(null);
     this.keep = setTimeout(() => dropSession(this), SESSION_KEEP_MS);
     return true;
   }
@@ -345,7 +355,7 @@ export function acquireDocSession(collabUrl: string, docId: string, userId: stri
   if (session) {
     sessions.delete(key);
   } else {
-    session = new DocSession(key, collabUrl, docId, document, takeDocLive(collabUrl, docId));
+    session = new DocSession(key, collabUrl, docId, document, takeDocLive(collabUrl, docId, userId));
   }
   sessions.set(key, session);
   session.retain();

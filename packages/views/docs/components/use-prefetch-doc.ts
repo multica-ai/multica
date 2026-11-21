@@ -2,11 +2,12 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { docCommentsOptions, docDetailOptions } from "@multica/core/docs";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWS } from "@multica/core/realtime";
 import { useNavigation } from "../../navigation";
-import { liveEditingOff, prefetchDocLive } from "./doc-live-session";
+import { findDocSession, liveEditingOff, prefetchDocLive } from "./doc-live-session";
 
 /** A pointer passing over a list is not heading for every row in it. */
 const HOVER_INTENT_MS = 80;
@@ -23,11 +24,12 @@ let docPageWarmed = false;
 export function useWarmDocPage(docId: string | undefined) {
   const { prefetch } = useNavigation();
   const p = useWorkspacePaths();
+  const href = docId ? p.docDetail(docId) : null;
   useEffect(() => {
-    if (!docId || !prefetch || docPageWarmed) return;
+    if (!href || !prefetch || docPageWarmed) return;
     const warm = () => {
       docPageWarmed = true;
-      prefetch(p.docDetail(docId));
+      prefetch(href);
     };
     if (typeof window.requestIdleCallback === "function") {
       const id = window.requestIdleCallback(warm, { timeout: 3000 });
@@ -35,7 +37,7 @@ export function useWarmDocPage(docId: string | undefined) {
     }
     const timer = window.setTimeout(warm, 1500);
     return () => window.clearTimeout(timer);
-  }, [docId, prefetch, p]);
+  }, [href, prefetch]);
 }
 
 /**
@@ -47,6 +49,7 @@ export function usePrefetchDoc() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const { collabUrl } = useWS();
+  const userId = useAuthStore((s) => s.user?.id ?? "");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
@@ -56,9 +59,11 @@ export function usePrefetchDoc() {
     (docId: string) => {
       void qc.prefetchQuery(docDetailOptions(wsId, docId));
       void qc.prefetchQuery(docCommentsOptions(wsId, docId));
-      if (!liveEditingOff.has(collabUrl)) prefetchDocLive(collabUrl, docId).catch(() => undefined);
+      // An open or kept session already holds the doc and is kept current.
+      if (liveEditingOff.has(collabUrl) || findDocSession(collabUrl, docId, userId)) return;
+      prefetchDocLive(collabUrl, docId, userId).catch(() => undefined);
     },
-    [qc, wsId, collabUrl],
+    [qc, wsId, collabUrl, userId],
   );
 
   return useCallback(

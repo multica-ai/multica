@@ -74,7 +74,7 @@ export function useDocCollab(docId: string, content: string): DocCollabState {
     const document =
       findDocSession(collabUrl, docId, userId)?.document ??
       (() => {
-        const ticket = peekDocLive(collabUrl, docId);
+        const ticket = peekDocLive(collabUrl, docId, userId);
         return ticket?.enabled ? ticket.document : null;
       })();
     return document ? { mode: "live" as const, document } : { mode: "checking" as const, document: null };
@@ -92,7 +92,7 @@ export function useDocCollab(docId: string, content: string): DocCollabState {
   useEffect(() => {
     if (mode !== "checking") return;
     let cancelled = false;
-    prefetchDocLive(collabUrl, docId)
+    prefetchDocLive(collabUrl, docId, userId)
       .then((ticket) => {
         if (cancelled) return;
         setDocument(ticket.enabled ? ticket.document : null);
@@ -104,7 +104,7 @@ export function useDocCollab(docId: string, content: string): DocCollabState {
     return () => {
       cancelled = true;
     };
-  }, [mode, docId, collabUrl]);
+  }, [mode, docId, collabUrl, userId]);
 
   useEffect(() => {
     if (mode !== "live" || !document || !userId) return;

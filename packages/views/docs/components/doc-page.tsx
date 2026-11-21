@@ -76,7 +76,9 @@ const LIVE_INFO_WAIT_MS = 1000;
 /**
  * Whether the page knows how the doc opens: solo, or live with the saved
  * state to show at once. Waiting for that briefly lets the doc appear in its
- * editor in one paint instead of as a static copy swapped out later.
+ * editor in one paint instead of as a static copy swapped out later. Once
+ * settled it stays so for the doc: the editor consumes what settled it, and
+ * falling back to the skeleton would unmount the editor.
  */
 function useLiveInfoSettled(docId: string): boolean {
   const { collabUrl } = useWS();
@@ -85,21 +87,22 @@ function useLiveInfoSettled(docId: string): boolean {
   const settled =
     settledDoc === docId ||
     liveEditingOff.has(collabUrl) ||
-    peekDocLive(collabUrl, docId) !== undefined ||
+    peekDocLive(collabUrl, docId, userId) !== undefined ||
     !!findDocSession(collabUrl, docId, userId)?.getState().ready;
+  if (settled && settledDoc !== docId) setSettledDoc(docId);
   useEffect(() => {
     if (settled) return;
     let cancelled = false;
     const done = () => {
       if (!cancelled) setSettledDoc(docId);
     };
-    prefetchDocLive(collabUrl, docId).then(done, done);
+    prefetchDocLive(collabUrl, docId, userId).then(done, done);
     const wait = setTimeout(done, LIVE_INFO_WAIT_MS);
     return () => {
       cancelled = true;
       clearTimeout(wait);
     };
-  }, [settled, collabUrl, docId]);
+  }, [settled, collabUrl, docId, userId]);
   return settled;
 }
 

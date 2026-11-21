@@ -11,6 +11,7 @@ const { apiMock, providers, sockets } = vi.hoisted(() => ({
       onClose: (e: { event: { reason: string } }) => void;
     };
     destroyed: boolean;
+    awareness: { local: unknown };
   }>,
   sockets: [] as Array<{ destroyed: boolean }>,
 }));
@@ -29,7 +30,18 @@ vi.mock("@hocuspocus/provider", () => {
   }
   class HocuspocusProvider {
     destroyed = false;
-    awareness = { on() {}, off() {}, getStates: () => new Map() };
+    awareness = {
+      local: {} as unknown,
+      on() {},
+      off() {},
+      getStates: () => new Map(),
+      getLocalState() {
+        return this.local;
+      },
+      setLocalState(state: unknown) {
+        this.local = state;
+      },
+    };
     constructor(public config: (typeof providers)[number]["config"]) {
       providers.push(this);
     }
@@ -88,16 +100,16 @@ describe("prefetchDocLive", () => {
   it("asks once for a doc while the answer is fresh, with its saved state", async () => {
     const { url, docId } = ids();
     apiMock.createDocCollabTicket.mockResolvedValue(ticket(docId));
-    await Promise.all([prefetchDocLive(url, docId), prefetchDocLive(url, docId)]);
+    await Promise.all([prefetchDocLive(url, docId, "u1"), prefetchDocLive(url, docId, "u1")]);
     expect(apiMock.createDocCollabTicket).toHaveBeenCalledTimes(1);
     expect(apiMock.createDocCollabTicket).toHaveBeenCalledWith(docId, { state: true });
-    expect(peekDocLive(url, docId)).toMatchObject({ enabled: true, document: `doc:${docId}` });
+    expect(peekDocLive(url, docId, "u1")).toMatchObject({ enabled: true, document: `doc:${docId}` });
   });
 
   it("remembers a server without live editing and opens no socket to it", async () => {
     const { url, docId } = ids();
     apiMock.createDocCollabTicket.mockResolvedValue({ enabled: false });
-    await prefetchDocLive(url, docId);
+    await prefetchDocLive(url, docId, "u1");
     expect(liveEditingOff.has(url)).toBe(true);
     expect(sockets).toHaveLength(0);
   });
@@ -106,23 +118,43 @@ describe("prefetchDocLive", () => {
     vi.useFakeTimers();
     const { url, docId } = ids();
     apiMock.createDocCollabTicket.mockResolvedValue(ticket(docId));
-    const first = prefetchDocLive(url, docId);
+    const first = prefetchDocLive(url, docId, "u1");
     expect(sockets).toHaveLength(0);
     await first;
     expect(sockets).toHaveLength(1);
     vi.advanceTimersByTime(60_000);
     expect(sockets[0]!.destroyed).toBe(true);
 
-    void prefetchDocLive(url, `${docId}-next`);
+    void prefetchDocLive(url, `${docId}-next`, "u1");
     expect(sockets).toHaveLength(2);
+  });
+
+  it("keeps answers per user: a ticket is personal", async () => {
+    const { url, docId } = ids();
+    apiMock.createDocCollabTicket.mockResolvedValue(ticket(docId));
+    await prefetchDocLive(url, docId, "u1");
+    expect(peekDocLive(url, docId, "u2")).toBeUndefined();
+    await prefetchDocLive(url, docId, "u2");
+    expect(apiMock.createDocCollabTicket).toHaveBeenCalledTimes(2);
+  });
+
+  it("forgets an answer nobody used once it is stale, and asks again", async () => {
+    vi.useFakeTimers();
+    const { url, docId } = ids();
+    apiMock.createDocCollabTicket.mockResolvedValue(ticket(docId));
+    await prefetchDocLive(url, docId, "u1");
+    vi.advanceTimersByTime(30_000);
+    expect(peekDocLive(url, docId, "u1")).toBeUndefined();
+    await prefetchDocLive(url, docId, "u1");
+    expect(apiMock.createDocCollabTicket).toHaveBeenCalledTimes(2);
   });
 
   it("forgets a failed request so the next one retries", async () => {
     const { url, docId } = ids();
     apiMock.createDocCollabTicket.mockRejectedValueOnce(new Error("offline"));
-    await expect(prefetchDocLive(url, docId)).rejects.toThrow("offline");
+    await expect(prefetchDocLive(url, docId, "u1")).rejects.toThrow("offline");
     apiMock.createDocCollabTicket.mockResolvedValue(ticket(docId));
-    await prefetchDocLive(url, docId);
+    await prefetchDocLive(url, docId, "u1");
     expect(apiMock.createDocCollabTicket).toHaveBeenCalledTimes(2);
   });
 });
@@ -131,7 +163,7 @@ describe("doc sessions", () => {
   it("shows the saved state before syncing and joins with the prefetched ticket once", async () => {
     const { url, docId } = ids();
     apiMock.createDocCollabTicket.mockResolvedValueOnce(ticket(docId, { state: savedState("hello") }));
-    await prefetchDocLive(url, docId);
+    await prefetchDocLive(url, docId, "u1");
 
     const session = acquireDocSession(url, docId, "u1", `doc:${docId}`);
     expect(session.getState()).toMatchObject({ ready: true, synced: false });
@@ -154,7 +186,7 @@ describe("doc sessions", () => {
   it("waits for the first sync when there is no saved state", async () => {
     const { url, docId } = ids();
     apiMock.createDocCollabTicket.mockResolvedValueOnce(ticket(docId));
-    await prefetchDocLive(url, docId);
+    await prefetchDocLive(url, docId, "u1");
     const session = acquireDocSession(url, docId, "u1", `doc:${docId}`);
     expect(session.getState().ready).toBe(false);
     session.ydoc.getText("t").insert(0, "typed");
@@ -177,6 +209,18 @@ describe("doc sessions", () => {
     // The socket closes once nothing uses it.
     vi.advanceTimersByTime(60_000);
     expect(sockets.at(-1)!.destroyed).toBe(true);
+  });
+
+  it("leaves the doc's presence while kept, and rejoins it on the next visit", () => {
+    const { url, docId } = ids();
+    const session = acquireDocSession(url, docId, "u1", `doc:${docId}`);
+    const awareness = providers.at(-1)!.awareness;
+    awareness.local = { user: { id: "u1" } };
+    releaseDocSession(session);
+    expect(awareness.local).toBeNull();
+    acquireDocSession(url, docId, "u1", `doc:${docId}`);
+    expect(awareness.local).toEqual({});
+    releaseDocSession(session, { discard: true });
   });
 
   it("shares one socket between docs on the same server", () => {
