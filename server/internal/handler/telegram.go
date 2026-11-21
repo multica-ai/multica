@@ -82,7 +82,8 @@ func (h *Handler) ListTelegramInstallations(w http.ResponseWriter, r *http.Reque
 // RegisterTelegramRequest is the body for a bot install: the token the user
 // pasted from @BotFather.
 type RegisterTelegramRequest struct {
-	BotToken string `json:"bot_token"`
+	BotToken string               `json:"bot_token"`
+	Menu     *telegram.MenuConfig `json:"menu,omitempty"`
 }
 
 // RegisterTelegramBot (POST /api/workspaces/{id}/telegram/install?agent_id=…)
@@ -128,6 +129,7 @@ func (h *Handler) RegisterTelegramBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row, err := h.TelegramInstall.Register(r.Context(), telegram.RegisterParams{
+		Menu:        body.Menu,
 		WorkspaceID: wsUUID,
 		AgentID:     agentUUID,
 		InitiatorID: initiatorUUID,
@@ -135,7 +137,7 @@ func (h *Handler) RegisterTelegramBot(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		switch {
-		case errors.Is(err, telegram.ErrInvalidBotToken):
+		case errors.Is(err, telegram.ErrInvalidBotToken), errors.Is(err, telegram.ErrInvalidMenuConfig):
 			writeError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, telegram.ErrCredentialsRejected):
 			writeError(w, http.StatusBadRequest, "Telegram rejected this bot token — generate a current token in @BotFather and try again")
