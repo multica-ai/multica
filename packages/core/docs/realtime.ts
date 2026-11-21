@@ -63,8 +63,9 @@ export function applyDocUpdated(qc: QueryClient, wsId: string, payload: unknown)
     }
   }
 
-  void qc.invalidateQueries({ queryKey: docKeys.versions(wsId, summary.id) });
+  // Every write that adds or extends a version names it; a move does not.
   if (typeof event?.version === "number") {
+    void qc.invalidateQueries({ queryKey: docKeys.versions(wsId, summary.id) });
     void qc.invalidateQueries({ queryKey: docKeys.version(wsId, summary.id, event.version) });
   }
 }

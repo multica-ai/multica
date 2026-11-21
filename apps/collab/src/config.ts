@@ -1,3 +1,6 @@
+/** Each live doc lives in this process's memory, so the service runs as one
+ *  replica: a second one would hold its own copy of the same doc. Scaling out
+ *  needs Hocuspocus's Redis extension or routing by doc id first. */
 export interface CollabConfig {
   port: number;
   /** Shared with the Go API: signs editor tickets and authenticates the

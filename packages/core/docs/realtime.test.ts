@@ -41,6 +41,7 @@ function setup() {
   qc.setQueryData<DocTree>(docKeys.tree(WS), { folders: [], docs: [listed] });
   qc.setQueryData<Doc>(docKeys.detail(WS, "doc-1"), doc(1, "old body"));
   qc.setQueryData(docKeys.comments(WS, "doc-1"), []);
+  qc.setQueryData(docKeys.versions(WS, "doc-1"), []);
   return qc;
 }
 const invalidated = (qc: QueryClient, key: readonly unknown[]) => qc.getQueryState(key)?.isInvalidated;
@@ -59,6 +60,7 @@ describe("applyDocUpdated", () => {
     expect(invalidated(qc, docKeys.detail(WS, "doc-1"))).toBe(true);
     expect(qc.getQueryState(docKeys.detail(WS, "doc-1"))!.fetchStatus).toBe("idle");
     expect(invalidated(qc, docKeys.comments(WS, "doc-1"))).toBe(false);
+    expect(invalidated(qc, docKeys.versions(WS, "doc-1"))).toBe(true);
   });
 
   it("refetches the body of a doc that is not edited live", () => {
@@ -74,6 +76,7 @@ describe("applyDocUpdated", () => {
     expect(qc.getQueryData<Doc>(docKeys.detail(WS, "doc-1"))).toMatchObject({ folderId: "f1", content: "old body" });
     expect(invalidated(qc, docKeys.detail(WS, "doc-1"))).toBe(false);
     expect(qc.getQueryData<DocTree>(docKeys.tree(WS))!.docs[0]!.folderId).toBe("f1");
+    expect(invalidated(qc, docKeys.versions(WS, "doc-1"))).toBe(false);
   });
 
   it("ignores an event older than the cache", () => {
