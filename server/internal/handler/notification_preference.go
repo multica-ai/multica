@@ -19,6 +19,9 @@ import (
 // preferences map so a single endpoint covers all user notification
 // preferences. `auto_archive_completed` is not an event group either: "muted"
 // stops your notifications from being archived when you complete an issue.
+// `auto_archive_on_action` set to "all" also archives them when you comment on
+// or edit the issue, and `after_auto_archive` is where the client goes when
+// the notification you are reading is archived that way.
 var validNotifGroups = map[string]bool{
 	"assignments":            true,
 	"status_changes":         true,
@@ -31,6 +34,8 @@ var validNotifGroups = map[string]bool{
 	"new_issues":             true,
 	"system_notifications":   true,
 	"auto_archive_completed": true,
+	"auto_archive_on_action": true,
+	"after_auto_archive":     true,
 	"others_issues":          true,
 }
 
@@ -45,8 +50,11 @@ var validNotifValues = map[string]bool{
 // `others_issues` is how much of someone else's issue a passive subscriber
 // receives: absent or "key_updates" for mentions, thread replies and handoffs,
 // "all" for every event. Muting it would only hide what still needs you.
+// `after_auto_archive` is absent or "stay" to keep the archived notification
+// open, "next" to open the next one.
 var notifValuesByGroup = map[string]map[string]bool{
-	"others_issues": {"all": true, "key_updates": true},
+	"others_issues":      {"all": true, "key_updates": true},
+	"after_auto_archive": {"stay": true, "next": true},
 }
 
 func validNotifValue(group, value string) bool {

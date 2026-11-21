@@ -122,6 +122,7 @@ import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
 import { inboxListLoad, useFilteredInboxRows } from "./use-filtered-inbox-rows";
 import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
+import { useMoveOnAfterAutoArchive } from "./use-move-on-after-auto-archive";
 import { useArchiveInboxBatchWithUndo, useArchiveInboxWithUndo, useRestoreInbox } from "./use-leave-inbox-row";
 import { useInboxSnooze } from "./use-inbox-snooze";
 import { InboxAppRequest } from "../../common/app-requests";
@@ -639,6 +640,14 @@ export function InboxPage() {
         ),
     });
   };
+
+  useMoveOnAfterAutoArchive({
+    settled: settledRow,
+    next: settledRow ? nextInboxRow(listedItems, settledRow.key) : null,
+    onNext: () => {
+      if (settledRow) advanceSelectionPast(settledRow.item.id, listedItems);
+    },
+  });
 
   const unsubscribable = useInboxUnsubscribable(wsId);
   const unsubscribeArchive = useUnsubscribeArchive();
