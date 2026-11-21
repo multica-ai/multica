@@ -88,7 +88,15 @@ multica workspace list
 multica workspace switch <slug>
 ```
 
-以降のコマンドはこのワークスペースを使います。単発のコマンドでは `--workspace-id` で一時的に上書きでき、`MULTICA_WORKSPACE_ID` を設定することもできます。
+以降のコマンドはこのワークスペースを使います。スクリプトでは、保存済みのデフォルトを変更せずに、コマンドごとに対象を固定できます。
+
+```bash
+multica issue list --workspace my-team
+```
+
+`--workspace` は完全な UUID、slug、または4文字以上の16進数で一意に識別できる UUID プレフィックスを受け付けます。優先順位は `--workspace`、`--workspace-id`、`MULTICA_WORKSPACE_ID`、プロファイルのデフォルトです。daemon が管理するエージェント実行では、タスクに紐づくワークスペースが維持され、このフラグでは変更できません。
+
+ワークスペースを位置引数で指定できるコマンドでは、その引数か `--workspace` のどちらか一方を使用してください。両方を指定すると、検索や書き込みの前にエラーになります。
 
 メンバーを招待する:
 
@@ -461,7 +469,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 
 ## コマンドリファレンス
 
-以下の表は、現在のすべてのトップレベルコマンドを CLI 自身のグループ分けに沿って掲載しています。すべてのコマンドがグローバルフラグ `--server-url`、`--workspace-id`、`--profile`、`--debug` を受け付けます。`--output` はコマンドごとに登録されるフラグで、デフォルトの形式はコマンドによって異なります: `list` 系は表、`get` や `create` 系は多くが JSON です。完全なフラグは `multica <command> --help` が正です。
+以下の表は、現在のすべてのトップレベルコマンドを CLI 自身のグループ分けに沿って掲載しています。すべてのコマンドがグローバルフラグ `--server-url`、`--workspace`、`--workspace-id`、`--profile`、`--debug` を受け付けます。`--output` はコマンドごとに登録されるフラグで、デフォルトの形式はコマンドによって異なります: `list` 系は表、`get` や `create` 系は多くが JSON です。完全なフラグは `multica <command> --help` が正です。
 
 ### Core
 

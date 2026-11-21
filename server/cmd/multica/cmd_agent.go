@@ -271,7 +271,10 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	}
 
 	serverURL := resolveServerURL(cmd)
-	workspaceID := resolveWorkspaceID(cmd)
+	workspaceID, err := resolveTargetWorkspaceID(cmd)
+	if err != nil {
+		return nil, err
+	}
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
@@ -501,11 +504,53 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 	return cfg.WorkspaceID
 }
 
-// requireWorkspaceID resolves the workspace ID and returns an error with
-// actionable instructions if it is empty (e.g. user has multiple workspaces
-// but no default configured).
+// resolveTargetWorkspaceID applies a human command's explicit selector without
+// changing the saved profile default. Pin a resolved slug/prefix in memory so
+// workspace URL paths and client headers cannot resolve it differently.
+// Daemon tasks retain their existing task-scoped workspace resolution.
+func resolveTargetWorkspaceID(cmd *cobra.Command) (string, error) {
+	if inDaemonManagedExecutionContext() ||
+		strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) != "" ||
+		strings.HasPrefix(strings.TrimSpace(os.Getenv("MULTICA_TOKEN")), "mat_") {
+		return cli.FlagOrEnv(cmd, "workspace-id", "MULTICA_WORKSPACE_ID", ""), nil
+	}
+	if cmd.Flags().Changed("workspace") {
+		target := strings.TrimSpace(cmd.Flag("workspace").Value.String())
+		if target == "" {
+			return "", fmt.Errorf("--workspace cannot be empty; pass a workspace id, slug, or id prefix")
+		}
+		// A full UUID is self-identifying: forward it without an extra
+		// /api/workspaces round trip, mirroring resolveWorkspaceArg. The
+		// downstream endpoint enforces access.
+		if uuidRegexp.MatchString(target) {
+			return target, nil
+		}
+		ctx, cancel := cli.APIContext(context.Background())
+		defer cancel()
+		ws, err := resolveWorkspaceRef(ctx, cmd, target)
+		if err != nil {
+			return "", err
+		}
+		// Pin the resolved UUID in this invocation so URL paths and client
+		// headers cannot re-resolve a slug to different workspaces. This
+		// changes only the in-memory flag, never the saved profile default.
+		if err := cmd.Flags().Set("workspace", ws.ID); err != nil {
+			return "", err
+		}
+		return ws.ID, nil
+	}
+	return resolveWorkspaceID(cmd), nil
+}
+
+// requireWorkspaceID resolves the workspace ID (honoring --workspace, so URL
+// paths built from it match the X-Workspace-ID header set by newAPIClient) and
+// returns an error with actionable instructions if it is empty (e.g. user has
+// multiple workspaces but no default configured).
 func requireWorkspaceID(cmd *cobra.Command) (string, error) {
-	id := resolveWorkspaceID(cmd)
+	id, err := resolveTargetWorkspaceID(cmd)
+	if err != nil {
+		return "", err
+	}
 	if id == "" {
 		if inDaemonManagedExecutionContext() {
 			return "", fmt.Errorf("workspace_id is required: MULTICA_WORKSPACE_ID must be set by the daemon in agent execution context (no fallback to user config)")

@@ -88,7 +88,15 @@ multica workspace list
 multica workspace switch <slug>
 ```
 
-이후 명령은 이 워크스페이스를 사용합니다. 한 번의 명령에서 `--workspace-id`로 임시 덮어쓸 수 있고 `MULTICA_WORKSPACE_ID`를 설정할 수도 있습니다.
+이후 명령은 이 워크스페이스를 사용합니다. 스크립트에서는 저장된 기본값을 바꾸지 않고 명령별로 대상을 고정할 수 있습니다.
+
+```bash
+multica issue list --workspace my-team
+```
+
+`--workspace`는 전체 UUID, slug 또는 4자 이상의 16진수로 구성된 고유한 UUID 접두사를 받습니다. 우선순위는 `--workspace`, `--workspace-id`, `MULTICA_WORKSPACE_ID`, 프로필 기본값 순입니다. daemon이 관리하는 에이전트 실행은 작업에 연결된 워크스페이스를 유지하며, 이 flag로 변경할 수 없습니다.
+
+워크스페이스를 위치 인자로 받는 명령에서는 해당 인자와 `--workspace` 중 하나만 사용하세요. 둘 다 지정하면 조회나 쓰기 전에 오류가 발생합니다.
 
 멤버 초대:
 
@@ -461,7 +469,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 
 ## 명령 참조
 
-다음 표는 현재의 모든 최상위 명령을 CLI 자체 그룹 순서로 정리합니다. 모든 명령은 전역 flag `--server-url`, `--workspace-id`, `--profile`, `--debug`를 허용합니다. `--output`은 명령별로 등록되는 flag이며 기본 형식은 명령에 따라 다릅니다. `list` 계열은 기본적으로 표를 사용하고 `get`, `create` 계열은 주로 JSON을 사용합니다. 전체 인수는 `multica <command> --help`를 기준으로 확인하세요.
+다음 표는 현재의 모든 최상위 명령을 CLI 자체 그룹 순서로 정리합니다. 모든 명령은 전역 flag `--server-url`, `--workspace`, `--workspace-id`, `--profile`, `--debug`를 허용합니다. `--output`은 명령별로 등록되는 flag이며 기본 형식은 명령에 따라 다릅니다. `list` 계열은 기본적으로 표를 사용하고 `get`, `create` 계열은 주로 JSON을 사용합니다. 전체 인수는 `multica <command> --help`를 기준으로 확인하세요.
 
 ### Core
 

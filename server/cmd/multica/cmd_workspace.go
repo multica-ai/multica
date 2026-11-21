@@ -92,8 +92,13 @@ var workspaceSwitchCmd = &cobra.Command{
 		"prefix (≥4 hex chars) as shown in 'workspace list'. Subsequent " +
 		"commands without --workspace-id or MULTICA_WORKSPACE_ID will target " +
 		"this workspace.\n\n" +
-		"Resolution priority (highest to lowest): --workspace-id flag, " +
-		"MULTICA_WORKSPACE_ID env, profile default (set by this command).\n\n" +
+		"Resolution priority (highest to lowest): --workspace flag, " +
+		"--workspace-id flag, MULTICA_WORKSPACE_ID env, profile default (set by " +
+		"this command).\n\n" +
+		"The profile default is shared, mutable state: a concurrent 'switch' " +
+		"can retarget it mid-run. For deterministic scripts, pass the global " +
+		"--workspace <id|slug|prefix> flag on each command instead of relying " +
+		"on the default.\n\n" +
 		"For low-level use, 'multica config set workspace_id <id>' writes the " +
 		"same setting without verification.",
 	Args: exactArgs(1),
@@ -465,6 +470,9 @@ func runWorkspaceSwitch(cmd *cobra.Command, args []string) error {
 // round trip; access control is enforced by the downstream endpoint.
 func resolveWorkspaceArg(cmd *cobra.Command, args []string) (string, error) {
 	if len(args) > 0 {
+		if cmd.Flags().Changed("workspace") {
+			return "", fmt.Errorf("pass either a workspace argument or --workspace, not both")
+		}
 		trimmed := strings.TrimSpace(args[0])
 		if uuidRegexp.MatchString(trimmed) {
 			return trimmed, nil
@@ -477,7 +485,7 @@ func resolveWorkspaceArg(cmd *cobra.Command, args []string) (string, error) {
 		}
 		return ws.ID, nil
 	}
-	return resolveWorkspaceID(cmd), nil
+	return resolveTargetWorkspaceID(cmd)
 }
 
 func runWorkspaceGet(cmd *cobra.Command, args []string) error {
