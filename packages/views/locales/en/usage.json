@@ -8,7 +8,9 @@
   "filter": {
     "project_label": "Project",
     "all_projects": "All projects",
-    "period_label": "Period"
+    "period_label": "Period",
+    "caller_label": "Caller",
+    "all_callers": "Anyone"
   },
   "history_limit": {
     "note": "Your plan covers the last {{days}} days. Upgrade to see earlier data. Nothing is deleted.",

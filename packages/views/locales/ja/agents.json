@@ -653,7 +653,12 @@
       "cancel_failed_toast": "実行をキャンセルできませんでした",
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
-      "queued_prefix": "{{when}} に待機開始"
+      "queued_prefix": "{{when}} に待機開始",
+      "caller_filter_label": "呼び出し元",
+      "caller_filter_all": "すべて",
+      "caller_filter_search": "メンバーを検索",
+      "caller_filter_members": "メンバー",
+      "caller_filter_clear_aria": "呼び出し元フィルターをクリア"
     },
     "connected_apps": {
       "loading": "アプリを読み込み中…",

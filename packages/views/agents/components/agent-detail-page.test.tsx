@@ -61,6 +61,12 @@ vi.mock("./tabs/activity-tab", () => ({
       view all work
     </button>
   ),
+  resolveAgentCallerId: (callerOverride: string | "all" | undefined, currentUserId: string | null) =>
+    callerOverride === undefined
+      ? currentUserId
+      : callerOverride === "all"
+        ? null
+        : callerOverride,
 }));
 vi.mock("./agent-instructions-section", () => ({
   AgentInstructionsSection: () => <div>instructions-section</div>,

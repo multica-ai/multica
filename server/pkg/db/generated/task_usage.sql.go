@@ -219,14 +219,16 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $2::timestamptz
   AND ($3::uuid IS NULL OR i.project_id = $3)
+  AND ($4::uuid IS NULL OR atq.originator_user_id = $4)
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC
 `
 
 type ListDashboardAgentRunTimeParams struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Since       pgtype.Timestamptz `json:"since"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Since            pgtype.Timestamptz `json:"since"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
 }
 
 type ListDashboardAgentRunTimeRow struct {
@@ -255,7 +257,12 @@ type ListDashboardAgentRunTimeRow struct {
 // charts the client trims to the same span; passed straight through without
 // re-truncation.
 func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboardAgentRunTimeParams) ([]ListDashboardAgentRunTimeRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardAgentRunTime, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	rows, err := q.db.Query(ctx, listDashboardAgentRunTime,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.ProjectID,
+		arg.OriginatorUserID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -298,14 +305,16 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $2::timestamptz
   AND ($3::uuid IS NULL OR i.project_id = $3)
+  AND ($4::uuid IS NULL OR atq.originator_user_id = $4)
 GROUP BY atq.agent_id, 2
 ORDER BY atq.agent_id, 2
 `
 
 type ListDashboardFailuresByAgentParams struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Since       pgtype.Timestamptz `json:"since"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Since            pgtype.Timestamptz `json:"since"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
 }
 
 type ListDashboardFailuresByAgentRow struct {
@@ -322,7 +331,12 @@ type ListDashboardFailuresByAgentRow struct {
 // No date bucketing, so no @tz — @since is the viewer's local
 // start-of-day-(N) so the window lines up with the per-agent run-time card.
 func (q *Queries) ListDashboardFailuresByAgent(ctx context.Context, arg ListDashboardFailuresByAgentParams) ([]ListDashboardFailuresByAgentRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardFailuresByAgent, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	rows, err := q.db.Query(ctx, listDashboardFailuresByAgent,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.ProjectID,
+		arg.OriginatorUserID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -358,15 +372,17 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $3::timestamptz
   AND ($4::uuid IS NULL OR i.project_id = $4)
+  AND ($5::uuid IS NULL OR atq.originator_user_id = $5)
 GROUP BY 1, 2
 ORDER BY 1 DESC, 2
 `
 
 type ListDashboardFailuresDailyParams struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Tz          string             `json:"tz"`
-	Since       pgtype.Timestamptz `json:"since"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Tz               string             `json:"tz"`
+	Since            pgtype.Timestamptz `json:"since"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
 }
 
 type ListDashboardFailuresDailyRow struct {
@@ -402,6 +418,7 @@ func (q *Queries) ListDashboardFailuresDaily(ctx context.Context, arg ListDashbo
 		arg.Tz,
 		arg.Since,
 		arg.ProjectID,
+		arg.OriginatorUserID,
 	)
 	if err != nil {
 		return nil, err
@@ -440,15 +457,17 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $3::timestamptz
   AND ($4::uuid IS NULL OR i.project_id = $4)
+  AND ($5::uuid IS NULL OR atq.originator_user_id = $5)
 GROUP BY DATE(atq.completed_at AT TIME ZONE $2::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE $2::text) DESC
 `
 
 type ListDashboardRunTimeDailyParams struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Tz          string             `json:"tz"`
-	Since       pgtype.Timestamptz `json:"since"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Tz               string             `json:"tz"`
+	Since            pgtype.Timestamptz `json:"since"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
 }
 
 type ListDashboardRunTimeDailyRow struct {
@@ -485,6 +504,7 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 		arg.Tz,
 		arg.Since,
 		arg.ProjectID,
+		arg.OriginatorUserID,
 	)
 	if err != nil {
 		return nil, err
@@ -603,6 +623,99 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardUsageByAgentByOriginator = `-- name: ListDashboardUsageByAgentByOriginator :many
+SELECT
+    atq.agent_id,
+    LOWER(tu.provider) AS provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int     AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+  AND ($4::uuid IS NULL OR atq.originator_user_id = $4)
+  AND atq.originator_user_id = $4
+GROUP BY atq.agent_id, LOWER(tu.provider), tu.model
+ORDER BY atq.agent_id, LOWER(tu.provider), tu.model
+`
+
+type ListDashboardUsageByAgentByOriginatorParams struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Since            pgtype.Timestamptz `json:"since"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
+}
+
+type ListDashboardUsageByAgentByOriginatorRow struct {
+	AgentID                  pgtype.UUID `json:"agent_id"`
+	Provider                 string      `json:"provider"`
+	Model                    string      `json:"model"`
+	InputTokens              int64       `json:"input_tokens"`
+	OutputTokens             int64       `json:"output_tokens"`
+	CacheReadTokens          int64       `json:"cache_read_tokens"`
+	CacheWriteTokens         int64       `json:"cache_write_tokens"`
+	CostUsdTicks             int64       `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64       `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64       `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64       `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64       `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32       `json:"task_count"`
+}
+
+// Caller-filtered per-(agent, provider, model) token aggregates. Same
+// rationale as ListDashboardUsageDailyByOriginator: the hourly rollup cannot
+// filter by originator, so this joins raw usage to the queue.
+func (q *Queries) ListDashboardUsageByAgentByOriginator(ctx context.Context, arg ListDashboardUsageByAgentByOriginatorParams) ([]ListDashboardUsageByAgentByOriginatorRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsageByAgentByOriginator,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.ProjectID,
+		arg.OriginatorUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUsageByAgentByOriginatorRow{}
+	for rows.Next() {
+		var i ListDashboardUsageByAgentByOriginatorRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.UncostedInputTokens,
+			&i.UncostedOutputTokens,
+			&i.UncostedCacheReadTokens,
+			&i.UncostedCacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardUsageDaily = `-- name: ListDashboardUsageDaily :many
 SELECT
     DATE(bucket_hour AT TIME ZONE $2::text) AS date,
@@ -680,6 +793,103 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 	items := []ListDashboardUsageDailyRow{}
 	for rows.Next() {
 		var i ListDashboardUsageDailyRow
+		if err := rows.Scan(
+			&i.Date,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.UncostedInputTokens,
+			&i.UncostedOutputTokens,
+			&i.UncostedCacheReadTokens,
+			&i.UncostedCacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardUsageDailyByOriginator = `-- name: ListDashboardUsageDailyByOriginator :many
+SELECT
+    DATE(tu.created_at AT TIME ZONE $2::text) AS date,
+    LOWER(tu.provider) AS provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int     AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= $3::timestamptz
+  AND ($4::uuid IS NULL OR i.project_id = $4)
+  AND ($5::uuid IS NULL OR atq.originator_user_id = $5)
+  AND atq.originator_user_id = $5
+GROUP BY DATE(tu.created_at AT TIME ZONE $2::text), LOWER(tu.provider), tu.model
+ORDER BY DATE(tu.created_at AT TIME ZONE $2::text) DESC, LOWER(tu.provider), tu.model
+`
+
+type ListDashboardUsageDailyByOriginatorParams struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Tz               string             `json:"tz"`
+	Since            pgtype.Timestamptz `json:"since"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
+}
+
+type ListDashboardUsageDailyByOriginatorRow struct {
+	Date                     pgtype.Date `json:"date"`
+	Provider                 string      `json:"provider"`
+	Model                    string      `json:"model"`
+	InputTokens              int64       `json:"input_tokens"`
+	OutputTokens             int64       `json:"output_tokens"`
+	CacheReadTokens          int64       `json:"cache_read_tokens"`
+	CacheWriteTokens         int64       `json:"cache_write_tokens"`
+	CostUsdTicks             int64       `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64       `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64       `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64       `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64       `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32       `json:"task_count"`
+}
+
+// Caller-filtered daily token aggregates. `task_usage_hourly` has no
+// originator dimension, so this reads raw `task_usage` joined to the queue
+// when `?originator_user_id=` is set. Same output shape as
+// ListDashboardUsageDaily so the handler can swap the source without a
+// second response type.
+func (q *Queries) ListDashboardUsageDailyByOriginator(ctx context.Context, arg ListDashboardUsageDailyByOriginatorParams) ([]ListDashboardUsageDailyByOriginatorRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsageDailyByOriginator,
+		arg.WorkspaceID,
+		arg.Tz,
+		arg.Since,
+		arg.ProjectID,
+		arg.OriginatorUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUsageDailyByOriginatorRow{}
+	for rows.Next() {
+		var i ListDashboardUsageDailyByOriginatorRow
 		if err := rows.Scan(
 			&i.Date,
 			&i.Provider,

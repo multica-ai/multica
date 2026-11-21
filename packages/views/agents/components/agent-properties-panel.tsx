@@ -47,6 +47,7 @@ export function AgentPropertiesPanel({
   owner,
   members,
   currentUserId,
+  callerId,
   canEdit,
   onUpdate,
   onEditAccess,
@@ -59,6 +60,8 @@ export function AgentPropertiesPanel({
   owner: MemberWithUser | null;
   members: MemberWithUser[];
   currentUserId: string | null;
+  /** The caller the 30-day summary scopes to (`null` = anyone). */
+  callerId?: string | null;
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   /** Opens the full access form; access is a draft-and-save choice. */
@@ -232,7 +235,7 @@ export function AgentPropertiesPanel({
         defaultOpen={false}
       >
         <div className="py-1">
-          <AgentPerformanceSummary agent={agent} />
+          <AgentPerformanceSummary agent={agent} callerId={callerId} />
         </div>
       </ObjectPanelSection>
     </div>

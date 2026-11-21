@@ -8,7 +8,9 @@
   "filter": {
     "project_label": "プロジェクト",
     "all_projects": "すべてのプロジェクト",
-    "period_label": "期間"
+    "period_label": "期間",
+    "caller_label": "呼び出し元",
+    "all_callers": "すべて"
   },
   "history_limit": {
     "note": "現在のプランでは直近 {{days}} 日を表示できます。アップグレードするとそれ以前のデータも表示できます。データは削除されません。",

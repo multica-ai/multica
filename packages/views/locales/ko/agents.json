@@ -653,7 +653,12 @@
       "cancel_failed_toast": "실행을 취소하지 못했습니다",
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
-      "queued_prefix": "{{when}} 대기 시작"
+      "queued_prefix": "{{when}} 대기 시작",
+      "caller_filter_label": "호출자",
+      "caller_filter_all": "전체",
+      "caller_filter_search": "멤버 검색",
+      "caller_filter_members": "멤버",
+      "caller_filter_clear_aria": "호출자 필터 지우기"
     },
     "connected_apps": {
       "loading": "앱을 불러오는 중…",

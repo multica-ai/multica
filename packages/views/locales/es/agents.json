@@ -799,7 +799,12 @@
       "cancel_failed_toast": "No se ha podido cancelar la ejecución",
       "started_prefix": "Iniciada {{when}}",
       "dispatched_prefix": "Enviada {{when}}",
-      "queued_prefix": "En cola {{when}}"
+      "queued_prefix": "En cola {{when}}",
+      "caller_filter_label": "Caller",
+      "caller_filter_all": "Anyone",
+      "caller_filter_search": "Search members",
+      "caller_filter_members": "Members",
+      "caller_filter_clear_aria": "Clear caller filter"
     },
     "connected_apps": {
       "loading": "Cargando aplicaciones…",

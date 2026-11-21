@@ -97,7 +97,7 @@ import { describeCancelImpact } from "./agent-row-actions";
 import { AgentChannelLinks, AgentChannelsSection } from "./agent-channels-section";
 import { AgentSkillsSection } from "./agent-skills-section";
 import { AgentWorkDialog } from "./agent-work-dialog";
-import { AgentWorkSections } from "./tabs/activity-tab";
+import { AgentWorkSections, resolveAgentCallerId } from "./tabs/activity-tab";
 
 const AGENT_DETAIL_LAYOUT_ID = "multica_agent_detail_layout";
 
@@ -177,6 +177,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     isLoading: permissionsLoading,
   } = useAgentPermissions(agent, wsId);
 
+  // The caller filter is page-level so the Recent work list and the
+  // properties panel's 30-day summary always follow the same caller. Kept
+  // with the other hooks, above the early returns further down.
+  const [callerOverride, setCallerOverride] = useState<string | "all">();
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancelRuns, setConfirmCancelRuns] = useState(false);
 
@@ -447,6 +451,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
   const currentUserId = currentUser?.id ?? null;
+  // Both surfaces below follow this one caller.
+  const callerId = resolveAgentCallerId(callerOverride, currentUserId);
   const runningCount = presence?.runningCount ?? 0;
   const queuedCount = presence?.queuedCount ?? 0;
   const hasActiveWork = runningCount + queuedCount > 0;
@@ -674,6 +680,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             owner={owner}
             members={members}
             currentUserId={currentUserId}
+            callerId={callerId}
             canEdit={canEdit.allowed}
             onUpdate={handleUpdate}
             onEditAccess={() => openAdvanced("access")}
@@ -703,6 +710,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             key={`${wsId}:${agent.id}`}
             agent={agent}
             scrollParent={scrollParent}
+            callerOverride={callerOverride}
+            onCallerChange={setCallerOverride}
             onViewAll={() => openWork(true)}
           />
 

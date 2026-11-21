@@ -712,6 +712,8 @@ export function parseDashboardHistoryLimit(value: string | null): number | null 
 export interface DashboardRequestParams {
   days?: number;
   project_id?: string | null;
+  /** Keep only runs triggered by this member; absent means every caller. */
+  originator_user_id?: string | null;
   tz?: string;
   onHistoryLimit?: (limitDays: number | null) => void;
 }
@@ -3368,6 +3370,7 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.originator_user_id) search.set("originator_user_id", params.originator_user_id);
     if (params.tz) search.set("tz", params.tz);
     const res = await this.fetchRaw(`${path}?${search}`, {
       extraHeaders: { "Content-Type": "application/json" },

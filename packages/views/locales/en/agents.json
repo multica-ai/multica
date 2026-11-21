@@ -817,7 +817,12 @@
       "cancel_failed_toast": "Failed to cancel run",
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
-      "queued_prefix": "Queued {{when}}"
+      "queued_prefix": "Queued {{when}}",
+      "caller_filter_label": "Caller",
+      "caller_filter_all": "Anyone",
+      "caller_filter_search": "Search members",
+      "caller_filter_members": "Members",
+      "caller_filter_clear_aria": "Clear caller filter"
     },
     "connected_apps": {
       "loading": "Loading apps...",

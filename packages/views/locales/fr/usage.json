@@ -8,7 +8,9 @@
   "filter": {
     "project_label": "Projet",
     "all_projects": "Tous les projets",
-    "period_label": "Période"
+    "period_label": "Période",
+    "caller_label": "Caller",
+    "all_callers": "Anyone"
   },
   "history_limit": {
     "note": "Votre forfait couvre les {{days}} derniers jours. Passez à un forfait supérieur pour voir les données plus anciennes. Rien n'est supprimé.",

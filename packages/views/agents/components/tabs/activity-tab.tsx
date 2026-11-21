@@ -7,6 +7,7 @@ import {
   CircleHelp,
   Hash,
   MessageSquare,
+  UserMinus,
   Workflow,
   X,
 } from "@multica/ui/icons";
@@ -27,15 +28,27 @@ import {
   agentTasksOptions,
   summarizeActivityWindow,
   useWorkspaceActivityMap,
+  type ActivityBucket,
+  type ActivityWindowSummary,
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton, type TimelineItem } from "../../../common/task-transcript";
 import { VirtuosoSeed } from "../../../common/virtuoso-seed";
+import { ActorAvatar } from "../../../common/actor-avatar";
 import { AttributionBadge } from "../../../issues/components/attribution-badge";
+import {
+  PropertyPicker,
+  PickerEmpty,
+  PickerItem,
+  PickerSection,
+} from "../../../issues/components/pickers/property-picker";
+import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
 import {
   ObjectSection,
   ObjectSectionAction,
@@ -54,6 +67,19 @@ const RECENT_SCROLL_SEEK = {
   enter: (velocity: number) => Math.abs(velocity) > 2000,
   exit: (velocity: number) => Math.abs(velocity) < 300,
 };
+/**
+ * The caller id a caller-scoped surface resolves to: the filter defaults to
+ * the signed-in user ("my runs") and may be switched to a specific member or
+ * to anyone (`"all"` — no filter).
+ */
+export function resolveAgentCallerId(
+  callerOverride: string | "all" | undefined,
+  currentUserId: string | null,
+): string | null {
+  if (callerOverride === undefined) return currentUserId;
+  return callerOverride === "all" ? null : callerOverride;
+}
+
 const RecentWorkList = forwardRef<HTMLDivElement, ListProps>(function RecentWorkList(
   { children, style, "data-testid": testId },
   ref,
@@ -89,13 +115,21 @@ export function AgentWorkSections({
   agent,
   onViewAll,
   scrollParent,
+  callerOverride: callerOverrideProp,
+  onCallerChange: onCallerChangeProp,
 }: {
   agent: Agent;
   scrollParent: HTMLElement | null;
   /** Opens every issue assigned to this agent. */
   onViewAll: () => void;
+  /** The caller filter, controlled when the page shares it with the
+   * properties panel's 30-day summary — both surfaces must follow the same
+   * caller. Uncontrolled inside this component otherwise. */
+  callerOverride?: string | "all";
+  onCallerChange?: (next: string | "all") => void;
 }) {
   const wsId = useWorkspaceId();
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   // `isLoading` (pending + fetching, no cached data) is true only on the
@@ -121,6 +155,18 @@ export function AgentWorkSections({
   const weekRuns = summarizeActivityWindow(activityMap.get(agent.id), 7).totalRuns;
 
   const [recentDisplayLimit, setRecentDisplayLimit] = useState(RECENT_INITIAL);
+
+  // The Recent work list is caller-filtered, defaulting to the signed-in
+  // user. The page may own the state so the properties panel's 30-day
+  // summary follows the same caller.
+  const [localCallerOverride, setLocalCallerOverride] = useState<string | "all">();
+  const callerOverride = callerOverrideProp ?? localCallerOverride;
+  const setCallerOverride = onCallerChangeProp ?? setLocalCallerOverride;
+  const callerId = resolveAgentCallerId(callerOverride, currentUserId);
+  const handleCallerChange = (next: string | "all") => {
+    setRecentDisplayLimit(RECENT_INITIAL);
+    setCallerOverride(next);
+  };
 
   // Chat tasks are intentionally hidden across every Agent-scoped surface
   // (list / detail / activity). They have their own UI in the chat
@@ -163,14 +209,15 @@ export function AgentWorkSections({
           !!t.completed_at &&
           (t.status === "completed" ||
             t.status === "failed" ||
-            t.status === "cancelled"),
+            t.status === "cancelled") &&
+          matchesCallerFilter(t, callerId),
       )
       .sort(
         (a, b) =>
           new Date(b.completed_at!).getTime() -
           new Date(a.completed_at!).getTime(),
       );
-  }, [agentTasks]);
+  }, [agentTasks, callerId]);
 
   const recentTasks = useMemo(
     () => recentTasksAll.slice(0, recentDisplayLimit),
@@ -188,6 +235,8 @@ export function AgentWorkSections({
         loading={isLoadingRecent}
         fetchingMore={isFetchingNextPage}
         fetchMoreFailed={isFetchNextPageError}
+        callerId={callerId}
+        onCallerChange={handleCallerChange}
         onShowMore={() => {
           if (recentDisplayLimit < recentTasksAll.length) {
             setRecentDisplayLimit((n) => n + RECENT_PAGE);
@@ -209,13 +258,36 @@ export function AgentWorkSections({
 
 /** The 30-day performance numbers for the properties panel. Kept apart from
  * the work sections so metrics never outrank current tasks or failures. */
-export function AgentPerformanceSummary({ agent }: { agent: Agent }) {
+export function AgentPerformanceSummary({
+  agent,
+  callerId = null,
+}: {
+  agent: Agent;
+  /** Scope the 30-day roll-up to one caller (`null` = anyone). */
+  callerId?: string | null;
+}) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const activity = activityMap.get(agent.id);
-  const summary = summarizeActivityWindow(activity, 30);
-  const avgDurationMs = activity?.avgDurationMs ?? 0;
+  // The task history is only fetched for the caller-filtered view; the
+  // default summary reads the server-side activity aggregate so the panel
+  // never depends on how much history was opened.
+  const { data: taskPages } = useInfiniteQuery({
+    ...agentTasksOptions(wsId, agent.id),
+    enabled: !!callerId,
+  });
+  const agentTasks = useMemo(
+    () => taskPages?.pages.flatMap((page) => page.tasks) ?? [],
+    [taskPages],
+  );
+  const callerSummary = callerId
+    ? summarizeCallerActivityLast30d(agentTasks, Date.now(), callerId)
+    : null;
+  const unfiltered = summarizeActivityWindow(activity, 30);
+  const summary = callerSummary ?? unfiltered;
+  const avgDurationMs =
+    callerSummary?.avgDurationMs ?? activity?.avgDurationMs ?? 0;
 
   if (summary.totalRuns === 0) {
     return (
@@ -352,6 +424,8 @@ function RecentWorkSection({
   weekRuns,
   hasMore,
   loading,
+  callerId,
+  onCallerChange,
   onShowMore,
   fetchingMore,
   fetchMoreFailed,
@@ -365,6 +439,9 @@ function RecentWorkSection({
   weekRuns: number | null;
   hasMore: boolean;
   loading: boolean;
+  /** Resolved caller id, or `null` for "anyone". */
+  callerId: string | null;
+  onCallerChange: (next: string | "all") => void;
   onShowMore: () => void;
   fetchingMore: boolean;
   fetchMoreFailed: boolean;
@@ -395,9 +472,12 @@ function RecentWorkSection({
           : t(($) => $.sections.recent_this_week, { count: weekRuns })
       }
       action={
-        <ObjectSectionAction icon={ArrowUpRight} onClick={onViewAll}>
-          {t(($) => $.sections.view_all)}
-        </ObjectSectionAction>
+        <>
+          <CallerFilterPicker value={callerId} onChange={onCallerChange} />
+          <ObjectSectionAction icon={ArrowUpRight} onClick={onViewAll}>
+            {t(($) => $.sections.view_all)}
+          </ObjectSectionAction>
+        </>
       }
     >
       {loading ? (
@@ -860,4 +940,207 @@ export function formatDurationMs(ms: number): string {
   const h = Math.floor(ms / (60 * 60_000));
   const m = Math.floor((ms % (60 * 60_000)) / 60_000);
   return `${h}h ${m}m`;
+}
+
+export function taskCallerUserId(task: AgentTask): string | null {
+  // The queue's originator_user_id is the caller the server filters on;
+  // attribution.originator is the same human's richer form.
+  return task.attribution?.originator?.id ?? task.originator_user_id ?? null;
+}
+
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function startOfLocalDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Average wall-clock duration of completed/failed tasks whose completion
+ * lands in the last 30 days. Pure function so callers can pass a
+ * deterministic `now` in tests.
+ */
+export function deriveAvgDurationLast30d(
+  tasks: readonly AgentTask[],
+  now: number,
+): number {
+  let sum = 0;
+  let count = 0;
+  for (const t of tasks) {
+    if (!t.completed_at || !t.started_at) continue;
+    const completedAt = new Date(t.completed_at).getTime();
+    if (Number.isNaN(completedAt)) continue;
+    if (now - completedAt > THIRTY_DAYS_MS) continue;
+    const startedAt = new Date(t.started_at).getTime();
+    const dur = completedAt - startedAt;
+    if (Number.isFinite(dur) && dur > 0) {
+      sum += dur;
+      count += 1;
+    }
+  }
+  return count > 0 ? Math.round(sum / count) : 0;
+}
+
+export function matchesCallerFilter(
+  task: AgentTask,
+  callerId: string | null,
+): boolean {
+  if (!callerId) return true;
+  return taskCallerUserId(task) === callerId;
+}
+
+/**
+ * Last-30-days roll-up from the same task list Recent work reads, so the
+ * panel numbers move with the caller filter instead of staying workspace-
+ * wide. Chat tasks stay out — they are not "work" on this surface.
+ */
+export function summarizeCallerActivityLast30d(
+  tasks: readonly AgentTask[],
+  now: number,
+  callerId: string | null,
+): ActivityWindowSummary & { avgDurationMs: number } {
+  const buckets: ActivityBucket[] = Array.from({ length: 30 }, () => ({
+    total: 0,
+    failed: 0,
+    completed: 0,
+    cancelled: 0,
+  }));
+  const today = startOfLocalDay(now);
+  const inWindow: AgentTask[] = [];
+  for (const task of tasks) {
+    if (task.chat_session_id) continue;
+    if (!task.completed_at) continue;
+    if (
+      task.status !== "completed" &&
+      task.status !== "failed" &&
+      task.status !== "cancelled"
+    ) {
+      continue;
+    }
+    if (!matchesCallerFilter(task, callerId)) continue;
+    const completedAt = new Date(task.completed_at).getTime();
+    if (Number.isNaN(completedAt) || now - completedAt > THIRTY_DAYS_MS) {
+      continue;
+    }
+    const daysAgo = Math.floor(
+      (today - startOfLocalDay(completedAt)) / DAY_MS,
+    );
+    if (daysAgo < 0 || daysAgo >= 30) continue;
+    buckets[30 - 1 - daysAgo]!.total += 1;
+    if (task.status === "failed") buckets[30 - 1 - daysAgo]!.failed += 1;
+    if (task.status === "completed") buckets[30 - 1 - daysAgo]!.completed += 1;
+    if (task.status === "cancelled")
+      buckets[30 - 1 - daysAgo]!.cancelled += 1;
+    inWindow.push(task);
+  }
+  let totalRuns = 0;
+  let totalFailed = 0;
+  let totalCompleted = 0;
+  let totalCancelled = 0;
+  for (const bucket of buckets) {
+    totalRuns += bucket.total;
+    totalFailed += bucket.failed;
+    totalCompleted += bucket.completed;
+    totalCancelled += bucket.cancelled;
+  }
+  const outcomes = totalCompleted + totalFailed;
+  const successRate =
+    outcomes > 0 ? Math.round((totalCompleted / outcomes) * 100) : null;
+  return {
+    buckets,
+    totalRuns,
+    totalFailed,
+    totalCompleted,
+    totalCancelled,
+    successRate,
+    windowDays: 30,
+    avgDurationMs: deriveAvgDurationLast30d(inWindow, now),
+  };
+}
+
+/** Caller filter for the Recent work section. */
+function CallerFilterPicker({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (next: string | "all") => void;
+}) {
+  const { t } = useT("agents");
+  const wsId = useWorkspaceId();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const query = filter.trim().toLowerCase();
+  const selected = value ? members.find((member) => member.user_id === value) : null;
+  const filteredMembers = members.filter(
+    (member) =>
+      member.name.toLowerCase().includes(query) ||
+      matchesPinyin(member.name, query),
+  );
+
+  return (
+    <PropertyPicker
+      open={open}
+      onOpenChange={(next: boolean) => {
+        setOpen(next);
+        if (!next) setFilter("");
+      }}
+      width="w-64"
+      align="end"
+      searchable
+      searchPlaceholder={t(($) => $.tab_body.activity.caller_filter_search)}
+      onSearchChange={setFilter}
+      trigger={
+        <span className="flex max-w-48 items-center gap-1.5 text-caption">
+          <span className="text-muted-foreground">
+            {t(($) => $.tab_body.activity.caller_filter_label)}
+          </span>
+          {selected ? (
+            <>
+              <ActorAvatar actorType="member" actorId={selected.user_id} size="sm" />
+              <span className="truncate">{selected.name}</span>
+            </>
+          ) : (
+            <span>{t(($) => $.tab_body.activity.caller_filter_all)}</span>
+          )}
+        </span>
+      }
+    >
+      <PickerItem
+        emptyValue
+        selected={value === null}
+        onClick={() => {
+          onChange("all");
+          setOpen(false);
+        }}
+      >
+        <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-muted-foreground">
+          {t(($) => $.tab_body.activity.caller_filter_all)}
+        </span>
+      </PickerItem>
+      {filteredMembers.length > 0 ? (
+        <PickerSection label={t(($) => $.tab_body.activity.caller_filter_members)}>
+          {filteredMembers.map((member) => (
+            <PickerItem
+              key={member.user_id}
+              selected={value === member.user_id}
+              onClick={() => {
+                onChange(member.user_id);
+                setOpen(false);
+              }}
+            >
+              <ActorAvatar actorType="member" actorId={member.user_id} size="sm" />
+              <span className="truncate">{member.name}</span>
+            </PickerItem>
+          ))}
+        </PickerSection>
+      ) : (
+        <PickerEmpty />
+      )}
+    </PropertyPicker>
+  );
 }

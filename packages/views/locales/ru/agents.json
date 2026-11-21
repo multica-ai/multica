@@ -863,7 +863,12 @@
       "dispatched_prefix": "Отправлено {{when}}",
       "queued_prefix": "В очереди с {{when}}",
       "runs_few": "запуска",
-      "runs_many": "запусков"
+      "runs_many": "запусков",
+      "caller_filter_label": "Caller",
+      "caller_filter_all": "Anyone",
+      "caller_filter_search": "Search members",
+      "caller_filter_members": "Members",
+      "caller_filter_clear_aria": "Clear caller filter"
     },
     "connected_apps": {
       "loading": "Загрузка приложений…",

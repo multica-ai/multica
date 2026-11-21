@@ -795,7 +795,12 @@
       "cancel_failed_toast": "取消运行失败",
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
-      "queued_prefix": "{{when}}排队"
+      "queued_prefix": "{{when}}排队",
+      "caller_filter_label": "调用人",
+      "caller_filter_all": "全部",
+      "caller_filter_search": "搜索成员",
+      "caller_filter_members": "成员",
+      "caller_filter_clear_aria": "清除调用人筛选"
     },
     "connected_apps": {
       "loading": "正在加载应用...",
