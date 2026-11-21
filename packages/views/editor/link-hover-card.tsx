@@ -22,6 +22,7 @@ import { useT } from "../i18n";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { useEditorOverlayOwner } from "./overlay-owner";
 import { useOpenAttachmentLink } from "./use-open-attachment-link";
+import { useOpenLocalFileLink } from "./use-open-local-file-link";
 
 function truncateUrl(url: string, max = 48): string {
   if (url.length <= max) return url;
@@ -148,6 +149,7 @@ function LinkHoverCard({
   const { t } = useT("editor");
   const overlayOwner = useEditorOverlayOwner();
   const attachmentLink = useOpenAttachmentLink();
+  const localFileLink = useOpenLocalFileLink();
 
   // Position the card when the portal div is mounted (ref callback).
   // Using useEffect would race with portal rendering — the div might
@@ -189,7 +191,7 @@ function LinkHoverCard({
   const handleOpen = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    if (attachmentLink.open(href)) return;
+    if (attachmentLink.open(href) || localFileLink.open(href)) return;
     openLink(href, slug, appOrigin);
   };
 
@@ -199,6 +201,7 @@ function LinkHoverCard({
   return (
     <>
       {attachmentLink.modal}
+      {localFileLink.modal}
       {visible && anchorEl
         ? createPortal(
             <div

@@ -1,3 +1,4 @@
+
 "use client";
 
 /**
@@ -69,6 +70,7 @@ import { preprocessMarkdown } from "../editor/utils/preprocess";
 import { highlightToHtml } from "../editor/utils/highlight-markdown";
 import { AttachmentDownloadProvider } from "../editor/attachment-download-context";
 import { useOpenAttachmentLink } from "../editor/use-open-attachment-link";
+import { useOpenLocalFileLink } from "../editor/use-open-local-file-link";
 import { Attachment as AttachmentRenderer } from "../editor/attachment";
 import { computeClosedFences, type ClosedFence } from "./streaming-fence";
 import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
@@ -95,6 +97,9 @@ export type RichContentPhase = "streaming" | "settled";
 // re-runs the whole subtree when `components` changes identity, which rewrites
 // every highlighted <code>'s innerHTML and collapses an active text selection
 // inside a code block (MUL-3621).
+
+// Local documents must not trigger content-derived network requests.
+const RemoteContentContext = createContext(true);
 
 const ClosedFenceContext = createContext<ReadonlyMap<number, ClosedFence>>(
   new Map<number, ClosedFence>(),
@@ -219,6 +224,8 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   const slug = useWorkspaceSlug();
   const appOrigin = useAppOrigin();
   const attachmentLink = useOpenAttachmentLink();
+  const localFileLink = useOpenLocalFileLink();
+  const allowRemoteContent = useContext(RemoteContentContext);
   // Platform probe only: `openInNewTab` present means desktop, where native
   // anchor behavior is a dead end and every click must be intercepted. Absent
   // (web), modified clicks are left to the browser — the only way to get a
@@ -240,6 +247,7 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   const isAttachmentLink = href ? !!attachmentLink.resolve(href) : false;
 
   if (isMentionHref(href)) {
+    if (!allowRemoteContent) return <>{children}</>;
     const match = href.match(/^mention:\/\/(member|agent|issue|project|doc|all)\/(.+)$/);
     if (match?.[1] === "issue" && match[2]) {
       // A bare identifier (from the autolink preprocessor) is carried as the id
@@ -285,12 +293,20 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
           attachmentLink.open(href);
           return;
         }
+        if (localFileLink.open(href)) {
+          e.preventDefault();
+          return;
+        }
         if (!desktopTabs && modified) return;
         e.preventDefault();
         openLink(href, slug, appOrigin, resolveClickIntent(e));
       }}
       onAuxClick={(e) => {
         if (e.button !== 1 || !href) return;
+        if (!isAttachmentLink && localFileLink.open(href)) {
+          e.preventDefault();
+          return;
+        }
         // Web: native middle click on a real anchor already opens a
         // background tab. Desktop: the native window-open request dead-ends
         // (denied, then dropped by the http/https allowlist), so route it.
@@ -311,12 +327,13 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
       <>
         {plainLink}
         {attachmentLink.modal}
+        {localFileLink.modal}
       </>
     );
   }
 
   // A bare in-app entity URL renders as the chip its mention form would.
-  const entity = href
+  const entity = allowRemoteContent && href
     ? unfurlableEntityLink(href, children, slug, appOrigin)
     : null;
   if (entity?.kind === "issue") {
@@ -335,7 +352,7 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
     return <DocMentionLink docId={entity.id} />;
   }
 
-  return plainLink;
+  return <>{plainLink}{localFileLink.modal}</>;
 }
 
 // Fenced code
@@ -382,8 +399,9 @@ function RichCode({ className, children, node, ...props }: RichCodeProps) {
   const language = /language-(\w+)/.exec(className || "")?.[1];
   const isBlock = isMultiLineNode(node);
   const fence = useClosedFence(nodeStartOffset(node));
+  const allowRemoteContent = useContext(RemoteContentContext);
 
-  if (isBlock && shouldUpgradeFence(language, fence != null)) {
+  if (allowRemoteContent && isBlock && shouldUpgradeFence(language, fence != null)) {
     // isRichFenceLanguage is re-checked for the type narrow; shouldUpgradeFence
     // already required it.
     if (isRichFenceLanguage(language)) {
@@ -433,11 +451,12 @@ function readFencedCodeChild(children: ReactNode): {
 function RichPre({ children }: RichPreProps) {
   const { language, offset } = readFencedCodeChild(children);
   const isFenceClosed = useClosedFence(offset) != null;
+  const allowRemoteContent = useContext(RemoteContentContext);
 
   // Upgraded fences escape the <pre><code> envelope entirely. An OPEN
   // mermaid/html fence deliberately falls through to the normal code shell, so
   // a half-streamed diagram reads as ordinary source with copy chrome.
-  if (shouldUpgradeFence(language, isFenceClosed)) {
+  if (allowRemoteContent && shouldUpgradeFence(language, isFenceClosed)) {
     return <>{children}</>;
   }
 
@@ -451,46 +470,39 @@ function RichPre({ children }: RichPreProps) {
   );
 }
 
+function RichImage({ src, alt }: ComponentPropsWithoutRef<"img">) {
+  const allowRemoteContent = useContext(RemoteContentContext);
+  if (!allowRemoteContent) return <span>{alt}</span>;
+  return (
+    <AttachmentRenderer
+      attachment={{
+        kind: "url", url: typeof src === "string" ? src : "",
+        filename: alt ?? "", forceKind: "image",
+      }}
+    />
+  );
+}
+
+function RichDiv({ node, children, ...props }: ComponentPropsWithoutRef<"div"> & ExtraProps) {
+  const allowRemoteContent = useContext(RemoteContentContext);
+  if (stringProperty(node, "dataType") === "fileCard") {
+    const rawHref = stringProperty(node, "dataHref");
+    const href = isAllowedFileCardHref(rawHref) ? rawHref : "";
+    const filename = stringProperty(node, "dataFilename");
+    if (!allowRemoteContent) return <RichLink href={href}>{filename}</RichLink>;
+    return <AttachmentRenderer attachment={{ kind: "url", url: href, filename }} />;
+  }
+  return <div {...props}>{children}</div>;
+}
+
 // The components map is module-level and static: it never depends on density,
 // phase or the fence gate, so its identity is stable for the lifetime of the
 // app and react-markdown can bail out of unchanged subtrees.
 const COMPONENTS: Partial<Components> = {
   a: RichLink,
 
-  // Images — unified through <Attachment>. The resolver context provided by
-  // AttachmentDownloadProvider turns a CDN URL into a full record when
-  // possible; external URLs render as plain images with lightbox-via-preview
-  // -modal. forceKind is mandatory: markdown `![]()` carries no content-type
-  // and alt is commonly empty, so without it images fall through to file-card
-  // chrome.
-  img: ({ src, alt }) => (
-    <AttachmentRenderer
-      attachment={{
-        kind: "url",
-        url: typeof src === "string" ? src : "",
-        filename: alt ?? "",
-        forceKind: "image",
-      }}
-    />
-  ),
-
-  // FileCard — intercept <div data-type="fileCard"> from preprocessMarkdown
-  div: ({ node, children, ...props }) => {
-    if (stringProperty(node, "dataType") === "fileCard") {
-      const rawHref = stringProperty(node, "dataHref");
-      const href = isAllowedFileCardHref(rawHref) ? rawHref : "";
-      return (
-        <AttachmentRenderer
-          attachment={{
-            kind: "url",
-            url: href,
-            filename: stringProperty(node, "dataFilename"),
-          }}
-        />
-      );
-    }
-    return <div {...props}>{children}</div>;
-  },
+  img: RichImage,
+  div: RichDiv,
 
   // Tables keep Tiptap's tableWrapper (border/radius/scroll) and add column
   // resizing, an expanded view and copy.
@@ -535,9 +547,16 @@ interface RenderedMarkdown {
 const RENDERED_MARKDOWN_LIMIT = 150;
 const renderedMarkdown = new Map<string, RenderedMarkdown>();
 
-function renderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
+function renderMarkdown(
+  content: string,
+  cdnDomain: string,
+  allowRemoteContent: boolean,
+): RenderedMarkdown {
   const processed = highlightToHtml(
-    preprocessMarkdown(content, { cdnDomain, autolinkIssueIdentifiers: true }),
+    preprocessMarkdown(content, {
+      cdnDomain,
+      autolinkIssueIdentifiers: allowRemoteContent,
+    }),
   );
   return {
     processed,
@@ -556,8 +575,12 @@ function renderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
   };
 }
 
-function cachedRenderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
-  const key = `${cdnDomain}\u0000${content}`;
+function cachedRenderMarkdown(
+  content: string,
+  cdnDomain: string,
+  allowRemoteContent: boolean,
+): RenderedMarkdown {
+  const key = `${cdnDomain}\u0000${allowRemoteContent}\u0000${content}`;
   const hit = renderedMarkdown.get(key);
   if (hit) {
     // Least recently used goes first.
@@ -565,7 +588,7 @@ function cachedRenderMarkdown(content: string, cdnDomain: string): RenderedMarkd
     renderedMarkdown.set(key, hit);
     return hit;
   }
-  const rendered = renderMarkdown(content, cdnDomain);
+  const rendered = renderMarkdown(content, cdnDomain, allowRemoteContent);
   renderedMarkdown.set(key, rendered);
   if (renderedMarkdown.size > RENDERED_MARKDOWN_LIMIT) {
     renderedMarkdown.delete(renderedMarkdown.keys().next().value!);
@@ -595,6 +618,8 @@ export interface RichContentProps {
    */
   phase?: RichContentPhase;
   className?: string;
+  /** Allow automatic resource/mention lookups and interactive fenced previews. */
+  allowRemoteContent?: boolean;
 }
 
 export const RichContent = memo(function RichContent({
@@ -603,6 +628,7 @@ export const RichContent = memo(function RichContent({
   density = "document",
   phase = "settled",
   className,
+  allowRemoteContent = true,
 }: RichContentProps) {
   // Subscribed, not read once. The CDN config is fetched asynchronously after
   // auth, so content that renders first would otherwise keep its legacy CDN
@@ -614,8 +640,13 @@ export const RichContent = memo(function RichContent({
 
   const settled = phase === "settled";
   const { processed, closedFences, element } = useMemo(
-    () => (settled ? cachedRenderMarkdown : renderMarkdown)(content, cdnDomain),
-    [content, cdnDomain, settled],
+    () =>
+      (settled ? cachedRenderMarkdown : renderMarkdown)(
+        content,
+        cdnDomain,
+        allowRemoteContent,
+      ),
+    [content, cdnDomain, settled, allowRemoteContent],
   );
   const tableSource = useMemo(() => ({ source: content, rendered: processed }), [content, processed]);
 
@@ -631,13 +662,15 @@ export const RichContent = memo(function RichContent({
   // code block (MUL-3621). A stable element reference lets React bail out.
   const markdown = useMemo(
     () => (
+      <RemoteContentContext.Provider value={allowRemoteContent}>
       <ClosedFenceContext.Provider value={closedFences}>
         <RichTableSourceContext.Provider value={tableSource}>
           {element}
         </RichTableSourceContext.Provider>
       </ClosedFenceContext.Provider>
+      </RemoteContentContext.Provider>
     ),
-    [element, closedFences, tableSource],
+    [element, closedFences, tableSource, allowRemoteContent],
   );
 
   return (
@@ -655,7 +688,7 @@ export const RichContent = memo(function RichContent({
         )}
       >
         {markdown}
-        <LinkHoverCard {...hover} />
+        {allowRemoteContent && <LinkHoverCard {...hover} />}
       </div>
     </AttachmentDownloadProvider>
   );

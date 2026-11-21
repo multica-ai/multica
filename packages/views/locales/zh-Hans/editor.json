@@ -93,6 +93,16 @@
     "address_hint": "?参数",
     "reload": "刷新"
   },
+  "local_file": {
+    "desktop_required": "本地文档链接可在 Multica Desktop 中打开。",
+    "project_required": "请从已连接本地项目的任务中打开此链接。",
+    "not_found": "找不到此本地文件。",
+    "outside_project": "此文件不在已连接的项目文件夹内。",
+    "unsupported_type": "只能打开 Markdown 和纯文本文档。",
+    "unavailable": "项目必须连接到这台电脑上的运行时。",
+    "too_large": "此本地文件过大，无法预览（最大 2 MiB）。",
+    "failed": "无法预览此本地文件。"
+  },
   "link_hover": {
     "copy_link": "复制链接",
     "open_link": "打开链接",

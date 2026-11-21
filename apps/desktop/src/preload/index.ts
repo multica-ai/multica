@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
+import type { LocalFileReadRequest, LocalFileReadResult } from "@multica/core/paths/local-file-link";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
@@ -207,6 +208,9 @@ const desktopAPI = {
     subscribeToMainRendererChannel("issue:open", callback),
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
+  /** Read a project document for the in-app preview without uploading its contents. */
+  readLocalFile: (request: LocalFileReadRequest): Promise<LocalFileReadResult> =>
+    ipcRenderer.invoke("file:read-local", request),
   /** Download a file by URL through Electron's native download system.
    *  Shows a save dialog and saves to disk. Unlike openExternal, this
    *  avoids browser rendering of HTML files on Linux.

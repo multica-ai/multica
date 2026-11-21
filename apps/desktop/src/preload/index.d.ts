@@ -1,4 +1,5 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
+import type { LocalFileReadRequest, LocalFileReadResult } from "@multica/core/paths/local-file-link";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { ContextMenuCommand, ContextMenuRequest } from "../shared/context-menu";
@@ -70,6 +71,8 @@ interface DesktopAPI {
   onIssueOpen: (callback: (url: string) => void) => () => void;
   /** Open a URL in the default browser. */
   openExternal: (url: string) => Promise<void>;
+  /** Read a project document for the in-app preview without uploading its contents. */
+  readLocalFile: (request: LocalFileReadRequest) => Promise<LocalFileReadResult>;
   /** Download a file by URL through Electron's native download system.
    *  Shows a native save dialog. On non-desktop platforms this is undefined. */
   downloadURL: (url: string) => Promise<void>;

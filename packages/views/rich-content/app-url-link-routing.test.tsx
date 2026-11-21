@@ -10,15 +10,18 @@
  * nothing about the routing decision.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { configStore } from "@multica/core/config";
 import type { Attachment } from "@multica/core/types";
+import type { LocalFileReadResult } from "@multica/core/paths/local-file-link";
 
 const APP_ORIGIN = "https://app.example";
+let desktopTabs = true;
 
+const resolveIssueIdentifier = vi.hoisted(() => vi.fn(() => null));
 vi.mock("../issues/hooks", () => ({
-  useResolveIssueIdentifier: () => null,
+  useResolveIssueIdentifier: resolveIssueIdentifier,
 }));
 
 // Only the workspace hooks are stubbed — the real path helpers stay in place so
@@ -34,7 +37,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
-  useOptionalNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  useOptionalNavigation: () => ({ push: vi.fn(), openInNewTab: desktopTabs ? vi.fn() : undefined }),
   resolveClickIntent: () => "push",
   useAppOrigin: () => APP_ORIGIN,
   AppLink: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -91,12 +94,19 @@ vi.mock("mermaid", () => ({
 }));
 
 import { RichContent } from "./rich-content";
+import {
+  CurrentIssueRenderContextProvider,
+  type CurrentIssueRenderContextValue,
+} from "../issues/current-issue-render-context";
 
 let navigatedPaths: string[] = [];
 let openSpy: ReturnType<typeof vi.spyOn>;
+let originalDesktopAPI: PropertyDescriptor | undefined;
 
 beforeEach(() => {
   navigatedPaths = [];
+  desktopTabs = true;
+  originalDesktopAPI = Object.getOwnPropertyDescriptor(window, "desktopAPI");
   act(() => {
     configStore.getState().setAttachmentPublicUrl("https://multica-api.erlinerd.com");
     configStore.getState().setCdnConfig({ cdnDomain: CDN_DOMAIN });
@@ -106,11 +116,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (originalDesktopAPI) Object.defineProperty(window, "desktopAPI", originalDesktopAPI);
+  else Reflect.deleteProperty(window, "desktopAPI");
   window.removeEventListener("multica:navigate", captureNavigate);
   vi.restoreAllMocks();
   downloadAttachmentSpy.mockClear();
   getAttachmentForDownload.mockReset();
   toastError.mockClear();
+  resolveIssueIdentifier.mockClear();
   act(() => {
     configStore.getState().setAttachmentPublicUrl("");
     configStore.getState().setCdnConfig({ cdnDomain: "" });
@@ -122,18 +135,29 @@ function captureNavigate(e: Event) {
   if (path) navigatedPaths.push(path);
 }
 
-function renderContent(content: string) {
+function renderContent(content: string, issue?: CurrentIssueRenderContextValue) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <RichContent content={content} />
+      <CurrentIssueRenderContextProvider value={issue ?? null}>
+        <RichContent content={content} />
+      </CurrentIssueRenderContextProvider>
     </QueryClientProvider>,
   );
 }
 
 describe("RichContent link routing", () => {
+  it("does not route a local proposal file into a nonexistent workspace", () => {
+    renderContent("[proposal.md](/Users/example/project/openspec/changes/example/proposal.md)");
+
+    screen.getByText("proposal.md").click();
+
+    expect(navigatedPaths).toEqual([]);
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
   it("routes a link to this deployment into the app instead of the browser", () => {
     renderContent(`[MUL-1](${APP_ORIGIN}/acme/issues/MUL-1)`);
 
@@ -300,5 +324,141 @@ describe("RichContent link routing", () => {
 
     expect(downloadAttachmentSpy).not.toHaveBeenCalled();
     expect(openSpy).toHaveBeenCalledWith(external, "_blank", "noopener,noreferrer");
+  });
+});
+
+describe("RichContent local document links", () => {
+  const href = "/Users/example/My%20Project/openspec/changes/example/proposal.md";
+  const issue = {
+    id: "issue-example",
+    identifier: "EX-1",
+    workspaceId: WS_ID,
+    projectId: "project-example",
+  };
+
+  function installDesktopAPI(result: LocalFileReadResult = {
+    ok: true, filename: "proposal.md", text: "# Local preview", contentType: "text/markdown", sizeBytes: 15,
+  }) {
+    const readLocalFile = vi.fn().mockResolvedValue(result);
+    Object.defineProperty(window, "desktopAPI", {
+      configurable: true,
+      value: { readLocalFile },
+    });
+    return readLocalFile;
+  }
+
+  it("renders a local document inside the existing preview dialog", async () => {
+    const readLocalFile = installDesktopAPI();
+    readLocalFile.mockResolvedValue({
+      ok: true, filename: "proposal.md", contentType: "text/markdown",
+      text: "# Local preview heading\n\nSynthetic document body.", sizeBytes: 52,
+    });
+    renderContent(`[proposal](${href})`, issue);
+    fireEvent.click(screen.getByRole("link", { name: "proposal" }));
+    expect(await screen.findByRole("dialog", { name: "proposal.md" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Local preview heading" })).toBeTruthy();
+    expect(navigatedPaths).toEqual([]);
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it("previews local Markdown without automatic remote content or mention requests", async () => {
+    const text = [
+      "# Private local heading", "", "SECRET-923", "",
+      "![Private image](https://tracking.example/private-reference)", "",
+      `[attachment.txt](https://${CDN_DOMAIN}/workspaces/${WS_ID}/01a13179-08aa-7898-ae86-3a1994d2147e.txt)`, "",
+      "```html", "<script>fetch('https://tracking.example/private-script')</script>", "```", "",
+      "```mermaid", "graph LR; A-->B", "```",
+    ].join("\n");
+    installDesktopAPI({ ok: true, filename: "proposal.md", contentType: "text/markdown", text, sizeBytes: text.length });
+    renderContent(`[proposal](${href})`, issue);
+    fireEvent.click(screen.getByRole("link", { name: "proposal" }));
+    const dialog = await screen.findByRole("dialog", { name: "proposal.md" });
+    expect(screen.getByRole("heading", { name: "Private local heading" })).toBeTruthy();
+    expect(dialog.textContent).toContain("SECRET-923");
+    expect(dialog.textContent).toContain("Private image");
+    expect(dialog.querySelector("img, iframe")).toBeNull();
+    expect(resolveIssueIdentifier).not.toHaveBeenCalled();
+    expect(getAttachmentForDownload).not.toHaveBeenCalled();
+    expect(downloadAttachmentSpy).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(navigatedPaths).toEqual([]);
+  });
+
+  it("opens a document with the owning issue's workspace and project", async () => {
+    const readLocalFile = installDesktopAPI();
+    renderContent(`[proposal](${href})`, issue);
+
+    fireEvent.click(screen.getByRole("link", { name: "proposal" }));
+
+    await vi.waitFor(() => expect(readLocalFile).toHaveBeenCalledExactlyOnceWith({
+      workspaceId: WS_ID, projectId: issue.projectId, href,
+    }));
+    expect(await screen.findByRole("dialog", { name: "proposal.md" })).toBeTruthy();
+    expect(navigatedPaths).toEqual([]);
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it.each(["modifier", "middle"])("intercepts a desktop %s click", async (kind) => {
+    const readLocalFile = installDesktopAPI();
+    renderContent(`[proposal](${href})`, issue);
+    const link = screen.getByRole("link", { name: "proposal" });
+
+    if (kind === "modifier") fireEvent.click(link, { ctrlKey: true });
+    else fireEvent(link, new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => expect(readLocalFile).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("dialog", { name: "proposal.md" })).toBeTruthy();
+    expect(navigatedPaths).toEqual([]);
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it.each(["plain", "modifier", "middle"])("shows web feedback without navigating on a %s click", (kind) => {
+    desktopTabs = false;
+    renderContent(`[proposal](${href})`, issue);
+    const link = screen.getByRole("link", { name: "proposal" });
+
+    if (kind === "middle") fireEvent(link, new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
+    else fireEvent.click(link, { ctrlKey: kind === "modifier" });
+
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(navigatedPaths).toEqual([]);
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not infer a project when the content has no owning issue", () => {
+    const readLocalFile = installDesktopAPI();
+    renderContent(`[proposal](${href})`);
+
+    fireEvent.click(screen.getByRole("link", { name: "proposal" }));
+
+    expect(readLocalFile).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(navigatedPaths).toEqual([]);
+  });
+
+  it.each(["not_found", "outside_project", "unsupported_type", "too_large", "unavailable", "failed"] as const)(
+    "reports a native %s failure without falling back to navigation",
+    async (reason) => {
+      installDesktopAPI({ ok: false, reason });
+      renderContent(`[proposal](${href})`, issue);
+
+      fireEvent.click(screen.getByRole("link", { name: "proposal" }));
+
+      await vi.waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+      expect(navigatedPaths).toEqual([]);
+      expect(openSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports a rejected IPC call instead of leaving an unhandled rejection", async () => {
+    const readLocalFile = installDesktopAPI();
+    readLocalFile.mockRejectedValue(new Error("fixture failure"));
+    renderContent(`[proposal](${href})`, issue);
+
+    fireEvent.click(screen.getByRole("link", { name: "proposal" }));
+
+    await vi.waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(navigatedPaths).toEqual([]);
   });
 });

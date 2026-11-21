@@ -81,6 +81,8 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 每个项目在同一台守护进程上最多关联一个本地目录。团队中的不同电脑可以分别为同一个项目关联各自的目录。
 
+在 Multica Desktop 中，点击任务描述或评论中的 Markdown 链接，可在 Multica 内预览 `.md`、`.markdown` 和 `.txt` 文件。文件大小不得超过 2 MiB，且必须位于项目已关联的文件夹内，该文件夹的运行时须在这台电脑上保持在线。浏览器不支持预览本地文件。
+
 <Callout type="warning">
 在默认的 `in_place` 模式下，本地目录不是隔离环境：智能体会直接看到并修改当前分支和未提交的文件，Multica 也不会自动切换分支、stash、commit、push 或创建 PR。worktree 模式不一样，见下面的[运行如何共享这个目录](#运行如何共享这个目录)。
 </Callout>

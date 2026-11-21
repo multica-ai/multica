@@ -9,6 +9,8 @@ import {
 export type CurrentIssueRenderContextValue = Readonly<{
   id: string;
   identifier: string;
+  workspaceId?: string;
+  projectId?: string | null;
 }>;
 
 /**

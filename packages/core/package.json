@@ -11,6 +11,7 @@
   "exports": {
     ".": "./index.ts",
     "./markdown": "./markdown/index.ts",
+    "./paths/local-file-link": "./paths/local-file-link.ts",
     "./types": "./types/index.ts",
     "./types/*": "./types/*.ts",
     "./attachments": "./attachments/index.ts",
