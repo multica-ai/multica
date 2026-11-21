@@ -1124,7 +1124,7 @@
   },
   "runtime_config": {
     "confirm_notice": "Got it",
-    "confirming_notice": "Saving…",
+    "confirming_notice": "Saving...",
     "current_concurrency": "Concurrency",
     "current_model": "Model",
     "current_runtime": "Runtime",
@@ -1133,7 +1133,7 @@
     "current_strategy": "Configuration strategy",
     "current_thinking": "Thinking",
     "load_failed": "Failed to load current configuration.",
-    "loading": "Loading current configuration…",
+    "loading": "Loading current configuration...",
     "not_editable": "Please add a runtime first.",
     "notice_required": "This agent used your runtime with recommended or default settings. Review and save your own configuration here if needed.",
     "notice_seen_failed_toast": "Failed to confirm runtime notice",

@@ -1095,7 +1095,7 @@
   },
   "runtime_config": {
     "confirm_notice": "知道了",
-    "confirming_notice": "保存中…",
+    "confirming_notice": "保存中...",
     "current_concurrency": "并发",
     "current_model": "模型",
     "current_runtime": "运行时",
@@ -1104,7 +1104,7 @@
     "current_strategy": "配置策略",
     "current_thinking": "思考",
     "load_failed": "当前配置加载失败。",
-    "loading": "正在加载当前配置…",
+    "loading": "正在加载当前配置...",
     "not_editable": "请先添加运行时。",
     "notice_required": "该智能体已使用你的运行时和推荐或默认配置运行。你可以在这里检查并保存自己的配置。",
     "notice_seen_failed_toast": "确认运行时提示失败",

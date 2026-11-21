@@ -145,7 +145,7 @@
     "footer_segment": "Tab 切类型",
     "footer_close": "Esc 关闭",
     "role_trigger": "触发人",
-    "no_results_with_query": "未找到与「{{query}}」相关的结果",
+    "no_results_with_query": "未找到与 {{query}} 相关的结果",
     "no_results_hint": "试试按类型筛选：{{words}}",
     "hover_runtime": "运行时",
     "hover_owner": "所有者",
