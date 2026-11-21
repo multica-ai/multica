@@ -262,7 +262,6 @@ export function RunConfirmModal({
                 {sendShortcut ? (
                   <ShortcutKeycaps
                     shortcut={sendShortcut}
-                    tone="on-primary"
                     decorative
                     className="ml-1"
                   />

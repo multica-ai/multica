@@ -12,16 +12,24 @@ describe("Kbd", () => {
     expect(kbd.className).toContain("in-data-[slot=tooltip-content]:bg-white/10!");
   });
 
-  it("supports md size, compact padding, and on-primary tone", () => {
+  it("supports md size and compact padding", () => {
     const { container } = render(
-      <Kbd size="md" tone="on-primary" compact>
+      <Kbd size="md" compact>
         K
       </Kbd>,
     );
     const kbd = container.querySelector("[data-slot='kbd']") as HTMLElement;
     expect(kbd.className).toContain("h-[2.15em]");
     expect(kbd.className).toContain("px-[0.42em]");
-    expect(kbd.className).toContain("text-primary-foreground");
+  });
+
+  it("takes its ink from currentColor inside a primary button", () => {
+    const { container } = render(<Kbd>K</Kbd>);
+    const kbd = container.querySelector("[data-slot='kbd']") as HTMLElement;
+    const inPrimary = "in-[[data-slot=button][data-variant=default]]";
+    expect(kbd.className).toContain(`${inPrimary}:text-current!`);
+    expect(kbd.className).toContain(`${inPrimary}:bg-current/14!`);
+    expect(kbd.className).toContain(`${inPrimary}:border-current/25!`);
   });
 
   it("renders every optical glyph with proportional em width and shared 16-unit height", () => {

@@ -679,7 +679,6 @@ export function AgentCreatePanel({
             // footer reflows at.
             <ShortcutKeycaps
               shortcut={sendShortcut}
-              tone="on-primary"
               decorative
               className="ml-1 max-sm:hidden"
             />

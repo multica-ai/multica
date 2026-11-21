@@ -184,7 +184,7 @@ const TONE_CLASSES: Record<DemoTone, string> = {
   subtle:
     "border border-input/85 bg-muted/70 text-muted-foreground shadow-[0_1px_0_0_color-mix(in_oklab,var(--input)_75%,transparent)]",
   "on-primary":
-    "border border-primary-foreground/25 bg-primary-foreground/14 text-primary-foreground shadow-none",
+    "border border-current/25 bg-current/14 text-current shadow-none",
   tooltip:
     "border border-white/14 bg-white/10 text-tooltip-foreground/90 shadow-none",
 };
@@ -390,7 +390,6 @@ export function DemoLiteralKbd({
   return (
     <Kbd
       size={size}
-      tone={tone === "on-primary" ? "on-primary" : "default"}
       compact
       className={tone === "tooltip" ? TONE_CLASSES.tooltip : undefined}
     >
