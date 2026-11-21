@@ -1,5 +1,3 @@
-import { i18n } from "./i18n/singleton";
-
 /**
  * Mobile-owned mirror of `packages/core/api/client.ts:dispatchReasonCode`.
  *
@@ -18,17 +16,16 @@ export function dispatchReasonCode(err: unknown): string | undefined {
   return undefined;
 }
 
-type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
-
 /**
- * User-facing sentence for a refused send. `invocation_not_allowed` is the
- * revoked-permission case (MUL-4525): the session was created while the user
- * could run the agent and the server now refuses, so it must not read as a
- * transient failure the user should retry.
+ * User-facing sentence for a refused send, from the `chat` namespace's
+ * `failure.*` keys. `invocation_not_allowed` is the revoked-permission case
+ * (MUL-4525): the session was created while the user could run the agent and
+ * the server now refuses, so it must not read as a transient failure the user
+ * should retry.
  */
 export function sendFailureMessage(
   err: unknown,
-  t: TranslateFn = i18n.getFixedT(i18n.language, "chat") as TranslateFn,
+  t: (key: string, options?: Record<string, unknown>) => string,
 ): string {
   switch (dispatchReasonCode(err)) {
     case "invocation_not_allowed":
@@ -36,6 +33,9 @@ export function sendFailureMessage(
     case "agent_runtime_required":
       return t("failure.agent_runtime_required");
     case "runtime_access_denied":
+      // The agent's owner cannot execute it on the selected private runtime.
+      // Retrying never fixes this — the fix is making that runtime public or
+      // rebinding/copying the agent to a runtime its owner can use.
       return t("failure.runtime_access_denied", {
         detail: t("failure.runtime_access_recovery"),
       });

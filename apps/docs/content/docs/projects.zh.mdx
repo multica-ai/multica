@@ -104,8 +104,6 @@ multica project member add <project-id> carol@example.com
 
 把私有项目改回**整个工作区**后，`owner`、`admin` 和 `member`都能看到这个项目及其中的任务、评论和附件。访客仍需获邀访问该项目。在界面中保存前会要求确认；`multica project update --visibility workspace` 则直接生效。
 
-如果工作区套餐限制私有项目，已有私有项目的可见范围和成员名单保持不变。此时无法新建私有项目、将项目改为私有，或向私有项目添加成员，包括通过指定负责人添加成员。有权限的成员仍可编辑项目详情、移除成员、将访问权限改为**整个工作区**，以及归档或删除项目。工作区 owner 仍可通过[工作区所有者恢复访问](#workspace-owner-recovery)加入项目。
-
 ### 工作区所有者恢复访问 [#workspace-owner-recovery]
 
 私有项目的名单里可能没有 `owner` 或 `admin`，甚至一个成员都不剩。工作区 `owner` 可以在**设置 → 常规 → 私有项目**中介入，这一部分只有所有者能看到（`admin` 看不到）。这里列出每个私有项目的名称和成员，不显示其他内容：加入之前，任务、评论和附件都看不到。
