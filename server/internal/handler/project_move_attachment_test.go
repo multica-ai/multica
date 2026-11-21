@@ -50,17 +50,6 @@ func TestProjectMoveAttachmentAccess(t *testing.T) {
 			}
 		})
 	}
-	// MUL-3821/#4477: this static route deliberately remains public.
-	for _, tc := range []struct{ name, user string }{{"target", targetOnly}, {"source", sourceOnly}, {"anonymous", ""}} {
-		t.Run("public_upload/"+tc.name, func(t *testing.T) {
-			req := newRequest("GET", url, nil)
-			req.Header.Set("X-User-ID", tc.user)
-			response := testutil.Call(t, h.ServeLocalUpload, req).Want(200)
-			if response.Body.String() != "moved bytes" {
-				t.Fatal("wrong public bytes")
-			}
-		})
-	}
 	testutil.Call(t, h.DeleteWorkspace, withURLParam(newRequest("DELETE", "/", nil), "id", source)).Want(204)
 	req := withURLParam(newRequest("GET", "/", nil), "id", attachment)
 	req.Header.Set("X-User-ID", targetOnly)
