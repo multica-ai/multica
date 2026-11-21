@@ -8,6 +8,22 @@ export type DialogLocale =
   | "es"
   | "ru";
 
+let appLocaleOverride: string | null = null;
+
+/**
+ * Record the renderer's resolved in-app locale so main-process native dialogs
+ * and daemon error strings match the user's Settings choice instead of only
+ * following the OS language.
+ */
+export function setAppDialogLocale(locale: string | null): void {
+  const trimmed = typeof locale === "string" ? locale.trim() : "";
+  appLocaleOverride = trimmed || null;
+}
+
+export function getEffectiveDialogLocale(getSystemLocale: () => string): string {
+  return appLocaleOverride ?? getSystemLocale();
+}
+
 export function resolveDialogLocale(preferredLanguage: string): DialogLocale {
   const parts = preferredLanguage
     .trim()

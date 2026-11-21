@@ -4,6 +4,7 @@ import { Linter } from "eslint";
 import tsParser from "@typescript-eslint/parser";
 import {
   NO_UNTRANSLATED_ATTRIBUTES,
+  NO_UNTRANSLATED_JSX_TEXT,
   NO_UNTRANSLATED_TOAST,
 } from "./eslint-i18n-guard.mjs";
 
@@ -33,6 +34,7 @@ function lint(code: string): string[] {
           "no-restricted-syntax": [
             "error",
             NO_UNTRANSLATED_ATTRIBUTES,
+            NO_UNTRANSLATED_JSX_TEXT,
             NO_UNTRANSLATED_TOAST,
           ],
         },
@@ -58,15 +60,20 @@ describe("no untranslated attribute copy", () => {
     ['title', '<span title="Copy link" />'],
     ['aria-label', '<input aria-label="Select all sub-issues" />'],
     ['alt', '<img alt="Workspace logo" />'],
+    ['accessibilityLabel', '<Pressable accessibilityLabel="Close sheet" />'],
+    ['ternary attribute', '<input placeholder={active ? "Search" : "Filter"} />'],
     ['expression container', '<input title={"Expression copy"} />'],
     ['template literal', '<input aria-label={`Select ${id}`} />'],
     ['interpolated template', '<input aria-label={`${label} key ${i}`} />'],
+    ['jsx text', '<div>Hardcoded label</div>'],
   ])("flags %s", (_name, code) => {
     expect(flags(code)).toBe(true);
   });
 
   it.each([
     ['translated call', '<input placeholder={t(($) => $.search)} />'],
+    ['code tag text', '<code>multica daemon start</code>'],
+    ['punctuation jsx text', '<span>/</span>'],
     ['URL literal', '<a title="https://example.com" />'],
     ['URL template', '<a title={`https://example.com/${id}`} />'],
     // Pure interpolation of already-translated values: no static English.

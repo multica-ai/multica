@@ -233,6 +233,8 @@
     "url": "Repository URL",
     "branch": "Starting branch (optional)",
     "label": "Label (optional)",
+    "label_placeholder": "e.g. Backend",
+    "open_attachment": "Open {{filename}}",
     "attach": "Attach",
     "attaching": "Attaching...",
     "branch_hint": "Runs start from this branch and open their pull requests against it. Leave empty to use the repository default branch.",

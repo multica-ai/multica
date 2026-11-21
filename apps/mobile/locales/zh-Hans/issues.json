@@ -229,6 +229,8 @@
     "url": "仓库 URL",
     "branch": "起始分支（可选）",
     "label": "标签（可选）",
+    "label_placeholder": "例如：后端",
+    "open_attachment": "打开 {{filename}}",
     "attach": "添加",
     "attaching": "添加中...",
     "branch_hint": "运行会从这个分支开始，并针对它创建 Pull Request。留空则使用仓库默认分支。",

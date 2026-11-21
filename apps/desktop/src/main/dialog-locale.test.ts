@@ -1,7 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { resolveDialogLocale } from "./dialog-locale";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  getEffectiveDialogLocale,
+  resolveDialogLocale,
+  setAppDialogLocale,
+} from "./dialog-locale";
 
 describe("resolveDialogLocale", () => {
+  afterEach(() => {
+    setAppDialogLocale(null);
+  });
+
+  it("prefers the renderer's in-app locale override over the OS system locale", () => {
+    expect(getEffectiveDialogLocale(() => "zh-CN")).toBe("zh-CN");
+    setAppDialogLocale("en");
+    expect(getEffectiveDialogLocale(() => "zh-CN")).toBe("en");
+    expect(resolveDialogLocale(getEffectiveDialogLocale(() => "zh-CN"))).toBe("en");
+    setAppDialogLocale(null);
+    expect(getEffectiveDialogLocale(() => "zh-CN")).toBe("zh-CN");
+  });
   it("parses exact BCP-47 language subtags without prefix collisions", () => {
     expect(resolveDialogLocale("ko")).toBe("ko");
     expect(resolveDialogLocale("ko-KR")).toBe("ko");

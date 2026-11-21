@@ -4,6 +4,7 @@ import { ICON_LIBRARY_IMPORT_PATTERNS, REDUCED_MOTION_IMPORT } from "@multica/es
 import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
 import {
   NO_UNTRANSLATED_ATTRIBUTES,
+  NO_UNTRANSLATED_JSX_TEXT,
   NO_UNTRANSLATED_TOAST,
 } from "../../packages/views/eslint-i18n-guard.mjs";
 
@@ -82,6 +83,7 @@ export default [
             "Direct router.navigate from application code breaks the Coordinator protocol (MUL-4741). Route it through the navigation adapter in src/platform.",
         },
         NO_UNTRANSLATED_ATTRIBUTES,
+        NO_UNTRANSLATED_JSX_TEXT,
         NO_UNTRANSLATED_TOAST,
         NO_ROUND_CONTROLS,
       ],

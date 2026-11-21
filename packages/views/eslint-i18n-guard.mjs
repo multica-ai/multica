@@ -17,7 +17,7 @@
 // ``aria-label={`${overflow} more`}`` both sailed through it.
 
 const COPY_ATTRIBUTE =
-  "JSXAttribute[name.name=/^(placeholder|title|aria-label|alt)$/]";
+  "JSXAttribute[name.name=/^(placeholder|title|aria-label|alt|accessibilityLabel)$/]";
 
 // A literal with a letter in it. `https?:`-prefixed values are URLs and example
 // endpoints, never copy.
@@ -43,9 +43,21 @@ export const NO_UNTRANSLATED_ATTRIBUTES = {
     `${COPY_ATTRIBUTE} > ${BARE_COPY}`,
     `${COPY_ATTRIBUTE} > JSXExpressionContainer > ${BARE_COPY}`,
     `${COPY_ATTRIBUTE} > JSXExpressionContainer > ${BARE_COPY_TEMPLATE}`,
+    `${COPY_ATTRIBUTE} > JSXExpressionContainer > ${FALLBACK} > ${BARE_COPY}`,
+    `${COPY_ATTRIBUTE} > JSXExpressionContainer > ${FALLBACK} > ${BARE_COPY_TEMPLATE}`,
   ].join(", "),
   message:
-    "User-visible text in placeholder/title/aria-label/alt must come from useT() — a screen reader reads aria-label and alt the way a sighted user reads a JSX child. Exempt technical values (a CLI command, a token prefix) with an inline eslint-disable and a reason.",
+    "User-visible text in placeholder/title/aria-label/alt/accessibilityLabel must come from useT() — a screen reader reads aria-label, accessibilityLabel, and alt the way a sighted user reads a JSX child. Exempt technical values (a CLI command, a token prefix) with an inline eslint-disable and a reason.",
+};
+
+// Direct JSX text nodes containing words (2+ ASCII letters), excluding literal
+// `<code>` snippets (CLI commands, config file paths). Used in apps that don't
+// load `eslint-plugin-i18next` directly (desktop renderer, web app routes, mobile).
+export const NO_UNTRANSLATED_JSX_TEXT = {
+  selector:
+    ":not(JSXElement[openingElement.name.name='code']) > JSXText[value=/[A-Za-z]{2,}/]",
+  message:
+    "User-visible JSX text must come from useT() rather than a hardcoded string literal. Exempt non-translatable brand/code text with an inline eslint-disable and a reason.",
 };
 
 export const NO_UNTRANSLATED_TOAST = {
