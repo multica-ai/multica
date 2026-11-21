@@ -66,6 +66,65 @@ func TestRerunTaskByUserContinuity(t *testing.T) {
 	}
 }
 
+// TestRerunIssueFreshContinuity is the issue-scoped half of the same contract.
+// POST /api/issues/{id}/rerun is what the web retry button calls, so the fresh
+// choice has to be expressible there too — otherwise the UI can only ever ask
+// for a continuing rerun and "Retry in a new session" has no route to land on.
+func TestRerunIssueFreshContinuity(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	for _, tc := range []struct {
+		name  string
+		fresh bool
+	}{
+		{name: "issue rerun reuse"},
+		{name: "issue rerun fresh", fresh: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fresh := tc.fresh
+			agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, context.Background())
+			issueID := dbfx.Issue(t, "rerun with an explicit continuity choice", testutil.Cols{
+				"assignee_type": "agent", "assignee_id": agentID,
+			})
+			commentID := dbfx.Comment(t, issueID, "continue this work")
+			sourceID := dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id": runtimeID, "issue_id": issueID, "status": "completed",
+				"session_id": "source-session", "work_dir": "/tmp/source-workdir",
+				"trigger_comment_id": commentID,
+			})
+			body := map[string]any{"task_id": sourceID}
+			if fresh {
+				body["fresh"] = true
+			}
+			req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/rerun", body), "id", issueID)
+			var result struct {
+				ID string `json:"id"`
+			}
+			testutil.Call(t, testHandler.RerunIssue, req).Want(http.StatusAccepted).JSON(&result)
+			row, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(result.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, result.ID) })
+			if uuidToString(row.AgentID) != agentID || uuidToString(row.RerunOfTaskID) != sourceID {
+				t.Fatalf("rerun lost source agent or lineage: %+v", row)
+			}
+			if !row.ForceFreshSession || service.IsFreshRerun(row) != fresh {
+				t.Fatalf("fresh=%v: unexpected stored continuity flags", fresh)
+			}
+			claimed := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+			if fresh {
+				if claimed.PriorSessionID != "" || claimed.PriorWorkDir != "" {
+					t.Fatalf("fresh rerun resumed %q / %q", claimed.PriorSessionID, claimed.PriorWorkDir)
+				}
+			} else if claimed.PriorSessionID != "source-session" || claimed.PriorWorkDir != "/tmp/source-workdir" {
+				t.Fatalf("default rerun lost continuity: %q / %q", claimed.PriorSessionID, claimed.PriorWorkDir)
+			}
+		})
+	}
+}
+
 func TestRerunTaskByUserRejectsInvalidSource(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
