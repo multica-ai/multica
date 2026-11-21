@@ -85,6 +85,7 @@ import {
 } from "@/data/realtime/chat-ws-updaters";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
 import { queuedChatMessages } from "@/lib/chat-queued-messages";
+import { chatSessionDisplayTitle } from "@/lib/chat-session-title";
 import { sendFailureMessage } from "@/lib/dispatch-reason";
 import { useT } from "@/lib/i18n";
 import { useAgentPresence } from "@/lib/use-agent-presence";
@@ -450,7 +451,7 @@ export default function ChatTab() {
     if (!activeSession) return;
     Alert.alert(
       t("alerts.delete_title"),
-      activeSession.title || t("sessions.new_chat"),
+      chatSessionDisplayTitle(activeSession.title, t),
       [
         { text: t("common:actions.cancel"), style: "cancel" },
         {
