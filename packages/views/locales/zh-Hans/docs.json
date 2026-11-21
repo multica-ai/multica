@@ -66,6 +66,7 @@
     "description": "它可能已被删除。"
   },
   "edited": "编辑于 {{time}}",
+  "view_history": "查看历史",
   "outline": "大纲",
   "link_copied": "链接已复制",
   "unavailable": {
