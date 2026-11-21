@@ -474,6 +474,29 @@ export class TestApiClient {
     return res.json();
   }
 
+  async getIssue(id: string) {
+    const res = await this.authedFetch(`/api/issues/${id}`);
+    if (!res.ok) throw new Error(`get issue: ${res.status}`);
+    return await res.json() as {id: string; status: string; description: string | null; description_revision?: number};
+  }
+
+  /** The local edit `multica issue edit-description` sends. */
+  async editIssueDescription(id: string, oldText: string, newText: string) {
+    const res = await this.authedFetch(`/api/issues/${id}/description/edits`, {
+      method: "POST",
+      body: JSON.stringify({ edits: [{ old_text: oldText, new_text: newText }] }),
+    });
+    if (!res.ok) throw new Error(`edit issue description: ${res.status} ${await res.text()}`);
+    return await res.json() as {description: string | null};
+  }
+
+  async listIssueActivity(id: string) {
+    const res = await this.authedFetch(`/api/issues/${id}/timeline`);
+    if (!res.ok) throw new Error(`issue timeline: ${res.status}`);
+    const entries = await res.json() as {type: string; action?: string; actor_id: string; details?: Record<string, string>}[];
+    return entries.filter((entry) => entry.type === "activity");
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
     for (const id of this.createdDocIds) await this.authedFetch(`/api/docs/${id}`, {method: "DELETE"});
