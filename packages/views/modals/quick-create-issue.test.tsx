@@ -952,6 +952,16 @@ describe("AgentCreatePanel", () => {
   // the user as a standing preference — the actor is the only thing that
   // carries over now (MUL-5862).
   describe("project is not remembered across creates", () => {
+    it("keeps a recovery project while its catalog refetch is unresolved", () => {
+      mockIssueDraftStore.draft.shared.projectId = "original-project";
+      mockProjectsQuery.data = [];
+      mockProjectsQuery.isSuccess = true;
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(),
+        recoveryProjects: { activeIds: null, failed: false, retry: vi.fn() } });
+      expect(mockIssueDraftStore.draft.shared.projectId).toBe("original-project");
+      expect(mockQuickCreateIssue).not.toHaveBeenCalled();
+    });
+
     it("ignores a lastProjectId left behind by an older build", () => {
       mockQuickCreateStore.lastProjectId = "proj-1";
       mockProjectsQuery.data = [{ id: "proj-1", title: "Web", icon: null }];

@@ -1,5 +1,7 @@
 "use client";
 
+import type { RecoveryProjectAvailability } from "./create-issue";
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeftRight,
@@ -108,12 +110,14 @@ type ActorSelection =
 // the same carry channel manual→agent uses, so the manual panel reads it
 // from `data?.project_id` without a parallel store.
 export function AgentCreatePanel({
+  recoveryProjects,
   onClose,
   onSwitchMode,
   data,
   isExpanded,
   setIsExpanded,
 }: {
+  recoveryProjects?: RecoveryProjectAvailability;
   onClose: () => void;
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
@@ -280,7 +284,7 @@ export function AgentCreatePanel({
   // own unfinished draft. It is deliberately NOT seeded from the last create
   // — see quick-create-store (MUL-5862). An opener that passes `project_id:
   // null` ("No project") means none, so the draft's does not fill in.
-  const [projectId, setProjectId] = useState<string | null>(() => {
+  const [selectedProjectId, setProjectId] = useState<string | null>(() => {
     if (data && "project_id" in data) return (data.project_id as string | null | undefined) ?? null;
     return draft.shared.projectId ?? null;
   });
@@ -293,6 +297,9 @@ export function AgentCreatePanel({
   const [fieldPickerOpen, setFieldPickerOpen] = useState<QuickCreateField | null>(null);
   // Local state + shared draft always move together, so both the picker rows
   // and the pill's quick-clear go through here.
+  const recoveryProjectBlocked = selectedProjectId !== null && recoveryProjects?.activeIds === null;
+  const projectId = selectedProjectId && recoveryProjects?.activeIds
+    && !recoveryProjects.activeIds.has(selectedProjectId) ? null : selectedProjectId;
   const commitProject = (next: string | null) => {
     setProjectId(next);
     setShared({ projectId: next ?? undefined });
@@ -316,13 +323,15 @@ export function AgentCreatePanel({
   // left, and leaving it would make the next open re-seed and submit the same
   // dead value.
   useEffect(() => {
-    if (!projectsLoaded || projectId === null) return;
-    if (projects.some((p) => p.id === projectId && !isProjectArchived(p))) return;
-    setProjectId(null);
-    if (draft.shared.projectId === projectId) {
-      setShared({ projectId: undefined });
+    if (selectedProjectId === null) return;
+    if (recoveryProjects) {
+      if (recoveryProjects.activeIds === null || recoveryProjects.activeIds.has(selectedProjectId)) return;
+    } else {
+      if (!projectsLoaded || projects.some((p) => p.id === selectedProjectId && !isProjectArchived(p))) return;
     }
-  }, [projectsLoaded, projects, projectId, draft.shared.projectId, setShared]);
+    setProjectId(null);
+    if (draft.shared.projectId === selectedProjectId) setShared({ projectId: undefined });
+  }, [projectsLoaded, projects, selectedProjectId, recoveryProjects, draft.shared.projectId, setShared]);
 
   // Mark the persisted draft's active mode so a later reopen and any reader of
   // the unified draft know which form is being edited.
@@ -448,7 +457,7 @@ export function AgentCreatePanel({
     onSubmit: async (md): Promise<boolean> => {
       // The button already disables on !actor / versionBlocked, but the
       // ⌘+Enter path bypasses it — re-guard here and keep the draft in place.
-      if (!actor || versionBlocked || (anchorCommentId && !sourcePreview)) return false;
+      if (!actor || versionBlocked || recoveryProjectBlocked || (anchorCommentId && !sourcePreview)) return false;
       if (
         selectedRuntime?.provider === "qoder_cloud" &&
         pendingAttachments.some((a) => contentReferencesAttachment(md, a))
@@ -603,7 +612,7 @@ export function AgentCreatePanel({
     void composer.submit();
   };
   const submitting = composer.submitting;
-  const canCreate = !!actor && !versionBlocked && !qoderAttachmentBlocked && !(anchorCommentId && !sourcePreview);
+  const canCreate = !!actor && !versionBlocked && !recoveryProjectBlocked && !qoderAttachmentBlocked && !(anchorCommentId && !sourcePreview);
   const voice = useComposerVoice({
     insert: (text) => editorRef.current?.insertText(text) ?? false,
     submit: canCreate ? submit : undefined,
@@ -827,6 +836,15 @@ export function AgentCreatePanel({
             expanded={sourceContextExpanded}
             onExpandedChange={onSourceContextExpandedChange}
           />
+        )}
+
+        {recoveryProjectBlocked && recoveryProjects?.failed && (
+          <div role="alert" className="flex items-center gap-2 px-5 pb-2 text-caption text-destructive">
+            <span>{t(($) => $.create_issue.recovery_projects_error)}</span>
+            <Button type="button" size="sm" variant="outline" onClick={recoveryProjects.retry}>
+              {tIssues(($) => $.detail.load_retry)}
+            </Button>
+          </div>
         )}
 
         {error && (

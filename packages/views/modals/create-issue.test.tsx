@@ -856,6 +856,40 @@ describe("CreateIssueModal", () => {
     expect(screen.getByRole("button", { name: "Upload file" })).not.toHaveAttribute("data-size");
   });
 
+  it("does not submit a recovery project absent from the active workspace catalog", async () => {
+    mockDraftStore.draft.shared.projectId = "original-project";
+    mockDraftStore.draft.manual.title = "Recovered request";
+    renderModal(<ManualCreatePanel onClose={vi.fn()} isExpanded={false} setIsExpanded={vi.fn()}
+      recoveryProjects={{ activeIds: new Set(["another-project"]), failed: false, retry: vi.fn() }} />);
+    await userEvent.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ project_id: undefined })));
+    expect(mockDraftStore.draft.shared.projectId).toBeUndefined();
+  });
+
+  it.each([false, true])("blocks recovery while the project catalog is unresolved (failed=%s)", async (failed) => {
+    mockDraftStore.draft.shared.projectId = "original-project";
+    mockDraftStore.draft.manual.title = "Recovered request";
+    const retry = vi.fn();
+    const view = renderModal(<ManualCreatePanel onClose={vi.fn()} isExpanded={false} setIsExpanded={vi.fn()}
+      recoveryProjects={{ activeIds: null, failed, retry }} />);
+    await userEvent.click(screen.getByRole("button", { name: "Create Issue" }));
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+    expect(mockDraftStore.draft.shared.projectId).toBe("original-project");
+    expect(screen.getByRole("button", { name: "Create Issue" })).toHaveAttribute("aria-disabled", "true");
+    if (failed) {
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not load projects.");
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(retry).toHaveBeenCalledTimes(1);
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+    }
+    view.rerender(<I18nWrapper><QueryClientProvider client={new QueryClient()}>
+      <ManualCreatePanel onClose={vi.fn()} isExpanded={false} setIsExpanded={vi.fn()}
+        recoveryProjects={{ activeIds: new Set(["original-project"]), failed: false, retry }} />
+    </QueryClientProvider></I18nWrapper>);
+    await userEvent.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ project_id: "original-project" })));
+  });
+
   it("shows success feedback with a direct path to the new issue", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

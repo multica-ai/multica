@@ -181,6 +181,7 @@
     "toast_link_subissues_partial": "No se han podido vincular {{failed}} de {{total}} subtareas",
     "toast_link_labels_failed": "No se han podido adjuntar las etiquetas",
     "toast_set_properties_failed": "No se han podido establecer {{count}} valores de propiedad personalizada",
+    "recovery_projects_error": "No se pudieron cargar los proyectos.",
     "unavailable_property_removed": "Se eliminó del borrador una propiedad personalizada no disponible. Revísalo antes de enviarlo de nuevo.",
     "switch_to_agent": "Cambiar a agente",
     "switch_to_agent_tooltip": "Cambiar a creación con agente: describe en una línea y deja que el agente la registre",

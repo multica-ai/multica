@@ -8597,8 +8597,11 @@ func (s *TaskService) writeQuickCreateOutcomeInbox(ctx context.Context, task db.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quickCreateNotifyTimeout)
 	defer cancel()
 	details, _ := json.Marshal(map[string]any{
-		"task_id":           util.UUIDToString(task.ID),
-		"agent_id":          util.UUIDToString(task.AgentID),
+		"task_id":  util.UUIDToString(task.ID),
+		"agent_id": util.UUIDToString(task.AgentID),
+		// Recovery belongs to this request, not the next unrelated create. An
+		// empty value preserves the original explicit no-project selection.
+		"project_id":        qc.ProjectID,
 		"original_prompt":   qc.Prompt,
 		"error":             redact.Text(errMsg),
 		"source_context_id": qc.SourceContextID,

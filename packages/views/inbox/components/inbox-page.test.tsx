@@ -77,8 +77,15 @@ vi.mock("@multica/core/modals", () => ({
   useModalStore: { getState: () => modalState },
 }));
 
+const issueDraftState = vi.hoisted(() => ({
+  setManual: vi.fn(),
+  setShared: vi.fn(),
+}));
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
-  useIssueDraftStore: { getState: () => ({ setDraft: vi.fn() }) },
+  useIssueDraftStore: Object.assign(
+    (selector: (state: typeof issueDraftState) => unknown) => selector(issueDraftState),
+    { getState: () => issueDraftState },
+  ),
 }));
 
 vi.mock("@multica/core/inbox/queries", () => ({
@@ -288,6 +295,9 @@ function reset() {
   retrySourceContextMutateAsync.mockResolvedValue({});
   showAutopilotQuotaRecoveryPrompt.mockClear();
   modalState.modal = null;
+  modalState.open.mockClear();
+  issueDraftState.setManual.mockClear();
+  issueDraftState.setShared.mockClear();
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.error).mockClear();
   rowActions = null;
@@ -879,6 +889,34 @@ describe("InboxPage", () => {
     fireEvent.click(back!);
 
     expect(screen.getByTestId("row")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["quick_create_failed", "original-project"],
+    ["quick_create_unconfirmed", "original-project"],
+    ["quick_create_failed", ""],
+    ["quick_create_failed", undefined],
+  ] as const)("recovers the original project for %s with project %s", (type, projectId) => {
+    reset();
+    listData.active = [item({
+      id: "project-recovery", issue_id: null, type,
+      details: {
+        original_prompt: "Original request", agent_id: "original-agent",
+        ...(projectId !== undefined ? { project_id: projectId } : {}),
+      },
+    })];
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    fireEvent.click(screen.getByTestId("recover-quick-create"));
+    // Opening recovery carries intent without mutating the ordinary draft.
+    expect(issueDraftState.setManual).not.toHaveBeenCalled();
+    expect(issueDraftState.setShared).not.toHaveBeenCalled();
+    expect(modalState.open).toHaveBeenCalledWith("create-issue", {
+      quick_create_recovery: {
+        notificationId: "project-recovery", workspaceId: "workspace-1", description: "Original request",
+        agentId: "original-agent", projectId: projectId || undefined,
+      },
+    });
   });
 
   it("retries a failed quick-create with its original source context", async () => {

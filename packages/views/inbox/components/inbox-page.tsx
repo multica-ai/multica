@@ -22,7 +22,6 @@ import {
   shortcutMatchesEvent,
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -1129,20 +1128,19 @@ export function InboxPage() {
         {isQuickCreateOutcome(detailItem.type) && (
           <Button
             size="sm"
+            data-testid="recover-quick-create"
             onClick={() => {
-              // Seed the legacy advanced form with the original prompt so the
-              // user can recover their input in the full editor instead of
-              // retyping. The agent picker hint becomes the assignee
-              // candidate (still editable).
-              const prompt = detailItem.details?.original_prompt ?? "";
-              const agentId = detailItem.details?.agent_id;
-              useIssueDraftStore.getState().setManual({
-                description: prompt,
-                ...(agentId
-                  ? { assigneeType: "agent" as const, assigneeId: agentId }
-                  : {}),
+              // The dialog owns isolation and seeds only after the ordinary
+              // draft has been backed up. Opening recovery must not edit it.
+              useModalStore.getState().open("create-issue", {
+                quick_create_recovery: {
+                  notificationId: detailItem.id,
+                  workspaceId: detailItem.workspace_id,
+                  description: detailItem.details?.original_prompt ?? "",
+                  projectId: detailItem.details?.project_id || undefined,
+                  agentId: detailItem.details?.agent_id || undefined,
+                },
               });
-              useModalStore.getState().open("create-issue");
             }}
           >
             {t(($) => $.detail.edit_advanced)}
