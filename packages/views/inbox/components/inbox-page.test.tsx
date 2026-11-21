@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
@@ -989,14 +990,15 @@ describe("InboxPage", () => {
       item({ id: "inbox-a", issue_id: "issue-a" }),
       item({ id: "inbox-b", issue_id: "issue-b" }),
     ];
+    const notice = () => (issueDetailProps.at(-1)?.notice as ((issueActions: ReactNode) => ReactNode) | undefined)?.(null);
     const { rerender } = render(<InboxPage />);
-    expect(issueDetailProps.at(-1)?.notice).toBeFalsy();
+    expect(notice()).toBeFalsy();
 
     listData.active = [item({ id: "inbox-b", issue_id: "issue-b" })];
     rerender(<InboxPage />);
 
     expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
-    expect(issueDetailProps.at(-1)?.notice).toBeTruthy();
+    expect(notice()).toBeTruthy();
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 

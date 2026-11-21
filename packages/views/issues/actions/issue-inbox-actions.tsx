@@ -42,8 +42,9 @@ import { useLocale, useT } from "../../i18n";
  * so the Inbox can be worked through without leaving the page.
  *
  * Once the notification leaves the Inbox on its own (the issue reached Done,
- * another window archived it), the section keeps the row in place and the bar
- * says so instead, with an undo and the way on to the next notification.
+ * another window archived it, an action from this bar archived it), the
+ * section keeps the row in place and the bar says so instead, with the
+ * issue's actions still there, an undo and the way on to the next one.
  *
  * A snoozed issue's bar says when it comes back instead, wherever it is
  * opened, with the way to bring it back now or change the time.
@@ -88,7 +89,7 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
   };
 
   const moveOn = () => leave(issueId, next);
-  useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
+  const cause = useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
 
   const archiveRef = useRef<(() => void) | null>(null);
   const snoozeRef = useRef<(() => void) | null>(null);
@@ -137,7 +138,8 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
     if (!settled) return null;
     return (
       <InboxKeptActions
-        label={keptText.notice(settled)}
+        label={keptText.notice(settled, cause)}
+        issueActions={settled.reason === "archived" ? issueActions : undefined}
         onUndo={() => restore(settled.item.id, { quiet: true })}
         next={next}
         onNext={moveOn}

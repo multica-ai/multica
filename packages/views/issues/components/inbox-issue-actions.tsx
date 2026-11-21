@@ -3,6 +3,7 @@
 import { ChevronDown, UserRound } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { noteInboxBarAction, takeInboxBarAction } from "@multica/core/inbox/auto-archive";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
@@ -39,12 +40,22 @@ export function InboxIssueActions({
   const chip = <Button variant="ghost" size="sm" className="min-w-0 max-w-48 shrink-0" />;
   const chevron = <ChevronDown className="size-3 shrink-0 text-muted-foreground @max-[30rem]/inbox-bar:hidden" />;
   const assigned = issue.assignee_type && issue.assignee_id ? { type: issue.assignee_type, id: issue.assignee_id } : null;
+  // Each of these archives the notification, and the settled bar names it.
+  const update = (updates: Partial<UpdateIssueRequest>) => {
+    if (updates.status) {
+      noteInboxBarAction(issue.id, { type: "status", status: updates.status });
+    } else if ("assignee_id" in updates) {
+      const assignee = updates.assignee_type && updates.assignee_id ? { type: updates.assignee_type, id: updates.assignee_id } : null;
+      noteInboxBarAction(issue.id, { type: "assignee", assignee });
+    }
+    onUpdate(updates);
+  };
 
   return (
     <>
       <StatusPicker
         status={issue.status}
-        onUpdate={onUpdate}
+        onUpdate={update}
         projectId={issue.project_id}
         issue={issue}
         onMarkDuplicate={onMarkDuplicate}
@@ -69,7 +80,7 @@ export function InboxIssueActions({
       <AssigneePicker
         assigneeType={issue.assignee_type}
         assigneeId={issue.assignee_id}
-        onUpdate={onUpdate}
+        onUpdate={update}
         align="start"
         tooltip={t(($) => $.detail.prop_assignee)}
         triggerRender={chip}
@@ -91,7 +102,13 @@ export function InboxIssueActions({
           )
         }
       />
-      <QuickActionsMenu issueId={issue.id} />
+      <QuickActionsMenu
+        issueId={issue.id}
+        onRun={(action, ran) => {
+          noteInboxBarAction(issue.id, { type: "quick_action", name: action.name });
+          void ran.then((posted) => posted || takeInboxBarAction(issue.id));
+        }}
+      />
     </>
   );
 }

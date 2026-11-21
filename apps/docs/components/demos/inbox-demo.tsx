@@ -2,10 +2,10 @@
 
 import { useState, type ReactNode } from "react";
 import {
+  AlarmClock,
   Archive,
   ArchiveRestore,
   Bot,
-  Check,
   ChevronRight,
   Circle,
   CircleCheck,
@@ -46,8 +46,11 @@ type Copy = {
   /** Newest first, as the section lists them. */
   notices: Notice[];
   selectPrompt: string;
-  markRead: string;
-  markUnread: string;
+  /** The Inbox bar under the issue's header. */
+  snooze: string;
+  /** The assignee of the issues that aren't an agent's. */
+  you: string;
+  statuses: Record<Status, string>;
   archive: string;
   archivedToast: string;
   runFailed: string;
@@ -110,8 +113,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       },
     ],
     selectPrompt: "Open a notification from the Inbox",
-    markRead: "Mark as read",
-    markUnread: "Mark as unread",
+    snooze: "Snooze",
+    you: "You",
+    statuses: { todo: "Todo", in_progress: "In Progress", in_review: "In Review" },
     archive: "Archive",
     archivedToast: "Notification archived",
     runFailed: "Run failed",
@@ -181,8 +185,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       },
     ],
     selectPrompt: "从收件箱打开一条通知",
-    markRead: "标为已读",
-    markUnread: "标为未读",
+    snooze: "延后",
+    you: "你",
+    statuses: { todo: "待办", in_progress: "进行中", in_review: "审核中" },
     archive: "归档",
     archivedToast: "已归档通知",
     runFailed: "运行失败",
@@ -248,8 +253,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       },
     ],
     selectPrompt: "從收件箱開啟一條通知",
-    markRead: "標為已讀",
-    markUnread: "標為未讀",
+    snooze: "延後",
+    you: "你",
+    statuses: { todo: "待辦", in_progress: "進行中", in_review: "審查中" },
     archive: "歸檔",
     archivedToast: "已歸檔通知",
     runFailed: "執行失敗",
@@ -315,8 +321,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       },
     ],
     selectPrompt: "インボックスから通知を開いてください",
-    markRead: "既読にする",
-    markUnread: "未読にする",
+    snooze: "スヌーズ",
+    you: "あなた",
+    statuses: { todo: "未着手", in_progress: "進行中", in_review: "レビュー中" },
     archive: "アーカイブ",
     archivedToast: "通知をアーカイブしました",
     runFailed: "実行失敗",
@@ -391,8 +398,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       },
     ],
     selectPrompt: "인박스에서 알림을 여세요",
-    markRead: "읽음으로 표시",
-    markUnread: "읽지 않음으로 표시",
+    snooze: "다시 알림",
+    you: "나",
+    statuses: { todo: "할 일", in_progress: "진행 중", in_review: "리뷰 중" },
     archive: "보관",
     archivedToast: "알림을 보관했습니다",
     runFailed: "실행 실패함",
@@ -461,8 +469,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       },
     ],
     selectPrompt: "Ouvrez une notification depuis la boîte de réception",
-    markRead: "Marquer comme lu",
-    markUnread: "Marquer comme non lu",
+    snooze: "Reporter",
+    you: "Vous",
+    statuses: { todo: "À faire", in_progress: "En cours", in_review: "En relecture" },
     archive: "Archiver",
     archivedToast: "Notification archivée",
     runFailed: "Exécution en échec",
@@ -553,32 +562,78 @@ function RowAvatar({ name, agent }: { name: string; agent: boolean }) {
   );
 }
 
-function HeaderAction({
+/** A control in the Inbox bar; unless `pinned`, its label gives way when the bar is narrow. */
+function BarButton({
+  icon,
   label,
-  coach,
+  shortcut,
+  muted = true,
+  pinned = false,
   onClick,
-  children,
 }: {
+  icon: ReactNode;
   label: string;
-  coach: boolean;
+  shortcut?: string;
+  muted?: boolean;
+  pinned?: boolean;
   onClick?: () => void;
-  children: ReactNode;
 }) {
   return (
-    <CoachMark active={coach} side="bottom" align="end" ringClassName="rounded-md">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        aria-label={label}
-        title={label}
-        disabled={!coach}
-        onClick={onClick}
-        className="text-muted-foreground disabled:opacity-100"
-      >
-        {children}
-      </Button>
-    </CoachMark>
+    <Button
+      type="button"
+      variant="ghost"
+      size="xs"
+      aria-label={label}
+      title={label}
+      disabled={!onClick}
+      onClick={onClick}
+      className={cn("shrink-0 gap-1 px-1.5 disabled:opacity-100 [&_svg]:size-3.5", muted && "text-muted-foreground")}
+    >
+      {icon}
+      <span className={cn(!pinned && "@max-[30rem]/bar:hidden")}>{label}</span>
+      {shortcut && (
+        <kbd className="rounded border bg-muted px-1 font-mono text-[0.625rem] leading-4 text-muted-foreground @max-[24rem]/bar:hidden">
+          {shortcut}
+        </kbd>
+      )}
+    </Button>
+  );
+}
+
+/**
+ * The bar under an issue opened from the Inbox: who did what and when, the
+ * issue's status and assignee, then the notification's Snooze and Archive.
+ */
+function InboxBar({
+  notice,
+  copy,
+  coach,
+  onArchive,
+}: {
+  notice: Notice;
+  copy: Copy;
+  coach: boolean;
+  onArchive: () => void;
+}) {
+  const status = statusOf(notice.id);
+  const assignee = notice.agent ? notice.actor : copy.you;
+  return (
+    <div className="@container/bar flex h-9 items-center gap-0.5 border-b px-3">
+      <span className="mr-1 flex min-w-0 flex-1 items-center gap-1.5 text-caption text-muted-foreground">
+        <RowAvatar name={notice.actor} agent={notice.agent} />
+        <span className="min-w-0 truncate">
+          <span className="font-medium text-foreground">{notice.actor}</span> {notice.detail}
+        </span>
+        <span className="shrink-0 tabular-nums text-faint-foreground @max-[30rem]/bar:hidden">· {notice.time}</span>
+      </span>
+      <BarButton icon={<DemoStatus status={status} />} label={copy.statuses[status]} muted={false} />
+      <BarButton icon={<RowAvatar name={assignee} agent={notice.agent} />} label={assignee} muted={false} />
+      <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+      <BarButton icon={<AlarmClock />} label={copy.snooze} shortcut="H" />
+      <CoachMark active={coach} side="bottom" align="end" ringClassName="rounded-md">
+        <BarButton icon={<Archive />} label={copy.archive} shortcut="E" pinned onClick={coach ? onArchive : undefined} />
+      </CoachMark>
+    </div>
   );
 }
 
@@ -707,19 +762,13 @@ export function InboxDemo() {
       <div className="flex h-10 items-center gap-2 border-b px-3">
         <span className="shrink-0 text-caption text-muted-foreground">{selected.issue}</span>
         <span className="min-w-0 flex-1 truncate text-label font-medium">{selected.title}</span>
-        <span className="flex shrink-0 items-center gap-0.5">
-          <HeaderAction label={isRead(selected.id) ? t.markUnread : t.markRead} coach={false}>
-            {isRead(selected.id) ? <CircleDot /> : <Check />}
-          </HeaderAction>
-          <HeaderAction
-            label={`${t.archive} (E)`}
-            coach={phase === "opened" || phase === "archived"}
-            onClick={() => setPhase(phase === "opened" ? "archived" : "archivedAgain")}
-          >
-            <Archive />
-          </HeaderAction>
-        </span>
       </div>
+      <InboxBar
+        notice={selected}
+        copy={t}
+        coach={phase === "opened" || phase === "archived"}
+        onArchive={() => setPhase(phase === "opened" ? "archived" : "archivedAgain")}
+      />
       <div className="flex flex-col gap-2 p-3">
         {selected.id === "failed" ? (
           <>

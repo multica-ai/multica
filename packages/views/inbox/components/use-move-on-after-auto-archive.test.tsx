@@ -6,11 +6,12 @@ import { toast } from "sonner";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { noteInboxAutoArchive } from "@multica/core/inbox/auto-archive";
+import { noteInboxAutoArchive, noteInboxBarAction } from "@multica/core/inbox/auto-archive";
 import type { KeptInboxRow } from "@multica/core/inbox/open-row";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { notificationPreferenceKeys } from "@multica/core/notification-preferences/queries";
-import type { InboxItem } from "@multica/core/types";
+import { issueDetailOptions } from "@multica/core/issues/queries";
+import type { InboxItem, Issue } from "@multica/core/types";
 import { getTestResources } from "../../test/i18n";
 import { useMoveOnAfterAutoArchive } from "./use-move-on-after-auto-archive";
 
@@ -58,7 +59,12 @@ function setup(preferences: Record<string, string>, initial: KeptInboxRow | null
     ({ settled }: { settled: KeptInboxRow | null }) => useMoveOnAfterAutoArchive({ settled, next: nextRow, onNext }),
     { wrapper, initialProps: { settled: initial } },
   );
-  return { onNext, settle: (row: KeptInboxRow | null) => view.rerender({ settled: row }) };
+  return {
+    onNext,
+    settle: (row: KeptInboxRow | null) => view.rerender({ settled: row }),
+    cause: () => view.result.current,
+    qc,
+  };
 }
 
 beforeEach(() => {
@@ -110,5 +116,38 @@ describe("useMoveOnAfterAutoArchive", () => {
     noteInboxAutoArchive({ issue_id: "issue-e", reason: "actor_acted" });
     settle(archived("issue-e"));
     expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("reports the bar action behind an archive it stays on", () => {
+    const { settle, cause } = setup({});
+    noteInboxBarAction("issue-f", { type: "status", status: "in_progress" });
+    noteInboxAutoArchive({ issue_id: "issue-f", reason: "actor_acted" });
+    settle(archived("issue-f"));
+    expect(cause()).toEqual({ type: "status", status: "in_progress" });
+  });
+
+  it("reports no assignment the issue does not show, as one dismissed at its confirmation", () => {
+    const { settle, cause, qc } = setup({});
+    qc.setQueryData(issueDetailOptions("ws", "issue-h").queryKey, {
+      id: "issue-h",
+      status: "in_review",
+      assignee_type: "member",
+      assignee_id: "member-1",
+    } as Issue);
+    noteInboxBarAction("issue-h", { type: "assignee", assignee: { type: "agent", id: "agent-nova" } });
+    noteInboxAutoArchive({ issue_id: "issue-h", reason: "actor_acted" });
+    settle(archived("issue-h"));
+    expect(cause()).toBeNull();
+  });
+
+  it("reports no action when something else archived it, and forgets the action", () => {
+    const { settle, cause } = setup({});
+    noteInboxBarAction("issue-g", { type: "status", status: "in_progress" });
+    settle(archived("issue-g"));
+    expect(cause()).toBeNull();
+    settle(null);
+    noteInboxAutoArchive({ issue_id: "issue-g", reason: "actor_acted" });
+    settle(archived("issue-g"));
+    expect(cause()).toBeNull();
   });
 });

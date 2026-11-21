@@ -148,6 +148,10 @@
     "leaves": "Leaves the Inbox when you move on",
     "filtered": "No longer matches your filters",
     "notification_archived": "Notification archived",
+    "changed_status": "Changed to {{status}}",
+    "reassigned": "Reassigned to {{name}}",
+    "unassigned": "Unassigned",
+    "ran_quick_action": "Ran {{name}}",
     "next": "Next",
     "next_tooltip": "Open next: {{title}}"
   },
