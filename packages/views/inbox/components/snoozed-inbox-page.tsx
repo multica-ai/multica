@@ -138,8 +138,8 @@ export function SnoozedInboxPage() {
           columns={columns}
           groups={groups}
           getRowId={(row) => row.issue_id}
-          // Without a server identifier the cache supplies it: the list asks
-          // for the href again on click, after the row's name cell loaded it.
+          // Older servers send no identifier. The cache supplies it when the
+          // issue was loaded before this list last rendered; else the UUID.
           getRowHref={(row) =>
             p.issueDetail(
               row.issue_identifier
