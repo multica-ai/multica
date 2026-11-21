@@ -8,7 +8,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { inboxUnreadSummaryOptions, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
-import { paths, useWorkspacePaths } from "@multica/core/paths";
+import { paths, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { InboxWorkspaceUnread } from "@multica/core/types";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
@@ -275,7 +275,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               issue={issue}
               query={server.results.query}
               disabled={server.stale}
-              onSelect={() => palette.navigate(p.issueDetail(issue.id))}
+              onSelect={() => palette.navigate(p.issueDetail(issueRouteRef(issue)))}
             />
           ))}
         </PaletteGroup>
@@ -431,7 +431,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               issue={issue}
               query={server.results.query}
               disabled={server.stale}
-              onSelect={() => palette.navigate(p.issueDetail(issue.id))}
+              onSelect={() => palette.navigate(p.issueDetail(issueRouteRef(issue)))}
             />
           ))}
         </PaletteGroup>
@@ -777,7 +777,7 @@ function EmptyState({ model }: { model: RootModel }) {
                     key={`issue:${item.id}`}
                     issue={item.issue}
                     query=""
-                    onSelect={() => palette.navigate(p.issueDetail(item.id))}
+                    onSelect={() => palette.navigate(p.issueDetail(issueRouteRef(item.issue)))}
                     trailing={<RowHint>{t(($) => $.types.issue)}</RowHint>}
                   />
                 );

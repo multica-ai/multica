@@ -14,7 +14,7 @@ import { useChatStore } from "@multica/core/chat";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { memberListOptions, skillListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -167,7 +167,7 @@ function AgentPanelLink({
           </DropdownMenuItem>
         )}
         {currentIssue && (
-          <DropdownMenuItem onClick={() => push(p.issueDetail(currentIssue.id))}>
+          <DropdownMenuItem onClick={() => push(p.issueDetail(issueRouteRef(currentIssue)))}>
             <ArrowUpRight className="h-3.5 w-3.5" />
             {t(($) => $.panels.team.open_issue, { identifier: currentIssue.identifier })}
           </DropdownMenuItem>

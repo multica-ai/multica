@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "re
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { AgentTask, Attachment, Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
+import type { AgentTask, Attachment, InboxItem, Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
 import { issueKeys } from "@multica/core/issues/queries";
 import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -16,6 +16,7 @@ import {
 } from "@multica/core/issues/stores/sub-issue-display-store";
 import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
+import enInbox from "../../locales/en/inbox.json";
 import enIssues from "../../locales/en/issues.json";
 import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores/issue-sidebar-sections-store";
 import { useSubIssuesCollapseStore } from "@multica/core/issues/stores/sub-issues-collapse-store";
@@ -27,7 +28,7 @@ vi.mock("./issue-wakeup-header-chip", () => ({
   ),
 }));
 
-const TEST_RESOURCES = { en: { agents: enAgents, common: enCommon, issues: enIssues } };
+const TEST_RESOURCES = { en: { agents: enAgents, common: enCommon, inbox: enInbox, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 const mockLocalDirectoryHint = vi.hoisted(() => vi.fn());
@@ -1390,7 +1391,7 @@ describe("IssueDetail (shared)", () => {
     // single link to the issue's own detail route (used to open the full page
     // from the inline Inbox pane). A bare issue has no ancestor crumbs.
     const leaf = await screen.findByText("TES-1 Implement authentication");
-    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/issue-1");
+    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/TES-1");
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {
@@ -1609,43 +1610,66 @@ describe("IssueDetail (shared)", () => {
       .toHaveTextContent(`${mockIssue.identifier} ${mockIssue.title}`);
   });
 
-  describe("header icon buttons", () => {
-    function renderWithDone() {
+  describe("Inbox bar", () => {
+    const inboxItem: InboxItem = {
+      id: "n-1",
+      workspace_id: "ws-1",
+      recipient_type: "member",
+      recipient_id: "user-1",
+      actor_type: "member",
+      actor_id: "user-1",
+      type: "new_comment",
+      severity: "info",
+      issue_id: "issue-1",
+      title: "Implement authentication",
+      body: "Ready for review.",
+      issue_status: "in_progress",
+      issue_priority: "none",
+      read: true,
+      archived: false,
+      created_at: "2026-01-15T00:00:00Z",
+      details: null,
+    };
+    function renderWithArchive(onArchive: () => void = () => {}, { item = inboxItem as InboxItem | null } = {}) {
       const queryClient = createTestQueryClient();
       return render(
         <I18nProvider locale="en" resources={TEST_RESOURCES}>
           <QueryClientProvider client={queryClient}>
-            <IssueDetail issueId="issue-1" onDone={() => {}} />
+            <IssueDetail issueId="issue-1" onArchive={onArchive} inboxItem={item ?? undefined} />
           </QueryClientProvider>
         </I18nProvider>,
       );
     }
 
-    it("names Mark as done and Pin after their tooltips on an open issue", async () => {
-      renderWithDone();
+    it("puts the notification's actions under the header, after why it is here and the issue's own", async () => {
+      const { container } = renderWithArchive();
 
-      expect(
-        await screen.findByRole("button", { name: enIssues.detail.mark_done_tooltip }),
-      ).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: enIssues.detail.pin_tooltip })).toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: enIssues.detail.archive_tooltip }),
-      ).not.toBeInTheDocument();
+      const archive = await screen.findByRole("button", { name: enInbox.context_menu.archive });
+      expect(archive.closest("header")).toBeNull();
+      const bar = archive.closest<HTMLElement>("[data-inbox-bar]")!;
+      expect(within(bar).getByText(enInbox.labels.commented)).toBeInTheDocument();
+      expect(within(bar).getByText(enIssues.status.in_progress)).toBeInTheDocument();
+      expect(container.querySelector("header")).not.toHaveTextContent(enInbox.context_menu.archive);
+      expect(screen.queryByRole("button", { name: "Mark as done" })).not.toBeInTheDocument();
     });
 
-    it("names Archive after its tooltip once the issue is done", async () => {
-      mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, status: "done" });
-      renderWithDone();
+    it("archives the notification without changing the issue's status", async () => {
+      const onArchive = vi.fn();
+      renderWithArchive(onArchive);
 
-      expect(
-        await screen.findByRole("button", { name: enIssues.detail.archive_tooltip }),
-      ).toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: enIssues.detail.mark_done_tooltip }),
-      ).not.toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("button", { name: enInbox.context_menu.archive }));
+      expect(onArchive).toHaveBeenCalledTimes(1);
+      expect(mockApiObj.updateIssue).not.toHaveBeenCalled();
     });
 
-    it("names the pin toggle Unpin while the issue is pinned", async () => {
+    it("shows no bar for a notification already archived", async () => {
+      renderWithArchive(() => {}, { item: null });
+
+      await screen.findByRole("button", { name: enCommon.more_actions });
+      expect(screen.queryByRole("button", { name: enInbox.context_menu.archive })).not.toBeInTheDocument();
+    });
+
+    it("keeps pinning in the more-actions menu rather than the header", async () => {
       mockApiObj.listPins.mockResolvedValue([
         {
           id: "pin-1",
@@ -1659,11 +1683,12 @@ describe("IssueDetail (shared)", () => {
       ]);
       renderIssueDetail();
 
+      fireEvent.click(await screen.findByRole("button", { name: enCommon.more_actions }));
       expect(
-        await screen.findByRole("button", { name: enIssues.detail.unpin_tooltip }),
+        await screen.findByRole("menuitem", { name: enIssues.actions.unpin_from_sidebar }),
       ).toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: enIssues.detail.pin_tooltip }),
+        screen.queryByRole("button", { name: enIssues.actions.unpin_from_sidebar }),
       ).not.toBeInTheDocument();
     });
   });
@@ -3908,7 +3933,7 @@ describe("IssueDetail (shared)", () => {
       await waitFor(() => expect(container.querySelector('[data-issue-sidebar-section="sub_issues"]')).not.toBeNull());
       const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
       expect(sidebar.getAllByRole("link")).toHaveLength(3);
-      expect(sidebar.getByRole("link", { name: /TES-11 Open destination/ })).toHaveAttribute("href", "/test/issues/child-open");
+      expect(sidebar.getByRole("link", { name: /TES-11 Open destination/ })).toHaveAttribute("href", "/test/issues/TES-11");
       expect(sidebar.getByRole("link", { name: /TES-13 Cancelled destination/ })).toBeInTheDocument();
       expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuenow", "1");
       expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuemax", "3");
@@ -3951,7 +3976,7 @@ describe("IssueDetail (shared)", () => {
       }
       const sidebar = within(document.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
       const childLinks = () => sidebar.getAllByRole("link").map((link) => link.getAttribute("href"));
-      const urls = (numbers: number[]) => numbers.map((n) => `/test/issues/child-${n}`);
+      const urls = (numbers: number[]) => numbers.map((n) => `/test/issues/TES-${n}`);
       const firstTen = [5, 8, 11, 14, 17, 20, 1, 4, 7, 10];
       expect(childLinks()).toEqual(urls(firstTen));
       expect(sidebar.getByText("6/25")).toBeInTheDocument();
@@ -3994,7 +4019,7 @@ describe("IssueDetail (shared)", () => {
       await findInlineChild("Child 10");
       const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
       expect(sidebar.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(
-        [2, 5, 8, 1, 4, 7, 10, 3, 6, 9].map((n) => `/test/issues/child-${n}`),
+        [2, 5, 8, 1, 4, 7, 10, 3, 6, 9].map((n) => `/test/issues/TES-${n}`),
       );
       expect(sidebar.queryByRole("button", { name: /Show .* more|Collapse|View all/ })).not.toBeInTheDocument();
       expect(sidebar.getByText("1/10")).toBeInTheDocument();

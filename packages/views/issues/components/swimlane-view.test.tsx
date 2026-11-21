@@ -794,7 +794,7 @@ describe("SwimLaneView", () => {
 
     const links = screen.getAllByRole("link", { name: "Open parent issue" });
     expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAttribute("href", expect.stringContaining("parent-1"));
+    expect(links[0]).toHaveAttribute("href", "/acme/issues/PROJ-1");
   });
 
   it("calls onMoveIssue on drag-and-drop end", () => {

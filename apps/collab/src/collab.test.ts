@@ -295,6 +295,55 @@ describe("collaboration server", () => {
     expect(markdown(a.document)).toBe("One\n\nTwo (Ada)");
   });
 
+  describe("keeps what Markdown cannot express", () => {
+    const image = { type: "image", attrs: { src: "https://cdn.example.com/a.png", alt: "a", width: 800, height: 600 } };
+    const file = { type: "fileCard", attrs: { href: "https://cdn.example.com/f.pdf", filename: "f.pdf", fileSize: 12345 } };
+    const uploading = { type: "image", attrs: { src: "blob:http://local/1", uploading: true, uploadId: "u1" } };
+    const paragraph = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+
+    /** Ada's editor holds media whose size and upload state live only in the
+     *  Yjs document; the server's copy has caught up with it. */
+    async function editorWithMedia() {
+      resetDoc("First.\n\nLast.");
+      const a = await connect(ada);
+      codec.applyJSON(a.document, {
+        type: "doc",
+        content: [paragraph("First."), image, file, uploading, paragraph("Last.")],
+      });
+      const live = () => codec.ydocToJSON(collab.server.hocuspocus.documents.get(NAME)!);
+      await waitFor(() => JSON.stringify(live()).includes('"uploadId":"u1"'));
+      return a;
+    }
+    const blocks = (doc: Y.Doc) =>
+      codec.ydocToJSON(doc).content!.filter((block) => block.type !== "paragraph").map((block) => block.attrs);
+
+    it("in blocks an agent's edit did not touch", async () => {
+      const a = await editorWithMedia();
+      const before = markdown(a.document);
+      const result = await internal("edit", {
+        actor: agent,
+        edits: [{ old_text: "First.", new_text: "First, edited." }],
+      });
+      expect(result.status).toBe(200);
+      await waitFor(() => markdown(a.document).includes("edited"));
+      expect(blocks(a.document)).toMatchObject([image.attrs, file.attrs, uploading.attrs]);
+      expect(markdown(a.document)).toBe(before.replace("First.", "First, edited."));
+    });
+
+    it("in blocks a whole-document write did not touch", async () => {
+      const a = await editorWithMedia();
+      const result = await internal("write", {
+        actor: agent,
+        base_revision: 1,
+        base_content: markdown(a.document),
+        content: markdown(a.document).replace("Last.", "Last, rewritten."),
+      });
+      expect(result.status).toBe(200);
+      await waitFor(() => markdown(a.document).includes("rewritten"));
+      expect(blocks(a.document)).toMatchObject([image.attrs, file.attrs, uploading.attrs]);
+    });
+  });
+
   it("serializes concurrent agent edits so neither is lost", async () => {
     resetDoc("Alpha\n\nBeta\n\nGamma");
     const [first, second] = await Promise.all([
@@ -351,6 +400,38 @@ describe("collaboration server", () => {
     await waitFor(() => collab.server.hocuspocus.getDocumentsCount() === 0);
     const again = await connect(ada, { document: a.document, epoch });
     expect(markdown(again.document)).toBe(expected);
+  });
+
+  describe("folds in a write stored while the API could not reach it", () => {
+    /** Ada has the doc open and the service holds it; an agent's write lands
+     *  in the stored doc directly, before Ada's typing is saved. */
+    async function directWriteDuringLiveEdit(stored: string) {
+      resetDoc("One\n\nTwo");
+      const a = await connect(ada);
+      fake.content = stored;
+      fake.revision += 1;
+      typeInto(a.document, 1, 3, " (Ada)");
+      await waitFor(() => fake.stores.length > 0, 2000);
+      return a;
+    }
+
+    it("merging it when it changed other blocks", async () => {
+      const a = await directWriteDuringLiveEdit("One (agent)\n\nTwo");
+      const expected = "One (agent)\n\nTwo (Ada)";
+      expect(fake.content).toBe(expected);
+      expect(fake.stores.at(-1)!.message).toBeUndefined();
+      await waitFor(() => markdown(a.document) === expected);
+    });
+
+    it("keeping both copies of a block both sides changed, in a labeled version", async () => {
+      const a = await directWriteDuringLiveEdit("One\n\nTwo (agent)");
+      const expected = "One\n\nTwo (Ada)\n\nTwo (agent)";
+      expect(fake.content).toBe(expected);
+      const store = fake.stores.at(-1)!;
+      expect(store.contributors).toEqual([ada.id]);
+      expect(store.message).toMatch(/^Kept both sides of 1 conflicting edit:/);
+      await waitFor(() => markdown(a.document) === expected);
+    });
   });
 
   it("tells a client to start over when no saved state is left to merge with", async () => {

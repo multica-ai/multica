@@ -24,7 +24,7 @@ import { pinListOptions } from "@multica/core/pins/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { useIssueUnread } from "@multica/core/issues/unread";
-import { useWorkspacePaths, type WorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import type { Issue, PinnedItem } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { IssueActionsContextMenu } from "../../issues/actions";
@@ -50,17 +50,13 @@ import {
 // render while the query is disabled, which re-fires the sync effect below.
 const EMPTY_PINS: PinnedItem[] = [];
 
-function pinHref(p: WorkspacePaths, pin: PinnedItem): string {
-  return pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id);
-}
-
 /**
  * Pin list state for the Issues panel. Lifted out of the section so the
  * panel can keep its plain rows unlit while a pinned item is the page on
  * screen.
  *
- * An issue pin matches by id, not by path: the issue route rewrites its UUID
- * URL to the `MUL-123` form, which a pin's href never equals.
+ * An issue pin matches by id, not by path: the address names the issue by
+ * UUID or by its `MUL-123` identifier.
  */
 export function usePanelPins(
   wsId: string | undefined,
@@ -100,7 +96,7 @@ export function usePanelPins(
   const isPinActive = (pin: PinnedItem) =>
     pin.item_type === "issue"
       ? pin.item_id === currentIssueId
-      : isPathWithin(pathname, pinHref(p, pin));
+      : isPathWithin(pathname, p.projectDetail(pin.item_id));
   // A collapsed section shows no rows, so it must not keep the tree unlit.
   const pinnedCollapsed = useSidebarTreeStore((s) => s.pinnedCollapsed);
   const isActivePinnedRoute = !pinnedCollapsed && displayed.some(isPinActive);
@@ -123,7 +119,6 @@ type PanelPins = ReturnType<typeof usePanelPins>;
 
 export function PinnedSection({ pins, wsId }: { pins: PanelPins; wsId: string }) {
   const { t } = useT("layout");
-  const p = useWorkspacePaths();
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -179,7 +174,6 @@ export function PinnedSection({ pins, wsId }: { pins: PanelPins; wsId: string })
               <PinRow
                 key={pin.id}
                 pin={pin}
-                href={pinHref(p, pin)}
                 active={isPinActive(pin)}
                 onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                 wsId={wsId}
@@ -252,6 +246,7 @@ function SortablePinItem({
       <AppLink
         href={href}
         newTabTitle={label}
+        data-issue-id={issue?.id}
         draggable={false}
         aria-current={active ? "page" : undefined}
         className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5")}
@@ -315,18 +310,17 @@ function SortablePinItem({
  */
 function PinRow({
   pin,
-  href,
   active,
   onUnpin,
   wsId,
 }: {
   pin: PinnedItem;
-  href: string;
   active: boolean;
   onUnpin: () => void;
   wsId: string;
 }) {
   const { t: tProjects } = useT("projects");
+  const p = useWorkspacePaths();
   const isIssue = pin.item_type === "issue";
   const agents = useIssueAgentState(wsId, isIssue ? pin.item_id : "");
   const unread = useIssueUnread(wsId, isIssue ? pin.item_id : "");
@@ -354,7 +348,7 @@ function PinRow({
     return (
       <SortablePinItem
         pin={pin}
-        href={unreadIssueHref(href, unread)}
+        href={unreadIssueHref(p.issueDetail(issueRouteRef(issue)), unread)}
         onUnpin={onUnpin}
         label={issue.title}
         active={active}
@@ -381,7 +375,7 @@ function PinRow({
   return (
     <SortablePinItem
       pin={pin}
-      href={href}
+      href={p.projectDetail(pin.item_id)}
       onUnpin={onUnpin}
       label={project.title}
       active={active}

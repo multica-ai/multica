@@ -475,10 +475,10 @@ describe("TableView cell editors under data refresh", () => {
     expect(navigationMocks.push).not.toHaveBeenCalled();
     // In preview mode Shift+Click opens the other target: the full page, in place.
     fireEvent.click(title, { shiftKey: true });
-    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/MUL-a");
     expect(peek.toggle).not.toHaveBeenCalled();
     fireEvent.click(row, { metaKey: true });
-    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith("/test/issues/a", "MUL-a");
+    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith("/test/issues/MUL-a", "MUL-a");
     expect(peek.open).toHaveBeenCalledTimes(2);
   });
 
@@ -499,25 +499,25 @@ describe("TableView cell editors under data refresh", () => {
     const title = within(row).getByRole("button", { name: "Alpha task" });
 
     await user.click(title);
-    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/MUL-a");
     expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
 
     navigationMocks.push.mockClear();
     await user.click(row);
-    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/MUL-a");
     expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
 
     navigationMocks.push.mockClear();
     fireEvent.click(title, { metaKey: true });
     expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
-      "/test/issues/a",
+      "/test/issues/MUL-a",
       "MUL-a",
     );
 
     navigationMocks.openInNewTab.mockClear();
     fireEvent.click(row, { metaKey: true, shiftKey: true });
     expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
-      "/test/issues/a",
+      "/test/issues/MUL-a",
       "MUL-a",
       { activate: true },
     );
@@ -554,7 +554,7 @@ describe("TableView cell editors under data refresh", () => {
     // Dead space on the row still opens a background tab on middle click.
     auxClick(row);
     expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
-      "/test/issues/a",
+      "/test/issues/MUL-a",
       "MUL-a",
     );
   });
@@ -579,15 +579,15 @@ describe("TableView cell editors under data refresh", () => {
     const title = within(row).getByRole("button", { name: "Alpha task" });
 
     await user.click(title);
-    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/MUL-a");
     expect(windowOpen).not.toHaveBeenCalled();
 
     fireEvent.click(title, { metaKey: true });
     expect(navigationMocks.getShareableUrl).toHaveBeenCalledWith(
-      "/test/issues/a",
+      "/test/issues/MUL-a",
     );
     expect(windowOpen).toHaveBeenCalledWith(
-      "https://app.example/test/issues/a",
+      "https://app.example/test/issues/MUL-a",
       "_blank",
       "noopener,noreferrer",
     );

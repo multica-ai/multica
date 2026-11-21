@@ -5,6 +5,9 @@ const withMDX = createMDX();
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
+  // Otherwise `next dev` writes a generic apps/docs/AGENTS.md; agent guidance
+  // lives in the root AGENTS.md.
+  agentRules: false,
   basePath: "/docs",
   // Visiting http://host/ (outside basePath) would otherwise 404 — redirect
   // to the docs root. basePath: false makes the source and destination

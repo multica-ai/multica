@@ -66,6 +66,7 @@
     "description": "Возможно, он удалён."
   },
   "edited": "Изменено {{time}}",
+  "view_history": "Открыть историю",
   "outline": "Содержание",
   "link_copied": "Ссылка скопирована",
   "unavailable": {

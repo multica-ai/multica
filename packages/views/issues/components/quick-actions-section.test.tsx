@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { QuickAction } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { QuickActionsSection } from "./quick-actions-section";
+import { QuickActionsMenu, QuickActionsSection } from "./quick-actions-section";
 
 // The section's contract (MUL-5465) is mostly about being HONEST with the
 // user, so these tests target exactly that: what gets offered, and what the
@@ -257,5 +257,47 @@ describe("QuickActionsSection", () => {
     fireEvent.click(disclosure);
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("button", { name: /Quick actions 6/i })).toBeVisible();
+  });
+});
+
+describe("QuickActionsMenu", () => {
+  beforeEach(() => {
+    runMock.mockReset();
+    loading = false;
+    queryError = false;
+    workspaceId = "ws-1";
+    toastCalls.length = 0;
+    reasonCode = undefined;
+    listData = [action(), action({ id: "qa-2", name: "Old one", status: "archived" })];
+  });
+
+  it("renders nothing before the workspace has any actions", () => {
+    listData = [];
+    renderWithI18n(<QuickActionsMenu issueId="i-1" />);
+    expect(screen.queryByRole("button", { name: "Quick actions" })).not.toBeInTheDocument();
+  });
+
+  it("lists the active actions and runs one, saying what came of it", async () => {
+    runMock.mockResolvedValue(outcome("queued"));
+    renderWithI18n(<QuickActionsMenu issueId="i-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick actions" }));
+    expect(screen.queryByRole("menuitem", { name: /Old one/ })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Code Review/ }));
+
+    await waitFor(() => expect(runMock).toHaveBeenCalledWith({ quickActionId: "qa-1" }));
+    await waitFor(() => expect(toastCalls[0]?.kind).toBe("success"));
+  });
+
+  it("explains a refusal in a dialog, as the sidebar does", async () => {
+    reasonCode = "invocation_not_allowed";
+    runMock.mockRejectedValue(new Error("forbidden"));
+    renderWithI18n(<QuickActionsMenu issueId="i-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Code Review/ }));
+
+    await waitFor(() => expect(screen.getByRole("alertdialog")).toBeInTheDocument());
+    expect(toastCalls).toHaveLength(0);
   });
 });

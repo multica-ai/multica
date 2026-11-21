@@ -344,8 +344,8 @@ An environment is the database, ports, CLI profile and processes that belong to
 one checkout. It is a named object: it can be listed, inspected and deleted.
 
 ```bash
-make up                      # start this checkout's environment (api + web)
-make up C=api,web,daemon     # choose the components
+make up                      # start this checkout's environment (api + collab + web)
+make up C=api,collab,web,daemon  # choose the components
 make status                  # what is running, and whether it is yours
 make list                    # every environment on this machine
 make down                    # stop the processes, keep the data
@@ -354,8 +354,11 @@ make destroy                 # stop, then drop the database and free the slot
 make gc                      # collect expired environments or ones whose checkout is gone
 ```
 
-Components are `api` (Go backend), `web` (Next.js), `daemon` (agent daemon) and
-`desktop` (Electron). Selecting any of them implies `api`. `make up` is
+Components are `api` (Go backend), `collab` (live doc co-editing), `web`
+(Next.js), `daemon` (agent daemon) and `desktop` (Electron). Selecting any of
+them implies `api`. `collab` gets its own port and a secret generated for the
+environment, and the API is wired to it only while it runs, so leaving it out
+(`make up C=api,web`) just turns docs back to saving through the API. `make up` is
 idempotent: re-running it against a live environment reuses the database, the
 profile and any component already healthy.
 

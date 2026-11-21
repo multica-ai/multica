@@ -1,6 +1,25 @@
-import { test, expect, type FileChooser } from "@playwright/test";
+import { test, expect, type FileChooser, type Page } from "@playwright/test";
 // Docs sits behind the docs_v1 flag: run the server with FF_DOCS_V1=true.
+//
+// The spec passes with or without collab, and each covers a different save path:
+// - `make up` (API + collab + Web): docs edit live, the header says "Live",
+//   and collab stores the body. Reads pass `flush` so they see what was typed
+//   without waiting out collab's store debounce.
+// - `make up C=api,web` after `make down C=collab`: docs save through the API
+//   and the header says "Saved". A running collab stays wired to the API
+//   whatever `C=` says, so stop it first.
+// Tests read the mode from that status. The few that exist in one mode only
+// skip in the other and say why; run both setups to cover everything.
 import { TestApiClient } from "./fixtures";
+
+type DocMode = "live" | "solo";
+
+/** Waits for the open doc to settle into a mode. The wait outlasts the page's 8s fallback to solo. */
+async function docMode(page: Page): Promise<DocMode> {
+  const status = page.getByRole("status").filter({ hasText: /^(Live|Saved)$/ });
+  await expect(status).toBeVisible({ timeout: 10_000 });
+  return (await status.textContent())?.trim() === "Live" ? "live" : "solo";
+}
 
 let api: TestApiClient;
 let slug: string;
@@ -52,7 +71,8 @@ test("Markdown autosave, folder move, immutable history and restore", async ({
     animations: "disabled",
     style: "nextjs-portal { display: none; }",
   });
-  await page.getByRole("link", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "History", exact: true }).click();
   await page.getByRole("button", { name: /^v1 / }).click();
   await expect(
     page.getByRole("heading", { name: "Release runbook", exact: true }),
@@ -83,6 +103,7 @@ test("navigating to history saves the last title and Markdown before the debounc
   const title = page.getByRole("textbox", { name: "Title", exact: true });
   const editor = page.locator('[contenteditable="true"]').first();
   await expect(title).toHaveValue("Quick edit");
+  const mode = await docMode(page);
   await expect(editor).toBeVisible();
   await page.clock.install({ time: new Date("2026-11-09T12:00:00Z") });
   await page.clock.pauseAt(new Date("2026-11-09T12:00:01Z"));
@@ -92,14 +113,24 @@ test("navigating to history saves the last title and Markdown before the debounc
   );
   await title.fill("Final title");
   await editor.fill("Last Markdown edit before leaving.");
-  await page.getByRole("link", { name: "History", exact: true }).click();
+  await page.getByRole("link", { name: /^Edited / }).click();
   await expect(page).toHaveURL(new RegExp(`/${doc.id}/history$`));
-  expect((await saving).postDataJSON()).toMatchObject({
-    title: "Final title", content: "Last Markdown edit before leaving.", base_revision: 1,
-  });
-  await expect.poll(async () => api.getDoc(doc.id)).toMatchObject({
-    title: "Final title", content: "Last Markdown edit before leaving.", revision: 2, version_count: 2,
-  });
+  const sent = (await saving).postDataJSON();
+  if (mode === "solo") {
+    expect(sent).toMatchObject({
+      title: "Final title", content: "Last Markdown edit before leaving.", base_revision: 1,
+    });
+    await expect.poll(async () => api.getDoc(doc.id)).toMatchObject({
+      title: "Final title", content: "Last Markdown edit before leaving.", revision: 2, version_count: 2,
+    });
+  } else {
+    // Live, the request carries the title alone; the body went to collab as it was typed.
+    expect(sent).toMatchObject({ title: "Final title" });
+    expect(sent).not.toHaveProperty("content");
+    await expect.poll(async () => api.getDoc(doc.id, { flush: true })).toMatchObject({
+      title: "Final title", content: "Last Markdown edit before leaving.",
+    });
+  }
 });
 
 test("stale save keeps a draft across reload and lets the human load the latest", async ({
@@ -109,6 +140,10 @@ test("stale save keeps a draft across reload and lets the human load the latest"
   await page.goto(`/${slug}/docs/${doc.id}`);
   const title = page.getByRole("textbox", { name: "Title", exact: true });
   await expect(title).toHaveValue("Design notes");
+  test.skip(
+    (await docMode(page)) === "live",
+    "Live editing merges a colleague's write instead of rejecting a stale save; the next test covers that.",
+  );
   await title.fill("My unsaved title");
   await api.updateDoc(doc.id, 1, "A colleague's newer content");
   await expect(
@@ -135,6 +170,27 @@ test("stale save keeps a draft across reload and lets the human load the latest"
   );
 });
 
+test("a colleague's write merges into a doc open for live editing", async ({ page }) => {
+  const doc = await api.createDoc("Design notes", "Original shared content");
+  await page.goto(`/${slug}/docs/${doc.id}`);
+  const title = page.getByRole("textbox", { name: "Title", exact: true });
+  await expect(title).toHaveValue("Design notes");
+  test.skip(
+    (await docMode(page)) === "solo",
+    "Without collab a colleague's write makes the open page's save stale; the previous test covers that.",
+  );
+  await title.fill("My new title");
+  await expect.poll(async () => (await api.getDoc(doc.id)).title).toBe("My new title");
+  await api.updateDoc(doc.id, 1, "A colleague's newer content");
+  const editor = page.locator('.ProseMirror[contenteditable="true"]').first();
+  await expect(editor).toHaveText("A colleague's newer content");
+  await expect(title).toHaveValue("My new title");
+  await expect(page.getByRole("alert").filter({ hasText: "Your draft is kept" })).toHaveCount(0);
+  await expect.poll(async () => api.getDoc(doc.id, { flush: true })).toMatchObject({
+    title: "My new title", content: "A colleague's newer content",
+  });
+});
+
 test("create a nested doc, edit Markdown, and delete it with confirmation", async ({page}) => {
   await page.goto(`/${slug}/docs`);
   await page.getByRole("button", {name: "New", exact: true}).click();
@@ -147,9 +203,10 @@ test("create a nested doc, edit Markdown, and delete it with confirmation", asyn
   await expect(page.getByRole("textbox", {name: "Title", exact: true})).toBeFocused();
   await page.keyboard.type("Architecture notes");
   const id = page.url().split("/").at(-1)!;
+  await docMode(page);
   const editor = page.locator('[contenteditable="true"]').first();
   await editor.fill("A shared architecture decision.");
-  await expect.poll(async () => (await api.getDoc(id)).content).toContain("A shared architecture decision.");
+  await expect.poll(async () => (await api.getDoc(id, { flush: true })).content).toContain("A shared architecture decision.");
   expect((await api.getDoc(id)).folder_id).not.toBeNull();
   await page.getByRole("button", {name: "More", exact: true}).click();
   await page.getByRole("menuitem", {name: "Delete", exact: true}).click();
@@ -172,8 +229,8 @@ test("block menu, block handle and outline shape a document", async ({ page }, i
   const choosers: FileChooser[] = [];
   page.on("filechooser", (chooser) => choosers.push(chooser));
   await page.goto(`/${slug}/docs/${doc.id}`);
-  const content = async () => (await api.getDoc(doc.id)).content;
-  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  const content = async () => (await api.getDoc(doc.id, { flush: true })).content;
+  await docMode(page);
   await expect(page.locator("time")).toHaveText(/^Edited /);
 
   const outline = page.getByRole("navigation", { name: "Outline" });

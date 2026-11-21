@@ -66,6 +66,7 @@
     "description": "It may have been deleted."
   },
   "edited": "Edited {{time}}",
+  "view_history": "View history",
   "outline": "Outline",
   "link_copied": "Link copied",
   "unavailable": {

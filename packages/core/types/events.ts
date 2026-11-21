@@ -273,6 +273,14 @@ export interface InboxBatchReadPayload {
 export interface InboxBatchArchivedPayload {
   recipient_id: string;
   count: number;
+  /** Set when the batch is one issue's notifications. */
+  issue_id?: string;
+  /**
+   * Why the server archived them on its own: "issue_status_terminal" when the
+   * recipient completed the issue, "actor_acted" when they commented on it,
+   * changed its status or reassigned it. Other values may appear; absent for user-requested batches.
+   */
+  reason?: string;
 }
 
 export interface CommentCreatedPayload {

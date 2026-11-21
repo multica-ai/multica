@@ -68,6 +68,13 @@ vi.mock("../../editor", () => ({
   useEditorUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
 vi.mock("./use-doc-collab", () => ({ useDocCollab: () => ({ mode: "solo" }) }));
+vi.mock("@multica/core/realtime", () => ({ useWS: () => ({ collabUrl: "ws://collab.test/collab" }) }));
+vi.mock("./doc-live-session", () => ({
+  liveEditingOff: new Set(["ws://collab.test/collab"]),
+  peekDocLive: () => undefined,
+  findDocSession: () => undefined,
+  prefetchDocLive: () => Promise.resolve({ enabled: false }),
+}));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../layout/breadcrumb-header", () => ({
   BreadcrumbHeader: ({ actions }: { actions?: React.ReactNode }) => <header>{actions}</header>,

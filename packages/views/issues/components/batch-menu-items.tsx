@@ -20,7 +20,7 @@ import {
 } from "@multica/ui/icons";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { PRIORITY_CONFIG, PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import { addDaysDateOnly, todayDateOnly } from "@multica/core/issues/date";
 import type { CommonIssueFields } from "@multica/core/issues/batch";
@@ -123,7 +123,7 @@ export function BatchMenuItems({
   const maxStage = issues.reduce((max, issue) => Math.max(max, issue.stage ?? 0), 0);
 
   const copyLinks = () => {
-    const links = issues.map((issue) => getShareableUrl(paths.issueDetail(issue.identifier || issue.id)));
+    const links = issues.map((issue) => getShareableUrl(paths.issueDetail(issueRouteRef(issue))));
     void copyText(links.join("\n")).then((ok) => {
       if (ok) toast.success(t(($) => $.batch.links_copied, { count }));
     });

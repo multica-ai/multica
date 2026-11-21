@@ -48,7 +48,6 @@
   "list": {
     "loading_selection": "Chargement de la notification…",
     "empty": "Aucune notification",
-    "mark_done_tooltip": "Marquer comme traité",
     "archive_tooltip": "Archiver",
     "time": {
       "just_now": "à l'instant",
@@ -126,6 +125,7 @@
     "set_due_date_to": "Date d'échéance définie au {{date}}",
     "removed_due_date": "Date d'échéance retirée",
     "reacted_to_comment": "A réagi {{emoji}} à votre commentaire",
+    "commented": "A commenté",
     "created_with_agent": "Créé avec un agent : {{identifier}}",
     "failed_with_detail": "Échec : {{detail}}",
     "autopilot_quota_blocked": "Exécution bloquée car la limite a été atteinte",
@@ -148,6 +148,10 @@
     "leaves": "Quitte la boîte de réception quand vous passez à la suite",
     "filtered": "Ne correspond plus à vos filtres",
     "notification_archived": "Notification archivée",
+    "changed_status": "Statut passé à {{status}}",
+    "reassigned": "Réassigné à {{name}}",
+    "unassigned": "Désassigné",
+    "ran_quick_action": "Action lancée : {{name}}",
     "next": "Suivante",
     "next_tooltip": "Ouvrir la suivante : {{title}}"
   },
@@ -158,7 +162,6 @@
     "mark_read_failed": "Échec du marquage comme lu",
     "mark_unread_failed": "Échec du marquage comme non lu",
     "archive_failed": "Échec de l'archivage",
-    "mark_done_failed": "Échec du marquage comme traité",
     "mark_all_read_failed": "Échec du marquage global comme lu",
     "archive_all_failed": "Échec de l'archivage global",
     "archive_all_read_failed": "Échec de l'archivage des éléments lus",
@@ -217,5 +220,16 @@
     "view_empty_description": "Reportez une tâche depuis votre boîte de réception : elle attend ici jusqu'à son retour.",
     "col_updates": "Pendant le report",
     "col_back": "Retour"
+  },
+  "auto_archive_prompt": {
+    "title": "Archiver les notifications une fois traitées",
+    "description": "La boîte de réception peut désormais archiver les notifications d'une tâche quand vous agissez dessus. Seules vos propres actions comptent, et une nouvelle notification fait revenir la tâche.",
+    "options": {
+      "handled": "Les tâches traitées quittent votre boîte de réception",
+      "completed": "Seul le fait de terminer ou d'annuler une tâche l'archive",
+      "never": "Vous archivez vous-même les notifications"
+    },
+    "hint": "Modifiable dans Paramètres › Notifications",
+    "confirm": "Terminé"
   }
 }

@@ -14,6 +14,7 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { resolveClickIntent, useHeldUntilArrival, useNavigation } from "../../navigation";
+import { AutoArchivePromptDialog } from "../../inbox/components/auto-archive-prompt-dialog";
 import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
@@ -149,9 +150,9 @@ export function WorkPanel() {
       : link.closest("[data-inbox-card]")
         ? INBOX_LIST
         : (link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") ?? null);
-    // Inbox links open the issue at its identifier; the Inbox records, and
-    // the issue header compares, the issue's id.
-    const segment = (list === INBOX_LIST && link.getAttribute("data-issue-id")) || routeSegment(path, p.issues());
+    // Inbox and tree links open the issue at its identifier; the lists
+    // record, and the issue header compares, the issue's id.
+    const segment = link.getAttribute("data-issue-id") || routeSegment(path, p.issues());
     // A click that opens a tab or window, as AppLink resolves it, leaves this
     // page and its records where they are. A desktop tab shares this page's
     // store, so an issue the Inbox opens there is recorded beside them.
@@ -249,6 +250,7 @@ export function WorkPanel() {
                 activeIssueId={inboxClaimsIssue ? currentIssueId : null}
               />
             )}
+            {wsId && <AutoArchivePromptDialog wsId={wsId} active={!!inboxOpenKey} />}
 
             {wsId && (
               <ViewsSection

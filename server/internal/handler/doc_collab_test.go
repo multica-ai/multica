@@ -153,6 +153,44 @@ func TestUpdateDocGoesThroughCollabWithItsMergeBase(t *testing.T) {
 	testutil.Call(t, testHandler.UpdateDoc, withURLParam(newRequest("PATCH", "/api/docs/"+doc.ID, map[string]any{"base_revision": 9, "content": "x"}), "id", doc.ID)).Want(http.StatusConflict)
 }
 
+func TestCollabTicketCarriesTheStateSavedWithTheCurrentRevision(t *testing.T) {
+	doc := createDocForTest(t)
+	service := httptest.NewServer(http.NotFoundHandler())
+	url := service.URL
+	service.Close()
+	useCollab(t, url)
+
+	ticket := func(body any) DocCollabTicketResponse {
+		t.Helper()
+		var resp DocCollabTicketResponse
+		testutil.Call(t, testHandler.CreateDocCollabTicket, withURLParam(newRequest("POST", "/api/docs/"+doc.ID+"/collab-ticket", body), "id", doc.ID)).Want(http.StatusOK).JSON(&resp)
+		if !resp.Enabled || resp.Token == "" || resp.Document != "doc:"+doc.ID {
+			t.Fatalf("ticket must be issued: %+v", resp)
+		}
+		return resp
+	}
+	if got := ticket(map[string]any{"state": true}); got.State != "" {
+		t.Fatalf("a doc never opened live has no state: %+v", got)
+	}
+
+	state := base64.StdEncoding.EncodeToString([]byte{7, 8, 9})
+	testutil.Call(t, testHandler.StoreCollabDoc, withURLParam(newRequest("POST", "/internal/collab/docs/"+doc.ID+"/store", map[string]any{
+		"base_revision": 1, "content": doc.Content, "ystate": state, "contributors": []DocContributor{}, "state_only": true,
+	}), "id", doc.ID)).Want(http.StatusOK)
+	if got := ticket(map[string]any{"state": true}); got.State != state {
+		t.Fatalf("state saved with the current revision must come back: %+v", got)
+	}
+	if got := ticket(nil); got.State != "" {
+		t.Fatalf("state is sent only when asked for: %+v", got)
+	}
+
+	// Written without the live session: the saved state is behind the doc.
+	testutil.Call(t, testHandler.UpdateDoc, withURLParam(newRequest("PATCH", "/api/docs/"+doc.ID, map[string]any{"base_revision": 1, "content": "Direct"}), "id", doc.ID)).Want(http.StatusOK)
+	if got := ticket(map[string]any{"state": true}); got.State != "" {
+		t.Fatalf("a state behind the doc must not be sent: %+v", got)
+	}
+}
+
 func TestDocWritesFallBackWhenCollabIsDown(t *testing.T) {
 	doc := createDocForTest(t)
 	service := httptest.NewServer(http.NotFoundHandler())

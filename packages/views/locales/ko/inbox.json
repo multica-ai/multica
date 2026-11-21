@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "알림을 불러오는 중…",
     "empty": "알림이 없습니다",
-    "mark_done_tooltip": "완료로 표시",
     "archive_tooltip": "보관",
     "time": {
       "just_now": "방금 전",
@@ -124,6 +123,7 @@
     "set_due_date_to": "마감일: {{date}}",
     "removed_due_date": "마감일 제거됨",
     "reacted_to_comment": "내 댓글에 {{emoji}} 반응을 남겼습니다",
+    "commented": "댓글을 남겼습니다",
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}",
     "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨",
@@ -145,6 +145,10 @@
     "leaves": "다른 곳으로 이동하면 인박스에서 빠집니다",
     "filtered": "더 이상 필터와 일치하지 않음",
     "notification_archived": "알림이 보관됨",
+    "changed_status": "상태 변경됨: {{status}}",
+    "reassigned": "{{name}}님에게 재할당됨",
+    "unassigned": "할당 해제됨",
+    "ran_quick_action": "{{name}} 실행됨",
     "next": "다음",
     "next_tooltip": "다음 열기: {{title}}"
   },
@@ -155,7 +159,6 @@
     "mark_read_failed": "읽음 표시를 하지 못했습니다",
     "mark_unread_failed": "읽지 않음 표시를 하지 못했습니다",
     "archive_failed": "보관하지 못했습니다",
-    "mark_done_failed": "완료 표시를 하지 못했습니다",
     "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",
     "archive_all_failed": "모두 보관하지 못했습니다",
     "archive_all_read_failed": "읽은 항목을 보관하지 못했습니다",
@@ -212,5 +215,16 @@
     "view_empty_description": "인박스에서 태스크를 미루면 돌아올 시간까지 여기에서 기다립니다.",
     "col_updates": "미뤄둔 동안",
     "col_back": "돌아오는 시간"
+  },
+  "auto_archive_prompt": {
+    "title": "처리한 알림을 자동으로 보관하세요",
+    "description": "이제 태스크를 처리하면 그 알림을 인박스에서 자동으로 보관할 수 있습니다. 내 동작만 해당되며, 새 알림이 오면 태스크가 다시 돌아옵니다.",
+    "options": {
+      "handled": "처리한 태스크는 인박스에 남지 않습니다",
+      "completed": "태스크를 완료하거나 취소할 때만 보관합니다",
+      "never": "알림은 직접 보관합니다"
+    },
+    "hint": "나중에 설정 › 알림에서 바꿀 수 있습니다",
+    "confirm": "완료"
   }
 }

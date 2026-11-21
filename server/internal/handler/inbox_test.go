@@ -441,6 +441,14 @@ func TestInboxItemsCarryIssueIdentifier(t *testing.T) {
 		t.Errorf("mark read issue_identifier = %s, want %s", got, want)
 	}
 
+	dbfx.Exec(t, `UPDATE inbox_item SET snoozed_until = now() + interval '1 day', snoozed_at = now() WHERE id = $1`, activeID)
+	var snoozed []SnoozedInboxResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListSnoozedInbox),
+		inboxRequest(http.MethodGet, "/api/inbox/snoozed", workspaceID)).Want(http.StatusOK).JSON(&snoozed)
+	if len(snoozed) != 1 || snoozed[0].IssueIdentifier == nil || *snoozed[0].IssueIdentifier != want {
+		t.Errorf("snoozed = %+v, want the issue with issue_identifier %s", snoozed, want)
+	}
+
 	// The archived views list an issue only while it has no active row.
 	dbfx.Exec(t, `UPDATE inbox_item SET archived = true WHERE workspace_id = $1`, workspaceID)
 	var archived []InboxItemResponse

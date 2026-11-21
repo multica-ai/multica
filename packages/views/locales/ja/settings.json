@@ -433,6 +433,10 @@
         "label": "通知をスヌーズ",
         "description": "インボックスから開いたタスクをスヌーズします。スヌーズ中なら今すぐ戻します。"
       },
+      "undoInboxAction": {
+        "label": "インボックスの操作を取り消す",
+        "description": "トーストが表示されている間は直前のアーカイブ・スヌーズ・購読解除を取り消します。開いている通知がアーカイブ済みならインボックスに戻します。"
+      },
       "send": {
         "label": "送信",
         "description": "新しいタスクの作成にも使えます。"
@@ -850,8 +854,34 @@
       "manual_label": "手動でアーカイブ",
       "manual_description": "サイドバーの行、または通知の上部から",
       "manual_value": "いつでも",
-      "done_label": "自分が完了したタスクをアーカイブ",
-      "done_description": "タスクを完了系またはキャンセル系のステータスにすると、その通知はアーカイブされます。他の人が完了したタスクはインボックスに残ります。",
+      "auto_label": "自分が対応したタスクをアーカイブ",
+      "auto_description": "自分の操作だけが対象です。新しい通知が届くとタスクは戻ってきます。",
+      "auto_presets": {
+        "never": "しない",
+        "completed": "完了したとき",
+        "handled": "返信・ステータス前進・担当変更の後",
+        "custom": "カスタム",
+        "custom_item": "カスタム..."
+      },
+      "auto_recommended": "おすすめ",
+      "auto_groups": {
+        "settle": "対応",
+        "tidy": "整理"
+      },
+      "auto_actions": {
+        "completed": "完了",
+        "comment": "返信",
+        "status": "ステータスを進める",
+        "assignee": "担当者変更",
+        "priority": "優先度変更",
+        "project": "プロジェクト変更",
+        "dates": "日付変更",
+        "labels": "ラベル変更"
+      },
+      "after_label": "アーカイブ後",
+      "after_description": "表示中の通知がこの方法でアーカイブされたとき。手動のアーカイブ（E）は従来どおり次を開きます。",
+      "after_stay": "このタスクに留まる",
+      "after_next": "次の通知を開く",
       "archived_label": "アーカイブ済みの通知",
       "archived_description": "ここから見つけてアーカイブを解除できます",
       "archived_action": "アーカイブ済みを表示"

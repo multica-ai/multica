@@ -67,6 +67,31 @@ describe("knowledge base client", () => {
     ).rejects.toThrow(/Malformed response/);
   });
 
+  it("asks for the saved state with a collab ticket only when told to", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const fetchMock = respond({ enabled: true, token: "t", document: "doc:d1", expires_at: "2026-11-21T00:00:00Z", state: "AAE=" });
+    expect(await client.createDocCollabTicket("d1", { state: true })).toEqual({
+      enabled: true,
+      token: "t",
+      document: "doc:d1",
+      expiresAt: "2026-11-21T00:00:00Z",
+      state: "AAE=",
+    });
+    expect(fetchMock.mock.calls[0]![1].body).toBe(JSON.stringify({ state: true }));
+
+    const plain = respond({ enabled: true, token: "t", document: "doc:d1" });
+    expect(await client.createDocCollabTicket("d1")).not.toHaveProperty("state");
+    expect(plain.mock.calls[0]![1].body).toBeUndefined();
+  });
+
+  it("treats a malformed collab ticket as live editing off", async () => {
+    const client = new ApiClient("https://api.example.test");
+    respond({ enabled: "yes", state: 42 });
+    expect(await client.createDocCollabTicket("d1", { state: true })).toEqual({ enabled: false });
+    respond({ enabled: true, document: "doc:d1" });
+    expect(await client.createDocCollabTicket("d1")).toEqual({ enabled: false });
+  });
+
   it("falls back to an empty tree and versions on malformed responses", async () => {
     const client = new ApiClient("https://api.example.test");
     respond({ folders: "nope" });

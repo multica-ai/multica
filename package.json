@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev:web": "turbo dev --filter=@multica/web",
+    "dev:collab": "pnpm --filter @multica/collab dev",
     "dev:docs": "turbo dev --filter=@multica/docs",
     "storybook": "pnpm -C apps/storybook storybook",
     "dev:desktop": "turbo dev --filter=@multica/desktop",

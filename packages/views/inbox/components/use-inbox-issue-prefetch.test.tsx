@@ -11,7 +11,10 @@ const prefetchRoute = vi.fn();
 vi.mock("../../navigation", () => ({ useNavigation: () => ({ prefetch: prefetchRoute }) }));
 vi.mock("@multica/core/api", () => ({
   api: {
-    getIssue: vi.fn(async (id: string) => ({ id, identifier: `MUL-${id}` })),
+    getIssue: vi.fn(async (ref: string) => {
+      const id = ref.replace(/^MUL-/, "");
+      return { id, identifier: `MUL-${id}` };
+    }),
     listTimeline: vi.fn(async () => []),
     listTasksByIssue: vi.fn(async () => []),
     listChildIssues: vi.fn(async () => ({ issues: [] })),
@@ -46,13 +49,15 @@ describe("useInboxIssuePrefetch", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
 
     // Read rows are skipped; three unread issues are warmed, the fourth is left for hover.
-    expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual(["a", "c", "d"]);
+    // By identifier, the key a link to the issue warms too, so the two share a request.
+    expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual(["MUL-a", "MUL-c", "MUL-d"]);
     expect(vi.mocked(api.listTimeline).mock.calls.map(([id]) => id)).toEqual(["a", "c", "d"]);
     expect(vi.mocked(api.listTasksByIssue).mock.calls.map(([id]) => id)).toEqual(["a", "c", "d"]);
     expect(vi.mocked(api.listChildIssues).mock.calls.map(([id]) => id)).toEqual(["a", "c", "d"]);
     expect(prefetchRoute.mock.calls.map(([href]) => href)).toEqual(["/ws/issues/MUL-a", "/ws/issues/MUL-c", "/ws/issues/MUL-d"]);
-    // An identifier URL resolves from cache too.
+    // An identifier URL resolves from cache, and the page reads the issue by UUID.
     expect(qc.getQueryData(issueKeys.detail("ws", "MUL-a"))).toEqual({ id: "a", identifier: "MUL-a" });
+    expect(qc.getQueryData(issueKeys.detail("ws", "a"))).toEqual({ id: "a", identifier: "MUL-a" });
   });
 
   it("warms a pointed-at row on demand, and never fetches a warm issue twice", async () => {
@@ -61,7 +66,7 @@ describe("useInboxIssuePrefetch", () => {
     await act(async () => { await hook.result.current(row("e", true)); });
     await act(async () => { await hook.result.current(row("a")); });
 
-    expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual(["a", "e"]);
+    expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual(["MUL-a", "MUL-e"]);
     expect(vi.mocked(api.listTimeline).mock.calls.map(([id]) => id)).toEqual(["a", "e"]);
   });
 

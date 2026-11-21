@@ -1096,9 +1096,14 @@ export class ApiClient {
       { endpoint: "GET /api/docs/{id}/versions" },
     ).versions;
   }
-  async createDocCollabTicket(id: string): Promise<DocCollabTicket> {
+  /** `state` also asks for the Yjs state saved with the doc, to show it
+   *  before the live session syncs. */
+  async createDocCollabTicket(id: string, options?: { state?: boolean }): Promise<DocCollabTicket> {
     return parseWithFallback<DocCollabTicket>(
-      await this.fetch<unknown>(`/api/docs/${id}/collab-ticket`, { method: "POST" }),
+      await this.fetch<unknown>(`/api/docs/${id}/collab-ticket`, {
+        method: "POST",
+        ...(options?.state ? { body: JSON.stringify({ state: true }) } : {}),
+      }),
       DocCollabTicketSchema,
       { enabled: false },
       { endpoint: "POST /api/docs/{id}/collab-ticket" },
@@ -3719,6 +3724,25 @@ export class ApiClient {
       NotificationPreferenceResponseSchema,
       EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
       { endpoint: "PATCH /api/notification-preferences" },
+    );
+  }
+
+  /**
+   * Answer the one-time auto-archive question for every workspace where it is
+   * pending. Answers with the active workspace's preferences.
+   */
+  async resolveAutoArchivePrompt(
+    preferences: NotificationPreferences,
+  ): Promise<NotificationPreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/notification-preferences/auto-archive-prompt", {
+      method: "POST",
+      body: JSON.stringify({ preferences }),
+    });
+    return parseWithFallback(
+      raw,
+      NotificationPreferenceResponseSchema,
+      EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
+      { endpoint: "POST /api/notification-preferences/auto-archive-prompt" },
     );
   }
 

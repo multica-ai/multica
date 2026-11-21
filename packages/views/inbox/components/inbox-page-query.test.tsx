@@ -27,9 +27,9 @@ vi.mock("../../modals/use-limit-recovery-prompt", () => ({
 
 const detailUnmounted = vi.hoisted(() => vi.fn());
 vi.mock("../../issues/components/issue-detail", () => ({
-  IssueDetail: ({ issueId, notice }: { issueId: string; notice?: ReactNode }) => {
+  IssueDetail: ({ issueId, notice }: { issueId: string; notice?: (issueActions: ReactNode) => ReactNode }) => {
     useEffect(() => () => detailUnmounted(issueId), [issueId]);
-    return <div data-testid="detail">{issueId}<div data-testid="notice">{notice}</div></div>;
+    return <div data-testid="detail">{issueId}<div data-testid="notice">{notice?.(null)}</div></div>;
   },
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
 }));

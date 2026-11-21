@@ -14,6 +14,7 @@ import {
   type InboxUnsubscribeScope,
 } from "@multica/core/inbox/mutations";
 import { useT } from "../../i18n";
+import { toastInboxUndo } from "./inbox-undo-toast";
 
 /**
  * Whether a list row offers "unsubscribe & archive": it is about an issue
@@ -66,27 +67,23 @@ export function useUnsubscribeArchive() {
     toast.error(err instanceof Error && err.message ? err.message : fallback);
   const returnRow = (issueId: string) => useInboxSelectionStore.getState().returnRow(wsId, issueId);
   const { mutate } = useUnsubscribeArchiveInbox({
-    onSuccess: ({ id, issueId, scope }) =>
-      toast.success(
-        scope === "subtree"
-          ? t(($) => $.toasts.unsubscribed_archived_subtree)
-          : t(($) => $.toasts.unsubscribed_archived),
-        {
-          description: t(($) => $.toasts.unsubscribed_hint),
-          action:
-            scope === "issue"
-              ? {
-                  label: t(($) => $.toasts.undo),
-                  onClick: () => {
-                    returnRow(issueId);
-                    undoUnsubscribeArchiveInbox(qc, wsId, { id, issueId }).catch(
-                      failed(t(($) => $.errors.undo_unsubscribe_failed)),
-                    );
-                  },
-                }
-              : undefined,
+    onSuccess: ({ id, issueId, scope }) => {
+      const description = t(($) => $.toasts.unsubscribed_hint);
+      if (scope === "subtree") {
+        toast.success(t(($) => $.toasts.unsubscribed_archived_subtree), { description });
+        return;
+      }
+      toastInboxUndo(t(($) => $.toasts.unsubscribed_archived), {
+        description,
+        label: t(($) => $.toasts.undo),
+        undo: () => {
+          returnRow(issueId);
+          undoUnsubscribeArchiveInbox(qc, wsId, { id, issueId }).catch(
+            failed(t(($) => $.errors.undo_unsubscribe_failed)),
+          );
         },
-      ),
+      });
+    },
     onError: (err, { issueId }) => {
       returnRow(issueId);
       failed(t(($) => $.errors.unsubscribe_archive_failed))(err);

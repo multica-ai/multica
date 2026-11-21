@@ -48,7 +48,6 @@
   "list": {
     "loading_selection": "Cargando notificación…",
     "empty": "No hay notificaciones",
-    "mark_done_tooltip": "Marcar como hecho",
     "archive_tooltip": "Archivar",
     "time": {
       "just_now": "ahora mismo",
@@ -126,6 +125,7 @@
     "set_due_date_to": "Establecer fecha de entrega en {{date}}",
     "removed_due_date": "Fecha de entrega eliminada",
     "reacted_to_comment": "Reaccionó {{emoji}} a tu comentario",
+    "commented": "Comentó",
     "created_with_agent": "Creada con agente: {{identifier}}",
     "failed_with_detail": "Falló: {{detail}}",
     "autopilot_quota_blocked": "Ejecución bloqueada porque se alcanzó el límite",
@@ -148,6 +148,10 @@
     "leaves": "Sale de la bandeja al continuar",
     "filtered": "Ya no coincide con tus filtros",
     "notification_archived": "Notificación archivada",
+    "changed_status": "Estado cambiado a {{status}}",
+    "reassigned": "Reasignada a {{name}}",
+    "unassigned": "Desasignada",
+    "ran_quick_action": "Se ejecutó {{name}}",
     "next": "Siguiente",
     "next_tooltip": "Abrir la siguiente: {{title}}"
   },
@@ -158,7 +162,6 @@
     "mark_read_failed": "No se ha podido marcar como leído",
     "mark_unread_failed": "No se ha podido marcar como no leído",
     "archive_failed": "No se ha podido archivar",
-    "mark_done_failed": "No se ha podido marcar como hecho",
     "mark_all_read_failed": "No se ha podido marcar todo como leído",
     "archive_all_failed": "No se ha podido archivar todo",
     "archive_all_read_failed": "No se ha podido archivar los elementos leídos",
@@ -217,5 +220,16 @@
     "view_empty_description": "Pospón un issue desde tu bandeja de entrada y esperará aquí hasta que sea hora de volver.",
     "col_updates": "Mientras estaba pospuesto",
     "col_back": "Vuelve"
+  },
+  "auto_archive_prompt": {
+    "title": "Archiva las notificaciones cuando ya las has gestionado",
+    "description": "La bandeja de entrada ya puede archivar las notificaciones de una tarea cuando actúas sobre ella. Solo cuentan tus propias acciones, y una notificación posterior devuelve la tarea.",
+    "options": {
+      "handled": "Las tareas que ya gestionaste salen de tu bandeja",
+      "completed": "Solo completar o cancelar una tarea la archiva",
+      "never": "Archivas las notificaciones tú mismo"
+    },
+    "hint": "Puedes cambiarlo en Ajustes › Notificaciones",
+    "confirm": "Listo"
   }
 }

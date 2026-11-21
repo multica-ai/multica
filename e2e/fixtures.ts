@@ -194,8 +194,9 @@ export class TestApiClient {
     const doc = await res.json() as {id: string; revision: number; title: string; content: string};
     this.createdDocIds.push(doc.id); return doc;
   }
-  async getDoc(id: string) {
-    const res = await this.authedFetch(`/api/docs/${id}`);
+  /** `flush` first stores what editors typed into a live doc; without collab it is ignored. */
+  async getDoc(id: string, { flush = false } = {}) {
+    const res = await this.authedFetch(`/api/docs/${id}${flush ? "?flush=true" : ""}`);
     if (!res.ok) throw new Error(`get doc: ${res.status}`);
     return await res.json() as {id: string; revision: number; title: string; content: string; folder_id: string | null; version_count: number};
   }

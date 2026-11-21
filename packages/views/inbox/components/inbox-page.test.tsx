@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
@@ -27,7 +28,7 @@ const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
 // The active list as a read that failed before anything loaded, and is
 // possibly being tried again.
 const activeFailure = { failed: false, retrying: false, refetch: vi.fn() };
-const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn() }));
+const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn(), getQueryData: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
   useQueryClient: () => queryClient,
@@ -63,6 +64,7 @@ vi.mock("@multica/core/hooks", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
     issueDetail: (id: string) => `/acme/issues/${id}`,
@@ -989,14 +991,15 @@ describe("InboxPage", () => {
       item({ id: "inbox-a", issue_id: "issue-a" }),
       item({ id: "inbox-b", issue_id: "issue-b" }),
     ];
+    const notice = () => (issueDetailProps.at(-1)?.notice as ((issueActions: ReactNode) => ReactNode) | undefined)?.(null);
     const { rerender } = render(<InboxPage />);
-    expect(issueDetailProps.at(-1)?.notice).toBeFalsy();
+    expect(notice()).toBeFalsy();
 
     listData.active = [item({ id: "inbox-b", issue_id: "issue-b" })];
     rerender(<InboxPage />);
 
     expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
-    expect(issueDetailProps.at(-1)?.notice).toBeTruthy();
+    expect(notice()).toBeTruthy();
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
@@ -1238,7 +1241,10 @@ describe("InboxPage", () => {
       renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
       await settle(archiveMutate, "success");
-      expect(toast.success).toHaveBeenCalledWith("Inbox", { action: { label: "Inbox", onClick: expect.any(Function) } });
+      expect(toast.success).toHaveBeenCalledWith(
+        "Inbox",
+        expect.objectContaining({ duration: 10_000, action: { label: "Inbox", onClick: expect.any(Function) } }),
+      );
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });

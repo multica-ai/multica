@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "正在加载通知...",
     "empty": "暂无通知",
-    "mark_done_tooltip": "标为已完成",
     "archive_tooltip": "归档",
     "time": {
       "just_now": "刚刚",
@@ -124,6 +123,7 @@
     "set_due_date_to": "截止日期设为 {{date}}",
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
+    "commented": "评论了",
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
     "autopilot_quota_blocked": "执行已被阻止：额度已用完",
@@ -145,6 +145,10 @@
     "leaves": "离开后移出收件箱",
     "filtered": "不再符合筛选",
     "notification_archived": "通知已归档",
+    "changed_status": "已改为{{status}}",
+    "reassigned": "已改派给 {{name}}",
+    "unassigned": "已取消分配",
+    "ran_quick_action": "已运行 {{name}}",
     "next": "下一条",
     "next_tooltip": "打开下一条：{{title}}"
   },
@@ -155,7 +159,6 @@
     "mark_read_failed": "标为已读失败",
     "mark_unread_failed": "标为未读失败",
     "archive_failed": "归档失败",
-    "mark_done_failed": "标为已完成失败",
     "mark_all_read_failed": "全部标为已读失败",
     "archive_all_failed": "归档全部失败",
     "archive_all_read_failed": "归档已读失败",
@@ -212,5 +215,16 @@
     "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。",
     "col_updates": "延后期间",
     "col_back": "恢复时间"
+  },
+  "auto_archive_prompt": {
+    "title": "处理完的通知，可以自动归档",
+    "description": "收件箱新增了自动归档：你处理完一个任务，它的通知就会移出收件箱。只算你自己的操作，有新动态会重新进收件箱。",
+    "options": {
+      "handled": "处理过的任务不再留在收件箱",
+      "completed": "只有完成或取消任务才归档",
+      "never": "自己手动归档"
+    },
+    "hint": "之后可以在 设置 › 通知 里修改",
+    "confirm": "确定"
   }
 }

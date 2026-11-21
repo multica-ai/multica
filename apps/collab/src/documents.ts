@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import * as Y from "yjs";
 import type { Document, Hocuspocus } from "@hocuspocus/server";
-import type { DocumentCodec } from "@multica/views/editor/schema/codec";
+import type { DocumentCodec, JSONContent } from "@multica/views/editor/schema/codec";
 import type { CollabApi, StoreRequest } from "./api";
 import { applyTextEdits, type EditFailure, type TextEdit } from "./edits";
-import { mergeDocuments, type MergeConflict } from "./merge";
+import { keepLiveBlocks, mergeDocuments, type MergeConflict } from "./merge";
 import type { Actor } from "./ticket";
 
 /** Close code telling a client its local copy belongs to a document the
@@ -131,7 +131,7 @@ export class DocumentStore {
         // only risks the round trip changing something.
         const target = stored.ystate_revision < stored.revision ? this.codec.parse(stored.content) : null;
         if (target && this.codec.ydocToMarkdown(candidate) !== this.codec.serialize(target)) {
-          this.codec.applyJSON(candidate, target, serverOrigin({ type: "member", id: "", name: "" }));
+          this.applyParsed(candidate, target, serverOrigin({ type: "member", id: "", name: "" }));
           from = "state+catch-up";
         }
       }
@@ -222,7 +222,7 @@ export class DocumentStore {
           }
         }
         if (tooLarge(this.codec.serialize(next))) return { status: "too_large", revision: state.revision };
-        this.codec.applyJSON(document, next, serverOrigin(req.actor));
+        this.applyParsed(document, next, serverOrigin(req.actor));
       }
       return this.commit(name, document, state, req, merged);
     });
@@ -245,12 +245,18 @@ export class DocumentStore {
       }
       const next = this.codec.parse(result.text);
       if (tooLarge(this.codec.serialize(next))) return { status: "too_large", revision: state.revision };
-      this.codec.applyJSON(document, next, serverOrigin(req.actor));
+      this.applyParsed(document, next, serverOrigin(req.actor));
       return this.commit(name, document, state, req, false);
     });
   }
 
   // ---- internals -----------------------------------------------------------
+
+  /** Every server-side write of content parsed from Markdown goes through
+   *  here, so it keeps what Markdown cannot express (see keepLiveBlocks). */
+  private applyParsed(ydoc: Y.Doc, next: JSONContent, origin: unknown) {
+    this.codec.applyJSON(ydoc, keepLiveBlocks(this.codec, this.codec.ydocToJSON(ydoc), next), origin);
+  }
 
   private async commit(
     name: string,
@@ -365,9 +371,9 @@ export class DocumentStore {
       giveBack();
       state.dirty = true;
       if (attempt >= 2) throw new Error(`doc ${state.id}: store kept conflicting`);
-      this.reconcile(name, document, state, result.content);
+      const note = this.reconcile(name, document, state, result.content);
       state.revision = result.revision;
-      return this.persist(name, document, req, attempt + 1);
+      return this.persist(name, document, note && !req.message ? { ...req, message: note } : req, attempt + 1);
     }
     state.revision = result.revision;
     state.persisted = content;
@@ -381,18 +387,25 @@ export class DocumentStore {
     return result.revision;
   }
 
-  private reconcile(name: string, document: Document, state: DocState, storedContent: string) {
+  /** Folds a change stored without this service into the live document.
+   *  Its writer was already told it succeeded, so a block both sides changed
+   *  keeps both copies, live first, and the returned note labels the version
+   *  that saves them. */
+  private reconcile(name: string, document: Document, state: DocState, storedContent: string): string | null {
     const base = this.codec.parse(state.persisted);
     const stored = this.codec.parse(storedContent);
     const live = this.codec.ydocToJSON(document);
     const result = mergeDocuments(this.codec, base, live, stored);
-    if (result.ok) {
-      this.codec.applyJSON(document, result.doc, serverOrigin({ type: "member", id: "", name: "" }));
-    } else {
-      // Keep what people are typing; the next store overwrites the stray write.
-      this.log.warn("stored change conflicts with live edits; keeping live", { doc: state.id, name });
-    }
+    const origin = serverOrigin({ type: "member", id: "", name: "" });
     state.persisted = this.codec.serialize(stored);
+    if (result.ok) {
+      this.applyParsed(document, result.doc, origin);
+      return null;
+    }
+    this.applyParsed(document, result.both, origin);
+    const count = result.conflicts.length;
+    this.log.warn("stored change conflicts with live edits; keeping both", { doc: state.id, name, conflicts: count });
+    return `Kept both sides of ${count} conflicting edit${count === 1 ? "" : "s"}: live text first, then a change saved while live editing was unavailable`;
   }
 
   /** Shows the writing agent in everyone's presence list for a moment. */

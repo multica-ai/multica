@@ -66,6 +66,7 @@
     "description": "削除された可能性があります。"
   },
   "edited": "最終編集 {{time}}",
+  "view_history": "履歴を表示",
   "outline": "目次",
   "link_copied": "リンクをコピーしました",
   "unavailable": {

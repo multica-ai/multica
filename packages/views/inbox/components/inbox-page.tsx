@@ -23,6 +23,7 @@ import {
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
+import { cachedIssueRouteRef } from "@multica/core/issues/canonical-id";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -122,6 +123,7 @@ import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
 import { inboxListLoad, useFilteredInboxRows } from "./use-filtered-inbox-rows";
 import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
+import { useMoveOnAfterAutoArchive } from "./use-move-on-after-auto-archive";
 import { useArchiveInboxBatchWithUndo, useArchiveInboxWithUndo, useRestoreInbox } from "./use-leave-inbox-row";
 import { useInboxSnooze } from "./use-inbox-snooze";
 import { InboxAppRequest } from "../../common/app-requests";
@@ -402,7 +404,7 @@ export function InboxPage() {
       setSelectedKey("");
       return;
     }
-    replace(wsPaths.issueDetail(selectedKey));
+    replace(wsPaths.issueDetail(cachedIssueRouteRef(queryClient, wsId, selectedKey)));
   }, [
     viewLoading,
     viewError,
@@ -414,6 +416,7 @@ export function InboxPage() {
     replace,
     wsPaths,
     wsId,
+    queryClient,
     setSelectedKey,
   ]);
 
@@ -639,6 +642,14 @@ export function InboxPage() {
         ),
     });
   };
+
+  const settledCause = useMoveOnAfterAutoArchive({
+    settled: settledRow,
+    next: settledRow ? nextInboxRow(listedItems, settledRow.key) : null,
+    onNext: () => {
+      if (settledRow) advanceSelectionPast(settledRow.item.id, listedItems);
+    },
+  });
 
   const unsubscribable = useInboxUnsubscribable(wsId);
   const unsubscribeArchive = useUnsubscribeArchive();
@@ -960,13 +971,13 @@ export function InboxPage() {
   ) : null;
 
   // The open notification left the Inbox on its own: say so above it, with
-  // the way back and the way on.
-  const keptNotice =
+  // the issue's actions once archived, the way back and the way on.
+  const keptNotice = (issueActions?: ReactNode) =>
     settledRow && detailItem && inboxRowKey(detailItem) === settledRow.key ? (
       <InboxKeptActions
-        layout="strip"
-        label={keptText.notice(settledRow)}
+        label={keptText.notice(settledRow, settledCause)}
         icon={settledRow.reason === "snoozed" ? <AlarmClock /> : undefined}
+        issueActions={settledRow.reason === "archived" ? issueActions : undefined}
         onUndo={() =>
           settledRow.reason === "snoozed"
             ? unsnooze(settledRow.item.id, settledRow.key)
@@ -1023,18 +1034,20 @@ export function InboxPage() {
             // longer exists.
             setSelectedKey("");
           }}
-          onDone={() => {
+          onArchive={() => {
             handleArchive(detailItem.id);
           }}
           onUnsubscribeArchive={
             isArchivedView ? undefined : (scope) => handleUnsubscribeArchive(detailItem.id, scope)
           }
+          // The archive lists notifications already dealt with: no bar.
+          inboxItem={isArchivedView ? undefined : detailItem}
         />
       </IssuePeekHost>
     </ErrorBoundary>
   ) : detailItem ? (
     <>
-    {keptNotice}
+    {keptNotice()}
     <div className="p-6">
       <h2 className="text-title font-semibold">
         {isAutopilotQuotaNotice(detailItem.type)

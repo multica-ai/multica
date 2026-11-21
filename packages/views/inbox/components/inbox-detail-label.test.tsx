@@ -5,10 +5,8 @@ import en from "../../locales/en/inbox.json";
 import zhHansIssues from "../../locales/zh-Hans/issues.json";
 import { InboxDetailLabel } from "./inbox-detail-label";
 
-vi.mock("../../issues/components", () => ({
-  StatusIcon: () => null,
-  PriorityIcon: () => null,
-}));
+vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => null }));
+vi.mock("../../issues/components/priority-icon", () => ({ PriorityIcon: () => null }));
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Someone" }),
 }));

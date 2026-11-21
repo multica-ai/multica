@@ -13,6 +13,7 @@ import type { InboxItem } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { inboxRowHref } from "./inbox-display";
+import { toastInboxUndo } from "./inbox-undo-toast";
 
 /**
  * Leave the open notification for `next`, as every Inbox action on it does:
@@ -61,13 +62,11 @@ export function useArchiveInboxWithUndo() {
       const returnRow = () => useInboxSelectionStore.getState().returnRow(wsId, key);
       return archiveAsync(id).then(
         () =>
-          toast.success(t(($) => $.toasts.archived), {
-            action: {
-              label: t(($) => $.toasts.undo),
-              onClick: () => {
-                returnRow();
-                void restore(id, { quiet: true });
-              },
+          toastInboxUndo(t(($) => $.toasts.archived), {
+            label: t(($) => $.toasts.undo),
+            undo: () => {
+              returnRow();
+              void restore(id, { quiet: true });
             },
           }),
         (err: unknown) => {
@@ -108,15 +107,13 @@ export function useArchiveInboxBatchWithUndo() {
       return archive().then(
         ({ count }) => {
           if (count === 0) return;
-          toast.success(t(($) => $.toasts.archived_many, { count }), {
-            action: {
-              label: t(($) => $.toasts.undo),
-              onClick: () => {
-                returnRow();
-                undoArchiveInboxBatch(qc, wsId, [...taken.values()]).catch((err: unknown) =>
-                  toast.error(errorMessage(err, t(($) => $.errors.unarchive_failed))),
-                );
-              },
+          toastInboxUndo(t(($) => $.toasts.archived_many, { count }), {
+            label: t(($) => $.toasts.undo),
+            undo: () => {
+              returnRow();
+              undoArchiveInboxBatch(qc, wsId, [...taken.values()]).catch((err: unknown) =>
+                toast.error(errorMessage(err, t(($) => $.errors.unarchive_failed))),
+              );
             },
           });
         },
