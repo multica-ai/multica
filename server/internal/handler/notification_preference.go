@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/inbox"
+	"github.com/multica-ai/multica/server/internal/integrations/googlechat"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -63,23 +64,17 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
 
-	pref, err := h.Queries.GetNotificationPreference(r.Context(), db.GetNotificationPreferenceParams{
-		WorkspaceID: parseUUID(workspaceID),
-		UserID:      parseUUID(userID),
-	})
+	prefs, err := h.loadNotificationPreferences(r, workspaceID, userID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"workspace_id": workspaceID,
-				"preferences":  inbox.WithDefaults(nil),
-			})
-			return
-		}
 		slog.Warn("GetNotificationPreference failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to get notification preferences")
 		return
 	}
-	writeNotificationPreferenceResponse(w, workspaceID, pref)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"workspace_id": workspaceID,
+		"preferences":  inbox.WithDefaults(maskedNotificationPreferences(prefs)),
+	})
 }
 
 type updateNotifPrefRequest struct {
@@ -101,6 +96,9 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	for k, v := range req.Preferences {
+		if k == "google_chat_webhook" {
+			continue
+		}
 		if !validNotifGroups[k] {
 			writeError(w, http.StatusBadRequest, "invalid preference group: "+k)
 			return nil, false
@@ -138,8 +136,103 @@ func writeNotificationPreferenceResponse(
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"workspace_id": workspaceID,
-		"preferences":  inbox.WithDefaults(prefs),
+		"preferences":  inbox.WithDefaults(maskedNotificationPreferences(prefs)),
 	})
+}
+
+func (h *Handler) loadNotificationPreferences(
+	r *http.Request,
+	workspaceID string,
+	userID string,
+) (map[string]string, error) {
+	pref, err := h.Queries.GetNotificationPreference(r.Context(), db.GetNotificationPreferenceParams{
+		WorkspaceID: parseUUID(workspaceID),
+		UserID:      parseUUID(userID),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var prefs map[string]string
+	if err := json.Unmarshal(pref.Preferences, &prefs); err != nil {
+		return map[string]string{}, nil
+	}
+	return prefs, nil
+}
+
+func maskedNotificationPreferences(prefs map[string]string) map[string]string {
+	masked := make(map[string]string, len(prefs))
+	for key, value := range prefs {
+		if key == "google_chat_webhook" && value != "" {
+			value = googlechat.MaskWebhookURL(value)
+		}
+		masked[key] = value
+	}
+	return masked
+}
+
+func (h *Handler) prepareNotificationPreferenceUpdate(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID string,
+	userID string,
+	preserveWebhookOnOmission bool,
+) (map[string]string, bool) {
+	current, err := h.loadNotificationPreferences(r, workspaceID, userID)
+	if err != nil {
+		slog.Warn("GetNotificationPreference before update failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load notification preferences")
+		return nil, false
+	}
+
+	next, ok := decodeNotificationPreferenceRequest(w, r)
+	if !ok {
+		return nil, false
+	}
+
+	incomingWebhook, webhookIncluded := next["google_chat_webhook"]
+	currentWebhook := current["google_chat_webhook"]
+	if preserveWebhookOnOmission && !webhookIncluded && currentWebhook != "" {
+		next["google_chat_webhook"] = currentWebhook
+	}
+	if webhookIncluded && incomingWebhook != "" {
+		if currentWebhook != "" && incomingWebhook == googlechat.MaskWebhookURL(currentWebhook) {
+			next["google_chat_webhook"] = currentWebhook
+			incomingWebhook = currentWebhook
+		} else if _, err := googlechat.ValidateWebhookURL(incomingWebhook); err != nil {
+			code := "google_chat_invalid_url"
+			if errors.Is(err, googlechat.ErrMissingCredentials) {
+				code = "google_chat_missing_credentials"
+			}
+			writeErrorCode(w, http.StatusBadRequest, code, err.Error())
+			return nil, false
+		}
+	}
+
+	if webhookIncluded && incomingWebhook != "" && incomingWebhook != currentWebhook {
+		workspace, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
+		if err != nil {
+			slog.Warn("GetWorkspace for Google Chat confirmation failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to load workspace")
+			return nil, false
+		}
+		if h.GoogleChatSender == nil {
+			writeErrorCode(w, http.StatusBadRequest, "google_chat_connection_failed", "Google Chat delivery is unavailable")
+			return nil, false
+		}
+		if err := h.GoogleChatSender.Send(
+			r.Context(),
+			incomingWebhook,
+			googlechat.FormatConfirmation(workspace.Name),
+		); err != nil {
+			writeErrorCode(w, http.StatusBadRequest, "google_chat_connection_failed", "failed to connect Google Chat webhook; verify the URL and try again")
+			return nil, false
+		}
+	}
+
+	return next, true
 }
 
 // UpdateNotificationPreferences preserves the original replace-all PUT
@@ -150,7 +243,7 @@ func (h *Handler) UpdateNotificationPreferences(w http.ResponseWriter, r *http.R
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
-	prefs, ok := decodeNotificationPreferenceRequest(w, r)
+	prefs, ok := h.prepareNotificationPreferenceUpdate(w, r, workspaceID, userID, true)
 	if !ok {
 		return
 	}
@@ -182,7 +275,7 @@ func (h *Handler) PatchNotificationPreferences(w http.ResponseWriter, r *http.Re
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
-	prefs, ok := decodeNotificationPreferenceRequest(w, r)
+	prefs, ok := h.prepareNotificationPreferenceUpdate(w, r, workspaceID, userID, false)
 	if !ok {
 		return
 	}

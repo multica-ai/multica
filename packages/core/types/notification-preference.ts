@@ -22,6 +22,7 @@ export type OthersIssuesValue = "all" | "key_updates";
 
 export type NotificationPreferences = Partial<Record<NotificationGroupKey, NotificationGroupValue>> & {
   others_issues?: OthersIssuesValue;
+  google_chat_webhook?: string;
 };
 
 export interface NotificationPreferenceResponse {

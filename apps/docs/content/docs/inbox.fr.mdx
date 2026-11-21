@@ -165,6 +165,12 @@ En dessous, **Me notifier pour** active ou désactive chaque type de notificatio
 
 **Changements de statut** est désactivé par défaut ; tous les autres types sont activés. Un type désactivé ne crée aucune notification, et le réactiver ne fait pas revenir ce que vous avez manqué ; les changements restent enregistrés sur la tâche. Quelques types, comme les résultats de création rapide et les mises en pause d'automatisation, ne relèvent pas de ces groupes et sont toujours envoyés. Les notifications système et du navigateur contrôlent les bannières sur le bureau et ne modifient pas la boîte de réception elle-même.
 
+### Envoyer les notifications dans Google Chat
+
+Dans **Paramètres → Notifications → Diffusion hors de l'application**, ajoutez un webhook entrant pour un espace Google Chat. Dans Google Chat, ouvrez **Applications et intégrations → Webhooks** pour cet espace, ajoutez un webhook, puis copiez son URL dans Multica.
+
+Multica publie une confirmation avant d'enregistrer le webhook. L'URL enregistrée est masquée dans les paramètres et les réponses de l'API, et les nouveaux éléments de la boîte de réception sont envoyés avec un lien vers la tâche correspondante.
+
 ## Étapes suivantes
 
 - [Commentaires](/comments) — réponses, mentions et fils de discussion.

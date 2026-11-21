@@ -1,6 +1,8 @@
 import type { NotificationPreferences } from "../types";
 
-type PreferenceKey = keyof NotificationPreferences;
+// The webhook is not a toggle: it is saved only after the server confirms it,
+// so it stays out of the optimistic defaults table below.
+type PreferenceKey = Exclude<keyof NotificationPreferences, "google_chat_webhook">;
 type PreferenceValues = Record<PreferenceKey, string | undefined>;
 
 /**
@@ -66,7 +68,14 @@ export function deriveNotificationPreferencePatch(
     }
   }
 
-  return patch as NotificationPreferences;
+  const result = patch as NotificationPreferences;
+  const previousWebhook = previous.google_chat_webhook ?? "";
+  const nextWebhook = next.google_chat_webhook ?? "";
+  if (previousWebhook !== nextWebhook) {
+    result.google_chat_webhook = nextWebhook;
+  }
+
+  return result;
 }
 
 /** Apply a preference patch while keeping default values sparse. */
@@ -82,6 +91,8 @@ export function applyNotificationPreferencePatch(
       next = withValue(next, key, value);
     }
   }
+
+  // Webhook writes require server confirmation; keep the last confirmed value.
 
   return next;
 }
