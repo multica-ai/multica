@@ -18,7 +18,7 @@ import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-i
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
-import { PanelBody, PanelHeader, isPathWithin } from "../panel-nav";
+import { PanelBody, PanelHeader, PanelScrollFadeContext, isPathWithin } from "../panel-nav";
 import { INBOX_LIST, InboxSection, useInboxSectionRows } from "./inbox-section";
 import { PinnedSection, usePanelPins } from "./pinned-section";
 import { useKeptActiveItem } from "./sidebar-tree";
@@ -235,48 +235,52 @@ export function WorkPanel() {
       {/* Outside PanelBody: clicks inside the menu's portal still bubble
           through the React tree, and must not reach rememberClickedIssue. */}
       <IssueContextMenuProvider variant="sidebar">
-        <PanelBody onClickCapture={rememberClickedIssue} onAuxClickCapture={rememberClickedIssue}>
-          {wsId && (
-            <InboxSection
-              wsId={wsId}
-              rows={inboxRows}
-              pathname={pathname}
-              activeIssueId={inboxClaimsIssue ? currentIssueId : null}
-            />
-          )}
+        {/* 360 Secure Browser paints this list's scroll-edge mask black while
+            the pointer moves between rows. The fade is decorative. */}
+        <PanelScrollFadeContext.Provider value={false}>
+          <PanelBody onClickCapture={rememberClickedIssue} onAuxClickCapture={rememberClickedIssue}>
+            {wsId && (
+              <InboxSection
+                wsId={wsId}
+                rows={inboxRows}
+                pathname={pathname}
+                activeIssueId={inboxClaimsIssue ? currentIssueId : null}
+              />
+            )}
 
-          {wsId && (
-            <div data-pinned-section className="contents">
-              <PinnedSection pins={pins} wsId={wsId} />
-            </div>
-          )}
+            {wsId && (
+              <div data-pinned-section className="contents">
+                <PinnedSection pins={pins} wsId={wsId} />
+              </div>
+            )}
 
-          {wsId && (
-            <ViewsSection
-              wsId={wsId}
-              pathname={pathname}
-              plainRowsLit={plainRowsLit}
-              issueInAllIssues={issueInAllIssues}
-              activeIssueId={currentIssueId}
-              litSource={litSource}
-              actions={viewActions}
-            />
-          )}
+            {wsId && (
+              <ViewsSection
+                wsId={wsId}
+                pathname={pathname}
+                plainRowsLit={plainRowsLit}
+                issueInAllIssues={issueInAllIssues}
+                activeIssueId={currentIssueId}
+                litSource={litSource}
+                actions={viewActions}
+              />
+            )}
 
-          {wsId && (
-            <ProjectsSection
-              wsId={wsId}
-              userId={userId}
-              pathname={pathname}
-              projects={shownProjects}
-              totalProjects={activeProjectCount}
-              plainRowsLit={plainRowsLit}
-              activeIssueId={currentIssueId}
-              litSource={litSource}
-              locatedSource={locatedSource}
-            />
-          )}
-        </PanelBody>
+            {wsId && (
+              <ProjectsSection
+                wsId={wsId}
+                userId={userId}
+                pathname={pathname}
+                projects={shownProjects}
+                totalProjects={activeProjectCount}
+                plainRowsLit={plainRowsLit}
+                activeIssueId={currentIssueId}
+                litSource={litSource}
+                locatedSource={locatedSource}
+              />
+            )}
+          </PanelBody>
+        </PanelScrollFadeContext.Provider>
       </IssueContextMenuProvider>
     </>
   );
