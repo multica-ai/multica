@@ -34,9 +34,12 @@ type Change struct {
 	Description string
 	// Status is the raw status key, which may be a custom one.
 	Status string
-	// Category is the canonical status this transition lands in. Filtering
-	// happens on this rather than Status: a custom status carries an opaque
-	// key ("in_review_2") but always reports one of the known categories.
+	// Category is the wire status_category this transition lands in.
+	// Filtering happens on this rather than Status: a custom status carries
+	// an opaque key ("in_review_2"), while status_category is always one of
+	// the seven built-in keys. Custom statuses inherit only lifecycle
+	// (issuestatus.WireCategory), so a custom non-terminal status reports
+	// todo or in_progress and never matches blocked or in_review.
 	Category string
 	// PrevStatus is empty when the payload did not carry one.
 	PrevStatus string

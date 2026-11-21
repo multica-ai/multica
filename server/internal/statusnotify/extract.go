@@ -25,10 +25,11 @@ func ExtractChange(e events.Event) (Change, bool) {
 		return Change{}, false
 	}
 
-	// StatusCategory carries omitempty, and its own doc comment tells
-	// consumers to fall back to Status rather than assume a blank means
-	// anything. A blank here would otherwise match no subscription and drop
-	// the notification silently.
+	// StatusCategory carries omitempty: an endpoint that cannot resolve a
+	// custom status leaves it blank. For a built-in status the wire category
+	// is the status key itself (issuestatus.WireCategory), so falling back to
+	// Status keeps blocked / in_review deliverable; an unresolved custom key
+	// stays opaque and matches no subscription, which is the safe default.
 	category := issue.StatusCategory
 	if category == "" {
 		category = issue.Status

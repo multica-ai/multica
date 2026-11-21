@@ -9,6 +9,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 )
 
 type stubStore struct {
@@ -195,9 +196,10 @@ func TestExtractChangeRequiresAStatusTransition(t *testing.T) {
 	}
 }
 
-// StatusCategory carries omitempty and its doc comment tells consumers to fall
-// back to Status. Without the fallback a custom status would match no
-// subscription and the notification would vanish silently.
+// StatusCategory carries omitempty. For a built-in status the wire category
+// equals the status key, so without the fallback a blocked issue whose
+// endpoint omitted the category would match no subscription and the
+// notification would vanish silently.
 func TestExtractChangeFallsBackToStatusWhenCategoryIsBlank(t *testing.T) {
 	e := events.Event{
 		Type:        "issue:updated",
@@ -216,6 +218,42 @@ func TestExtractChangeFallsBackToStatusWhenCategoryIsBlank(t *testing.T) {
 	}
 	if change.Category != CategoryBlocked {
 		t.Errorf("Category = %q, want %q", change.Category, CategoryBlocked)
+	}
+}
+
+// A custom status inherits only lifecycle, so the handler projects a custom
+// non-terminal key to in_progress on the wire. Subscribers to blocked must
+// not be paged for it just because its display name sounds like a blocker.
+func TestCustomStatusMatchesOnlyItsWireCategory(t *testing.T) {
+	wire := issuestatus.WireCategory("waiting_on_vendor", issuestatus.CategoryStarted)
+	e := events.Event{
+		Type:        "issue:updated",
+		WorkspaceID: "ws-1",
+		Payload: map[string]any{
+			"status_changed": true,
+			"issue": handler.IssueResponse{
+				ID: "id-1", WorkspaceID: "ws-1", Identifier: "ENG-1",
+				Title: "t", Status: "waiting_on_vendor", StatusCategory: wire,
+			},
+		},
+	}
+	change, ok := ExtractChange(e)
+	if !ok {
+		t.Fatal("expected a Change")
+	}
+	if change.Category != issuestatus.InProgress {
+		t.Fatalf("Category = %q, want %q", change.Category, issuestatus.InProgress)
+	}
+
+	ch := &stubChannel{caps: channel.CapText}
+	n := newNotifier(stubStore{subs: []Subscription{
+		{WorkspaceID: "ws-1", Target: "oc_team", Categories: []string{CategoryBlocked, CategoryInReview}},
+	}}, ch)
+	if err := n.Notify(context.Background(), change); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if ch.sendCall != 0 {
+		t.Fatalf("custom started status delivered %d messages to blocked/in_review, want 0", ch.sendCall)
 	}
 }
 
