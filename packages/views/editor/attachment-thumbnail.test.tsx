@@ -55,15 +55,17 @@ vi.mock("./preview-sequence-context", () => ({
 import { MessageSquare } from "@multica/ui/icons";
 import { Attachment } from "./attachment";
 import { ImageThumbnailsProvider } from "./image-thumbnails-context";
+import { AttachmentDownloadProvider } from "./attachment-download-context";
 import { useContextMenuScope } from "../common/context-menu-scope";
 import { __resetInlineMediaBlobCacheForTests } from "./hooks/use-inline-media-url";
 
-const THUMBNAIL = "/api/attachments/shot/thumbnail";
+const ID = "01a1fd7f-d98e-74a7-a9f3-650a6ca7bc15";
+const THUMBNAIL = `/api/attachments/${ID}/thumbnail`;
 const SIGNED = "https://cdn.example.test/shot.png?Signature=s";
 
 function record(over: Partial<AttachmentRecord> = {}): AttachmentRecord {
   return {
-    id: "shot",
+    id: ID,
     workspace_id: "ws-1",
     issue_id: "issue-1",
     comment_id: "c-1",
@@ -74,7 +76,7 @@ function record(over: Partial<AttachmentRecord> = {}): AttachmentRecord {
     filename: "shot.png",
     url: "https://cdn.example.test/shot.png",
     download_url: SIGNED,
-    markdown_url: "https://cdn.example.test/api/attachments/shot/download",
+    markdown_url: `https://cdn.example.test/api/attachments/${ID}/download`,
     content_type: "image/png",
     size_bytes: 6 * 1024 * 1024,
     width: 5472,
@@ -163,16 +165,45 @@ describe("comment images under the thumbnails preference", () => {
     expect(sources()).toEqual([SIGNED]);
   });
 
-  it("on desktop, fetches the thumbnail's bytes and none of the original's", async () => {
+  it("on desktop, fetches the thumbnail's bytes and nothing for the original", async () => {
     getBaseUrlMock.mockReturnValue("https://api.example.test");
-    // Proxy storage: the original would be fetched as authenticated bytes.
+    // Proxy storage: the original would be re-signed, then fetched as bytes.
     getAttachmentMock.mockResolvedValue(record({ download_url: "" }));
     renderImage(
-      record({ download_url: "", markdown_url: "/api/attachments/shot/download", url: "" }),
+      record({ download_url: "", markdown_url: `/api/attachments/${ID}/download`, url: "" }),
     );
     await waitFor(() => expect(sources()).toEqual(["blob:thumbnail"]));
-    expect(thumbnailBlobMock).toHaveBeenCalledWith("shot", expect.anything());
+    expect(thumbnailBlobMock).toHaveBeenCalledWith(ID, expect.anything());
+    expect(getAttachmentMock).not.toHaveBeenCalled();
     expect(getAttachmentBlobMock).not.toHaveBeenCalled();
+  });
+
+  it("on desktop, re-signs the original once its thumbnail fails", async () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    thumbnailBlobMock.mockRejectedValueOnce(new Error("404"));
+    getAttachmentMock.mockResolvedValue(record());
+    renderImage(
+      record({ download_url: "", markdown_url: `/api/attachments/${ID}/download`, url: "" }),
+    );
+    await waitFor(() => expect(sources()).toEqual([SIGNED]));
+    expect(getAttachmentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves a body image to its attachment and loads the thumbnail", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const attachment = record();
+    renderWithI18n(
+      <QueryClientProvider client={qc}>
+        <ImageThumbnailsProvider enabled>
+          <AttachmentDownloadProvider attachments={[attachment]}>
+            <Attachment
+              attachment={{ kind: "url", url: attachment.markdown_url!, filename: "", forceKind: "image" }}
+            />
+          </AttachmentDownloadProvider>
+        </ImageThumbnailsProvider>
+      </QueryClientProvider>,
+    );
+    expect(sources()).toEqual([THUMBNAIL]);
   });
 });
 
@@ -208,15 +239,15 @@ describe("a comment thumbnail's right-click menu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy image" }));
     const load = copyImageMock.mock.calls[0]![0] as () => Promise<Blob>;
     expect(await (await load()).text()).toBe("original");
-    expect(originalBlobMock).toHaveBeenCalledWith("shot");
+    expect(originalBlobMock).toHaveBeenCalledWith(ID);
 
     await openMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Download" }));
-    expect(downloadMock).toHaveBeenCalledWith("shot");
+    expect(downloadMock).toHaveBeenCalledWith(ID);
 
     await openMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "View image" }));
-    expect(openAtMock).toHaveBeenCalledWith("shot");
+    expect(openAtMock).toHaveBeenCalledWith(ID);
 
     await openMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Copy link" }));

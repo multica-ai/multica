@@ -84,17 +84,20 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // load failure as meaningful (the viewer skips broken images) waits it out
 // instead of rendering it.
 // Viewers and neighbour prefetch reauthenticate stale metadata on mount;
-// inline thumbnails stay lazy.
+// inline thumbnails stay lazy. A disabled call fetches nothing and returns
+// the picked URL, for a caller that is not rendering the original.
 export function useResignedInlineMedia(
   attachmentId: string | undefined,
   rawPickedUrl: string,
   blobFallback: boolean,
   {
+    enabled = true,
     refreshOnMount = false,
     metadataSource = "workspace",
     workspaceId,
     currentMetadata,
   }: {
+    enabled?: boolean;
     refreshOnMount?: boolean;
     metadataSource?: "workspace" | "markdown-link";
     /** Workspace that owns the attachment, when it may not be the current one. */
@@ -117,6 +120,7 @@ export function useResignedInlineMedia(
     }
   })();
   const needsResign =
+    enabled &&
     !!resignAttachmentId &&
     !!pickedUrl &&
     (refreshOnMount ||

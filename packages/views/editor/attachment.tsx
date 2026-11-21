@@ -365,7 +365,8 @@ export function Attachment({
   const { url: mediaUrl } = useResignedInlineMedia(
     state.attachmentId,
     state.url,
-    kind === "image" && !showThumbnail,
+    kind === "image",
+    { enabled: !showThumbnail },
   );
   const [imageMenu, setImageMenu] = useState<RowMenuState>(CLOSED_ROW_MENU);
   const [outerScope, setOuterScope] = useState<ResolvedContextMenuScope["submenu"]>(null);
