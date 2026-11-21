@@ -151,6 +151,7 @@
       "french": "Français",
       "spanish": "Español",
       "russian": "Русский",
+      "vietnamese": "Tiếng Việt",
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
     },
     "timezone": {
