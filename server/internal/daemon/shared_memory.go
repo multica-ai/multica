@@ -245,25 +245,47 @@ func renderSharedMemoryContext(facts []sharedMemoryFact) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n\nRelevant shared memory (reference context; verify current state from the cited source):\n")
+	const maxBytes = sharedMemoryMaxTokens * 4
 	for _, fact := range facts {
 		content := strings.TrimSpace(fact.Content)
 		if content == "" {
 			continue
 		}
-		remaining := sharedMemoryMaxTokens*4 - b.Len()
+		prefix := "\n- source: " + fact.Path + "\n  "
+		const suffix = "\n"
+		remaining := maxBytes - b.Len() - len(prefix) - len(suffix)
 		if remaining <= 0 {
-			break
+			continue
 		}
-		if len(content) > remaining {
-			content = truncateUTF8(content, remaining)
+		content = truncateMemoryContent(content, remaining)
+		if content == "" {
+			continue
 		}
-		fmtLine := "\n- source: " + fact.Path + "\n  " + strings.ReplaceAll(content, "\n", "\n  ") + "\n"
-		if b.Len()+len(fmtLine) > sharedMemoryMaxTokens*4 {
-			break
+		fmtLine := prefix + strings.ReplaceAll(content, "\n", "\n  ") + suffix
+		if b.Len()+len(fmtLine) > maxBytes {
+			continue
 		}
 		b.WriteString(fmtLine)
 	}
 	return b.String()
+}
+
+// truncateMemoryContent bounds the rendered form, including the two-space
+// indentation added after each newline. Binary search operates on source bytes;
+// truncateUTF8 keeps every candidate at a valid UTF-8 boundary.
+func truncateMemoryContent(content string, maxRenderedBytes int) string {
+	low, high := 0, len(content)
+	for low < high {
+		mid := low + (high-low+1)/2
+		candidate := truncateUTF8(content, mid)
+		rendered := strings.ReplaceAll(candidate, "\n", "\n  ")
+		if len(rendered) <= maxRenderedBytes {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	return truncateUTF8(content, low)
 }
 
 func truncateUTF8(value string, maxBytes int) string {

@@ -44,11 +44,32 @@ func TestSharedMemoryPromptBoundsCountAndApproximateTokenBudget(t *testing.T) {
 		facts[i] = sharedMemoryFact{Path: "fact.md", Content: strings.Repeat("가", 10000)}
 	}
 	got := renderSharedMemoryContext(facts)
+	if !strings.Contains(got, "source: fact.md") {
+		t.Fatal("expected a long fact to be truncated and included with its source")
+	}
 	if strings.Count(got, "source:") > sharedMemoryTopN {
 		t.Fatalf("rendered more than top-N=%d facts", sharedMemoryTopN)
 	}
 	if len(got) > sharedMemoryMaxTokens*4 {
 		t.Fatalf("rendered context exceeds token budget: chars=%d budget=%d", len(got), sharedMemoryMaxTokens*4)
+	}
+}
+
+func TestRenderSharedMemoryContextCountsSourceAndIndentationOverhead(t *testing.T) {
+	facts := []sharedMemoryFact{{
+		Path:    "facts/" + strings.Repeat("long-path-segment/", 12) + "fact.md",
+		Content: strings.Repeat("한글\n", 2000),
+	}}
+
+	got := renderSharedMemoryContext(facts)
+	if len(got) > sharedMemoryMaxTokens*4 {
+		t.Fatalf("rendered context exceeds byte cap: bytes=%d cap=%d", len(got), sharedMemoryMaxTokens*4)
+	}
+	if !strings.Contains(got, "source: "+facts[0].Path) {
+		t.Fatal("expected source prefix to be included within the byte cap")
+	}
+	if !strings.Contains(got, "한글") {
+		t.Fatal("expected fact content to remain after accounting for formatting overhead")
 	}
 }
 

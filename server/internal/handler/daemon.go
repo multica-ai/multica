@@ -1640,6 +1640,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					// For member-authored comments, AuthorID is a user UUID
 					// (see handler.resolveActor) — look up the user's display name.
 					if comment.AuthorID.Valid {
+						resp.InitiatorIsWorkspaceOwner = runtime.OwnerID.Valid && comment.AuthorID == runtime.OwnerID
 						if u, err := h.Queries.GetUser(r.Context(), comment.AuthorID); err == nil {
 							resp.TriggerAuthorName = u.Name
 							resp.InitiatorName = u.Name
