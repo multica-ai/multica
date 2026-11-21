@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { takeInboxAutoArchive } from "@multica/core/inbox/auto-archive";
+import { type InboxBarAction, takeInboxAutoArchive, takeInboxBarAction } from "@multica/core/inbox/auto-archive";
 import type { KeptInboxRow } from "@multica/core/inbox/open-row";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
@@ -21,6 +21,9 @@ import { useRestoreInbox } from "./use-leave-inbox-row";
  *
  * Only the focused window moves on: acting in another window or tab must not
  * pull this one away from what it shows.
+ *
+ * Returns the Inbox bar action that archived the settled row, when it was
+ * taken in this window, so the bar can say what the user did.
  */
 export function useMoveOnAfterAutoArchive({
   settled,
@@ -30,24 +33,28 @@ export function useMoveOnAfterAutoArchive({
   settled: KeptInboxRow | null;
   next: InboxItem | null;
   onNext: () => void;
-}) {
+}): InboxBarAction | null {
   const { t } = useT("inbox");
   const wsId = useWorkspaceId();
   const { data } = useQuery(notificationPreferenceOptions(wsId));
   const movesOn = notificationPreferenceValue(data?.preferences ?? {}, "after_auto_archive") === "next";
   const restore = useRestoreInbox();
   const archivedKey = settled?.reason === "archived" ? settled.key : null;
+  const [cause, setCause] = useState<{ key: string; action: InboxBarAction } | null>(null);
 
   const latest = useRef({ settled, next, onNext, movesOn });
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = { settled, next, onNext, movesOn };
   });
 
-  useEffect(() => {
+  // Before paint, so the settled bar never shows the plain archive first.
+  useLayoutEffect(() => {
     if (!archivedKey) return;
     const { settled: row, next: nextRow, onNext: moveOn, movesOn: moves } = latest.current;
-    if (!takeInboxAutoArchive(archivedKey)) return;
-    if (!moves || !row || !nextRow || !document.hasFocus()) return;
+    const own = takeInboxAutoArchive(archivedKey);
+    const action = takeInboxBarAction(archivedKey);
+    setCause(own && action ? { key: archivedKey, action } : null);
+    if (!own || !moves || !row || !nextRow || !document.hasFocus()) return;
     moveOn();
     toast.success(t(($) => $.toasts.archived), {
       action: {
@@ -59,4 +66,6 @@ export function useMoveOnAfterAutoArchive({
       },
     });
   }, [archivedKey, wsId, restore, t]);
+
+  return cause && cause.key === archivedKey ? cause.action : null;
 }

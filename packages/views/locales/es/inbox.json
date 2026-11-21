@@ -148,6 +148,10 @@
     "leaves": "Sale de la bandeja al continuar",
     "filtered": "Ya no coincide con tus filtros",
     "notification_archived": "Notificación archivada",
+    "changed_status": "Estado cambiado a {{status}}",
+    "reassigned": "Reasignada a {{name}}",
+    "unassigned": "Desasignada",
+    "ran_quick_action": "Se ejecutó {{name}}",
     "next": "Siguiente",
     "next_tooltip": "Abrir la siguiente: {{title}}"
   },

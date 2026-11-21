@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { noteInboxAutoArchive } from "@multica/core/inbox/auto-archive";
+import { noteInboxAutoArchive, noteInboxBarAction } from "@multica/core/inbox/auto-archive";
 import type { KeptInboxRow } from "@multica/core/inbox/open-row";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { notificationPreferenceKeys } from "@multica/core/notification-preferences/queries";
@@ -58,7 +58,11 @@ function setup(preferences: Record<string, string>, initial: KeptInboxRow | null
     ({ settled }: { settled: KeptInboxRow | null }) => useMoveOnAfterAutoArchive({ settled, next: nextRow, onNext }),
     { wrapper, initialProps: { settled: initial } },
   );
-  return { onNext, settle: (row: KeptInboxRow | null) => view.rerender({ settled: row }) };
+  return {
+    onNext,
+    settle: (row: KeptInboxRow | null) => view.rerender({ settled: row }),
+    cause: () => view.result.current,
+  };
 }
 
 beforeEach(() => {
@@ -110,5 +114,24 @@ describe("useMoveOnAfterAutoArchive", () => {
     noteInboxAutoArchive({ issue_id: "issue-e", reason: "actor_acted" });
     settle(archived("issue-e"));
     expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("reports the bar action behind an archive it stays on", () => {
+    const { settle, cause } = setup({});
+    noteInboxBarAction("issue-f", { type: "status", status: "in_progress" });
+    noteInboxAutoArchive({ issue_id: "issue-f", reason: "actor_acted" });
+    settle(archived("issue-f"));
+    expect(cause()).toEqual({ type: "status", status: "in_progress" });
+  });
+
+  it("reports no action when something else archived it, and forgets the action", () => {
+    const { settle, cause } = setup({});
+    noteInboxBarAction("issue-g", { type: "status", status: "in_progress" });
+    settle(archived("issue-g"));
+    expect(cause()).toBeNull();
+    settle(null);
+    noteInboxAutoArchive({ issue_id: "issue-g", reason: "actor_acted" });
+    settle(archived("issue-g"));
+    expect(cause()).toBeNull();
   });
 });

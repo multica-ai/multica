@@ -641,7 +641,7 @@ export function InboxPage() {
     });
   };
 
-  useMoveOnAfterAutoArchive({
+  const settledCause = useMoveOnAfterAutoArchive({
     settled: settledRow,
     next: settledRow ? nextInboxRow(listedItems, settledRow.key) : null,
     onNext: () => {
@@ -969,12 +969,13 @@ export function InboxPage() {
   ) : null;
 
   // The open notification left the Inbox on its own: say so above it, with
-  // the way back and the way on.
-  const keptNotice =
+  // the issue's actions once archived, the way back and the way on.
+  const keptNotice = (issueActions?: ReactNode) =>
     settledRow && detailItem && inboxRowKey(detailItem) === settledRow.key ? (
       <InboxKeptActions
-        label={keptText.notice(settledRow)}
+        label={keptText.notice(settledRow, settledCause)}
         icon={settledRow.reason === "snoozed" ? <AlarmClock /> : undefined}
+        issueActions={settledRow.reason === "archived" ? issueActions : undefined}
         onUndo={() =>
           settledRow.reason === "snoozed"
             ? unsnooze(settledRow.item.id, settledRow.key)
@@ -1044,7 +1045,7 @@ export function InboxPage() {
     </ErrorBoundary>
   ) : detailItem ? (
     <>
-    {keptNotice}
+    {keptNotice()}
     <div className="p-6">
       <h2 className="text-title font-semibold">
         {isAutopilotQuotaNotice(detailItem.type)

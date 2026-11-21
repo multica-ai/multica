@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { noteInboxAutoArchive, takeInboxAutoArchive } from "./auto-archive";
+import { noteInboxAutoArchive, noteInboxBarAction, takeInboxAutoArchive, takeInboxBarAction } from "./auto-archive";
 
 describe("inbox auto-archive records", () => {
   it.each(["issue_status_terminal", "actor_acted"])("records an archive the user caused: %s", (reason) => {
@@ -19,5 +19,19 @@ describe("inbox auto-archive records", () => {
   it("forgets a record once it is stale", () => {
     noteInboxAutoArchive({ issue_id: "issue-c", reason: "actor_acted" }, 1_000);
     expect(takeInboxAutoArchive("issue-c", 1_000 + 30_001)).toBe(false);
+  });
+});
+
+describe("inbox bar actions", () => {
+  it("keeps the latest action on an issue until it is taken", () => {
+    noteInboxBarAction("issue-a", { type: "status", status: "in_progress" }, 1_000);
+    noteInboxBarAction("issue-a", { type: "quick_action", name: "Code Review" }, 1_500);
+    expect(takeInboxBarAction("issue-a", 2_000)).toEqual({ type: "quick_action", name: "Code Review" });
+    expect(takeInboxBarAction("issue-a", 2_000)).toBeNull();
+  });
+
+  it("forgets an action once it is stale", () => {
+    noteInboxBarAction("issue-b", { type: "assignee", assignee: null }, 1_000);
+    expect(takeInboxBarAction("issue-b", 1_000 + 30_001)).toBeNull();
   });
 });

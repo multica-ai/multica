@@ -6,12 +6,13 @@ import { toast } from "sonner";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
+import { type InboxBarAction, noteInboxAutoArchive, noteInboxBarAction } from "@multica/core/inbox/auto-archive";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { inboxListOptions, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { childIssuesOptions, issueDetailOptions, issueSubscribersOptions } from "@multica/core/issues/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import type { InboxItem, Issue, SnoozedInboxIssue } from "@multica/core/types";
+import type { Agent, InboxItem, Issue, SnoozedInboxIssue } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
 import { IssueInboxBar } from "../issue-inbox-actions";
@@ -245,11 +246,59 @@ describe("IssueInboxBar", () => {
     expect(issueAction.compareDocumentPosition(snooze) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("drops the issue's actions once the notification has left the Inbox", async () => {
+  it("keeps the issue's actions once the notification has left the Inbox", async () => {
     const nav = setup({ issueActions: <button type="button">Set status</button> });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
     expect(await screen.findByText("Notification archived")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Set status" })).toBeNull();
+    const issueAction = screen.getByRole("button", { name: "Set status" });
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(issueAction.compareDocumentPosition(undo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  describe("after an action from the bar archives the notification", () => {
+    /** The bar's action, then the server's archive of it as the user's own. */
+    const actFromBar = (nav: ReturnType<typeof setup>, action: InboxBarAction) => {
+      noteInboxBarAction("issue-1", action);
+      noteInboxAutoArchive({ issue_id: "issue-1", reason: "actor_acted" });
+      act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+    };
+
+    it("names the status it set, keeps the issue's actions, and undoes the archive", async () => {
+      const nav = setup({ issueActions: <button type="button">Set status</button> });
+      actFromBar(nav, { type: "status", status: "in_progress" });
+      expect(await screen.findByText("Changed to In Progress · Notification archived")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Set status" })).toBeInTheDocument();
+      expect(nav.push).not.toHaveBeenCalled();
+
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Undo" })));
+      expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
+    });
+
+    it("names the new assignee", async () => {
+      const nav = setup();
+      nav.qc.setQueryData(agentListOptions("ws").queryKey, [{ id: "agent-nova", name: "Nova" } as Agent]);
+      actFromBar(nav, { type: "assignee", assignee: { type: "agent", id: "agent-nova" } });
+      expect(await screen.findByText("Reassigned to Nova · Notification archived")).toBeInTheDocument();
+    });
+
+    it("names the quick action it ran", async () => {
+      const nav = setup();
+      actFromBar(nav, { type: "quick_action", name: "Code Review" });
+      expect(await screen.findByText("Ran Code Review · Notification archived")).toBeInTheDocument();
+    });
+
+    it("names the status for Done too, over the status alone", async () => {
+      const nav = setup({ rows: [{ ...ROWS[0]!, issue_status: "done" }, ROWS[1]!] });
+      actFromBar(nav, { type: "status", status: "done" });
+      expect(await screen.findByText("Changed to Done · Notification archived")).toBeInTheDocument();
+    });
+
+    it("claims nothing when the archive came from elsewhere", async () => {
+      const nav = setup();
+      noteInboxBarAction("issue-1", { type: "status", status: "in_progress" });
+      act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+      expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    });
   });
 
   it("offers snooze in place of a read toggle", () => {

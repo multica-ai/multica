@@ -262,7 +262,7 @@ function QuickActionRow({
  * The quick actions behind one button, for the Inbox bar. Nothing configured
  * renders nothing.
  */
-export function QuickActionsMenu({ issueId }: { issueId: string }) {
+export function QuickActionsMenu({ issueId, onRun }: { issueId: string; onRun?: (action: QuickAction) => void }) {
   const { t } = useT("issues");
   const wsId = useCurrentWorkspace()?.id ?? "";
   const [blocked, setBlocked] = useState<QuickAction | null>(null);
@@ -289,7 +289,13 @@ export function QuickActionsMenu({ issueId }: { issueId: string }) {
         </TooltipHint>
         <DropdownMenuContent align="start" className="w-auto min-w-56 max-w-80">
           {actions.map((action) => (
-            <DropdownMenuItem key={action.id} onClick={() => void run(action)}>
+            <DropdownMenuItem
+              key={action.id}
+              onClick={() => {
+                onRun?.(action);
+                void run(action);
+              }}
+            >
               <Zap className="h-4 w-4" />
               <span className="min-w-0 flex-1 truncate">{action.name}</span>
               {action.target_name ? (

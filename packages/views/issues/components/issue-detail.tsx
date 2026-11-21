@@ -1299,8 +1299,12 @@ interface IssueDetailProps {
   variant?: "page" | "peek";
   /** Peek only: host controls at the end of the header (open full page, close). */
   trailingActions?: ReactNode;
-  /** A bar the host shows under the header in place of the Inbox bar, above the scrolling body. */
-  notice?: ReactNode;
+  /**
+   * A bar the host shows under the header in place of the Inbox bar, above the
+   * scrolling body, given the issue's own actions to keep in it. Returning
+   * nothing shows the Inbox bar.
+   */
+  notice?: (issueActions: ReactNode) => ReactNode;
   /**
    * Read the viewer's inbox notifications on this issue while it is on screen
    * (MUL-8588). The inbox turns this off for the issue it has open: it reads
@@ -3908,7 +3912,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             </>
           }
         />
-        {notice ??
+        {notice?.(inboxIssueActions) ??
           (onArchive ? (
             inboxItem && (
               <InboxOpenBar item={inboxItem} issueActions={inboxIssueActions}>

@@ -148,6 +148,10 @@
     "leaves": "Quitte la boîte de réception quand vous passez à la suite",
     "filtered": "Ne correspond plus à vos filtres",
     "notification_archived": "Notification archivée",
+    "changed_status": "Statut passé à {{status}}",
+    "reassigned": "Réassigné à {{name}}",
+    "unassigned": "Désassigné",
+    "ran_quick_action": "Action lancée : {{name}}",
     "next": "Suivante",
     "next_tooltip": "Ouvrir la suivante : {{title}}"
   },
