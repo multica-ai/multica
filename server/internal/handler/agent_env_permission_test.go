@@ -62,7 +62,7 @@ func agentEnvOwnerFixture(t *testing.T, agentName, email string) (agentID, owner
 	ownerUserID = createPermissionTestMember(t, email)
 	agentID = createHandlerTestAgent(t, agentName, nil)
 	if _, err := testPool.Exec(context.Background(), `
-		UPDATE agent SET owner_id = $1, custom_env = '{"API_KEY":"secret-value"}' WHERE id = $2
+		UPDATE agent SET owner_id = $1, custom_env = '{"API_KEY":"secret-value"}', custom_env_notes = '{"API_KEY":"private-note"}' WHERE id = $2
 	`, ownerUserID, agentID); err != nil {
 		t.Fatalf("assign agent owner: %v", err)
 	}
@@ -91,6 +91,9 @@ func TestAgentEnv_AgentOwnerMemberCanRevealAndUpdate(t *testing.T) {
 	var resp AgentEnvResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode reveal response: %v", err)
+	}
+	if resp.CustomEnvNotes["API_KEY"] != "private-note" {
+		t.Fatal("agent owner cannot read notes")
 	}
 	if resp.CustomEnv["API_KEY"] != "secret-value" {
 		t.Fatalf("expected plaintext API_KEY, got %v", resp.CustomEnv)
@@ -152,7 +155,7 @@ func TestAgentEnv_UnrelatedMemberForbidden(t *testing.T) {
 		body any
 	}{
 		{"reveal", testHandler.GetAgentEnv, nil},
-		{"update", testHandler.UpdateAgentEnv, map[string]any{"custom_env": map[string]string{"API_KEY": "stolen"}}},
+		{"update", testHandler.UpdateAgentEnv, map[string]any{"custom_env": map[string]string{"API_KEY": "stolen"}, "custom_env_notes": map[string]string{"API_KEY": "unauthorized-note"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -235,7 +238,7 @@ func TestAgentEnv_AgentActorRejectedForOwnedAgent(t *testing.T) {
 		body any
 	}{
 		{"reveal", testHandler.GetAgentEnv, nil},
-		{"update", testHandler.UpdateAgentEnv, map[string]any{"custom_env": map[string]string{"API_KEY": "exfiltrated"}}},
+		{"update", testHandler.UpdateAgentEnv, map[string]any{"custom_env": map[string]string{"API_KEY": "exfiltrated"}, "custom_env_notes": map[string]string{"API_KEY": "unauthorized-note"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
