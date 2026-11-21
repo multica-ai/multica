@@ -1505,6 +1505,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.InitiatorUserID.Valid {
 		resp.InitiatorType = "member"
 		resp.InitiatorID = uuidToString(task.InitiatorUserID)
+		resp.InitiatorIsWorkspaceOwner = runtime.OwnerID.Valid && task.InitiatorUserID == runtime.OwnerID
 		if u, err := h.Queries.GetUser(r.Context(), task.InitiatorUserID); err == nil {
 			resp.InitiatorName = u.Name
 			resp.InitiatorEmail = u.Email
@@ -1522,6 +1523,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
+			resp.IssueTitle = issue.Title
+			if issue.Description.Valid {
+				resp.IssueDescription = issue.Description.String
+			}
 
 			// Squad-leader briefing injection: when the issue is assigned
 			// to a squad and the claiming agent is that squad's current
@@ -1635,6 +1640,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					// For member-authored comments, AuthorID is a user UUID
 					// (see handler.resolveActor) — look up the user's display name.
 					if comment.AuthorID.Valid {
+						resp.InitiatorIsWorkspaceOwner = runtime.OwnerID.Valid && comment.AuthorID == runtime.OwnerID
 						if u, err := h.Queries.GetUser(r.Context(), comment.AuthorID); err == nil {
 							resp.TriggerAuthorName = u.Name
 							resp.InitiatorName = u.Name

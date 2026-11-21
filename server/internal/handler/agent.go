@@ -225,12 +225,14 @@ type ProjectResourceData struct {
 }
 
 type AgentTaskResponse struct {
-	ExecutionPolicy string `json:"execution_policy"`
-	ID              string `json:"id"`
-	AgentID         string `json:"agent_id"`
-	RuntimeID       string `json:"runtime_id"`
-	IssueID         string `json:"issue_id"`
-	WorkspaceID     string `json:"workspace_id"`
+	ExecutionPolicy  string `json:"execution_policy"`
+	ID               string `json:"id"`
+	AgentID          string `json:"agent_id"`
+	RuntimeID        string `json:"runtime_id"`
+	IssueID          string `json:"issue_id"`
+	IssueTitle       string `json:"issue_title,omitempty"`
+	IssueDescription string `json:"issue_description,omitempty"`
+	WorkspaceID      string `json:"workspace_id"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
@@ -320,11 +322,12 @@ type AgentTaskResponse struct {
 	// per-person privacy / access rules instead of seeing every requester as
 	// the owner. The agent's effective Multica credentials stay owner-scoped —
 	// this is an attested identity, not a credential. See MUL-2645.
-	InitiatorType  string `json:"initiator_type,omitempty"`  // "member" or "agent"
-	InitiatorID    string `json:"initiator_id,omitempty"`    // user UUID (member) or agent UUID
-	InitiatorName  string `json:"initiator_name,omitempty"`  // display name of the initiator
-	InitiatorEmail string `json:"initiator_email,omitempty"` // member email; empty for agent initiators
-	Kind           string `json:"kind"`                      // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	InitiatorType             string `json:"initiator_type,omitempty"`  // "member" or "agent"
+	InitiatorID               string `json:"initiator_id,omitempty"`    // user UUID (member) or agent UUID
+	InitiatorName             string `json:"initiator_name,omitempty"`  // display name of the initiator
+	InitiatorEmail            string `json:"initiator_email,omitempty"` // member email; empty for agent initiators
+	InitiatorIsWorkspaceOwner bool   `json:"initiator_is_workspace_owner,omitempty"`
+	Kind                      string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request

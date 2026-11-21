@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -32,9 +31,13 @@ func syncCodexHooksAndTrust(sharedHome, codexHome string) error {
 	if err != nil {
 		return fmt.Errorf("read task config.toml: %w", err)
 	}
-	oldKey := strconv.Quote(srcHooks + ":pre_tool_use:0:0")
-	newKey := strconv.Quote(dstHooks + ":pre_tool_use:0:0")
-	updated := strings.ReplaceAll(string(data), oldKey, newKey)
+	// Hook trust is keyed by source path, event, group index, and handler
+	// index. Rewrite every state key for this hooks.json source so newly
+	// enabled lifecycle events (for example UserPromptSubmit and Stop) remain
+	// trusted inside the isolated per-task CODEX_HOME.
+	oldPrefix := `"` + srcHooks + ":"
+	newPrefix := `"` + dstHooks + ":"
+	updated := strings.ReplaceAll(string(data), oldPrefix, newPrefix)
 	if updated == string(data) {
 		return nil
 	}

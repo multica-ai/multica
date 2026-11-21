@@ -4553,11 +4553,12 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesInitiator(t *testing.T) {
 	}
 	var resp struct {
 		Task *struct {
-			ID             string `json:"id"`
-			InitiatorType  string `json:"initiator_type"`
-			InitiatorID    string `json:"initiator_id"`
-			InitiatorName  string `json:"initiator_name"`
-			InitiatorEmail string `json:"initiator_email"`
+			ID                        string `json:"id"`
+			InitiatorType             string `json:"initiator_type"`
+			InitiatorID               string `json:"initiator_id"`
+			InitiatorName             string `json:"initiator_name"`
+			InitiatorEmail            string `json:"initiator_email"`
+			InitiatorIsWorkspaceOwner bool   `json:"initiator_is_workspace_owner"`
 		} `json:"task"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
@@ -4577,6 +4578,9 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesInitiator(t *testing.T) {
 	}
 	if resp.Task.InitiatorEmail != handlerTestEmail {
 		t.Errorf("initiator_email = %q, want %q", resp.Task.InitiatorEmail, handlerTestEmail)
+	}
+	if !resp.Task.InitiatorIsWorkspaceOwner {
+		t.Error("initiator_is_workspace_owner = false, want true for runtime owner's comment")
 	}
 }
 

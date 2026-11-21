@@ -24,7 +24,9 @@ func TestSyncCodexHooksAndTrustCopiesAndRewritesTrustedPath(t *testing.T) {
 	}
 	sharedHooks := filepath.Join(shared, "hooks.json")
 	trust := `trusted_hash = "sha256:keep-this-hash"`
-	config := "[hooks.state." + strconv.Quote(sharedHooks+":pre_tool_use:0:0") + "]\n" + trust + "\n"
+	config := "[hooks.state." + strconv.Quote(sharedHooks+":pre_tool_use:0:0") + "]\n" + trust + "\n" +
+		"[hooks.state." + strconv.Quote(sharedHooks+":user_prompt_submit:0:0") + "]\n" + trust + "\n" +
+		"[hooks.state." + strconv.Quote(sharedHooks+":stop:0:0") + "]\n" + trust + "\n"
 	if err := os.WriteFile(filepath.Join(shared, "config.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -43,9 +45,14 @@ func TestSyncCodexHooksAndTrustCopiesAndRewritesTrustedPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantKey := strconv.Quote(filepath.Join(task, "hooks.json") + ":pre_tool_use:0:0")
-	if !strings.Contains(string(gotConfig), wantKey) || !strings.Contains(string(gotConfig), trust) {
-		t.Fatalf("task config did not preserve trust at rewritten path:\n%s", gotConfig)
+	for _, event := range []string{"pre_tool_use", "user_prompt_submit", "stop"} {
+		wantKey := strconv.Quote(filepath.Join(task, "hooks.json") + ":" + event + ":0:0")
+		if !strings.Contains(string(gotConfig), wantKey) {
+			t.Fatalf("task config did not preserve %s trust at rewritten path:\n%s", event, gotConfig)
+		}
+	}
+	if strings.Count(string(gotConfig), trust) != 3 {
+		t.Fatalf("task config did not preserve all trust hashes:\n%s", gotConfig)
 	}
 	sharedConfig, err := os.ReadFile(filepath.Join(shared, "config.toml"))
 	if err != nil || string(sharedConfig) != config {
