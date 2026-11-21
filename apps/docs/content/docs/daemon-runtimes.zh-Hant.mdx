@@ -57,6 +57,21 @@ multica daemon start
 
 如需把執行工作目錄放到其他磁碟，可用 `multica config set workspaces_root <path>` 為當前 profile 持久化根目錄，也可在 `daemon start` 或 `daemon restart` 中傳入 `--workspaces-root <path>`。flag 的優先順序高於 `MULTICA_WORKSPACES_ROOT`，環境變數又高於 profile 配置。修改根目錄不會遷移已有的執行目錄。
 
+### AI 代理的預設本機目錄 [#agent-default-directory]
+
+在守護程序的啟動環境中設定 `MULTICA_AGENT_LOCAL_DIRECTORIES`，將完整的 AI 代理 UUID 對應至這台電腦上的絕對路徑：
+
+```bash
+export MULTICA_AGENT_LOCAL_DIRECTORIES='{"12ab5678-1234-4567-890a-123456789abc":"/path/to/workspace"}'
+multica daemon restart
+```
+
+此對應適用於沒有專案 `local_directory` 綁定的任務、聊天、快速建立及自動化執行。專案綁定優先，包括綁定至其他守護程序的目錄。小隊協調 AI 代理仍使用受管理的工作目錄；未設定的 AI 代理維持原有行為。
+
+執行沿用 `in_place` 流程：可讀取目錄中的指令、skill 及工具設定，也可修改檔案。任務、快速建立與自動化的寫入執行共用既有路徑鎖，聊天執行仍免於該鎖。清理時，守護程序不會刪除使用者目錄。
+
+JSON 格式錯誤、AI 代理 UUID 無效、路徑空白或使用相對路徑時，守護程序會拒絕啟動。執行開始時，目錄必須存在且可寫入。修改啟動環境後需重新啟動守護程序；此對應不是伺服器端的 AI 代理設定。
+
 啟動時，守護程序檢測 `PATH` 中受支援的 AI 程式設計工具，為你有權連線的工作區註冊執行時。工具剛安裝或剛登入時，重啟守護程序就會重新檢測。
 
 守護程序至少需要檢測到一款內建支援的 AI 程式設計工具才能啟動。安裝方法和可執行檔名見[安裝 AI 程式設計工具](/install-agent-runtime)。
@@ -163,7 +178,7 @@ Cursor 依專案目錄保存 MCP 的 OAuth 登入，而每次執行都有自己�
 
 AI 代理有 MCP 設定時，每次執行都有自己的 Cursor 資料目錄，執行在那裡的 `mcp-auth.json` 就是這個連結。沒有 MCP 設定時，執行使用你自己的 Cursor 資料目錄（`~/.cursor`，或 daemon 的 `CURSOR_DATA_DIR`）和其中設定的 MCP 服務；daemon 只把 Cursor 在 `projects/` 下為執行目錄保存的 `mcp-auth.json` 連結到 AI 代理的登入檔。執行的目錄被清理時，這個連結會一併刪除。
 
-沒有 MCP 設定時，有兩種執行不做連結，因為它們對應的 Cursor 專案你自己也在用，連結會取代你在那裡的登入：在專案本機目錄裡原地工作的執行，以及目錄外層套著一個 git 儲存庫的執行，例如主目錄下的 dotfiles 儲存庫（Cursor 會把這個儲存庫當作專案）。這些執行使用 Cursor 在該目錄下已有的登入，執行紀錄裡也不會提供登入指令；需要時自己在該目錄裡執行 `cursor-agent mcp login <server>` 登入。
+沒有 MCP 設定時，有兩種執行不做連結，因為它們對應的 Cursor 專案你自己也在用，連結會取代你在那裡的登入：在本機目錄裡原地工作的執行，以及目錄外層套著一個 git 儲存庫的執行，例如主目錄下的 dotfiles 儲存庫（Cursor 會把這個儲存庫當作專案）。這些執行使用 Cursor 在該目錄下已有的登入，執行紀錄裡也不會提供登入指令；需要時自己在該目錄裡執行 `cursor-agent mcp login <server>` 登入。
 
 如果某個服務仍需登入，執行紀錄裡會寫明是哪個服務，並提供要在執行環境所在電腦上執行的指令。有 MCP 設定的 AI 代理，例如：
 
@@ -202,9 +217,9 @@ cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~
 
 任務仍未關閉時，執行完成 12 小時後只刪可以重新生成的內容：目錄中的 `node_modules`、`.next`、`.turbo`，以及 `codex-home` 下的四個精確路徑：`.sandbox-bin`、`.tmp/plugins`、`.tmp/marketplaces`、`cache/remote_plugin_catalog`。其他檔案（包括 SQLite 資料庫和 WAL 檔案）保留。受管的任務執行目錄預設還會在執行完成 14 天後整體刪除，不論任務是否關閉。
 
-未歸檔的聊天如果使用 Multica 管理的工作目錄，守護程序預設會在最後一次執行結束 12 小時後，按同樣的規則清理可重新生成的內容。清理成功後，守護程序會略過該次執行的重複掃描。後續執行結束並經過相同的等待時間後，就會再次符合清理條件。聊天直接在專案本地目錄執行時，只清理上述精確路徑中的 Codex 快取。
+未歸檔的聊天如果使用 Multica 管理的工作目錄，守護程序預設會在最後一次執行結束 12 小時後，按同樣的規則清理可重新生成的內容。清理成功後，守護程序會略過該次執行的重複掃描。後續執行結束並經過相同的等待時間後，就會再次符合清理條件。聊天直接在本機目錄執行時，只清理上述精確路徑中的 Codex 快取。
 
-直接執行時，專案的本地目錄就是工作目錄。守護程序清理時會保留這個目錄。執行記錄目錄保留 daemon 日誌和 `output/`。執行完成超過 `MULTICA_GC_COMPLETED_TASK_TTL`（預設 14 天）後，如果會話記錄保存在記錄目錄外，就刪除整個 `codex-home`；仍保存任務本地會話記錄的 home 會保留。將該變數設為 `0` 可關閉 home 到期清理。後續執行會重建 home 並重新連接會話儲存；會話儲存仍遵循下文獨立的保留策略。
+在本機目錄執行時，工作目錄就是你自己的目錄。守護程序清理時會保留這個目錄。執行記錄目錄保留 daemon 日誌和 `output/`。執行完成超過 `MULTICA_GC_COMPLETED_TASK_TTL`（預設 14 天）後，如果會話記錄保存在記錄目錄外，就刪除整個 `codex-home`；仍保存任務本地會話記錄的 home 會保留。將該變數設為 `0` 可關閉 home 到期清理。後續執行會重建 home 並重新連接會話儲存；會話儲存仍遵循下文獨立的保留策略。
 
 因此，即使執行已結束，`multica daemon disk-usage --by-task` 仍可能列出執行記錄目錄。已完成工作的保留期限不會刪除執行記錄目錄，也不會讓其他提供者的 home 到期，例如仍保留的 `hermes-home`。
 

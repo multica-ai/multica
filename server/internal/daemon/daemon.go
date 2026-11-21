@@ -6083,8 +6083,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot *taskSlotLease)
 		"reuse_workdir", task.PriorWorkDir != "",
 	)
 
-	// If the task targets a project_resource of type local_directory that
-	// is pinned to this daemon, acquire the path mutex before runner.run
+	// If the task targets a project local_directory or an agent default
+	// directory on this daemon, acquire the path mutex before runner.run
 	// so the server-side state machine is dispatched →
 	// waiting_local_directory → running rather than backwards-transitioning
 	// from running into the wait state. The release is deferred so a panic
@@ -6268,7 +6268,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot *taskSlotLease)
 	// crash leaves the directory as an orphan (cleaned up by GCOrphanTTL).
 	if result.EnvRoot != "" {
 		if meta, ok := gcMetaForTask(task); ok {
-			// A local_directory project_resource matched this daemon
+			// A project binding or agent default local_directory assignment
 			// means the agent ran in the user's own tree. Stamp the
 			// meta so the GC loop never tries to RemoveAll envRoot's
 			// sibling workdir (which is the user's path) or the envRoot
@@ -6282,7 +6282,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot *taskSlotLease)
 			// exempt env root, so the directory would accumulate one env
 			// root per task forever — the exact cost the exemption was
 			// meant to trade away for a user's own files.
-			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment != nil && !assignment.UsesWorktree() {
+			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID, d.cfg.AgentLocalDirectories); assignment != nil && !assignment.UsesWorktree() {
 				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
@@ -6433,8 +6433,8 @@ func withoutWorktreePreserved(err error) error {
 	return errors.Join(rest...)
 }
 
-// acquireLocalDirectoryLockIfNeeded inspects the task's project resources for
-// a local_directory pinned to this daemon, validates the path, and takes the
+// acquireLocalDirectoryLockIfNeeded resolves the task's project or agent-default
+// local_directory on this daemon, validates the path, and takes the
 // path mutex. Returns a release callback (nil when no local_directory
 // resource applies) and abort=true when the caller must bail without
 // starting the task (the helper has already reported the failure to the
@@ -6453,10 +6453,10 @@ func withoutWorktreePreserved(err error) error {
 //  4. The blocking wait is cancelled (daemon shutdown, server-side cancel)
 //     — fail the task with the ctx error.
 func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger, slot *taskSlotLease) (release func(), abort bool) {
-	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
+	if d.cfg.DaemonID == "" || (len(task.ProjectResources) == 0 && len(d.cfg.AgentLocalDirectories) == 0) {
 		return nil, false
 	}
-	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID, d.cfg.AgentLocalDirectories)
 	if err != nil {
 		taskLog.Error("local_directory: resolve resource failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
@@ -6491,13 +6491,18 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
 		failureReason := "local_directory_error"
+		message := err.Error()
 		if errors.Is(err, errLocalDirectoryMissing) {
-			failureReason = taskfailure.ReasonLocalDirectoryMissing.String()
+			if assignment.AgentDefault {
+				message = "The agent's default directory no longer exists. Update " + agentLocalDirectoriesEnv + " on this machine and restart the daemon."
+			} else {
+				failureReason = taskfailure.ReasonLocalDirectoryMissing.String()
+			}
 		}
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
-			errorMessage:  err.Error(),
+			errorMessage:  message,
 			failureReason: failureReason,
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
@@ -8470,7 +8475,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
 	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID, d.cfg.AgentLocalDirectories)
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running

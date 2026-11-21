@@ -27,6 +27,12 @@ func (w *executionCapacityWaitWriter) Write(p []byte) (int, error) {
 }
 
 func TestRunBatchPollerDirectoryWaitReleasesExecutionCapacity(t *testing.T) {
+	for _, source := range []string{"project resource", "agent default"} {
+		t.Run(source, func(t *testing.T) { testDirectoryWaitExecutionCapacity(t, source) })
+	}
+}
+
+func testDirectoryWaitExecutionCapacity(t *testing.T, source string) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -80,6 +86,11 @@ func TestRunBatchPollerDirectoryWaitReleasesExecutionCapacity(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	d := New(Config{ServerBaseURL: srv.URL, DaemonID: "daemon", WorkspacesRoot: t.TempDir(), PollInterval: 10 * time.Millisecond, MaxConcurrentTasks: 2}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	if source == "agent default" {
+		holder.ProjectResources = nil
+		waiter.ProjectResources = nil
+		d.cfg.AgentLocalDirectories = map[string]string{holder.AgentID: dir, waiter.AgentID: dir}
+	}
 	d.workspaces["workspace"] = &workspaceState{workspaceID: "workspace", runtimeIDs: []string{"local", "other"}}
 	d.runtimeIndex["local"] = Runtime{ID: "local", Provider: "codex"}
 	d.runtimeIndex["other"] = Runtime{ID: "other", Provider: "claude"}
