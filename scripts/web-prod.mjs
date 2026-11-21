@@ -140,7 +140,9 @@ async function main() {
         for (let i = 0; i < 40 && !exited(server); i++) await sleep(250);
         if (!exited(server)) try { process.kill(-server.pid, "SIGKILL"); } catch { /* already gone */ }
       }
-      for (let i = 0; i < 40 && listenerPid(webPort); i++) await sleep(250);
+      if (server?.pid || stoppedDev) {
+        for (let i = 0; i < 40 && listenerPid(webPort); i++) await sleep(250);
+      }
       if (stoppedDev) {
         log("starting the dev web server again");
         if (!devEnvRun("up", "--components", "web")) {
