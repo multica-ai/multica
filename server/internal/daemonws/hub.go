@@ -698,10 +698,14 @@ func (h *Hub) notifyFrame(runtimeID string, data []byte, eventID string) (delive
 			deduped = true
 			continue
 		}
-		select {
-		case c.send <- data:
+		// Must go through trySend. This loop holds only h.mu's read lock, and a
+		// read lock does not exclude unregister, which closes c.send under the
+		// write lock. A bare send here races that close and panics the process.
+		// trySend takes sendMu and checks sendClosed first, which is how
+		// invalidateRuntime already delivers.
+		if c.trySend(data) {
 			delivered = true
-		default:
+		} else {
 			slow = append(slow, c)
 		}
 	}
@@ -726,10 +730,14 @@ func (h *Hub) notifyWorkspaceFrame(workspaceID string, data []byte, eventID stri
 			deduped = true
 			continue
 		}
-		select {
-		case c.send <- data:
+		// Must go through trySend. This loop holds only h.mu's read lock, and a
+		// read lock does not exclude unregister, which closes c.send under the
+		// write lock. A bare send here races that close and panics the process.
+		// trySend takes sendMu and checks sendClosed first, which is how
+		// invalidateRuntime already delivers.
+		if c.trySend(data) {
 			delivered = true
-		default:
+		} else {
 			slow = append(slow, c)
 		}
 	}
@@ -754,10 +762,14 @@ func (h *Hub) notifyUserFrame(userID string, data []byte, eventID string) (deliv
 			deduped = true
 			continue
 		}
-		select {
-		case c.send <- data:
+		// Must go through trySend. This loop holds only h.mu's read lock, and a
+		// read lock does not exclude unregister, which closes c.send under the
+		// write lock. A bare send here races that close and panics the process.
+		// trySend takes sendMu and checks sendClosed first, which is how
+		// invalidateRuntime already delivers.
+		if c.trySend(data) {
 			delivered = true
-		default:
+		} else {
 			slow = append(slow, c)
 		}
 	}
