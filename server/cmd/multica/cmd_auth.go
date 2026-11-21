@@ -68,6 +68,7 @@ const callbackHostFlag = "callback-host"
 const callbackHostFlagHelp = "Callback host reachable from the browser: localhost, 127.0.0.1, or an RFC 1918 IPv4 address. For SSH-only machines, use the printed tunnel hint instead."
 
 func init() {
+	authStatusCmd.Flags().Bool("json", false, "Print connection and token status as JSON without credentials")
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authLogoutCmd)
 }
@@ -487,7 +488,25 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 	return nil
 }
 
+type authStatusUser struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+func verifyAuthStatus(ctx context.Context, serverURL, token string) (authStatusUser, error) {
+	client := cli.NewAPIClient(serverURL, "", token)
+	ctx, cancel := cli.APIContext(ctx)
+	defer cancel()
+	var user authStatusUser
+	err := client.GetJSON(ctx, "/api/me", &user)
+	return user, err
+}
+
 func runAuthStatus(cmd *cobra.Command, _ []string) error {
+	asJSON, _ := cmd.Flags().GetBool("json")
+	if asJSON {
+		return runAuthStatusJSON(cmd)
+	}
 	if err := requireTaskLocalConfigRoot(); err != nil {
 		return err
 	}
@@ -503,16 +522,8 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	client := cli.NewAPIClient(serverURL, "", token)
-
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
-	var me struct {
-		Name  string `json:"name"`
-		Email string `json:"email"`
-	}
-	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
+	me, err := verifyAuthStatus(cmd.Context(), serverURL, token)
+	if err != nil {
 		var httpErr *cli.HTTPError
 		if errors.As(err, &httpErr) && httpErr.Kind() == cli.KindAuthRequired {
 			if taskContext {
@@ -537,6 +548,83 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", serverURL, me.Name, me.Email, prefix)
 	return nil
+}
+
+type authStatusJSON struct {
+	Version           string `json:"version"`
+	Commit            string `json:"commit"`
+	Profile           string `json:"profile"`
+	ServerOrigin      string `json:"server_origin"`
+	WorkspaceID       string `json:"workspace_id"`
+	DaemonManaged     bool   `json:"daemon_managed"`
+	TokenState        string `json:"token_state"`
+	VerificationError string `json:"verification_error,omitempty"`
+}
+
+func runAuthStatusJSON(cmd *cobra.Command) error {
+	serverURL := tryResolveServerURL(cmd)
+	status := authStatusJSON{
+		Version:       version,
+		Commit:        commit,
+		Profile:       resolveProfile(cmd),
+		ServerOrigin:  authStatusServerOrigin(serverURL),
+		WorkspaceID:   resolveWorkspaceID(cmd),
+		DaemonManaged: inDaemonManagedExecutionContext(),
+		TokenState:    "unverified",
+	}
+	if status.Profile == "" {
+		status.Profile = "default"
+	}
+
+	token := resolveToken(cmd)
+	switch {
+	case token == "":
+		status.TokenState = "missing"
+	case status.DaemonManaged && !strings.HasPrefix(token, "mat_"):
+		status.TokenState = "invalid_scope"
+	}
+	switch {
+	case requireTaskLocalConfigRoot() != nil:
+		status.VerificationError = "task_config_unavailable"
+	case serverURL == "":
+		status.VerificationError = "server_unconfigured"
+	case status.ServerOrigin == "":
+		status.VerificationError = "server_invalid"
+	case status.TokenState == "unverified":
+		_, err := verifyAuthStatus(cmd.Context(), serverURL, token)
+		if err == nil {
+			status.TokenState = "verified"
+		} else {
+			kind := authStatusErrorKind(err)
+			status.VerificationError = kind.String()
+			if kind == cli.KindAuthRequired {
+				status.TokenState = "rejected"
+			}
+		}
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), status)
+}
+
+// Report only the origin so diagnosing a caller does not expose URL
+// credentials or values embedded in a path, query, or fragment.
+func authStatusServerOrigin(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+func authStatusErrorKind(err error) cli.ErrorKind {
+	var httpErr *cli.HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.Kind()
+	}
+	var networkErr *cli.NetworkError
+	if errors.As(err, &networkErr) {
+		return networkErr.Kind
+	}
+	return cli.KindUnknown
 }
 
 // The .brand SVG is written by `node scripts/brand/sync.mjs` from
