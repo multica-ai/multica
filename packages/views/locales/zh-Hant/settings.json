@@ -851,10 +851,23 @@
       "manual_description": "在側欄列上或通知詳情頂部點歸檔",
       "manual_value": "隨時",
       "auto_label": "自動歸檔我處理過的任務",
-      "auto_description": "只由你自己的動作觸發；改優先級、日期、標籤不算。歸檔後有新動態，會重新進收件箱。",
+      "auto_description": "選擇哪些操作會歸檔通知。別人的操作不算，有新動態會重新進收件箱。",
       "auto_never": "從不",
-      "auto_completed": "完成任務時",
-      "auto_acted": "回覆、改狀態或轉交後",
+      "auto_separator": "、",
+      "auto_groups": {
+        "settle": "處理 · 預設開啟",
+        "tidy": "整理"
+      },
+      "auto_actions": {
+        "completed": "完成",
+        "comment": "回覆",
+        "status": "改狀態",
+        "assignee": "轉交",
+        "priority": "改優先級",
+        "project": "改專案",
+        "dates": "改日期",
+        "labels": "改標籤"
+      },
       "after_label": "歸檔後",
       "after_description": "正在看的通知被自動歸檔時。手動歸檔（E）照舊打開下一條。",
       "after_stay": "停在目前任務",

@@ -851,10 +851,23 @@
       "manual_description": "サイドバーの行、または通知の上部から",
       "manual_value": "いつでも",
       "auto_label": "自分が対応したタスクをアーカイブ",
-      "auto_description": "自分の操作だけが対象です。引き継ぎとはステータスや担当者を変えることで、優先度・日付・ラベルの編集は含みません。新しい通知が届くとタスクは戻ってきます。",
+      "auto_description": "どの操作でタスクの通知をアーカイブするか選びます。他の人の操作ではアーカイブされず、新しい通知が届くとタスクは戻ってきます。",
       "auto_never": "しない",
-      "auto_completed": "完了したとき",
-      "auto_acted": "返信・引き継ぎしたとき",
+      "auto_separator": "、",
+      "auto_groups": {
+        "settle": "対応 · 既定でオン",
+        "tidy": "整理"
+      },
+      "auto_actions": {
+        "completed": "完了",
+        "comment": "返信",
+        "status": "ステータス変更",
+        "assignee": "担当者変更",
+        "priority": "優先度変更",
+        "project": "プロジェクト変更",
+        "dates": "日付変更",
+        "labels": "ラベル変更"
+      },
       "after_label": "アーカイブ後",
       "after_description": "表示中の通知がこの方法でアーカイブされたとき。手動のアーカイブ（E）は従来どおり次を開きます。",
       "after_stay": "このタスクに留まる",

@@ -861,10 +861,23 @@
       "manual_description": "Depuis sa ligne dans la barre latérale ou le haut de la notification",
       "manual_value": "À tout moment",
       "auto_label": "Archiver les tâches que vous traitez",
-      "auto_description": "Seules vos propres actions comptent. Déléguer, c'est changer le statut ou le responsable ; modifier la priorité, les dates ou les étiquettes ne compte pas. Une nouvelle notification fait revenir la tâche.",
+      "auto_description": "Choisissez lesquelles de vos actions archivent les notifications d'une tâche. Celles des autres ne le font jamais, et une nouvelle notification fait revenir la tâche.",
       "auto_never": "Jamais",
-      "auto_completed": "Quand vous les terminez",
-      "auto_acted": "Quand vous répondez ou déléguez",
+      "auto_separator": ", ",
+      "auto_groups": {
+        "settle": "La traiter · activé par défaut",
+        "tidy": "La ranger"
+      },
+      "auto_actions": {
+        "completed": "Terminer",
+        "comment": "Répondre",
+        "status": "Changer le statut",
+        "assignee": "Réassigner",
+        "priority": "Changer la priorité",
+        "project": "Changer le projet",
+        "dates": "Changer les dates",
+        "labels": "Changer les libellés"
+      },
       "after_label": "Après l'archivage",
       "after_description": "Quand la notification que vous lisez est archivée ainsi. Archiver à la main (E) ouvre toujours la suivante.",
       "after_stay": "Rester sur la tâche",

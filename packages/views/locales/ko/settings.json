@@ -851,10 +851,23 @@
       "manual_description": "사이드바의 행이나 알림 상단에서",
       "manual_value": "언제든지",
       "auto_label": "내가 처리한 태스크 보관",
-      "auto_description": "내 동작만 해당됩니다. 넘기기는 상태나 담당자를 바꾸는 것이며, 우선순위·날짜·라벨 편집은 해당되지 않습니다. 새 알림이 오면 태스크가 다시 돌아옵니다.",
+      "auto_description": "어떤 내 동작이 태스크 알림을 보관할지 고르세요. 다른 사람의 동작으로는 보관되지 않으며, 새 알림이 오면 태스크가 다시 돌아옵니다.",
       "auto_never": "안 함",
-      "auto_completed": "완료했을 때",
-      "auto_acted": "답글을 달거나 넘겼을 때",
+      "auto_separator": ", ",
+      "auto_groups": {
+        "settle": "처리 · 기본으로 켜짐",
+        "tidy": "정리"
+      },
+      "auto_actions": {
+        "completed": "완료",
+        "comment": "답글",
+        "status": "상태 변경",
+        "assignee": "담당자 변경",
+        "priority": "우선순위 변경",
+        "project": "프로젝트 변경",
+        "dates": "날짜 변경",
+        "labels": "라벨 변경"
+      },
       "after_label": "보관한 뒤",
       "after_description": "보고 있는 알림이 이렇게 보관될 때. 직접 보관(E)하면 지금처럼 다음 알림을 엽니다.",
       "after_stay": "이 태스크에 머무르기",

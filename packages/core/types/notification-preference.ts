@@ -9,8 +9,22 @@ export type NotificationGroupKey =
   | "new_issues"
   | "agent_activity"
   | "system_notifications"
+  | AutoArchiveKey;
+
+/**
+ * Each action you take on an issue that can archive your own notifications on
+ * it. `auto_archive_completed` is moving it to a done or closed status;
+ * `auto_archive_on_status` is any other status change.
+ */
+export type AutoArchiveKey =
   | "auto_archive_completed"
-  | "auto_archive_on_action";
+  | "auto_archive_on_comment"
+  | "auto_archive_on_status"
+  | "auto_archive_on_assignee"
+  | "auto_archive_on_priority"
+  | "auto_archive_on_project"
+  | "auto_archive_on_dates"
+  | "auto_archive_on_labels";
 
 export type NotificationGroupValue = "all" | "muted";
 

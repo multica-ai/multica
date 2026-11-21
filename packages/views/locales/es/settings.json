@@ -861,10 +861,23 @@
       "manual_description": "Desde su fila en la barra lateral o desde la parte superior de la notificación",
       "manual_value": "En cualquier momento",
       "auto_label": "Archivar las tareas que gestionas",
-      "auto_description": "Solo cuentan tus propias acciones. Delegar es cambiar el estado o el responsable; editar la prioridad, las fechas o las etiquetas no cuenta. Una notificación posterior devuelve la tarea.",
+      "auto_description": "Elige qué acciones tuyas archivan las notificaciones de una tarea. Las acciones de otros nunca lo hacen, y una notificación posterior devuelve la tarea.",
       "auto_never": "Nunca",
-      "auto_completed": "Al completarlas",
-      "auto_acted": "Al responder o delegar",
+      "auto_separator": ", ",
+      "auto_groups": {
+        "settle": "Resolverla · activado por defecto",
+        "tidy": "Organizarla"
+      },
+      "auto_actions": {
+        "completed": "Completar",
+        "comment": "Responder",
+        "status": "Cambiar estado",
+        "assignee": "Reasignar",
+        "priority": "Cambiar prioridad",
+        "project": "Cambiar proyecto",
+        "dates": "Cambiar fechas",
+        "labels": "Cambiar etiquetas"
+      },
       "after_label": "Después de archivar",
       "after_description": "Cuando la notificación que estás leyendo se archiva así. Archivar a mano (E) sigue abriendo la siguiente.",
       "after_stay": "Quedarse en la tarea",
