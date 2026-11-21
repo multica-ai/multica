@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -39,6 +41,10 @@ func readDaemonPortRecord(profile string) (daemonPortRecord, bool) {
 // A crash or systemd handoff can leave it behind. Old daemons without this file
 // remain discoverable at the profile-derived port.
 func resolveHealthPort(profile string) int {
+	return resolveHealthPortOr(profile, healthPortForProfile(profile))
+}
+
+func resolveHealthPortOr(profile string, preferred int) int {
 	if record, ok := readDaemonPortRecord(profile); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		health := checkDaemonHealthOnPort(ctx, record.Port)
@@ -47,7 +53,25 @@ func resolveHealthPort(profile string) int {
 			return record.Port
 		}
 	}
-	return healthPortForProfile(profile)
+	return preferred
+}
+
+// A profile name can match across different OS users. During startup, an
+// existing listener only belongs to this profile if its PID matches local state.
+func profileDaemonPIDMatches(profile string, port int, health map[string]any) bool {
+	pid, ok := health["pid"].(float64)
+	if !ok || pid <= 0 {
+		return false
+	}
+	if record, ok := readDaemonPortRecord(profile); ok && record.Port == port && float64(record.PID) == pid {
+		return true
+	}
+	data, err := os.ReadFile(daemonPIDPathForProfile(profile))
+	if err != nil {
+		return false
+	}
+	legacyPID, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	return err == nil && float64(legacyPID) == pid
 }
 
 func publishDaemonPort(profile string, record daemonPortRecord) error {
