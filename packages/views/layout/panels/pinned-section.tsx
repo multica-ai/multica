@@ -160,6 +160,7 @@ export function PinnedSection({ pins, wsId }: { pins: PanelPins; wsId: string })
 
   return (
     <PanelSection
+      data-pinned-section
       label={t(($) => $.sidebar.pinned_label)}
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}

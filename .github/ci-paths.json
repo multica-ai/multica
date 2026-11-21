@@ -3,6 +3,7 @@
     ".github/actions/frontend-quality/**",
     "apps/web/**",
     "apps/desktop/**",
+    "apps/collab/**",
     "packages/**",
     "server/internal/handler/testdata/quick_action_bodies.json",
     "package.json",

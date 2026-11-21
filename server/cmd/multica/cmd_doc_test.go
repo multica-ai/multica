@@ -13,7 +13,7 @@ import (
 )
 
 func TestDocCommandsExposeOnlyAgentReadWrite(t *testing.T) {
-	expected := map[string]bool{"list": true, "search": true, "get": true, "create": true, "update": true, "move": true}
+	expected := map[string]bool{"list": true, "search": true, "get": true, "create": true, "edit": true, "update": true, "move": true}
 	for _, command := range docCmd.Commands() {
 		if !expected[command.Name()] {
 			t.Fatalf("unexpected doc command: %s", command.Name())

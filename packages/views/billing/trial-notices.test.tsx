@@ -239,7 +239,7 @@ describe("WorkspaceTrialNotices", () => {
     expect(dialog).toHaveTextContent("Acme Labs is now on Free. Nothing was deleted.");
     expect(dialog).toHaveTextContent("Members, projects, and settings you already have stay as they are.");
     expect(dialog).toHaveTextContent("Private projects stay private.");
-    expect(dialog).toHaveTextContent("Automations get 200 runs a month; 1,284 used this month.");
+    expect(dialog).toHaveTextContent("Autopilots get 200 runs a month; 1,284 used this month.");
 
     fireEvent.click(screen.getByRole("button", { name: "Continue on Free" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -263,7 +263,7 @@ describe("WorkspaceTrialNotices", () => {
     renderWithI18n(<WorkspaceTrialNotices />);
 
     const dialog = screen.getByRole("dialog", { name: "Your Business trial has ended" });
-    expect(dialog).toHaveTextContent("Automations get 200 runs a month; 12 used this month.");
+    expect(dialog).toHaveTextContent("Autopilots get 200 runs a month; 12 used this month.");
     expect(dialog).not.toHaveTextContent("Private projects");
   });
 

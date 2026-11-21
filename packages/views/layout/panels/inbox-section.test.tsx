@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -458,7 +458,7 @@ describe("InboxSection", () => {
     );
     expect(rows()).toHaveLength(5);
 
-    fireEvent.click(screen.getByRole("button", { name: "Show 2 more…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 more..." }));
     expect(rows()).toHaveLength(7);
   });
 
@@ -658,7 +658,7 @@ describe("InboxSection with every row shown", () => {
     };
   }
 
-  function renderInPanel(count: number, activeIssueId: string | null = null) {
+  function renderInPanel(count: number, activeIssueId: string | null = null, above: ReactNode = null) {
     const items = Array.from({ length: count }, (_, i) =>
       item({
         id: `n${i}`,
@@ -676,6 +676,7 @@ describe("InboxSection with every row shown", () => {
       <QueryClientProvider client={client}>
         <NavigationProvider value={adapter("/acme/issues")}>
           <PanelBody>
+            {above}
             <Harness activeIssueId={activeIssueId} pathname="/acme/issues" openKey={activeIssueId} />
           </PanelBody>
         </NavigationProvider>
@@ -712,10 +713,72 @@ describe("InboxSection with every row shown", () => {
     }
   });
 
+  it("follows a section above it that mounts or changes height", async () => {
+    const restore = installLayout();
+    const rect = Element.prototype.getBoundingClientRect;
+    // Where the list starts below the panel's top, as the section above it sets.
+    let listTop = 0;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const top = this.matches("[data-sidebar-list]") ? listTop : 0;
+      return { width: 280, height: ROW_HEIGHT, top, left: 0, right: 280, bottom: top + ROW_HEIGHT, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    };
+    const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        private entry: { callback: ResizeObserverCallback; targets: Set<Element> };
+        constructor(callback: ResizeObserverCallback) {
+          this.entry = { callback, targets: new Set() };
+          observers.push(this.entry);
+        }
+        observe(target: Element) {
+          this.entry.targets.add(target);
+        }
+        unobserve(target: Element) {
+          this.entry.targets.delete(target);
+        }
+        disconnect() {
+          this.entry.targets.clear();
+        }
+      },
+    );
+    const resize = (target: Element) => {
+      for (const { callback, targets } of observers) {
+        if (targets.has(target)) callback([], {} as ResizeObserver);
+      }
+    };
+    const showAbove: { set?: (shown: boolean) => void } = {};
+    function Above() {
+      const [shown, setShown] = useState(false);
+      showAbove.set = setShown;
+      return shown ? <section data-testid="above" /> : null;
+    }
+    try {
+      renderInPanel(300, null, <Above />);
+      fireEvent.click(screen.getByRole("button", { name: /^Show \d+ more/ }));
+      await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+      const atTop = rows().length;
+
+      // A section mounts above the list and pushes it most of a viewport down.
+      listTop = 500;
+      act(() => showAbove.set!(true));
+      await waitFor(() => expect(rows().length).toBeLessThan(atTop));
+
+      // It collapses: the panel keeps its size, the section above shrinks.
+      listTop = 0;
+      act(() => resize(screen.getByTestId("above")));
+      await waitFor(() => expect(rows()).toHaveLength(atTop));
+    } finally {
+      vi.unstubAllGlobals();
+      Element.prototype.getBoundingClientRect = rect;
+      restore();
+    }
+  });
+
   it("keeps a short list fully mounted", () => {
     useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, limit: 5 } });
     renderInPanel(30);
-    fireEvent.click(screen.getByRole("button", { name: "Show 25 more…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show 25 more..." }));
     expect(rows()).toHaveLength(30);
   });
 });

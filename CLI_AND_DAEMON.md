@@ -233,7 +233,7 @@ multica daemon status
 multica daemon status --output json
 ```
 
-Shows PID, uptime, detected agents, and watched workspaces.
+Shows PID, uptime, detected agents (including why any detected agent was skipped), and watched workspaces.
 
 ### Logs
 
@@ -427,7 +427,7 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` for cleanup. The active-
 
 Configured patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The managed Codex cache is matched by its exact relative path, so a repository's own `.sandbox-bin` is not removed unless an operator explicitly adds that basename to `MULTICA_GC_ARTIFACT_PATTERNS`. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, including the managed Codex cache, set `MULTICA_GC_ARTIFACT_TTL=0`.
 
-`multica daemon disk-usage` reports the `.repos` footprint on its own line rather than folding it into the per-task totals — every task in a workspace checks out from that shared cache, so attributing it to individual task directories would double-count it. Note that the repo cache is reclaimed on the schedule above and not by any per-issue status change, so it is normal for it to persist after every task directory is gone.
+`multica daemon disk-usage` reports the `.repos` footprint on its own line rather than folding it into the per-task totals — every task in a workspace checks out from that shared cache, so attributing it to individual task directories would double-count it. In per-task output (`--by-task`), the `MODE` column marks runs that worked in place in a project's local directory as `in place` (`local_directory: true` in JSON when recorded in local metadata). Note that the repo cache is reclaimed on the schedule above and not by any per-issue status change, so it is normal for it to persist after every task directory is gone.
 
 Agent-specific overrides:
 
@@ -1133,8 +1133,6 @@ To assign a squad instead, use `--squad` (name or ID) or `--squad-id` (canonical
 ```bash
 multica autopilot trigger <id>            # Fires the autopilot once, returns the run
 ```
-
-On Multica Cloud, a member running this command directly uses no automation quota. Runs triggered by an agent on a member's behalf, a schedule, or a webhook count toward the workspace quota. When an agent triggers a run after an enforced limit is reached, the API returns HTTP 429 with `reason_code: quota_exceeded` and a `Retry-After` header.
 
 The command exits non-zero unless the run actually started (`issue_created` or
 `running`). If a run is `skipped` (for example, the runtime is offline

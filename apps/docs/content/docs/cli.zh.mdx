@@ -292,7 +292,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-env` 系列只在 `agent create` 中可用。之后修改用 `agent env set`，它整体替换原有变量，值写成 `****` 的键保留原值。
 - `agent update --mcp-config null` 清除 MCP 配置。
 - `--custom-args` 是 JSON 数组，排在启动参数的最后。选模型用 `--model`，部分工具会拒绝出现在自定义参数里的 `--model`。
-- 谁能调用智能体用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是旧写法，会映射到 `--permission-mode`；两者同时给出时以 `--permission-mode` 为准。在 Multica Cloud 上，Business 包含成员名单。Free 和 Pro 工作区开启强制后，`agent create` 或 `agent update` 新建名单或往名单里加人会以 `feature_locked` 拒绝；移除成员、原样保存名单、改成 `private` 或 `--public-to-workspace` 仍然可以。
+- 谁能调用智能体用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是旧写法，会映射到 `--permission-mode`；两者同时给出时以 `--permission-mode` 为准。
 
 ## 守护进程和运行时
 
@@ -317,7 +317,7 @@ multica runtime profile create --display-name "内部 Claude 封装" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` 为当前 profile 登记开机自启，平台差异见[开机自启](/daemon-runtimes#autostart)。`runtime usage` 默认统计 90 天，`--days` 最多 365。`runtime update` 让那台电脑上的守护进程把 CLI 更新到指定版本，`--wait` 等待更新结束；更新失败、更新超时或等待本身超时时，命令会以非零状态退出。`runtime profile create` 用 `--runtime-type` 指定兼容的工具（旧的 `--protocol-family` 仍可用）；固定参数目前只能在网页端填写。 `runtime profile create` 默认绑定当前机器；使用 `--daemon-id <id>` 可以选择另一台已登记的本地机器。 旧配置可以通过 `multica runtime profile update <profile-id> --daemon-id <id>` 绑定机器。
+`daemon autostart` 为当前 profile 登记开机自启，平台差异见[开机自启](/daemon-runtimes#autostart)。`runtime usage` 默认统计 90 天，`--days` 最多 365。`runtime update` 让那台电脑上的守护进程把 CLI 更新到指定版本。与在**运行时**页面点击**更新**（忙碌时会[排队等待空闲](/daemon-runtimes#updating-cli)）不同，该请求不会排队：如果机器正在执行任务，这次更新会直接失败，而不会等待。`--wait` 等待更新结束；更新失败、更新超时或等待本身超时时，命令会以非零状态退出。`runtime profile create` 用 `--runtime-type` 指定兼容的工具（旧的 `--protocol-family` 仍可用）；固定参数目前只能在网页端填写。 `runtime profile create` 默认绑定当前机器；使用 `--daemon-id <id>` 可以选择另一台已登记的本地机器。 旧配置可以通过 `multica runtime profile update <profile-id> --daemon-id <id>` 绑定机器。
 
 删除仍绑定活跃智能体的运行时时，命令默认拒绝。`multica runtime delete <id> --cascade` 会解绑这些智能体、保留其配置与历史记录，并取消它们的活动运行。
 

@@ -69,7 +69,7 @@
     "empty": "Tu bandeja de entrada está vacía",
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
-    "edit_advanced": "Editar como formulario avanzado",
+    "edit_advanced": "Abrir formulario completo",
     "autopilot_quota_exceeded_body": "Este espacio de trabajo alcanzó su límite de {{limit}} ejecuciones de autopilot del periodo actual. Las siguientes ejecuciones no se iniciarán hasta que la asignación se restablezca {{resetAt}}, o hasta que el espacio de trabajo mejore su plan o compre más ejecuciones.",
     "project_owner_joined_body": "{{name}} es propietario del espacio de trabajo y se ha añadido a este proyecto privado. Ahora puede ver sus tareas, comentarios y archivos adjuntos.",
     "open_project": "Abrir proyecto",
@@ -154,7 +154,7 @@
   "errors": {
     "archived_lookup_failed": "No se ha podido cargar la notificación enlazada",
     "source_context_retry_failed": "No se ha podido reintentar con el contexto original",
-    "source_context_retry_unavailable": "Este contexto ya no se puede reintentar. Vuelve a empezar desde el punto de ramificación.",
+    "source_context_retry_unavailable": "Esta solicitud ya no se puede reintentar. Empieza de nuevo desde el mensaje o la tarea original.",
     "mark_read_failed": "No se ha podido marcar como leído",
     "mark_unread_failed": "No se ha podido marcar como no leído",
     "archive_failed": "No se ha podido archivar",
@@ -176,7 +176,7 @@
     "description": "Esta notificación se eliminará permanentemente. Las tareas y ejecuciones relacionadas se conservarán.",
     "issue_description": "Las notificaciones de esta tarea en esta vista se eliminarán permanentemente. La tarea y sus ejecuciones se conservarán.",
     "cancel": "Cancelar",
-    "active_issue_description": "Las notificaciones activas de esta tarea se eliminarán permanentemente. Las notificaciones archivadas anteriormente se conservarán y volverán a aparecer en Archivadas. La tarea y sus ejecuciones se conservarán."
+    "active_issue_description": "Esto elimina permanentemente las notificaciones activas de la bandeja de entrada para esta tarea. Las notificaciones archivadas anteriormente, la tarea y sus ejecuciones se conservan."
   },
   "unsubscribe": {
     "title": "Darse de baja y archivar. Dejarás de recibir sus actualizaciones; las @menciones te seguirán llegando.",
@@ -202,7 +202,7 @@
     "picker_hour": "Hora",
     "picker_minute": "Minuto",
     "picker_submit": "Posponer hasta {{time}}",
-    "hint": "Vuelve antes si te mencionan por tu nombre, te asignan o falla una ejecución.",
+    "hint": "Vuelve antes si te mencionan con @, te la asignan o falla una ejecución.",
     "custom_invalid": "Elige una hora futura, dentro de un año.",
     "back_at": "Vuelve {{time}}",
     "returned": "Pospuesto hasta ahora",

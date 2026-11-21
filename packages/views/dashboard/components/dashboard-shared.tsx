@@ -9,7 +9,7 @@ import { formatDuration } from "../utils";
 // Period selector — mirrors the runtime detail page so users see the same
 // option set across both dashboards. `dims` declares which chart dimensions
 // each range may be drawn at: 1d / 7d at the weekly grain collapse to a single
-// bar, 180d at the daily grain is 180 unreadable bars.
+// bar, 180d / 365d at the daily grain are hundreds of unreadable bars.
 //
 // 1d semantic: "today" (the natural calendar day from 00:00 in the viewer's
 // timezone), not "the last 24 hours". The `dailyCutoffIso` filter on the page
@@ -20,9 +20,20 @@ export const TIME_RANGES = [
   { label: "30d", days: 30, dims: ["daily", "weekly"] as const },
   { label: "90d", days: 90, dims: ["daily", "weekly"] as const },
   { label: "180d", days: 180, dims: ["weekly"] as const },
+  { label: "365d", days: 365, dims: ["weekly"] as const },
 ] as const;
 
 export type TimeRange = (typeof TIME_RANGES)[number]["days"];
+export type TimeRangeOption = (typeof TIME_RANGES)[number];
+
+/**
+ * The ranges the dashboard offers. 365d follows the dashboard_history_365d
+ * flag: on by default on servers that support it, and a kill switch should
+ * the year-long queries be too slow for a deployment (MUL-9490).
+ */
+export function dashboardTimeRanges(allowYear: boolean): readonly TimeRangeOption[] {
+  return allowYear ? TIME_RANGES : TIME_RANGES.filter((r) => r.days !== 365);
+}
 export type Dim = "daily" | "weekly";
 
 /**

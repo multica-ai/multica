@@ -146,7 +146,7 @@ describe("PinnedSection", () => {
     expect(lastPin()).toBeNull();
     expect(activePinnedRoute).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Show 1 more…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 more..." }));
     expect(lastPin()).toHaveAttribute("aria-current", "page");
     expect(activePinnedRoute).toBe(true);
 

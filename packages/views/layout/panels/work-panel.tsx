@@ -236,6 +236,8 @@ export function WorkPanel() {
           through the React tree, and must not reach rememberClickedIssue. */}
       <IssueContextMenuProvider variant="sidebar">
         <PanelBody onClickCapture={rememberClickedIssue} onAuxClickCapture={rememberClickedIssue}>
+          {wsId && <PinnedSection pins={pins} wsId={wsId} />}
+
           {wsId && (
             <InboxSection
               wsId={wsId}
@@ -243,12 +245,6 @@ export function WorkPanel() {
               pathname={pathname}
               activeIssueId={inboxClaimsIssue ? currentIssueId : null}
             />
-          )}
-
-          {wsId && (
-            <div data-pinned-section className="contents">
-              <PinnedSection pins={pins} wsId={wsId} />
-            </div>
           )}
 
           {wsId && (

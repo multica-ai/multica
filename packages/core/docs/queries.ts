@@ -54,8 +54,11 @@ export function docVersionOptions(wsId: string, id: string, number: number) {
 export function isDocNotFound(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404;
 }
+/** A save based on a stale revision that the server could not apply: refused
+ *  outright, or refused because the stale draft and a newer edit changed the
+ *  same block. Either way the draft must be reconciled with the latest doc. */
 export function isDocRevisionConflict(error: unknown): boolean {
   if (!(error instanceof ApiError) || error.status !== 409) return false;
   const body = error.body as { code?: unknown } | undefined;
-  return body?.code === "revision_conflict";
+  return body?.code === "revision_conflict" || body?.code === "doc_merge_conflict";
 }

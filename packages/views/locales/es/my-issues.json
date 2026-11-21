@@ -2,8 +2,8 @@
   "page": {
     "breadcrumb": "Mis tareas",
     "workspace_fallback": "Espacio de trabajo",
-    "empty_title": "No tienes tareas asignadas",
-    "empty_description": "Las tareas que crees o que te asignen aparecerán aquí."
+    "empty_title": "Aún no hay tareas",
+    "empty_description": "Las tareas asignadas a ti, creadas por ti o en las que participan tus agentes y squads aparecerán aquí."
   },
   "header": {
     "scope": {
@@ -14,7 +14,7 @@
       "created_label": "Creadas",
       "created_description": "Tareas que he creado",
       "agents_label": "Mis agentes y squads",
-      "agents_description": "Tareas asignadas a mis agentes"
+      "agents_description": "Tareas asignadas a mis agentes y squads"
     },
     "filter_button": "Filtrar",
     "filter_status": "Estado",

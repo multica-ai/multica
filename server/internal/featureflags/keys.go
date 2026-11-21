@@ -42,6 +42,14 @@ const (
 	// for a deployment. It is a GLOBAL switch. Turning it off leaves existing
 	// doc rows untouched — they simply become unreachable until it is back on.
 	DocsV1 = "docs_v1"
+	// DashboardHistory365d offers the 365-day range on the workspace dashboard
+	// (MUL-9490). On by default; FF_DASHBOARD_HISTORY_365D=off hides the range
+	// again if the year-long dashboard queries turn out too slow for a
+	// deployment. It only hides the range in the client; the plan's history
+	// limit is enforced on the server either way. Clients treat a missing key
+	// as off, so a newer client never offers 365 days to a server that would
+	// read days=371 as the default 30.
+	DashboardHistory365d = "dashboard_history_365d"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -93,11 +101,16 @@ func DocsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, DocsV1, false)
 }
 
+func DashboardHistory365dEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, DashboardHistory365d, true)
+}
+
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
 	out := make(map[string]bool, len(frontendPublicFlags)+5)
 	for _, key := range frontendPublicFlags {
 		out[key] = flags.IsEnabled(ctx, key, false)
 	}
+	out[DashboardHistory365d] = DashboardHistory365dEnabled(ctx, flags)
 	out[agentBuilderCompat] = true
 	out[agentSkillTogglesCompat] = true
 	out[resourceLabelsCompat] = true

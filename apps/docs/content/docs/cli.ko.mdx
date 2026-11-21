@@ -292,7 +292,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-env` 계열 플래그는 `agent create`에만 있습니다. 나중에 바꿀 때는 `agent env set`을 쓰며, 전체를 교체하고 값이 `****`인 키는 기존 값을 유지합니다.
 - `agent update --mcp-config null`은 MCP 설정을 지웁니다.
 - `--custom-args`는 JSON 배열이며 실행 인수의 맨 끝에 붙습니다. 모델은 `--model`로 고르세요. 사용자 지정 인수 안의 `--model`을 거부하는 도구도 있습니다.
-- 에이전트를 호출할 수 있는 사람은 `--permission-mode`로 정합니다. `private`은 소유자만, `public_to`는 `--public-to-workspace` 또는 `--public-to-member <user-id>`와 함께 씁니다. `--visibility private|workspace`는 예전 방식이며 `--permission-mode`로 변환됩니다. 둘 다 지정하면 `--permission-mode`가 우선합니다. Multica Cloud에서 멤버 목록은 Business에 포함됩니다. Free와 Pro에서 제한이 적용되면 `agent create`나 `agent update`로 목록을 새로 설정하거나 멤버를 추가할 때 `feature_locked`로 거부됩니다. 멤버 제거, 같은 목록 다시 저장, `private` 또는 `--public-to-workspace`로의 변경은 계속 할 수 있습니다.
+- 에이전트를 호출할 수 있는 사람은 `--permission-mode`로 정합니다. `private`은 소유자만, `public_to`는 `--public-to-workspace` 또는 `--public-to-member <user-id>`와 함께 씁니다. `--visibility private|workspace`는 예전 방식이며 `--permission-mode`로 변환됩니다. 둘 다 지정하면 `--permission-mode`가 우선합니다.
 
 ## 데몬과 런타임
 
@@ -317,7 +317,7 @@ multica runtime profile create --display-name "사내 Claude 래퍼" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart`는 현재 profile이 로그인할 때 시작되도록 등록합니다. 플랫폼별 차이는 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 참고하세요. `runtime usage`는 기본적으로 90일을 집계하며 `--days`는 최대 365입니다. `runtime update`는 해당 컴퓨터의 데몬이 CLI를 지정한 버전으로 업데이트하게 하고, `--wait`를 붙이면 업데이트가 끝날 때까지 기다립니다. 업데이트 실패, 업데이트 시간 초과 또는 대기 자체의 시간 초과 시 종료 코드는 0이 아닙니다. `runtime profile create`는 호환 도구를 `--runtime-type`으로 지정합니다(예전 `--protocol-family`도 쓸 수 있음). 고정 인수는 현재 웹 앱에서만 설정할 수 있습니다. `runtime profile create`는 기본적으로 현재 컴퓨터에 연결합니다. 다른 등록된 로컬 컴퓨터를 선택하려면 `--daemon-id <id>`를 지정하세요. 기존 설정은 `multica runtime profile update <profile-id> --daemon-id <id>`로 컴퓨터에 연결할 수 있습니다.
+`daemon autostart`는 현재 profile이 로그인할 때 시작되도록 등록합니다. 플랫폼별 차이는 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 참고하세요. `runtime usage`는 기본적으로 90일을 집계하며 `--days`는 최대 365입니다. `runtime update`는 해당 컴퓨터의 데몬이 CLI를 지정한 버전으로 업데이트하게 합니다. **런타임** 페이지의 **업데이트**(사용 중일 때 [유휴 시까지 대기](/daemon-runtimes#updating-cli))와 달리, 이 요청은 대기열에 들어가지 않습니다. 머신이 작업을 실행 중이면 업데이트는 기다리지 않고 실패합니다. `--wait`를 붙이면 업데이트가 끝날 때까지 기다리며, 업데이트 실패, 업데이트 시간 초과 또는 대기 자체의 시간 초과 시 종료 코드는 0이 아닙니다. `runtime profile create`는 호환 도구를 `--runtime-type`으로 지정합니다(예전 `--protocol-family`도 쓸 수 있음). 고정 인수는 현재 웹 앱에서만 설정할 수 있습니다. `runtime profile create`는 기본적으로 현재 컴퓨터에 연결합니다. 다른 등록된 로컬 컴퓨터를 선택하려면 `--daemon-id <id>`를 지정하세요. 기존 설정은 `multica runtime profile update <profile-id> --daemon-id <id>`로 컴퓨터에 연결할 수 있습니다.
 
 활성 에이전트가 계속 연결된 런타임을 삭제하면 명령이 기본적으로 거부됩니다. `multica runtime delete <id> --cascade`는 에이전트의 런타임 연결을 해제하고 설정과 기록을 보존하며 활성 실행을 취소합니다.
 

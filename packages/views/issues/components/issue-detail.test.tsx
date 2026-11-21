@@ -199,6 +199,10 @@ vi.mock("../../editor", async () => ({
     children,
   usePreviewSequence: () => ({ openAt: () => false }),
   collectPreviewSequence: () => [],
+  // The real provider is plain context; attachment-thumbnail.test.tsx covers it.
+  ...(await vi.importActual<typeof import("../../editor/image-thumbnails-context")>(
+    "../../editor/image-thumbnails-context",
+  )),
   // Comment attachments render as their filename — the viewer and file cards
   // have their own suites.
   AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) =>
@@ -974,7 +978,7 @@ describe("IssueDetail (shared)", () => {
     const header = await screen.findByRole("button", { name: /^Deliverables/ });
     expect(header).toHaveTextContent("1");
     expect(screen.getByRole("button", { name: "report.md, version 2" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "View all 1 deliverable" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View 1 deliverable" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "brief.pdf" })).toBeNull();
   });
 
@@ -999,7 +1003,7 @@ describe("IssueDetail (shared)", () => {
     }]);
     renderIssueDetail();
     expect(await screen.findByRole("button", { name: "historical-chart.png" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "View all 1 deliverable" }));
+    fireEvent.click(screen.getByRole("button", { name: "View 1 deliverable" }));
     expect(await screen.findByTitle("historical-chart.png")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show in comments" })).toBeInTheDocument();
     expect(mockApiObj.listComments).not.toHaveBeenCalled();
@@ -1033,7 +1037,7 @@ describe("IssueDetail (shared)", () => {
     }]);
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
     renderIssueDetail();
-    fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View 1 deliverable" }));
     fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
     await waitFor(() => expect(hasHighlightedCommentBackground(
       document.getElementById("comment-image-reply"),
@@ -1043,7 +1047,7 @@ describe("IssueDetail (shared)", () => {
     expect(document.querySelectorAll('[id^="comment-history-"]').length).toBeLessThanOrEqual(8);
     expect(mockApiObj.listComments).not.toHaveBeenCalled();
     const jumps = scrollIntoViewIndexSpy.mock.calls.length;
-    fireEvent.click(screen.getByRole("button", { name: "View all 1 deliverable" }));
+    fireEvent.click(screen.getByRole("button", { name: "View 1 deliverable" }));
     fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
     await waitFor(() => expect(scrollIntoViewIndexSpy.mock.calls.length).toBeGreaterThan(jumps));
   });
@@ -2627,7 +2631,7 @@ describe("IssueDetail (shared)", () => {
     const links = await screen.findAllByRole("link", { name: "MUL-9" });
     expect(links[0]?.getAttribute("href")).toBe("/test/issues/issue-9");
     expect(screen.getByText(/^marked this issue as a duplicate of/i)).toBeInTheDocument();
-    expect(screen.getByText(/removed the duplicate mark, MUL-8 was deleted/i)).toBeInTheDocument();
+    expect(screen.getByText(/removed the duplicate mark \(MUL-8 was deleted\)/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "MUL-8" })).not.toBeInTheDocument();
     // Reopening replaces the status row, so the unmarked row says where it went.
     expect(screen.getByText(/and moved it to Todo/i)).toBeInTheDocument();
@@ -3544,7 +3548,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));
+      fireEvent.click(await screen.findByRole("button", { name: "View 1 deliverable" }));
       const overview = await screen.findByRole("dialog", { name: /deliverables$/ });
       expect(document.getElementById("comment-reply-2")).toBeNull();
       fireEvent.click(within(overview).getByRole("button", { name: "Show in comments" }));
@@ -3592,7 +3596,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));
+      fireEvent.click(await screen.findByRole("button", { name: "View 1 deliverable" }));
       const overview = await screen.findByRole("dialog", { name: /deliverables$/ });
       fireEvent.click(within(overview).getByRole("button", { name: "Show in comments" }));
 

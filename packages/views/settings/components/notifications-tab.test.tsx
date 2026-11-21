@@ -61,13 +61,13 @@ describe("Inbox notification settings", () => {
       "Other people's issues",
       "Status changes",
       "Comments",
-      "Priority & Due date",
+      "Priority & due date",
       "Projects you subscribe to",
       "New issues",
       "Agents",
       "Agent activity",
     ]);
-    expect(within(inbox).getByRole("switch", { name: "Priority & Due date" })).not.toBeChecked();
+    expect(within(inbox).getByRole("switch", { name: "Priority & due date" })).not.toBeChecked();
     expect(within(inbox).getByRole("switch", { name: "Comments" })).toBeChecked();
   });
 
@@ -145,7 +145,7 @@ describe("notification setting hierarchy", () => {
       </QueryClientProvider>,
     );
     expect(screen.queryByRole("region", { name: "Chat" })).toBeNull();
-    const system = screen.getByRole("region", { name: "System Notifications" });
+    const system = screen.getByRole("region", { name: "System notifications" });
     if (systemMuted) {
       expect(within(system).queryByRole("switch", { name: "Include chat replies" })).toBeNull();
       expect(within(system).getAllByRole("switch")).toHaveLength(1);

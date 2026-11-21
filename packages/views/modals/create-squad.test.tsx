@@ -232,8 +232,8 @@ function makeSquad(overrides: Partial<Squad> = {}): Squad {
 function getSubmitButton(): HTMLButtonElement {
   const btn = screen
     .getAllByRole("button")
-    .find((b) => b.textContent === "Create Squad");
-  if (!btn) throw new Error("Create Squad submit button not found");
+    .find((b) => b.textContent === "Create squad");
+  if (!btn) throw new Error("Create squad submit button not found");
   return btn as HTMLButtonElement;
 }
 
@@ -321,8 +321,8 @@ describe("CreateSquadModal", () => {
     renderModal();
     // The leader group headers come from the LeaderPicker — agent name "MineAgentOne"
     // appears under the My Agents section, "OtherAgentOne" under Workspace Agents.
-    const myGroupLabels = screen.getAllByText("My Agents");
-    const wsGroupLabels = screen.getAllByText("Workspace Agents");
+    const myGroupLabels = screen.getAllByText("My agents");
+    const wsGroupLabels = screen.getAllByText("Workspace agents");
     expect(myGroupLabels.length).toBeGreaterThanOrEqual(1);
     expect(wsGroupLabels.length).toBeGreaterThanOrEqual(1);
 
@@ -331,8 +331,8 @@ describe("CreateSquadModal", () => {
     // both sections; the additional-members picker also has them, but both
     // pickers follow the same order so the assertion holds either way).
     const all = Array.from(document.querySelectorAll("*"));
-    const myIdx = all.findIndex((n) => n.textContent === "My Agents");
-    const wsIdx = all.findIndex((n) => n.textContent === "Workspace Agents");
+    const myIdx = all.findIndex((n) => n.textContent === "My agents");
+    const wsIdx = all.findIndex((n) => n.textContent === "Workspace agents");
     expect(myIdx).toBeLessThan(wsIdx);
   });
 

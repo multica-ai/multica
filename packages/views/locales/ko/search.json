@@ -135,7 +135,7 @@
   },
   "delegate": {
     "row": "에이전트에게 맡기기: “{{prompt}}”",
-    "hint": "빠른 만들기"
+    "hint": "에이전트로 만들기"
   },
   "best": {
     "assign": "{{subject}}를 {{name}}에게 지정",

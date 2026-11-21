@@ -67,7 +67,7 @@
     "empty": "인박스가 비어 있습니다",
     "original_input": "원본 입력",
     "retry_with_context": "컨텍스트를 유지하여 재시도",
-    "edit_advanced": "고급 양식으로 수정",
+    "edit_advanced": "전체 양식 열기",
     "autopilot_quota_exceeded_body": "이 워크스페이스는 현재 기간의 오토파일럿 실행 한도 {{limit}}회에 도달했습니다. 한도가 {{resetAt}}에 초기화되거나 업그레이드 또는 실행 횟수를 추가 구매할 때까지 이후 오토파일럿 실행은 시작되지 않습니다.",
     "project_owner_joined_body": "{{name}} 님은 워크스페이스 소유자이며 이 비공개 프로젝트에 자신을 추가했습니다. 이제 태스크, 댓글, 첨부 파일을 볼 수 있습니다.",
     "open_project": "프로젝트 열기",
@@ -151,7 +151,7 @@
   "errors": {
     "archived_lookup_failed": "링크된 알림을 불러오지 못했습니다",
     "source_context_retry_failed": "원본 컨텍스트로 재시도하지 못했습니다",
-    "source_context_retry_unavailable": "이 컨텍스트는 더 이상 재시도할 수 없습니다. 분기 지점에서 다시 시작하세요.",
+    "source_context_retry_unavailable": "이 요청은 더 이상 다시 시도할 수 없습니다. 원본 메시지 또는 태스크에서 다시 시작하세요.",
     "mark_read_failed": "읽음 표시를 하지 못했습니다",
     "mark_unread_failed": "읽지 않음 표시를 하지 못했습니다",
     "archive_failed": "보관하지 못했습니다",
@@ -173,7 +173,7 @@
     "description": "이 알림은 영구적으로 삭제됩니다. 관련 작업과 실행 기록은 유지됩니다.",
     "issue_description": "이 보기에서 해당 작업의 알림이 영구적으로 삭제됩니다. 작업과 실행 기록은 유지됩니다.",
     "cancel": "취소",
-    "active_issue_description": "이 작업의 받은편지함 알림은 영구적으로 삭제됩니다. 이전에 보관한 알림은 유지되며 보관함에 다시 표시됩니다. 작업과 실행 기록은 유지됩니다."
+    "active_issue_description": "이 태스크의 활성 받은 편지함 알림이 영구적으로 삭제됩니다. 이전에 보관한 알림과 태스크, 실행 기록은 유지됩니다."
   },
   "unsubscribe": {
     "title": "구독을 해제하고 보관합니다. 이 태스크의 업데이트 알림은 오지 않지만 @멘션은 계속 알림을 받습니다.",
@@ -198,7 +198,7 @@
     "picker_hour": "시",
     "picker_minute": "분",
     "picker_submit": "{{time}}까지 미루기",
-    "hint": "이름으로 멘션되거나, 할당되거나, 실행이 실패하면 일찍 돌아옵니다.",
+    "hint": "@멘션되거나, 담당자로 지정되거나, 실행이 실패하면 예정보다 일찍 돌아옵니다.",
     "custom_invalid": "1년 이내의 미래 시간을 선택하세요.",
     "back_at": "{{time}}에 돌아옴",
     "returned": "다시 알림 종료",
