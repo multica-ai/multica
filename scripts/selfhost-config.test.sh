@@ -83,20 +83,36 @@ require_config "$config" 'COLLAB_INTERNAL_URL: ""'
 collab_env="$tmp_dir/.env.collab"
 sed 's/^# COLLAB_SECRET=$/COLLAB_SECRET=collab-secret-from-env/;s/^# COMPOSE_PROFILES=collab$/COMPOSE_PROFILES=collab/;s/^# FF_DOCS_V1=true$/FF_DOCS_V1=true/' \
   "$tmp_env" >"$collab_env"
-# Docs is off by default, and an empty FF_DOCS_V1 would pin it off, so the
-# backend must not receive the variable at all until it is set.
-docs_flag="$(env -u FF_DOCS_V1 docker compose --env-file "$tmp_env" -f docker-compose.selfhost.yml config --format json |
-  node -e '
+# Feature flags reach the backend only when set: an empty FF_ value pins the
+# flag off (Docs stays off, and a kill switch turns its feature off), so a flag
+# left unset must not appear in the container at all.
+backend_flags() {
+  local env_file=$1
+  # Unset every FF_ variable first so the agent's own environment cannot leak.
+  # shellcheck disable=SC2046
+  env $(compgen -e | grep '^FF_' | sed 's/^/-u /') \
+    docker compose --env-file "$env_file" -f docker-compose.selfhost.yml config --format json |
+    node -e '
 let raw = "";
 process.stdin.on("data", (chunk) => (raw += chunk));
 process.stdin.on("end", () => {
-  process.stdout.write(String(JSON.parse(raw).services.backend.environment.FF_DOCS_V1 ?? "unset"));
+  const env = JSON.parse(raw).services.backend.environment;
+  // A bare `FF_X:` that nothing sets comes back as null: not passed.
+  for (const [name, value] of Object.entries(env)) {
+    if (name.startsWith("FF_") && value !== null) console.log(name + "=" + value);
+  }
 });
-')"
-if [ "$docs_flag" != unset ]; then
-  echo "The backend must not receive FF_DOCS_V1 unless it is set, got: $docs_flag"
+'
+}
+default_flags="$(backend_flags "$tmp_env")"
+if [ -n "$default_flags" ]; then
+  echo "The backend must not receive feature flags that are not set, got:"
+  echo "$default_flags"
   exit 1
 fi
+kill_switch_env="$tmp_dir/.env.kill-switch"
+sed 's/^# FF_LOCAL_SEARCH_INDEX=off$/FF_LOCAL_SEARCH_INDEX=off/' "$tmp_env" >"$kill_switch_env"
+require_env "$(backend_flags "$kill_switch_env")" 'FF_LOCAL_SEARCH_INDEX=off'
 collab_config="$(env -u COLLAB_SECRET -u COLLAB_INTERNAL_URL -u COMPOSE_PROFILES -u FF_DOCS_V1 \
   docker compose --env-file "$collab_env" -f docker-compose.selfhost.yml config --format json)"
 node -e '
@@ -159,6 +175,29 @@ while IFS= read -r secret_key; do
     exit 1
   fi
 done <<<"$secret_keys"
+
+# The same drift for feature flags: each FF_ variable .env.example tells an
+# operator to set must be mapped into the backend, without a value so it is
+# passed only when set. Flags that only matter to a multica-cloud deployment
+# are left out on purpose.
+cloud_only_flags=(FF_BILLING_WORKSPACE_SUBSCRIPTIONS)
+documented_flags="$(grep -oE '^(# )?FF_[A-Z0-9_]+=' .env.example | sed -E 's/^# //;s/=$//' | sort -u)" || true
+if [ -z "$documented_flags" ]; then
+  echo "Found no FF_ variables in .env.example; this check no longer sees the"
+  echo "documented feature flags and needs updating."
+  exit 1
+fi
+while IFS= read -r flag; do
+  if [[ " ${cloud_only_flags[*]} " == *" $flag "* ]]; then
+    continue
+  fi
+  if ! grep -Eq "^[[:space:]]+${flag}:[[:space:]]*$" docker-compose.selfhost.yml; then
+    echo "$flag is documented in .env.example but not mapped into the backend service"
+    echo "in docker-compose.selfhost.yml as \`$flag:\`, so self-hosted deployments cannot"
+    echo "set it. If it only matters to multica-cloud, add it to cloud_only_flags here."
+    exit 1
+  fi
+done <<<"$documented_flags"
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then

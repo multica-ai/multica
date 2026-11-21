@@ -207,9 +207,31 @@ rewrite configuration. Its backend fallback therefore accepts
 `BACKEND_PORT` → `API_PORT` → `SERVER_PORT` → `8080`, while an explicit
 `REMOTE_API_URL` or `NEXT_PUBLIC_API_URL` still takes priority.
 
+### Feature Flags (Optional)
+
+Some features are switched with `FF_<FLAG_KEY>` variables: `true`, `false` (or `on` / `off`), a percent rollout like `25%`, or a variant name.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FF_DOCS_V1` | off | Workspace Docs. |
+| `FF_LOCAL_SEARCH_INDEX` | on | Web and Desktop keep a local search index per workspace. Set `off` to make clients search through the server again. |
+| `FF_DASHBOARD_HISTORY_365D` | on | The 365-day range on the Analytics page. Set `off` if year-long dashboard queries are too slow for your database. |
+
+With Docker Compose, set them in `.env` and run `make selfhost` (or `docker compose -f docker-compose.selfhost.yml up -d`) again. `docker-compose.selfhost.yml` passes only the flags listed above, and only when they are set, so leave a flag out of `.env` to keep its default: a flag set to an empty value is off.
+
+With Helm, list flags by key under `backend.config.featureFlags`; each becomes `FF_<KEY>` in the backend ConfigMap, and the backend restarts when they change:
+
+```yaml
+backend:
+  config:
+    featureFlags:
+      docs_v1: true
+      local_search_index: false
+```
+
 ### Live Doc Co-editing (Optional)
 
-Docs (`FF_DOCS_V1=true`) work without it: every edit saves through the API. The `collab` service adds live co-editing, where everyone in a doc sees each other's cursors and changes as they type, and the editor shows **Live**. Editors never connect to it directly. They open a WebSocket to `/collab` on the backend, the same way they reach `/ws`, and the backend forwards it.
+Docs (`FF_DOCS_V1=true`, see [Feature Flags](#feature-flags-optional)) work without it: every edit saves through the API. The `collab` service adds live co-editing, where everyone in a doc sees each other's cursors and changes as they type, and the editor shows **Live**. Editors never connect to it directly. They open a WebSocket to `/collab` on the backend, the same way they reach `/ws`, and the backend forwards it.
 
 | Variable | Service | Description |
 |----------|---------|-------------|

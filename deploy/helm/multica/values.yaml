@@ -185,6 +185,14 @@ backend:
     # Larger limits can slow browser previews.
     maxPreviewSize: 2MiB
     localUploadBaseUrl: http://api.multica.dev.lan
+    # Feature flags by flag key, each rendered as an FF_<KEY> variable
+    # (docs_v1 -> FF_DOCS_V1). An unlisted flag keeps its default; an empty
+    # value turns the flag off. Values: true, false, a percent like "25%", or
+    # a variant name. The flags documented in .env.example:
+    #   docs_v1: true                  # Workspace Docs, off until set
+    #   local_search_index: false      # kill switch, on by default
+    #   dashboard_history_365d: false  # kill switch, on by default
+    featureFlags: {}
   resources:
     requests:
       cpu: 100m
