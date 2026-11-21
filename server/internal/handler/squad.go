@@ -684,7 +684,20 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	rows, err := h.Queries.ListSquadMemberStatusRows(r.Context(), squad.ID)
+	// Smart-runtime members have no template runtime; resolve their health
+	// through the caller's personal configuration, the same per-viewer
+	// resolution the agent detail page uses.
+	// An absent caller id (internal probes) resolves NULL: the personal
+	// config join misses and smart members read from the template binding,
+	// exactly like the pre-smart behavior.
+	viewerUserID := pgtype.UUID{}
+	if raw := requestUserID(r); raw != "" {
+		viewerUserID = parseUUID(raw)
+	}
+	rows, err := h.Queries.ListSquadMemberStatusRows(r.Context(), db.ListSquadMemberStatusRowsParams{
+		SquadID:      squad.ID,
+		ViewerUserID: viewerUserID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list squad member status")
 		return

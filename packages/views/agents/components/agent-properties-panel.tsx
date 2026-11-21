@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Globe, Lock, Settings2, Users } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import type {
@@ -68,6 +69,7 @@ export function AgentPropertiesPanel({
   onEditAccess: () => void;
   onOpenSettings: () => void;
 }) {
+  const qc = useQueryClient();
   const { t } = useT("agents");
   const { t: tl } = useT("layout");
   const { t: tr } = useT("runtimes");
@@ -83,7 +85,30 @@ export function AgentPropertiesPanel({
     runtimeOptions,
     changeModel,
     changeRuntime,
-  } = useExecutionControls({ agent, runtime, runtimes, currentUserId, update });
+  } = useExecutionControls({
+    agent,
+    runtime,
+    runtimes,
+    currentUserId,
+    update,
+    // The agent list payload carries the runtime config summary the panel
+    // reads; a personal-config save must re-read it.
+    onSaved: () => {
+      void qc.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+
+  // Smart agents carry no template runtime/model: display what the viewer's
+  // personal configuration resolves to (the pickers above write to it too).
+  const isSmart = agent.share_runtime === false;
+  const currentConfig = agent.runtime_config_summary?.current ?? null;
+  const effectiveRuntimeId =
+    (isSmart ? currentConfig?.runtime_id : agent.runtime_id) ?? "";
+  const displayModel = isSmart && currentConfig?.model ? currentConfig.model : agent.model;
+  const displayThinkingLevel =
+    isSmart && currentConfig?.thinking_level
+      ? currentConfig.thinking_level
+      : agent.thinking_level;
 
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const week = summarizeActivityWindow(activityMap.get(agent.id), 7);
@@ -125,7 +150,7 @@ export function AgentPropertiesPanel({
 
         <ObjectProperty label={t(($) => $.inspector.prop_runtime)}>
           <RuntimePicker
-            value={agent.runtime_id}
+            value={effectiveRuntimeId || agent.runtime_id}
             runtimes={runtimeOptions}
             members={members}
             currentUserId={currentUserId}
@@ -161,19 +186,19 @@ export function AgentPropertiesPanel({
           <>
             <ObjectProperty label={t(($) => $.inspector.prop_model)}>
               <ModelPicker
-                runtimeId={agent.runtime_id}
+                runtimeId={effectiveRuntimeId || agent.runtime_id}
                 runtimeOnline={canDiscoverRuntimeModels}
-                value={agent.model ?? ""}
+                value={displayModel ?? ""}
                 canEdit={canEdit}
                 onChange={changeModel}
               />
             </ObjectProperty>
             <ThinkingPropRow
-              runtimeId={agent.runtime_id}
+              runtimeId={effectiveRuntimeId || agent.runtime_id}
               runtimeOnline={canDiscoverRuntimeModels}
               provider={runtime?.provider ?? ""}
-              model={agent.model ?? ""}
-              value={agent.thinking_level ?? ""}
+              model={displayModel ?? ""}
+              value={displayThinkingLevel ?? ""}
               canEdit={canEdit}
               onChange={(thinkingLevel) => update({ thinking_level: thinkingLevel })}
             />

@@ -7,6 +7,7 @@ import {
   isRuntimeUsableForUser,
   runtimeModelsOptions,
 } from "@multica/core/runtimes";
+import { api } from "@multica/core/api";
 import { buildModelChangeUpdate, type ModelCatalog } from "./model-change-cleanup";
 
 /**
@@ -15,17 +16,33 @@ import { buildModelChangeUpdate, type ModelCatalog } from "./model-change-cleanu
  */
 export function useExecutionControls({
   agent,
-  runtime,
+  runtime: fixedRuntime,
   runtimes,
   currentUserId,
   update,
+  onSaved,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
   runtimes: AgentRuntime[];
   currentUserId: string | null;
   update: (data: Record<string, unknown>) => Promise<void>;
+  /** Runs after a personal-config save so the panel re-reads the summary. */
+  onSaved?: () => void;
 }) {
+  // Smart agents carry no template runtime: the viewer's personal runtime
+  // configuration names the runtime (and model) their runs actually use, so
+  // reads resolve through it and writes go to the personal-config endpoint
+  // instead of the template PATCH (which the server rejects for smart
+  // agents with `smart strategy requires a CLI and no runtime_id`).
+  const isSmart = agent.share_runtime === false;
+  const currentConfig = agent.runtime_config_summary?.current ?? null;
+  const effectiveRuntimeId =
+    (isSmart ? currentConfig?.runtime_id : agent.runtime_id) ?? "";
+  const runtime = useMemo(
+    () => (isSmart ? runtimes.find((r) => r.id === effectiveRuntimeId) ?? null : fixedRuntime),
+    [isSmart, effectiveRuntimeId, runtimes, fixedRuntime],
+  );
   // A Qoder agent is bound to an agent in Qoder Cloud Agents, and the model lives there. Moving
   // between Qoder and any other runtime would need a different configuration
   // the server either rejects or the bridge refuses, so neither direction is
@@ -59,9 +76,30 @@ export function useExecutionControls({
     [modelsQuery.data, modelsQuery.isSuccess],
   );
 
+  const savePersonalConfig = useCallback(
+    (patch: { runtime_id?: string; model?: string; thinking_level?: string }) =>
+      api
+        .updateAgentRuntimeCurrentConfig(agent.id, {
+          strategy: "custom",
+          runtime_id: patch.runtime_id ?? currentConfig?.runtime_id ?? "",
+          model: patch.model ?? currentConfig?.model ?? "",
+          thinking_level:
+            patch.thinking_level ?? currentConfig?.thinking_level ?? "",
+          service_tier: currentConfig?.service_tier ?? "",
+          max_concurrent_tasks:
+            currentConfig?.max_concurrent_tasks ?? agent.max_concurrent_tasks,
+          runtime_config: currentConfig?.runtime_config ?? {},
+        })
+        .then(() => onSaved?.()),
+    [agent.id, agent.max_concurrent_tasks, currentConfig, onSaved],
+  );
+
   const changeModel = useCallback(
-    (model: string) =>
-      update(
+    (model: string) => {
+      if (isSmart) {
+        return savePersonalConfig({ model });
+      }
+      return update(
         buildModelChangeUpdate({
           provider: runtime?.provider ?? "",
           model,
@@ -69,22 +107,29 @@ export function useExecutionControls({
           serviceTier: agent.service_tier ?? "",
           catalog: modelCatalog,
         }),
-      ),
-    [agent.service_tier, agent.thinking_level, modelCatalog, runtime?.provider, update],
+      );
+    },
+    [agent.service_tier, agent.thinking_level, isSmart, modelCatalog, runtime?.provider, savePersonalConfig, update],
   );
 
   // Model, thinking level, and service tier are runtime/model native. Clear
   // them together so the new runtime resolves its own defaults instead of
   // inheriting incompatible tokens.
   const changeRuntime = useCallback(
-    (runtimeId: string) =>
-      update({
+    (runtimeId: string) => {
+      if (isSmart) {
+        // Switching runtimes clears the model/thinking overrides so the new
+        // runtime resolves its own defaults, mirroring the fixed path.
+        return savePersonalConfig({ runtime_id: runtimeId, model: "", thinking_level: "" });
+      }
+      return update({
         runtime_id: runtimeId,
         model: "",
         thinking_level: "",
         service_tier: "",
-      }),
-    [update],
+      });
+    },
+    [isSmart, savePersonalConfig, update],
   );
 
   return {

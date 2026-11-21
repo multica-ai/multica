@@ -974,6 +974,7 @@ function SquadProperties({
                   <DropdownMenuRadioItem key={m.member_id} value={m.member_id}>
                     <ActorAvatar actorType="agent" actorId={m.member_id} size="xs" />
                     <span className="truncate">{getEntityName("agent", m.member_id)}</span>
+                    <SmartRuntimeAgentBadgeById agentId={m.member_id} />
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
