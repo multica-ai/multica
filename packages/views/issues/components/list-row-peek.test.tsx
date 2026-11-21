@@ -104,7 +104,7 @@ describe("ListRow side peek", () => {
     expect(navigation.push).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("link"));
-    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/issue-1");
+    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/MUL-1");
   });
 
   it("opens on a plain click when side preview is preferred", () => {

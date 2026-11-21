@@ -2233,7 +2233,7 @@ export function TableView({
       // middle clicks open tabs. Callbacks without an event (keyboard
       // affordances) count as plain clicks.
       intentNavigate(
-        paths.issueDetail(issue.id),
+        paths.issueDetail(issue.identifier),
         event ? resolveClickIntent(event) : "push",
         issue.identifier,
       );

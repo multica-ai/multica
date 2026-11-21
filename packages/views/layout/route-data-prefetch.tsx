@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   agentActivity30dOptions,
@@ -10,6 +10,8 @@ import {
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { inboxListOptions } from "@multica/core/inbox/queries";
+import { issueDetailOptions, issueKeys, prefetchIssuePage } from "@multica/core/issues/queries";
+import type { Issue } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useIsGuest } from "@multica/core/permissions";
 import { paths, useCurrentWorkspace, useWorkspaceSlug } from "@multica/core/paths";
@@ -73,6 +75,22 @@ const ROUTES = {
 
 type RouteKey = keyof typeof ROUTES;
 
+/** A pointer passing over a list of issues is not heading for every row in it. */
+const ISSUE_HOVER_INTENT_MS = 80;
+
+/**
+ * The issue a link names by UUID or identifier, also cached under its UUID:
+ * the page keys everything else by UUID, and resolves an identifier through
+ * the identifier-keyed entry this fills.
+ */
+async function fetchIssue(qc: QueryClient, wsId: string, ref: string): Promise<Issue> {
+  const issue = await qc.fetchQuery(issueDetailOptions(wsId, ref));
+  if (issue.id !== ref) {
+    qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) => old ?? issue);
+  }
+  return issue;
+}
+
 // A guest (MUL-9420) only reaches these pages.
 const GUEST_ROUTES: RouteKey[] = ["projects", "inbox"];
 
@@ -88,9 +106,10 @@ const WARM_ON_IDLE: RouteKey[] = [
 ];
 
 /**
- * Feeds `AppLink`'s hover/focus prefetch with the destination page's data and
- * warms the common list pages once the workspace is idle. Mount inside the
- * workspace shell, around the navigation that should benefit.
+ * Feeds `AppLink`'s hover/focus prefetch with the destination page's data, an
+ * issue page's included, and warms the common list pages once the workspace
+ * is idle. Mount inside the workspace shell, around the navigation that
+ * should benefit.
  */
 export function RouteDataPrefetch({
   wsId,
@@ -114,13 +133,41 @@ export function RouteDataPrefetch({
     return new Map<string, WarmRoute>(keys.map((key) => [p[key](), ROUTES[key]]));
   }, [slug, guest]);
 
+  const issuePrefix = slug ? `${paths.workspace(slug).issues()}/` : null;
+  const issueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (issueTimer.current) clearTimeout(issueTimer.current);
+  }, []);
+
   const prefetch = useCallback(
     (href: string) => {
       if (!wsId) return;
       const path = href.split(/[?#]/)[0] ?? href;
+      const segment = issuePrefix && path.startsWith(issuePrefix) ? path.slice(issuePrefix.length) : "";
+      if (segment && !segment.includes("/")) {
+        // The issue alone holds the page's first paint, so it is fetched at
+        // once; what the page fills in after it waits for the pointer to
+        // settle. A failed warm-up is the page's own first request again.
+        if (issueTimer.current) clearTimeout(issueTimer.current);
+        let ref: string;
+        try {
+          ref = decodeURIComponent(segment);
+        } catch {
+          return;
+        }
+        const issue = fetchIssue(qc, wsId, ref);
+        issue.catch(() => undefined);
+        // A guest's issue page reads the issue alone (MUL-9420).
+        if (guest) return;
+        issueTimer.current = setTimeout(() => {
+          issueTimer.current = null;
+          issue.then((loaded) => prefetchIssuePage(qc, wsId, loaded.id)).catch(() => undefined);
+        }, ISSUE_HOVER_INTENT_MS);
+        return;
+      }
       routeByHref.get(path)?.(qc, wsId, userId);
     },
-    [qc, routeByHref, wsId, userId],
+    [qc, routeByHref, issuePrefix, wsId, userId, guest],
   );
 
   useEffect(() => {
