@@ -26,6 +26,12 @@ multica project get <project-id> --output json
 multica project resource list <project-id> --output json
 ```
 
+Project progress counts issues: `scope` leaves out cancelled issues, `completed`
+is the done category, and `started` issues are tracked separately without adding
+to `percent`. Read it from `progress` on the project, or from
+`multica project progress` for the weekly history, forecast and per-assignee
+breakdown.
+
 Project resources are mutated through project resource commands/endpoints. Issue
 comments do not create durable project resources.
 
@@ -48,6 +54,7 @@ Common resource types:
 ```bash
 multica project list --output json
 multica project get <project-id> --output json
+multica project progress <project-id> --output json   # scope/completed/started, weekly history, forecast, by assignee
 multica project create --title "<title>" --repo <github-url> --output json
 multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
 multica project update <project-id> --title "<title>" --output json

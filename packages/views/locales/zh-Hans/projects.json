@@ -102,7 +102,25 @@
     "toast_project_deleted": "已删除项目",
     "toast_move_issue_failed": "移动任务失败",
     "archive_action": "归档项目",
-    "restore_action": "恢复项目"
+    "restore_action": "恢复项目",
+    "progress_panel": {
+      "summary_other": "{{count}} 个任务中已完成 {{completed}} 个",
+      "legend_completed": "已完成",
+      "legend_started": "进行中",
+      "legend_unstarted": "未开始",
+      "cancelled_note_other": "另有 {{count}} 个已取消，不计入进度",
+      "empty_hint": "任务加进来之后开始计算进度和趋势。",
+      "chart_label": "每周进度",
+      "chart_today": "今天",
+      "forecast_no_due": "按近期的完成速度，预计 {{date}} 完成",
+      "forecast_ahead_other": "按近期的完成速度，预计 {{date}} 完成，比截止日期早 {{count}} 天",
+      "forecast_behind_other": "按近期的完成速度，预计 {{date}} 完成，比截止日期晚 {{count}} 天",
+      "forecast_on_due": "按近期的完成速度，预计 {{date}} 完成，正好赶上截止日期",
+      "forecast_none": "近期完成的任务太少，暂时无法预测完成日期。",
+      "by_assignee": "按负责人",
+      "agent_tag": "智能体",
+      "unassigned": "未分配"
+    }
   },
   "resources": {
     "section_header": "资源",

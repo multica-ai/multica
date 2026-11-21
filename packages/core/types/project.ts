@@ -46,6 +46,49 @@ export interface ListPrivateProjectsResponse {
   total: number;
 }
 
+/**
+ * Issue-count progress of a project. Scope leaves out cancelled issues (the
+ * closed category); started issues are counted but add nothing to percent.
+ */
+export interface ProjectProgress {
+  unit: "issues";
+  scope: number;
+  completed: number;
+  started: number;
+  unstarted: number;
+  cancelled: number;
+  /** completed / scope, rounded down; 0 when scope is 0. */
+  percent: number;
+}
+
+export interface ProjectProgressAssignee {
+  assignee_type: "member" | "agent" | "squad" | null;
+  assignee_id: string | null;
+  scope: number;
+  completed: number;
+  started: number;
+}
+
+/** One weekly sample; `date` is a calendar day ("YYYY-MM-DD"), the last one is today. */
+export interface ProjectProgressPoint {
+  date: string;
+  scope: number;
+  started: number;
+  completed: number;
+}
+
+export interface ProjectProgressForecast {
+  completion_date: string;
+  weekly_velocity: number;
+}
+
+export interface ProjectProgressDetail {
+  progress: ProjectProgress;
+  by_assignee: ProjectProgressAssignee[];
+  history: ProjectProgressPoint[];
+  forecast: ProjectProgressForecast | null;
+}
+
 export interface Project {
   id: string;
   workspace_id: string;
@@ -72,7 +115,10 @@ export interface Project {
    */
   last_activity_at?: string;
   issue_count: number;
+  /** Done and cancelled issues together; prefer `progress` for completion. */
   done_count: number;
+  /** Optional because older servers do not send it. */
+  progress?: ProjectProgress;
   resource_count: number;
   /**
    * The workflow this project uses; null for the workspace Default workflow.

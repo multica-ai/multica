@@ -203,28 +203,43 @@ const getProjectIssueStats = `-- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
        count(*) FILTER (WHERE status = ANY($1::text[]))::bigint AS done_count,
+       count(*) FILTER (WHERE status = ANY($2::text[]))::bigint AS completed_count,
+       count(*) FILTER (WHERE status = ANY($3::text[]))::bigint AS started_count,
        max(GREATEST(updated_at, last_activity_at))::timestamptz AS last_issue_activity_at
 FROM issue
-WHERE workspace_id = $2::uuid
-  AND project_id = ANY($3::uuid[])
+WHERE workspace_id = $4::uuid
+  AND project_id = ANY($5::uuid[])
 GROUP BY project_id
 `
 
 type GetProjectIssueStatsParams struct {
-	TerminalStatusKeys []string      `json:"terminal_status_keys"`
-	WorkspaceID        pgtype.UUID   `json:"workspace_id"`
-	ProjectIds         []pgtype.UUID `json:"project_ids"`
+	TerminalStatusKeys  []string      `json:"terminal_status_keys"`
+	CompletedStatusKeys []string      `json:"completed_status_keys"`
+	StartedStatusKeys   []string      `json:"started_status_keys"`
+	WorkspaceID         pgtype.UUID   `json:"workspace_id"`
+	ProjectIds          []pgtype.UUID `json:"project_ids"`
 }
 
 type GetProjectIssueStatsRow struct {
 	ProjectID           pgtype.UUID        `json:"project_id"`
 	TotalCount          int64              `json:"total_count"`
 	DoneCount           int64              `json:"done_count"`
+	CompletedCount      int64              `json:"completed_count"`
+	StartedCount        int64              `json:"started_count"`
 	LastIssueActivityAt pgtype.Timestamptz `json:"last_issue_activity_at"`
 }
 
+// done_count counts every terminal issue (done and closed categories) and
+// keeps that meaning for older clients; completed_count is the done category
+// alone, so cancelled = done_count - completed_count.
 func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueStatsParams) ([]GetProjectIssueStatsRow, error) {
-	rows, err := q.db.Query(ctx, getProjectIssueStats, arg.TerminalStatusKeys, arg.WorkspaceID, arg.ProjectIds)
+	rows, err := q.db.Query(ctx, getProjectIssueStats,
+		arg.TerminalStatusKeys,
+		arg.CompletedStatusKeys,
+		arg.StartedStatusKeys,
+		arg.WorkspaceID,
+		arg.ProjectIds,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +251,97 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueS
 			&i.ProjectID,
 			&i.TotalCount,
 			&i.DoneCount,
+			&i.CompletedCount,
+			&i.StartedCount,
 			&i.LastIssueActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueStatusChangesSince = `-- name: ListIssueStatusChangesSince :many
+SELECT issue_id, details, created_at
+FROM activity_log
+WHERE workspace_id = $1::uuid
+  AND issue_id = ANY($2::uuid[])
+  AND action = 'status_changed'
+  AND created_at >= $3::timestamptz
+ORDER BY created_at, id
+`
+
+type ListIssueStatusChangesSinceParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueIds    []pgtype.UUID      `json:"issue_ids"`
+	Since       pgtype.Timestamptz `json:"since"`
+}
+
+type ListIssueStatusChangesSinceRow struct {
+	IssueID   pgtype.UUID        `json:"issue_id"`
+	Details   []byte             `json:"details"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListIssueStatusChangesSince(ctx context.Context, arg ListIssueStatusChangesSinceParams) ([]ListIssueStatusChangesSinceRow, error) {
+	rows, err := q.db.Query(ctx, listIssueStatusChangesSince, arg.WorkspaceID, arg.IssueIds, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueStatusChangesSinceRow{}
+	for rows.Next() {
+		var i ListIssueStatusChangesSinceRow
+		if err := rows.Scan(&i.IssueID, &i.Details, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectProgressIssues = `-- name: ListProjectProgressIssues :many
+SELECT id, status, assignee_type, assignee_id, created_at
+FROM issue
+WHERE workspace_id = $1::uuid
+  AND project_id = $2::uuid
+`
+
+type ListProjectProgressIssuesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
+
+type ListProjectProgressIssuesRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	Status       string             `json:"status"`
+	AssigneeType pgtype.Text        `json:"assignee_type"`
+	AssigneeID   pgtype.UUID        `json:"assignee_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListProjectProgressIssues(ctx context.Context, arg ListProjectProgressIssuesParams) ([]ListProjectProgressIssuesRow, error) {
+	rows, err := q.db.Query(ctx, listProjectProgressIssues, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListProjectProgressIssuesRow{}
+	for rows.Next() {
+		var i ListProjectProgressIssuesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
