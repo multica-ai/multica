@@ -52,6 +52,10 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
   api: apiMock,
 }));
 vi.mock("../../issue-views/use-view-actions", () => ({ useIssueViewActions: () => actions }));
+// jsdom drops `mask-image`, so the fade stands in as a style it keeps.
+vi.mock("@multica/ui/hooks/use-scroll-fade", () => ({
+  useScrollFade: () => ({ opacity: 0.5 }),
+}));
 vi.mock("../../issue-views/delete-view-dialog", () => ({ DeleteViewDialog: () => null }));
 vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
@@ -317,6 +321,18 @@ describe("WorkPanel sections", () => {
     renderPanel("/acme/my-issues", [], [PROJECT]);
     expect(labels()[0]).toBe("Inbox");
     expect(sections()[0]!.parentElement!.firstElementChild).toBe(sections()[0]);
+  });
+});
+
+describe("WorkPanel scroll fade", () => {
+  it("leaves an issue row's scroller without an inline opacity", async () => {
+    // The harness does not provide PanelScrollFadeContext, so the parent
+    // value stays at the default (on). PanelBody would paint the sentinel.
+    renderPanel("/acme/my-issues");
+    const row = await screen.findByRole("link", { name: ISSUE.title });
+    const scroller = row.closest(".overflow-y-auto");
+    expect(scroller).not.toBeNull();
+    expect((scroller as HTMLElement).style.opacity).toBe("");
   });
 });
 
