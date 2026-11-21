@@ -42,6 +42,19 @@ describe("createLandingDict", () => {
     }
   });
 
+  it("translates the pricing page with the same plans and comparison as English", () => {
+    const en = createLandingDict("en");
+    const marks = (t: ReturnType<typeof createLandingDict>) =>
+      t.pricing.compare.groups.map((group) => group.rows.map((row) => row.cells.map((cell) => typeof cell === "boolean" ? cell : "value")));
+    for (const locale of ["zh-Hans", "ja", "ko"] as const) {
+      const t = createLandingDict(locale);
+      expect(shape(t.pricing)).toEqual(shape(en.pricing));
+      expect(marks(t)).toEqual(marks(en));
+      expect(t.pricing.title).not.toBe(en.pricing.title);
+      expect(t.pricing.plans.business.features[0]!.label).not.toBe(en.pricing.plans.business.features[0]!.label);
+    }
+  });
+
   it("translates every page's title and share card", () => {
     const en = createLandingDict("en");
     for (const locale of ["zh-Hans", "ja", "ko"] as const) {

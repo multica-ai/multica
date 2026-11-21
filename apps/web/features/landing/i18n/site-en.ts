@@ -44,6 +44,12 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       ogDescription:
         "Free to self-host inside your organization. Offering Multica to others as a hosted service needs a commercial license.",
     },
+    pricing: {
+      title: "Pricing",
+      description: "Free for small teams, Pro and Business per member, and Enterprise for security and self-hosting. Agents are unlimited on every plan.",
+      ogTitle: "Pricing — Multica",
+      ogDescription: "Pay for your team. Run as many agents as you like.",
+    },
     privacy: {
       title: "Privacy Policy",
       description: "How Multica collects, uses, and protects personal information on multica.ai and Multica Cloud.",

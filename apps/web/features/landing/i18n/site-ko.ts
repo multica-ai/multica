@@ -41,6 +41,12 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       ogTitle: "라이선스 — Multica",
       ogDescription: "조직 내부에서 자체 호스팅하는 것은 무료입니다. Multica를 다른 사람에게 호스팅 서비스로 제공하려면 상용 라이선스가 필요합니다.",
     },
+    pricing: {
+      title: "요금",
+      description: "작은 팀은 무료, Pro와 Business는 멤버당 요금, Enterprise는 보안과 셀프 호스팅을 위한 요금제입니다. 에이전트는 모든 요금제에서 무제한입니다.",
+      ogTitle: "요금 — Multica",
+      ogDescription: "팀원 수만큼만 내고, 에이전트는 마음껏 쓰세요.",
+    },
     privacy: {
       title: "개인정보 처리방침",
       description: "Multica가 multica.ai와 Multica Cloud에서 개인정보를 수집, 이용, 보호하는 방법.",

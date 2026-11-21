@@ -40,6 +40,12 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       ogTitle: "许可协议 — Multica",
       ogDescription: "在组织内部自托管免费。把 Multica 作为托管服务提供给他人，需要商业许可。",
     },
+    pricing: {
+      title: "定价",
+      description: "小团队免费，Pro 和 Business 按成员计费，Enterprise 满足安全和私有化部署需求。所有套餐的智能体都不限数量。",
+      ogTitle: "定价 — Multica",
+      ogDescription: "按团队成员付费，智能体随便用。",
+    },
     privacy: {
       title: "隐私政策",
       description: "Multica 如何在 multica.ai 和 Multica Cloud 上收集、使用和保护个人信息。",

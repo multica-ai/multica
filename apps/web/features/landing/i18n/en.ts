@@ -1,10 +1,12 @@
 import { githubUrl, discordUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 import { enSiteCopy } from "./site-en";
+import { enPricingCopy } from "./pricing-en";
 
 export function createEnDict(): LandingDict {
   return {
   ...enSiteCopy,
+  pricing: enPricingCopy,
   faq: {
     label: "FAQ",
     headline: "Questions & answers.",
