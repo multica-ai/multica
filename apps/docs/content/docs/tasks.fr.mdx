@@ -69,6 +69,7 @@ Dans le journal d'exécution, vous pouvez :
 - Cliquer sur **Voir la transcription** sur une ligne pour voir les messages de l'agent, les appels d'outils et la sortie d'erreur. Pour une exécution encore en cours, la transcription continue de s'afficher en direct tant que la boîte de dialogue reste ouverte, et un bouton **Plus récents d'abord** inverse l'ordre des événements.
 - Arrêter les exécutions en file d'attente, en démarrage, en attente d'un répertoire local ou au travail.
 - Relancer une exécution en échec ou annulée.
+- Relancer une exécution terminée dans une nouvelle session.
 
 La démo ci-dessous parcourt un cycle complet : une exécution entre en file, démarre et échoue ; vous la relancez et la nouvelle exécution se termine. Une fois la nouvelle exécution lancée, vous pouvez aussi essayer de l'arrêter en cours de route.
 
@@ -143,6 +144,8 @@ Le préfixe `agent_error.` est omis dans ce tableau.
 Cliquer sur le bouton Relancer l'exécution d'une ligne du journal d'exécution invoque **l'agent qui a traité cette exécution à ce moment-là**. Même si la tâche a été réassignée depuis, la relance ne bascule pas vers le nouvel assigné.
 
 Une relance conserve autant que possible les fichiers que l'exécution précédente a déjà écrits dans le répertoire local. Si la session d'origine est toujours sûre et que le même runtime prend en charge la relance, celle-ci poursuit aussi la session précédente. Les erreurs qui corrompent la session, comme un dépassement de contexte ou des requêtes invalides, démarrent plutôt une nouvelle session dans le répertoire de travail d'origine. Lorsque le répertoire d'origine n'existe plus, un nouveau répertoire de travail est utilisé.
+
+Pour repartir de zéro sans l'ancien contexte, cliquez sur **Relancer dans une nouvelle session** sur la ligne d'une exécution terminée, puis confirmez. L'agent de cette exécution repart dans une nouvelle session et un nouveau répertoire de travail, et les exécutions et commentaires précédents restent sur la tâche. Si cet agent est encore en cours d'exécution sur la tâche, la nouvelle exécution attend qu'elle se termine. Les détails de contexte de la transcription indiquent **Nouvelle session**.
 
 Retrouvez l’exécution source, puis relancez-la depuis le CLI :
 

@@ -44,6 +44,7 @@ import {
 } from "./issue-run-timeline";
 import { RunCumulativeChart } from "./issue-runs-cumulative-chart";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
+import { canRerunInFreshSession, FreshSessionRunButton } from "./fresh-session-run-button";
 import { RunTriggerLabel } from "./run-trigger-label";
 import { useFormatSpend, useStatusLabel, useTriggerText } from "./task-run-labels";
 
@@ -991,6 +992,7 @@ function RunListRow({ run, issueId, showIssue, costWidth }: { run: TimelineRun; 
             title={t(($) => $.execution_log.transcript_tooltip)}
           />
           {canRetryRun(task) && <RetryRunButton task={task} issueId={issueId} />}
+          {canRerunInFreshSession(task) && <FreshSessionRunButton task={task} />}
         </span>
         <span className={cn(COL.toggle, "flex justify-end")}>
           <DeferredTooltip

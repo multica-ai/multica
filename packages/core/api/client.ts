@@ -3513,6 +3513,20 @@ export class ApiClient {
     });
   }
 
+  /** Repeats an issue-linked run. `fresh` starts a new agent session and
+   *  working directory instead of continuing the source run's. */
+  async rerunTask(taskId: string, options: { fresh: boolean }): Promise<AgentTask> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/rerun`, {
+      method: "POST",
+      body: JSON.stringify({ fresh: options.fresh }),
+    });
+    const task = parseWithFallback<AgentTask | null>(raw, AgentTaskSchema, null, {
+      endpoint: "POST /api/tasks/:id/rerun",
+    });
+    if (!task) throw new Error("Invalid task rerun response");
+    return task;
+  }
+
   async retrySourceContextQuickCreate(taskId: string): Promise<AgentTask> {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/retry-source-context`, {
       method: "POST",

@@ -877,6 +877,7 @@
     "retry_task_aria": "Relancer l'exécution",
     "retry_failed": "Échec de la relance de l'exécution",
     "retry_blocked": "Non relancée — vous n'avez pas la permission d'utiliser cet agent",
+    "fresh_session_tooltip": "Relancer dans une nouvelle session",
     "transcript_tooltip": "Voir la transcription",
     "jump_to_run": "Aller à l'exécution",
     "cancel_failed": "Échec de l'annulation de l'exécution",
@@ -996,6 +997,14 @@
     "running_note": " Le travail en cours peut mettre quelques secondes à s'arrêter complètement.",
     "keep": "Laisser tourner",
     "confirm": "Arrêter l'exécution"
+  },
+  "fresh_session_dialog": {
+    "title": "Relancer dans une nouvelle session ?",
+    "body": "L'agent repart de zéro, sans la conversation de cette exécution, dans un nouveau répertoire de travail. Les exécutions et commentaires précédents restent sur la tâche. Si l'agent est encore en cours d'exécution sur cette tâche, la nouvelle exécution attend qu'elle se termine.",
+    "cancel": "Annuler",
+    "confirm": "Relancer",
+    "started": "Relance mise en file dans une nouvelle session",
+    "failed": "Impossible de relancer dans une nouvelle session"
   },
   "batch": {
     "delete_restricted": "Vous pouvez supprimer les tâches créées par vous ou par vos agents. Les propriétaires et administrateurs peuvent supprimer toute tâche.",

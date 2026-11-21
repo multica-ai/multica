@@ -844,6 +844,7 @@
     "retry_task_aria": "重试运行",
     "retry_failed": "重试运行失败",
     "retry_blocked": "未重试——你没有该智能体的使用权限",
+    "fresh_session_tooltip": "在新会话中重新运行",
     "transcript_tooltip": "查看记录",
     "jump_to_run": "跳转到运行",
     "cancel_failed": "取消运行失败",
@@ -953,6 +954,14 @@
     "running_note": "进行中的运行可能需要几秒才能完全停止。",
     "keep": "保留运行",
     "confirm": "停止运行"
+  },
+  "fresh_session_dialog": {
+    "title": "在新会话中重新运行？",
+    "body": "智能体将不带本次运行的对话，在新的工作目录中从头开始。之前的运行和评论仍保留在任务中。如果智能体仍在这个任务上运行，新的运行会等它结束后开始。",
+    "cancel": "取消",
+    "confirm": "重新运行",
+    "started": "已在新会话中排队重新运行",
+    "failed": "在新会话中重新运行失败"
   },
   "batch": {
     "delete_restricted": "你可以删除本人或本人拥有的智能体创建的任务。工作区 owner 和 admin 可以删除任意任务。",
