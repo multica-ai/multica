@@ -331,16 +331,54 @@ func archiveStaleTaskFailedInbox(
 		"row_count", len(rows), "recipient_count", count)
 }
 
-// autoArchiveCompletedPref is the preference key for archiving your own
-// notifications when you move an issue to a done or closed status. It is on
-// unless set to "muted".
-const autoArchiveCompletedPref = "auto_archive_completed"
+// Preference keys for archiving your own notifications on an issue you
+// handled. `auto_archive_completed` covers moving it to a done or closed
+// status and is on unless "muted". `auto_archive_on_action` covers any comment
+// or field change you make, completing included, and is off unless "all".
+const (
+	autoArchiveCompletedPref = "auto_archive_completed"
+	autoArchiveOnActionPref  = "auto_archive_on_action"
+)
 
-// archiveTerminalIssueInbox archives the actor's own notifications for an
-// issue they moved to a done or closed status, read or not, the same set
-// "Archive completed" clears by hand. Other recipients keep theirs: someone
-// else finishing an issue is news they have not seen yet.
-func archiveTerminalIssueInbox(
+// Why the actor's notifications were archived, sent as `reason` on
+// inbox:batch-archived so the client can tell its user's own action apart.
+const (
+	archiveReasonCompleted = "issue_status_terminal"
+	archiveReasonActed     = "actor_acted"
+)
+
+// autoArchivesFor reports whether prefs archive the actor's notifications for
+// reason. nil prefs, a member without a stored row, applies the defaults.
+func autoArchivesFor(prefs map[string]string, reason string) bool {
+	onAction := prefs[autoArchiveOnActionPref] == "all"
+	if reason == archiveReasonActed {
+		return onAction
+	}
+	return onAction || prefs[autoArchiveCompletedPref] != "muted"
+}
+
+// issueFieldsChangedByActor reports whether an issue:updated payload changed a
+// field that handling the issue means: status, assignee, priority, project or
+// its dates. Title, description and parent edits are not.
+func issueFieldsChangedByActor(payload map[string]any) bool {
+	for _, key := range []string{
+		"status_changed", "assignee_changed", "priority_changed",
+		"project_changed", "start_date_changed", "due_date_changed",
+	} {
+		if changed, _ := payload[key].(bool); changed {
+			return true
+		}
+	}
+	return false
+}
+
+// archiveActorIssueInbox archives the actor's own notifications for an issue
+// they handled, read or not: completed for `archiveReasonCompleted` (the same
+// set "Archive completed" clears by hand), commented on or edited for
+// `archiveReasonActed`. Other recipients keep theirs: someone else acting on
+// an issue is news they have not seen yet. A later notification brings the
+// issue back.
+func archiveActorIssueInbox(
 	ctx context.Context,
 	queries *db.Queries,
 	bus *events.Bus,
@@ -348,8 +386,9 @@ func archiveTerminalIssueInbox(
 	issueID string,
 	actorType string,
 	actorID string,
+	reason string,
 ) {
-	if actorType != "member" || actorID == "" {
+	if actorType != "member" || actorID == "" || issueID == "" {
 		return
 	}
 
@@ -358,22 +397,22 @@ func archiveTerminalIssueInbox(
 		WorkspaceID: parseUUID(workspaceID),
 		UserID:      parseUUID(actorID),
 	})
+	var prefs map[string]string
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 	case err != nil:
-		slog.Warn("auto-archive terminal issue inbox: load preference failed; keeping rows",
-			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		slog.Warn("auto-archive actor issue inbox: load preference failed; keeping rows",
+			"workspace_id", workspaceID, "issue_id", issueID, "reason", reason, "error", err)
 		return
 	default:
-		var prefs map[string]string
 		if err := json.Unmarshal(pref.Preferences, &prefs); err != nil {
-			slog.Warn("auto-archive terminal issue inbox: bad preference JSON; keeping rows",
-				"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+			slog.Warn("auto-archive actor issue inbox: bad preference JSON; keeping rows",
+				"workspace_id", workspaceID, "issue_id", issueID, "reason", reason, "error", err)
 			return
 		}
-		if prefs[autoArchiveCompletedPref] == "muted" {
-			return
-		}
+	}
+	if !autoArchivesFor(prefs, reason) {
+		return
 	}
 
 	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{
@@ -383,8 +422,8 @@ func archiveTerminalIssueInbox(
 		IssueID:       parseUUID(issueID),
 	})
 	if err != nil {
-		slog.Error("auto-archive terminal issue inbox: query failed",
-			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		slog.Error("auto-archive actor issue inbox: query failed",
+			"workspace_id", workspaceID, "issue_id", issueID, "reason", reason, "error", err)
 		return
 	}
 	if count == 0 {
@@ -397,12 +436,12 @@ func archiveTerminalIssueInbox(
 			"recipient_id": actorID,
 			"count":        count,
 			"issue_id":     issueID,
-			"reason":       "issue_status_terminal",
+			"reason":       reason,
 		},
 	})
 
-	slog.Info("auto-archive terminal issue inbox: archived rows",
-		"workspace_id", workspaceID, "issue_id", issueID, "row_count", count)
+	slog.Info("auto-archive actor issue inbox: archived rows",
+		"workspace_id", workspaceID, "issue_id", issueID, "reason", reason, "row_count", count)
 }
 
 type inboxArchivedRecipient struct {
@@ -1079,7 +1118,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				slog.Warn("resolve issue status category for terminal-issue inbox archive; keeping rows",
 					"issue_id", issue.ID, "status", issue.Status, "error", categoryErr)
 			case category == issuestatus.CategoryDone, category == issuestatus.CategoryClosed:
-				archiveTerminalIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID, e.ActorType, e.ActorID)
+				archiveActorIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID, e.ActorType, e.ActorID, archiveReasonCompleted)
 			}
 		}
 
@@ -1154,6 +1193,21 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					issue.Title, "", skip, emptyDetails)
 			}
 		}
+
+		if issueFieldsChangedByActor(payload) {
+			archiveActorIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID, e.ActorType, e.ActorID, archiveReasonActed)
+		}
+	})
+
+	// issue_labels:changed — labelling an issue is handling it, like the
+	// field changes above.
+	bus.Subscribe(protocol.EventIssueLabelsChanged, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		issueID, _ := payload["issue_id"].(string)
+		archiveActorIssueInbox(ctx, queries, bus, e.WorkspaceID, issueID, e.ActorType, e.ActorID, archiveReasonActed)
 	})
 
 	// comment:created — notify all subscribers except the commenter
@@ -1218,6 +1272,12 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			mentioned, "new_comment", "info",
 			issueTitle, commentContent,
 			commentDetails)
+
+		// A quick action posts its prompt as the member's own comment, so
+		// running one counts the same as replying.
+		if authorType == "member" {
+			archiveActorIssueInbox(ctx, queries, bus, e.WorkspaceID, issueID, e.ActorType, e.ActorID, archiveReasonActed)
+		}
 	})
 
 	// issue_reaction:added — notify the issue creator

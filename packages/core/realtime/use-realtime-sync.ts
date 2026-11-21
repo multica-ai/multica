@@ -66,6 +66,7 @@ import {
   invalidateUpdatedAtSortedIssueLists,
 } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
+import { noteInboxAutoArchive } from "../inbox/auto-archive";
 import {
   notificationPreferenceOptions,
   notificationPreferenceKeys,
@@ -111,6 +112,7 @@ import type {
   IssueMetadataChangedPayload,
   IssuePropertiesChangedPayload,
   InboxNewPayload,
+  InboxBatchArchivedPayload,
   InboxItem,
   NotificationPreferenceResponse,
   CommentCreatedPayload,
@@ -1395,6 +1397,12 @@ export function useRealtimeSync(
       await handleInboxNew(qc, item);
     });
 
+    // Recorded before the refresh the generic inbox handler schedules, so the
+    // Inbox knows why the open notification left once the list drops it.
+    const unsubInboxBatchArchived = ws.on("inbox:batch-archived", (p) => {
+      noteInboxAutoArchive(p as InboxBatchArchivedPayload);
+    });
+
     // --- Timeline event handlers (global fallback) ---
     // These events are also handled granularly by useIssueTimeline when
     // IssueDetail is mounted. This global handler exists to mark the
@@ -2145,6 +2153,7 @@ export function useRealtimeSync(
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
+      unsubInboxBatchArchived();
       docUnsubs.forEach(unsub => unsub());
       unsubCommentCreated();
       unsubCommentUpdated();

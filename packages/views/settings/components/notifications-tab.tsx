@@ -8,6 +8,7 @@ import { notificationPreferenceOptions } from "@multica/core/notification-prefer
 import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
 import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import type {
+  AfterAutoArchiveValue,
   NotificationGroupKey,
   NotificationPreferences,
   OthersIssuesValue,
@@ -43,6 +44,19 @@ const INBOX_CATEGORIES = [
   { key: "agents", groups: ["agent_activity"] },
 ] as const;
 
+/**
+ * Which of your own actions archive an issue's notifications, as one choice
+ * over two keys: completing it (`auto_archive_completed`, on by default) and
+ * commenting on or editing it (`auto_archive_on_action`), which includes
+ * completing.
+ */
+type AutoArchiveLevel = "never" | "completed" | "acted";
+
+function autoArchiveLevel(preferences: NotificationPreferences): AutoArchiveLevel {
+  if (notificationPreferenceValue(preferences, "auto_archive_on_action") === "all") return "acted";
+  return notificationPreferenceValue(preferences, "auto_archive_completed") === "muted" ? "never" : "completed";
+}
+
 export function NotificationsTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
@@ -76,6 +90,24 @@ export function NotificationsTab() {
   const othersIssuesItems: { value: OthersIssuesValue; label: string }[] = [
     { value: "key_updates", label: t(($) => $.notifications.others_issues.key_updates) },
     { value: "all", label: t(($) => $.notifications.others_issues.all) },
+  ];
+
+  const autoArchive = autoArchiveLevel(preferences);
+  const handleAutoArchive = (level: AutoArchiveLevel) => {
+    save({
+      ...preferences,
+      auto_archive_completed: level === "never" ? "muted" : "all",
+      auto_archive_on_action: level === "acted" ? "all" : "muted",
+    });
+  };
+  const autoArchiveItems: { value: AutoArchiveLevel; label: string }[] = [
+    { value: "never", label: t(($) => $.notifications.leaving.auto_never) },
+    { value: "completed", label: t(($) => $.notifications.leaving.auto_completed) },
+    { value: "acted", label: t(($) => $.notifications.leaving.auto_acted) },
+  ];
+  const afterAutoArchiveItems: { value: AfterAutoArchiveValue; label: string }[] = [
+    { value: "stay", label: t(($) => $.notifications.leaving.after_stay) },
+    { value: "next", label: t(($) => $.notifications.leaving.after_next) },
   ];
 
   const systemEnabled = preferences.system_notifications !== "muted";
@@ -161,15 +193,61 @@ export function NotificationsTab() {
           </SettingsRow>
           <SettingsRow
             anchor="auto_archive_completed"
-            label={t(($) => $.notifications.leaving.done_label)}
-            description={t(($) => $.notifications.leaving.done_description)}
+            label={t(($) => $.notifications.leaving.auto_label)}
+            description={t(($) => $.notifications.leaving.auto_description)}
           >
-            <Switch
-              checked={preferences.auto_archive_completed !== "muted"}
-              aria-label={t(($) => $.notifications.leaving.done_label)}
-              onCheckedChange={(checked) => handleToggle("auto_archive_completed", checked)}
-            />
+            <Select
+              items={autoArchiveItems}
+              value={autoArchive}
+              onValueChange={(next) => next && handleAutoArchive(next as AutoArchiveLevel)}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-48"
+                aria-label={t(($) => $.notifications.leaving.auto_label)}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {autoArchiveItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </SettingsRow>
+          {autoArchive !== "never" && (
+            <SettingsRow
+              anchor="after_auto_archive"
+              className="pl-8"
+              label={t(($) => $.notifications.leaving.after_label)}
+              description={t(($) => $.notifications.leaving.after_description)}
+            >
+              <Select
+                items={afterAutoArchiveItems}
+                value={notificationPreferenceValue(preferences, "after_auto_archive")}
+                onValueChange={(next) =>
+                  next && save({ ...preferences, after_auto_archive: next as AfterAutoArchiveValue })
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-48"
+                  aria-label={t(($) => $.notifications.leaving.after_label)}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {afterAutoArchiveItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsRow>
+          )}
           <SettingsRow
             anchor="archived"
             label={t(($) => $.notifications.leaving.archived_label)}

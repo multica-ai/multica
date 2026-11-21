@@ -20,7 +20,9 @@ const PREFERENCE_DEFAULTS: { [K in PreferenceKey]-?: NonNullable<NotificationPre
   agent_activity: "all",
   system_notifications: "all",
   auto_archive_completed: "all",
+  auto_archive_on_action: "muted",
   others_issues: "key_updates",
+  after_auto_archive: "stay",
 };
 
 const PREFERENCE_KEYS = Object.keys(PREFERENCE_DEFAULTS) as PreferenceKey[];
