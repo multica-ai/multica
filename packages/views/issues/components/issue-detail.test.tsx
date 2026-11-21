@@ -1610,39 +1610,34 @@ describe("IssueDetail (shared)", () => {
   });
 
   describe("header icon buttons", () => {
-    function renderWithDone() {
+    function renderWithArchive(onArchive: () => void = () => {}) {
       const queryClient = createTestQueryClient();
       return render(
         <I18nProvider locale="en" resources={TEST_RESOURCES}>
           <QueryClientProvider client={queryClient}>
-            <IssueDetail issueId="issue-1" onDone={() => {}} />
+            <IssueDetail issueId="issue-1" onArchive={onArchive} />
           </QueryClientProvider>
         </I18nProvider>,
       );
     }
 
-    it("names Mark as done and Pin after their tooltips on an open issue", async () => {
-      renderWithDone();
-
-      expect(
-        await screen.findByRole("button", { name: enIssues.detail.mark_done_tooltip }),
-      ).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: enIssues.detail.pin_tooltip })).toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: enIssues.detail.archive_tooltip }),
-      ).not.toBeInTheDocument();
-    });
-
-    it("names Archive after its tooltip once the issue is done", async () => {
-      mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, status: "done" });
-      renderWithDone();
+    it("names Archive and Pin after their tooltips on an open issue", async () => {
+      renderWithArchive();
 
       expect(
         await screen.findByRole("button", { name: enIssues.detail.archive_tooltip }),
       ).toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: enIssues.detail.mark_done_tooltip }),
-      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: enIssues.detail.pin_tooltip })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Mark as done" })).not.toBeInTheDocument();
+    });
+
+    it("archives the notification without changing the issue's status", async () => {
+      const onArchive = vi.fn();
+      renderWithArchive(onArchive);
+
+      fireEvent.click(await screen.findByRole("button", { name: enIssues.detail.archive_tooltip }));
+      expect(onArchive).toHaveBeenCalledTimes(1);
+      expect(mockApiObj.updateIssue).not.toHaveBeenCalled();
     });
 
     it("names the pin toggle Unpin while the issue is pinned", async () => {

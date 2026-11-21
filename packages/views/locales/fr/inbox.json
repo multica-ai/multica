@@ -48,7 +48,6 @@
   "list": {
     "loading_selection": "Chargement de la notification…",
     "empty": "Aucune notification",
-    "mark_done_tooltip": "Marquer comme traité",
     "archive_tooltip": "Archiver",
     "time": {
       "just_now": "à l'instant",
@@ -158,7 +157,6 @@
     "mark_read_failed": "Échec du marquage comme lu",
     "mark_unread_failed": "Échec du marquage comme non lu",
     "archive_failed": "Échec de l'archivage",
-    "mark_done_failed": "Échec du marquage comme traité",
     "mark_all_read_failed": "Échec du marquage global comme lu",
     "archive_all_failed": "Échec de l'archivage global",
     "archive_all_read_failed": "Échec de l'archivage des éléments lus",
