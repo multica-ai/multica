@@ -17,7 +17,7 @@ type failingUpdateStore struct {
 	createErr error
 }
 
-func (s *failingUpdateStore) Create(context.Context, string, string, string) (*UpdateRequest, error) {
+func (s *failingUpdateStore) Create(context.Context, string, string, string, string, bool) (*UpdateRequest, error) {
 	return nil, s.createErr
 }
 

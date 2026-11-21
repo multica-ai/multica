@@ -66,7 +66,7 @@ describe("blocked trigger copy", () => {
 
     expect(denied).toBe(en.comment.trigger_blocked_runtime_access_denied);
     expect(denied.toLowerCase()).toContain("public");
-    expect(denied.toLowerCase()).toContain("rebind");
+    expect(denied.toLowerCase()).toContain("bind");
     expect(denied.toLowerCase()).not.toContain("try again");
     expect(blockedShortReasonLabel("runtime_access_denied", t)).toBe(
       en.comment.trigger_blocked_short_runtime_access_denied,

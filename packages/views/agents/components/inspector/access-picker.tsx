@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Globe, Loader2, Lock, Users } from "@multica/ui/icons";
 import type {
   AgentInvocationTarget,
@@ -10,9 +10,11 @@ import type {
   MemberWithUser,
 } from "@multica/core/types";
 import { effectiveAccessScope } from "@multica/core/agents";
+import type { PaidFeatureAccess } from "@multica/core/billing";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { ActorAvatar } from "../../../common/actor-avatar";
+import { PaidFeatureNotice, PaidFeatureUpgradeBadge } from "../../../billing";
 import { useT } from "../../../i18n";
 
 export type AccessChange = {
@@ -51,6 +53,8 @@ export function AccessPicker({
   onReadyChange,
   onChange,
   hideFooter = false,
+  membersAccess,
+  lockedMemberPool,
 }: {
   permissionMode: AgentPermissionMode;
   invocationTargets: AgentInvocationTarget[] | undefined;
@@ -69,6 +73,13 @@ export function AccessPicker({
   /** When true, suppress the bottom Save footer — the parent dialog owns
    *  the apply trigger (e.g. the bulk "Set access scope" dialog). */
   hideFooter?: boolean;
+  /** The plan's `agent_invocation_members` access for this agent (or, in
+   *  bulk, for agents that do not use it yet). Omitted means available. */
+  membersAccess?: Pick<PaidFeatureAccess, "canAdd" | "state">;
+  /** Who may be picked while adding members is locked, in place of this
+   *  agent's own list. Bulk edit passes the people every selected agent
+   *  already has, so any subset is a reduction for each of them. */
+  lockedMemberPool?: string[];
 }) {
   const { t } = useT("agents");
   const { t: tc } = useT("common");
@@ -127,9 +138,19 @@ export function AccessPicker({
     }
   }, [persistedScope, persistedMembers]);
 
-  const editableMembers = ownerId
+  // Without the paid feature an agent keeps the people it already has: they
+  // can be unchecked, but nobody new can be picked, and an agent without a
+  // member list cannot get one.
+  const canAddMembers = membersAccess?.canAdd ?? true;
+  const lockedPool = lockedMemberPool ?? persistedMembers;
+  const membersChoiceDisabled =
+    !canAddMembers &&
+    (lockedMemberPool ? lockedMemberPool.length === 0 : persistedScope !== "members");
+  const editableMembers = (ownerId
     ? members.filter((member) => member.user_id !== ownerId)
-    : members;
+    : members
+  ).filter((member) => canAddMembers || lockedPool.includes(member.user_id));
+  const paidState = membersAccess?.state;
 
   const sameMembers =
     draftMembers.length === persistedMembers.length &&
@@ -262,9 +283,21 @@ export function AccessPicker({
           title={t(($) => $.access.members_title)}
           description={t(($) => $.access.members_desc)}
           selected={draftScope === "members"}
+          disabled={membersChoiceDisabled}
           onSelect={() => selectDraftScope("members")}
+          trailing={
+            paidState === "read_only" || paidState === "unavailable" ? (
+              <PaidFeatureUpgradeBadge feature="agent_invocation_members" />
+            ) : null
+          }
         />
       </div>
+
+      {paidState === "read_only" || paidState === "unavailable" ? (
+        <div className="border-t border-surface-border px-4 py-3 sm:px-6">
+          <PaidFeatureNotice state={paidState} />
+        </div>
+      ) : null}
 
       {draftScope === "members" ? (
         <div className="border-t border-surface-border bg-muted/20 px-4 py-5 sm:px-6">
@@ -355,7 +388,9 @@ function AccessChoice({
   title,
   description,
   selected,
+  disabled = false,
   onSelect,
+  trailing,
 }: {
   name: string;
   value: string;
@@ -363,27 +398,37 @@ function AccessChoice({
   title: string;
   description: string;
   selected: boolean;
+  disabled?: boolean;
   onSelect: () => void;
+  /** Rendered beside the label, not inside it, so a control here keeps its
+   *  own focus and accessible name and does not toggle the radio. */
+  trailing?: ReactNode;
 }) {
+  // Same tree with or without `trailing`: a badge appearing once the plan
+  // loads must not remount (and unfocus) the radio.
   return (
-    <label className="flex min-h-16 cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-surface-hover">
-      <input
-        type="radio"
-        name={name}
-        value={value}
-        checked={selected}
-        onChange={onSelect}
-        className="mt-2 size-4 shrink-0 accent-foreground"
-      />
-      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <Icon className="size-4" aria-hidden="true" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-body font-medium">{title}</span>
-        <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
-          {description}
+    <div className="flex items-start">
+      <label className="flex min-h-16 flex-1 cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-surface-hover has-disabled:cursor-default has-disabled:opacity-60 has-disabled:hover:bg-transparent">
+        <input
+          type="radio"
+          name={name}
+          value={value}
+          checked={selected}
+          disabled={disabled}
+          onChange={onSelect}
+          className="mt-2 size-4 shrink-0 accent-foreground"
+        />
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Icon className="size-4" aria-hidden="true" />
         </span>
-      </span>
-    </label>
+        <span className="min-w-0 flex-1">
+          <span className="block text-body font-medium">{title}</span>
+          <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
+            {description}
+          </span>
+        </span>
+      </label>
+      {trailing ? <div className="shrink-0 py-4 pr-4">{trailing}</div> : null}
+    </div>
   );
 }

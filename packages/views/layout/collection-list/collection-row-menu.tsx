@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { MoreHorizontal } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
@@ -44,15 +44,22 @@ export function CollectionRowMenu({
 
   const point = menu.point;
   const anchor = usePointAnchor(point);
+  const pointTriggerId = useId();
 
   return (
     <DropdownMenu
       open={menu.open}
+      triggerId={point ? pointTriggerId : undefined}
       onOpenChange={(open, details) => {
         const next = nextRowMenuState(menu, open, details.reason);
         if (next) setMenu(next);
       }}
     >
+      {/* A menu Base UI opens with no active trigger has no node in its
+          floating tree, so a submenu opening reads as a sibling and closes it. */}
+      {point && (
+        <DropdownMenuTrigger id={pointTriggerId} nativeButton={false} render={<span hidden aria-hidden />} />
+      )}
       {!triggerHidden && (
         <DeferredTooltip
           content={name}

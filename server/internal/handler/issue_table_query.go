@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -112,6 +113,7 @@ type issueTableFiltersRequest struct {
 	Properties      map[string][]json.RawMessage `json:"properties,omitempty"`
 	Date            *issueTableDateFilterRequest `json:"date,omitempty"`
 	WorkingOnly     bool                         `json:"working_only,omitempty"`
+	IdleOnly        bool                         `json:"idle_only,omitempty"`
 	WorkingIssueIDs []string                     `json:"working_issue_ids,omitempty"`
 	// UnreadIssueIDs is the viewer's unread issues as the client holds them
 	// (`/api/issues/unread`, plus any it keeps on screen after reading). An
@@ -183,6 +185,19 @@ type issueTableSQL struct {
 	args        []any
 	fingerprint string
 	workspaceID pgtype.UUID
+	hidden      projectaccess.Hidden
+	// hiddenProjectsRef is the placeholder holding the viewer's hidden project
+	// ids, empty when the viewer sees every project.
+	hiddenProjectsRef string
+}
+
+// parentVisible is a predicate on a parent issue aliased p: true unless the
+// parent sits in a project the viewer cannot see.
+func (s issueTableSQL) parentVisible() string {
+	if s.hiddenProjectsRef == "" {
+		return "TRUE"
+	}
+	return hiddenProjectPredicate("p.project_id", s.hiddenProjectsRef)
 }
 
 type issueTableCursor struct {
@@ -517,8 +532,10 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return issueTableSQL{}, false
 	}
+	hiddenProjectsRef := ""
 	if ids := hidden.Param(); ids != nil {
-		where = append(where, hiddenProjectPredicate("i.project_id", addArg(ids)))
+		hiddenProjectsRef = addArg(ids)
+		where = append(where, hiddenProjectPredicate("i.project_id", hiddenProjectsRef))
 	}
 
 	negated := make(map[string]bool, len(spec.Filters.Negate))
@@ -848,6 +865,37 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	if spec.Filters.WorkingOnly {
 		where = append(where, "EXISTS (SELECT 1 FROM agent_task_queue atq WHERE atq.issue_id = i.id AND atq.status = 'running')")
 	}
+	if spec.Filters.IdleOnly {
+		if spec.Filters.WorkingOnly || spec.Filters.WorkingIssueIDs != nil {
+			writeError(w, http.StatusBadRequest, "idle_only cannot be combined with working filters")
+			return issueTableSQL{}, false
+		}
+		// Match the same visible-agent snapshot as Inbox, including queued and
+		// deferred wakeup work. A private agent must not change membership for
+		// a member who cannot see it.
+		member, ok := h.workspaceMember(w, r, workspaceID)
+		if !ok {
+			return issueTableSQL{}, false
+		}
+		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+		allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+		if !ok {
+			writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
+			return issueTableSQL{}, false
+		}
+		agentIDs := make([]pgtype.UUID, 0, len(allowed))
+		for id := range allowed {
+			agentIDs = append(agentIDs, parseUUID(id))
+		}
+		if len(agentIDs) > 0 {
+			where = append(where, fmt.Sprintf(`NOT EXISTS (
+  SELECT 1 FROM agent_task_queue atq
+  WHERE atq.issue_id = i.id AND atq.agent_id = ANY(%s::uuid[])
+    AND (atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+      OR (atq.status = 'deferred' AND COALESCE(atq.context->>'wakeup_id', '') <> ''))
+)`, addArg(agentIDs)))
+		}
+	}
 	workingIssueIDs, ok := parseIssueTableUUIDList(w, spec.Filters.WorkingIssueIDs, "filters.working_issue_ids")
 	if !ok {
 		return issueTableSQL{}, false
@@ -882,9 +930,11 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	where = appendIssueTableSearchFilter(where, addArg, spec.Search)
 
 	return issueTableSQL{
-		where:       strings.Join(where, " AND "),
-		args:        args,
-		fingerprint: fingerprint,
-		workspaceID: workspaceUUID,
+		where:             strings.Join(where, " AND "),
+		args:              args,
+		fingerprint:       fingerprint,
+		workspaceID:       workspaceUUID,
+		hidden:            hidden,
+		hiddenProjectsRef: hiddenProjectsRef,
 	}, true
 }

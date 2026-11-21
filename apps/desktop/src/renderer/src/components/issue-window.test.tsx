@@ -1,5 +1,16 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "@multica/core/i18n/react";
+import { RESOURCES } from "@multica/views/locales";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" resources={RESOURCES}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 const state = vi.hoisted(() => ({
   workspaces: [] as { id: string; slug: string }[],
@@ -44,6 +55,14 @@ vi.mock("@multica/views/modals/registry", () => ({
 
 vi.mock("@multica/views/layout", () => ({
   WorkspacePresencePrefetch: () => null,
+}));
+
+vi.mock("./document-title-sync", () => ({
+  DocumentTitleSync: () => null,
+}));
+
+vi.mock("@multica/views/voice", () => ({
+  VoiceWorkspaceWords: () => null,
 }));
 
 vi.mock("@multica/views/platform", () => ({

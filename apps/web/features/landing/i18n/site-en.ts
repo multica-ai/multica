@@ -76,7 +76,7 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     header: {
       home: "Multica home",
       githubStars: "GitHub, {count} stars",
-      logIn: "Log in",
+      logIn: "Sign in",
       getStarted: "Get started",
       dashboard: "Dashboard",
     },
@@ -146,7 +146,7 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
         },
         chat: {
           title: "Mention an agent in chat",
-          body: "From Slack, Lark, DingTalk, WeCom, or Telegram. The agent reads the thread, files the issue, and gets to work.",
+          body: "From Slack, Lark, DingTalk, WeCom, Telegram, or WeChat. The agent reads the thread, files the issue, and gets to work.",
           alt: "A team chat channel where Mia mentions Backend Agent about failing exports, and the agent replies in the channel with a link to the Multica issue it filed and is working on",
         },
         autopilots: {
@@ -164,7 +164,7 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     agents: {
       lead: "No new agent to learn.",
       title: "Bring the ones you already use.",
-      all: "All 27 agents",
+      all: "All 31 agents",
     },
     updates: {
       eyebrow: "Changelog",

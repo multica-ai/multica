@@ -8,6 +8,7 @@ import { Pressable, View } from "react-native";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
+import { chatSessionDisplayTitle } from "@/lib/chat-session-title";
 import { useT } from "@/lib/i18n";
 
 interface Props {
@@ -23,7 +24,7 @@ export function ChatTitleButton({
 }: Props) {
   const { t } = useT("chat");
   const agentName = currentAgent?.name ?? t("title.fallback");
-  const subtitle = currentSession?.title || t("sessions.new_chat");
+  const subtitle = chatSessionDisplayTitle(currentSession?.title, t);
 
   return (
     <Pressable

@@ -170,7 +170,7 @@ describe("TeamPanel agent previews", () => {
     await waitFor(() => expect(getIssue).toHaveBeenCalledTimes(5));
     expect(screen.getByRole("link", { name: /^All agents/ })).toBeInTheDocument();
 
-    fireEvent.click(working.getByRole("button", { name: "Show 95 more…" }));
+    fireEvent.click(working.getByRole("button", { name: "Show 95 more..." }));
     expect(working.getAllByRole("link")).toHaveLength(100);
     expect(working.getByRole("button", { name: "Show fewer" })).toHaveAttribute("aria-expanded", "true");
 
@@ -188,7 +188,7 @@ describe("TeamPanel agent previews", () => {
 
     expect(working.getAllByRole("link")).toHaveLength(5);
     expect(attention.getAllByRole("link")).toHaveLength(5);
-    fireEvent.click(attention.getByRole("button", { name: "Show 3 more…" }));
+    fireEvent.click(attention.getByRole("button", { name: "Show 3 more..." }));
     expect(attention.getAllByRole("link")).toHaveLength(8);
     expect(working.getAllByRole("link")).toHaveLength(5);
 

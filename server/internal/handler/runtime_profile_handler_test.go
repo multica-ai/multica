@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -346,10 +347,12 @@ func TestCreateRuntimeProfile_ForcesWorkspaceVisibility(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	dbfx.Runtime(t, "Profile creation machine", testutil.Cols{"daemon_id": "profile-create-machine", "runtime_mode": "local"})
 	ctx := context.Background()
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+		"daemon_id":       "profile-create-machine",
 		"display_name":    "Visibility Forced Profile",
 		"protocol_family": "codex",
 		"command_name":    "vis-forced-codex",
@@ -385,6 +388,7 @@ func TestCreateRuntimeProfile_ValidatesCommandAndFixedArgs(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	dbfx.Runtime(t, "Profile creation machine", testutil.Cols{"daemon_id": "profile-create-machine", "runtime_mode": "local"})
 	cases := []struct {
 		name        string
 		commandName string
@@ -413,6 +417,7 @@ func TestCreateRuntimeProfile_ValidatesCommandAndFixedArgs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+				"daemon_id":       "profile-create-machine",
 				"display_name":    "Validation " + tc.name,
 				"protocol_family": "codex",
 				"command_name":    tc.commandName,
@@ -443,17 +448,21 @@ func TestCreateRuntimeProfile_RuntimeIdentity(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	dbfx.Runtime(t, "Profile creation machine", testutil.Cols{"daemon_id": "profile-create-machine", "runtime_mode": "local"})
 	for _, tc := range []struct {
-		name, target, family string
-		status               int
+		name, target, family, wantFamily string
+		status                           int
 	}{
-		{"omp", "omp", "", http.StatusCreated},
-		{"legacy pi", "", "pi", http.StatusCreated},
-		{"mismatch", "omp", "codex", http.StatusBadRequest},
-		{"unknown", "unknown", "", http.StatusBadRequest},
+		{"omp", "omp", "", "pi", http.StatusCreated},
+		{"amp", "amp", "", "amp", http.StatusCreated},
+		{"amp protocol", "", "amp", "amp", http.StatusCreated},
+		{"legacy pi", "", "pi", "pi", http.StatusCreated},
+		{"mismatch", "omp", "codex", "", http.StatusBadRequest},
+		{"unknown", "unknown", "", "", http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := withURLParam(newRequest("POST", "/", map[string]any{
+				"daemon_id":    "profile-create-machine",
 				"display_name": "Identity " + tc.name, "runtime_type": tc.target,
 				"protocol_family": tc.family, "command_name": "wrapper", "fixed_args": []string{"launch"},
 			}), "id", testWorkspaceID)
@@ -474,7 +483,7 @@ func TestCreateRuntimeProfile_RuntimeIdentity(t *testing.T) {
 			if want == "" {
 				want = tc.family
 			}
-			if resp.RuntimeType != want || resp.ProtocolFamily != "pi" || resp.CommandName != "wrapper" || len(resp.FixedArgs) != 1 {
+			if resp.RuntimeType != want || resp.ProtocolFamily != tc.wantFamily || resp.CommandName != "wrapper" || len(resp.FixedArgs) != 1 {
 				t.Fatalf("incorrect identity: %+v", resp)
 			}
 		})

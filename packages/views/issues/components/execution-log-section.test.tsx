@@ -466,7 +466,7 @@ describe("execution log failure reasons", () => {
     );
 
     // The latest past runs are listed without a toggle.
-    expect(screen.getByText(/提供商配额已用尽/)).toBeInTheDocument();
+    expect(screen.getByText(/提供方额度已用尽/)).toBeInTheDocument();
     expect(
       screen.queryByText(/Provider quota exhausted/),
     ).not.toBeInTheDocument();
@@ -486,7 +486,7 @@ describe("execution log failure reasons", () => {
     );
 
     expect(screen.queryByTitle(/provider returned 402/)).not.toBeInTheDocument();
-    expect(screen.getByTitle("提供商配额已用尽")).toBeInTheDocument();
+    expect(screen.getByTitle("提供方额度已用尽")).toBeInTheDocument();
   });
 });
 

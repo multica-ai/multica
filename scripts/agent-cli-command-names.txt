@@ -1,4 +1,5 @@
 agy
+amp
 claude
 codebuddy
 codearts
@@ -23,6 +24,7 @@ qodercli
 qoderclicn
 qwen
 qwenpaw
+droid
 reasonix
 traecli
 zeroclaw

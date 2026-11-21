@@ -13,6 +13,10 @@ import {
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import type { Issue } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
+import {
+  ScrollRestorationProvider,
+  type ScrollRestorationAdapter,
+} from "../../platform";
 import { IssueContextMenuProvider } from "../actions";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
@@ -82,17 +86,48 @@ const ISSUE = {
   updated_at: "2026-03-01T00:00:00Z",
 } as unknown as Issue;
 
-function renderGantt(locale: "en" | "zh-Hans") {
+function renderGantt(
+  locale: "en" | "zh-Hans",
+  scroll: ScrollRestorationAdapter = { get: () => undefined },
+) {
   const store = createStore<IssueViewState>()(viewStoreSlice);
   return renderWithI18n(
     <ViewStoreProvider store={store}>
-      <IssueContextMenuProvider>
-        <GanttView issues={[ISSUE]} />
-      </IssueContextMenuProvider>
+      <ScrollRestorationProvider adapter={scroll}>
+        <IssueContextMenuProvider>
+          <GanttView issues={[ISSUE]} />
+        </IssueContextMenuProvider>
+      </ScrollRestorationProvider>
     </ViewStoreProvider>,
     { locale },
   );
 }
+
+describe("GanttView scroll restoration", () => {
+  function scroller() {
+    return document.querySelector<HTMLElement>('[data-tab-scroll-root="gantt"]')!;
+  }
+
+  it("brings both axes back instead of jumping to today", () => {
+    const { unmount } = renderGantt("en", {
+      get: (key) => (key === "gantt" ? { top: 240, left: 90, height: 900 } : undefined),
+    });
+
+    expect(scroller().scrollTop).toBe(240);
+    expect(scroller().scrollLeft).toBe(90);
+    unmount();
+  });
+
+  it("still opens on today when nothing was saved sideways", () => {
+    const { unmount } = renderGantt("en", {
+      get: (key) => (key === "gantt" ? { top: 240, height: 900 } : undefined),
+    });
+
+    expect(scroller().scrollTop).toBe(240);
+    expect(scroller().scrollLeft).toBeGreaterThan(0);
+    unmount();
+  });
+});
 
 describe("GanttView date localization", () => {
   beforeAll(() => {

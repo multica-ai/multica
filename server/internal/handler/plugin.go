@@ -239,6 +239,10 @@ type installPluginRequest struct {
 
 // InstallPlugin — POST /api/workspaces/{id}/plugins
 func (h *Handler) InstallPlugin(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	if !h.requirePluginsV1(w, r) {
 		return
 	}

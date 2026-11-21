@@ -18,9 +18,7 @@ func TestZcodeHandshakeFailureClosesOwnedProcess(t *testing.T) {
 	pidfile := filepath.Join(root, "pid")
 	script := "#!/usr/bin/python3\nimport os,time\nopen(" + fmt.Sprintf("%q", pidfile) + ",'w').write(str(os.getpid()))\ntime.sleep(60)\n"
 	bin := filepath.Join(root, "zcode")
-	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	t.Cleanup(func() {
 		if !t.Failed() {
 			return
@@ -67,9 +65,7 @@ for n in range(2):
 time.sleep(60)
 `
 	bin := filepath.Join(root, "zcode")
-	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	t.Cleanup(func() {
 		if !t.Failed() {
 			return

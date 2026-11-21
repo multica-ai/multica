@@ -6,6 +6,7 @@ import type { AgentTask, Issue, QuickAction } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
+import { useAssigneePicksStore } from "@multica/core/issues/stores/assignee-picks-store";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
@@ -58,10 +59,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["workspaces", "ws-1", "squads"],
     queryFn: () => Promise.resolve([]),
   }),
-  assigneeFrequencyOptions: () => ({
-    queryKey: ["workspaces", "ws-1", "assignee-frequency"],
-    queryFn: () => Promise.resolve([]),
-  }),
 }));
 
 const { ACTOR_NAMES } = vi.hoisted(() => ({
@@ -87,7 +84,7 @@ const { cancelRunMock, updateIssueMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: updateIssueMock }),
+  useUpdateIssue: () => ({ mutate: updateIssueMock, mutateAsync: updateIssueMock }),
   useCancelIssueRun: () => ({ mutateAsync: cancelRunMock }),
 }));
 
@@ -134,7 +131,7 @@ vi.mock("sonner", () => ({
   toast: { success: toastSuccessMock, error: toastErrorMock, info: vi.fn() },
 }));
 
-const { apiMocks, copyTextMock } = vi.hoisted(() => ({
+const { apiMocks, copyTextMock, copyTextAndHtmlMock } = vi.hoisted(() => ({
   apiMocks: {
     listTasksByIssue: vi.fn(),
     listIssueWorkflows: vi.fn(),
@@ -147,6 +144,7 @@ const { apiMocks, copyTextMock } = vi.hoisted(() => ({
     runQuickAction: vi.fn(),
   },
   copyTextMock: vi.fn(),
+  copyTextAndHtmlMock: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -156,14 +154,21 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: copyTextMock,
+  copyTextAndHtml: copyTextAndHtmlMock,
 }));
 
 vi.mock("../../../common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: any) => <span data-testid="actor">{actorId}</span>,
 }));
 
+const platform = vi.hoisted(() => ({ desktop: false }));
+vi.mock("../../../platform/local-directory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../platform/local-directory")>()),
+  isDesktopShell: () => platform.desktop,
+}));
+
 // Import after mocks.
-import { IssueActionsDropdown } from "../issue-actions-dropdown";
+import { IssueActionsDropdown, useIssuePageMenu } from "../issue-actions-dropdown";
 import {
   IssueActionsContextMenu,
   IssueContextMenuProvider,
@@ -204,6 +209,9 @@ function wrap(ui: React.ReactNode) {
 }
 
 beforeEach(() => {
+  // Picks persist in a real store; keep one test's picks out of the next's Recent.
+  useAssigneePicksStore.setState({ byScope: {} });
+  platform.desktop = false;
   deletionPolicy.allowed = true;
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
@@ -215,6 +223,8 @@ beforeEach(() => {
   navState.hash = "";
   copyTextMock.mockReset();
   copyTextMock.mockResolvedValue(true);
+  copyTextAndHtmlMock.mockReset();
+  copyTextAndHtmlMock.mockResolvedValue(true);
   toastSuccessMock.mockReset();
   toastErrorMock.mockReset();
   apiMocks.listQuickActions.mockReset();
@@ -236,7 +246,7 @@ beforeEach(() => {
   apiMocks.markIssueUnread.mockResolvedValue({ unread: true });
   cancelRunMock.mockReset();
   cancelRunMock.mockResolvedValue(undefined);
-  updateIssueMock.mockReset();
+  updateIssueMock.mockReset().mockResolvedValue(mockIssue);
 });
 
 describe("IssueActionsDropdown", () => {
@@ -260,12 +270,32 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
+    expect(screen.getByText("Copy link with title")).toBeInTheDocument();
     expect(screen.getByText("Create sub-issue")).toBeInTheDocument();
     expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
     // Linking to existing issues stays inside the "Relations" submenu.
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
+  });
+
+  it("copies the identifier and title as a rich link", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Copy link with title"));
+
+    expect(copyTextAndHtmlMock).toHaveBeenCalledWith(
+      "[TES-1 Example](https://app.example/test/issues/TES-1)",
+      '<a href="https://app.example/test/issues/TES-1">TES-1 Example</a>',
+    );
   });
 
   it("lists Create sub-issue directly below Rename issue", async () => {
@@ -479,7 +509,7 @@ describe("IssueActionsDropdown", () => {
     await waitFor(() => {
       expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1", false, { view: "timeline" });
     });
-    fireEvent.click(await screen.findByText("Copy local workdir path"));
+    fireEvent.click(await screen.findByText("Copy local working directory path"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
@@ -707,6 +737,56 @@ describe("Quick actions (MUL-9093)", () => {
     );
   });
 
+  function IssuePageHarness() {
+    const pageMenu = useIssuePageMenu();
+    return (
+      <div>
+        <IssueActionsDropdown
+          issue={mockIssue}
+          rowMenu={pageMenu.rowMenu}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />
+        <div data-testid="page-body" onContextMenu={pageMenu.onContextMenu}>
+          <p data-testid="blank">Body</p>
+          <a href="https://example.com" data-testid="link">Link</a>
+        </div>
+      </div>
+    );
+  }
+
+  describe("right-click in the issue page body", () => {
+    it("opens the issue menu, quick actions included, on Desktop", async () => {
+      platform.desktop = true;
+      render(wrap(<IssuePageHarness />));
+      // fireEvent returns false once a handler called preventDefault.
+      expect(fireEvent.contextMenu(screen.getByTestId("blank"))).toBe(false);
+
+      expect(await screen.findByText("Rename issue")).toBeInTheDocument();
+      fireEvent.click(await screen.findByText("Quick actions"));
+      expect(await screen.findByText("Review")).toBeInTheDocument();
+    });
+
+    it("leaves a link's right-click to the link's own menu on Desktop", async () => {
+      platform.desktop = true;
+      render(wrap(<IssuePageHarness />));
+      expect(fireEvent.contextMenu(screen.getByTestId("link"))).toBe(true);
+
+      await waitFor(() => expect(apiMocks.listQuickActions).not.toHaveBeenCalled());
+      expect(screen.queryByText("Rename issue")).not.toBeInTheDocument();
+    });
+
+    it("keeps the browser's own menu on web, with Quick actions still under the ⋯ button", async () => {
+      render(wrap(<IssuePageHarness />));
+      expect(fireEvent.contextMenu(screen.getByTestId("blank"))).toBe(true);
+      await waitFor(() => expect(apiMocks.listQuickActions).not.toHaveBeenCalled());
+      expect(screen.queryByText("Rename issue")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("trigger"));
+      fireEvent.click(await screen.findByText("Quick actions"));
+      expect(await screen.findByText("Review")).toBeInTheDocument();
+    });
+  });
+
   it("is absent when the workspace has no active quick actions", async () => {
     apiMocks.listQuickActions.mockResolvedValue({
       quick_actions: [quickAction({ status: "archived" })],
@@ -748,7 +828,8 @@ describe("Sidebar variant (MUL-8425)", () => {
       "Pin to sidebar",
       "Mark as unread",
       "Copy link",
-      "Copy identifier",
+      "Copy link with title",
+      "Copy issue ID",
     ]);
     expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");
     // No workdir entry, so the menu has no reason to fetch the task list.
@@ -779,7 +860,7 @@ describe("Sidebar variant (MUL-8425)", () => {
 
   it("copies the identifier", async () => {
     openSidebarMenu();
-    fireEvent.click(await screen.findByText("Copy identifier"));
+    fireEvent.click(await screen.findByText("Copy issue ID"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("TES-1");

@@ -295,7 +295,7 @@ func TestGrokPricingMatchesRecordedTurn(t *testing.T) {
 	// Captured payload: inputTokens 12929, cachedReadTokens 10880,
 	// outputTokens 29, totalTokens 12958, costUsdTicks 75360000. Grok counts
 	// the cached prefix inside inputTokens, so the uncached remainder is
-	// 12929 - 10880 = 2049 (see excludeACPCachedInput in pkg/agent/hermes.go).
+	// 12929 - 10880 = 2049 (see normalizeACPTokenUsage in pkg/agent/acp_usage.go).
 	const (
 		uncachedInput = int64(2049)
 		cacheRead     = int64(10880)
@@ -373,6 +373,59 @@ func TestPriceForModelAliasAlibabaMoonshotVolcengine(t *testing.T) {
 		}
 		if got != tc.want {
 			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+}
+
+// TestPriceForModelAliasGLM53AndKimiK31Pro pins the newly priced SKUs and the
+// transports that report them: Hermes' `custom:glm-5.3` and opencode's
+// `zhipuai/glm-5.3` (routing prefixes reach the rows through the `(^|/|:)`
+// anchors), Kimi Code's `kimi-code/k3.1-pro`. The distinct CodeBuddy SKU
+// `kimi-k3-1`, the double-price `kimi-k3.1-pro-highspeed` variants and Kimi
+// Code's subscription coding-route alias `kimi-for-coding` (absent from
+// Moonshot's API price sheet, like `ark-code-latest`) stay unmapped rather
+// than borrowing a guessed rate.
+func TestPriceForModelAliasGLM53AndKimiK31Pro(t *testing.T) {
+	glm53 := ModelPrice{Provider: "zai", Model: "glm-5.3", InputPerM: 1.4, CacheReadPerM: 0.26, CacheWritePerM: 1.4, OutputPerM: 4.4}
+	glm53Flash := ModelPrice{Provider: "zai", Model: "glm-5.3-flash", InputPerM: 0.15, CacheReadPerM: 0.03, CacheWritePerM: 0.15, OutputPerM: 0.5}
+	kimiK31 := ModelPrice{Provider: "moonshotai", Model: "kimi-k3.1-pro", InputPerM: 2.0, CacheReadPerM: 0.20, CacheWritePerM: 2.0, OutputPerM: 10.0}
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{"glm-5.3", glm53},
+		{"custom:glm-5.3", glm53},
+		{"zhipuai/glm-5.3", glm53},
+		{"glm-5.3[1m]", glm53},
+		{"glm-5.3-flash", glm53Flash},
+		{"kimi-k3.1-pro", kimiK31},
+		{"kimi-code/k3.1-pro", kimiK31},
+		{"k3.1-pro", kimiK31},
+		{"kimi-k3.1-pro[1m]", kimiK31},
+	}
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	for _, model := range []string{
+		"kimi-for-coding",
+		"kimi-code/kimi-for-coding",
+		"kimi-k3-1",
+		"kimi-k3.1-pro-highspeed",
+		"kimi-code/k3.1-pro-highspeed",
+		"k3.1-pro-highspeed",
+		"glm-5.3-flashx",
+		"glm-5.3-fast",
+		"glm-5.3-extra",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
 		}
 	}
 }

@@ -206,7 +206,8 @@ export function FeatureIntroCarousel({
       className="w-full max-w-[22.5rem]"
     >
       <div
-        className="flex gap-6 transition-transform duration-300 ease-out motion-reduce:transition-none"
+        // The translated track can overlap the intro actions; only slides receive pointer events.
+        className="pointer-events-none flex gap-6 transition-transform duration-300 ease-out motion-reduce:transition-none"
         style={{ transform: `translateX(calc(${-index} * (100% + 1.5rem)))` }}
       >
         {slides.map((slide, i) => {
@@ -223,7 +224,7 @@ export function FeatureIntroCarousel({
               aria-hidden={!active}
               inert={!active}
               className={cn(
-                "w-full shrink-0 transition-opacity duration-300 motion-reduce:transition-none",
+                "pointer-events-auto w-full shrink-0 transition-opacity duration-300 motion-reduce:transition-none",
                 active ? "opacity-100" : i === index + 1 ? "opacity-40" : "opacity-0",
               )}
             >

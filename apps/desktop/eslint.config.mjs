@@ -2,6 +2,11 @@ import globals from "globals";
 import reactConfig from "@multica/eslint-config/react";
 import { ICON_LIBRARY_IMPORT_PATTERNS, REDUCED_MOTION_IMPORT } from "@multica/eslint-config/base";
 import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
+import {
+  NO_UNTRANSLATED_ATTRIBUTES,
+  NO_UNTRANSLATED_JSX_TEXT,
+  NO_UNTRANSLATED_TOAST,
+} from "../../packages/views/eslint-i18n-guard.mjs";
 
 export default [
   ...reactConfig,
@@ -69,6 +74,24 @@ export default [
           patterns: ICON_LIBRARY_IMPORT_PATTERNS,
         },
       ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.object.name='router'][callee.property.name='navigate']",
+          message:
+            "Direct router.navigate from application code breaks the Coordinator protocol (MUL-4741). Route it through the navigation adapter in src/platform.",
+        },
+        NO_UNTRANSLATED_ATTRIBUTES,
+        NO_UNTRANSLATED_JSX_TEXT,
+        NO_UNTRANSLATED_TOAST,
+        NO_ROUND_CONTROLS,
+      ],
+    },
+  },
+  {
+    files: ["src/renderer/src/components/desktop-dev-toolbar.tsx"],
+    rules: {
       "no-restricted-syntax": [
         "error",
         {

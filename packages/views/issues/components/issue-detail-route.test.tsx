@@ -10,6 +10,7 @@ import type { NavigationAdapter } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton } from "./issue-detail";
 import {
   IssueDetailRoute,
+  parseAppRequestHighlightHash,
   parseCommentHighlightHash,
   useCanonicalIssueUrl,
 } from "./issue-detail-route";
@@ -144,6 +145,16 @@ describe("parseCommentHighlightHash", () => {
     ["#comment-unsafe/value", undefined],
   ])("maps %s to %s", (hash, expected) => {
     expect(parseCommentHighlightHash(hash)).toBe(expected);
+  });
+});
+
+describe("parseAppRequestHighlightHash", () => {
+  it.each([
+    ["#app-request-01a02814-f098-7309-8286-0b249c66884d", "01a02814-f098-7309-8286-0b249c66884d"],
+    ["#comment-c1", undefined],
+    ["#app-request-", undefined],
+  ])("maps %s to %s", (hash, expected) => {
+    expect(parseAppRequestHighlightHash(hash)).toBe(expected);
   });
 });
 

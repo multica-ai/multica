@@ -16,8 +16,10 @@ import { IssueViewHeader } from "./view-header";
 const copyLink = vi.hoisted(() => vi.fn());
 const rename = vi.hoisted(() => vi.fn());
 const active = vi.hoisted(() => ({ view: null as IssueView | null }));
+const viewer = vi.hoisted(() => ({ guest: false }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => viewer.guest }));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
@@ -101,6 +103,7 @@ beforeEach(() => {
   copyLink.mockClear();
   rename.mockClear();
   active.view = null;
+  viewer.guest = false;
   useIssueViewRenameStore.setState({ target: null });
   useIssueViewEditStore.setState({ viewId: null });
   myIssuesViewStore.setState({ scope: "assigned" });
@@ -117,7 +120,7 @@ describe("IssueViewHeader copy link", () => {
     },
     {
       kind: "my",
-      title: "My Issues",
+      title: "My issues",
       pathname: "/acme/my-issues",
       search: "",
       expected: "/acme/my-issues",
@@ -136,6 +139,19 @@ describe("IssueViewHeader copy link", () => {
     await user.click(screen.getByRole("button", { name: title }));
     await user.click(await screen.findByRole("menuitem", { name: "Copy link" }));
     expect(copyLink).toHaveBeenCalledWith(expected);
+  });
+});
+
+describe("IssueViewHeader new issue button", () => {
+  it("offers a member the new-issue button", () => {
+    renderHeader("my", "header-new-issue-member", adapterFor("/acme/my-issues"));
+    expect(screen.getByRole("button", { name: "New issue" })).toBeInTheDocument();
+  });
+
+  it("hides the new-issue button from a guest (MUL-9420)", () => {
+    viewer.guest = true;
+    renderHeader("my", "header-new-issue-guest", adapterFor("/acme/my-issues"));
+    expect(screen.queryByRole("button", { name: "New issue" })).toBeNull();
   });
 });
 

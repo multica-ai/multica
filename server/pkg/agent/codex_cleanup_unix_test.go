@@ -6,11 +6,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestCodexInitializeParentDeadlineDoesNotPersistOpaqueEnv is the other half of
@@ -27,11 +25,10 @@ import (
 // Canceled arm only.
 //
 // The fake writes the secret to stderr before reading the handshake, so the
-// redaction check never depends on racing our own initialize write. The budget
-// is sized against measurement: reaching the app-server's first line costs
-// ~430-465ms here (version probe plus launch), so 2s keeps ~4x headroom, and
-// the ready-file guard below fails loudly rather than vacuously if a slower
-// machine ever misses it.
+// redaction check never depends on racing our own initialize write. The
+// caller's deadline expires only once the fake has written it, and the
+// handshake bound is the fallback timeout, so the deadline is the only thing
+// that can end the run no matter how slowly the fake starts.
 func TestCodexInitializeParentDeadlineDoesNotPersistOpaqueEnv(t *testing.T) {
 	t.Parallel()
 
@@ -41,7 +38,7 @@ func TestCodexInitializeParentDeadlineDoesNotPersistOpaqueEnv(t *testing.T) {
 		`echo "$OPAQUE_AUTH_VALUE" >&2`+"\n"+
 		`touch "`+readyFile+`"`+"\n"+
 		`read line`+"\n"+
-		`sleep 5`+"\n")
+		`sleep 300`+"\n")
 
 	var logs strings.Builder
 	backend, err := New("codex", Config{
@@ -52,10 +49,9 @@ func TestCodexInitializeParentDeadlineDoesNotPersistOpaqueEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Below the 4s handshake bound, so the parent deadline is what ends the run.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: 10 * time.Second, HandshakeTimeout: 4 * time.Second})
+	ctx := newExpirableContext()
+	defer ctx.expire()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: testFallbackTimeout, HandshakeTimeout: testFallbackTimeout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,10 +59,9 @@ func TestCodexInitializeParentDeadlineDoesNotPersistOpaqueEnv(t *testing.T) {
 		for range session.Messages {
 		}
 	}()
+	waitForTestFile(t, readyFile)
+	ctx.expire()
 	result := <-session.Result
-	if _, err := os.Stat(readyFile); err != nil {
-		t.Fatalf("fake app-server never wrote the secret to stderr, so the redaction check would pass vacuously: %v", err)
-	}
 	persisted := fmt.Sprintf("%+v\n%s", result, logs.String())
 	if strings.Contains(persisted, secret) {
 		t.Fatalf("opaque env persisted after the parent deadline: %s", persisted)
@@ -85,7 +80,7 @@ func TestCodexInitializeParentCancellationDoesNotPersistOpaqueEnv(t *testing.T) 
 		`read line`+"\n"+
 		`echo "$OPAQUE_AUTH_VALUE" >&2`+"\n"+
 		`touch "`+readyFile+`"`+"\n"+
-		`sleep 5`+"\n")
+		`sleep 300`+"\n")
 
 	var logs strings.Builder
 	backend, err := New("codex", Config{
@@ -98,7 +93,7 @@ func TestCodexInitializeParentCancellationDoesNotPersistOpaqueEnv(t *testing.T) 
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: 10 * time.Second, HandshakeTimeout: 4 * time.Second})
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: testFallbackTimeout, HandshakeTimeout: testFallbackTimeout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,21 +101,9 @@ func TestCodexInitializeParentCancellationDoesNotPersistOpaqueEnv(t *testing.T) 
 		for range session.Messages {
 		}
 	}()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, err := os.Stat(readyFile); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake app-server did not write stderr before cancellation")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitForTestFile(t, readyFile)
 	cancel()
 	result := <-session.Result
-	if _, err := os.Stat(readyFile); err != nil {
-		t.Fatalf("fake app-server never wrote the secret to stderr, so the redaction check would pass vacuously: %v", err)
-	}
 	persisted := fmt.Sprintf("%+v\n%s", result, logs.String())
 	if strings.Contains(persisted, secret) {
 		t.Fatalf("opaque env persisted after parent context ended: %s", persisted)

@@ -8,6 +8,7 @@ import {
   PLUGINS_V1_FLAG,
 } from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
+import { ScrollRestorationProvider } from "../../platform";
 
 // This file tests the settings SHELL — the chrome around the tabs — so every
 // tab panel is stubbed out. Their contents have their own test files. Profile
@@ -227,6 +228,36 @@ describe("SettingsPage header", () => {
   });
 });
 
+describe("SettingsPage scroll restoration", () => {
+  // Every settings page shares the route, so one page's offset must not land
+  // on another when the content remounts.
+  it("gives each page its own saved offset", () => {
+    const get = vi.fn((key: string) =>
+      key === "settings:members:" ? { top: 360, height: 1400 } : undefined,
+    );
+    navigationState.search = "tab=members";
+    const { rerender } = renderWithI18n(
+      <ScrollRestorationProvider adapter={{ get }}>
+        <SettingsPage />
+      </ScrollRestorationProvider>,
+    );
+
+    const members = screen.getByText("MembersTab").closest<HTMLElement>("[data-tab-scroll-root]")!;
+    expect(members.getAttribute("data-tab-scroll-root")).toBe("settings:members:");
+    expect(members.scrollTop).toBe(360);
+
+    navigationState.search = "tab=labels";
+    rerender(
+      <ScrollRestorationProvider adapter={{ get }}>
+        <SettingsPage />
+      </ScrollRestorationProvider>,
+    );
+    const labels = screen.getByText("LabelsTab").closest<HTMLElement>("[data-tab-scroll-root]")!;
+    expect(labels.getAttribute("data-tab-scroll-root")).toBe("settings:labels:");
+    expect(labels.scrollTop).toBe(0);
+  });
+});
+
 describe("SettingsPage Plugin feature flag", () => {
   it("hides Plugins and falls back from a direct tab URL when disabled", () => {
     navigationState.search = "tab=plugins";
@@ -259,7 +290,7 @@ describe("SettingsPage workflows", () => {
 
     expect(screen.getByText("WorkflowsTab")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByRole("link", { name: "Issue Statuses" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Issue statuses" })).not.toBeInTheDocument();
   });
 
   it("opens old status catalog links in workflows", () => {
@@ -318,7 +349,7 @@ describe("SettingsPage information architecture", () => {
     ]);
     const personal = within(nav()).getByRole("region", { name: "Personal" });
     expect(within(personal).getByRole("link", { name: "Preferences" })).toBeInTheDocument();
-    expect(within(personal).getByRole("link", { name: "API Tokens" })).toBeInTheDocument();
+    expect(within(personal).getByRole("link", { name: "API tokens" })).toBeInTheDocument();
 
     const workspace = within(nav()).getByRole("region", { name: "Workspace" });
     expect(within(workspace).getByRole("link", { name: "Members" })).toBeInTheDocument();

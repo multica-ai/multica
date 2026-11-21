@@ -80,6 +80,7 @@ import {
 } from "./build-steps";
 import { buildRunOutcome } from "./run-outcome";
 import { RunTimeline } from "./run-timeline";
+import { ContextReceiptButton } from "./context-receipt";
 import {
   base64ByteLength,
   readImageResult,
@@ -870,7 +871,7 @@ export function AgentTranscriptDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
+        className="!max-w-5xl !w-[calc(100%-4rem)] !max-h-[calc(100%-4rem)] !h-[calc(100%-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
         finalFocus={finalFocus}
       >
@@ -945,6 +946,9 @@ export function AgentTranscriptDialog({
             )}
 
             <div className="flex shrink-0 items-center gap-0.5">
+              {/* What the agent was handed (MUL-9013). Renders nothing for
+                  runs whose daemon predates the receipt. */}
+              <ContextReceiptButton taskId={task.id} open={open} />
               {hasRunDetails && (
                 <Popover>
                   <PopoverTrigger

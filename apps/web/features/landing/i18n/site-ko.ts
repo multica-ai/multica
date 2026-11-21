@@ -143,8 +143,8 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
         },
         chat: {
           title: "채팅에서 에이전트를 멘션하세요",
-          body: "Slack, Lark, DingTalk, WeCom, Telegram에서. 에이전트가 스레드를 읽고, Issue를 만들고, 작업을 시작합니다.",
-          alt: "팀 채팅 채널. Mia가 내보내기 실패 건으로 Backend Agent를 멘션하고, 에이전트가 직접 만들어 처리 중인 Multica Issue 링크와 함께 답한다",
+          body: "Slack, Lark, DingTalk, WeCom, WeChat, Telegram에서. 에이전트가 스레드를 읽고, Issue를 만들고, 작업을 시작합니다.",
+          alt: "팀 채팅 채널. Mia가 내보내기 실패 건으로 Backend Agent를 멘션하고, 에이전트가 직접 만들어 처리 중인 Multica 태스크 링크와 함께 답한다",
         },
         autopilots: {
           title: "오토파일럿이 일정에 맞춰 실행됩니다",
@@ -161,7 +161,7 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     agents: {
       lead: "새로운 에이전트를 배울 필요는 없습니다.",
       title: "이미 쓰고 있는 그대로.",
-      all: "에이전트 27종 전체",
+      all: "에이전트 31종 전체",
     },
     updates: {
       eyebrow: "변경 로그",

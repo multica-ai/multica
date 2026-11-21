@@ -3,8 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, Link2, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
-import { copyText } from "@multica/ui/lib/clipboard";
+import { Archive, ArchiveRestore, ExternalLink, Link2, Pencil, Pin, PinOff, Trash2, Type } from "@multica/ui/icons";
+import { copyText, copyTextAndHtml } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
@@ -31,19 +31,26 @@ import { agentListOptions, memberListOptions } from "@multica/core/workspace/que
 import { useT } from "../../i18n";
 import { useIntentNavigate, useNavigation } from "../../navigation";
 import { CollectionRowMenu } from "../../layout/collection-list";
+import { titleLinkPayload } from "../../common/title-link";
+import { useArchiveProjects, useRestoreProjects } from "./project-archive";
+import { getProjectFoldersExtension } from "../../extensions";
 
 export function DeleteProjectsDialog({
   rows,
   open,
   onOpenChange,
   onDeleted,
+  onArchiveInstead,
 }: {
   rows: Project[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDeleted?: () => void;
+  /** Offers archiving as the reversible alternative; omitted when every row is already archived. */
+  onArchiveInstead?: () => void;
 }) {
   const { t } = useT("projects");
+  const canArchiveInstead = !!onArchiveInstead && rows.some((p) => !p.archived_at);
   const deleteProject = useDeleteProject();
   const [deleting, setDeleting] = useState(false);
 
@@ -81,7 +88,29 @@ export function DeleteProjectsDialog({
             {t(($) => $.delete_dialog.description)}
           </DialogDescription>
         </DialogHeader>
+        {canArchiveInstead && (
+          <div className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-caption text-muted-foreground">
+            <Archive className="mt-0.5 size-3.5 shrink-0" />
+            <span>{t(($) => $.delete_dialog.archive_hint)}</span>
+          </div>
+        )}
         <DialogFooter>
+          {canArchiveInstead && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="sm:mr-auto"
+              disabled={deleting}
+              onClick={() => {
+                onOpenChange(false);
+                onArchiveInstead?.();
+              }}
+            >
+              <Archive className="size-3.5" />
+              {t(($) => $.delete_dialog.archive_instead)}
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"
@@ -135,12 +164,15 @@ export function ProjectRowActions({
   const { t } = useT("projects");
   const { t: tCommon } = useT("common");
   const { t: tLayout } = useT("layout");
+  const ProjectFolderItems = getProjectFoldersExtension()?.ProjectMenuItems;
   const wsPaths = useWorkspacePaths();
   const intentNavigate = useIntentNavigate();
   const { getShareableUrl } = useNavigation();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const { requestArchive, dialog: archiveDialog } = useArchiveProjects();
+  const restore = useRestoreProjects();
 
   const togglePin = () => {
     if (pinned) deletePin.mutate({ itemType: "project", itemId: project.id });
@@ -149,6 +181,17 @@ export function ProjectRowActions({
   const copyLink = async () => {
     if (await copyText(getShareableUrl(wsPaths.projectDetail(project.id)))) {
       toast.success(tLayout(($) => $.rail.link_copied));
+    }
+  };
+  const copyTitleAsLink = async () => {
+    const { text, html } = titleLinkPayload(
+      project.title,
+      getShareableUrl(wsPaths.projectDetail(project.id)),
+    );
+    if (await copyTextAndHtml(text, html)) {
+      toast.success(t(($) => $.detail.toast_title_link_copied));
+    } else {
+      toast.error(t(($) => $.detail.toast_title_link_copy_failed));
     }
   };
 
@@ -188,6 +231,7 @@ export function ProjectRowActions({
           <ExternalLink className="size-3.5" />
           {tCommon(($) => $.navigation.open_in_new_tab)}
         </DropdownMenuItem>
+        {ProjectFolderItems && <ProjectFolderItems project={project} />}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={togglePin}>
           {pinned ? (
@@ -201,17 +245,30 @@ export function ProjectRowActions({
           <Link2 className="size-3.5" />
           {tLayout(($) => $.rail.copy_link)}
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void copyTitleAsLink()}>
+          <Type className="size-3.5" />
+          {t(($) => $.detail.copy_title_as_link)}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {project.archived_at ? (
+          <DropdownMenuItem onClick={() => restore(project)}>
+            <ArchiveRestore className="size-3.5" />
+            {t(($) => $.page.restore)}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem onClick={() => requestArchive([project])}>
+            <Archive className="size-3.5" />
+            {t(($) => $.page.archive)}
+          </DropdownMenuItem>
+        )}
         {canDelete && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 className="size-3.5" />
-              {t(($) => $.page.delete)}
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2 className="size-3.5" />
+            {t(($) => $.page.delete)}
+          </DropdownMenuItem>
         )}
         {trailing}
       </CollectionRowMenu>
@@ -220,7 +277,9 @@ export function ProjectRowActions({
         rows={[project]}
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
+        onArchiveInstead={() => requestArchive([project], { immediate: true })}
       />
+      {archiveDialog}
     </>
   );
 }

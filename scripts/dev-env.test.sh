@@ -172,10 +172,12 @@ assert_stop_handles_listener() {
   )
 }
 
-# Launcher 100 owns listener 200; listener 999 is someone else's.
+# Launcher 100 owns listener 200; listener 999 is someone else's. The api's
+# sources fingerprint as fp-now, and `make up` recorded `api_build` for it
+# ("-" for no record).
 assert_component_state() {
   local case_name=$1 component=$2 listener=$3 reported_commit=$4 probe_ok=$5
-  local expected_state=$6 expected_detail=$7
+  local expected_state=$6 expected_detail=$7 api_build=${8:-100 fp-now}
   (
     # shellcheck disable=SC1090
     source "$root_dir/scripts/dev-env.sh"
@@ -183,15 +185,18 @@ assert_component_state() {
     mkdir -p "$STATE_DIR"
     BACKEND_PORT=18080
     FRONTEND_PORT=13000
+    COLLAB_PORT=14000
     TEST_LISTENER=$listener
     TEST_COMMIT=$reported_commit
     TEST_PROBE_OK=$probe_ok
+    [ "$api_build" = - ] || printf '%s\n' "$api_build" > "$(api_build_file)"
 
     component_pid() { printf '100'; }
     port_listener_pid() { printf '%s' "$TEST_LISTENER"; }
     process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
     process_parent_id() { printf '1'; }
     checkout_commit() { printf 'bbb2222'; }
+    api_source_fingerprint() { printf 'fp-now'; }
     health_json() {
       printf '{"pid":%s,"commit":"%s","started_at":"2026-01-01T00:00:00Z"}' "$TEST_LISTENER" "$TEST_COMMIT"
     }
@@ -260,6 +265,243 @@ assert_start_web() {
   )
 }
 
+# Launcher 100 owns listener 200, which reports `reported_commit`; a relaunch
+# gets launcher 101 and the same listener. The api's sources fingerprint as
+# fp-now, and `make up` previously recorded `api_build` ("-" for no record).
+assert_start_api() {
+  local case_name=$1 reported_commit=$2 api_build=$3 expected_output=$4
+  local expected_events=$5 expected_build=$6
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-api-$case_name"
+    LOG_DIR="$STATE_DIR"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    ENV_FILE=.env.example
+    local events="$STATE_DIR/events"
+    : > "$events"
+    printf '100\n' > "$(pid_file api)"
+    [ "$api_build" = - ] || printf '%s\n' "$api_build" > "$(api_build_file)"
+    TEST_COMMIT=$reported_commit
+
+    component_pid() { cat "$(pid_file api)"; }
+    port_listener_pid() { printf '200'; }
+    port_free() { :; }
+    process_group_id() { [ "$1" = 200 ] && component_pid api || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    checkout_commit() { printf 'bbb2222'; }
+    api_source_fingerprint() { printf 'fp-now'; }
+    health_json() {
+      printf '{"pid":200,"commit":"%s","started_at":"2026-01-01T00:00:00Z"}' "$TEST_COMMIT"
+    }
+    now_epoch() { printf '1000'; }
+    sleep() { :; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; }
+    launch_detached() {
+      printf 'launch %s\n' "$1" >> "$events"
+      printf '101\n' > "$(pid_file api)"
+      TEST_COMMIT=bbb2222
+    }
+
+    local status=0
+    ( start_api ) > "$out" 2>&1 || status=$?
+    [ "$status" = 0 ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_api exited $status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+    [ "$(cat "$(api_build_file)" 2>/dev/null)" = "$expected_build" ] \
+      || fail "$case_name recorded api build = '$(cat "$(api_build_file)" 2>/dev/null)', want '$expected_build'"
+  )
+}
+
+# The same current api as above, with `components` selected and collab's
+# listener running or not. `recorded` is the collab URL the api was launched
+# with ("-" for an api started before collab existed).
+assert_start_api_collab() {
+  local case_name=$1 components=$2 collab_running=$3 recorded=$4 expected_output=$5
+  local expected_events=$6 expected_recorded=$7
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-api-collab-$case_name"
+    LOG_DIR="$STATE_DIR"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    COLLAB_PORT=14000
+    COMPONENTS="$components"
+    ENV_FILE=.env.example
+    COLLAB_SECRET=test-secret
+    local events="$STATE_DIR/events"
+    : > "$events"
+    printf '100\n' > "$(pid_file api)"
+    printf '100 fp-now\n' > "$(api_build_file)"
+    [ "$recorded" = - ] || printf '%s\n' "$recorded" > "$(api_collab_file)"
+    TEST_COLLAB_RUNNING=$collab_running
+
+    eval "original_$(declare -f listener_belongs_to_component)"
+    listener_belongs_to_component() {
+      if [ "$1" = collab ]; then [ "$TEST_COLLAB_RUNNING" = 1 ]; else original_listener_belongs_to_component "$@"; fi
+    }
+    component_pid() { cat "$(pid_file api)"; }
+    port_listener_pid() { printf '200'; }
+    port_free() { :; }
+    process_group_id() { [ "$1" = 200 ] && component_pid api || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    checkout_commit() { printf 'bbb2222'; }
+    api_source_fingerprint() { printf 'fp-now'; }
+    health_json() {
+      printf '{"pid":200,"commit":"bbb2222","started_at":"2026-01-01T00:00:00Z"}'
+    }
+    now_epoch() { printf '1000'; }
+    sleep() { :; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; }
+    launch_detached() {
+      local arg wiring=""
+      for arg in "$@"; do
+        case "$arg" in COLLAB_INTERNAL_URL=*) wiring="$arg" ;; esac
+      done
+      printf 'launch %s %s\n' "$1" "$wiring" >> "$events"
+      printf '101\n' > "$(pid_file api)"
+    }
+
+    local status=0
+    ( start_api ) > "$out" 2>&1 || status=$?
+    [ "$status" = 0 ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_api exited $status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+    [ "$(cat "$(api_collab_file)" 2>/dev/null)" = "$expected_recorded" ] \
+      || fail "$case_name recorded collab URL = '$(cat "$(api_collab_file)" 2>/dev/null)', want '$expected_recorded'"
+  )
+}
+
+# The generated secret is created once, private, and reused; one set in the env
+# file wins over it.
+assert_collab_secret() (
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  STATE_DIR="$tmp_dir/collab-secret"
+  mkdir -p "$STATE_DIR"
+  unset COLLAB_SECRET
+  local first second
+  first="$(collab_secret)"
+  second="$(collab_secret)"
+  [ "${#first}" = 64 ] || fail "generated collab secret has ${#first} characters, want 64"
+  [ "$first" = "$second" ] || fail "collab secret changed between calls"
+  case "$(ls -l "$STATE_DIR/collab.secret")" in
+    -rw-------*) ;;
+    *) fail "collab secret file is readable by others: $(ls -l "$STATE_DIR/collab.secret")" ;;
+  esac
+  [ "$(COLLAB_SECRET=from-env-file collab_secret)" = from-env-file ] \
+    || fail "a COLLAB_SECRET from the env file did not win"
+)
+
+# Launcher 100 owns listener 200; listener 999 is someone else's ("" for a free
+# port). /health answers when `healthy` is 1.
+assert_start_collab() {
+  local case_name=$1 listener=$2 healthy=$3 expected_status=$4
+  local expected_output=$5 expected_events=$6
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-collab-$case_name"
+    LOG_DIR="$STATE_DIR"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    COLLAB_PORT=14000
+    ENV_FILE=.env.example
+    COLLAB_SECRET=test-secret
+    local events="$STATE_DIR/events"
+    printf '%s' "$listener" > "$STATE_DIR/listener"
+    printf '%s' "$healthy" > "$STATE_DIR/healthy"
+    : > "$events"
+
+    component_pid() { printf '100'; }
+    port_listener_pid() { cat "$STATE_DIR/listener"; }
+    port_free() { [ -z "$(port_listener_pid)" ]; }
+    process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    describe_port_owner() { printf 'pid %s' "$(port_listener_pid "$1")"; }
+    collab_healthy() { [ "$(cat "$STATE_DIR/healthy")" = 1 ]; }
+    collab_cdn_domain() { printf 'localhost'; }
+    sleep() { :; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; : > "$STATE_DIR/listener"; }
+    launch_detached() {
+      local arg wiring=""
+      for arg in "$@"; do
+        case "$arg" in COLLAB_PORT=*|MULTICA_API_URL=*) wiring="$wiring $arg" ;; esac
+      done
+      printf 'launch %s%s\n' "$1" "$wiring" >> "$events"
+      printf '100\n' > "$(pid_file collab)"
+      printf '200' > "$STATE_DIR/listener"
+      printf '1' > "$STATE_DIR/healthy"
+    }
+
+    local status=0
+    ( start_collab ) > "$out" 2>&1 || status=$?
+    [ "$status" = "$expected_status" ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_collab exited $status, want $expected_status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+  )
+}
+
+# The fingerprint follows server/'s uncommitted state in a real repository:
+# tracked edits, staged edits and untracked files count, ignored files and
+# changes outside server/ do not, and undoing an edit restores it.
+assert_api_source_fingerprint() (
+  local repo="$tmp_dir/fingerprint-repo" clean
+  mkdir -p "$repo/server/bin"
+  git -C "$repo" init -q
+  printf 'package main\n' > "$repo/server/main.go"
+  printf 'bin/\n' > "$repo/server/.gitignore"
+  printf 'readme\n' > "$repo/README.md"
+  git -C "$repo" add -A
+  git -C "$repo" -c user.name=t -c user.email=t@example.com commit -qm init
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  DIR="$repo"
+  fingerprint_is() {
+    local label=$1 relation=$2 actual
+    actual="$(api_source_fingerprint)"
+    [ -n "$actual" ] || fail "fingerprint $label: empty"
+    if [ "$relation" = same ]; then
+      [ "$actual" = "$clean" ] || fail "fingerprint $label: changed, want it unchanged"
+    else
+      [ "$actual" != "$clean" ] || fail "fingerprint $label: unchanged, want it changed"
+    fi
+    printf '%s' "$actual"
+  }
+  clean="$(api_source_fingerprint)"
+  [ -n "$clean" ] || fail "fingerprint of a clean tree is empty"
+  [ "$(api_source_fingerprint)" = "$clean" ] || fail "fingerprint is not stable"
+
+  printf 'built\n' > "$repo/server/bin/multica"
+  printf 'edited\n' >> "$repo/README.md"
+  fingerprint_is "ignored file and edit outside server/" same >/dev/null
+
+  printf '// edit\n' >> "$repo/server/main.go"
+  fingerprint_is "tracked edit" changed >/dev/null
+  git -C "$repo" add server/main.go
+  fingerprint_is "staged edit" changed >/dev/null
+  git -C "$repo" reset -q
+  git -C "$repo" checkout -q -- server/main.go
+  fingerprint_is "reverted edit" same >/dev/null
+
+  local first
+  printf 'package main\n' > "$repo/server/new.go"
+  first="$(fingerprint_is "untracked file" changed)"
+  printf '// edit\n' >> "$repo/server/new.go"
+  [ "$(fingerprint_is "edited untracked file" changed)" != "$first" ] \
+    || fail "fingerprint did not follow an edit to an untracked file"
+  rm "$repo/server/new.go"
+  fingerprint_is "removed untracked file" same >/dev/null
+)
+
 # ---------------------------------------------------------------------------
 # An empty registry is a normal state, not an error.
 # ---------------------------------------------------------------------------
@@ -321,7 +563,9 @@ node -e '
   if (payload.backend_port !== 18981) throw new Error("backend_port = " + payload.backend_port);
   if (payload.desktop_cdp_port !== null) throw new Error("desktop_cdp_port = " + payload.desktop_cdp_port);
   if (payload.workspace_slug !== "dev") throw new Error("workspace_slug = " + payload.workspace_slug);
-  for (const key of ["api", "web", "daemon", "desktop"]) {
+  // Manifests written before collab existed derive its port from the offset.
+  if (payload.collab_port !== 14901) throw new Error("collab_port = " + payload.collab_port);
+  for (const key of ["api", "collab", "web", "daemon", "desktop"]) {
     if (!payload.components[key]) throw new Error("missing component " + key);
     if (payload.components[key].state !== "stopped") {
       throw new Error(key + " state = " + payload.components[key].state);
@@ -345,6 +589,15 @@ if [ "$status" -ne 0 ]; then
   fail "down on a stopped environment exited $status, want 0"
 fi
 require_contains "$out" "stopped"
+
+# `make down C=daemon` must reach the script as a component filter. Dropping C
+# here stops api and web too, which is what `make up C=...` users do not expect.
+make -s -n -C "$root_dir" down C=daemon > "$out" 2>&1 || fail "make -n down C=daemon failed"
+require_contains "$out" "dev-env.sh down --components daemon"
+if make -s -n -C "$root_dir" destroy C=daemon > "$out" 2>&1; then
+  fail "make destroy C=daemon must refuse instead of destroying the whole environment"
+fi
+require_contains "$out" "make down C=daemon"
 
 # Commands launched through env-exec must not inherit the daemon-task identity
 # hints that make human/profile CLI commands reject --profile.
@@ -404,6 +657,9 @@ assert_component_state api-current api 200 bbb2222 1 running "commit bbb2222"
 assert_component_state api-stale api 200 aaa1111 1 stale "running aaa1111, checkout at bbb2222; run make up"
 assert_component_state api-foreign api 999 bbb2222 1 mismatch "not this checkout/process"
 assert_component_state api-foreign-old api 999 aaa1111 1 mismatch "not this checkout/process"
+assert_component_state api-dirty api 200 bbb2222 1 stale "pid 200 was compiled before server/ changed (uncommitted changes differ); run make up" "100 fp-old"
+assert_component_state api-unrecorded api 200 bbb2222 1 stale "has no recorded source fingerprint" -
+assert_component_state api-other-launcher api 200 bbb2222 1 stale "has no recorded source fingerprint" "300 fp-now"
 assert_component_state web-running web 200 - 1 running "pid 200"
 assert_component_state web-busy web 200 - 0 busy "pid 200 is ours but not responding"
 assert_component_state web-foreign web 999 - 1 mismatch "listener pid 999 is not owned"
@@ -416,6 +672,132 @@ assert_start_web compiling 200 3 0 "web already running on :13000 (pid 200)" ""
 assert_start_web hung 200 never 0 "did not answer within 300s; restarting it" $'stop web\nlaunch web'
 assert_start_web foreign 999 0 1 "Port 13000 is busy: pid 999" ""
 assert_start_web foreign-silent 999 never 1 "Port 13000 is busy: pid 999" ""
+
+# `go run` compiles the api once, so `make up` restarts an api of the current
+# commit when server/ has uncommitted changes it was not compiled from, and
+# keeps it when nothing changed.
+assert_api_source_fingerprint
+assert_start_api unchanged bbb2222 "100 fp-now" "api already running on :18080 (pid 200, commit bbb2222)" "" "100 fp-now"
+assert_start_api dirty bbb2222 "100 fp-old" "was compiled before server/ changed (uncommitted changes differ); restarting it" $'stop api\nlaunch api' "101 fp-now"
+assert_start_api unrecorded bbb2222 - "has no recorded source fingerprint" $'stop api\nlaunch api' "101 fp-now"
+assert_start_api old-commit aaa1111 "100 fp-now" "is ours but not commit bbb2222; restarting it" $'stop api\nlaunch api' "101 fp-now"
+
+# The api is wired to collab only when collab is selected or already running,
+# so a doc page never waits on a collab that is not there, and `make up`
+# restarts an api whose wiring no longer matches.
+assert_start_api_collab selected-new "api collab web" 0 - \
+  "is not connected to collab on :14000; restarting it" \
+  $'stop api\nlaunch api COLLAB_INTERNAL_URL=http://localhost:14000' "http://localhost:14000"
+assert_start_api_collab selected-wired "api collab web" 0 "http://localhost:14000" \
+  "api already running on :18080" "" "http://localhost:14000"
+assert_start_api_collab running-unselected "api web" 1 "" \
+  "is not connected to collab on :14000; restarting it" \
+  $'stop api\nlaunch api COLLAB_INTERNAL_URL=http://localhost:14000' "http://localhost:14000"
+assert_start_api_collab gone "api web" 0 "http://localhost:14000" \
+  "points at a collab service that is not running; restarting it" \
+  $'stop api\nlaunch api COLLAB_INTERNAL_URL=' ""
+assert_start_api_collab never-wired "api web" 0 - \
+  "api already running on :18080" "" ""
+
+stopped_in="$(bash -c 'source "$1"; stop_order api collab web daemon' _ "$root_dir/scripts/dev-env.sh")"
+[ "$stopped_in" = "collab api web daemon " ] \
+  || fail "down must stop collab before the api it saves docs through, got: $stopped_in"
+
+assert_collab_secret
+assert_start_collab running 200 1 0 "collab already running on :14000 (pid 200)" ""
+assert_start_collab hung 200 0 0 "is ours but not answering /health; restarting it" \
+  $'stop collab\nlaunch collab COLLAB_PORT=14000 MULTICA_API_URL=http://localhost:18080'
+assert_start_collab fresh "" 1 0 "collab serving ws://localhost:14000 (pid 200)" \
+  $'launch collab COLLAB_PORT=14000 MULTICA_API_URL=http://localhost:18080'
+assert_start_collab foreign 999 1 1 "Port 14000 is busy: pid 999" ""
+assert_component_state collab-running collab 200 - 1 running "pid 200"
+assert_component_state collab-busy collab 200 - 0 busy "not answering /health"
+assert_component_state collab-foreign collab 999 - 1 mismatch "listener pid 999 is not owned"
+
+# ---------------------------------------------------------------------------
+# Daemon: `daemon start` is a no-op while one is running, so `make up` has to
+# restart a daemon that is not running this checkout's current build itself.
+# ---------------------------------------------------------------------------
+head_commit="$(git -C "$root_dir" rev-parse HEAD)"
+old_commit=0123456789abcdef0123456789abcdef01234567
+old_short="$(git -C "$root_dir" rev-parse --short "$old_commit")"
+daemon_fake="$tmp_dir/daemon-fake"
+mkdir -p "$daemon_fake/server/bin" "$daemon_fake/go-bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$daemon_fake/go-bin/go"
+chmod +x "$daemon_fake/go-bin/go"
+cat > "$daemon_fake/server/bin/multica" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_DAEMON/calls"
+case "$1 $2" in
+  "daemon status") cat "$FAKE_DAEMON/status" ;;
+  "daemon stop") printf '{"status":"stopped"}' > "$FAKE_DAEMON/status" ;;
+  "daemon start")
+    printf '{"status":"running","pid":5002,"cli_commit":"%s","uptime":"1s"}' \
+      "$(cat "$FAKE_DAEMON/start_commit")" > "$FAKE_DAEMON/status" ;;
+esac
+EOF
+chmod +x "$daemon_fake/server/bin/multica"
+
+# Args: case, commit the running daemon reports, recorded "<pid> <hash>" (or
+# "-" for none), commit a fresh start reports, expected exit, expected output,
+# expected record afterwards.
+assert_start_daemon() (
+  local case_name=$1 running_commit=$2 recorded=$3 start_commit=$4
+  local expected_status=$5 expected=$6 expected_record=$7 status=0 bin_hash
+  export FAKE_DAEMON="$tmp_dir/daemon-$case_name"
+  mkdir -p "$FAKE_DAEMON"
+  printf '{"status":"running","pid":5001,"cli_commit":"%s","active_task_count":1}' \
+    "$running_commit" > "$FAKE_DAEMON/status"
+  printf '%s' "$start_commit" > "$FAKE_DAEMON/start_commit"
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  PATH="$daemon_fake/go-bin:$PATH"
+  DIR="$root_dir" PROFILE=dev-test STATE_DIR="$FAKE_DAEMON" PROFILE_DIR="$FAKE_DAEMON"
+  WORKSPACES_ROOT="$FAKE_DAEMON/ws" MULTICA_BIN="$daemon_fake/server/bin/multica"
+  bin_hash="$(file_sha256 "$MULTICA_BIN")"
+  [ -n "$bin_hash" ] || fail "file_sha256 printed nothing"
+  case "$recorded" in
+    -) ;;
+    current) printf '5001 %s\n' "$bin_hash" > "$(daemon_build_file)" ;;
+    *) printf '%s\n' "$recorded" > "$(daemon_build_file)" ;;
+  esac
+  (start_daemon) > "$out" 2>&1 || status=$?
+  [ "$status" = "$expected_status" ] || { sed 's/^/  /' "$out" >&2; fail "$case_name: start_daemon exited $status, want $expected_status"; }
+  require_contains "$out" "$expected"
+  case "$expected_record" in
+    restarted) [ "$(cat "$(daemon_build_file)")" = "5002 $bin_hash" ] \
+      || fail "$case_name: recorded build is '$(cat "$(daemon_build_file)" 2>/dev/null)', want the restarted daemon" ;;
+    kept) ! grep -q '^daemon stop' "$FAKE_DAEMON/calls" \
+      || fail "$case_name: stopped a daemon that already ran the current build" ;;
+  esac
+)
+assert_start_daemon current "$head_commit" current "$head_commit" 0 "daemon already running for profile dev-test (pid 5001" kept
+assert_start_daemon old-commit "$old_commit" current "$head_commit" 0 "runs commit $old_short, checkout is at" restarted
+assert_start_daemon dirty-edit "$head_commit" "5001 not-this-binary" "$head_commit" 0 "uncommitted changes differ" restarted
+assert_start_daemon unrecorded "$head_commit" - "$head_commit" 0 "was not started from" restarted
+assert_start_daemon other-pid "$head_commit" "4000 x" "$head_commit" 0 "interrupts 1 active task(s)" restarted
+assert_start_daemon wrong-start "$old_commit" current "$old_commit" 1 "reports commit $old_short after start" -
+
+# `make status` shows the daemon's commit, and calls a daemon that `make up`
+# would restart stale instead of running.
+assert_daemon_state() (
+  local case_name=$1 running_commit=$2 recorded=$3 expected_state=$4 expected=$5 row
+  export FAKE_DAEMON="$tmp_dir/daemon-state-$case_name"
+  mkdir -p "$FAKE_DAEMON"
+  printf '{"status":"running","pid":5001,"cli_commit":"%s","uptime":"3m0s"}' \
+    "$running_commit" > "$FAKE_DAEMON/status"
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  DIR="$root_dir" PROFILE=dev-test STATE_DIR="$FAKE_DAEMON" PROFILE_DIR="$FAKE_DAEMON"
+  WORKSPACES_ROOT="$FAKE_DAEMON/ws" MULTICA_BIN="$daemon_fake/server/bin/multica"
+  [ "$recorded" = - ] || printf '5001 %s\n' "$(file_sha256 "$MULTICA_BIN")" > "$(daemon_build_file)"
+  row="$(component_state daemon)"
+  [ "${row%%|*}" = "$expected_state" ] || fail "$case_name: daemon state row '$row', want $expected_state"
+  case "$row" in *"$expected"*) ;; *) fail "$case_name: daemon state row '$row', want '$expected'" ;; esac
+)
+assert_daemon_state current "$head_commit" current running "pid 5001 commit $(git -C "$root_dir" rev-parse --short HEAD) up 3m0s"
+assert_daemon_state old-commit "$old_commit" current stale "runs commit $old_short, checkout is at"
+assert_daemon_state unrecorded "$head_commit" - stale "run make up C=daemon to restart"
 
 # ---------------------------------------------------------------------------
 # Desktop: CDP port, env file, process tree, and the daemon Desktop starts.
@@ -591,5 +973,44 @@ fi
 printf 'n\n' | dev_env destroy orphan-902 > "$out" 2>&1 || fail "declining destroy must exit 0"
 require_contains "$out" "Cancelled."
 [ -d "$MULTICA_DEV_HOME/envs/orphan-902" ] || fail "declined destroy removed the environment anyway"
+
+# ---------------------------------------------------------------------------
+# uutils mkdir (Ubuntu 26.04) reports success to a caller that lost the race
+# to create a directory. A mkdir that succeeds on the held allocation lock must
+# not hand it to a second holder, or two `up`s allocate the same slot.
+# ---------------------------------------------------------------------------
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  command mkdir -p "$LOCK_DIR"
+  printf '%s\n' "$PPID" > "$LOCK_DIR/pid"
+  mkdir() { command mkdir "$@" 2>/dev/null || [ -d "$LOCK_DIR" ]; }
+  sleep() { :; }
+  if (acquire_lock) > "$out" 2>&1; then
+    fail "a mkdir that succeeded on the held lock directory let a second holder in"
+  fi
+  require_contains "$out" "Timed out waiting for the allocation lock"
+  [ "$(cat "$LOCK_DIR/pid")" = "$PPID" ] || fail "the lock holder's pid was overwritten"
+  command rm -rf "$LOCK_DIR"
+)
+
+# Releasing must drop only this holder's claim. Under uutils mkdir the next
+# caller can claim the directory as soon as the pid file is unlinked; deleting
+# the directory after that would hand the lock to a third caller.
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  acquire_lock
+  rm() {
+    command rm -f "$LOCK_DIR/pid"
+    # The next caller claims the lock between the unlink and the directory removal.
+    printf '%s\n' "$PPID" > "$LOCK_DIR/pid"
+    case "$1" in -r*) command rmdir "$LOCK_DIR" ;; esac
+  }
+  release_lock 2> "$out" || fail "release_lock failed when the next holder had already claimed the lock"
+  unset -f rm
+  [ "$(cat "$LOCK_DIR/pid" 2>/dev/null)" = "$PPID" ] || fail "release_lock removed the next holder's lock"
+  command rm -rf "$LOCK_DIR"
+)
 
 echo "✓ dev-env.sh registry behaviour verified"

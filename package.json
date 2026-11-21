@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev:web": "turbo dev --filter=@multica/web",
+    "dev:collab": "pnpm --filter @multica/collab dev",
     "dev:docs": "turbo dev --filter=@multica/docs",
+    "storybook": "pnpm -C apps/storybook storybook",
     "dev:desktop": "turbo dev --filter=@multica/desktop",
     "dev:desktop:staging": "turbo dev:staging --filter=@multica/desktop",
     "dev:mobile": "pnpm -C apps/mobile dev",
@@ -71,6 +73,7 @@
     "pg": "^8.20.0",
     "postcss": "catalog:",
     "turbo": "^2.5.4",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "yaml": "catalog:"
   }
 }

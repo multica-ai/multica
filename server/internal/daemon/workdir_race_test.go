@@ -72,7 +72,7 @@ func TestHandleTask_DoesNotCallStartTaskItself(t *testing.T) {
 		Agent:       &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	if !runnerCalled.Load() {
 		t.Fatal("fake runner was never invoked — handleTask aborted before runner.run, can't assert ordering")
@@ -863,7 +863,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 		Agent:       &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	if !completeCalled.Load() {
 		t.Fatal("/complete was never hit — handleTask did not reach reportTaskResult")

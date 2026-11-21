@@ -42,6 +42,9 @@ deleted_channel_task_deliveries AS (
 ),
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore WHERE task_id IN (SELECT id FROM batch)
+),
+deleted_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE task_id IN (SELECT id FROM batch)
 )
 DELETE FROM agent_task_queue WHERE id IN (SELECT id FROM batch)
 `
@@ -232,6 +235,36 @@ func (q *Queries) DeleteWorkspaceConnections(ctx context.Context, workspaceID pg
 	return err
 }
 
+const deleteWorkspaceDashboardRangeViews = `-- name: DeleteWorkspaceDashboardRangeViews :exec
+DELETE FROM dashboard_range_view
+WHERE dashboard_range_view.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceDashboardRangeViews(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceDashboardRangeViews, workspaceID)
+	return err
+}
+
+const deleteWorkspaceEntitlementFeatureAttempts = `-- name: DeleteWorkspaceEntitlementFeatureAttempts :exec
+DELETE FROM entitlement_feature_attempt
+WHERE entitlement_feature_attempt.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceEntitlementFeatureAttempts(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceEntitlementFeatureAttempts, workspaceID)
+	return err
+}
+
+const deleteWorkspaceEntitlementLimitOverages = `-- name: DeleteWorkspaceEntitlementLimitOverages :exec
+DELETE FROM entitlement_limit_overage
+WHERE entitlement_limit_overage.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceEntitlementLimitOverages(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceEntitlementLimitOverages, workspaceID)
+	return err
+}
+
 const deleteWorkspaceIssueRoots = `-- name: DeleteWorkspaceIssueRoots :exec
 WITH deleted_wakeup_receipts AS (
  DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE workspace_id=$1)
@@ -316,6 +349,9 @@ deleted_orphan_task_supplements AS (
 deleted_orphan_task_supplement_capabilities AS (
     DELETE FROM task_supplement_capability WHERE workspace_id = $1
 ),
+deleted_orphan_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE workspace_id = $1
+),
 deleted_hourly_dirty AS (
     DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1
 ),
@@ -333,9 +369,15 @@ deleted_lark_outbound_cards AS (
     DELETE FROM lark_outbound_card_message
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
 ),
+deleted_chat_submission_receipts AS (
+    DELETE FROM chat_submission_receipt WHERE chat_submission_receipt.workspace_id = $1
+),
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
+),
+deleted_chat_wakeups AS (
+    DELETE FROM chat_wakeup WHERE workspace_id = $1
 ),
 deleted_agent_builder_drafts AS (
     DELETE FROM agent_builder_draft WHERE workspace_id = $1
@@ -482,6 +524,13 @@ deleted_channel_binding_tokens AS (
 ),
 deleted_wecom_install_sessions AS (
     DELETE FROM wecom_install_session WHERE workspace_id = $1
+),
+deleted_weixin_login_sessions AS (
+    DELETE FROM weixin_login_session WHERE workspace_id = $1
+),
+deleted_weixin_account_states AS (
+    DELETE FROM weixin_account_state
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
 ),
 deleted_workspace_composio_connections AS (
     DELETE FROM workspace_composio_connection WHERE workspace_id = $1
@@ -639,6 +688,9 @@ WITH
 deleted_runtimes AS (
     DELETE FROM agent_runtime WHERE agent_runtime.workspace_id = $1
 ),
+deleted_runtime_rate_limits AS (
+    DELETE FROM runtime_rate_limit WHERE runtime_rate_limit.workspace_id = $1
+),
 deleted_profiles AS (
     DELETE FROM runtime_profile WHERE runtime_profile.workspace_id = $1
 ),
@@ -647,6 +699,9 @@ deleted_project_members AS (
 ),
 deleted_project_subscribers AS (
     DELETE FROM project_subscriber WHERE project_subscriber.workspace_id = $1
+),
+deleted_project_folders AS (
+    DELETE FROM project_folder WHERE project_folder.workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1
 `

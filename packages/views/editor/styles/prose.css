@@ -426,7 +426,8 @@
   max-width: 18rem;
 }
 
-.rich-text-editor :is(td, th) span.project-chip {
+.rich-text-editor :is(td, th) span.project-chip,
+.rich-text-editor :is(td, th) span.doc-chip {
   display: inline-grid;
   grid-template-columns: auto minmax(0, max-content);
   max-width: 18rem;
@@ -590,13 +591,15 @@
    link color and underline above would be a second, competing one drawn
    through the card. Every chip-shaped mention belongs here. */
 .rich-text-editor a.issue-mention,
-.rich-text-editor a.project-mention {
+.rich-text-editor a.project-mention,
+.rich-text-editor a.doc-mention {
   color: inherit;
   text-decoration: none;
 }
 
 .rich-text-editor a.issue-mention:hover,
-.rich-text-editor a.project-mention:hover {
+.rich-text-editor a.project-mention:hover,
+.rich-text-editor a.doc-mention:hover {
   text-decoration: none;
 }
 
