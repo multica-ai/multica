@@ -23,7 +23,7 @@ import {
   type RuntimeMachine,
 } from "../../../runtimes/components/runtime-machines";
 import { Label } from "@multica/ui/components/ui/label";
-import { CHIP_CLASS } from "./chip";
+import { CHIP_CLASS, FIELD_STATIC_CLASS, FIELD_TRIGGER_CLASS } from "./chip";
 import { useT } from "../../../i18n";
 
 type Filter = "mine" | "all";
@@ -124,7 +124,7 @@ export function RuntimePicker({
     );
     if (variant === "field") {
       const control = (
-        <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-body text-muted-foreground">
+        <div className={FIELD_STATIC_CLASS}>
           {icon}
           <span className="min-w-0 flex-1 truncate">{combinedLabel}</span>
           {selected ? (
@@ -251,7 +251,7 @@ export function RuntimePicker({
           type="button"
           className={
             variant === "field"
-              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
+              ? `${showLabel ? "mt-1.5 " : ""}${FIELD_TRIGGER_CLASS}`
               : CHIP_CLASS
           }
           aria-label={triggerTitle}

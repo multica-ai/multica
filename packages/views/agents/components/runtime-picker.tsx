@@ -22,6 +22,7 @@ import {
   runtimeRowLabel,
 } from "../../runtimes/components/runtime-machines";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { FIELD_TRIGGER_CLASS } from "./inspector/chip";
 
 export type RuntimeFilter = "mine" | "all";
 
@@ -162,7 +163,7 @@ export function RuntimePicker({
       >
         <PopoverTrigger
           disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
-          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          className={`mt-1.5 ${FIELD_TRIGGER_CLASS}`}
         >
           {runtimesLoading ? (
             <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
@@ -174,30 +175,28 @@ export function RuntimePicker({
           ) : (
             <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
           )}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 truncate font-medium">
-                {runtimesLoading
-                  ? t(($) => $.create_dialog.runtime_loading)
-                  : selectedRuntime
-                    ? runtimeDisplayName(selectedRuntime)
-                    : !autoSelect && runtimes.length > 0
-                      ? t(($) => $.model_dropdown.select_runtime_first)
-                      : t(($) => $.create_dialog.runtime_none)}
-              </span>
-              {selectedRuntime?.runtime_mode === "cloud" && (
-                <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
-                  {t(($) => $.create_dialog.runtime_cloud_badge)}
-                </span>
-              )}
-            </div>
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="min-w-0 truncate">
+              {runtimesLoading
+                ? t(($) => $.create_dialog.runtime_loading)
+                : selectedRuntime
+                  ? runtimeDisplayName(selectedRuntime)
+                  : !autoSelect && runtimes.length > 0
+                    ? t(($) => $.model_dropdown.select_runtime_first)
+                    : t(($) => $.create_dialog.runtime_none)}
+            </span>
             {selectedRuntime && (
-              <div className="truncate text-caption text-muted-foreground">
+              <span className="min-w-0 shrink-[2] truncate text-caption text-muted-foreground">
                 {getOwnerMember(selectedRuntime.owner_id)?.name ??
                   selectedRuntime.device_info}
-              </div>
+              </span>
             )}
-          </div>
+            {selectedRuntime?.runtime_mode === "cloud" && (
+              <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
+                {t(($) => $.create_dialog.runtime_cloud_badge)}
+              </span>
+            )}
+          </span>
           <ChevronDown
             className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
               open ? "rotate-180" : ""

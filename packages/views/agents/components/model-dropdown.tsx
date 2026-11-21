@@ -15,6 +15,7 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
+import { FIELD_TRIGGER_CLASS } from "./inspector/chip";
 import { UnavailableModelsNote } from "./unavailable-models-note";
 import { ModelSearchHeader } from "./model-search-header";
 
@@ -168,22 +169,17 @@ export function ModelDropdown({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           disabled={disabled}
-          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          className={`mt-1.5 ${FIELD_TRIGGER_CLASS}`}
         >
           <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            {/* Wrapped in flex to mirror RuntimePicker's trigger DOM. The
-                two pickers sit side-by-side; inline-in-flex vs block-line-
-                box height calc would otherwise leave them ~1px misaligned. */}
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 truncate font-medium">{triggerLabel}</span>
-            </div>
+          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className="min-w-0 truncate">{triggerLabel}</span>
             {value && (
-              <div className="truncate text-caption text-muted-foreground">
+              <span className="shrink-0 text-caption text-muted-foreground">
                 {modelLabel(models, value)}
-              </div>
+              </span>
             )}
-          </div>
+          </span>
           <ChevronDown
             className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
           />

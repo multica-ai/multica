@@ -13,6 +13,7 @@ import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
 import { findModelCapabilityEntry } from "./model-capability";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { FIELD_TRIGGER_CLASS, FIELD_STATIC_CLASS } from "./chip";
 
 /**
  * Full-width service-tier field for Codex agents. Capability comes from the
@@ -107,7 +108,7 @@ function ServiceTierPicker({
   };
 
   const display = (
-    <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-body text-muted-foreground">
+    <div className={FIELD_STATIC_CLASS}>
       <Gauge className="h-4 w-4 shrink-0" aria-hidden="true" />
       <span className="min-w-0 truncate">{triggerLabel}</span>
     </div>
@@ -124,7 +125,7 @@ function ServiceTierPicker({
       triggerRender={
         <button
           type="button"
-          className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className={FIELD_TRIGGER_CLASS}
           aria-label={triggerTitle}
         />
       }

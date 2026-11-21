@@ -41,7 +41,10 @@ export function QoderAgentSelect({
         onValueChange={(next) => onChange(next ?? "")}
         disabled={disabled || query.isPending || !items.length}
       >
-        <SelectTrigger className="w-full" aria-labelledby={labelId}>
+        <SelectTrigger
+          className="w-full rounded-lg px-3 data-[size=default]:h-10"
+          aria-labelledby={labelId}
+        >
           <SelectValue placeholder={t(($) => $.qoder.select_agent)} />
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
