@@ -231,5 +231,28 @@
     },
     "hint": "Puedes cambiarlo en Ajustes › Notificaciones",
     "confirm": "Listo"
+  },
+  "zero": {
+    "cleared_title": "Bandeja de entrada vacía",
+    "just_archived": "Se archivó {{label}}",
+    "just_snoozed": "{{label}} pospuesto hasta {{time}}",
+    "just_unsubscribed": "Suscripción cancelada y archivado: {{label}}",
+    "just_archived_many_one": "Se archivó {{count}} notificación",
+    "just_archived_many_other": "Se archivaron {{count}} notificaciones",
+    "snoozed_summary_one": "{{count}} pospuesta · vuelve {{time}}",
+    "snoozed_summary_other": "{{count}} pospuestas · la próxima vuelve {{time}}",
+    "bar_snoozed_one": "{{count}} pospuesta",
+    "bar_snoozed_other": "{{count}} pospuestas",
+    "my_work": "Mi trabajo",
+    "go_to_my_work": "Ir a Mi trabajo",
+    "agents_working_one": "{{count}} agente trabajando",
+    "agents_working_other": "{{count}} agentes trabajando",
+    "view_archived": "Ver archivadas",
+    "quick_jump": "Ir rápido",
+    "filtered_title": "Todo al día para este filtro",
+    "filtered_remaining_one": "Hay {{count}} otra notificación en tu bandeja",
+    "filtered_remaining_other": "Hay {{count}} otras notificaciones en tu bandeja",
+    "clear_and_continue": "Limpiar filtros y continuar",
+    "undo_item": "Deshacer {{label}}"
   }
 }

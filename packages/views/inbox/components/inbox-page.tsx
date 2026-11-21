@@ -11,7 +11,6 @@ import {
 } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { MulticaBleedMark } from "@multica/ui/components/common/multica-graphics";
 import { ApiError, errorCode } from "@multica/core/api";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
@@ -24,7 +23,7 @@ import {
 import { isImeComposing } from "@multica/core/utils";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { cachedIssueRouteRef } from "@multica/core/issues/canonical-id";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { useInboxSelectionStore, type LastInboxCleared } from "@multica/core/inbox/selection-store";
 import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import {
@@ -115,16 +114,24 @@ import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
 import {
   getInboxDisplayTitle,
+  inboxRowHref,
   isAutopilotQuotaNotice,
   isQuickCreateOutcome,
   resolveDetailItem,
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
+import { InboxEmptyState } from "./inbox-empty-state";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
 import { inboxListLoad, useFilteredInboxRows } from "./use-filtered-inbox-rows";
 import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
 import { useMoveOnAfterAutoArchive } from "./use-move-on-after-auto-archive";
-import { useArchiveInboxBatchWithUndo, useArchiveInboxWithUndo, useRestoreInbox } from "./use-leave-inbox-row";
+import {
+  clearedLabelForItem,
+  collectBatchArchiveIds,
+  useArchiveInboxBatchWithUndo,
+  useArchiveInboxWithUndo,
+  useRestoreInbox,
+} from "./use-leave-inbox-row";
 import { useInboxSnooze } from "./use-inbox-snooze";
 import { InboxAppRequest } from "../../common/app-requests";
 import { useT } from "../../i18n";
@@ -141,7 +148,7 @@ export function InboxPage() {
   const showAutopilotQuotaRecoveryPrompt = useLimitRecoveryPrompt(
     "autopilot_quota",
   );
-  const { searchParams, replace } = useNavigation();
+  const { searchParams, replace, push } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
   const urlView: InboxView =
     searchParams.get("view") === ARCHIVED_VIEW_PARAM ? "archived" : "inbox";
@@ -595,15 +602,17 @@ export function InboxPage() {
   // section's, which applies the same filters.
   const listedItems = opensAnyLiveRow ? sectionList.rows : selectionItems;
   const leaveRow = useInboxSelectionStore((s) => s.leaveRow);
+  const recordLastCleared = useInboxSelectionStore((s) => s.recordLastCleared);
   // Moving the selection off a row (an Inbox action on it) lets it go rather
   // than keep it in place.
-  const advanceSelectionPast = (id: string, list: InboxItem[]) => {
+  const advanceSelectionPast = (id: string, list: InboxItem[], cleared?: LastInboxCleared) => {
     const target = list.find((i) => i.id === id);
     const wasSelected = !!target && inboxRowKey(target) === selectedKey;
     if (!wasSelected) return;
     leaveRow(wsId, selectedKey);
     // Only clear the selection when nothing else is left.
     const next = nextInboxRow(list, selectedKey);
+    if (!next && cleared) recordLastCleared(wsId, cleared);
     setSelectedKey(next ? inboxRowKey(next) : "");
   };
   // A batch archive that takes the open row moves on to the next one it leaves.
@@ -614,19 +623,39 @@ export function InboxPage() {
   ) => {
     const open = listedItems.find((i) => inboxRowKey(i) === selectedKey);
     const takesOpen = !!open && archives(open);
+    const takenIds = takesOpen ? collectBatchArchiveIds(queryClient, wsId, archives) : [];
     void archiveBatchWithUndo(archive, archives, failed, takesOpen ? selectedKey : null);
     if (!takesOpen) return;
     leaveRow(wsId, selectedKey);
     const next = nextInboxRow(listedItems, selectedKey, archives);
+    if (!next && takenIds.length > 0) {
+      recordLastCleared(wsId, {
+        kind: "batch_archived",
+        count: takenIds.length,
+        itemIds: takenIds,
+        key: selectedKey,
+        clearedAt: Date.now(),
+      });
+    }
     setSelectedKey(next ? inboxRowKey(next) : "");
   };
 
   // Toasts live in these shared handlers so every archive surface confirms alike.
   const handleArchive = (id: string) => {
-    advanceSelectionPast(id, listedItems);
+    const target = listedItems.find((i) => i.id === id);
+    const cleared: LastInboxCleared | undefined = target
+      ? {
+          kind: "archived",
+          itemId: target.id,
+          key: inboxRowKey(target),
+          label: clearedLabelForItem(target),
+          href: inboxRowHref(wsPaths, target),
+          clearedAt: Date.now(),
+        }
+      : undefined;
+    advanceSelectionPast(id, listedItems, cleared);
     // Archived already: moving on is all that is left.
     if (settledRow?.item.id === id) return;
-    const target = listedItems.find((i) => i.id === id);
     archiveWithUndo(id, target ? inboxRowKey(target) : id);
   };
 
@@ -647,7 +676,15 @@ export function InboxPage() {
     settled: settledRow,
     next: settledRow ? nextInboxRow(listedItems, settledRow.key) : null,
     onNext: () => {
-      if (settledRow) advanceSelectionPast(settledRow.item.id, listedItems);
+      if (!settledRow) return;
+      advanceSelectionPast(settledRow.item.id, listedItems, {
+        kind: "archived",
+        itemId: settledRow.item.id,
+        key: settledRow.key,
+        label: clearedLabelForItem(settledRow.item),
+        href: inboxRowHref(wsPaths, settledRow.item),
+        clearedAt: Date.now(),
+      });
     },
   });
 
@@ -656,7 +693,16 @@ export function InboxPage() {
   const handleUnsubscribeArchive = (id: string, scope: InboxUnsubscribeScope = "issue") => {
     const item = listedItems.find((i) => i.id === id);
     if (!item?.issue_id) return;
-    advanceSelectionPast(id, listedItems);
+    advanceSelectionPast(id, listedItems, {
+      kind: "unsubscribed",
+      itemId: item.id,
+      issueId: item.issue_id,
+      key: inboxRowKey(item),
+      label: clearedLabelForItem(item),
+      href: inboxRowHref(wsPaths, item),
+      undoable: scope === "issue",
+      clearedAt: Date.now(),
+    });
     unsubscribeArchive({ id, issueId: item.issue_id }, scope);
   };
 
@@ -1256,6 +1302,15 @@ export function InboxPage() {
   // The live list is the Inbox section of the Work panel beside this page, so
   // the page shows only the detail. The archive keeps its own list column.
 
+  const handleClearFiltersAndContinue = () => {
+    clearFilters(wsId);
+    const first = items[0];
+    if (!isCompact && first) {
+      if (first.issue_id) useInboxSelectionStore.getState().rememberSidebarIssue(wsId, first.issue_id);
+      push?.(inboxRowHref(wsPaths, first));
+    }
+  };
+
   const emptyDetail = (
     <>
       {(!archiveSplit || listCollapsed) && (
@@ -1268,24 +1323,17 @@ export function InboxPage() {
       {liveFailed ? (
         <div className="flex min-h-0 flex-1 flex-col justify-center">{liveLoadFailed}</div>
       ) : (
-      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
-        {inboxZeroCount === 0 ? (
-          <MulticaBleedMark
-            key={inboxZeroRises ? "rise" : "rest"}
-            enterDelay={inboxZeroRises ? 0.2 : undefined}
-            className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
-          />
-        ) : (
-          <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
-        )}
-        <p className="relative text-body">
-          {visibleItems.length > 0
-            ? t(($) => $.detail.select_prompt)
-            : isArchivedView
-              ? t(($) => $.list.archived_empty)
-              : t(($) => $.detail.empty)}
-        </p>
-      </div>
+        <InboxEmptyState
+          wsId={wsId}
+          isArchivedView={isArchivedView}
+          visibleCount={visibleItems.length}
+          totalActiveCount={items.length}
+          hasActiveFilters={hasActiveFilters}
+          inboxZeroRises={inboxZeroRises}
+          isCompact={isCompact}
+          onClearFiltersAndContinue={handleClearFiltersAndContinue}
+          onViewArchived={() => setView("archived")}
+        />
       )}
     </>
   );

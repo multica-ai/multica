@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef } from "react";
-import { Archive, ArrowDown, Undo2 } from "@multica/ui/icons";
+import { Archive, ArrowDown, ArrowRight, CheckCircle2, Undo2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -88,15 +88,24 @@ export function InboxKeptActions({
   onUndo,
   next,
   onNext,
+  inboxCleared = false,
+  snoozedCount = 0,
+  onSnoozedClick,
+  onGoToMyWork,
 }: {
   label: ReactNode;
-  /** Defaults to the archive icon. */
+  /** Defaults to the archive icon (or a success check when the Inbox is cleared). */
   icon?: ReactNode;
   issueActions?: ReactNode;
   onUndo?: () => void;
   /** The notification `onNext` opens; without one there is nothing to move on to. */
   next: InboxItem | null;
   onNext: () => void;
+  /** True when archiving this row emptied the entire unfiltered Inbox (stay-in-place mode). */
+  inboxCleared?: boolean;
+  snoozedCount?: number;
+  onSnoozedClick?: () => void;
+  onGoToMyWork?: () => void;
 }) {
   const { t } = useT("inbox");
   const undoRef = useRef(onUndo);
@@ -120,11 +129,35 @@ export function InboxKeptActions({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
+  const statusIcon =
+    icon ?? (inboxCleared ? <CheckCircle2 className="text-success" /> : <Archive />);
+  const statusLabel = inboxCleared ? (
+    <span className="flex min-w-0 items-center gap-1.5 truncate">
+      <span className="font-medium text-foreground">{t(($) => $.zero.cleared_title)}</span>
+      <span aria-hidden className="text-faint-foreground">·</span>
+      <span className="truncate">{label}</span>
+      {snoozedCount > 0 && onSnoozedClick && (
+        <>
+          <span aria-hidden className="text-faint-foreground @max-[34rem]/inbox-bar:hidden">·</span>
+          <button
+            type="button"
+            onClick={onSnoozedClick}
+            className="shrink-0 underline decoration-surface-border underline-offset-2 transition-colors hover:text-foreground @max-[34rem]/inbox-bar:hidden"
+          >
+            {t(($) => $.zero.bar_snoozed, { count: snoozedCount })}
+          </button>
+        </>
+      )}
+    </span>
+  ) : (
+    label
+  );
+
   return (
     <InboxBar settled>
-      <InboxBarStatus icon={icon ?? <Archive />} label={label} />
+      <InboxBarStatus icon={statusIcon} label={statusLabel} />
       {issueActions}
-      {issueActions && (onUndo || next) && <InboxBarSeparator />}
+      {issueActions && (onUndo || next || (inboxCleared && onGoToMyWork)) && <InboxBarSeparator />}
       {onUndo && (
         <Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground" onClick={onUndo}>
           <Undo2 />
@@ -134,7 +167,14 @@ export function InboxKeptActions({
           </span>
         </Button>
       )}
-      {next && <InboxNextButton next={next} onNext={onNext} />}
+      {next ? (
+        <InboxNextButton next={next} onNext={onNext} />
+      ) : inboxCleared && onGoToMyWork ? (
+        <Button size="sm" variant="outline" className="shrink-0" onClick={onGoToMyWork}>
+          {t(($) => $.zero.go_to_my_work)}
+          <ArrowRight />
+        </Button>
+      ) : null}
     </InboxBar>
   );
 }

@@ -1,0 +1,357 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  AlarmClock,
+  Archive,
+  Check,
+  CircleUser,
+  Filter,
+  History,
+  Inbox,
+  Undo2,
+} from "@multica/ui/icons";
+import { Button } from "@multica/ui/components/ui/button";
+import { MulticaBleedMark } from "@multica/ui/components/common/multica-graphics";
+import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
+import { useSearchStore } from "@multica/core/command-bar";
+import {
+  undoArchiveInboxBatch,
+  undoUnsubscribeArchiveInbox,
+  useUnsnoozeInbox,
+} from "@multica/core/inbox/mutations";
+import { inboxKeys, snoozedInboxOptions } from "@multica/core/inbox/queries";
+import {
+  useInboxSelectionStore,
+  type LastInboxCleared,
+} from "@multica/core/inbox/selection-store";
+import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
+import { useIsGuest } from "@multica/core/permissions";
+import type { SnoozedInboxIssue, WorkspaceWorkingAgent } from "@multica/core/types";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
+import { useLocale, useT } from "../../i18n";
+import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
+import { useNavigation } from "../../navigation";
+import { formatSnoozeTime } from "./inbox-snooze-time";
+import { useRestoreInbox } from "./use-leave-inbox-row";
+
+const NO_SNOOZED: SnoozedInboxIssue[] = [];
+const NO_AGENTS: WorkspaceWorkingAgent[] = [];
+
+/**
+ * The empty detail canvas of `/inbox`:
+ * - Prompt to pick a row when notifications still exist in the Work panel.
+ * - Quiet archived-empty state when browsing Archived.
+ * - Filtered-empty state when active filters hid remaining notifications
+ *   (never confused with true Inbox Zero).
+ * - Calm Inbox Zero state with MulticaBleedMark, persistent inline undo for
+ *   the action that just cleared the Inbox, snoozed summary, and quiet next
+ *   steps (My work, working agents, Archived, keyboard hints).
+ */
+export function InboxEmptyState({
+  wsId,
+  isArchivedView,
+  visibleCount,
+  totalActiveCount,
+  hasActiveFilters,
+  inboxZeroRises,
+  isCompact = false,
+  onClearFiltersAndContinue,
+  onViewArchived,
+}: {
+  wsId: string;
+  isArchivedView: boolean;
+  visibleCount: number;
+  /** Total active (unfiltered, unarchived) notifications in the Inbox. */
+  totalActiveCount: number;
+  hasActiveFilters: boolean;
+  inboxZeroRises: boolean;
+  isCompact?: boolean;
+  onClearFiltersAndContinue: () => void;
+  onViewArchived: () => void;
+}) {
+  const { t } = useT("inbox");
+  const { t: tLayout } = useT("layout");
+  const locale = useLocale();
+  const qc = useQueryClient();
+  const { push } = useNavigation();
+  const builtinNav = useBuiltinViewNavigation();
+  const guest = useIsGuest(wsId);
+  const restoreInbox = useRestoreInbox();
+  const { mutateAsync: unsnoozeAsync } = useUnsnoozeInbox();
+
+  const lastCleared = useInboxSelectionStore((s) => s.lastClearedByWorkspace[wsId] ?? null);
+  const clearLastCleared = useInboxSelectionStore((s) => s.clearLastCleared);
+
+  const isFilteredEmpty = !isArchivedView && hasActiveFilters && visibleCount === 0 && totalActiveCount > 0;
+  const isInboxZero = !isArchivedView && visibleCount === 0 && !isFilteredEmpty;
+
+  const { data: snoozed = NO_SNOOZED } = useQuery({
+    ...snoozedInboxOptions(wsId),
+    enabled: isInboxZero && !!wsId,
+  });
+  const { data: workingAgents = NO_AGENTS } = useQuery({
+    ...workspaceWorkingAgentsOptions(wsId, "issue"),
+    enabled: isInboxZero && !guest && !!wsId,
+  });
+
+  const activeSnoozed = useMemo(() => {
+    const now = Date.now();
+    return snoozed
+      .filter((entry) => new Date(entry.snoozed_until).getTime() > now)
+      .sort((a, b) => new Date(a.snoozed_until).getTime() - new Date(b.snoozed_until).getTime());
+  }, [snoozed]);
+
+  const workingCount = workingAgents.length;
+
+  const [undoing, setUndoing] = useState(false);
+
+  /** Resolves whether the undo went through; a failure is toasted. */
+  const requestUndo = (entry: LastInboxCleared): Promise<boolean> => {
+    const failed = (fallback: string) => (err: unknown) => {
+      toast.error(err instanceof Error && err.message ? err.message : fallback);
+      return false;
+    };
+    switch (entry.kind) {
+      case "archived":
+        return restoreInbox(entry.itemId, { quiet: true });
+      case "snoozed":
+        return unsnoozeAsync({ id: entry.itemId, read: entry.wasRead }).then(
+          () => true,
+          failed(t(($) => $.snooze.unsnooze_failed)),
+        );
+      case "unsubscribed":
+        return undoUnsubscribeArchiveInbox(qc, wsId, { id: entry.itemId, issueId: entry.issueId }).then(
+          () => true,
+          failed(t(($) => $.errors.undo_unsubscribe_failed)),
+        );
+      case "batch_archived":
+        return undoArchiveInboxBatch(qc, wsId, entry.itemIds).then(
+          () => true,
+          failed(t(($) => $.errors.unarchive_failed)),
+        );
+    }
+  };
+
+  // The restored row must be in the Inbox list before its link opens: the
+  // Inbox page drops a `?issue=` selection it cannot find there. The write
+  // refreshes the list without waiting, and that refresh starts first, so this
+  // one (cancel, then refetch) is the last and the one awaited.
+  const refreshInboxList = async () => {
+    await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+    await qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+  };
+
+  const handleUndoCleared = async (entry: LastInboxCleared) => {
+    if (undoing || !canUndoCleared(entry)) return;
+    setUndoing(true);
+    const undone = await requestUndo(entry);
+    if (undone) await refreshInboxList();
+    setUndoing(false);
+    // A failed undo keeps the entry, so it can be tried again.
+    if (!undone) return;
+
+    const store = useInboxSelectionStore.getState();
+    clearLastCleared(wsId, entry.key ?? undefined);
+    if (entry.kind === "batch_archived") {
+      if (entry.key) store.returnRow(wsId, entry.key);
+      return;
+    }
+    store.returnRow(wsId, entry.key);
+    if (entry.kind === "unsubscribed") store.rememberSidebarIssue(wsId, entry.issueId);
+    else if (entry.href.includes("/issues/")) store.rememberSidebarIssue(wsId, entry.key);
+    push?.(entry.href);
+  };
+
+  const clearedSummary = (entry: LastInboxCleared): string => {
+    if (entry.kind === "archived") return t(($) => $.zero.just_archived, { label: entry.label });
+    if (entry.kind === "snoozed") {
+      return t(($) => $.zero.just_snoozed, {
+        label: entry.label,
+        time: formatSnoozeTime(new Date(entry.until), new Date(), locale),
+      });
+    }
+    if (entry.kind === "unsubscribed") return t(($) => $.zero.just_unsubscribed, { label: entry.label });
+    return t(($) => $.zero.just_archived_many, { count: entry.count });
+  };
+
+  const canUndoCleared = (entry: LastInboxCleared) => entry.kind !== "unsubscribed" || entry.undoable;
+
+  // Desktop prompt when active notifications exist in the Work panel.
+  if (visibleCount > 0) {
+    return (
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
+        <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
+        <p className="relative text-body">{t(($) => $.detail.select_prompt)}</p>
+      </div>
+    );
+  }
+
+  // Archived view empty state stays quiet and distinct from Inbox Zero.
+  if (isArchivedView) {
+    return (
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
+        <Archive className="mb-3 h-10 w-10 text-faint-foreground" />
+        <p className="relative text-body">{t(($) => $.list.archived_empty)}</p>
+      </div>
+    );
+  }
+
+  // Filtered-empty state: active filters hid other notifications in the Inbox.
+  if (isFilteredEmpty) {
+    return (
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6 text-center">
+        <div className="-mt-8 flex max-w-md flex-col items-center">
+          <div className="mb-4 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+            <Filter className="size-5" />
+          </div>
+          <h2 className="text-title font-semibold text-foreground">{t(($) => $.zero.filtered_title)}</h2>
+          <p className="mt-1.5 text-label text-muted-foreground">
+            {t(($) => $.zero.filtered_remaining, { count: totalActiveCount })}
+          </p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+            <Button size="sm" onClick={onClearFiltersAndContinue}>
+              <span>{t(($) => $.zero.clear_and_continue)}</span>
+              <span className="tabular-nums opacity-75">{totalActiveCount}</span>
+            </Button>
+            {lastCleared && canUndoCleared(lastCleared) && (
+              <Button size="sm" variant="outline" disabled={undoing} onClick={() => void handleUndoCleared(lastCleared)}>
+                <Undo2 />
+                {lastCleared.kind === "batch_archived"
+                  ? t(($) => $.toasts.undo)
+                  : t(($) => $.zero.undo_item, { label: lastCleared.label })}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // True Inbox Zero.
+  const rises = inboxZeroRises || lastCleared !== null;
+  const bleedKey = lastCleared ? `rise-${lastCleared.clearedAt}` : inboxZeroRises ? "rise" : "rest";
+  const earliestSnooze = activeSnoozed[0] ? new Date(activeSnoozed[0].snoozed_until) : null;
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6 text-center">
+      <MulticaBleedMark
+        key={bleedKey}
+        enterDelay={rises ? 0.2 : undefined}
+        className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
+      />
+      <div className="relative z-10 -mt-8 flex max-w-md flex-col items-center">
+        <div
+          aria-hidden
+          className="mb-4 flex size-11 items-center justify-center rounded-xl border border-surface-border bg-surface text-success shadow-[var(--surface-shadow)]"
+        >
+          <Check className="size-5" />
+        </div>
+        <h2 className="text-title font-semibold text-foreground">{t(($) => $.zero.cleared_title)}</h2>
+        {lastCleared ? (
+          <p className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-label text-muted-foreground">
+            <span>{clearedSummary(lastCleared)}</span>
+            {canUndoCleared(lastCleared) && (
+              <>
+                <span aria-hidden className="text-faint-foreground">·</span>
+                <button
+                  type="button"
+                  disabled={undoing}
+                  onClick={() => void handleUndoCleared(lastCleared)}
+                  className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <Undo2 className="size-3" />
+                  {t(($) => $.toasts.undo)}
+                </button>
+              </>
+            )}
+          </p>
+        ) : (
+          <p className="mt-1.5 text-label text-muted-foreground">{t(($) => $.detail.empty)}</p>
+        )}
+
+        {activeSnoozed.length > 0 && earliestSnooze && (
+          <button
+            type="button"
+            onClick={() => {
+              builtinNav.prepare("snoozed");
+              push?.(builtinNav.hrefFor("snoozed"));
+            }}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-caption text-faint-foreground transition-colors hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <AlarmClock className="size-3.5 shrink-0" />
+            <span>
+              {t(($) => $.zero.snoozed_summary, {
+                count: activeSnoozed.length,
+                time: formatSnoozeTime(earliestSnooze, new Date(), locale),
+              })}
+            </span>
+          </button>
+        )}
+
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+          {!guest && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                builtinNav.prepare("my_work");
+                push?.(builtinNav.hrefFor("my_work"));
+              }}
+            >
+              <CircleUser />
+              <span>{t(($) => $.zero.my_work)}</span>
+            </Button>
+          )}
+          {!guest && workingCount > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                builtinNav.prepare("working");
+                push?.(builtinNav.hrefFor("working"));
+              }}
+            >
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand ring-3 ring-brand/20" />
+              <span>{t(($) => $.zero.agents_working, { count: workingCount })}</span>
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-muted-foreground"
+            onClick={onViewArchived}
+          >
+            <History />
+            <span>{t(($) => $.zero.view_archived)}</span>
+          </Button>
+        </div>
+
+        {!isCompact && (
+          <div className="mt-5 flex items-center justify-center gap-4 text-caption text-faint-foreground">
+            {!guest && (
+              <button
+                type="button"
+                onClick={() => openCreateIssueWithPreference()}
+                className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <ActionShortcutKeycaps action="createIssue" />
+                <span>{tLayout(($) => $.sidebar.new_issue)}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => useSearchStore.getState().setOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              <ActionShortcutKeycaps action="openSearch" />
+              <span>{t(($) => $.zero.quick_jump)}</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

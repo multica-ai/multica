@@ -52,17 +52,19 @@ export function useMoveOnAfterAutoArchive({
   // Before paint, so the settled bar never shows the plain archive first.
   useLayoutEffect(() => {
     if (!archivedKey) return;
-    const { settled: row, next: nextRow, onNext: moveOn, movesOn: moves } = latest.current;
+    const { settled: row, onNext: moveOn, movesOn: moves } = latest.current;
     const own = takeInboxAutoArchive(archivedKey);
     const action = takeInboxBarAction(archivedKey);
     const shown = own && action && reflects(qc.getQueryData(issueDetailOptions(wsId, archivedKey).queryKey), action);
     setCause(shown ? { key: archivedKey, action } : null);
-    if (!own || !moves || !row || !nextRow || !document.hasFocus()) return;
+    if (!own || !moves || !row || !document.hasFocus()) return;
     moveOn();
     toastInboxUndo(t(($) => $.toasts.archived), {
       label: t(($) => $.toasts.undo),
       undo: () => {
-        useInboxSelectionStore.getState().returnRow(wsId, archivedKey);
+        const store = useInboxSelectionStore.getState();
+        store.returnRow(wsId, archivedKey);
+        store.clearLastCleared(wsId, archivedKey);
         void restore(row.item.id, { quiet: true });
       },
     });

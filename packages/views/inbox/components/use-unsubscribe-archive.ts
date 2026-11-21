@@ -65,7 +65,11 @@ export function useUnsubscribeArchive() {
   const wsId = useWorkspaceId();
   const failed = (fallback: string) => (err: unknown) =>
     toast.error(err instanceof Error && err.message ? err.message : fallback);
-  const returnRow = (issueId: string) => useInboxSelectionStore.getState().returnRow(wsId, issueId);
+  const returnRow = (issueId: string) => {
+    const store = useInboxSelectionStore.getState();
+    store.returnRow(wsId, issueId);
+    store.clearLastCleared(wsId, issueId);
+  };
   const { mutate } = useUnsubscribeArchiveInbox({
     onSuccess: ({ id, issueId, scope }) => {
       const description = t(($) => $.toasts.unsubscribed_hint);
