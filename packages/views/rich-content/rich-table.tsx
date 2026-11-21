@@ -91,7 +91,10 @@ function headerCells(table: HTMLTableElement): HTMLTableCellElement[] {
 // sizing lifted and restored within the same task, so the browser paints only
 // the restored layout. Only the <table> and its <col>s are touched: in the
 // editor, a style written to a cell would reach ProseMirror as an edit.
-function measureColumns(table: HTMLTableElement): { min: number[]; max: number[] } {
+function measureColumns(
+  table: HTMLTableElement,
+  available?: number,
+): { min: number[]; max: number[] } {
   const { style } = table;
   const saved = { layout: style.tableLayout, width: style.width, minWidth: style.minWidth };
   const fixed = table.hasAttribute("data-column-widths");
@@ -103,10 +106,13 @@ function measureColumns(table: HTMLTableElement): { min: number[]; max: number[]
   for (const col of cols) col.style.width = "";
   style.tableLayout = "auto";
   style.minWidth = "0";
-  style.width = "max-content";
-  const max = read();
   style.width = "min-content";
   const min = read();
+  let max: number[] = [];
+  if (available === undefined || sum(min) > available) {
+    style.width = "max-content";
+    max = read();
+  }
 
   style.tableLayout = saved.layout;
   style.width = saved.width;
@@ -126,7 +132,7 @@ function measureColumns(table: HTMLTableElement): { min: number[]; max: number[]
 const PREFERRED_MAX_COLUMN_WIDTH = 320;
 
 function overflowWidths(table: HTMLTableElement, available: number): number[] | null {
-  const { min, max } = measureColumns(table);
+  const { min, max } = measureColumns(table, available);
   if (min.length === 0 || sum(min) <= available) return null;
   return min.map((least, i) => Math.max(least, Math.min(max[i] ?? least, PREFERRED_MAX_COLUMN_WIDTH)));
 }
