@@ -125,7 +125,19 @@ func resolveFromEmail(smtpHost string) string {
 	return resendFrom
 }
 
-func (s *EmailService) openSMTPClient() (*smtp.Client, error) {
+// SMTP relay time limits. The send stays synchronous so relay errors still
+// reach the caller, but a stalled relay can no longer hold the request for
+// long. smtpSendTimeout is one budget for the whole send, including the
+// LOGIN-fallback reconnect, and still leaves room for relays that scan the
+// message before acknowledging DATA. Variables so tests can shorten them.
+var (
+	smtpDialTimeout = 5 * time.Second
+	smtpSendTimeout = 20 * time.Second
+)
+
+// openSMTPClient dials the relay and applies deadline to the whole connection,
+// so every later command (EHLO, STARTTLS, AUTH, MAIL, RCPT, DATA, QUIT) shares it.
+func (s *EmailService) openSMTPClient(deadline time.Time) (*smtp.Client, error) {
 	addr := net.JoinHostPort(s.smtpHost, s.smtpPort)
 
 	tlsCfg := &tls.Config{
@@ -133,18 +145,20 @@ func (s *EmailService) openSMTPClient() (*smtp.Client, error) {
 		InsecureSkipVerify: s.smtpTLSInsecure, //nolint:gosec // opt-in via SMTP_TLS_INSECURE=true
 	}
 
+	// Timeout covers the TCP connect (and the TLS handshake for implicit TLS);
+	// Deadline keeps the dial inside the remaining send budget.
+	dialer := &net.Dialer{Timeout: smtpDialTimeout, Deadline: deadline}
 	var conn net.Conn
 	var err error
 	if s.smtpTLSImplicit {
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
 		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
 	} else {
-		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
+		conn, err = dialer.Dial("tcp", addr)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("smtp dial %s: %w", addr, err)
 	}
-	if err = conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+	if err = conn.SetDeadline(deadline); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("smtp set deadline: %w", err)
 	}
@@ -259,7 +273,8 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 		return fmt.Errorf("SMTP_FROM_EMAIL or RESEND_FROM_EMAIL is required when SMTP_HOST is set")
 	}
 
-	c, err := s.openSMTPClient()
+	deadline := time.Now().Add(smtpSendTimeout)
+	c, err := s.openSMTPClient(deadline)
 	if err != nil {
 		return err
 	}
@@ -273,7 +288,7 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 			}
 
 			c.Close()
-			c, err = s.openSMTPClient()
+			c, err = s.openSMTPClient(deadline)
 			if err != nil {
 				return fmt.Errorf("smtp auth: plain auth failed (%v); login reconnect failed: %w", authErr, err)
 			}

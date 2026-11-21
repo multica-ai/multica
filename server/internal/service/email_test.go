@@ -10,7 +10,9 @@ import (
 	"net/textproto"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type fakeSMTPAuthClient struct {
@@ -726,5 +728,124 @@ func TestSendSMTP_LoginAuthRejectsUnencryptedRemote(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unencrypted connection") {
 		t.Errorf("expected 'unencrypted connection' error, got: %v", err)
+	}
+}
+
+// --- SMTP time limits ---
+
+func setSMTPSendTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := smtpSendTimeout
+	smtpSendTimeout = d
+	t.Cleanup(func() { smtpSendTimeout = prev })
+}
+
+// startStallingSMTPServer accepts connections and hands each one to handle.
+// Connections stay open until the test ends, so a client that waits on them
+// only gets out through its own deadline.
+func startStallingSMTPServer(t *testing.T, handle func(n int, conn net.Conn)) (host, port string) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	var conns []net.Conn
+	var mu sync.Mutex
+	go func() {
+		for n := 0; ; n++ {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+			go handle(n, conn)
+		}
+	}()
+	t.Cleanup(func() {
+		l.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			c.Close()
+		}
+	})
+	host, port, _ = net.SplitHostPort(l.Addr().String())
+	return host, port
+}
+
+func TestSendSMTP_StalledRelayStopsAtSendTimeout(t *testing.T) {
+	setSMTPSendTimeout(t, 500*time.Millisecond)
+	// Accepts the TCP connection but never sends the 220 greeting.
+	host, port := startStallingSMTPServer(t, func(int, net.Conn) {})
+
+	s := &EmailService{fromEmail: "from@example.com", smtpHost: host, smtpPort: port}
+	start := time.Now()
+	err := s.sendSMTP("to@example.com", "Subject", "<p>body</p>")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error from a relay that never greets")
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("sendSMTP took %v on a stalled relay, want about the 500ms send timeout", elapsed)
+	}
+}
+
+func TestSendSMTP_LoginReconnectSharesSendTimeout(t *testing.T) {
+	setSMTPSendTimeout(t, 2*time.Second)
+	// First connection: slow PLAIN rejection that triggers the LOGIN fallback.
+	// Second connection: never greets. The reconnect must not get a fresh budget.
+	host, port := startStallingSMTPServer(t, func(n int, conn net.Conn) {
+		if n > 0 {
+			return
+		}
+		r := bufio.NewReader(conn)
+		fmt.Fprint(conn, "220 test-smtp ESMTP\r\n")
+		if _, err := r.ReadString('\n'); err != nil { // EHLO
+			return
+		}
+		fmt.Fprint(conn, "250-test-smtp Hello\r\n250-AUTH PLAIN LOGIN\r\n250 OK\r\n")
+		if _, err := r.ReadString('\n'); err != nil { // AUTH PLAIN
+			return
+		}
+		time.Sleep(1500 * time.Millisecond)
+		fmt.Fprint(conn, "504 5.7.4 Unrecognized authentication type\r\n")
+		// net/smtp answers a failed AUTH with "*" and then QUIT.
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if strings.HasPrefix(strings.ToUpper(line), "QUIT") {
+				fmt.Fprint(conn, "221 bye\r\n")
+				return
+			}
+			fmt.Fprint(conn, "501 cancelled\r\n")
+		}
+	})
+
+	s := &EmailService{
+		fromEmail:    "from@example.com",
+		smtpHost:     host,
+		smtpPort:     port,
+		smtpUsername: "user",
+		smtpPassword: "pass",
+	}
+	start := time.Now()
+	err := s.sendSMTP("to@example.com", "Subject", "<p>body</p>")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error when the LOGIN reconnect stalls")
+	}
+	if !strings.Contains(err.Error(), "login reconnect failed") {
+		t.Fatalf("expected the reconnect to fail, got: %v", err)
+	}
+	// Shared budget: about 2s in total. A fresh budget per connection would be
+	// about 1.5s + 2s = 3.5s.
+	if elapsed > 3*time.Second {
+		t.Fatalf("sendSMTP took %v; the LOGIN reconnect should share the 2s send timeout", elapsed)
 	}
 }
