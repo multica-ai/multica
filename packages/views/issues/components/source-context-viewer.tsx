@@ -71,7 +71,7 @@ export function SourceContextBadge({
 
   const openCurrent = (value: IssueSourceContext) => {
     if (value.anchor_comment_state !== "available" || !value.current_source || value.can_open_current_source !== true) return;
-    navigation.push(`${paths.issueDetail(value.current_source.issue_id)}#comment-${value.current_source.anchor_comment_id}`);
+    navigation.push(`${paths.issueDetail(value.current_source.identifier || value.current_source.issue_id)}#comment-${value.current_source.anchor_comment_id}`);
   };
   const refresh = async () => {
     try {
@@ -156,7 +156,7 @@ export function SourceContextBadge({
           </span>
           {parentIssue ? (
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(parentIssue.identifier)}
               aria-label={`${originIdentifier} ${originTitle}`}
               className="group/source-parent flex min-w-0 items-center gap-1.5 rounded-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >

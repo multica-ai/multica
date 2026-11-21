@@ -102,7 +102,7 @@ describe("SourceContextBadge", () => {
     expect(summary).toHaveClass("border-border/60", "bg-muted/30");
     expect(screen.getByRole("link", { name: /MUL-7 Current source title/ })).toHaveAttribute(
       "href",
-      "/acme/issues/source-issue",
+      "/acme/issues/MUL-7",
     );
     expect(screen.getByText("1/3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Context snapshot" })).toBeInTheDocument();
@@ -118,7 +118,7 @@ describe("SourceContextBadge", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Go to source comment" }));
     await waitFor(() => expect(refetch).toHaveBeenCalledOnce());
-    expect(navigationPush).toHaveBeenCalledWith("/acme/issues/source-issue#comment-selected");
+    expect(navigationPush).toHaveBeenCalledWith("/acme/issues/NEW-7#comment-selected");
   });
 
   it("keeps the snapshot open when live-source revalidation fails", async () => {

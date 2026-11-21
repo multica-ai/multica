@@ -175,7 +175,7 @@ describe("DraggableBoardCard side peek", () => {
     renderCard();
     // Handled here, not left to the browser (a new window on web).
     expect(fireEvent.click(link(), { shiftKey: true })).toBe(false);
-    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/issue-1");
+    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/MUL-1");
     expect(peek.open).not.toHaveBeenCalled();
     expect(peek.toggle).not.toHaveBeenCalled();
   });

@@ -556,6 +556,7 @@ function useTaskRowModel(task: AgentTask) {
     cfg,
     hasIssue,
     issue,
+    issueRef: issue?.identifier || task.issue_identifier || task.issue_id,
     title,
     SourceIcon,
     sourceLabel,
@@ -591,13 +592,13 @@ function TaskTitle({ task, title }: { task: AgentTask; title: string }) {
   );
 }
 
-function OpenIssueIconLink({ issueId }: { issueId: string }) {
+function OpenIssueIconLink({ issueRef }: { issueRef: string }) {
   const { t } = useT("agents");
   const paths = useWorkspacePaths();
   return (
     <Tooltip>
       <TooltipTrigger
-        render={<AppLink href={paths.issueDetail(issueId)} />}
+        render={<AppLink href={paths.issueDetail(issueRef)} />}
         aria-label={t(($) => $.tab_body.activity.open_issue_aria)}
         className={`flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground ${TOUCH_ACTION_CLASS}`}
       >
@@ -627,7 +628,7 @@ function LiveTaskRow({
   const timeAgo = useTimeAgo();
   const paths = useWorkspacePaths();
   const [cancelling, setCancelling] = useState(false);
-  const { cfg, hasIssue, issue, title, SourceIcon, sourceLabel, sourceFallback, statusLabel } =
+  const { cfg, hasIssue, issue, issueRef, title, SourceIcon, sourceLabel, sourceFallback, statusLabel } =
     useTaskRowModel(task);
   const Icon = cfg.icon;
   const isRunning = task.status === "running";
@@ -721,7 +722,7 @@ function LiveTaskRow({
         <Button
           variant="outline"
           size="sm"
-          render={<AppLink href={paths.issueDetail(task.issue_id)} />}
+          render={<AppLink href={paths.issueDetail(issueRef)} />}
           nativeButton={false}
         >
           {t(($) => $.sections.open)}
@@ -743,7 +744,7 @@ const RecentTaskRow = memo(function RecentTaskRow({
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
-  const { cfg, hasIssue, issue, title, SourceIcon, sourceLabel, failureLabel, statusLabel } =
+  const { cfg, hasIssue, issue, issueRef, title, SourceIcon, sourceLabel, failureLabel, statusLabel } =
     useTaskRowModel(task);
   const Icon = cfg.icon;
 
@@ -792,7 +793,7 @@ const RecentTaskRow = memo(function RecentTaskRow({
         )}
       </span>
       <div className={HOVER_ACTIONS_CLASS}>
-        {hasIssue && <OpenIssueIconLink issueId={task.issue_id} />}
+        {hasIssue && <OpenIssueIconLink issueRef={issueRef} />}
         <TranscriptButton
           task={task}
           agentName={agentName}

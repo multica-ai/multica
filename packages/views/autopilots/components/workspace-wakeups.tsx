@@ -523,7 +523,7 @@ export function WorkspaceWakeups() {
         columns={columns}
         rows={rows}
         getRowId={rowId}
-        getRowHref={(row) => paths.issueDetail(row.issue_id)}
+        getRowHref={(row) => paths.issueDetail(row.issue_identifier || row.issue_id)}
         getRowTitle={(row) => `${row.issue_identifier} ${row.issue_title}`}
         selection={{
           selectedIds: selected,

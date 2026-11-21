@@ -1270,7 +1270,7 @@ describe("SearchCommand", () => {
       expect(handRow()).toHaveTextContent(`Hand to agent: “${prompt}”`);
       fireEvent.keyDown(input(), { key: "Enter" });
 
-      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-812");
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/MUL-812");
       expect(mockOpenModal).not.toHaveBeenCalled();
       expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });

@@ -109,9 +109,9 @@ describe("PinnedSection", () => {
       data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" },
       error: null,
     };
-    // The issue route rewrites the pin's UUID URL to the identifier form.
     renderWithI18n(<Harness pathname="/acme/issues/MUL-123" currentIssueId="issue-1" />);
     const row = (await screen.findByText("Keep this pin")).closest("a");
+    expect(row).toHaveAttribute("href", "/acme/issues/MUL-123");
     expect(row).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText("MUL-123 Keep this pin")).toBeNull();
     expect(activePinnedRoute).toBe(true);
@@ -141,7 +141,7 @@ describe("PinnedSection", () => {
       error: null,
     };
     renderWithI18n(<Harness pathname="/acme/issues/MUL-6" currentIssueId="issue-6" />);
-    const lastPin = () => document.querySelector('a[href="/acme/issues/issue-6"]');
+    const lastPin = () => document.querySelectorAll("a")[5] ?? null;
 
     expect(lastPin()).toBeNull();
     expect(activePinnedRoute).toBe(false);

@@ -197,7 +197,7 @@ describe("AgentLivePeekCard", () => {
     expect(screen.getByText("Working")).toBeInTheDocument();
     // identifier + title both render under the same link.
     const link = screen.getByRole("link", { name: /MUL-42/ });
-    expect(link).toHaveAttribute("href", "/test/issues/issue-42");
+    expect(link).toHaveAttribute("href", "/test/issues/MUL-42");
     expect(link.textContent).toContain("Wire up live peek");
   });
 

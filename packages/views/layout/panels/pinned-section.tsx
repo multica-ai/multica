@@ -59,8 +59,8 @@ function pinHref(p: WorkspacePaths, pin: PinnedItem): string {
  * panel can keep its plain rows unlit while a pinned item is the page on
  * screen.
  *
- * An issue pin matches by id, not by path: the issue route rewrites its UUID
- * URL to the `MUL-123` form, which a pin's href never equals.
+ * An issue pin matches by id, not by path: the address names the issue by
+ * UUID or by its `MUL-123` identifier.
  */
 export function usePanelPins(
   wsId: string | undefined,
@@ -252,6 +252,7 @@ function SortablePinItem({
       <AppLink
         href={href}
         newTabTitle={label}
+        data-issue-id={issue?.id}
         draggable={false}
         aria-current={active ? "page" : undefined}
         className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5")}
@@ -327,6 +328,7 @@ function PinRow({
   wsId: string;
 }) {
   const { t: tProjects } = useT("projects");
+  const p = useWorkspacePaths();
   const isIssue = pin.item_type === "issue";
   const agents = useIssueAgentState(wsId, isIssue ? pin.item_id : "");
   const unread = useIssueUnread(wsId, isIssue ? pin.item_id : "");
@@ -354,7 +356,7 @@ function PinRow({
     return (
       <SortablePinItem
         pin={pin}
-        href={unreadIssueHref(href, unread)}
+        href={unreadIssueHref(p.issueDetail(issue.identifier), unread)}
         onUnpin={onUnpin}
         label={issue.title}
         active={active}

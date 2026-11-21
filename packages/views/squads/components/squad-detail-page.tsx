@@ -673,7 +673,7 @@ function SquadMembersSection({
                       <>
                         <span className="shrink-0">{t(($) => $.detail.working_on)}</span>
                         <AppLink
-                          href={p.issueDetail(primaryIssue.issue_id)}
+                          href={p.issueDetail(primaryIssue.identifier || primaryIssue.issue_id)}
                           title={primaryIssue.title}
                           className="shrink-0 font-mono uppercase transition-colors hover:text-foreground"
                         >
@@ -885,7 +885,7 @@ function SquadRecentWorkSection({
           {issues.map((issue) => (
             <AppLink
               key={issue.id}
-              href={p.issueDetail(issue.id)}
+              href={p.issueDetail(issue.identifier)}
               className="flex h-10 items-center gap-3 px-3 text-body transition-colors hover:bg-accent/50"
             >
               <StatusIcon

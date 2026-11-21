@@ -2225,7 +2225,7 @@ export function TableView({
   const openIssue = useCallback(
     (issue: Issue, event?: React.MouseEvent) => {
       // Match card links, including the preferred default and modifier keys.
-      if (handlePeekClick(issue.id, event)) {
+      if (handlePeekClick(issue, event)) {
         if (event?.shiftKey) window.getSelection()?.removeAllRanges();
         return;
       }

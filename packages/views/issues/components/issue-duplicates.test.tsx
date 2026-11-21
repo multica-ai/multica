@@ -113,7 +113,7 @@ describe("IssueDuplicateBanner", () => {
 
     // The original's identifier and title sit inside the link, after the prefix.
     const link = await screen.findByRole("link", { name: /Duplicate of MUL-6980 Tap targets are too small/ });
-    expect(link.getAttribute("href")).toBe("/acme/issues/original");
+    expect(link.getAttribute("href")).toBe("/acme/issues/MUL-6980");
     // The unmark control is not nested inside the link.
     const unmark = screen.getByRole("button", { name: "Not a duplicate" });
     expect(link.contains(unmark)).toBe(false);
@@ -142,7 +142,7 @@ describe("IssueDuplicatesSection", () => {
     renderWithQuery(<IssueDuplicatesSection issueId="original" />);
 
     const row = await screen.findByRole("link", { name: /MUL-7412/ });
-    expect(row.getAttribute("href")).toBe("/acme/issues/duplicate");
+    expect(row.getAttribute("href")).toBe("/acme/issues/MUL-7412");
     expect(screen.getByRole("button", { name: "Duplicates 2" })).toBeTruthy();
     // Every duplicate is cancelled, so the row shows who reported it instead
     // of a status icon that would be identical on each line.
@@ -169,7 +169,7 @@ describe("IssueDuplicateOfMarker", () => {
 
     const marker = screen.getByRole("link", { name: "MUL-6980" });
     expect(marker.tagName).toBe("A");
-    expect(marker.getAttribute("href")).toBe("/acme/issues/original");
+    expect(marker.getAttribute("href")).toBe("/acme/issues/MUL-6980");
     expect(marker.getAttribute("title")).toBe("Duplicate of MUL-6980 Tap targets are too small");
 
     fireEvent.click(marker);
@@ -187,7 +187,7 @@ describe("IssueDuplicateOfMarker", () => {
     const marker = screen.getByRole("link", { name: "MUL-6980" });
     expect(marker.tagName).toBe("SPAN");
     fireEvent.click(marker);
-    expect(navigate).toHaveBeenCalledWith("/acme/issues/original", "push", "MUL-6980");
+    expect(navigate).toHaveBeenCalledWith("/acme/issues/MUL-6980", "push", "MUL-6980");
     expect(rowClick).not.toHaveBeenCalled();
   });
 
