@@ -672,6 +672,10 @@ type Daemon struct {
 	brewInstall    bool        // resolved once: was this binary installed via brew?
 	brewPrefix     string      // Homebrew prefix when brewInstall and it resolved; the stable path is derived per call by cli.StableExecutablePath
 	updating       atomic.Bool // prevents concurrent update attempts
+	// queuedUpdate is a deferrable update held until the daemon is idle; see
+	// queued_update.go. Guarded by queuedUpdateMu.
+	queuedUpdateMu sync.Mutex
+	queuedUpdate   *queuedServerUpdate
 	// activeTasks is the ownership-safe count of tasks currently in handleTask.
 	// It deliberately includes preparation and local-directory waiters because
 	// restart/update barriers must not kill any claimed task.
@@ -5016,7 +5020,8 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		// Additive field: the models are still worth rendering, but the server
 		// must not persist them as this runtime's real catalog (MUL-5549).
 		// Older servers ignore it and keep the previous behaviour.
-		"fallback": catalog.Fallback,
+		"fallback":                    catalog.Fallback,
+		"effort_discovery_incomplete": catalog.EffortDiscoveryIncomplete,
 	})
 }
 
@@ -5175,6 +5180,10 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		})
 		return
 	}
+	if update.Deferrable {
+		d.handleQueuedUpdate(ctx, runtimeID, update)
+		return
+	}
 
 	switch d.tryBeginServerUpdate(ctx) {
 	case serverUpdateAlreadyRunning:
@@ -5192,6 +5201,16 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		})
 		return
 	}
+	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
+	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+		"status": "running",
+	})
+	d.runAcquiredServerUpdate(ctx, runtimeID, update.ID, update.TargetVersion)
+}
+
+// runAcquiredServerUpdate installs targetVersion and restarts. The caller has
+// won tryBeginServerUpdate and already reported "running".
+func (d *Daemon) runAcquiredServerUpdate(ctx context.Context, runtimeID, updateID, targetVersion string) {
 	restarting := false
 	defer func() {
 		if !restarting {
@@ -5200,17 +5219,10 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		}
 	}()
 
-	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
-
-	// Report running status.
-	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-		"status": "running",
-	})
-
-	output, err := d.runUpdateFn(update.TargetVersion)
+	output, err := d.runUpdateFn(targetVersion)
 	if err != nil {
 		d.logger.Error("CLI update failed", "error", err, "output", output)
-		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+		d.reportUpdateResult(ctx, runtimeID, updateID, map[string]any{
 			"status": "failed",
 			"error":  err.Error(),
 		})
@@ -5218,9 +5230,9 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	}
 
 	d.logger.Info("CLI update completed successfully", "output", output)
-	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+	d.reportUpdateResult(ctx, runtimeID, updateID, map[string]any{
 		"status": "completed",
-		"output": fmt.Sprintf("Updated to %s", update.TargetVersion),
+		"output": fmt.Sprintf("Updated to %s", targetVersion),
 	})
 
 	// Trigger daemon restart with the new binary.
@@ -5312,13 +5324,15 @@ func (d *Daemon) runUpdate(targetVersion string) (string, error) {
 // Overridable for tests to avoid real sleeps.
 var updateReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
-func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) {
-	d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
+func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) error {
+	return d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
 		return d.client.ReportUpdateResult(ctx, runtimeID, updateID, payload)
 	})
 }
 
-func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) {
+// reportUpdateResultWithRetry returns nil once a report is accepted, or the
+// last error.
+func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) error {
 	var lastErr error
 	for attempt, wait := range updateReportBackoffs {
 		if wait > 0 {
@@ -5327,7 +5341,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 				d.logger.Error("CLI update report cancelled",
 					"runtime_id", runtimeID, "update_id", updateID,
 					"attempt", attempt, "error", ctx.Err())
-				return
+				return ctx.Err()
 			case <-time.After(wait):
 			}
 		}
@@ -5339,7 +5353,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 					"runtime_id", runtimeID, "update_id", updateID,
 					"attempt", attempt+1)
 			}
-			return
+			return nil
 		}
 		lastErr = err
 
@@ -5348,7 +5362,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 			d.logger.Error("CLI update report rejected — not retrying",
 				"runtime_id", runtimeID, "update_id", updateID,
 				"status", reqErr.StatusCode, "error", err)
-			return
+			return err
 		}
 
 		d.logger.Warn("CLI update report failed — will retry",
@@ -5357,6 +5371,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 	}
 	d.logger.Error("CLI update report exhausted retries",
 		"runtime_id", runtimeID, "update_id", updateID, "error", lastErr)
+	return lastErr
 }
 
 // tryEnterClaim records the intent to call ClaimTask. Returns true if the
@@ -5666,7 +5681,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			}
 			go func(t Task, slot int) {
 				defer taskWG.Done()
-				defer d.activeTasks.Add(-1)
+				defer d.finishActiveTask()
 				executionSlot := newTaskSlotLease(sem, slot, wakeup)
 				defer executionSlot.release()
 				d.handleTask(parentCtx, t, executionSlot)
@@ -6429,7 +6444,8 @@ func withoutWorktreePreserved(err error) error {
 //
 //  1. The project_resource JSON is structurally broken — fail the task fast.
 //  2. The path fails validation (missing, not a directory, no R/W, system
-//     blacklist) — fail the task fast with a user-facing reason.
+//     blacklist) — fail the task fast with a user-facing reason; a missing
+//     directory gets its own local_directory_missing reason.
 //  3. The mutex is held by another task — call MarkTaskWaitingLocalDirectory
 //     so the row flips to waiting_local_directory while we block on the
 //     lock, returning execution capacity during the wait. Reacquire capacity
@@ -6474,11 +6490,15 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	}
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
+		failureReason := "local_directory_error"
+		if errors.Is(err, errLocalDirectoryMissing) {
+			failureReason = taskfailure.ReasonLocalDirectoryMissing.String()
+		}
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			failureReason: failureReason,
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
@@ -8339,6 +8359,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,
 		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
+		DocsEnabled:                      task.DocsEnabled,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,

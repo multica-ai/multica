@@ -316,3 +316,47 @@ func TestSummarySlowReadReturnsEachGenerationWithItsOwnBudget(t *testing.T) {
 		t.Fatalf("SQL executions = %d, want 2", runs.Load())
 	}
 }
+
+// PendingSummaryCallers counts only callers already inside the generation that
+// will run next, so a test can wait until callers share one query.
+func TestPendingSummaryCallersCountsJoinedGeneration(t *testing.T) {
+	g := New(Config{Concurrency: 2})
+	started, finish := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	query := func(context.Context) (any, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-finish
+		}
+		return nil, nil
+	}
+	if n := g.PendingSummaryCallers("user"); n != 0 {
+		t.Fatalf("idle pending = %d", n)
+	}
+	done := make(chan error, 3)
+	read := func() { _, err := g.Summary(context.Background(), "user", query); done <- err }
+	go read()
+	<-started
+	if n := g.PendingSummaryCallers("user"); n != 0 {
+		t.Fatalf("running generation counted as pending: %d", n)
+	}
+	go read()
+	eventually(t, func() bool { return g.PendingSummaryCallers("user") == 1 })
+	go read()
+	eventually(t, func() bool { return g.PendingSummaryCallers("user") == 2 })
+	if n := g.PendingSummaryCallers("other"); n != 0 {
+		t.Fatalf("other user pending = %d", n)
+	}
+	close(finish)
+	for range 3 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("pending callers did not share one query: %d", calls.Load())
+	}
+	if n := g.PendingSummaryCallers("user"); n != 0 {
+		t.Fatalf("finished pending = %d", n)
+	}
+}

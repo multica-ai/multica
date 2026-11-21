@@ -208,10 +208,12 @@ function Harness({
   childProgressMap,
   surfaceKey,
   onCreateIssue = () => {},
+  canCreate = true,
 }: {
   childProgressMap: Map<string, ChildProgress>;
   surfaceKey: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
+  canCreate?: boolean;
 }) {
   return (
     <ViewStoreProvider store={getIssueSurfaceViewStore(surfaceKey)}>
@@ -222,7 +224,7 @@ function Harness({
           search=""
           onSearchChange={() => {}}
           onLoadedIssuesChange={() => {}}
-          onCreateIssue={onCreateIssue}
+          onCreateIssue={canCreate ? onCreateIssue : undefined}
           exportIssues={() => Promise.resolve(serverIssues)}
           resolveExportLookups={() =>
             Promise.resolve({
@@ -299,7 +301,6 @@ describe("TableView cell editors under data refresh", () => {
       listMembers: async () => [],
       listAgents: async () => [],
       listSquads: async () => [],
-      getAssigneeFrequency: async () => [],
       listIssueStatuses: async () => ({ statuses: [] }),
       listIssueTableRows: async () => ({
         query_fingerprint: "test",
@@ -433,6 +434,25 @@ describe("TableView cell editors under data refresh", () => {
       parent_issue_identifier: "MUL-a",
       project_id: "project-1",
     });
+  });
+
+  it("offers no sub-issue creation when the viewer cannot create issues (guest, MUL-9420)", async () => {
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-no-sub-issue-${Math.floor(Math.random() * 1e9)}`}
+          canCreate={false}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Create sub-issue" })).toBeNull();
+    // The row's other title action stays.
+    expect(within(row).getByRole("button", { name: "Rename issue" })).toBeInTheDocument();
   });
 
   it("uses the preferred peek for both titles and row space; Shift opens the full page instead", async () => {

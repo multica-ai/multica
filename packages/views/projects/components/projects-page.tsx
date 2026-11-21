@@ -605,6 +605,7 @@ export function ProjectsPage() {
           <CollectionNameCell
             icon={<ProjectIcon project={project} size="sm" />}
             title={project.title}
+            titleTooltip={project.title}
             muted={isProjectArchived(project)}
           />
         ),

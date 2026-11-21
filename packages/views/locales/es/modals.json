@@ -162,15 +162,20 @@
     "autopilot_quota_limit": {
       "title": "Este espacio de trabajo ha alcanzado su límite de ejecuciones de automatizaciones",
       "checking_description": "Comprobando las acciones de facturación disponibles para este espacio de trabajo…",
-      "upgrade_description": "Actualiza a Pro para restaurar las ejecuciones de automatizaciones.",
+      "upgrade_description": "Mejora a Pro para aumentar el límite mensual y reanudar las ejecuciones de autopilot, o espera a que se restablezca la asignación.",
       "portal_description": "Abre el portal de facturación para gestionar la suscripción de este espacio de trabajo y restaurar las ejecuciones de automatizaciones.",
-      "contact_description": "Pide a un propietario o administrador del espacio de trabajo que actualice a Pro.",
+      "contact_description": "Pide a un propietario o administrador del espacio de trabajo que mejore el plan, o espera a que se restablezca la asignación.",
       "billing_description": "Abre Facturación para ver las opciones de actualización disponibles para este espacio de trabajo.",
       "billing_unavailable_description": "No se han podido cargar las acciones de facturación. Abre Facturación para reintentarlo.",
       "billing_disabled_description": "Espera a que se reinicie la cuota actual, o contacta con el administrador de tu espacio de trabajo.",
       "upgrade_action": "Actualizar a Pro",
       "portal_action": "Abrir portal de facturación",
-      "billing_action": "Ver facturación"
+      "billing_action": "Ver facturación",
+      "addon_description": "Compra más ejecuciones para reanudar las ejecuciones de autopilot este mes, o espera a que se restablezca la asignación.",
+      "contact_addon_description": "Pide a un propietario o administrador del espacio de trabajo que compre más ejecuciones, o espera a que se restablezca la asignación.",
+      "contact_addon_or_upgrade_description": "Pide a un propietario o administrador del espacio de trabajo que compre más ejecuciones o mejore el plan, o espera a que se restablezca la asignación.",
+      "addon_action": "Comprar más ejecuciones",
+      "upgrade_business_action": "Mejorar a Business"
     },
     "toast_link_subissues_all_failed": "No se han podido vincular las subtareas",
     "toast_link_subissues_partial": "No se han podido vincular {{failed}} de {{total}} subtareas",

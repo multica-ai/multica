@@ -1330,6 +1330,9 @@ export function aggregateByWeek(
   usage: readonly WeeklyAggregable[],
   tz: string,
   weekCount: number,
+  // The first day the plan lets the dashboard read (MUL-9490); the leftmost
+  // week it cuts into is marked partial.
+  earliestDay: string | null = null,
 ): {
   weeklyTokens: WeeklyTokenData[];
   weeklyCostStack: WeeklyCostStackData[];
@@ -1361,6 +1364,9 @@ export function aggregateByWeek(
   }
 
   for (const u of usage) {
+    // Days before the plan's range never count, even when a response from a
+    // replica still on the old policy includes them.
+    if (earliestDay && u.date < earliestDay) continue;
     const wkStart = weekStartIso(u.date);
     if (wkStart < firstWeekStart || wkStart > currentWeekStart) continue;
     const tokens = tokenMap.get(wkStart);
@@ -1381,24 +1387,19 @@ export function aggregateByWeek(
 
   const decorate = (weekStart: string) => {
     const weekEnd = addDaysIso(weekStart, 6);
-    const partial = today < weekEnd;
-    // Inclusive count of how many days of this week have actually elapsed.
-    // Sits at 7 for closed weeks, 1..6 for the current week.
-    const elapsedDays = Math.min(
-      7,
-      Math.max(
-        1,
-        // Day index of `today` within [weekStart, weekEnd] + 1.
-        diffDaysIso(weekStart, today < weekStart ? weekStart : today < weekEnd ? today : weekEnd) + 1,
-      ),
-    );
+    // Inclusive count of the week's days that have elapsed and that the plan
+    // covers: 7 for a closed week, fewer for the current week or the leftmost
+    // week a history limit cuts into.
+    const from = earliestDay && earliestDay > weekStart ? earliestDay : weekStart;
+    const to = today < weekEnd ? today : weekEnd;
+    const daysCovered = Math.min(7, Math.max(1, diffDaysIso(from, to) + 1));
     return {
       weekStart,
       weekEnd,
       label: formatShortDate(weekStart),
       rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
-      partial,
-      daysCovered: partial ? elapsedDays : 7,
+      partial: daysCovered < 7,
+      daysCovered,
     };
   };
 

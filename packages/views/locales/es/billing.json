@@ -28,6 +28,7 @@
     "actions": {
       "retry": "Reintentar",
       "retry_autopilots": "Reintentar el uso de automatización",
+      "retry_storage": "Reintentar uso del almacenamiento de adjuntos",
       "upgrade_to": "Actualizar a {{plan}}",
       "switch_to": "Cambiar a {{plan}}",
       "manage": "Gestionar facturación",
@@ -135,7 +136,22 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "{{used}} completadas · {{reserved}} en curso",
       "resets_at": "Se reinicia el {{date}}",
-      "usage_unavailable": "El uso no está disponible temporalmente"
+      "usage_unavailable": "El uso no está disponible temporalmente",
+      "members": "Miembros",
+      "members_pending": "Invitaciones pendientes: {{pending}}",
+      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan.",
+      "storage": "Almacenamiento de adjuntos",
+      "storage_description": "Adjuntos de incidencias, comentarios y chats.",
+      "storage_label": "Uso del almacenamiento de adjuntos",
+      "addon": "Ejecuciones adicionales",
+      "addon_description": "Cuando se agota la asignación, las automatizaciones se pausan hasta el próximo mes o hasta que compres más ejecuciones.",
+      "addon_included": "Incluye {{runs}} ejecuciones adicionales",
+      "addon_none": "Ninguna este mes",
+      "addon_purchased": "{{runs}} compradas este mes",
+      "addon_buy": "Comprar · {{price}} / {{runs}} ejecuciones",
+      "addon_buy_fallback": "Comprar más ejecuciones",
+      "dashboard_history": "Historial de analítica",
+      "dashboard_history_days": "Últimos {{days}} días"
     },
     "seats": {
       "title": "Puestos",
@@ -218,11 +234,22 @@
       "success_title": "Plan cambiado",
       "success_description": "Este espacio de trabajo ahora usa {{plan}}.",
       "unresolved": "No se ha podido confirmar el cambio de plan anterior. Contacta con soporte antes de cambiar de plan.",
-      "check_failed": "No se ha podido comprobar el cambio de plan. Vuelve a intentarlo."
+      "check_failed": "No se ha podido comprobar el cambio de plan. Vuelve a intentarlo.",
+      "addon_downgrade_notice": "Tras el cambio, el límite de este mes será de {{limit}} ejecuciones, incluidas las compradas. Este mes se han usado {{used}}.",
+      "addon_downgrade_notice_limit_only": "Tras el cambio, el límite de este mes será de {{limit}} ejecuciones, incluidas las compradas."
     },
     "confirm": {
       "title": "¿Continuar a Stripe Checkout?",
-      "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago."
+      "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago.",
+      "held_invite": "Incluye un puesto de pago más para la invitación a {{email}}. Cuando se complete el pago, envíala desde Facturación."
+    },
+    "held_invite": {
+      "title": "El espacio de trabajo ya está en {{plan}}",
+      "description": "Guardaste una invitación para {{email}} como {{role}} hasta mejorar el plan. ¿La envías ahora?",
+      "role_admin": "administrador",
+      "role_member": "miembro",
+      "send": "Enviar invitación",
+      "discard": "Descartar"
     }
   },
   "return_page": {
@@ -238,6 +265,120 @@
     "read_only": "Solo lectura. Mejora el plan para editar.",
     "unavailable": "No está incluido en el plan de este espacio de trabajo.",
     "view_plans": "Ver planes",
-    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más."
+    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más.",
+    "upgrade_to_add": "Mejorar el plan",
+    "business": "Business",
+    "badge_label": "Función de Business. Ver detalles",
+    "upgrade_to_business": "Pasar a Business",
+    "ask_admin": "Pide a un administrador del espacio de trabajo que pase el plan a Business.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "Permitir que personas concretas ejecuten un agente es una función de Business",
+        "description": "\"Solo yo\" y \"Todo el espacio de trabajo\" siguen disponibles en todos los planes."
+      },
+      "runtime_member_sharing": {
+        "title": "Compartir un runtime con miembros concretos es una función de Business",
+        "description": "\"Privado\" y \"Público\" siguen disponibles en todos los planes."
+      }
+    }
+  },
+  "trial": {
+    "status": {
+      "active": "Prueba de Business",
+      "days_left_one": "queda {{count}} día",
+      "days_left_other": "quedan {{count}} días",
+      "active_label_one": "Prueba de Business, queda {{count}} día. Abrir Facturación.",
+      "active_label_other": "Prueba de Business, quedan {{count}} días. Abrir Facturación.",
+      "free": "Free",
+      "upgrade": "Actualizar",
+      "ended_label": "La prueba de Business terminó y este espacio de trabajo está en Free. Abre Facturación para actualizar.",
+      "ending": "termina ya",
+      "ending_label": "La prueba de Business está terminando. Abrir Facturación."
+    },
+    "reminder": {
+      "halfway_title_one": "Tu prueba de Business va por la mitad: queda {{count}} día.",
+      "halfway_title_other": "Tu prueba de Business va por la mitad: quedan {{count}} días.",
+      "days_left_title_one": "Queda {{count}} día de tu prueba de Business.",
+      "days_left_title_other": "Quedan {{count}} días de tu prueba de Business.",
+      "last_day_title": "Tu prueba de Business termina en menos de un día.",
+      "body": "El {{date}} este espacio de trabajo pasa a Free. Elige un plan para seguir con Business.",
+      "later": "Más tarde",
+      "choose_plan": "Elegir un plan"
+    },
+    "welcome": {
+      "title_one": "¡Bienvenido! Este espacio de trabajo tiene una prueba gratuita de Business de {{count}} día",
+      "title_other": "¡Bienvenido! Este espacio de trabajo tiene una prueba gratuita de Business de {{count}} días",
+      "body": "Los proyectos privados y las demás funciones de Business están activos. No hace falta tarjeta; al terminar la prueba, el espacio de trabajo pasa a Free.",
+      "action": "Ver qué incluye",
+      "close": "Cerrar"
+    },
+    "ended": {
+      "title": "Tu prueba de Business ha terminado",
+      "description": "{{workspace}} ahora está en Free. No se eliminó nada.",
+      "description_without_name": "Este espacio de trabajo ahora está en Free. No se eliminó nada.",
+      "kept": "Los miembros, proyectos y ajustes que ya tienes se mantienen igual.",
+      "private_projects": "Los proyectos privados siguen siendo privados. Sus listas de acceso son de solo lectura hasta que actualices.",
+      "autopilot": "Las automatizaciones tienen {{limit}} ejecuciones al mes; este mes se usaron {{used}}.",
+      "autopilot_paused": "Las automatizaciones tienen {{limit}} ejecuciones al mes y este mes se usaron {{used}}, así que están en pausa hasta el {{date}}.",
+      "keep_free": "Seguir en Free",
+      "upgrade": "Actualizar a Business",
+      "member_title": "Este espacio de trabajo ahora está en Free",
+      "member_description": "Los ajustes existentes siguen funcionando. Si necesitas más, pregunta a un administrador del espacio de trabajo."
+    },
+    "card": {
+      "title": "Prueba de Business",
+      "badge_one": "Prueba · queda {{count}} día",
+      "badge_other": "Prueba · quedan {{count}} días",
+      "description": "Prueba hasta el {{date}}. No hay método de pago registrado, así que después el espacio de trabajo pasa a Free y no se cobra nada.",
+      "started": "Empezó el {{date}}",
+      "progress": "Día {{day}} de {{total}}",
+      "ends": "Termina el {{date}}",
+      "ended_title": "La prueba de Business terminó",
+      "ended_description": "La prueba terminó el {{date}}. Elige un plan abajo para recuperar las funciones de Business.",
+      "choose_plan": "Elegir un plan",
+      "ended_description_member": "La prueba terminó el {{date}}. Pide a un administrador del espacio de trabajo que actualice el plan para recuperar las funciones de Business."
+    },
+    "features": {
+      "title": "Funciones de Business en tu prueba",
+      "description": "Al terminar la prueba no se elimina ni se desactiva nada; solo no podrás añadir más.",
+      "private_projects": {
+        "name": "Proyectos privados",
+        "after": "Siguen siendo privados después de la prueba. Sus listas de acceso pasan a solo lectura."
+      },
+      "guests": {
+        "name": "Invitados",
+        "after": "Los invitados actuales conservan su acceso después de la prueba. Para invitar a nuevos invitados necesitas Pro o Business."
+      }
+    }
+  },
+  "storage_limit": {
+    "title": "{{filename}} no se subió",
+    "copy_title": "No se creó la subincidencia: no se pudieron copiar sus adjuntos de origen",
+    "admin_body": "El almacenamiento de adjuntos está lleno ({{used}} / {{limit}}). Los adjuntos existentes no se ven afectados.",
+    "admin_body_no_figures": "El almacenamiento de adjuntos está lleno. Los adjuntos existentes no se ven afectados.",
+    "member_body": "El almacenamiento de adjuntos está lleno. Pide a un administrador que actualice el plan o elimina los adjuntos que ya no necesites.",
+    "dismiss": "Cerrar"
+  },
+  "autopilot_addon": {
+    "title": "Comprar más ejecuciones de automatización",
+    "description": "Las ejecuciones adicionales valen para este mes y las comparte todo el espacio de trabajo. Primero se usa la asignación del plan.",
+    "options_label": "Número de ejecuciones",
+    "option": "{{runs}} ejecuciones",
+    "usage_summary": "{{used}} / {{limit}} usadas este mes; se restablece el {{date}}.",
+    "pay": "Continuar para pagar {{amount}}",
+    "pay_fallback": "Continuar al pago",
+    "cancel": "Cancelar",
+    "loading": "Cargando el precio del complemento…",
+    "unavailable": "Este espacio de trabajo no puede comprar ejecuciones adicionales ahora.",
+    "conflict": "No se pueden comprar ejecuciones ahora o el precio cambió. Revisa las opciones y vuelve a intentarlo.",
+    "error": "No se pudo abrir la página de pago. Vuelve a intentarlo.",
+    "success_title": "Ejecuciones añadidas",
+    "success_description": "Se añadieron {{runs}} ejecuciones para este mes. Las automatizaciones se reanudan en su próxima ejecución.",
+    "confirming_title": "Confirmando el pago",
+    "confirming_description": "Las ejecuciones se añaden en cuanto Stripe confirma el pago. Revisa el uso más abajo en unos momentos.",
+    "not_paid_title": "Pago no completado",
+    "not_paid_description": "No se cobró nada ni se añadieron ejecuciones.",
+    "cancel_title": "Pago cancelado",
+    "cancel_description": "No se cobró nada."
   }
 }

@@ -7,6 +7,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { getCurrentWsId } from "@multica/core/platform";
 import {
   docKeys,
+  isDocNotFound,
   isDocRevisionConflict,
   setDocDraft,
   removeDocDraft,
@@ -134,7 +135,8 @@ export function useDocDraft(doc: Doc) {
         return;
       }
       updateStatus(isDocRevisionConflict(error) ? "conflict" : "error");
-      if (isDocRevisionConflict(error))
+      // A doc deleted elsewhere answers 404: refetch so the page says so.
+      if (isDocRevisionConflict(error) || isDocNotFound(error))
         void qc.invalidateQueries({ queryKey: docKeys.detail(wsId, doc.id) });
     } finally {
       saving.current = false;
@@ -144,12 +146,12 @@ export function useDocDraft(doc: Doc) {
   };
   saveRef.current = save;
   useEffect(() => {
-    if (!dirty || status !== "saved") return;
+    if (!draft || !dirty || status !== "saved") return;
     const timer = setTimeout(() => {
-      void save();
+      void saveRef.current();
     }, 1500);
     return () => clearTimeout(timer);
-  });
+  }, [draft, dirty, status]);
   const change = (patch: Partial<Pick<DocDraft, "title" | "content">>) => {
     if (!inScope()) return;
     const current =

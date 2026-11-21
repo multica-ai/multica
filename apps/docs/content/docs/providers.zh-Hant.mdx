@@ -53,6 +53,8 @@ Multica 不替代你在用的 AI 程式設計工具：執行時呼叫電腦上�
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+對於 Claude Code，如果常駐程式環境中的 `CLAUDE_CONFIG_DIR` 是絕對路徑，Multica 會從該目錄列出和匯入使用者及外掛技能。掃描器無法讀取僅在啟動包裝指令碼中設定的路徑。
+
 Amp 的模型欄位用於選擇 Amp **模式**（如 `high`），而不是底層模型 ID。留空則使用 Amp 的預設模式。
 
 Amp 還需要在守護行程或 AI 代理環境中設定 `AMP_API_KEY`，僅有互動式登入紀錄不夠。

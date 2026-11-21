@@ -13,11 +13,24 @@ type GateName string
 
 const (
 	GateAutopilotRuns GateName = "autopilot_runs"
+	// GateMembers caps a workspace's members. Guests take no slot. It has no
+	// period: the limit is a ceiling on headcount, not a budget that resets.
+	GateMembers GateName = "members"
+	// GateStorageBytes caps the attachment bytes a workspace holds. Like
+	// members it has no period: the limit is what the workspace may hold now.
+	GateStorageBytes GateName = "storage_bytes"
+	// GateDashboardHistoryDays caps how many calendar days back the workspace
+	// dashboard can read. Limit is a day count with no period.
+	GateDashboardHistoryDays GateName = "dashboard_history_days"
 )
+
+// MaxDashboardHistoryDays is the largest dashboard_history_days limit Cloud
+// may send. A larger value is a malformed gate.
+const MaxDashboardHistoryDays = 365
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateAutopilotRuns:
+	case GateAutopilotRuns, GateMembers, GateStorageBytes, GateDashboardHistoryDays:
 		return true
 	default:
 		return false
@@ -33,7 +46,13 @@ const (
 	ActionObserve Action = "observe"
 	ActionEnforce Action = "enforce"
 
+	// NotificationFirstRejectionPerPeriod notifies on the first rejection of
+	// a period only.
 	NotificationFirstRejectionPerPeriod = "first_rejection_per_period"
+	// NotificationFirstRejectionPerLimit notifies on the first rejection for
+	// each limit within a period, so a limit raised by an add-on purchase
+	// re-arms the notice (policy revision 6).
+	NotificationFirstRejectionPerLimit = "first_rejection_per_limit"
 )
 
 type Reason string
@@ -53,6 +72,10 @@ const (
 	// without touching the rest of an otherwise valid policy.
 	ReasonFeatureMissing Reason = "feature_missing"
 	ReasonFeatureInvalid Reason = "feature_invalid"
+	// ReasonGateMissing and ReasonGateInvalid fail one optional gate open the
+	// same way, leaving autopilot_runs and the features untouched.
+	ReasonGateMissing Reason = "gate_missing"
+	ReasonGateInvalid Reason = "gate_invalid"
 )
 
 // Gate is the effective instruction for one generic enforcement point. Limits
@@ -73,8 +96,12 @@ type NotificationPolicy struct {
 // Decision carries enough source information for consumers to audit why a gate
 // was enforced, observed, or disabled without exposing Cloud's private inputs.
 type Decision struct {
-	Gate                Gate
-	Reason              Reason
+	Gate   Gate
+	Reason Reason
+	// Downgraded is set when Cloud sent enforce but the cached policy has gone
+	// stale, so Gate.Action was lowered to observe. It tells a configured
+	// observe apart from a Cloud outage, as FeatureDecision.Downgraded does.
+	Downgraded          bool
 	PolicyRevision      int64
 	SubscriptionVersion int64
 	CloudValidUntil     time.Time
@@ -92,22 +119,59 @@ type Provider interface {
 	Gate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
 }
 
+// Refresher re-reads one gate ahead of its cached lifetime. A consumer calls
+// it only right before rejecting, so a plan change made moments ago (an
+// upgrade that was just paid for) is not refused on a policy cached before it.
+// A Provider without it rejects on the cached decision.
+type Refresher interface {
+	RefreshGate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
+}
+
+// FreshRefresher re-reads one gate from Cloud now, skipping the short reuse
+// window RefreshGate applies; concurrent callers for a workspace share one
+// fetch. The autopilot quota calls it right before rejecting a run, so a limit
+// Cloud raised moments ago (a paid add-on confirmed by Stripe's webhook) is
+// never refused on a policy any instance cached before it.
+type FreshRefresher interface {
+	RefreshGateNow(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
+}
+
 // FeatureName is a stable paid-feature key. Unlike a GateName it meters
 // nothing: it says whether a workspace may add to the feature's configuration.
 type FeatureName string
 
 const (
 	FeaturePrivateProjects FeatureName = "private_projects"
+	// FeatureGuests covers adding guests (MUL-9420): inviting one, making a
+	// member a guest, and sharing more projects with a guest.
+	FeatureGuests FeatureName = "guests"
+	// FeatureAgentInvocationMembers covers letting specific members invoke an
+	// agent: creating an agent with a member list, adding to the list, and
+	// switching from "only me" or "whole workspace" to specific members.
+	FeatureAgentInvocationMembers FeatureName = "agent_invocation_members"
+	// FeatureRuntimeMemberSharing covers sharing a private runtime with
+	// specific members: adding anyone to its shared_with list.
+	FeatureRuntimeMemberSharing FeatureName = "runtime_member_sharing"
+	// FeatureTeamAppAccounts covers team Apps accounts: connecting one for an
+	// app that has none, giving an agent a team-account app or a higher level
+	// on one, and custom team rules.
+	FeatureTeamAppAccounts FeatureName = "team_app_accounts"
 )
 
 // Features lists every paid feature this consumer understands.
 func Features() []FeatureName {
-	return []FeatureName{FeaturePrivateProjects}
+	return []FeatureName{
+		FeaturePrivateProjects,
+		FeatureGuests,
+		FeatureAgentInvocationMembers,
+		FeatureRuntimeMemberSharing,
+		FeatureTeamAppAccounts,
+	}
 }
 
 func (n FeatureName) Valid() bool {
 	switch n {
-	case FeaturePrivateProjects:
+	case FeaturePrivateProjects, FeatureGuests, FeatureAgentInvocationMembers, FeatureRuntimeMemberSharing, FeatureTeamAppAccounts:
 		return true
 	default:
 		return false

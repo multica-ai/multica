@@ -11,6 +11,7 @@ import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { inboxListOptions } from "@multica/core/inbox/queries";
 import { useAuthStore } from "@multica/core/auth";
+import { useIsGuest } from "@multica/core/permissions";
 import { paths, useCurrentWorkspace, useWorkspaceSlug } from "@multica/core/paths";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -72,6 +73,9 @@ const ROUTES = {
 
 type RouteKey = keyof typeof ROUTES;
 
+// A guest (MUL-9420) only reaches these pages.
+const GUEST_ROUTES: RouteKey[] = ["projects", "inbox"];
+
 // Small, workspace-scoped lists worth fetching before anyone asks, so the
 // first visit to each is already warm. Unobserved queries are collected after
 // their gcTime; hover/focus prefetch covers visits after that.
@@ -91,10 +95,12 @@ const WARM_ON_IDLE: RouteKey[] = [
 export function RouteDataPrefetch({
   wsId,
   userId,
+  guest = false,
   children,
 }: {
   wsId: string | undefined;
   userId: string | null;
+  guest?: boolean;
   children: ReactNode;
 }) {
   const qc = useQueryClient();
@@ -104,10 +110,9 @@ export function RouteDataPrefetch({
   const routeByHref = useMemo(() => {
     if (!slug) return new Map<string, WarmRoute>();
     const p = paths.workspace(slug);
-    return new Map<string, WarmRoute>(
-      (Object.keys(ROUTES) as RouteKey[]).map((key) => [p[key](), ROUTES[key]]),
-    );
-  }, [slug]);
+    const keys = guest ? GUEST_ROUTES : (Object.keys(ROUTES) as RouteKey[]);
+    return new Map<string, WarmRoute>(keys.map((key) => [p[key](), ROUTES[key]]));
+  }, [slug, guest]);
 
   const prefetch = useCallback(
     (href: string) => {
@@ -121,7 +126,7 @@ export function RouteDataPrefetch({
   useEffect(() => {
     if (!wsId) return;
     const warm = () => {
-      for (const key of WARM_ON_IDLE) ROUTES[key](qc, wsId, userId);
+      for (const key of guest ? GUEST_ROUTES : WARM_ON_IDLE) ROUTES[key](qc, wsId, userId);
     };
     if (typeof window.requestIdleCallback === "function") {
       const id = window.requestIdleCallback(warm, { timeout: 3000 });
@@ -129,7 +134,7 @@ export function RouteDataPrefetch({
     }
     const timer = window.setTimeout(warm, 1500);
     return () => window.clearTimeout(timer);
-  }, [qc, wsId, userId]);
+  }, [qc, wsId, userId, guest]);
 
   return (
     <RouteDataPrefetchProvider value={prefetch}>
@@ -142,8 +147,9 @@ export function RouteDataPrefetch({
 export function ShellRouteDataPrefetch({ children }: { children: ReactNode }) {
   const wsId = useCurrentWorkspace()?.id;
   const userId = useAuthStore((s) => s.user?.id ?? null);
+  const guest = useIsGuest(wsId);
   return (
-    <RouteDataPrefetch wsId={wsId} userId={userId}>
+    <RouteDataPrefetch wsId={wsId} userId={userId} guest={guest}>
       {children}
     </RouteDataPrefetch>
   );

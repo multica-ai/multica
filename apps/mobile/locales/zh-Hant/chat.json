@@ -141,6 +141,7 @@
     "codex_resume_oversized": "會話過大，無法恢復",
     "idle_watchdog": "AI 代理長時間無活動，執行已停止",
     "local_directory_error": "本地目錄出錯",
+    "local_directory_missing": "專案的本地資料夾已不存在",
     "cancelled": "系統已取消",
     "agent_error": "AI 代理執行出錯",
     "codex_semantic_inactivity": "Codex 長時間沒有語義進展",

@@ -31,11 +31,11 @@ WITH base AS MATERIALIZED (
       AND i.recipient_id = $2::uuid
       AND i.archived = true
       -- MUL-8472: private projects the caller cannot see.
-      AND ($3::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
-          SELECT 1 FROM issue hidden_issue
-          WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY($3::uuid[])
-      ))
+      -- A row without an issue counts as outside any project, which a guest's
+      -- hidden set holds (projectaccess.NoProject), as ListInboxItems does.
+      AND ($3::uuid[] IS NULL OR NOT (COALESCE(
+          (SELECT hidden_issue.project_id FROM issue hidden_issue WHERE hidden_issue.id = i.issue_id),
+          '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[])))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
           WHERE active.workspace_id = i.workspace_id
@@ -226,11 +226,11 @@ WITH base AS MATERIALIZED (
       AND i.recipient_id = $2::uuid
       AND i.archived = true
       -- MUL-8472: private projects the caller cannot see.
-      AND ($3::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
-          SELECT 1 FROM issue hidden_issue
-          WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY($3::uuid[])
-      ))
+      -- A row without an issue counts as outside any project, which a guest's
+      -- hidden set holds (projectaccess.NoProject), as ListInboxItems does.
+      AND ($3::uuid[] IS NULL OR NOT (COALESCE(
+          (SELECT hidden_issue.project_id FROM issue hidden_issue WHERE hidden_issue.id = i.issue_id),
+          '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[])))
       AND ($4::uuid IS NULL OR i.issue_id = $4::uuid
            OR (i.issue_id IS NULL AND i.id = $4::uuid))
       AND (i.issue_id IS NULL OR NOT EXISTS (
@@ -291,7 +291,7 @@ WITH base AS MATERIALIZED (
     ORDER BY created_at DESC, id DESC
     LIMIT $20::int
 )
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at, selected.issue_status, selected.issue_priority,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at, i.returned_at, selected.issue_status, selected.issue_priority,
        iss.number AS issue_number,
        iss.project_id AS issue_project_id,
        iss.assignee_type AS issue_assignee_type,
@@ -414,6 +414,7 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 			&i.InboxItem.Section,
 			&i.InboxItem.SnoozedUntil,
 			&i.InboxItem.SnoozedAt,
+			&i.InboxItem.ReturnedAt,
 			&i.IssueStatus,
 			&i.IssuePriority,
 			&i.IssueNumber,

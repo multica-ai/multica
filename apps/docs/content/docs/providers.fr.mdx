@@ -53,6 +53,8 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+Pour Claude Code, Multica liste et importe les compétences utilisateur et de plugins depuis le chemin absolu `CLAUDE_CONFIG_DIR` défini dans l’environnement du daemon. Le scanner ne voit pas les chemins définis uniquement dans un script de lancement.
+
 Pour Amp, le champ du modèle sélectionne un **mode** Amp, comme `high`, et non l’identifiant du modèle sous-jacent. Laissez-le vide pour utiliser le mode par défaut d’Amp.
 
 Amp exige aussi `AMP_API_KEY` dans l’environnement du daemon ou de l’agent ; une connexion interactive enregistrée ne suffit pas.

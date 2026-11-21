@@ -29,6 +29,13 @@ const restrictedBucketRef = vi.hoisted(() => ({ current: false }));
 const runtimeMeteredCountRef = vi.hoisted(() => ({
   current: undefined as number | undefined,
 }));
+// The plan's enforced dashboard history limit GET /features reports
+// (MUL-9490). Null is no limit, the self-hosted and observed case.
+const historyLimitRef = vi.hoisted(() => ({ current: null as number | null }));
+// Plan limits from GET /prices, which label the locked ranges.
+const planLimitsRef = vi.hoisted(() => ({
+  current: null as null | Record<string, { dashboardHistoryDays: number | null }>,
+}));
 
 // Kept out of the fixture ternary so the sentinel's shape reads at a glance.
 // Unlike the deleted-agents bucket this one carries real seconds / tasks: the
@@ -75,6 +82,25 @@ vi.mock("@tanstack/react-query", async () => {
     useQueryClient: () => ({ invalidateQueries: vi.fn() }),
     useQuery: (opts: { queryKey: unknown[] }) => {
       queryKeys.push(opts.queryKey);
+      if (opts.queryKey[0] === "workspace-features") {
+        return {
+          data: { features: {}, limits: { dashboardHistoryDays: historyLimitRef.current } },
+          isPending: false,
+          isSuccess: true,
+          dataUpdatedAt: 1,
+        };
+      }
+      if (opts.queryKey[0] === "dashboard-history-observed") {
+        return { data: undefined, isPending: true };
+      }
+      if (opts.queryKey[0] === "workspace-subscriptions") {
+        return {
+          data: planLimitsRef.current
+            ? { pro: {}, business: {}, planLimits: planLimitsRef.current }
+            : undefined,
+          isPending: false,
+        };
+      }
       if (dashboardDataRef.current) {
         // ["workspaces", wsId, "agents"] — needed so the Errors breakdown can
         // resolve agent-1 to a name and render its drill-down link.
@@ -215,6 +241,13 @@ vi.mock("@tanstack/react-query", async () => {
   };
 });
 
+const billingEnabledRef = vi.hoisted(() => ({ current: true }));
+const yearRangeEnabledRef = vi.hoisted(() => ({ current: true }));
+vi.mock("@multica/core/config", () => ({
+  useFeatureEnabled: (key: string) =>
+    key === "dashboard_history_365d" ? yearRangeEnabledRef.current : billingEnabledRef.current,
+}));
+
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -228,6 +261,7 @@ vi.mock("@multica/core/api", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agentDetail: (id: string) => `/acme/agents/${id}`,
+    settings: () => "/acme/settings",
   }),
 }));
 
@@ -326,12 +360,12 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
     cleanup();
   });
 
-  // The `tz` segment is the last element of every dashboard key
-  // (see dashboardKeys in @multica/core/dashboard/queries).
+  // The `tz` segment sits after the project in every dashboard key, before
+  // the history limit (see dashboardKeys in @multica/core/dashboard/queries).
   function tzSegments(): unknown[] {
     return queryKeys
       .filter((k) => k[0] === "dashboard")
-      .map((k) => k[k.length - 1]);
+      .map((k) => k[5]);
   }
 
   it("uses the stored timezone in every dashboard query key", () => {
@@ -890,5 +924,135 @@ describe("DashboardPage — leaderboard density", () => {
       gridTemplateColumns:
         "minmax(10rem, 1.6fr) minmax(6rem, 1fr) 5rem 5rem 5rem 4rem",
     });
+  });
+});
+
+describe("DashboardPage — plan history limit (MUL-9490)", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    restrictedBucketRef.current = false;
+    historyLimitRef.current = null;
+    planLimitsRef.current = null;
+    billingEnabledRef.current = true;
+    yearRangeEnabledRef.current = true;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+  afterEach(() => {
+    historyLimitRef.current = null;
+    planLimitsRef.current = null;
+  });
+
+  const daysInKeys = (part: string) =>
+    queryKeys.filter((k) => k[0] === "dashboard" && k[2] === part).map((k) => k[3]);
+
+  async function openRangeMenu(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: "Period" }));
+    return screen.findByRole("menu");
+  }
+
+  it("offers 365 days and fetches 371 for its weekly chart when nothing is enforced", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+    const option = within(menu).getByRole("menuitemradio", { name: /365d/ });
+    expect(option).not.toHaveAttribute("aria-disabled", "true");
+    expect(within(menu).queryByText(/Your plan covers/)).toBeNull();
+
+    queryKeys.length = 0;
+    await user.click(option);
+    expect(daysInKeys("daily")).toContain(371);
+    expect(daysInKeys("by-agent")).toContain(365);
+  });
+
+  it("leaves 365 days out until its flag is on", async () => {
+    yearRangeEnabledRef.current = false;
+    historyLimitRef.current = 30;
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+    expect(within(menu).queryByRole("menuitemradio", { name: /365d/ })).toBeNull();
+    expect(within(menu).getByRole("menuitemradio", { name: /180d/ })).toHaveAttribute("aria-disabled", "true");
+    expect(queryKeys.filter((k) => k[0] === "dashboard").every((k) => k[3] !== 365 && k[3] !== 371)).toBe(true);
+  });
+
+  it("locks ranges past the plan and labels the plan that covers each", async () => {
+    historyLimitRef.current = 30;
+    planLimitsRef.current = {
+      free: { dashboardHistoryDays: 30 },
+      pro: { dashboardHistoryDays: 90 },
+      business: { dashboardHistoryDays: 365 },
+    };
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+
+    for (const label of ["1d", "7d", "30d"]) {
+      expect(within(menu).getByRole("menuitemradio", { name: new RegExp(`^${label}`) })).not.toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    }
+    expect(within(menu).getByRole("menuitemradio", { name: /90d/ })).toHaveAttribute("aria-disabled", "true");
+    expect(within(menu).getByRole("menuitemradio", { name: /90d/ })).toHaveTextContent("Pro");
+    expect(within(menu).getByRole("menuitemradio", { name: /180d/ })).toHaveTextContent("Business");
+    expect(within(menu).getByRole("menuitemradio", { name: /365d/ })).toHaveTextContent("Business");
+    expect(menu).toHaveTextContent("Your plan covers the last 30 days.");
+    expect(within(menu).getByRole("button", { name: "View plans" })).toBeInTheDocument();
+    // Every query is keyed on the limit it is made under.
+    expect(queryKeys.filter((k) => k[0] === "dashboard").every((k) => k[6] === 30)).toBe(true);
+  });
+
+  it("labels plans from the configured limits, not a fixed table", async () => {
+    historyLimitRef.current = 30;
+    planLimitsRef.current = {
+      free: { dashboardHistoryDays: 30 },
+      pro: { dashboardHistoryDays: 180 },
+      business: { dashboardHistoryDays: 365 },
+    };
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+    expect(within(menu).getByRole("menuitemradio", { name: /180d/ })).toHaveTextContent("Pro");
+    expect(within(menu).getByRole("menuitemradio", { name: /365d/ })).toHaveTextContent("Business");
+  });
+
+  it("shows only the lock when plan limits are unavailable, and no button without billing", async () => {
+    historyLimitRef.current = 30;
+    billingEnabledRef.current = false;
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+    const option = within(menu).getByRole("menuitemradio", { name: /90d/ });
+    expect(option).toHaveAttribute("aria-disabled", "true");
+    expect(option).not.toHaveTextContent("Pro");
+    expect(option).not.toHaveTextContent("Business");
+    expect(menu).toHaveTextContent("Your plan covers the last 30 days.");
+    expect(within(menu).queryByRole("button", { name: "View plans" })).toBeNull();
+  });
+
+  it("reads the longest range the plan covers after a downgrade, and restores the pick on upgrade", async () => {
+    const user = userEvent.setup();
+    const view = renderDashboard();
+    const menu = await openRangeMenu(user);
+    await user.click(within(menu).getByRole("menuitemradio", { name: /90d/ }));
+    expect(screen.getByRole("button", { name: "Period" })).toHaveTextContent("90d");
+
+    // The trial ends: the limit drops to 30 while the page is open.
+    historyLimitRef.current = 30;
+    queryKeys.length = 0;
+    view.rerender(<DashboardHarness />);
+    expect(screen.getByRole("button", { name: "Period" })).toHaveTextContent("30d");
+    expect(daysInKeys("by-agent")).toEqual(expect.arrayContaining([30]));
+    expect(daysInKeys("by-agent")).not.toContain(90);
+    expect(daysInKeys("daily")).toContain(35);
+    expect(screen.getByText(/Cost · 30D/)).toBeInTheDocument();
+
+    // An upgrade lifts it; the reader's pick comes back.
+    historyLimitRef.current = null;
+    view.rerender(<DashboardHarness />);
+    expect(screen.getByRole("button", { name: "Period" })).toHaveTextContent("90d");
   });
 });

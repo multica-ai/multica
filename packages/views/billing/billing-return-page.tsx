@@ -33,7 +33,16 @@ import { useT } from "../i18n";
  *     short message, so the failure states below say what happened.
  */
 
-const RESULT_VALUES = new Set(["success", "cancel", "portal"]);
+const RESULT_VALUES = new Set([
+  "success",
+  "cancel",
+  "portal",
+  "autopilot_addon",
+  "autopilot_addon_cancel",
+]);
+// An add-on return carries its Checkout Session so Billing can confirm the
+// payment at once. Only Stripe's ID shape is forwarded.
+const SESSION_ID_RE = /^cs_[A-Za-z0-9_]+$/;
 // Same shape check the rest of core uses for route UUIDs. Only a well-formed ID
 // is worth carrying anywhere, and this one can end up in a third-party OAuth
 // state on the login detour below.
@@ -50,6 +59,11 @@ export function BillingReturnPage() {
     workspaceIdRaw && UUID_RE.test(workspaceIdRaw) ? workspaceIdRaw : null;
   const resultParam = navigation.searchParams.get("result");
   const result = resultParam && RESULT_VALUES.has(resultParam) ? resultParam : null;
+  const sessionIdParam = navigation.searchParams.get("session_id");
+  const addonSessionId =
+    result === "autopilot_addon" && sessionIdParam && SESSION_ID_RE.test(sessionIdParam)
+      ? sessionIdParam
+      : null;
 
   const {
     data: workspaces,
@@ -97,11 +111,12 @@ export function BillingReturnPage() {
 
     const destination = `${paths.workspace(match.slug).settings()}?tab=billing${
       result ? `&result=${result}` : ""
-    }`;
+    }${addonSessionId ? `&session_id=${addonSessionId}` : ""}`;
     // replace(), not push(): the Stripe hop should not sit in history where a
     // back navigation would re-run this redirect.
     navigation.replace(destination);
   }, [
+    addonSessionId,
     isAuthLoading,
     isWorkspacesError,
     isWorkspacesPending,

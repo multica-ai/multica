@@ -1035,6 +1035,7 @@
       "codex_resume_oversized": "Sesión demasiado grande para reanudar",
       "idle_watchdog": "El agente se detuvo por inactividad",
       "local_directory_error": "Error de directorio local",
+      "local_directory_missing": "La carpeta local del proyecto ya no existe",
       "cancelled": "Cancelada por el sistema",
       "agent_error": "Error de ejecución del agente",
       "codex_semantic_inactivity": "Tiempo de inactividad semántica de Codex agotado",

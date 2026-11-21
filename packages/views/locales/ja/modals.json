@@ -185,15 +185,20 @@
     "autopilot_quota_limit": {
       "title": "このワークスペースはオートパイロット実行数の上限に達しました",
       "checking_description": "このワークスペースで利用可能な請求操作を確認しています…",
-      "upgrade_description": "Pro にアップグレードすると、オートパイロット実行を再開できます。",
+      "upgrade_description": "Pro にアップグレードすると月間上限が増え、オートパイロット実行を再開できます。実行枠のリセットを待つこともできます。",
       "portal_description": "請求ポータルを開いてワークスペースのサブスクリプションを管理し、オートパイロット実行を再開してください。",
-      "contact_description": "ワークスペースの所有者または管理者に Pro へのアップグレードを依頼してください。",
+      "contact_description": "ワークスペースの所有者または管理者にプランのアップグレードを依頼するか、実行枠のリセットを待ってください。",
       "billing_description": "請求設定を開いて、このワークスペースで利用可能なアップグレードオプションを確認してください。",
       "billing_unavailable_description": "請求操作を読み込めませんでした。請求設定を開いて再試行してください。",
       "billing_disabled_description": "現在の実行枠がリセットされるまで待つか、ワークスペースの管理者に連絡してください。",
       "upgrade_action": "Pro にアップグレード",
       "portal_action": "請求ポータルを開く",
-      "billing_action": "請求設定を表示"
+      "billing_action": "請求設定を表示",
+      "addon_description": "実行回数を追加購入すると今月中にオートパイロット実行を再開できます。実行枠のリセットを待つこともできます。",
+      "contact_addon_description": "ワークスペースの所有者または管理者に実行回数の追加購入を依頼するか、実行枠のリセットを待ってください。",
+      "contact_addon_or_upgrade_description": "ワークスペースの所有者または管理者に実行回数の追加購入かプランのアップグレードを依頼するか、実行枠のリセットを待ってください。",
+      "addon_action": "実行回数を追加購入",
+      "upgrade_business_action": "Business にアップグレード"
     },
     "toast_link_subissues_all_failed": "サブタスクをリンクできませんでした",
     "toast_link_subissues_partial": "サブタスク {{total}} 件中 {{failed}} 件をリンクできませんでした",

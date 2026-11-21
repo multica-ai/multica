@@ -654,6 +654,10 @@ WHERE entitlement_limit_overage.workspace_id = $1;
 DELETE FROM entitlement_feature_attempt
 WHERE entitlement_feature_attempt.workspace_id = $1;
 
+-- name: DeleteWorkspaceDashboardRangeViews :exec
+DELETE FROM dashboard_range_view
+WHERE dashboard_range_view.workspace_id = $1;
+
 -- name: DeleteWorkspaceAutopilotChildren :exec
 WITH
 deleted_triggers AS (

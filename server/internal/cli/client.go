@@ -218,7 +218,10 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 // which keeps signing regardless of this capability — so the signature in list
 // payloads was pure cost: raw bytes, a per-attachment RSA sign, and bytes that
 // differ on every read and therefore defeat agent prompt caching.
-const clientCapabilities = "stable_attachment_urls"
+//
+// workspace-guests-v1 keeps guests in workspace member and invitation lists,
+// which the server hides from clients that cannot render the guest role.
+const clientCapabilities = "stable_attachment_urls,workspace-guests-v1"
 
 func (c *APIClient) setHeaders(req *http.Request) {
 	req.Header.Set("X-Client-Capabilities", clientCapabilities)
@@ -816,7 +819,19 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 		c.setHeaders(req)
 	}
 
-	resp, err := c.HTTPClient.Do(req)
+	// Downloads may have a longer caller budget than ordinary API requests.
+	// Keep the shared client unchanged for concurrent requests and preserve
+	// its timeout when the caller has no deadline (or disabled client timeouts).
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok && httpClient.Timeout > 0 {
+		if remaining := time.Until(deadline); remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
 	err = wrapTransport(req, err)
 	if err != nil {
 		return nil, err

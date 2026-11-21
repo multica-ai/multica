@@ -13,7 +13,9 @@ import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { configStore } from "@multica/core/config";
 import { docTreeOptions } from "@multica/core/docs";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
@@ -371,6 +373,8 @@ describe("SearchCommand", () => {
     apiFns.set("getBaseUrl", vi.fn(() => "http://127.0.0.1:8080"));
     apiFns.set("searchIssues", vi.fn(() => Promise.resolve({ issues: [], total: 0 })));
     apiFns.set("searchProjects", vi.fn(() => Promise.resolve({ projects: [], total: 0 })));
+    apiFns.set("searchDocs", vi.fn(() => Promise.resolve({ docs: [] })));
+    configStore.getState().setFeatureFlags({ [DOCS_V1_FLAG]: true });
     mockPush.mockReset();
     mockPathname.current = "/ws-test/issues";
     mockGetShareableUrl.mockReset().mockImplementation((p: string) => `https://app.multica/${p}`);
@@ -418,6 +422,39 @@ describe("SearchCommand", () => {
     expect(screen.queryByText("Pages")).not.toBeInTheDocument();
     expect(renderedHeadings()).toEqual(["New"]);
     expect(renderedValues()).toEqual(["command:new-issue", "command:chat-with-agent"]);
+  });
+
+  describe("guest (MUL-9420)", () => {
+    beforeEach(() => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+    });
+
+    it("offers no New issue on an empty query", () => {
+      renderSearch();
+
+      expect(renderedValues()).not.toContain("command:new-issue");
+    });
+
+    it("finds no New issue command and no hand-to-agent row while typing", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "new");
+
+      expect(await rowText("New project")).toBeInTheDocument();
+      expect(screen.queryByText((_, el) => el?.textContent === "New issue" && el?.tagName === "SPAN")).toBeNull();
+      expect(renderedValues()).not.toContain("hand-to-agent");
+    });
+
+    it("drops New issue from a project's context commands", () => {
+      registerContext({
+        kind: "project",
+        project: { id: "proj-1", title: "Shared project", archived_at: null },
+      } as CommandBarContext);
+      renderSearch();
+
+      expect(renderedValues()).toContain("command:context-project:project-status");
+      expect(renderedValues()).not.toContain("command:context-project:project-new-issue");
+    });
   });
 
   describe("pages and global commands", () => {
@@ -711,6 +748,55 @@ describe("SearchCommand", () => {
       expect(rows[0]).toHaveTextContent("Release runbookEngineering");
       fireEvent.click(rows[0]!);
       expect(mockPush).toHaveBeenCalledWith("/ws-test/docs/doc-runbook");
+    });
+
+    it("offers no Docs page or doc rows while docs_v1 is off", async () => {
+      configStore.getState().setFeatureFlags({});
+      seed(docTreeOptions("ws-test"), {
+        folders: [],
+        docs: [{ id: "doc-runbook", title: "Docs runbook", folderId: null }],
+      });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "docs");
+
+      // Past the doc search debounce, so a request would have gone out.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+      expect(renderedValues()).not.toContain("page:docs");
+      expect(screen.queryByRole("group", { name: "Docs" })).not.toBeInTheDocument();
+      expect(api("searchDocs")).not.toHaveBeenCalled();
+    });
+
+    it("adds server content hits under Docs with an excerpt, without repeating title hits", async () => {
+      seed(docTreeOptions("ws-test"), {
+        folders: [{ id: "folder-eng", title: "Engineering" }],
+        docs: [{ id: "doc-rotation", title: "Key rotation", folderId: "folder-eng" }],
+      });
+      const summary = (id: string, title: string) => ({
+        id, workspaceId: "ws-test", folderId: "folder-eng", title, revision: 1, versionCount: 1,
+        createdByType: "member", createdById: ME, updatedByType: "member", updatedById: ME,
+        createdAt: "2026-11-19T00:00:00Z", updatedAt: "2026-11-19T00:00:00Z",
+      });
+      api("searchDocs").mockResolvedValue({
+        docs: [
+          { ...summary("doc-rotation", "Key rotation"), matchSource: "title", matchedSnippet: null },
+          {
+            ...summary("doc-runbook", "Release runbook"),
+            matchSource: "content",
+            matchedSnippet: "...before cutover, follow [Key rotation](mention://doc/doc-rotation) steps...",
+          },
+        ],
+      });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "rotation");
+
+      const docs = await screen.findByRole("group", { name: "Docs" });
+      await waitFor(() => expect(within(docs).getAllByRole("option")).toHaveLength(2));
+      const rows = within(docs).getAllByRole("option");
+      expect(rows[0]).toHaveTextContent("Key rotationEngineering");
+      expect(rows[1]).toHaveTextContent("Release runbook...before cutover, follow Key rotation steps...");
+      expect(api("searchDocs")).toHaveBeenCalledWith(expect.objectContaining({ q: "rotation", limit: 10 }));
     });
 
     it("lists workspace members and navigates to the member page", async () => {

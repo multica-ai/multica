@@ -13,6 +13,7 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import type { InboxWorkspaceUnread } from "@multica/core/types";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
+import { useIsGuest } from "@multica/core/permissions";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../common/actor-avatar";
 import { BUILTIN_VIEW_ICON, useBuiltinViewNavigation } from "../issue-views/builtin-views";
@@ -21,6 +22,7 @@ import { ProjectIcon } from "../projects/components/project-icon";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { useT } from "../i18n";
 import { HighlightText } from "./highlight-text";
+import { stripMentionMarkdown } from "../issues/utils/strip-mention-markdown";
 import { useIssueTargetWriter } from "./issue-target";
 import { usePalette } from "./palette-context";
 import { CommandGroupView, CommandRow, PaletteGroup, ROW_CLASS, ROW_ICON_CLASS, RowHint } from "./rows";
@@ -62,6 +64,8 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
   const p = useWorkspacePaths();
   const { data: unreadSummary = EMPTY_UNREAD_SUMMARY } = useQuery(inboxUnreadSummaryOptions());
   const unreadWsIds = unreadWorkspaceIds(unreadSummary);
+  // A guest (MUL-9420) can neither create issues nor hand work to an agent.
+  const guest = useIsGuest(useWorkspaceId());
   const { server, partitioned, objects, text } = model;
   const query = text;
 
@@ -349,14 +353,16 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
       score: objects.docs[0]!.score,
       node: (
         <PaletteGroup key="docs" heading={t(($) => $.groups.docs)}>
-          {objects.docs.map(({ item: { doc, folder } }) => (
+          {objects.docs.map(({ item: { doc, folder, snippet, stale } }) => (
             <ObjectRow
               key={doc.id}
+              disabled={stale}
               value={`doc:${doc.id}`}
               icon={<FileText className={ROW_ICON_CLASS} />}
-              title={doc.title}
+              title={doc.title || t(($) => $.untitled_doc)}
               query={query}
-              detail={folder ?? undefined}
+              // A content hit says why it matched; a title hit says where it lives.
+              detail={snippet ? stripMentionMarkdown(snippet) : (folder ?? undefined)}
               onSelect={() => palette.navigate(p.docDetail(doc.id))}
             />
           ))}
@@ -406,7 +412,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
 
   return (
     <>
-      {best && <BestMatchGroups best={best} query={query} target={model.primaryIssueTarget} />}
+      {best && <BestMatchGroups best={best} query={query} target={model.primaryIssueTarget} canCreateIssue={!guest} />}
       {groups.map((group) => group.node)}
       {partitioned.hasCancelled && (
         <PaletteGroup heading={t(($) => $.groups.cancelled)}>
@@ -444,7 +450,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
       {!server.isLoading && nothing && (
         <div className="py-10 text-center text-body text-muted-foreground">{t(($) => $.empty.no_results)}</div>
       )}
-      {model.handToAgent && <HandToAgentRow seed={model.handToAgent} disabled={server.stale} />}
+      {model.handToAgent && !guest && <HandToAgentRow seed={model.handToAgent} disabled={server.stale} />}
     </>
   );
 }
@@ -540,10 +546,12 @@ function BestMatchGroups({
   best,
   query,
   target,
+  canCreateIssue,
 }: {
   best: BestMatch;
   query: string;
   target: IssueTarget | null;
+  canCreateIssue: boolean;
 }) {
   const { t } = useT("search");
   const palette = usePalette();
@@ -600,7 +608,7 @@ function BestMatchGroups({
         trailing={<RowHint>{t(($) => $.types.squad)}</RowHint>}
       />
     );
-    if (best.entry.runnable && target && subject) {
+    if (best.entry.assignable && target && subject) {
       actions.push({
         id: "assign",
         label: t(($) => $.best.assign, { subject, name: squad.name }),
@@ -638,7 +646,7 @@ function BestMatchGroups({
         trailing={<RowHint>{t(($) => $.types.project)}</RowHint>}
       />
     );
-    if (!project.archived_at) {
+    if (!project.archived_at && canCreateIssue) {
       actions.push({
         id: "new-issue",
         label: t(($) => $.best.new_issue_in, { name: project.title }),

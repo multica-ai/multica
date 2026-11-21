@@ -49,7 +49,7 @@ The daemon runs in the background by default. Common commands:
 
 | Command | Purpose |
 | --- | --- |
-| `multica daemon status` | Show daemon and connection status |
+| `multica daemon status` | Show daemon and connection status, including why any detected agent was skipped |
 | `multica daemon logs -f` | Follow the logs |
 | `multica daemon restart` | Restart the daemon and re-detect local tools |
 | `multica daemon stop` | Stop the daemon |
@@ -60,6 +60,22 @@ To place run workspaces on another disk, persist a root for the current profile 
 On startup, the daemon detects supported AI coding tools on `PATH` and registers runtimes for the workspaces you are allowed to connect. If a tool was just installed or signed in, restart the daemon to detect it.
 
 The daemon needs at least one built-in supported AI coding tool detected before it will start. Install methods and executable names are in [Install AI coding tools](/install-agent-runtime).
+
+### Run in a Linux container [#linux-container]
+
+Install the Multica CLI and at least one supported coding tool in the image. Run the container as a non-root user. Set `MULTICA_SERVER_URL` to the API URL reachable from inside the container. Mount a personal access token as a secret and pass it to login on standard input. Replace `my-workspace` with your workspace slug.
+
+```bash
+multica --profile container login --token < /run/secrets/multica-pat
+multica --profile container workspace switch my-workspace
+exec multica --profile container daemon start --foreground --no-auto-update
+```
+
+Run login and workspace selection when provisioning the profile. For a long-lived runtime, mount the container user's `~/.multica` on writable persistent storage. It stores the profile's access token and the daemon ID. If the directory is lost when the container is replaced, you must log in again and the daemon registers a new runtime. Agents assigned to the original runtime cannot pick up tasks in the replacement container.
+
+To preserve run directories and the `.repos` cache across container replacements, mount the workspaces root on writable persistent storage. With `--profile container`, the default workspaces root is `~/multica_workspaces_container`.
+
+Configure the coding tool's own authentication separately. Let the container supervisor restart the foreground daemon, and upgrade the CLI by replacing the image.
 
 ### Start at login [#autostart]
 
@@ -162,9 +178,13 @@ The login applies from the agent's next run; the current run does not pick it up
 
 The daemon runs its first cleanup about 30 seconds after starting, then every 2 hours. Directories in use by a running run are never cleaned. `multica daemon disk-usage` shows usage per workspace or per run. The durations below are defaults; the matching `MULTICA_GC_*` variables are in [Environment variables](/environment-variables#gc).
 
+The per-run `MODE` column marks in-place runs with `in place`. JSON reports these rows as `local_directory: true` when the run metadata identifies the mode.
+
 ### Run directories
 
-Each run gets a directory under the workspaces root (default `~/multica_workspaces`) holding the checked-out code, output, and logs; later runs on the same issue reuse it. The whole directory is removed:
+Each run gets a directory under the workspaces root (default `~/multica_workspaces`) holding the checked-out code, output, and logs; later runs on the same issue reuse it.
+
+The table covers whole-directory cleanup for directories managed by Multica. Runs that work in place in a project's local directory retain their separate record directory, as described below.
 
 | Run source | When it is removed |
 |---|---|
@@ -177,7 +197,9 @@ While the issue is still open, 12 hours after a run completes only regenerable c
 
 For an unarchived chat in a work directory managed by Multica, the daemon applies the same regenerable content cleanup 12 hours after its last run ends by default. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay. For chats in a project's local directory, only the exact Codex cache paths above are cleaned.
 
-A run on a project's local directory works in your own directory, which the daemon never touches. Its record directory keeps daemon logs and `output/`. After `MULTICA_GC_COMPLETED_TASK_TTL` (14 days by default), the daemon removes its entire `codex-home` if session history is stored outside the record directory. Homes with task-local session history are retained. Set the variable to `0` to disable home expiry. A later run rebuilds the home and reconnects the conversation store; that store still follows its own session retention policy below.
+When a run works in place, its working directory is your project directory. The daemon leaves it alone during cleanup. Its record directory keeps daemon logs and `output/`. After `MULTICA_GC_COMPLETED_TASK_TTL` (14 days by default), the daemon removes its entire `codex-home` if session history is stored outside the record directory. Homes with task-local session history are retained. Set the variable to `0` to disable home expiry. A later run rebuilds the home and reconnects the conversation store; that store still follows its own session retention policy below.
+
+The record directory can therefore still appear in `multica daemon disk-usage --by-task` after the run ends. The completed-task TTL does not remove the record directory or expire other provider homes, such as a retained `hermes-home`.
 
 ### Shared repository cache
 
@@ -213,11 +235,15 @@ A local runtime is **private** by default: only the runtime owner can create age
 
 Only the owner can make it **public**. Workspace admins can rename or delete a runtime, but sharing one is the owner's decision. Once it is public, other workspace members can select this runtime and route their agents' runs to this computer; the underlying AI coding tool's login credentials are not shared.
 
-To share it with selected people instead, open the runtime's detail page, choose **Members**, pick one or more workspace members, and **Save**. Those members can select the runtime and create agents on it. Only the owner can change the list, and being on it does not let anyone rename, delete, or administer the runtime.
+To share it with selected people instead, open the runtime's detail page, choose **Members**, pick one or more workspace members, and **Save**. Those members can select the runtime and create agents on it. Only the owner can change the list, and being on it does not let anyone rename, delete, or administer the runtime. On Multica Cloud, sharing with selected members is included in Business. On Free and Pro, an existing list keeps working and members can still be removed or the runtime made private or public, but nobody new can be added. Self-hosted workspaces can share with selected members.
 
 When the owner removes members, narrows a public runtime to specific members, or makes it **private** again, Multica shows the affected agents and active runs, including Agent Builder sessions, before applying the change. Confirmation unbinds those teammates' agents, cancels their queued, dispatched, running, local-directory-waiting and deferred runs with `runtime_access_revoked`, and pauses active autopilots assigned to the unbound agents. Agents and runs belonging to the owner or to members who keep access are unaffected. A changed plan requires renewed confirmation; concurrent chat writes may require a retry. To resume work, bind the agent to an accessible runtime, then explicitly resume its paused autopilots.
 
 Cancellation preserves chat history and stores draft/attachment recovery data on the server. Web and desktop use the existing draft recovery UI; mobile does not yet expose that recovery UI. A started turn with no output waits for the daemon's cancellation acknowledgement or the server's finalize grace period before deciding whether to restore the input. A connected daemon observes cancellation through its regular check. If the computer is offline, server-side access is still revoked immediately, but the local process may continue until it receives cancellation after reconnecting; the server cannot guarantee an immediate remote stop.
+
+### Remove a built-in local runtime [#remove-a-runtime]
+
+On the runtime detail page, open the actions menu and choose **Delete runtime**. If agents are still bound, review the list and confirm that you want to unbind them. Their instructions, chats, and run history are preserved. Queued and in-progress runs are canceled. Multica pauses active autopilots assigned to those agents or to squads they lead. Bind the agents to another runtime before assigning new work. After rebinding, manually resume the paused autopilots. A daemon that still detects the tool can register it again.
 
 ## Custom runtime profiles
 

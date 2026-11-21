@@ -28,6 +28,10 @@ Ouvrez **Automatisation** dans la barre latérale, choisissez un modèle ou part
 
 Une automatisation est activée par défaut après l'enregistrement. **Exécuter maintenant** lance le flux complet une fois, à tout moment, sans attendre la planification.
 
+Sur Multica Cloud, **Exécuter maintenant** ne consomme aucune unité du quota d’automatisation quand un membre lance lui-même l’exécution. Il peut s’en servir même si le quota est épuisé. Les exécutions planifiées, celles déclenchées par webhook et celles qu’un agent lance pour un membre sont décomptées du quota.
+
+Une fois le quota épuisé, les exécutions décomptées sont ignorées jusqu’à sa réinitialisation au début du mois suivant. Sur Pro et Business, un propriétaire ou un administrateur peut aussi acheter des exécutions dans **Paramètres → Facturation** (10 $ les 1 000 exécutions, réglées sur la page de paiement Stripe et valables le mois en cours) ; sur Free, passer à un forfait supérieur augmente la limite. Les propriétaires, les administrateurs et le membre qui a créé l’automatisation reçoivent une notification dans la boîte de réception la première fois qu’une exécution est ignorée à chaque limite.
+
 Voici une automatisation dont le mode de sortie est Créer une tâche. Cliquez sur **Exécuter maintenant**, ou avancez jusqu'à la prochaine exécution planifiée, et regardez-la créer une tâche, la confier à l'agent, puis terminer l'exécution.
 
 <AutopilotDemo />
@@ -141,7 +145,7 @@ Pour déboguer un expéditeur, comparez les réponses de Multica à ce tableau :
 |---|---|---|
 | 200 | `accepted` | Acceptée et une exécution a été créée ; renvoie les ID de la livraison et de l'exécution. |
 | 200 | `skipped` | Acceptée, mais cette exécution a été ignorée (par exemple, le runtime est hors ligne en mode exécution seule) ; inclut la raison. |
-| 200 | `ignored` | Aucune exécution créée : le déclencheur est désactivé, l'automatisation est en pause ou archivée, ou l'événement a été filtré ; le champ `reason` en indique la cause. |
+| 200 | `ignored` | Aucune exécution créée : le déclencheur est désactivé, l'automatisation est en pause ou archivée, ou l'événement a été filtré ; le champ `reason` en indique la cause. Si le quota d’automatisation est épuisé, la réponse contient `reason_code: quota_exceeded`. |
 | 200 | `duplicate` | La clé d'idempotence correspond à une livraison existante ; renvoie l'ID de la livraison d'origine et n'exécute rien de nouveau. |
 | 400 | Message d'erreur | Le corps est vide, n'est pas du JSON valide, ou n'est pas un objet/tableau JSON. |
 | 401 | `rejected` | Le déclencheur a un secret de signature configuré, mais la requête n'a pas de signature ou la signature ne correspond pas. |
@@ -177,7 +181,7 @@ La mise en pause manuelle arrête les planifications, les webhooks et **Exécute
 
 ## Permissions
 
-- Tout membre de l'espace de travail peut créer des automatisations ;
+- Les rôles `owner`, `admin` et `member` peuvent créer des automatisations.
 - le créateur et les propriétaires/administrateurs de l'espace de travail peuvent modifier, exécuter, supprimer et gérer les déclencheurs ;
 - le créateur et les propriétaires/administrateurs peuvent accorder l'accès de gestion à des collaborateurs ;
 - les collaborateurs peuvent modifier, exécuter et gérer les déclencheurs, mais ne peuvent pas accorder l'accès à d'autres personnes ;

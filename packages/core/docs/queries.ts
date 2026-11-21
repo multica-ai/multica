@@ -10,7 +10,16 @@ export const docKeys = {
     [...docKeys.all(wsId), "versions", id] as const,
   version: (wsId: string, id: string, number: number) =>
     [...docKeys.all(wsId), "version", id, number] as const,
+  comments: (wsId: string, id: string) =>
+    [...docKeys.all(wsId), "comments", id] as const,
 };
+
+export function docCommentsOptions(wsId: string, docId: string) {
+  return queryOptions({
+    queryKey: docKeys.comments(wsId, docId),
+    queryFn: () => api.listDocComments(docId),
+  });
+}
 
 export function docTreeOptions(wsId: string) {
   return queryOptions({
@@ -42,6 +51,9 @@ export function docVersionOptions(wsId: string, id: string, number: number) {
   });
 }
 
+export function isDocNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
 export function isDocRevisionConflict(error: unknown): boolean {
   if (!(error instanceof ApiError) || error.status !== 409) return false;
   const body = error.body as { code?: unknown } | undefined;

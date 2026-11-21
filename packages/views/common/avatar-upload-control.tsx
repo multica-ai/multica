@@ -20,6 +20,7 @@ import { Separator } from "@multica/ui/components/ui/separator";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 import { cn } from "@multica/ui/lib/utils";
+import { useStorageLimitToast } from "../billing/storage-limit-notice";
 import { useT } from "../i18n";
 import { AvatarCropDialog } from "./avatar-crop-dialog";
 import { TextAvatarDialog } from "./text-avatar-dialog";
@@ -157,6 +158,7 @@ export function AvatarUploadControl({
 }: AvatarUploadControlProps) {
   const { t } = useT("common");
   const { upload } = useFileUpload(api);
+  const toastStorageLimit = useStorageLimitToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadPendingRef = useRef(false);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
@@ -215,6 +217,7 @@ export function AvatarUploadControl({
       toast.success(t(($) => $.avatar_upload.updated));
     } catch (err) {
       // Only the upload above can land here — see persistedByCaller.
+      if (toastStorageLimit(err, file.name)) return;
       toast.error(
         err instanceof Error ? err.message : t(($) => $.avatar_upload.failed),
       );

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -35,6 +36,29 @@ var docListCmd = &cobra.Command{
 	RunE:  runDocList,
 }
 
+var docSearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Search docs by title or content",
+	Long: "Search docs in the current workspace. The query matches doc titles and\n" +
+		"Markdown content; with several words, every word must appear somewhere\n" +
+		"in the doc. Title matches rank first.\n\n" +
+		"The MATCH column (match_source in --output json) reports whether the\n" +
+		"title or the content matched, with a short excerpt for content hits.\n" +
+		"Read a result with `multica doc get <doc-id>`.",
+	Args: exactArgs(1),
+	RunE: runDocSearch,
+}
+
+var docMoveCmd = &cobra.Command{
+	Use:   "move <doc-id>",
+	Short: "Move a doc into a folder, or to the top level",
+	Long: "Move a doc into another folder of the workspace knowledge base.\n\n" +
+		"--folder takes a folder id (or a unique prefix of one from `multica doc list`), " +
+		"or `root` for the top level. Moving does not change the doc's content or revision.",
+	Args: exactArgs(1),
+	RunE: runDocMove,
+}
+
 var docGetCmd = &cobra.Command{
 	Use:   "get <doc-id>",
 	Short: "Get a doc with its content and current revision",
@@ -56,8 +80,12 @@ var docUpdateCmd = &cobra.Command{
 }
 
 func init() {
-	docCmd.AddCommand(docListCmd, docGetCmd, docCreateCmd, docUpdateCmd)
+	docCmd.AddCommand(docListCmd, docSearchCmd, docGetCmd, docCreateCmd, docUpdateCmd, docMoveCmd)
+	docMoveCmd.Flags().String("folder", "", "Destination folder id, or `root` for the top level (required)")
+	docMoveCmd.Flags().String("output", "json", "Output format: table or json")
 	docListCmd.Flags().String("output", "table", "Output format: table or json")
+	docSearchCmd.Flags().Int("limit", 20, "Maximum results (at most 50)")
+	docSearchCmd.Flags().String("output", "table", "Output format: table or json")
 	docGetCmd.Flags().String("output", "json", "Output format: json or content")
 	for _, cmd := range []*cobra.Command{docCreateCmd, docUpdateCmd} {
 		cmd.Flags().String("title", "", "Document title")
@@ -210,6 +238,78 @@ func runDocList(cmd *cobra.Command, _ []string) error {
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i][2] < rows[j][2] })
 	cli.PrintTable(os.Stdout, []string{"ID", "TYPE", "PATH", "REVISION", "UPDATED"}, rows)
 	return nil
+}
+
+func runDocSearch(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	params := url.Values{}
+	params.Set("q", args[0])
+	if v, _ := cmd.Flags().GetInt("limit"); v > 0 {
+		params.Set("limit", fmt.Sprintf("%d", v))
+	}
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/docs/search?"+params.Encode(), &result); err != nil {
+		return fmt.Errorf("search docs: %w", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	docs, _ := result["docs"].([]any)
+	rows := make([][]string, 0, len(docs))
+	for _, raw := range docs {
+		doc, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		match := strVal(doc, "match_source")
+		if snippet := strVal(doc, "matched_snippet"); snippet != "" {
+			if runes := []rune(snippet); len(runes) > 60 {
+				snippet = string(runes[:57]) + "..."
+			}
+			match += ": " + snippet
+		}
+		updated := strVal(doc, "updated_at")
+		if len(updated) >= 10 {
+			updated = updated[:10]
+		}
+		rows = append(rows, []string{strVal(doc, "id"), strVal(doc, "title"), updated, match})
+	}
+	cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "UPDATED", "MATCH"}, rows)
+	return nil
+}
+
+func runDocMove(cmd *cobra.Command, args []string) error {
+	destination, _ := cmd.Flags().GetString("folder")
+	if strings.TrimSpace(destination) == "" {
+		return fmt.Errorf("--folder is required: a folder id, or `root` for the top level")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	id, err := resolveDocRef(ctx, client, args[0], false)
+	if err != nil {
+		return err
+	}
+	folder, err := resolveDocFolderTarget(ctx, client, destination)
+	if err != nil {
+		return err
+	}
+	var doc map[string]any
+	if err := client.PostJSON(ctx, "/api/docs/"+id+"/move", map[string]any{"folder_id": folder}, &doc); err != nil {
+		return fmt.Errorf("move doc: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	return printDocSummary(doc, output)
 }
 
 func runDocGet(cmd *cobra.Command, args []string) error {

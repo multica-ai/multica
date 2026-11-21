@@ -8,11 +8,20 @@ import { Button } from "@multica/ui/components/ui/button";
 import { PageHeader } from "../../layout/page-header";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
+import { DocsGate } from "./docs-gate";
 export function DocsHomePage({
   folderId = null,
 }: {
   folderId?: string | null;
 }) {
+  return (
+    <DocsGate>
+      <DocsHomePageContent folderId={folderId} />
+    </DocsGate>
+  );
+}
+
+function DocsHomePageContent({ folderId }: { folderId: string | null }) {
   const { t } = useT("docs");
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();

@@ -283,7 +283,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-env` 系列只在 `agent create` 中可用。之後修改用 `agent env set`，它整體替換原有變數，值寫成 `****` 的鍵保留原值。
 - `agent update --mcp-config null` 清除 MCP 配置。
 - `--custom-args` 是 JSON 陣列，排在啟動引數的最後。選模型用 `--model`，部分工具會拒絕出現在自定義引數裡的 `--model`。
-- 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。
+- 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。在 Multica Cloud 上，Business 包含成員名單。Free 和 Pro 工作區開啟強制後，`agent create` 或 `agent update` 新建名單或往名單裡加人會以 `feature_locked` 拒絕；移除成員、原樣儲存名單、改成 `private` 或 `--public-to-workspace` 仍然可以。
 
 ### AI 代理執行記錄
 
@@ -522,7 +522,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `trigger <id>` | 手動觸發一次 | |
 | | `runs <id>` | 檢視執行歷史 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 管理定時和 webhook 觸發器 | `trigger-add`：`--kind`（`schedule` 或 `webhook`）、`--cron`、`--timezone`（預設 UTC）、`--label` |
-| `workspace` | `list/get/create/update/switch` | 管理工作區；`switch` 設定當前 profile 的預設工作區 | `create`：`--name`、`--slug`（均必填）、`--issue-prefix`、`--description`、`--context` / `--context-stdin`；`update` 可改除 slug 外的同類欄位 |
+| `workspace` | `list/get/create/update/switch` | 管理工作區；`switch` 設定當前 profile 的預設工作區；AI 代理執行時 `list` 只回傳所在工作區 | `create`：`--name`、`--slug`（均必填）、`--issue-prefix`、`--description`、`--context` / `--context-stdin`；`update` 可改除 slug 外的同類欄位 |
 | | `mcp list/add/update/remove` | 管理工作區的 MCP 服務庫 | 寫操作需要 owner/admin。這裡新增的服務不會分配給任何 agent——用 `multica agent mcp add` 分配給某個 agent。`list` 只列出名稱與 transport；儲存的條目是只寫的，任何角色都讀不回。`--server-config-file` / `--server-config-stdin` 避免 token 進入 shell 歷史 |
 | | `member list/invite <email>` | 檢視成員、發出邀請 | `invite`：`--role`（member 或 admin，預設 member） |
 | `repo` | `list/add/remove/checkout` | 管理工作區倉庫並檢出到本機 | `--url`（可重複）；`checkout`：`--ref` |
@@ -537,7 +537,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | `chat` | `history`、`thread [id]` | 讀取 AI 代理當前正在處理的外部聊天會話 | `--limit`、`--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 管理目前聊天執行的跟進；見[聊天喚醒](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | [列出通知](/inbox)，不標為已讀；`--archived` 或 `--snoozed` 改為列出封存或稍後提醒的內容 | `--unread`、`--issue`、`--since`、`--project`、`--type`、`--output`（`table` 或 `json`）；`--archived` 讀取全部分頁 |
-| | `count` | 目前工作區及你所在各工作區的未讀數 | `--output` |
+| | `count` | 目前工作區及你所在各工作區的未讀數；AI 代理執行時只回傳所在工作區 | `--output` |
 | | `read [<id>...]` | 將通知標為已讀（作用於所在任務的全部通知）；或一個任務上的全部通知，或全部 | `--issue`、`--all`（需要 `--yes`） |
 | | `unread <id>...` | 將通知標為未讀 | |
 | | `archive [<id>...]` | 封存通知（作用於所在任務的全部通知）；或批次封存 | `--all`、`--read`、`--completed`（皆需 `--yes`） |
