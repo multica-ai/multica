@@ -4,14 +4,17 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { RuntimeModel } from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
-import { PropRow } from "../../../common/prop-row";
+import { ObjectProperty } from "../../../layout/object-page";
 import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
 import { ThinkingPicker } from "./thinking-picker";
-import { findModelCapabilityEntry } from "./model-capability";
+import {
+  findModelCapabilityEntry,
+  thinkingLevelRequiredForProvider,
+} from "./model-capability";
 
 /**
- * Thinking row for the agent inspector. Hidden when the active model has
+ * Thinking row for the agent properties panel. Hidden when the active model has
  * no `supported_levels` advertised AND nothing is persisted, so providers
  * that don't expose reasoning never surface an empty row. If the agent
  * already has a `thinking_level` saved (model swap into a non-thinking
@@ -23,9 +26,9 @@ import { findModelCapabilityEntry } from "./model-capability";
  * state honestly.
  *
  * Reuses the shared runtime-models query so it hits the same 60s cache
- * as the model picker; no extra round-trip on the inspector's hot path.
+ * as the model picker; no extra round-trip on the panel's hot path.
  * The sibling ModelPicker mounts unconditionally next to this row, so
- * the shared query subscription is established by the inspector mount
+ * the shared query subscription is established by the panel mount
  * itself — returning null here does NOT cancel discovery.
  */
 export function ThinkingPropRow({
@@ -58,14 +61,15 @@ export function ThinkingPropRow({
   if (levels.length === 0 && !value) return null;
 
   return (
-    <PropRow label={t(($) => $.inspector.prop_thinking)} interactive={false}>
+    <ObjectProperty label={t(($) => $.inspector.prop_thinking)}>
       <ThinkingPicker
         value={value}
         levels={levels}
         canEdit={canEdit}
+        allowClear={levels.length === 0 || !thinkingLevelRequiredForProvider(provider)}
         onChange={onChange}
       />
-    </PropRow>
+    </ObjectProperty>
   );
 }
 
@@ -106,6 +110,7 @@ export function ThinkingSettingField({
         value={value}
         levels={levels}
         canEdit={canEdit}
+        allowClear={levels.length === 0 || !thinkingLevelRequiredForProvider(provider)}
         onChange={onChange}
       />
     </SettingsRow>
@@ -125,6 +130,13 @@ function pickModelEntry(
   // support. Fail closed (no preview): the row hides unless a stale level is
   // persisted, in which case it still renders so the orphan can be cleared.
   // Mirrors the backend ValidateThinkingLevel. (MUL-4347)
-  if (provider === "codex") return undefined;
+  //
+  // omp is fenced off for the same reason with a different cause: its
+  // `omp models --json` catalog marks no default at all and sorts by
+  // provider/id, so `models[0]` is arbitrary — and at task time omp resolves
+  // its own default role model, then clamps the level to what that model
+  // supports. Previewing any entry here would offer a level the real model may
+  // silently lower. (MUL-7412)
+  if (provider === "codex" || provider === "omp") return undefined;
   return models.find((m) => m.default) ?? models[0];
 }

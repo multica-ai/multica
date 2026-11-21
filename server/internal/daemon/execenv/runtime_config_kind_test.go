@@ -36,7 +36,7 @@ func TestClassifyTask(t *testing.T) {
 }
 
 // TestTaskKindHasIssueContext pins the predicate that gates Project
-// Context / Issue Metadata / Sub-issue Creation in the slim dispatcher.
+// Context / Sub-issue Creation in the slim dispatcher.
 func TestTaskKindHasIssueContext(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -73,6 +73,22 @@ func TestBuildMetaSkillContentBriefContent(t *testing.T) {
 	}
 	if strings.Contains(out, "Get full issue details.") {
 		t.Errorf("brief still carries the retired legacy `issue get` description\n---\n%s", out)
+	}
+}
+
+// TestBuildMetaSkillContentDocsFollowFlag pins that the `multica doc` command
+// and the mention://doc form reach the brief only when the server's docs_v1
+// flag is on, so a deployment without Docs never points agents at it.
+func TestBuildMetaSkillContentDocsFollowFlag(t *testing.T) {
+	t.Parallel()
+
+	for _, enabled := range []bool{false, true} {
+		out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1", DocsEnabled: enabled})
+		for _, line := range []string{"`multica doc list|search|get|create|edit|update|move`", "mention://doc/<doc-id>"} {
+			if got := strings.Contains(out, line); got != enabled {
+				t.Errorf("DocsEnabled=%v: brief contains %q = %v\n---\n%s", enabled, line, got, out)
+			}
+		}
 	}
 }
 
@@ -143,7 +159,6 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Repositories", map[taskKind]bool{
 			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
 		}},
-		{"## Issue Metadata", issueKinds},
 		{"## Instruction Precedence", issueKinds},
 		{"## Sub-issue Creation", issueKinds},
 		// Quick-create included: it used to be skipped here and carry its own
@@ -213,6 +228,64 @@ func TestBriefOwnsAutopilotIssueCommandsGuard(t *testing.T) {
 	}
 }
 
+// TestQuickCreateBriefOwnsRunAndOutputRules pins the brief as the single
+// statement of how a quick-create run executes and what it prints (MUL-6984).
+//
+// The same five rules used to be written three times — the brief's Workflow
+// section, the brief's ## Output section, and the per-turn prompt's "Output
+// format" block — with two of the three copies in this very file. The brief is
+// the copy that survives, because its own contract is that these guardrails
+// hold "even if the user message is missing"; the per-turn message now renders
+// only the field VALUES the modal picked.
+func TestQuickCreateBriefOwnsRunAndOutputRules(t *testing.T) {
+	t.Parallel()
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		QuickCreatePrompt: "create an issue about flaky tests",
+		AgentName:         "Eve", AgentID: "eve-1",
+	})
+
+	for _, want := range []string{
+		// exactly one create, no retry — a retry would duplicate the issue
+		"Run exactly one `" + multicaCLICommand() + " issue create --output json` invocation",
+		"Do not retry for any reason",
+		// no issue to query, transition, or comment on
+		"Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add`",
+		// the success line, and the reason it must not be scraped or
+		// prefix-guessed: workspaces set their own issue prefix, so a
+		// successful create must not read as failed
+		"`identifier` (preferred) or `id` (fallback)",
+		"Created <identifier-or-id>: <title>",
+		"never assume a workspace issue prefix such as `MUL-`",
+		// failure path
+		"exit with that error as the only output",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("quick-create brief missing rule %q\n---\n%s", want, out)
+		}
+	}
+
+	// ## Output states where the output goes and how a FILE is delivered; the
+	// rules themselves are stated once, above. A second copy here is what this
+	// change removed.
+	outputIdx := strings.Index(out, "## Output")
+	if outputIdx < 0 {
+		t.Fatalf("quick-create brief has no ## Output section\n---\n%s", out)
+	}
+	outputSection := out[outputIdx:]
+	if !strings.Contains(outputSection, "**Delivering files here:**") {
+		t.Errorf("## Output lost the file-delivery channel\n---\n%s", outputSection)
+	}
+	for _, banned := range []string{
+		"Created <identifier-or-id>: <title>",
+		"Do NOT call `multica issue comment add`",
+	} {
+		if strings.Contains(outputSection, banned) {
+			t.Errorf("## Output restates workflow rule %q\n---\n%s", banned, outputSection)
+		}
+	}
+}
+
 // TestSlimQuickCreateAvailableCommands locks the minimal-variant content
 // for quick-create's Available Commands: `issue create` present, every
 // other Core command absent (the hard guardrails forbid the call).
@@ -239,9 +312,6 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 		"multica issue update <id>",
 		"multica issue status <id> <status>",
 		"multica issue comment add <issue-id>",
-		"multica issue metadata list <issue-id>",
-		"multica issue metadata set <issue-id>",
-		"multica issue metadata delete <issue-id>",
 		"multica issue children <id>",
 		"multica repo checkout <url>",
 		"### Squad maintenance",
@@ -250,6 +320,31 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 		if strings.Contains(out, banned) {
 			t.Errorf("quick_create slim Available Commands should NOT advertise %q (hard guardrails forbid the call)", banned)
 		}
+	}
+}
+
+func TestAntigravityBackgroundTaskSafetyAllKinds(t *testing.T) {
+	t.Parallel()
+	for name, ctx := range map[string]TaskContextForEnv{
+		"comment":      {IssueID: "i", TriggerCommentID: "c"},
+		"assignment":   {IssueID: "i"},
+		"autopilot":    {AutopilotRunID: "r"},
+		"quick-create": {QuickCreatePrompt: "p"},
+		"chat":         {ChatSessionID: "c"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agy := buildMetaSkillContent("antigravity", ctx)
+			if !strings.Contains(agy, "yield the model subturn while waiting") ||
+				strings.Contains(agy, "whatever a tool response promises") || strings.Contains(agy, "Never background-and-yield") {
+				t.Fatal("Antigravity model-subturn contract missing or contradicted")
+			}
+			for _, provider := range []string{"claude", "codex", "codebuddy", "hermes"} {
+				other := buildMetaSkillContent(provider, ctx)
+				if !strings.Contains(other, "Never background-and-yield") || strings.Contains(other, "yield the model subturn") {
+					t.Fatalf("%s inherited Antigravity's exception", provider)
+				}
+			}
+		})
 	}
 }
 

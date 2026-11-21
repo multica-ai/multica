@@ -2,13 +2,14 @@
 
 import { statusCategoryOfKey } from "@multica/core/issues";
 import { useState } from "react";
-import { ArrowRight, Download, Loader2 } from "lucide-react";
+import { ArrowRight, Download, Loader2 } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { MulticaWordmark } from "@multica/ui/components/common/multica-wordmark";
+import { MulticaStarRow } from "@multica/ui/components/common/multica-graphics";
 import { cn } from "@multica/ui/lib/utils";
 import { DragStrip } from "@multica/views/platform";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
-import type { IssueStatus } from "@multica/core/types";
+import type { BuiltInIssueStatus } from "@multica/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { useT } from "../../i18n";
@@ -78,12 +79,11 @@ export function StepWelcome({
         <DragStrip />
         <div className="flex flex-1 flex-col justify-center px-6 pb-12 sm:px-10 md:px-20 lg:px-20 xl:px-24">
           <div className="flex w-full max-w-[540px] flex-col gap-8">
-            <div className="flex items-center gap-2.5">
-              <MulticaIcon className="size-5 text-foreground" noSpin />
-              <span className="font-serif text-title-lg font-medium tracking-tight">
-                {t(($) => $.welcome.wordmark)}
-              </span>
-            </div>
+            <MulticaWordmark
+              writeDelayMs={200}
+              title={t(($) => $.welcome.wordmark)}
+              className="h-[35px] self-start text-foreground"
+            />
 
             <h1 className="text-balance font-serif text-5xl font-medium leading-[1.04] tracking-tight sm:text-6xl">
               {t(($) => $.welcome.headline_line1)}
@@ -96,11 +96,11 @@ export function StepWelcome({
               <p className="text-title leading-relaxed text-foreground">
                 {t(($) => $.welcome.lede)}
               </p>
-              <p className="text-body leading-relaxed text-muted-foreground">
-                {isWeb
-                  ? t(($) => $.welcome.lede_web)
-                  : t(($) => $.welcome.lede_desktop)}
-              </p>
+              {isWeb && (
+                <p className="text-body leading-relaxed text-muted-foreground">
+                  {t(($) => $.welcome.lede_web)}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -172,12 +172,13 @@ export function StepWelcome({
           fills the viewport edge-to-edge. `justify-center` inside
           centers the mock cards vertically, mirroring the left
           column's copy-center layout. */}
-      <div className="hidden border-l bg-muted/40 lg:flex lg:flex-1 lg:flex-col lg:overflow-hidden">
+      <div className="relative hidden border-l bg-muted/40 lg:flex lg:flex-1 lg:flex-col lg:overflow-hidden">
+        <MulticaStarRow
+          count={9}
+          className="pointer-events-none absolute -bottom-10 left-1/2 w-[130%] -translate-x-1/2 text-muted"
+        />
         <DragStrip />
-        <div className="flex flex-1 flex-col items-center justify-center gap-7 px-8 py-8">
-          <p className="max-w-[440px] text-balance text-center font-serif text-body-lg italic leading-snug text-muted-foreground">
-            {t(($) => $.welcome.illustration_caption)}
-          </p>
+        <div className="relative flex flex-1 flex-col items-center justify-center gap-7 px-8 py-8">
           <WelcomeIllustration />
         </div>
       </div>
@@ -300,7 +301,7 @@ function MockActivityCard({
   actor: ActivityActor;
   issueId: string;
   content: React.ReactNode;
-  status?: Extract<IssueStatus, "in_progress" | "done" | "in_review">;
+  status?: Extract<BuiltInIssueStatus, "in_progress" | "done" | "in_review">;
   timestamp?: string;
   className?: string;
 }) {
@@ -362,7 +363,7 @@ function StatusFooter({
   status,
   timestamp,
 }: {
-  status: IssueStatus;
+  status: BuiltInIssueStatus;
   timestamp?: string;
 }) {
   // The illustration's statuses are hard-coded BUILT-IN keys, so the label
@@ -384,7 +385,7 @@ function StatusFooter({
             status === "in_progress" && "animate-pulse",
           )}
         />
-        {t(($) => $.status[category])}
+        {t(($) => $.status[status])}
       </span>
       {timestamp && (
         <>

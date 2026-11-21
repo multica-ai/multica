@@ -5,7 +5,7 @@ import {
   resolveBillingRecovery,
   type BillingRecoveryKind,
 } from "@multica/core/billing/recovery";
-import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
+import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags/keys";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -15,8 +15,10 @@ import {
   workspaceSubscriptionSummaryOptions,
 } from "@/data/queries/billing";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 import {
-  getAutopilotQuotaBody,
+  getInboxNoticeBody,
+  isInboxNotice,
   getInboxDisplayTitle,
 } from "@/lib/inbox-display";
 
@@ -27,20 +29,34 @@ function BillingRecovery({
   recovery: BillingRecoveryKind;
   billingUrl: string | null;
 }) {
+  const { t } = useT("inbox");
   switch (recovery) {
     case "checking":
       return <ActivityIndicator />;
     case "billing_disabled":
       return (
         <Text className="text-sm leading-5 text-muted-foreground">
-          Billing changes are unavailable for this workspace. Contact your
-          workspace administrator for help.
+          {t("detail.billing_disabled")}
         </Text>
       );
     case "contact_admin":
       return (
         <Text className="text-sm leading-5 text-muted-foreground">
-          Ask a workspace owner or admin to review the billing options.
+          {t("detail.contact_admin")}
+        </Text>
+      );
+    case "autopilot_addon":
+      // Buying runs is a card payment; the app opens web Billing for it.
+      return billingUrl ? (
+        <Button
+          onPress={() => void Linking.openURL(billingUrl)}
+          accessibilityLabel={t("detail.buy_runs")}
+        >
+          <Text>{t("detail.buy_runs")}</Text>
+        </Button>
+      ) : (
+        <Text className="text-sm leading-5 text-muted-foreground">
+          {t("detail.buy_runs_web")}
         </Text>
       );
     case "checkout":
@@ -50,13 +66,13 @@ function BillingRecovery({
       return billingUrl ? (
         <Button
           onPress={() => void Linking.openURL(billingUrl)}
-          accessibilityLabel="Review billing options"
+          accessibilityLabel={t("detail.review_billing")}
         >
-          <Text>Review billing options</Text>
+          <Text>{t("detail.review_billing")}</Text>
         </Button>
       ) : (
         <Text className="text-sm leading-5 text-muted-foreground">
-          Open Multica on the web to review billing options.
+          {t("detail.review_billing_web")}
         </Text>
       );
   }
@@ -66,6 +82,7 @@ export default function InboxNoticeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const { t } = useT("inbox");
   const { data: items, isLoading } = useQuery(inboxListOptions(wsId));
 
   // Read the raw workspace-scoped cache: deduplication can replace a row,
@@ -88,6 +105,7 @@ export default function InboxNoticeDetail() {
   const checkingConfig =
     isQuotaNotice && !configQuery.data && configQuery.isFetching;
   const recovery = resolveBillingRecovery({
+    autopilotAddon: true,
     actions: summaryQuery.data?.availableActions,
     billingEnabled: checkingConfig || billingEnabled,
     loading:
@@ -99,20 +117,20 @@ export default function InboxNoticeDetail() {
   const webUrl = process.env.EXPO_PUBLIC_WEB_URL?.replace(/\/+$/, "");
   const billingUrl =
     webUrl && wsSlug ? `${webUrl}/${wsSlug}/settings?tab=billing` : null;
-  const body = item ? getAutopilotQuotaBody(item) : null;
+  const body = item ? getInboxNoticeBody(item) : null;
 
   return (
     <View className="flex-1 bg-background">
       <View className="flex-row items-center border-b border-border px-4 py-3">
         <Text className="flex-1 text-lg font-semibold text-foreground">
-          {item ? getInboxDisplayTitle(item) : "Notification"}
+          {item ? getInboxDisplayTitle(item) : t("detail.notification")}
         </Text>
         <IconButton
           name="close"
           variant="secondary"
           className="size-7 rounded-full"
           onPress={() => router.back()}
-          accessibilityLabel="Close notification"
+          accessibilityLabel={t("detail.close")}
         />
       </View>
 
@@ -120,12 +138,10 @@ export default function InboxNoticeDetail() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator />
         </View>
-      ) : !item ||
-        (item.type !== "autopilot_quota_exceeded" &&
-          item.type !== "autopilot_paused") ? (
+      ) : !item || !isInboxNotice(item.type) ? (
         <View className="px-4 py-8">
           <Text className="text-sm text-muted-foreground text-center">
-            This notification is no longer available.
+            {t("detail.unavailable")}
           </Text>
         </View>
       ) : (

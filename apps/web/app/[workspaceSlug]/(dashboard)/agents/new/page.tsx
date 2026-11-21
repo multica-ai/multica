@@ -1,5 +1,5 @@
-import { ChooseCreateMethodPage } from "@multica/views/agents";
+import { ChooseRuntimePage } from "@multica/views/agents/choose-runtime-page";
 
 export default function NewAgentRoute() {
-  return <ChooseCreateMethodPage />;
+  return <ChooseRuntimePage />;
 }

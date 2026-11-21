@@ -3,7 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { pickLocale, type SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
-import { useWelcomeStore } from "@multica/core/onboarding";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { api } from "@multica/core/api";
@@ -16,7 +15,13 @@ import { DesktopLoginPage } from "./pages/login";
 import { DesktopAuthRecoveryPage } from "./pages/auth-recovery";
 import { DesktopShell } from "./components/desktop-layout";
 import { UpdateNotification } from "./components/update-notification";
+import { NativeContextMenu } from "./components/native-context-menu";
 import { IssueWindow } from "./components/issue-window";
+import { DesktopDevToolbar } from "./components/desktop-dev-toolbar";
+import {
+  DESKTOP_EMERGENCY_COPY,
+  resolveDesktopEmergencyLocale,
+} from "./components/emergency-copy";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
@@ -25,11 +30,24 @@ import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
+import { AppearanceSync } from "@multica/views/common/appearance-sync";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
 import { flushFreezeBreadcrumb } from "./freeze-flush";
 import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
+import { WorkspaceWindowBridge } from "./platform/workspace-window-bridge";
+import { IssueDeepLinkBridge } from "./platform/issue-deep-link-bridge";
+import {
+  launchWorkspaceSlug,
+  otherWindowWorkspaces,
+  resolveWindowWorkspace,
+} from "./platform/workspace-windows";
+import {
+  tearDownOnLogout,
+  tearDownOnSessionExpiry,
+  type SessionTeardown,
+} from "./platform/session-teardown";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -39,8 +57,12 @@ import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
 const HTML_LANG: Record<SupportedLocale, string> = {
   en: "en",
   "zh-Hans": "zh-CN",
+  "zh-Hant": "zh-TW",
   ko: "ko-KR",
   ja: "ja-JP",
+  fr: "fr-FR",
+  es: "es",
+  ru: "ru",
 };
 
 
@@ -90,7 +112,7 @@ function IssueWindowContent() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="think" size={40} />
       </div>
     );
   }
@@ -126,12 +148,12 @@ function AppContent() {
 
   // Listen for invite IDs delivered via deep link (multica://invite/<id>).
   // We open the overlay regardless of login state — if the user isn't logged
-  // in, InvitePage's queries will fail and render the "not found" state,
+  // in, InvitationsPage's queries will fail and render the "not found" state,
   // which is acceptable; the expected pre-flight happens in the web app
   // (login + next=/invite/... dance) before the deep link is ever dispatched.
   useEffect(() => {
     return window.desktopAPI.onInviteOpen((invitationId) => {
-      useWindowOverlayStore.getState().open({ type: "invite", invitationId });
+      useWindowOverlayStore.getState().open({ type: "invitations", invitationId });
     });
   }, []);
 
@@ -281,12 +303,17 @@ function AppContent() {
   // while a failed background refetch retains the last successful list.
   useLayoutEffect(() => {
     if (!workspaceListReady) return;
-    const validSlugs = new Set(workspaces.map((w) => w.slug));
-    useTabStore.getState().validateWorkspaceSlugs(validSlugs);
+    const slugs = workspaces.map((w) => w.slug);
+    useTabStore.getState().validateWorkspaceSlugs(new Set(slugs));
     const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
-    if (!activeWorkspaceSlug && workspaces.length > 0) {
-      switchWorkspace(workspaces[0].slug);
-    }
+    if (slugs.length === 0) return;
+    const target = resolveWindowWorkspace(
+      slugs,
+      activeWorkspaceSlug,
+      launchWorkspaceSlug(),
+      otherWindowWorkspaces(),
+    );
+    if (target && target !== activeWorkspaceSlug) switchWorkspace(target);
   }, [workspaces, workspaceListReady]);
 
   // null = undecided (pre-login or list hasn't settled yet)
@@ -315,7 +342,7 @@ function AppContent() {
   if (isLoading || bootstrapping) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="think" size={40} />
       </div>
     );
   }
@@ -334,13 +361,22 @@ function AppContent() {
   return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
-function BlockingRuntimeConfigError({ message }: { message: string }) {
+function BlockingRuntimeConfigError({
+  locale,
+  message,
+}: {
+  locale: SupportedLocale;
+  message: string;
+}) {
+  const copy = DESKTOP_EMERGENCY_COPY[resolveDesktopEmergencyLocale(locale)];
   return (
     <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
       <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-        <h1 className="text-title font-semibold">Desktop configuration error</h1>
+        <h1 className="text-title font-semibold">{copy.configTitle}</h1>
         <p className="mt-3 text-body text-muted-foreground">
-          Multica Desktop could not load <code>~/.multica/desktop.json</code>. Fix or remove the file and restart the app.
+          {copy.configDescriptionBefore}
+          <code>~/.multica/desktop.json</code>
+          {copy.configDescriptionAfter}
         </p>
         <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-caption text-muted-foreground">
           {message}
@@ -350,30 +386,24 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
   );
 }
 
-// On logout, wipe desktop-only in-memory state and stop the daemon so that
-// a subsequent login as a different user never inherits the previous user's
-// tabs, overlay, or credentials. Zustand persist only writes to localStorage;
-// useLogout clears the storage key, but the live stores stay populated until
-// we explicitly reset them here.
-async function handleDaemonLogout() {
-  // Report synchronously before async daemon cleanup so a rapidly closed main
-  // window cannot leave authenticated issue renderers behind.
-  window.desktopAPI.reportAuthSession?.(null);
-  useTabStore.getState().reset();
-  useWindowOverlayStore.getState().close();
-  // Drop any post-onboarding welcome signal so user B logging in next
-  // doesn't inherit user A's pending modal state.
-  useWelcomeStore.getState().reset();
-  try {
-    await window.daemonAPI.clearToken();
-  } catch {
-    // Best-effort — clearing is followed by stop which also hardens state.
-  }
-  try {
-    await window.daemonAPI.stop();
-  } catch {
-    // Daemon may already be stopped.
-  }
+// Binds the teardown steps to this renderer's real stores and IPC. Which of
+// them each path runs — and why logout stops the daemon while an expiry
+// leaves it running — lives in platform/session-teardown.
+const sessionTeardown: SessionTeardown = {
+  reportAuthSession: (userId) =>
+    window.desktopAPI.reportAuthSession?.(userId),
+  resetTabs: () => useTabStore.getState().reset(),
+  closeOverlay: () => useWindowOverlayStore.getState().close(),
+  clearDaemonToken: () => window.daemonAPI.clearToken(),
+  stopDaemon: () => window.daemonAPI.stop(),
+};
+
+function handleDaemonLogout() {
+  return tearDownOnLogout(sessionTeardown);
+}
+
+function handleSessionExpired() {
+  tearDownOnSessionExpiry(sessionTeardown);
 }
 
 export default function App() {
@@ -432,6 +462,7 @@ export default function App() {
   // with the Chinese-first fallback stack before the override kicks in.
   useLayoutEffect(() => {
     document.documentElement.lang = HTML_LANG[locale];
+    window.desktopAPI.setLocale?.(locale);
   }, [locale]);
 
   // React to OS-level language changes detected by main on focus regain.
@@ -454,6 +485,7 @@ export default function App() {
 
   return (
     <ThemeProvider>
+      <AppearanceSync />
       {runtimeConfigResult.ok ? (
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}
@@ -461,13 +493,19 @@ export default function App() {
           onLogout={
             windowContext.kind === "main" ? handleDaemonLogout : undefined
           }
+          onSessionExpired={
+            windowContext.kind === "main" ? handleSessionExpired : undefined
+          }
           identity={identity}
           locale={locale}
           resources={resources}
           localeAdapter={localeAdapter}
         >
           <DesktopAuthSessionBridge />
+          <NativeContextMenu />
           {windowContext.kind === "main" && <DiagnosticRouteReporter />}
+          {windowContext.kind === "main" && <WorkspaceWindowBridge />}
+          {windowContext.kind === "main" && <IssueDeepLinkBridge />}
           {windowContext.kind === "main" && (
             <DesktopClientUsageReporter
               apiUrl={runtimeConfigResult.config.apiUrl}
@@ -478,9 +516,18 @@ export default function App() {
           ) : (
             <AppContent />
           )}
+          {/* Opt-in dev status bar; see "Dev Toolbar" in CONTRIBUTING.md. */}
+          {import.meta.env.DEV &&
+            import.meta.env.VITE_DEV_TOOLBAR &&
+            windowContext.kind === "main" && (
+              <DesktopDevToolbar apiUrl={runtimeConfigResult.config.apiUrl} />
+            )}
         </CoreProvider>
       ) : (
-        <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
+        <BlockingRuntimeConfigError
+          locale={locale}
+          message={runtimeConfigResult.error.message}
+        />
       )}
       <Toaster />
       {windowContext.kind === "main" && <UpdateNotification />}

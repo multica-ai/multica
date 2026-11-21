@@ -74,8 +74,8 @@ func TestTelegramMutationHandlersRejectUnconfiguredDeployment(t *testing.T) {
 
 			tt.run(h, w, req)
 
-			if w.Code != http.StatusServiceUnavailable {
-				t.Fatalf("expected 503, got %d body=%s", w.Code, w.Body.String())
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d body=%s", w.Code, w.Body.String())
 			}
 		})
 	}

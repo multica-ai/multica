@@ -1,9 +1,10 @@
 import type { MetadataRoute } from "next";
+import { landingAlternates } from "@/lib/landing-locale-path";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = "https://www.multica.ai";
 
-  return [
+  const pages: MetadataRoute.Sitemap = [
     {
       url: baseUrl,
       lastModified: new Date("2026-04-01"),
@@ -28,5 +29,22 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "monthly",
       priority: 0.7,
     },
+    {
+      url: `${baseUrl}/licensing`,
+      lastModified: new Date("2026-09-21"),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
+      url: `${baseUrl}/privacy`,
+      lastModified: new Date("2026-09-21"),
+      changeFrequency: "yearly",
+      priority: 0.3,
+    },
   ];
+
+  return pages.map((page) => ({
+    ...page,
+    alternates: { languages: landingAlternates(page.url.slice(baseUrl.length) || "/", baseUrl) },
+  }));
 }

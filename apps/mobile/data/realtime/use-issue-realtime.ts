@@ -5,14 +5,15 @@
  * Handles:
  *   - issue:updated / issue:deleted / issue_labels:changed → detail cache
  *   - issue_attachments:changed → attachment cache
- *   - comment:created / comment:updated / comment:deleted → timeline
+ *   - comment:created / comment:updated / comment:deleted → timeline +
+ *     owner issue revision (detail / list projections)
  *   - activity:created → timeline
  *   - reaction:added / reaction:removed → comment reactions on timeline
  *   - issue_reaction:added / issue_reaction:removed → issue-level reactions on detail
- *   - task:queued / task:dispatch / task:progress / task:completed /
- *     task:failed / task:cancelled → invalidate timeline + detail (task
- *     state can flip an issue's status server-side without firing
- *     issue:updated, so we refetch the authoritative detail too)
+ *   - task:queued / task:coalesced / task:dispatch / task:progress /
+ *     task:completed / task:failed / task:cancelled → invalidate timeline +
+ *     detail (task state can flip an issue's status server-side without
+ *     firing issue:updated, so we refetch the authoritative detail too)
  *   - reconnect → invalidate detail + timeline (we might've missed events
  *     while disconnected; server has no replay buffer for this client)
  *
@@ -43,6 +44,7 @@ import {
   clearIssueDetail,
   commentToTimelineEntry,
   invalidateIssueAfterReconnect,
+  invalidateIssueOwnerProjections,
   patchIssueDetail,
   patchIssueLabels,
   patchIssuesList,
@@ -141,6 +143,14 @@ export function useIssueRealtime(
           if (payload.comment.issue_id !== issueId) return;
           const entry = commentToTimelineEntry(payload.comment);
           replaceCommentTimelineEntry(qc, wsId, issueId, entry);
+          // Edits and tombstoning deletes can advance the owner issue
+          // (revision, last_activity_at). Mirrors web's comment handlers: apply
+          // issue_revision when present, otherwise refetch the owner projections.
+          if (payload.issue_revision) {
+            onIssueAuxiliaryRevision(qc, wsId, issueId, payload.issue_revision);
+          } else {
+            invalidateIssueOwnerProjections(qc, wsId, issueId);
+          }
         }),
         // Resolve / unresolve broadcast from any client. Payload carries the
         // full Comment with the new resolved_at/resolved_by_* fields, so we
@@ -160,11 +170,16 @@ export function useIssueRealtime(
         }),
         ws.on("comment:deleted", (payload) => {
           if (payload.issue_id !== issueId) return;
-          // Cascade: descendant replies must come out alongside the parent,
-          // otherwise buildTimelineRows promotes them to top-level rows and
-          // the user sees ghost replies after another client deletes the
-          // thread. Server already cascades; this mirrors it in the cache.
+          // A comment with replies is tombstoned (comment:updated), never
+          // removed, so any cached reply of a removed comment is stale (older
+          // servers cascaded the delete). Sweep them so buildTimelineRows
+          // does not promote them to ghost top-level rows.
           removeCommentCascade(qc, wsId, issueId, payload.comment_id);
+          if (payload.issue_revision) {
+            onIssueAuxiliaryRevision(qc, wsId, issueId, payload.issue_revision);
+          } else {
+            invalidateIssueOwnerProjections(qc, wsId, issueId);
+          }
         }),
         ws.on("activity:created", (payload) => {
           if (payload.issue_id !== issueId) return;
@@ -215,6 +230,7 @@ export function useIssueRealtime(
 
         // ----- Agent task progress -----
         ws.on("task:queued", onTaskEvent),
+        ws.on("task:coalesced", onTaskEvent),
         ws.on("task:dispatch", onTaskEvent),
         ws.on("task:progress", onTaskEvent),
         ws.on("task:completed", onTaskEvent),

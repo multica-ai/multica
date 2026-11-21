@@ -54,7 +54,7 @@ func decodeTimelineEntries(t *testing.T, w *httptest.ResponseRecorder) []Timelin
 }
 
 // bulkSeedActivities inserts n activities one second apart starting at start.
-// One statement, because these tests need thousands of rows.
+// One statement, because cap scenarios need more rows than a window holds.
 func bulkSeedActivities(t *testing.T, issueID string, start time.Time, n int) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(), `
@@ -98,6 +98,23 @@ func bulkSeedReplies(t *testing.T, issueID, parentID string, start time.Time, n 
 	if err != nil {
 		t.Fatalf("bulk seed %d replies: %v", n, err)
 	}
+}
+
+// shrinkListCapsForTest runs one cap scenario at a small size. The production
+// values (2000-row windows, a 2000-row completion budget, 64 levels) only size
+// the safety net: windowing, the probe row and thread completion behave the
+// same at any size, while seeding and deleting thousands of rows per scenario
+// made the cap tests the slowest in the package. Window-sized counts in these
+// tests are derived from the variables; the few fixed ones (a handful of old
+// replies, a +50 overflow) stay well inside the shrunk budgets. The timeline and
+// comment caps stay equal, as they are in production.
+func shrinkListCapsForTest(t *testing.T) {
+	t.Helper()
+	comments, timeline, budget, depth := commentHardCap, timelineHardCap, commentThreadContextBudget, commentThreadMaxDepth
+	commentHardCap, timelineHardCap, commentThreadContextBudget, commentThreadMaxDepth = 20, 20, 20, 8
+	t.Cleanup(func() {
+		commentHardCap, timelineHardCap, commentThreadContextBudget, commentThreadMaxDepth = comments, timeline, budget, depth
+	})
 }
 
 // seedComment inserts a single comment at an exact timestamp, optionally as a
@@ -145,10 +162,11 @@ func mustParseTS(t *testing.T, label, raw string) time.Time {
 // more activities than the cap, the response must be the newest window. Before
 // the fix the LAST seeded activity was missing and the FIRST one was present.
 func TestListTimeline_HardCapKeepsNewestActivities(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "hard cap keeps newest")
 
 	// 100 rows past the cap, ending "now" so the newest row is unambiguous.
-	const total = timelineHardCap + 100
+	total := timelineHardCap + 100
 	start := time.Now().UTC().Add(-time.Duration(total) * time.Second).Truncate(time.Second)
 	bulkSeedActivities(t, issueID, start, total)
 
@@ -189,23 +207,26 @@ func TestListTimeline_HardCapKeepsNewestActivities(t *testing.T) {
 // costs activity density in the older range, which is metadata, and it is
 // reported rather than hidden.
 func TestListTimeline_ActivityTruncationDoesNotDropComments(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "activity truncation keeps comments")
 
-	const activityTotal = timelineHardCap + 100
+	activityTotal := timelineHardCap + 100
 	activityStart := time.Now().UTC().Add(-time.Duration(activityTotal) * time.Second).Truncate(time.Second)
 	// Comments reach far further back than the activity window can.
 	commentStart := activityStart.Add(-2 * time.Hour)
+	// Below the comment cap, so only the activity list can be truncated.
+	commentTotal := timelineHardCap / 2
 
 	bulkSeedActivities(t, issueID, activityStart, activityTotal)
-	bulkSeedComments(t, issueID, commentStart, 50)
+	bulkSeedComments(t, issueID, commentStart, commentTotal)
 
 	w := fetchTimelineRecorder(t, issueID, "")
 	entries := decodeTimelineEntries(t, w)
 	commentCount, activityCount := countByType(entries)
 
-	// Every comment survives even though all 50 predate the oldest activity.
-	if commentCount != 50 {
-		t.Errorf("comment count = %d, want 50: activity truncation must not delete comments", commentCount)
+	// Every comment survives even though all of them predate the oldest activity.
+	if commentCount != commentTotal {
+		t.Errorf("comment count = %d, want %d: activity truncation must not delete comments", commentCount, commentTotal)
 	}
 	if activityCount != timelineHardCap {
 		t.Errorf("activity count = %d, want %d", activityCount, timelineHardCap)
@@ -221,6 +242,7 @@ func TestListTimeline_ActivityTruncationDoesNotDropComments(t *testing.T) {
 // inside the window. The reply must not come back without its parent — an orphan
 // is invisible in the UI, not merely mis-nested (MUL-1847 / #2263).
 func TestListTimeline_NoOrphanedReplies(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "no orphaned replies")
 
 	// An old root, then enough newer comments to push it out of the window,
@@ -253,6 +275,7 @@ func TestListTimeline_NoOrphanedReplies(t *testing.T) {
 // reply would make its collapsed count and author list look complete while five
 // older replies were missing.
 func TestListTimeline_RootResolvedThreadIsComplete(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "root-resolved thread is complete")
 
 	base := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Second)
@@ -303,6 +326,7 @@ func TestListTimeline_RootResolvedThreadIsComplete(t *testing.T) {
 // window but a later reply remains, deriveThreadResolution would otherwise see
 // no resolution and render an already-resolved thread as unresolved.
 func TestListTimeline_ReplyResolutionOutsideWindowIsRestored(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "reply resolution is restored")
 
 	base := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Second)
@@ -352,6 +376,7 @@ func TestListTimeline_ReplyResolutionOutsideWindowIsRestored(t *testing.T) {
 // its root plus an arbitrary suffix would let old clients fold partial data.
 // The whole affected thread must disappear while truncation remains explicit.
 func TestListTimeline_OversizedAffectedThreadIsDroppedWhole(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "oversized affected thread is dropped")
 
 	base := time.Now().UTC().Add(-6 * time.Hour).Truncate(time.Second)
@@ -401,6 +426,7 @@ func assertNoOrphanedReplies(t *testing.T, entries []TimelineEntry) {
 // would have rendered as a raw prompt instead of a quick-action card. The query
 // now returns db.Comment directly so new columns cannot be lost this way.
 func TestListTimeline_BackfilledRootKeepsQuickActionID(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "backfilled root keeps quick_action_id")
 
 	base := time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second)
@@ -446,6 +472,7 @@ func TestListTimeline_BackfilledRootKeepsQuickActionID(t *testing.T) {
 // reporting it as truncated would be a lie and would trigger a needless
 // ancestor-backfill query.
 func TestListTimeline_ExactlyAtCapIsNotTruncated(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "exactly at cap")
 
 	start := time.Now().UTC().Add(-time.Duration(timelineHardCap) * time.Second).Truncate(time.Second)
@@ -467,9 +494,10 @@ func TestListTimeline_ExactlyAtCapIsNotTruncated(t *testing.T) {
 // response also stops claiming the timeline is complete. has_more_before was
 // hardcoded false.
 func TestListTimeline_WrappedShapeReportsHasMoreBefore(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "wrapped has_more_before")
 
-	const total = timelineHardCap + 10
+	total := timelineHardCap + 10
 	start := time.Now().UTC().Add(-time.Duration(total) * time.Second).Truncate(time.Second)
 	bulkSeedActivities(t, issueID, start, total)
 

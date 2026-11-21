@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -74,6 +76,7 @@ type SessionQueries interface {
 	ResolveChannelChatContextHistoryStart(ctx context.Context, arg db.ResolveChannelChatContextHistoryStartParams) error
 	SetChannelChatContextInitiator(ctx context.Context, arg db.SetChannelChatContextInitiatorParams) (pgtype.UUID, error)
 	UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error
+	SetChannelChatContextReplyTarget(ctx context.Context, arg db.SetChannelChatContextReplyTargetParams) error
 	MarkChannelInboundDedupProcessed(ctx context.Context, arg db.MarkChannelInboundDedupProcessedParams) (int64, error)
 }
 
@@ -205,6 +208,9 @@ func (a dbSessionQueries) SetChannelChatContextInitiator(ctx context.Context, ar
 func (a dbSessionQueries) UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error {
 	return a.q.UpdateChannelChatSessionBindingReplyTarget(ctx, arg)
 }
+func (a dbSessionQueries) SetChannelChatContextReplyTarget(ctx context.Context, arg db.SetChannelChatContextReplyTargetParams) error {
+	return a.q.SetChannelChatContextReplyTarget(ctx, arg)
+}
 func (a dbSessionQueries) MarkChannelInboundDedupProcessed(ctx context.Context, arg db.MarkChannelInboundDedupProcessedParams) (int64, error) {
 	return a.q.MarkChannelInboundDedupProcessed(ctx, arg)
 }
@@ -218,17 +224,6 @@ type SessionTitles struct {
 	Group    string
 	Direct   string
 	Fallback string
-}
-
-func (t SessionTitles) forType(ct channel.ChatType) string {
-	switch ct {
-	case channel.ChatTypeGroup:
-		return t.Group
-	case channel.ChatTypeP2P:
-		return t.Direct
-	default:
-		return t.Fallback
-	}
 }
 
 // ChatSession is the shared chat-session service. One instance is built per
@@ -359,9 +354,19 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 
 // AppendInput is the channel-agnostic input for AppendUserMessage. Body is the
 // full stored text (including any platform enrichment); CommandText is the
-// user's OWN typed text used for `/issue` parsing (empty falls back to Body) —
-// the adapter supplies it because enrichment is platform-specific. ClaimToken
-// is the dedup owner-fence: when valid, the Mark runs inside this method's tx.
+// user's OWN typed text, used for `/issue` parsing AND for first-title
+// selection (empty falls back to Body) — the adapter supplies it because
+// enrichment is platform-specific. ClaimToken is the dedup owner-fence: when
+// valid, the Mark runs inside this method's tx.
+//
+// With ForceFresh set, CommandText must carry the WHOLE original source
+// INCLUDING the leading /clear directive rather than the bare directive:
+// chatTitleSource consumes exactly one already-applied directive from it, so a
+// bare "/clear" leaves nothing behind and the Chat silently keeps an empty
+// title. Router-driven channels satisfy this because Router never rewrites
+// CommandText for /clear; an adapter handling a native slash command has
+// already split the two and must rejoin them (slackDMControlStarter's
+// ClearSlackDMContext is the one such caller today).
 //
 // MessageID and ThreadID are the REAL platform message id and thread id of this
 // trigger — the outbound reply target recorded on the binding (last_message_id /
@@ -369,14 +374,20 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 // its own binding row, recording the real thread here per session does not clash
 // across sibling threads.
 type AppendInput struct {
-	SessionID           pgtype.UUID
-	Sender              pgtype.UUID
-	InstallationID      pgtype.UUID
-	Body                string
-	CommandText         string
-	MessageID           string
-	DedupMessageID      string
-	ThreadID            string
+	SessionID      pgtype.UUID
+	Sender         pgtype.UUID
+	InstallationID pgtype.UUID
+	Body           string
+	CommandText    string
+	MessageID      string
+	DedupMessageID string
+	ThreadID       string
+	// SenderChannelID is the platform-native id of whoever sent THIS message
+	// (Lark open_id, Slack user id, ...). Sender above is the Multica user it
+	// resolved to; both are recorded because the outbound side needs the
+	// platform id to render a native @-mention, and a Multica user can hold
+	// more than one platform identity on the same installation.
+	SenderChannelID     string
 	ClaimToken          pgtype.UUID
 	MediaPendingSeconds float64
 	ForceFresh          bool
@@ -392,11 +403,17 @@ type StartSessionInput struct {
 	EnsureSessionInput
 	// Initiator is the authenticated sender of the /new command. Sender in the
 	// embedded EnsureSessionInput remains the owner of the newly created Chat.
-	Initiator              pgtype.UUID
-	Body                   string
-	MessageID              string
-	DedupMessageID         string
-	ThreadID               string
+	Initiator pgtype.UUID
+	Body      string
+	// CommandText is the current member-authored instruction before adapter
+	// context enrichment. It is used only for the initial Chat title; Body
+	// remains the canonical persisted/agent-visible content.
+	CommandText    string
+	MessageID      string
+	DedupMessageID string
+	ThreadID       string
+	// SenderChannelID mirrors AppendInput.SenderChannelID.
+	SenderChannelID        string
 	ClaimToken             pgtype.UUID
 	MediaPendingSeconds    float64
 	PersistMessage         bool
@@ -468,7 +485,7 @@ func (s *ChatSession) StartSession(ctx context.Context, in StartSessionInput) (S
 
 	title := ""
 	if in.PersistMessage {
-		title = deriveFirstMessageTitle(in.Body, in.MediaPendingSeconds > 0)
+		title = deriveFirstMessageTitle(chatTitleSource(in.Body, in.CommandText, false), in.MediaPendingSeconds > 0)
 	}
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
 		ID: dbid.NewV7(), WorkspaceID: in.WorkspaceID, AgentID: in.AgentID,
@@ -529,6 +546,17 @@ func (s *ChatSession) StartSession(ctx context.Context, in StartSessionInput) (S
 			ReplyChatSessionID: session.ID, LastMessageID: textOrNull(in.MessageID), LastThreadID: textOrNull(in.ThreadID),
 		}); err != nil {
 			return StartSessionResult{}, fmt.Errorf("set started chat reply target: %w", err)
+		}
+		// A started session opens at revision 1, and the message that started
+		// it is that generation's trigger.
+		if err := qtx.SetChannelChatContextReplyTarget(ctx, db.SetChannelChatContextReplyTargetParams{
+			ChatSessionID: session.ID,
+			Revision:      1,
+			LastMessageID: textOrNull(in.MessageID),
+			LastThreadID:  textOrNull(in.ThreadID),
+			LastSenderID:  textOrNull(in.SenderChannelID),
+		}); err != nil {
+			return StartSessionResult{}, fmt.Errorf("snapshot started chat reply target: %w", err)
 		}
 	}
 	dedupMessageID := in.DedupMessageID
@@ -645,7 +673,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	becameVisible := cmd == nil && !hadPublicUserMessage && !currentSession.ExplicitlyCreatedAt.Valid
 	initializedTitle := ""
 	if cmd == nil {
-		title := deriveFirstMessageTitle(in.Body, in.MediaPendingSeconds > 0)
+		title := deriveFirstMessageTitle(chatTitleSource(in.Body, in.CommandText, in.ForceFresh), in.MediaPendingSeconds > 0)
 		if becameVisible {
 			if _, err := qtx.ReplaceImplicitChatSessionTitle(ctx, db.ReplaceImplicitChatSessionTitleParams{ID: in.SessionID, Title: title}); err != nil {
 				return AppendResult{}, fmt.Errorf("replace implicit chat title: %w", err)
@@ -690,6 +718,21 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		}); err != nil {
 			return AppendResult{}, fmt.Errorf("snapshot channel context initiator: %w", err)
 		}
+		// The trigger an outbound reply answers, snapshotted on the same
+		// generation and under the same command guard as the initiator above:
+		// a message excluded from agent input is not the question being
+		// answered, so it must not become the message the answer quotes.
+		if in.MessageID != "" {
+			if err := qtx.SetChannelChatContextReplyTarget(ctx, db.SetChannelChatContextReplyTargetParams{
+				ChatSessionID: in.SessionID,
+				Revision:      contextRevision,
+				LastMessageID: textOrNull(in.MessageID),
+				LastThreadID:  textOrNull(in.ThreadID),
+				LastSenderID:  textOrNull(in.SenderChannelID),
+			}); err != nil {
+				return AppendResult{}, fmt.Errorf("snapshot channel context reply target: %w", err)
+			}
+		}
 	}
 	// channel_ingested is the immutable provenance the cancel path gates on:
 	// it must be stamped in the same transaction as the message so no later
@@ -715,8 +758,10 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		return AppendResult{}, fmt.Errorf("touch chat session: %w", err)
 	}
 
-	// Record the latest trigger so the decoupled outbound patcher can thread
-	// its reply back into the originating topic.
+	// Advance the session's latest-trigger cursor, which the history-boundary
+	// bookkeeping reads. The outbound reply target is NOT taken from here — it
+	// is frozen per generation above, because this cursor belongs to the
+	// session and a debounced run answers one generation of it.
 	if in.MessageID != "" {
 		if err := qtx.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
 			ReplyChatSessionID: in.SessionID,
@@ -875,7 +920,36 @@ func (s *ChatSession) BindMediaRefsWithResult(ctx context.Context, in BindMediaI
 		// gone, atomically. Either way the reconciler settles the objects.
 		return BindMediaResult{}, fmt.Errorf("commit media: %w", err)
 	}
+	if len(in.MediaRefs) > 0 {
+		if hook := mediaStoredHook.Load(); hook != nil {
+			// The bind's caller has a finish budget of its own; the hook only
+			// records, so it gets a short slice of it and gives up quietly.
+			hookCtx, cancel := context.WithTimeout(ctx, mediaStoredHookBudget)
+			(*hook)(hookCtx, in.WorkspaceID)
+			cancel()
+		}
+	}
 	return result, nil
+}
+
+// mediaStoredHook runs after channel media becomes attachments. Every channel
+// adapter builds its own ChatSession, so the server installs the hook once
+// instead of threading it through each one.
+var mediaStoredHook atomic.Pointer[func(context.Context, pgtype.UUID)]
+
+// mediaStoredHookBudget bounds the hook, so recording storage use cannot hold
+// up the task the channel message is about to start.
+const mediaStoredHookBudget = time.Second
+
+// SetMediaStoredHook installs fn to run after a channel message's media is
+// stored as attachments in a workspace (MUL-9489: the storage limit records,
+// but never refuses, these files). nil removes it. fn must not fail the bind.
+func SetMediaStoredHook(fn func(ctx context.Context, workspaceID pgtype.UUID)) {
+	if fn == nil {
+		mediaStoredHook.Store(nil)
+		return
+	}
+	mediaStoredHook.Store(&fn)
 }
 
 func (s *ChatSession) clearMediaPending(ctx context.Context, q SessionQueries, in BindMediaInput) error {
@@ -1012,7 +1086,14 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 				media.ref.Type == channel.MsgTypeImage,
 			)
 			issueMarkdown = append(issueMarkdown, block)
-			if media.ref.InlinePlaceholder != "" {
+			// InlineIDOnly markers are left out on purpose. A marker that only
+			// refers to an attachment sits in the adapter's quoted context,
+			// which composeIssueCommandMediaDescription excludes from the
+			// description by contract; materializing it here would put
+			// somebody else's picture into the issue body as if the reporter
+			// had attached it. The attachment itself is still created and
+			// still listed above.
+			if media.ref.InlinePlaceholder != "" && !media.ref.InlineIDOnly {
 				replacements = append(replacements, inlineMediaReplacement{
 					placeholder: media.ref.InlinePlaceholder,
 					index:       media.ref.InlineIndex,
@@ -1066,11 +1147,13 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		if !linked[media.id] || media.ref.InlinePlaceholder == "" {
 			continue
 		}
-		replacements = append(replacements, inlineMediaReplacement{
-			placeholder: media.ref.InlinePlaceholder,
-			index:       media.ref.InlineIndex,
-			markdown:    inlineAttachmentMarkdown(media.ref, media.id),
-		})
+		for index := media.ref.InlineIndex; index < media.ref.InlineIndex+max(1, media.ref.InlineCount); index++ {
+			replacements = append(replacements, inlineMediaReplacement{
+				placeholder: media.ref.InlinePlaceholder,
+				index:       index,
+				markdown:    inlineMediaMarkdown(media.ref, media.id),
+			})
+		}
 	}
 	if body, changed := composeInlineMediaBody(in.Body, replacements); changed {
 		rows, err := qtx.UpdateChatMessageContentForChannelMedia(ctx, db.UpdateChatMessageContentForChannelMediaParams{
@@ -1200,6 +1283,39 @@ func nthSubstringIndex(body, marker string, target int) int {
 		}
 		offset = found + len(marker)
 	}
+}
+
+// inlineMediaMarkdown is what an adapter's marker is replaced with once the
+// attachment behind it exists — either the object embedded, or the marker
+// naming it. See channel.MediaRef.InlineIDOnly for which an adapter asks for
+// and why.
+func inlineMediaMarkdown(ref channel.MediaRef, id pgtype.UUID) string {
+	if ref.InlineIDOnly {
+		return inlineAttachmentIDMarker(ref.InlinePlaceholder, id)
+	}
+	return inlineAttachmentMarkdown(ref, id)
+}
+
+// inlineAttachmentIDMarker rewrites a bracketed marker so it names the
+// attachment it stands for: "[Image: unavailable]" becomes
+// "[Image: 019fe1d3-…]".
+//
+// Everything up to the first colon is kept, so the label is whatever the
+// adapter called the thing and the engine only replaces the state word after
+// it. That is deliberate — the marker the adapter renders and the marker that
+// replaces it have to stay the same shape for a reader to see them as one
+// thing, and the only way to guarantee that is to derive one from the other
+// rather than spell the vocabulary out twice.
+func inlineAttachmentIDMarker(marker string, id pgtype.UUID) string {
+	label := strings.TrimSuffix(strings.TrimPrefix(marker, "["), "]")
+	if colon := strings.IndexByte(label, ':'); colon >= 0 {
+		label = label[:colon]
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "[" + uuid.UUID(id.Bytes).String() + "]"
+	}
+	return "[" + label + ": " + uuid.UUID(id.Bytes).String() + "]"
 }
 
 func inlineAttachmentMarkdown(ref channel.MediaRef, id pgtype.UUID) string {

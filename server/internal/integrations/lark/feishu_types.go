@@ -1,6 +1,10 @@
 package lark
 
-import "github.com/jackc/pgx/v5/pgtype"
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
+)
 
 // This file holds the Feishu adapter's native-ish inbound/outbound value
 // types. The WS connector decodes a raw Lark event into an InboundMessage;
@@ -8,6 +12,19 @@ import "github.com/jackc/pgx/v5/pgtype"
 // channel-agnostic engine.Router, and the feishu resolvers / OutcomeReplier
 // translate back at the adapter boundary. (Formerly defined on dispatcher.go,
 // which the MUL-3620 Router cutover removed.)
+
+// ContextMedia is collected only from a message rendered into this turn.
+// Occurrences lets repeated explicit source positions share one attachment.
+type ContextMedia struct {
+	MessageID   string
+	ResourceKey string
+	Type        channel.MsgType
+	FetchType   string
+	Filename    string
+	MimeType    string
+	Placeholder string
+	Occurrences int
+}
 
 // InboundMessage is the Feishu connector's decoded, enriched event. It is the
 // adapter's internal shape: feishuChannel maps it to a channel.InboundMessage
@@ -26,7 +43,8 @@ type InboundMessage struct {
 	// event.message.content. Text/post decoding consumes it immediately; media
 	// ingestion keeps it so the adapter can extract image_key/file_key before
 	// translating to channel.InboundMessage.
-	Content string
+	Content      string
+	ContextMedia []ContextMedia
 	// ForceFreshSession marks this dispatch as a one-off fresh start: the
 	// daemon should skip prior session resume when it claims the resulting
 	// chat task.
@@ -59,6 +77,10 @@ type InboundMessage struct {
 	// enricher prepends quoted/forwarded context). `/issue` is parsed from
 	// THIS, not the enriched Body.
 	CommandBody string
+
+	// HasSelectedContext is set when enrichment renders an explicitly selected
+	// quote or forward; automatic recent context does not set it.
+	HasSelectedContext bool
 }
 
 // Outcome categorizes what the inbound pipeline decided. The OutcomeReplier
@@ -98,6 +120,8 @@ type DispatchResult struct {
 	// IssueIdentifier is the workspace-qualified key ("MUL-42") for the
 	// created issue, used verbatim in the confirmation message.
 	IssueIdentifier string
+	// IssueWorkspaceSlug is the workspace route segment used in deep links.
+	IssueWorkspaceSlug string
 	// IssueTitle is the title supplied on /issue, echoed in the confirmation.
 	IssueTitle string
 	// IssueDuplicate distinguishes an active-issue conflict from a successful

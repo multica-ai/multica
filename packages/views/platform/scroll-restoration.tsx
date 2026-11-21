@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useMemo,
   type ReactNode,
 } from "react";
 
@@ -36,10 +37,14 @@ import {
  * so a re-upload to the same attachment id refuses to restore a stale offset.
  * Plain containers leave it undefined and get identity comparison (undefined
  * === undefined), so they are unaffected.
+ *
+ * `left` is the horizontal offset, present only when it is > 0 (e.g. the
+ * board's column strip scrolled sideways); an entry may then carry top 0.
  */
 export interface ScrollRestorationEntry {
   top: number;
   height: number;
+  left?: number;
   contentKey?: string;
 }
 
@@ -60,6 +65,12 @@ export interface ScrollRestorationAdapter {
    * when there is nothing to restore.
    */
   get(containerKey: string): ScrollRestorationEntry | undefined;
+  /**
+   * Register a plain scroll container at attach time. The returned cleanup
+   * captures it before detach, including same-route view changes. The platform
+   * binds the capture to the tab/route that owned the element at registration.
+   */
+  registerScrollRoot?(containerKey: string, element: HTMLElement): () => void;
   /**
    * Register/unregister a scroll source that is not a `[data-tab-scroll-root]`
    * element (currently: a sandboxed iframe's internal document). Desktop
@@ -126,33 +137,107 @@ export function useRestoredScrollEntry(
 }
 
 /**
- * The saved scroll offset for a container key on the current route, or
- * undefined. Read it once at mount (e.g. into a Virtuoso `initialScrollTop`)
- * — it reflects the state captured when this route was last left.
+ * The saved vertical scroll offset for a container key on the current route,
+ * or undefined when there is none (an entry saved only for its horizontal
+ * offset counts as none). Read it once at mount (e.g. into a Virtuoso
+ * `initialScrollTop`) — it reflects the state captured when this route was
+ * last left.
  */
 export function useRestoredScrollOffset(containerKey: string): number | undefined {
-  return useRestoredScrollEntry(containerKey)?.top;
+  const top = useRestoredScrollEntry(containerKey)?.top;
+  return top !== undefined && top > 0 ? top : undefined;
+}
+
+/**
+ * How long a restore holds the saved offset while the content settles. Long
+ * enough for cached data and lazy sections to land after mount, short enough
+ * that a slow network load does not yank the page later.
+ */
+const RESTORE_SETTLE_MS = 1500;
+
+/** Inputs that mean the user is scrolling the container themselves. */
+const USER_SCROLL_EVENTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+
+/**
+ * Assign the saved offsets to a container that just attached, then hold them
+ * while the content settles. Sections that render a frame or two after mount
+ * move the offset: the browser clamps it while the content is still short,
+ * and content that grows or collapses above it shifts it. So until the
+ * deadline, an offset moved by a change in the content's size is put back.
+ * The restore yields for good once the user scrolls the container, or other
+ * code moves it without the content changing size (a deep-link jump).
+ * Returns a cancel for the pending hold.
+ */
+function restoreOffsets(
+  el: HTMLElement,
+  saved: ScrollRestorationEntry,
+): () => void {
+  const top = saved.top > 0 ? saved.top : undefined;
+  const left = saved.left !== undefined && saved.left > 0 ? saved.left : undefined;
+  if (top === undefined && left === undefined) return () => {};
+  const apply = () => {
+    if (top !== undefined && el.scrollTop !== top) el.scrollTop = top;
+    if (left !== undefined && el.scrollLeft !== left) el.scrollLeft = left;
+  };
+  // Only the restored axes count: the other may be the view's own business.
+  const position = () =>
+    `${top === undefined ? "" : el.scrollTop}:${left === undefined ? "" : el.scrollLeft}`;
+  const size = () => `${el.scrollHeight}:${el.scrollWidth}`;
+
+  apply();
+  if (typeof requestAnimationFrame !== "function") return () => {};
+
+  const deadline = performance.now() + RESTORE_SETTLE_MS;
+  let landed = position();
+  let lastSize = size();
+  let frame = 0;
+  const stop = () => {
+    cancelAnimationFrame(frame);
+    for (const type of USER_SCROLL_EVENTS) el.removeEventListener(type, stop);
+  };
+  const tick = () => {
+    if (!el.isConnected || performance.now() > deadline) return stop();
+    const nextSize = size();
+    if (position() !== landed && nextSize === lastSize) return stop();
+    apply();
+    landed = position();
+    lastSize = nextSize;
+    frame = requestAnimationFrame(tick);
+  };
+  for (const type of USER_SCROLL_EVENTS) {
+    el.addEventListener(type, stop, { passive: true });
+  }
+  frame = requestAnimationFrame(tick);
+  return stop;
 }
 
 /**
  * Ref callback for PLAIN (non-virtualized) scroll containers: assigns the
- * saved offset when the element attaches, which happens during commit —
- * before paint — so the first visible frame is already at the restored
- * position. Compose it with other refs via a merged callback.
+ * saved offsets (vertical and horizontal) when the element attaches, which
+ * happens during commit — before paint — so the first visible frame is
+ * already at the restored position when the content is there; content that
+ * lands a few frames later is caught up by `restoreOffsets`. Compose it with
+ * other refs via a merged callback. Detach captures the latest offsets
+ * through the same adapter.
  */
 export function useRestoredScrollRef(
   containerKey: string,
 ): (el: HTMLElement | null) => void {
   const adapter = useContext(ScrollRestorationContext);
-  return useCallback(
-    (el: HTMLElement | null) => {
+  return useMemo(() => {
+    let capture: (() => void) | undefined;
+    let cancelRestore: (() => void) | undefined;
+    return (el: HTMLElement | null) => {
+      cancelRestore?.();
+      cancelRestore = undefined;
+      capture?.();
+      capture = undefined;
       if (!el) return;
       const saved = adapter?.get(containerKey);
-      if (!saved || saved.top <= 0) return;
-      el.scrollTop = saved.top;
-    },
-    [adapter, containerKey],
-  );
+      if (saved) cancelRestore = restoreOffsets(el, saved);
+      capture = adapter?.registerScrollRoot?.(containerKey, el);
+    };
+  }, [adapter, containerKey]);
 }
 
 /**

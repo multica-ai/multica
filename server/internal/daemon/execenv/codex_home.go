@@ -272,6 +272,16 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}
+	// Expose the desktop app's bundled plugin marketplaces (openai-bundled:
+	// browser, chrome, ...) inside the task home. The CLI resolves bundled
+	// marketplace sources against the ACTIVE CODEX_HOME and silently drops
+	// ones outside it, so without this the task loses the marketplace whose
+	// browser plugin owns the Stop/Interrupt hooks that tell node_repl
+	// "turn_ended" — no notification, no tab cleanup, no session release.
+	// See codex_bundled_marketplaces.go.
+	if err := exposeSharedCodexBundledMarketplaces(codexHome, sharedHome); err != nil {
+		logger.Warn("execenv: codex-home bundled marketplaces exposure failed", "error", err)
+	}
 
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
 	// need to fall back to danger-full-access because of openai/codex#10390,
@@ -293,8 +303,9 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		// so the fail-closed policy just computed above would only exist in
 		// memory while the effective config silently stays loose. Abort rather
 		// than launch Codex with an unenforced sandbox: on fresh Prepare this
-		// fails the task; on Reuse the caller leaves env.CodexHome unset, which
-		// configureCodexTaskShellEnvironment then refuses to start (MUL-4957).
+		// fails the task; on Reuse the caller declines the reuse and falls back
+		// to Prepare, which re-runs this check against a fresh home and fails
+		// the task if the managed block still cannot be written (MUL-4957).
 		return fmt.Errorf("ensure codex sandbox config: %w", err)
 	}
 
@@ -302,7 +313,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// so the parent thread's `turn/completed` is not interpreted as task
 	// completion while spawned subagents are still running. See
 	// codex_multi_agent.go for the full rationale and escape hatch.
-	if err := ensureCodexMultiAgentConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
+	if err := ensureCodexMultiAgentConfig(filepath.Join(codexHome, "config.toml"), opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure multi-agent config failed", "error", err)
 	}
 

@@ -23,7 +23,7 @@ import (
 // from every future session lookup.
 func TestRunTaskPiBusyRetryDoesNotRetireHealthySession(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	priorSessionID := filepath.Join(t.TempDir(), "busy-session.jsonl")
 	claim, err := os.OpenFile(priorSessionID, os.O_CREATE|os.O_RDWR, 0o600)
@@ -51,7 +51,7 @@ printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 

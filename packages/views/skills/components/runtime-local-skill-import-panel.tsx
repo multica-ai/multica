@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -14,7 +15,7 @@ import {
   Search,
   SkipForward,
   XCircle,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type {
   RuntimeLocalSkillImportConflict,
   RuntimeLocalSkillSummary,
@@ -65,9 +66,7 @@ import {
 } from "../../runtimes/components/runtime-machines";
 import { isNameConflictError } from "../lib/utils";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 type BulkImportResult = {
   key: string;
@@ -102,9 +101,7 @@ const INITIAL_BULK_STATE: BulkImportState = {
   results: [],
 };
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Max concurrent imports. Higher = faster but more daemon/network pressure.
@@ -135,9 +132,7 @@ function ResultIcon({ status }: { status: BulkImportResult["status"] }) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Skill row with checkbox
-// ---------------------------------------------------------------------------
 
 function SkillItem({
   skill,
@@ -248,9 +243,7 @@ function SkillItem({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Summary view (shown after bulk import completes)
-// ---------------------------------------------------------------------------
 
 function BulkImportSummary({ results }: { results: BulkImportResult[] }) {
   const { t } = useT("skills");
@@ -311,7 +304,7 @@ function BulkImportSummary({ results }: { results: BulkImportResult[] }) {
         {results.map((r) => (
           <div
             key={r.key}
-            className="flex items-center gap-2 rounded px-2 py-1.5 text-caption"
+            className="flex items-center gap-2 rounded-xs px-2 py-1.5 text-caption"
           >
             <ResultIcon status={r.status} />
             <span className="min-w-0 flex-1 truncate">{r.name}</span>
@@ -499,9 +492,7 @@ function ConflictResolutionPanel({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Panel
-// ---------------------------------------------------------------------------
 
 export function RuntimeLocalSkillImportPanel({
   onImported,
@@ -514,7 +505,7 @@ export function RuntimeLocalSkillImportPanel({
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id ?? null);
-  const shouldReduceMotion = useReducedMotion() ?? false;
+  const shouldReduceMotion = useReducedMotion();
 
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const localRuntimes = useMemo(
@@ -953,7 +944,7 @@ export function RuntimeLocalSkillImportPanel({
             {bulkState.results.map((r) => (
               <div
                 key={r.key}
-                className="flex items-center gap-2 rounded px-2 py-1 text-caption"
+                className="flex items-center gap-2 rounded-xs px-2 py-1 text-caption"
               >
                 <ResultIcon status={r.status} />
                 <span className="truncate">{r.name}</span>
@@ -1075,9 +1066,6 @@ export function RuntimeLocalSkillImportPanel({
           <p className="text-body text-muted-foreground">
             {t(($) => $.runtime_import.no_skills_title)}
           </p>
-          <p className="mt-1 text-caption text-muted-foreground">
-            {t(($) => $.runtime_import.no_skills_hint)}
-          </p>
         </div>
       );
     }
@@ -1095,9 +1083,6 @@ export function RuntimeLocalSkillImportPanel({
 
         {filteredRuntimeSkills.length === 0 ? (
           <div className="rounded-lg border border-dashed px-4 py-8 text-center">
-            <p className="text-body text-muted-foreground">
-              {t(($) => $.runtime_import.no_search_results_title)}
-            </p>
             <p className="mt-1 text-caption text-muted-foreground">
               {t(($) => $.runtime_import.no_search_results_hint, {
                 query: skillSearchQuery.trim(),

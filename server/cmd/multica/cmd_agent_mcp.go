@@ -12,8 +12,6 @@ import (
 )
 
 // Assigning a workspace MCP server to an agent, mirroring `agent skills`.
-// Kept in its own file so cmd_agent.go's line references — which the
-// multica-creating-agents source map cites — stay stable.
 
 var agentMcpCmd = &cobra.Command{
 	Use:   "mcp",

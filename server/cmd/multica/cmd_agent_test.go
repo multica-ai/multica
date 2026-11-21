@@ -33,6 +33,109 @@ func freshAgentEnvSetCmd() *cobra.Command {
 	return c
 }
 
+func newAgentTasksTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "tasks"}
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Int("limit", 200, "")
+	cmd.Flags().String("before", "", "")
+	cmd.Flags().String("profile", "", "")
+	return cmd
+}
+
+func TestRunAgentTasksRequestsUsageForJSON(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/agents/agent-123/tasks" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("include_usage"); got != "true" {
+			t.Errorf("include_usage = %q, want true for JSON output", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"id":    "task-1",
+			"usage": []map[string]any{{"provider": "openai", "input_tokens": 12}},
+		}})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newAgentTasksTestCmd()
+	out, err := captureStdout(t, func() error { return runAgentTasks(cmd, []string{"agent-123"}) })
+	if err != nil {
+		t.Fatalf("runAgentTasks: %v", err)
+	}
+	if !strings.Contains(out, `"input_tokens": 12`) {
+		t.Fatalf("JSON output missing usage: %s", out)
+	}
+}
+
+func TestRunAgentTasksPagination(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	cursor := "2026-09-24T01:02:03.123456Z|00000000-0000-0000-0000-000000000001"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "7" || r.URL.Query().Get("before") != cursor {
+			t.Errorf("pagination query = %s", r.URL.RawQuery)
+		}
+		w.Header().Set("X-Agent-Tasks-Next-Cursor", cursor)
+		_, _ = w.Write([]byte(`[{"id":"task-1"}]`))
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newAgentTasksTestCmd()
+	_ = cmd.Flags().Set("limit", "7")
+	_ = cmd.Flags().Set("before", cursor)
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	output, err := captureStdout(t, func() error { return runAgentTasks(cmd, []string{"agent-123"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "--before") || !strings.Contains(stderr.String(), cursor) {
+		t.Fatalf("missing continuation: %s", stderr.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(output), &rows); err != nil {
+		t.Fatalf("stdout must remain JSON: %s", output)
+	}
+}
+
+func TestRunAgentTasksKeepsTableRequestLightweight(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/agents/agent-123/tasks" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("include_usage"); got != "" {
+			t.Errorf("include_usage = %q, want omitted for table output", got)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "task-1", "status": "completed"}})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newAgentTasksTestCmd()
+	if err := cmd.Flags().Set("output", "table"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := captureStdout(t, func() error { return runAgentTasks(cmd, []string{"agent-123"}) })
+	if err != nil {
+		t.Fatalf("runAgentTasks: %v", err)
+	}
+	if !strings.Contains(out, "task-1") {
+		t.Fatalf("output = %s", out)
+	}
+}
+
 func chdirWithDaemonTaskMarker(t *testing.T) {
 	t.Helper()
 
@@ -148,7 +251,7 @@ func TestMissingServerConfigMessageExplainsPortOnlyContext(t *testing.T) {
 // and asserts the CLI refuses the config-PAT fallback from the escaped cwd.
 func TestNewAPIClient_WorkdirParentEscapeFailsClosed(t *testing.T) {
 	// Seed a user config with a mul_ PAT that must never be picked up.
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_owner_pat"}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -230,7 +333,7 @@ func TestNewAPIClient_LeftoverMarkerActionableError(t *testing.T) {
 // Outside agent context, the three-level fallback (flag → env → config) is
 // unchanged.
 func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	// Seed the global CLI config with a workspace_id that must NOT be
 	// picked up while running inside an agent task.
@@ -325,7 +428,7 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 }
 
 func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_profile_token"}); err != nil {
 		t.Fatalf("seed config: %v", err)
@@ -539,7 +642,7 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 
 func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 	t.Setenv("MULTICA_AGENT_ID", "")
@@ -564,7 +667,7 @@ func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 }
 
 func TestNewAPIClient_WorkdirMarkerRequiresTaskToken(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("MULTICA_AGENT_ID", "")
 	t.Setenv("MULTICA_TASK_ID", "")
@@ -672,7 +775,7 @@ func TestParseCustomEnv(t *testing.T) {
 // --custom-env* flags are gone from `agent update`; the hint must
 // surface their replacement so users discover the new audited path.
 func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
 	t.Setenv("MULTICA_WORKSPACE_ID", "test-ws")
 	t.Setenv("MULTICA_TOKEN", "test-token")
@@ -728,7 +831,7 @@ func TestAgentMaxConcurrentTasksFlagValidation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_TOKEN", "test-token")
@@ -1708,12 +1811,14 @@ func TestAgentGetTableIncludesAvatarURL(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 
 	err := runAgentGet(cmd, []string{"agent-123"})
 
 	w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 
 	if err != nil {
 		t.Fatalf("runAgentGet: %v", err)
@@ -1993,4 +2098,204 @@ func TestAgentCreateThinkingLevelServerRejectionSurfaces(t *testing.T) {
 	if !strings.Contains(err.Error(), "not a recognised value for runtime") {
 		t.Fatalf("server thinking_level rejection should surface to the user; got: %v", err)
 	}
+}
+
+func TestAgentCreateSendsConversationStarters(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+	}))
+	defer srv.Close()
+
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("conversation-starters", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	_ = cmd.Flags().Set("name", "TestAgent")
+	_ = cmd.Flags().Set("runtime-id", "runtime-1")
+	_ = cmd.Flags().Set("conversation-starters", `[{"label":"Review a PR","prompt":"Review the open pull request."}]`)
+
+	if err := runAgentCreate(cmd, nil); err != nil {
+		t.Fatalf("runAgentCreate: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/api/agents" {
+		t.Fatalf("path = %q, want /api/agents", gotPath)
+	}
+	got, ok := gotBody["conversation_starters"].([]any)
+	if !ok {
+		t.Fatalf("conversation_starters body = %v, want array", gotBody["conversation_starters"])
+	}
+	if !reflect.DeepEqual(got, []any{
+		map[string]any{"label": "Review a PR", "prompt": "Review the open pull request."},
+	}) {
+		t.Fatalf("conversation_starters body = %v", got)
+	}
+}
+
+func TestAgentCreateOmitsConversationStartersWhenUnset(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+	}))
+	defer srv.Close()
+
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("conversation-starters", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	_ = cmd.Flags().Set("name", "TestAgent")
+	_ = cmd.Flags().Set("runtime-id", "runtime-1")
+
+	if err := runAgentCreate(cmd, nil); err != nil {
+		t.Fatalf("runAgentCreate: %v", err)
+	}
+	if _, ok := gotBody["conversation_starters"]; ok {
+		t.Fatalf("unset --conversation-starters must be omitted from the body; got %v", gotBody)
+	}
+}
+
+func TestAgentUpdateSendsConversationStarters(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  []any
+	}{
+		{
+			name:  "set explicit starters",
+			value: `[{"label":"Review a PR","prompt":"Review the open pull request."}]`,
+			want: []any{
+				map[string]any{"label": "Review a PR", "prompt": "Review the open pull request."},
+			},
+		},
+		{"empty array clears", "[]", []any{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Errorf("decode request body: %v", err)
+				}
+				json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+			}))
+			defer srv.Close()
+
+			t.Chdir(t.TempDir())
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			t.Setenv("MULTICA_AGENT_ID", "")
+			t.Setenv("MULTICA_TASK_ID", "")
+
+			cmd := &cobra.Command{Use: "update"}
+			cmd.Flags().String("conversation-starters", "", "")
+			cmd.Flags().String("output", "json", "")
+			cmd.Flags().String("profile", "", "")
+			if err := cmd.Flags().Set("conversation-starters", tc.value); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+				t.Fatalf("runAgentUpdate: %v", err)
+			}
+			if gotMethod != http.MethodPut {
+				t.Fatalf("method = %s, want PUT", gotMethod)
+			}
+			if gotPath != "/api/agents/agent-123" {
+				t.Fatalf("path = %q, want /api/agents/agent-123", gotPath)
+			}
+			got, ok := gotBody["conversation_starters"].([]any)
+			if !ok {
+				t.Fatalf("body missing conversation_starters array; got %v", gotBody)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("conversation_starters body = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAgentCreateAndUpdateExposeConversationStartersFlag(t *testing.T) {
+	if agentCreateCmd.Flag("conversation-starters") == nil {
+		t.Error("agent create must expose --conversation-starters")
+	}
+	if agentUpdateCmd.Flag("conversation-starters") == nil {
+		t.Error("agent update must expose --conversation-starters")
+	}
+	for name, usage := range map[string]string{
+		"create": agentCreateCmd.Flag("conversation-starters").Usage,
+		"update": agentUpdateCmd.Flag("conversation-starters").Usage,
+	} {
+		for _, contract := range []string{`{"label","prompt"}`, "3"} {
+			if !strings.Contains(usage, contract) {
+				t.Errorf("agent %s --conversation-starters help = %q, want %q", name, usage, contract)
+			}
+		}
+	}
+	if !strings.Contains(agentUpdateCmd.Flag("conversation-starters").Usage, "[]") {
+		t.Errorf("agent update --conversation-starters help must mention [] to clear; got %q", agentUpdateCmd.Flag("conversation-starters").Usage)
+	}
+}
+
+func TestParseConversationStarters(t *testing.T) {
+	t.Run("empty array", func(t *testing.T) {
+		got, err := parseConversationStarters("[]")
+		if err != nil {
+			t.Fatalf("parseConversationStarters([]): %v", err)
+		}
+		if got == nil || len(got) != 0 {
+			t.Fatalf("got %#v, want empty non-nil slice", got)
+		}
+	})
+	t.Run("rejects null", func(t *testing.T) {
+		_, err := parseConversationStarters("null")
+		if err == nil || !strings.Contains(err.Error(), "[]") {
+			t.Fatalf("expected []-to-clear error, got %v", err)
+		}
+	})
+	t.Run("rejects more than three", func(t *testing.T) {
+		_, err := parseConversationStarters(`[{"label":"a","prompt":"a"},{"label":"b","prompt":"b"},{"label":"c","prompt":"c"},{"label":"d","prompt":"d"}]`)
+		if err == nil || !strings.Contains(err.Error(), "at most 3") {
+			t.Fatalf("expected max-3 error, got %v", err)
+		}
+	})
+	t.Run("rejects object", func(t *testing.T) {
+		_, err := parseConversationStarters(`{"label":"a","prompt":"a"}`)
+		if err == nil || !strings.Contains(err.Error(), "JSON array") {
+			t.Fatalf("expected array error, got %v", err)
+		}
+	})
 }

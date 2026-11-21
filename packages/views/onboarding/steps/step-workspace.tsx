@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useRef, useEffect, useState } from "react";
-import { Dices, Plus } from "lucide-react";
+import { Dices, Plus } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -559,9 +559,6 @@ function CreateNewWorkspaceCard({
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="truncate text-body font-medium text-foreground">
             {t(($) => $.step_workspace.create_new_title)}
-          </div>
-          <div className="truncate text-caption text-muted-foreground">
-            {t(($) => $.step_workspace.create_new_subtitle)}
           </div>
         </div>
         <RadioMark selected={selected} />

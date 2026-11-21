@@ -3,10 +3,31 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestTaskClaimableWaitSecondsExcludesDeferredDelay(t *testing.T) {
+	createdAt := time.Unix(1_000, 0)
+	fireAt := createdAt.Add(10 * time.Minute)
+	dispatchedAt := fireAt.Add(3 * time.Second)
+	task := db.AgentTaskQueue{
+		CreatedAt:    pgtype.Timestamptz{Time: createdAt, Valid: true},
+		FireAt:       pgtype.Timestamptz{Time: fireAt, Valid: true},
+		DispatchedAt: pgtype.Timestamptz{Time: dispatchedAt, Valid: true},
+	}
+
+	if got := taskClaimableWaitSeconds(task); got != 3 {
+		t.Fatalf("taskClaimableWaitSeconds() = %v, want 3", got)
+	}
+	task.FireAt = pgtype.Timestamptz{}
+	if got := taskClaimableWaitSeconds(task); got != 603 {
+		t.Fatalf("immediate task claimable wait = %v, want 603", got)
+	}
+}
 
 // stubWakeup records every call so the test can assert that notify
 // reaches the daemon hub and carries the right runtime / task IDs.

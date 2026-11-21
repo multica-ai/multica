@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
-  <img alt="Multica" src="docs/assets/logo-light.svg" width="50">
+  <img alt="Multica" src="docs/assets/logo-light.svg" width="160">
 </picture>
 
 # Vision
@@ -18,7 +18,7 @@
 
 ## Why "Multica"
 
-Multica — **Mul**tiplexed **I**nformation and **C**omputing **A**gent.
+Multica — **Mult**iplexed **I**nformation and **C**omputing **A**gent.
 
 The name is a nod to Multics, the pioneering operating system of the 1960s that introduced
 time-sharing — letting multiple users share a single machine as if each had it to themselves.

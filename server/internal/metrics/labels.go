@@ -35,6 +35,7 @@ const (
 	labelGate         = "gate"
 	labelOutcome      = "outcome"
 	labelStage        = "stage"
+	labelClaimPath    = "claim_path"
 )
 
 var businessMetricLabels = map[string][]string{
@@ -44,6 +45,8 @@ var businessMetricLabels = map[string][]string{
 	"multica_agent_task_terminal_total":                {labelSource, labelRuntimeMode, labelTerminalStatus},
 	"multica_agent_task_failed_total":                  {labelSource, labelRuntimeMode, labelFailureReason},
 	"multica_agent_task_queue_wait_seconds":            {labelSource, labelRuntimeMode},
+	"multica_agent_task_claimable_wait_seconds":        {labelSource, labelRuntimeMode},
+	"multica_agent_task_claim_decision_total":          {labelClaimPath, labelOutcome, labelReason},
 	"multica_agent_task_run_seconds":                   {labelSource, labelRuntimeMode, labelTerminalStatus},
 	"multica_agent_task_total_seconds":                 {labelSource, labelRuntimeMode, labelTerminalStatus},
 	"multica_agent_task_in_progress":                   {labelSource, labelRuntimeMode},
@@ -61,6 +64,8 @@ var businessMetricLabels = map[string][]string{
 	"multica_runtime_sweeper_candidate_rows_total":     {labelStage},
 	"multica_runtime_sweeper_rows_changed_total":       {labelStage},
 	"multica_agent_runtime_lookup_total":               {labelSource, labelResult},
+	"multica_issue_metadata_mutation_total":            {labelOp, labelResult},
+	"multica_issue_metadata_mutation_duration_seconds": {labelOp, labelResult},
 
 	// PR3 funnel / community / commercial.
 	"multica_signup_total":                             {labelSignupSource},
@@ -104,6 +109,9 @@ var businessMetricLabels = map[string][]string{
 	"multica_entitlement_decision_total":               {labelGate, labelAction, labelReason},
 	"multica_entitlement_version_regression_total":     {},
 	"multica_autopilot_quota_decision_total":           {labelAction, labelSource, labelResult},
+	"multica_storage_quota_sum_total":                  {labelSource, labelResult},
+	"multica_storage_quota_sum_duration_seconds":       {labelSource},
+	"multica_storage_quota_decision_total":             {labelAction, labelSource, labelResult},
 }
 
 var forbiddenMetricLabels = map[string]struct{}{
@@ -155,8 +163,12 @@ var (
 		"kimi":          "kimi",
 		"reasonix":      "reasonix",
 		"dim":           "dim",
+		"devin":         "devin",
 		"mcode":         "mcode",
+		"muse":          "muse",
 		"zeroclaw":      "zeroclaw",
+		"museapp":       "museapp",
+		"zcode":         "zcode",
 		"multica_agent": "multica_agent",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",
@@ -165,6 +177,8 @@ var (
 		"qoder":         "qoder",
 		"qoderclicn":    "qoderclicn",
 		"qwen":          "qwen",
+		"droid":         "droid",
+		"amp":           "amp",
 		"traecli":       "traecli",
 		"other":         "other",
 	}

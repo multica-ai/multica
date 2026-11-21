@@ -1,17 +1,13 @@
 -- name: ListIssueProperties :many
--- usage_count = number of issues in the workspace that currently carry a
--- value for this property. `properties ? id` is a seq scan today; fine at
--- the 20-definition / small-workspace scale this feature targets.
-SELECT p.*,
-    (
-        SELECT COUNT(*) FROM issue i
-        WHERE i.workspace_id = p.workspace_id
-          AND i.properties ? p.id::text
-    )::bigint AS usage_count
-FROM issue_property p
-WHERE p.workspace_id = sqlc.arg('workspace_id')::uuid
-  AND (sqlc.arg('include_archived')::bool OR p.archived_at IS NULL)
-ORDER BY p.position ASC, LOWER(p.name) ASC;
+-- Definition catalog without usage counts — the hot path every issue surface,
+-- the CLI's name resolution, and every realtime refetch hit.
+SELECT * FROM issue_property
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND (sqlc.arg('include_archived')::bool OR archived_at IS NULL)
+ORDER BY position ASC, LOWER(name) ASC;
+
+-- usage_count is computed in Go (propertyUsageQuery in
+-- internal/handler/property.go): it needs one output column per definition.
 
 -- name: GetIssueProperty :one
 SELECT * FROM issue_property
@@ -48,8 +44,9 @@ WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
 -- name: SetIssuePropertyValue :one
--- Single-key atomic write (mirror of SetIssueMetadataKey): concurrent writers
--- on different property keys never clobber each other.
+-- Single-key atomic write: concurrent writers on different property keys
+-- never clobber each other. Unlike SetIssueMetadataKey, a no-op still updates
+-- and returns the issue row.
 UPDATE issue
 SET properties = jsonb_set(properties, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb, true),
     revision = revision + CASE WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN 1 ELSE 0 END,

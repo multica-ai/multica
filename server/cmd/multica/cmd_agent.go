@@ -65,7 +65,7 @@ var agentRestoreCmd = &cobra.Command{
 
 var agentTasksCmd = &cobra.Command{
 	Use:   "tasks <id>",
-	Short: "List tasks for an agent",
+	Short: "List runs for an agent",
 	Args:  exactArgs(1),
 	RunE:  runAgentTasks,
 }
@@ -160,12 +160,13 @@ func init() {
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("description", "", "Agent description")
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
+	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Empty = runtime default.")
 	agentCreateCmd.Flags().String("service-tier", "", "Codex execution speed: empty = inherit local Codex configuration; default = explicit Standard when supported by the daemon's installed Codex CLI; a catalog tier such as priority = explicit Fast.")
-	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
+	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; provider adapters may reserve and filter their own model flags. OpenClaw agent model overrides use runtime_config.model_override and apply to all newly claimed runs until changed or cleared.")
 	agentCreateCmd.Flags().String("custom-env", "", "Custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to set an empty map.")
 	agentCreateCmd.Flags().Bool("custom-env-stdin", false, "Read the --custom-env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
 	agentCreateCmd.Flags().String("custom-env-file", "", "Read the --custom-env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
@@ -176,19 +177,20 @@ func init() {
 	agentCreateCmd.Flags().String("permission-mode", "", "Invocation permission mode: private (owner only) or public_to (allow-list via --public-to-*). Authoritative over --visibility when set.")
 	agentCreateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
-	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks (1-50)")
+	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent runs (1-50)")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent update
 	agentUpdateCmd.Flags().String("name", "", "New name")
 	agentUpdateCmd.Flags().String("description", "", "New description")
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
+	agentUpdateCmd.Flags().String("conversation-starters", "", "New conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Pass '[]' to clear. Omit to leave the stored value unchanged.")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("service-tier", "", "New Codex execution speed: default = explicit Standard when supported by the daemon's installed Codex CLI; a catalog tier such as priority = explicit Fast. Pass an empty string to clear and inherit local Codex configuration.")
-	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
+	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; provider adapters may reserve and filter their own model flags. OpenClaw agent model overrides use runtime_config.model_override and apply to all newly claimed runs until changed or cleared.")
 	// custom_env is intentionally NOT part of `agent update`. Use
 	// `multica agent env set <id>` — that path admits the agent owner or a
 	// workspace owner/admin, denies agent actors, and writes a persisted
@@ -206,7 +208,7 @@ func init() {
 	agentUpdateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentUpdateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentUpdateCmd.Flags().String("status", "", "New status")
-	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks (1-50)")
+	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent runs (1-50)")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -217,6 +219,8 @@ func init() {
 
 	// agent tasks
 	agentTasksCmd.Flags().String("output", "table", "Output format: table or json")
+	agentTasksCmd.Flags().Int("limit", 200, "Maximum runs per page (1-200)")
+	agentTasksCmd.Flags().String("before", "", "Cursor from the previous page")
 
 	// agent avatar
 	agentAvatarCmd.Flags().String("file", "", "Path to the avatar image file (required)")
@@ -256,13 +260,12 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	token := resolveToken(cmd)
 	if taskContext && !strings.HasPrefix(token, "mat_") {
 		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
-		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), the likeliest cause outside a
-		// real task is a leftover marker from a crashed daemon task in a
-		// local_directory. Name the exact file so a normal user can recover
-		// instead of hitting an opaque "requires mat_ token" error. Shares its
-		// wording with requireHumanLocalCommand: same cause, same remedy.
-		if markerPath := leftoverDaemonTaskMarkerPath(); markerPath != "" {
-			return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", leftoverMarkerSuffix(markerPath))
+		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), name the exact file and say
+		// whether it can be a leftover, instead of an opaque "requires mat_
+		// token" error. Shares its wording with requireHumanLocalCommand: same
+		// cause, same remedy.
+		if hint := taskMarkerHint(); hint != "" {
+			return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", hint)
 		}
 		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", daemonPortOnlyContextHint())
 	}
@@ -411,8 +414,8 @@ func requireTaskLocalConfigRoot() error {
 		// too: a user hitting this one through `config show` or `auth status`
 		// is as stuck as one hitting the others, and "which command did you
 		// happen to run first" must not decide whether the error is actionable.
-		if markerPath := leftoverDaemonTaskMarkerPath(); markerPath != "" {
-			return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s%s", cli.TaskConfigRootEnv, leftoverMarkerSuffix(markerPath))
+		if hint := taskMarkerHint(); hint != "" {
+			return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s%s", cli.TaskConfigRootEnv, hint)
 		}
 		return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s%s", cli.TaskConfigRootEnv, daemonPortOnlyContextHint())
 	}
@@ -433,8 +436,8 @@ func requireHumanLocalCommand(command string) error {
 	// until someone deletes the file by hand (MUL-6132). Name it, so the user
 	// knows which file that is; the bare message below sends them to the source
 	// instead. Mirrors newAPIClient's leftover-marker handling.
-	if markerPath := leftoverDaemonTaskMarkerPath(); markerPath != "" {
-		return fmt.Errorf("%s is not available inside a daemon-managed task%s", command, leftoverMarkerSuffix(markerPath))
+	if hint := taskMarkerHint(); hint != "" {
+		return fmt.Errorf("%s is not available inside a daemon-managed task%s", command, hint)
 	}
 	return fmt.Errorf("%s is not available inside a daemon-managed task", command)
 }
@@ -451,6 +454,11 @@ func daemonTaskContextMarkerPath() string {
 	if err != nil {
 		return ""
 	}
+	return daemonTaskContextMarkerPathFrom(dir)
+}
+
+// daemonTaskContextMarkerPathFrom is daemonTaskContextMarkerPath starting at dir.
+func daemonTaskContextMarkerPathFrom(dir string) string {
 	for {
 		markerPath := filepath.Join(dir, execenv.TaskContextMarkerRelPath)
 		// Only a marker we can read AND whose managed_by matches counts as a
@@ -507,9 +515,7 @@ func requireWorkspaceID(cmd *cobra.Command) (string, error) {
 	return id, nil
 }
 
-// ---------------------------------------------------------------------------
 // Agent commands
-// ---------------------------------------------------------------------------
 
 func runAgentList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -653,6 +659,9 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("instructions"); v != "" {
 		body["instructions"] = v
 	}
+	if err := applyConversationStartersFlag(cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("runtime-config") {
 		v, _ := cmd.Flags().GetString("runtime-config")
 		var rc any
@@ -744,6 +753,9 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("instructions")
 		body["instructions"] = v
 	}
+	if err := applyConversationStartersFlag(cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("runtime-id") {
 		v, _ := cmd.Flags().GetString("runtime-id")
 		body["runtime_id"] = v
@@ -802,7 +814,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -874,15 +886,34 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	output, _ := cmd.Flags().GetString("output")
+	params := url.Values{}
+	limit, _ := cmd.Flags().GetInt("limit")
+	if limit < 1 {
+		return fmt.Errorf("limit must be a positive integer")
+	}
+	params.Set("limit", fmt.Sprint(limit))
+	before, _ := cmd.Flags().GetString("before")
+	if before != "" {
+		params.Set("before", before)
+	}
+	if output == "json" {
+		params.Set("include_usage", "true")
+	}
+	path := "/api/agents/" + args[0] + "/tasks?" + params.Encode()
+
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var tasks []map[string]any
-	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/tasks", &tasks); err != nil {
-		return fmt.Errorf("list agent tasks: %w", err)
+	responseHeaders, err := client.GetJSONWithHeaders(ctx, path, &tasks)
+	if err != nil {
+		return fmt.Errorf("list agent runs: %w", err)
+	}
+	if cursor := responseHeaders.Get("X-Agent-Tasks-Next-Cursor"); cursor != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "More runs available; use --before %q to fetch the next page.\n", cursor)
 	}
 
-	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, tasks)
 	}
@@ -981,9 +1012,7 @@ func runAgentAvatar(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Agent skills subcommands
-// ---------------------------------------------------------------------------
 
 func runAgentSkillsList(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
@@ -1111,9 +1140,7 @@ func printAgentSkillsMutationResult(cmd *cobra.Command, agentID string, result j
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Agent env subcommands
-// ---------------------------------------------------------------------------
 
 // runAgentEnvGet fetches the plaintext custom_env for a single agent
 // via the audited `/env` endpoint. The CLI prints raw JSON in JSON
@@ -1188,9 +1215,7 @@ func runAgentEnvSet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 // parseCustomEnv parses the --custom-env flag value (a JSON object literal)
 // into a string map suitable for the request body. The clear-all signal is
@@ -1228,6 +1253,48 @@ func parseCustomArgs(raw string) ([]string, error) {
 		return nil, fmt.Errorf("--custom-args must be a valid JSON array of strings")
 	}
 	return ca, nil
+}
+
+// agentConversationStarter is the CLI wire shape for conversation_starters.
+// Limits match the server/handler and packages/core/agents/constants.ts.
+type agentConversationStarter struct {
+	Label  string `json:"label"`
+	Prompt string `json:"prompt"`
+}
+
+func applyConversationStartersFlag(cmd *cobra.Command, body map[string]any) error {
+	if !cmd.Flags().Changed("conversation-starters") {
+		return nil
+	}
+	v, _ := cmd.Flags().GetString("conversation-starters")
+	starters, err := parseConversationStarters(v)
+	if err != nil {
+		return err
+	}
+	body["conversation_starters"] = starters
+	return nil
+}
+
+// parseConversationStarters parses --conversation-starters (a JSON array of
+// {label, prompt} objects). An explicit [] is a valid clear; null/empty input
+// is rejected so it cannot be confused with omit. A nil slice is coerced to
+// empty so encoding/json emits [] rather than null.
+func parseConversationStarters(raw string) ([]agentConversationStarter, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.EqualFold(trimmed, "null") {
+		return nil, fmt.Errorf("--conversation-starters must be a JSON array of {\"label\",\"prompt\"} objects; pass '[]' to clear")
+	}
+	var starters []agentConversationStarter
+	if err := json.Unmarshal([]byte(raw), &starters); err != nil {
+		return nil, fmt.Errorf("--conversation-starters must be a JSON array of {\"label\",\"prompt\"} objects")
+	}
+	if starters == nil {
+		starters = []agentConversationStarter{}
+	}
+	if len(starters) > 3 {
+		return nil, fmt.Errorf("--conversation-starters must contain at most 3 items")
+	}
+	return starters, nil
 }
 
 // resolveCustomEnv collects the --custom-env, --custom-env-stdin, and

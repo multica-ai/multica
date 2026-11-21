@@ -1,8 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
+import { statusCategoryOfKey } from "@multica/core/issues";
 import type { Issue, IssueStatusEntry } from "@multica/core/types";
+import * as clipboard from "@multica/ui/lib/clipboard";
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -44,8 +46,9 @@ vi.mock("@multica/core/pins", () => ({
 }));
 
 const mockUpdateMutate = vi.fn();
+const mockUpdateMutateAsync = vi.fn();
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: mockUpdateMutate }),
+  useUpdateIssue: () => ({ mutate: mockUpdateMutate, mutateAsync: mockUpdateMutateAsync }),
 }));
 
 // The status catalog is server state; this suite only needs it to answer which
@@ -54,10 +57,18 @@ vi.mock("@multica/core/issues/mutations", () => ({
 // `status === "backlog"` / `=== "todo"` comparison gets wrong (MUL-6463).
 const catalogEntries: IssueStatusEntry[] = [
   ...(["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const).map(
-    (key, i) => statusEntry({ id: key, key, name: key, category: key, is_system: true, position: i }),
+    (key, i) =>
+      statusEntry({
+        id: key,
+        key,
+        name: key,
+        category: statusCategoryOfKey(key),
+        is_system: true,
+        position: i,
+      }),
   ),
-  statusEntry({ id: "later", key: "later", name: "Later", category: "backlog", position: 7 }),
-  statusEntry({ id: "rework", key: "rework", name: "Rework", category: "todo", position: 8 }),
+  statusEntry({ id: "later", key: "later", name: "Later", category: "unstarted", position: 7 }),
+  statusEntry({ id: "rework", key: "rework", name: "Rework", category: "unstarted", position: 8 }),
 ];
 function statusEntry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
   return {
@@ -66,7 +77,7 @@ function statusEntry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
     key: "custom",
     name: "Custom",
     description: "",
-    category: "todo",
+    category: "unstarted",
     color: "#22c55e",
     is_system: false,
     position: 0,
@@ -142,6 +153,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 beforeEach(() => {
   mockOpenModal.mockReset();
   mockUpdateMutate.mockReset();
+  mockUpdateMutateAsync.mockReset().mockResolvedValue(mockIssue);
   mockCreatePinMutate.mockReset();
   mockDeletePinMutate.mockReset();
   vi.mocked(toast.success).mockReset();
@@ -154,15 +166,19 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("useIssueActions", () => {
-  it("updateField dispatches useUpdateIssue.mutate with the correct payload", () => {
+  it("updateField dispatches useUpdateIssue.mutateAsync with the correct payload", () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 
     act(() => {
       result.current.updateField({ status: "done" });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", status: "done" },
       expect.any(Object),
     );
@@ -184,7 +200,7 @@ describe("useIssueActions", () => {
       assigneeType: "agent",
       assigneeId: "agent-1",
     });
-    expect(mockUpdateMutate).not.toHaveBeenCalled();
+    expect(mockUpdateMutateAsync).not.toHaveBeenCalled();
   });
 
   it("assigning an agent to a backlog issue applies directly — backlog never starts a run", () => {
@@ -198,7 +214,7 @@ describe("useIssueActions", () => {
       });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "agent", assignee_id: "agent-1" },
       expect.any(Object),
     );
@@ -228,7 +244,7 @@ describe("useIssueActions", () => {
       assigneeType: "agent",
       assigneeId: "agent-1",
     });
-    expect(mockUpdateMutate).not.toHaveBeenCalled();
+    expect(mockUpdateMutateAsync).not.toHaveBeenCalled();
   });
 
   it("a status change that starts no run applies directly", () => {
@@ -238,7 +254,7 @@ describe("useIssueActions", () => {
       result.current.updateField({ status: "in_progress" });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", status: "in_progress" },
       expect.any(Object),
     );
@@ -255,7 +271,7 @@ describe("useIssueActions", () => {
       });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
       expect.any(Object),
     );
@@ -286,6 +302,42 @@ describe("useIssueActions", () => {
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       "https://app.multica.com/test/issues/issue-1",
+    );
+  });
+
+  it("copyTitleAsLink copies the identifier and title as a Markdown link", async () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyTitleAsLink();
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      "[TES-1 Example](https://app.multica.com/test/issues/TES-1)",
+    );
+  });
+
+  it("copyTitleAsLink reports a failed copy without a success toast", async () => {
+    vi.spyOn(clipboard, "copyTextAndHtml").mockResolvedValueOnce(false);
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyTitleAsLink();
+    });
+
+    expect(toast.error).toHaveBeenCalledOnce();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("copyCommentLink writes the issue's shareable URL anchored at the comment", async () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyCommentLink("comment-7");
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      "https://app.multica.com/test/issues/TES-1#comment-comment-7",
     );
   });
 

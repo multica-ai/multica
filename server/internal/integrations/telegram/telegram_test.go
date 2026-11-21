@@ -202,21 +202,27 @@ func TestInboundGroupHumanReplyUsesCaptionAndHandlesNonText(t *testing.T) {
 		name   string
 		reply  *Message
 		wanted string
+		file   string // the quoted file carried for the resolver, if any
 	}{
 		{
 			name: "caption",
 			reply: &Message{MessageID: 9, From: &User{ID: 222, Username: "ada"},
-				Caption: "diagram caption", Photo: []any{struct{}{}},
+				Caption: "diagram caption", Photo: []PhotoSize{{FileID: "p1"}},
 			},
-			wanted: "diagram caption",
+			wanted: "[Image]\ndiagram caption",
+			file:   "p1",
 		},
 		{
-			name: "empty non-text",
+			name: "file without caption",
 			reply: &Message{MessageID: 9, From: &User{ID: 222, Username: "ada"},
-				Document: &struct {
-					FileName string `json:"file_name"`
-				}{FileName: "notes.txt"},
+				Document: &FileRef{FileID: "d1", FileName: "notes.txt"},
 			},
+			wanted: "[File: notes.txt]",
+			file:   "d1",
+		},
+		{
+			name:   "empty non-text",
+			reply:  &Message{MessageID: 9, From: &User{ID: 222, Username: "ada"}, Sticker: &struct{}{}},
 			wanted: "[empty or non-text message]",
 		},
 	} {
@@ -229,6 +235,14 @@ func TestInboundGroupHumanReplyUsesCaptionAndHandlesNonText(t *testing.T) {
 			if !ok || !msg.AddressedToBot || msg.CommandText != "inspect this" ||
 				!strings.Contains(msg.Text, "sender=\"ada\"") || !strings.Contains(msg.Text, tc.wanted) {
 				t.Fatalf("message = %+v", msg)
+			}
+			raw, _ := decodeTelegramRaw(msg)
+			file := ""
+			if len(raw.Media) == 1 {
+				file = raw.Media[0].FileID
+			}
+			if file != tc.file || len(raw.Media) > 1 {
+				t.Fatalf("media = %+v, want quoted file %q", raw.Media, tc.file)
 			}
 		})
 	}
@@ -611,7 +625,7 @@ func TestDispatchUnsupportedMediaInAddressedGroupPreservesTopicAndReply(t *testi
 	}
 	base := Message{
 		MessageID: 21, From: &User{ID: 3, FirstName: "U"}, Chat: Chat{ID: -42, Type: "supergroup"},
-		Photo: []any{struct{}{}}, IsTopicMessage: true, MessageThreadID: 8,
+		Sticker: &struct{}{}, IsTopicMessage: true, MessageThreadID: 8,
 	}
 	if err := c.dispatch(context.Background(), Update{UpdateID: 1, Message: &base}); err != nil {
 		t.Fatal(err)
@@ -619,8 +633,9 @@ func TestDispatchUnsupportedMediaInAddressedGroupPreservesTopicAndReply(t *testi
 	if len(got) != 0 {
 		t.Fatalf("unaddressed group media produced notice: %+v", got)
 	}
-	base.Caption = "@my_bot look"
-	base.CaptionEntities = []MessageEntity{{Type: "mention", Offset: 0, Length: 7}}
+	// A sticker cannot carry a caption, so replying to the bot is how it is
+	// addressed in a group.
+	base.ReplyToMessage = &Message{MessageID: 5, From: &User{ID: 999, IsBot: true}}
 	if err := c.dispatch(context.Background(), Update{UpdateID: 2, Message: &base}); err != nil {
 		t.Fatal(err)
 	}
@@ -691,3 +706,24 @@ func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard,
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestInboundBareControlKeepsSelectedXMLContext(t *testing.T) {
+	for _, command := range []string{"/new", "/clear"} {
+		for _, mentioned := range []bool{false, true} {
+			text := command
+			if mentioned {
+				text = "@my_bot " + text
+			}
+			msg, ok := inboundFromUpdate(Update{UpdateID: 1, Message: &Message{
+				MessageID: 10, From: &User{ID: 111}, Chat: Chat{ID: -100200, Type: "supergroup"}, Text: text,
+				ReplyToMessage: &Message{MessageID: 9, From: &User{ID: 222, FirstName: "Ada"}, Text: "selected text"},
+			}}, 999, "my_bot")
+			if !ok || msg.HasSelectedContext != mentioned || msg.CommandText != command || msg.ForceFresh != (command == "/clear") {
+				t.Fatalf("selected Telegram control = %+v", msg)
+			}
+			if mentioned && (!strings.Contains(msg.Text, "<quoted_message ") || !strings.Contains(msg.Text, "selected text") || strings.Contains(msg.Text, command)) {
+				t.Fatalf("XML quote not preserved: %q", msg.Text)
+			}
+		}
+	}
+}

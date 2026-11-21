@@ -1,6 +1,6 @@
 import { useImperativeHandle, useRef, useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AutopilotTrigger } from "@multica/core/types";
@@ -260,5 +260,139 @@ describe("AutopilotDialog schedule section on an autopilot that has one", () => 
     await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
     expect(mockUpdateTrigger).not.toHaveBeenCalled();
     expect(mockCreateTrigger).not.toHaveBeenCalled();
+  });
+});
+
+// Regression cover for MUL-7478: the schedule panel counted triggers of every
+// kind, so a 1 schedule + 1 webhook autopilot — where exactly one row can take
+// a cron and the write below names it — was locked out of schedule editing
+// entirely, with a notice pointing at a detail page that had no editor either.
+describe("AutopilotDialog schedule section on an autopilot with several triggers", () => {
+  beforeEach(() => {
+    mockUpdateAutopilot.mockReset().mockResolvedValue({ id: AUTOPILOT_ID });
+    mockCreateTrigger.mockReset().mockResolvedValue({ id: "trg-new" });
+    mockUpdateTrigger.mockReset().mockResolvedValue({ id: "trg-sched" });
+  });
+
+  it("edits the one schedule of an autopilot that also has a webhook", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([
+      trigger({ id: "trg-sched" }),
+      trigger({ id: "trg-hook", kind: "webhook", cron_expression: null, timezone: null }),
+    ]);
+
+    // The stored schedule, live — not the locked notice a second trigger of any
+    // kind used to produce.
+    expect(screen.getByTestId("timezone-picker")).toHaveTextContent("Asia/Shanghai");
+    expect(screen.queryByText(/Close this dialog/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "At an interval" }));
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    // The schedule row, never the webhook one: the API rejects a cron on any
+    // other kind, and rotating the webhook's URL out from under its callers
+    // would be the wrong write to guess at.
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toMatchObject({
+      autopilotId: AUTOPILOT_ID,
+      triggerId: "trg-sched",
+    });
+    expect(mockCreateTrigger).not.toHaveBeenCalled();
+  });
+
+  it("states which schedules to go and edit instead of showing the first of them", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([
+      trigger({ id: "trg-morning" }),
+      trigger({ id: "trg-evening", cron_expression: "TZ=Asia/Shanghai 0 18 * * *" }),
+    ]);
+
+    expect(
+      screen.getByText(
+        "This autopilot has 2 schedules. Close this dialog and edit each one under Triggers below.",
+      ),
+    ).toBeInTheDocument();
+    // A single-value editor cannot show two schedules, and a disabled one
+    // showing the first is still the half-truth a reader would set a clock by.
+    expect(screen.queryByTestId("timezone-picker")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "At an interval" })).not.toBeInTheDocument();
+
+    await user.click(saveButton());
+
+    // Other fields still save; the schedules are left to the trigger rows.
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
+    expect(mockCreateTrigger).not.toHaveBeenCalled();
+  });
+});
+
+// Event filters are edited in one place, the per-webhook dialog. The webhook
+// panel (rendered when the first trigger is a webhook) reads them back and
+// opens that dialog; the autopilot's own Save never writes them.
+describe("AutopilotDialog webhook section", () => {
+  beforeEach(() => {
+    mockUpdateAutopilot.mockReset().mockResolvedValue({ id: AUTOPILOT_ID });
+    mockCreateTrigger.mockReset().mockResolvedValue({ id: "trg-new" });
+    mockUpdateTrigger.mockReset().mockResolvedValue({ id: "trg-hook" });
+  });
+
+  const webhook = (overrides: Partial<AutopilotTrigger> = {}) =>
+    trigger({
+      id: "trg-hook",
+      kind: "webhook",
+      cron_expression: null,
+      timezone: null,
+      webhook_token: "tok-1",
+      event_filters: [{ event: "pull_request" }],
+      ...overrides,
+    });
+
+  it("reads the filters back and edits them in the webhook's own dialog", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([webhook(), trigger({ id: "trg-sched" })]);
+
+    expect(screen.getByTitle("pull_request")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Event" })).not.toBeInTheDocument();
+    expect(screen.getByText("Event filters save immediately — clicking Cancel here won't undo them.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit filters" }));
+    const filters = await screen.findByRole("dialog", { name: "Edit webhook" });
+    await user.click(within(filters).getByRole("button", { name: "Remove rule" }));
+    await user.click(within(filters).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toEqual({
+      autopilotId: AUTOPILOT_ID,
+      triggerId: "trg-hook",
+      event_filters: [],
+    });
+  });
+
+  it("leaves the filters alone when the autopilot itself is saved", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([webhook()]);
+
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
+  });
+
+  it("sends the reader to the trigger rows instead of editing the first of several webhooks", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([webhook(), webhook({ id: "trg-hook-2", webhook_token: "tok-2" })]);
+
+    expect(
+      screen.getByText(
+        "This autopilot has more than one webhook. Close this dialog and edit each one under Triggers below.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit filters" })).not.toBeInTheDocument();
+
+    await user.click(saveButton());
+
+    // Other fields still save; the webhooks are left to their rows.
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
   });
 });

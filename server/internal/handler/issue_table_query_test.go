@@ -89,16 +89,18 @@ func TestCanonicalIssueTableFingerprintNormalizesSetLikeArrays(t *testing.T) {
 	left := issueTableQuerySpec{
 		Scope: issueTableScope{Kind: "workspace", AssigneeTypes: []string{"agent", "member", "agent"}},
 		Filters: issueTableFiltersRequest{
-			Statuses:   []string{"todo", "backlog", "todo"},
-			ProjectIDs: []string{"b", "a"},
+			Statuses:        []string{"todo", "backlog", "todo"},
+			ProjectIDs:      []string{"b", "a"},
+			ProjectStatuses: []string{"planned", "in_progress", "planned"},
 		},
 		Sort: issueTableSortRequest{Field: "title", Direction: "asc"},
 	}
 	right := issueTableQuerySpec{
 		Scope: issueTableScope{Kind: "workspace", AssigneeTypes: []string{"member", "agent"}},
 		Filters: issueTableFiltersRequest{
-			Statuses:   []string{"backlog", "todo"},
-			ProjectIDs: []string{"a", "b"},
+			Statuses:        []string{"backlog", "todo"},
+			ProjectIDs:      []string{"a", "b"},
+			ProjectStatuses: []string{"in_progress", "planned"},
 		},
 		Sort: issueTableSortRequest{Field: "title", Direction: "asc"},
 	}
@@ -268,6 +270,79 @@ func TestIssueTableWorkingIssueIDsAreExplicitAndAssigneeIndependent(t *testing.T
 	}
 	if strings.Contains(compiled.where, "i.assignee_id") {
 		t.Fatalf("working-issue predicate must not filter issue assignees: %q", compiled.where)
+	}
+}
+
+func TestIssueTableUnreadIssueIDsAreExplicit(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	base := issueTableQuerySpec{
+		Scope: issueTableScope{Kind: "workspace"},
+		Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+	withEmpty := base
+	withEmpty.Filters.UnreadIssueIDs = []string{}
+	withEmptyWorking := base
+	withEmptyWorking.Filters.WorkingIssueIDs = []string{}
+
+	unfilteredFingerprint, err := canonicalIssueTableFingerprint(testWorkspaceID, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyFingerprint, err := canonicalIssueTableFingerprint(testWorkspaceID, withEmpty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyWorkingFingerprint, err := canonicalIssueTableFingerprint(testWorkspaceID, withEmptyWorking)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unfilteredFingerprint == emptyFingerprint {
+		t.Fatal("explicit empty unread_issue_ids must not share the unfiltered cursor fingerprint")
+	}
+	if emptyWorkingFingerprint == emptyFingerprint {
+		t.Fatal("explicit empty unread_issue_ids must not share the empty working_issue_ids fingerprint")
+	}
+
+	w := httptest.NewRecorder()
+	compiled, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		withEmpty,
+	)
+	if !ok {
+		t.Fatalf("compile empty filter: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(compiled.where, "FALSE") {
+		t.Fatalf("explicit empty unread_issue_ids predicate = %q, want FALSE", compiled.where)
+	}
+
+	withIssue := base
+	withIssue.Filters.UnreadIssueIDs = []string{"00000000-0000-4000-8000-000000000001"}
+	w = httptest.NewRecorder()
+	compiled, ok = testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		withIssue,
+	)
+	if !ok {
+		t.Fatalf("compile issue filter: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(compiled.where, "i.id = ANY(") {
+		t.Errorf("unread-issue predicate = %q, want issue-id membership", compiled.where)
+	}
+
+	invalid := base
+	invalid.Filters.UnreadIssueIDs = []string{"not-a-uuid"}
+	w = httptest.NewRecorder()
+	if _, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		invalid,
+	); ok || w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid unread_issue_ids: ok=%v code=%d, want 400", ok, w.Code)
 	}
 }
 
@@ -467,8 +542,9 @@ func TestIssueTableLastActivityDefaultsToIndexedOrder(t *testing.T) {
 	sort, ok := testHandler.issueTableOrderBy(
 		w,
 		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
-		testWorkspaceID,
+		parseUUID(testWorkspaceID),
 		issueTableSortRequest{Field: "last_activity"},
+		func(any) string { return "$1" },
 	)
 	if !ok {
 		t.Fatalf("last_activity sort rejected: status=%d body=%s", w.Code, w.Body.String())

@@ -68,6 +68,11 @@ func TestProfileSetSignature_DetectsRegistrationAffectingChanges(t *testing.T) {
 			out[0].CommandName = "different-bin"
 			return out
 		}},
+		{"change runtime_type", func(in []RuntimeProfile) []RuntimeProfile {
+			out := append([]RuntimeProfile(nil), in...)
+			out[0].RuntimeType = "omp"
+			return out
+		}},
 		{"change protocol_family", func(in []RuntimeProfile) []RuntimeProfile {
 			out := append([]RuntimeProfile(nil), in...)
 			out[0].ProtocolFamily = "claude"

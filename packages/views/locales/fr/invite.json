@@ -1,0 +1,60 @@
+{
+  "header": {
+    "back": "Retour",
+    "log_out": "Se déconnecter"
+  },
+  "list": {
+    "title": "Vous avez été invité",
+    "subtitle": "En rejoignant un espace de travail, vous y serez redirigé. Les autres invitations restent en attente.",
+    "workspace_fallback": "Espace de travail",
+    "inviter_fallback": "Quelqu'un",
+    "invited_admin": "{{inviter}} vous a invité en tant qu'administrateur",
+    "invited_member": "{{inviter}} vous a invité en tant que membre",
+    "accept": "Rejoindre",
+    "joining": "Adhésion...",
+    "decline": "Refuser",
+    "declining": "Refus...",
+    "skip": "Ignorer et configurer mon propre espace de travail"
+  },
+  "empty": {
+    "title": "Aucune invitation en attente",
+    "hint": "Poursuivez pour configurer votre propre espace de travail.",
+    "continue": "Passer à la configuration",
+    "go_to_dashboard": "Aller à l'espace de travail"
+  },
+  "linked": {
+    "not_found": "Cette invitation a peut-être expiré, été révoquée, ou n'appartient pas à votre compte.",
+    "accepted": "Cette invitation a déjà été acceptée.",
+    "declined": "Cette invitation a déjà été refusée.",
+    "expired": "Cette invitation a expiré."
+  },
+  "errors": {
+    "accept_failed": "Échec de l'acceptation de l'invitation",
+    "decline_failed": "Échec du refus de l'invitation",
+    "member_limit_reached": "{{workspace}} est complet. Contactez la personne qui vous a invité ; vous pourrez le rejoindre une fois son forfait mis à niveau."
+  },
+  "join": {
+    "no_code": "Aucun code d'invitation trouvé. Utilisez un lien de partage valide.",
+    "invalid": "Ce lien d'invitation n'est pas valide ou a expiré.",
+    "joined_title": "C'est fait !",
+    "redirecting": "Redirection vers votre espace de travail...",
+    "error_title": "Impossible d'ouvrir l'invitation",
+    "go_home": "Retour à l'accueil",
+    "loading": "Chargement de l'invitation...",
+    "title": "Vous êtes invité à rejoindre {{workspace}}",
+    "invited_by": "Invitation de {{name}}",
+    "join_as": "Vous rejoindrez cet espace de travail en tant que",
+    "role_admin": "Admin",
+    "role_member": "Membre",
+    "login_required": "Vous devez vous connecter pour rejoindre cet espace de travail.",
+    "join": "Rejoindre l'espace de travail",
+    "joining": "Adhésion...",
+    "log_in_to_join": "Se connecter pour rejoindre",
+    "join_failed": "Impossible de rejoindre l'espace de travail. Le lien a peut-être expiré.",
+    "seats_full": "Tous les sièges achetés sont occupés. Demandez à un administrateur de l'espace de travail d'ajouter un siège avant de réessayer.",
+    "seats_unavailable": "Impossible de vérifier la capacité en membres. Réessayez.",
+    "full_title": "{{workspace}} est complet",
+    "full_description": "Contactez la personne qui vous a invité. Ce lien fonctionnera de nouveau une fois le forfait de l'espace de travail mis à niveau.",
+    "retry": "Réessayer"
+  }
+}

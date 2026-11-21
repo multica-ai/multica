@@ -50,9 +50,15 @@ type APIClient struct {
 	BaseURL     string
 	WorkspaceID string
 	Token       string
-	AgentID     string // When set, requests are attributed to this agent instead of the user.
-	TaskID      string // When set, sent as X-Task-ID for agent-task validation.
-	HTTPClient  *http.Client
+	// AgentID / TaskID travel as X-Agent-ID / X-Task-ID execution context.
+	// They are NOT what makes the server treat a request as the agent's: the
+	// server strips both headers on entry and re-stamps them from the bound
+	// mat_ task token, so attribution follows the token, not these fields
+	// (MUL-3428). The CLI only sets them inside a daemon-managed task, where
+	// MULTICA_TOKEN is that mat_ token.
+	AgentID    string
+	TaskID     string
+	HTTPClient *http.Client
 
 	// Identity overrides. Empty values fall back to the package-level
 	// ClientPlatform / ClientVersion / ClientOS.
@@ -86,23 +92,29 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s returned %d: %s", e.Method, e.Path, e.StatusCode, strings.TrimSpace(e.Body))
 }
 
+// maxErrorBodyBytes caps how much of an error response is kept. It must hold
+// a whole structured error: a workflow's 409 status mapping plan lists one row
+// per status in use (up to 50) and runs past 4 KiB, and a truncated body no
+// longer parses as JSON. Only --debug prints the raw body.
+const maxErrorBodyBytes = 64 << 10
+
 // newHTTPError builds a *HTTPError from an error response (status >= 400),
 // reading a capped slice of the body. Every Multica API helper funnels its
 // >= 400 responses through this so the top-level FormatError / ExitCodeFor can
 // classify the failure via errors.As(err, **HTTPError) regardless of which
 // HTTP verb the command used.
 func newHTTPError(method, path string, resp *http.Response) *HTTPError {
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	return &HTTPError{
 		Method:     method,
 		Path:       path,
 		StatusCode: resp.StatusCode,
 		Body:       strings.TrimSpace(string(data)),
-		TaskScoped: requestUsedTaskToken(resp),
+		TaskScoped: RequestUsedTaskToken(resp),
 	}
 }
 
-// requestUsedTaskToken reports whether the request that produced resp actually
+// RequestUsedTaskToken reports whether the request that produced resp actually
 // sent a task token.
 //
 // Reading the client's own Token field would be wrong twice over. DownloadFile
@@ -112,7 +124,7 @@ func newHTTPError(method, path string, resp *http.Response) *HTTPError {
 // across a cross-host redirect, so the request that was sent is not always the
 // one the caller built. resp.Request is the request that actually went out,
 // after redirects, which is the only thing this claim can honestly rest on.
-func requestUsedTaskToken(resp *http.Response) bool {
+func RequestUsedTaskToken(resp *http.Response) bool {
 	if resp == nil || resp.Request == nil {
 		return false
 	}
@@ -206,7 +218,10 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 // which keeps signing regardless of this capability — so the signature in list
 // payloads was pure cost: raw bytes, a per-attachment RSA sign, and bytes that
 // differ on every read and therefore defeat agent prompt caching.
-const clientCapabilities = "stable_attachment_urls"
+//
+// workspace-guests-v1 keeps guests in workspace member and invitation lists,
+// which the server hides from clients that cannot render the guest role.
+const clientCapabilities = "stable_attachment_urls,workspace-guests-v1"
 
 func (c *APIClient) setHeaders(req *http.Request) {
 	req.Header.Set("X-Client-Capabilities", clientCapabilities)
@@ -311,6 +326,17 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 
 // DeleteJSONResponse performs a DELETE request and optionally decodes the JSON response.
 func (c *APIClient) DeleteJSONResponse(ctx context.Context, path string, out any) error {
+	return c.deleteJSON(ctx, path, out, nil)
+}
+
+// DeleteJSONWithConflict lets callers consume a structured 409 in full before
+// deciding whether a follow-up request is safe. Other HTTP errors use the
+// usual bounded diagnostic body.
+func (c *APIClient) DeleteJSONWithConflict(ctx context.Context, path string, onConflict func(io.Reader) error) error {
+	return c.deleteJSON(ctx, path, nil, onConflict)
+}
+
+func (c *APIClient) deleteJSON(ctx context.Context, path string, out any, onConflict func(io.Reader) error) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+path, nil)
 	if err != nil {
 		return err
@@ -324,6 +350,9 @@ func (c *APIClient) DeleteJSONResponse(ctx context.Context, path string, out any
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusConflict && onConflict != nil {
+		return onConflict(resp.Body)
+	}
 	if resp.StatusCode >= 400 {
 		return newHTTPError(http.MethodDelete, path, resp)
 	}
@@ -466,55 +495,79 @@ type AttachmentResponse struct {
 // UploadFile uploads a file via multipart form to /api/upload-file.
 // It returns the attachment ID from the server response.
 func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename string, issueID string) (string, error) {
+	att, err := c.UploadIssueAttachment(ctx, fileData, filename, issueID)
+	if err != nil {
+		return "", err
+	}
+	return att.ID, nil
+}
+
+// UploadIssueAttachment uploads a file via multipart form to /api/upload-file
+// and returns the full AttachmentResponse. An empty issueID leaves the row
+// unbound, which is what `issue create` needs: the file is uploaded before the
+// issue exists, its `markdown_url` goes into the description, and the create
+// call binds it via `attachment_ids`.
+func (c *APIClient) UploadIssueAttachment(ctx context.Context, fileData []byte, filename string, issueID string) (AttachmentResponse, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
 	part, err := writer.CreateFormFile("file", filepath.Base(filename))
 	if err != nil {
-		return "", fmt.Errorf("create form file: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("create form file: %w", err)
 	}
 	if _, err := part.Write(fileData); err != nil {
-		return "", fmt.Errorf("write file data: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("write file data: %w", err)
 	}
 
 	if issueID != "" {
 		if err := writer.WriteField("issue_id", issueID); err != nil {
-			return "", fmt.Errorf("write issue_id field: %w", err)
+			return AttachmentResponse{}, fmt.Errorf("write issue_id field: %w", err)
 		}
 	}
 
 	if err := writer.Close(); err != nil {
-		return "", fmt.Errorf("close multipart writer: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("close multipart writer: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file", &body)
 	if err != nil {
-		return "", err
+		return AttachmentResponse{}, err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	c.setHeaders(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	// Honor a longer context deadline for large files: callers widen the
+	// context for uploads, which the default client timeout would shadow.
+	// Same shape as UploadChatAttachment / UploadFileWithURL.
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
 	err = wrapTransport(req, err)
 	if err != nil {
-		return "", err
+		return AttachmentResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return "", newHTTPError(http.MethodPost, "/api/upload-file", resp)
+		return AttachmentResponse{}, newHTTPError(http.MethodPost, "/api/upload-file", resp)
 	}
 
-	var result map[string]any
+	var result AttachmentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode upload response: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", wrapBodyRead(req, err))
 	}
-
-	id, _ := result["id"].(string)
-	if id == "" {
-		return "", fmt.Errorf("upload response missing attachment id")
+	if result.ID == "" {
+		return AttachmentResponse{}, fmt.Errorf("upload response missing attachment id")
 	}
-	return id, nil
+	return result, nil
 }
 
 // UploadChatAttachment uploads a file via multipart form to /api/upload-file
@@ -572,7 +625,7 @@ func (c *APIClient) UploadChatAttachment(ctx context.Context, fileData []byte, f
 
 	var result AttachmentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", wrapBodyRead(req, err))
 	}
 	if result.ID == "" {
 		return AttachmentResponse{}, fmt.Errorf("upload response missing attachment id")
@@ -632,7 +685,7 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 
 	var result AttachmentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", "", fmt.Errorf("decode upload response: %w", err)
+		return "", "", fmt.Errorf("decode upload response: %w", wrapBodyRead(req, err))
 	}
 	if result.URL == "" {
 		return "", "", fmt.Errorf("upload response missing attachment url")
@@ -766,7 +819,19 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 		c.setHeaders(req)
 	}
 
-	resp, err := c.HTTPClient.Do(req)
+	// Downloads may have a longer caller budget than ordinary API requests.
+	// Keep the shared client unchanged for concurrent requests and preserve
+	// its timeout when the caller has no deadline (or disabled client timeouts).
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok && httpClient.Timeout > 0 {
+		if remaining := time.Until(deadline); remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
 	err = wrapTransport(req, err)
 	if err != nil {
 		return nil, err
@@ -778,31 +843,6 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	}
 
 	const maxDownloadSize = 100 << 20 // 100 MB
-	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
-}
-
-// HealthCheck hits the /health endpoint and returns the response body.
-func (c *APIClient) HealthCheck(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := c.HTTPClient.Do(req)
-	err = wrapTransport(req, err)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode >= 400 {
-		return "", &HTTPError{
-			Method:     http.MethodGet,
-			Path:       "/health",
-			StatusCode: resp.StatusCode,
-			Body:       strings.TrimSpace(string(data)),
-			TaskScoped: requestUsedTaskToken(resp),
-		}
-	}
-	return strings.TrimSpace(string(data)), nil
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
+	return data, wrapBodyRead(req, err)
 }

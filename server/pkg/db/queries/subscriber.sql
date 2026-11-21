@@ -160,9 +160,74 @@ DO UPDATE SET unsubscribed_at = NULL, opt_out_scope = NULL, reason = EXCLUDED.re
 -- can tell "never subscribed" (no row) from "chose to leave" (row with
 -- unsubscribed_at). scope='issue' keeps the opt-out from reaching descendants:
 -- future children of this issue are still allowed to subscribe the user.
-UPDATE issue_subscriber
-SET unsubscribed_at = now(), opt_out_scope = 'issue'
-WHERE issue_id = $1 AND user_type = $2 AND user_id = $3 AND unsubscribed_at IS NULL;
+--
+-- A member watching the issue's project has no row to retire, yet still hears
+-- about the issue, so the opt-out is inserted for them. An existing tombstone
+-- is left as it is: a 'subtree' opt-out must not be narrowed to 'issue'.
+-- Members with neither a row nor a project subscription get nothing, so
+-- leaving an issue you never watched does not block later auto-subscribes.
+WITH retired AS (
+    UPDATE issue_subscriber
+    SET unsubscribed_at = now(), opt_out_scope = 'issue'
+    WHERE issue_subscriber.issue_id = sqlc.arg(issue_id)
+      AND issue_subscriber.user_type = sqlc.arg(user_type)
+      AND issue_subscriber.user_id = sqlc.arg(user_id)
+      AND issue_subscriber.unsubscribed_at IS NULL
+    RETURNING issue_subscriber.issue_id
+)
+INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason, unsubscribed_at, opt_out_scope)
+SELECT i.id, 'member', ps.user_id, 'manual', now(), 'issue'
+FROM issue i
+JOIN project_subscriber ps
+  ON ps.project_id = i.project_id AND ps.workspace_id = i.workspace_id
+WHERE i.id = sqlc.arg(issue_id)
+  AND sqlc.arg(user_type)::text = 'member'
+  AND ps.user_id = sqlc.arg(user_id)
+  AND NOT EXISTS (SELECT 1 FROM retired)
+ON CONFLICT (issue_id, user_type, user_id) DO NOTHING;
+
+-- name: UndoIssueUnsubscribe :one
+-- Reverse an issue-scope opt-out, putting the subscription back exactly as it
+-- was instead of subscribing again (which would rewrite the reason to manual
+-- and lift the member out of the delegated and bystander tiers):
+--
+--   * a retired row keeps its reason (creator, commenter, delegated, ...), so
+--     it is reactivated as it stands;
+--   * a tombstone the opt-out itself inserted for a project watcher has no
+--     subscription behind it, so it is deleted and the project covers the
+--     issue again. RemoveIssueSubscriber writes such a row in one statement,
+--     which is why its created_at equals its unsubscribed_at; a retired row
+--     was created before it was retired.
+--
+-- Subtree opt-outs are not undone here: they cover descendants and future
+-- children, which one issue's row cannot restore.
+WITH target AS (
+    SELECT s.issue_id, s.user_type, s.user_id, s.created_at = s.unsubscribed_at AS synthetic
+    FROM issue_subscriber s
+    WHERE s.issue_id = sqlc.arg(issue_id)
+      AND s.user_type = sqlc.arg(user_type)
+      AND s.user_id = sqlc.arg(user_id)
+      AND s.unsubscribed_at IS NOT NULL
+      AND s.opt_out_scope = 'issue'
+),
+dropped AS (
+    DELETE FROM issue_subscriber s
+    USING target t
+    WHERE t.synthetic
+      AND s.issue_id = t.issue_id AND s.user_type = t.user_type AND s.user_id = t.user_id
+    RETURNING s.issue_id
+),
+revived AS (
+    UPDATE issue_subscriber s
+    SET unsubscribed_at = NULL, opt_out_scope = NULL
+    FROM target t
+    WHERE NOT t.synthetic
+      AND s.issue_id = t.issue_id AND s.user_type = t.user_type AND s.user_id = t.user_id
+    RETURNING s.reason
+)
+SELECT
+    COALESCE((SELECT reason FROM revived), '')::text AS revived_reason,
+    EXISTS (SELECT 1 FROM dropped) AS dropped_opt_out;
 
 -- name: UnsubscribeFromIssueSubtree :many
 -- Leave an issue AND every descendant in one action. An agent-built tree is
@@ -234,9 +299,86 @@ SELECT * FROM issue_subscriber
 WHERE issue_id = $1 AND unsubscribed_at IS NULL
 ORDER BY created_at;
 
+-- name: ListSubscribedIssueIDs :many
+-- Every issue in the workspace the member actively subscribes to; opt-out
+-- tombstones do not count.
+SELECT s.issue_id
+FROM issue_subscriber s
+JOIN issue i ON i.id = s.issue_id
+WHERE i.workspace_id = sqlc.arg(workspace_id)
+  AND s.user_type = 'member'
+  AND s.user_id = sqlc.arg(user_id)
+  AND s.unsubscribed_at IS NULL
+  -- MUL-8472: private projects the caller cannot see.
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])));
+
 -- name: IsIssueSubscriber :one
 SELECT EXISTS(
     SELECT 1 FROM issue_subscriber
     WHERE issue_id = $1 AND user_type = $2 AND user_id = $3
       AND unsubscribed_at IS NULL
 ) AS subscribed;
+
+-- name: GetDelegatedSubscriptionFacts :one
+-- Loads the two facts the delegated-subscriber rule needs about the run that
+-- filed an issue: the human that run carried, and HOW the delegation chain the
+-- run belongs to acquired that human (MUL-5483, MUL-7051). One walk, so one
+-- round trip and one tenant guard rather than two.
+--
+-- WHY the second fact is needed. Attribution COPIES the originator across every
+-- agent hop instead of chaining it (MUL-4302 §3.2), so originator_user_id alone
+-- cannot say why a chain has a human: a member's own comment and an autopilot
+-- trigger somebody armed months ago leave an identical value on every
+-- descendant run. Until MUL-6951 the difference did not have to be read —
+-- direct_human was the only root that left an originator at all, so "has an
+-- originator" WAS "a human asked for this". An armed trigger now carries its
+-- creator's authorization too, and that equivalence is what silently turned the
+-- rule into "subscribe whoever armed the automation" (MUL-7051).
+--
+-- Only originator_source separates the two, and every hop relabels itself
+-- 'delegation' / 'comment_source' — so it is the chain ROOT's label that has to
+-- be read. delegated_from_task_id is the link back to the run a hop copied its
+-- human from: follow it while the label is still a hop label and the walk lands
+-- on the run that actually resolved the human.
+--
+-- Tenancy: every hop re-joins agent and re-checks workspace_id — the same guard
+-- GetAgentTaskInWorkspace applies to a single task (MUL-4252) — so a foreign
+-- delegated_from_task_id can never pull a row from another tenant. Both hops
+-- carry it: the anchor's predicate is the one an issue pointing straight at a
+-- foreign run exercises, the recursive one is what stops a local run from
+-- claiming a parent outside the workspace.
+--
+-- The 32-hop stop is a REAL product limit, not just cycle protection (a run can
+-- only reference an older run, so the lineage cannot cycle anyway): a chain
+-- deeper than that reports the hop label it stopped on and its human is not
+-- subscribed. Accepted deliberately — no observed chain comes close, and this
+-- read is on the issue-create path — see DelegatedSubscriber for the contract
+-- and what removing the limit would take.
+--
+-- A lineage truncated by a deleted ancestor, or by that limit, reports the hop
+-- label it stopped on, never a root label, so the caller reads it as "not
+-- proven" instead of assuming a human asked.
+WITH RECURSIVE lineage AS (
+    SELECT atq.id, atq.originator_user_id, atq.originator_source, atq.delegated_from_task_id, 0 AS depth
+    FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id
+    WHERE atq.id = sqlc.arg(origin_task_id) AND a.workspace_id = sqlc.arg(workspace_id)
+
+    UNION ALL
+
+    SELECT parent.id, parent.originator_user_id, parent.originator_source,
+           parent.delegated_from_task_id, child.depth + 1
+    FROM lineage child
+    JOIN agent_task_queue parent ON parent.id = child.delegated_from_task_id
+    JOIN agent parent_agent ON parent_agent.id = parent.agent_id
+    WHERE child.originator_source IN ('delegation', 'comment_source')
+      AND parent_agent.workspace_id = sqlc.arg(workspace_id)
+      AND child.depth < 32
+),
+chain_root AS (
+    SELECT originator_source FROM lineage ORDER BY depth DESC LIMIT 1
+)
+SELECT origin.originator_user_id, chain_root.originator_source AS root_source
+FROM lineage origin
+CROSS JOIN chain_root
+WHERE origin.depth = 0;

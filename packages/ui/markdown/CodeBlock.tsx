@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { codeToHtml, bundledLanguages, type BundledLanguage } from 'shiki'
-import { Copy, Check } from "lucide-react"
+import { Copy, Check } from "@multica/ui/icons"
 import { useTranslation } from "react-i18next"
 import { Button } from "@multica/ui/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip"
@@ -243,7 +243,7 @@ export function InlineCode({
   return (
     <code
       className={cn(
-        'px-1.5 py-0.5 rounded bg-foreground/[0.03] border border-foreground/[0.05] font-mono text-body text-foreground',
+        'px-1.5 py-0.5 rounded-xs bg-foreground/[0.03] border border-foreground/[0.05] font-mono text-body text-foreground',
         CODE_LIGATURE_CLASS,
         className
       )}

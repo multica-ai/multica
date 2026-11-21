@@ -21,7 +21,7 @@ func (h *Handler) requirePluginsV1(w http.ResponseWriter, r *http.Request) bool 
 	if h.pluginsV1Enabled(r.Context()) {
 		return true
 	}
-	writeError(w, http.StatusServiceUnavailable, "Plugin management is not enabled")
+	writeFeatureDisabled(w, "plugin_api_disabled", "Plugin management is not enabled")
 	return false
 }
 
@@ -239,6 +239,10 @@ type installPluginRequest struct {
 
 // InstallPlugin — POST /api/workspaces/{id}/plugins
 func (h *Handler) InstallPlugin(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	if !h.requirePluginsV1(w, r) {
 		return
 	}

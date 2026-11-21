@@ -1,0 +1,26 @@
+name: Frontend quality
+description: Shared UI checks using the caller's installed dependencies
+runs:
+  using: composite
+  steps:
+    # Same entry point as local runs, so a new scripts/**/*.test.mjs file is
+    # picked up here without being listed.
+    - name: Test repository scripts
+      shell: bash
+      run: pnpm test:scripts
+
+    - name: Check packages/ui wildcard exports
+      shell: bash
+      run: node scripts/check-ui-wildcard-exports.mjs
+
+    - name: Check UI radius tokens
+      shell: bash
+      run: node scripts/check-ui-radius-tokens.mjs
+
+    - name: Check shared dependencies use the pnpm catalog
+      shell: bash
+      run: node scripts/check-dependency-catalog.mjs
+
+    - name: Check for dead code and phantom dependencies (knip)
+      shell: bash
+      run: pnpm knip

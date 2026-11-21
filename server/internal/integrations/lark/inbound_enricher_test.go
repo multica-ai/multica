@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -14,6 +15,7 @@ import (
 // ids it was asked for, so tests can assert both the rendered body and
 // the network fan-out (e.g. "no call when nothing to enrich").
 type enricherFakeClient struct {
+	mu         sync.Mutex
 	configured bool
 	byID       map[string][]LarkMessage
 	errByID    map[string]error
@@ -46,6 +48,8 @@ func newEnricherFake() *enricherFakeClient {
 
 func (f *enricherFakeClient) IsConfigured() bool { return f.configured }
 func (f *enricherFakeClient) GetMessage(ctx context.Context, creds InstallationCredentials, id string) ([]LarkMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, id)
 	if e, ok := f.errByID[id]; ok {
 		return nil, e
@@ -173,7 +177,7 @@ func TestEnrichMergeForward(t *testing.T) {
 [User 1]: 你们线上的 Multica 能用吗
 [User 1]: 我这边无法登录
 [User 2]: 我这边 web 和 desktop 都能登陆
-[User 1]: [Image]
+[User 1]: [Image 1: unavailable]
 </forwarded_messages>`
 	if out.Body != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
@@ -500,5 +504,45 @@ func TestEnrichResolvesMentionsInChildren(t *testing.T) {
 	out := enrich(t, fake, InboundMessage{MessageType: "merge_forward", MessageID: "om_f"}, InboundEnricherConfig{})
 	if !strings.Contains(out.Body, "@Alice 看一下") {
 		t.Errorf("child mention not resolved: %q", out.Body)
+	}
+}
+
+func TestEnrichSelectedContextSurvivesBareControl(t *testing.T) {
+	for _, command := range []string{"/new", "/clear"} {
+		for _, unavailable := range []bool{false, true} {
+			t.Run(command+map[bool]string{false: "/quote", true: "/unavailable"}[unavailable], func(t *testing.T) {
+				fake := newEnricherFake()
+				fake.byID["parent"] = []LarkMessage{textMsg("parent", "author", "selected text", "1000")}
+				if unavailable {
+					fake.errByID["parent"] = errors.New("unavailable")
+				}
+				out := enrich(t, fake, InboundMessage{MessageType: "text", Body: command, CommandBody: command, ParentID: "parent"}, InboundEnricherConfig{})
+				normalized := channelMessageFromLark(out)
+				if !normalized.HasSelectedContext || normalized.CommandText != command || !strings.Contains(normalized.Text, "<quoted_message ") || strings.Contains(normalized.Text, command) || normalized.ForceFresh != (command == "/clear") {
+					t.Fatalf("selected Lark control = %+v", normalized)
+				}
+			})
+		}
+	}
+	fake := newEnricherFake()
+	fake.byChat["group"] = []LarkMessage{textMsg("recent", "author", "recent only", "1000")}
+	out := enrich(t, fake, InboundMessage{MessageType: "text", ChatType: ChatTypeGroup, ChatID: "group", AddressedToBot: true, Body: "/clear", CommandBody: "/clear"}, InboundEnricherConfig{RecentContextSize: 5})
+	if out.HasSelectedContext {
+		t.Fatal("automatic recent history must not count as sender-selected input")
+	}
+}
+
+func TestEnrichForwardMarksSelectedContext(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		fake := newEnricherFake()
+		fake.byID["forward"] = []LarkMessage{{MessageID: "forward", MessageType: "merge_forward"}, textMsg("child", "sender", "selected forward", "1000")}
+		if failed {
+			fake.errByID["forward"] = errors.New("unavailable")
+		}
+		out := enrich(t, fake, InboundMessage{MessageID: "forward", MessageType: "merge_forward"}, InboundEnricherConfig{})
+		normalized := channelMessageFromLark(out)
+		if !normalized.HasSelectedContext || !strings.Contains(normalized.Text, "<forwarded_messages") {
+			t.Fatalf("forward selection or original format lost: %+v", normalized)
+		}
 	}
 }

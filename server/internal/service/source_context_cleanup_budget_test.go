@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -16,6 +17,24 @@ import (
 // sourceContextCleanupTestLock serializes every cleanup-oracle test against the
 // other packages that sweep the same integration database.
 const sourceContextCleanupTestLock = int64(0x53434f4e54455854)
+
+// lockSourceContextCleanupTests holds sourceContextCleanupTestLock for the rest
+// of the test on a dedicated session. Cleanup ends that session rather than
+// unlocking and handing it back to the shared pool: closing the connection
+// always releases a session-level advisory lock, whereas an unlock that failed
+// on a pooled session would block every later taker of the key.
+func lockSourceContextCleanupTests(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	pooled, err := pool.Acquire(context.Background())
+	if err != nil {
+		t.Fatalf("acquire source-context cleanup test lock connection: %v", err)
+	}
+	conn := pooled.Hijack()
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	if _, err := conn.Exec(context.Background(), `SELECT pg_advisory_lock($1)`, sourceContextCleanupTestLock); err != nil {
+		t.Fatalf("lock source-context cleanup tests: %v", err)
+	}
+}
 
 // failingSourceContextObjectStore records the context each delete received and
 // always fails, standing in for an object store that is down or throttling.
@@ -55,18 +74,7 @@ func (s *failingSourceContextObjectStore) attemptCount() int {
 func TestCleanupSourceContextObjectIntentsBoundsAttemptsNotSuccesses(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
-	lockConn, err := pool.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("acquire cleanup test lock: %v", err)
-	}
-	if _, err := lockConn.Exec(ctx, `SELECT pg_advisory_lock($1)`, sourceContextCleanupTestLock); err != nil {
-		lockConn.Release()
-		t.Fatalf("lock source-context cleanup tests: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, sourceContextCleanupTestLock)
-		lockConn.Release()
-	})
+	lockSourceContextCleanupTests(t, pool)
 
 	workspaceID, _, _, _ := seedAttributionFixture(t, pool)
 	workspaceUUID := util.MustParseUUID(workspaceID)
@@ -149,18 +157,7 @@ func TestCleanupSourceContextObjectIntentsBoundsAttemptsNotSuccesses(t *testing.
 func TestCleanupAbandonedSourceContextsStopsWhenTheRoundBudgetEnds(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
-	lockConn, err := pool.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("acquire cleanup test lock: %v", err)
-	}
-	if _, err := lockConn.Exec(ctx, `SELECT pg_advisory_lock($1)`, sourceContextCleanupTestLock); err != nil {
-		lockConn.Release()
-		t.Fatalf("lock source-context cleanup tests: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, sourceContextCleanupTestLock)
-		lockConn.Release()
-	})
+	lockSourceContextCleanupTests(t, pool)
 
 	workspaceID, userID, _, sourceIssueID := seedAttributionFixture(t, pool)
 	workspaceUUID := util.MustParseUUID(workspaceID)

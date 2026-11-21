@@ -19,9 +19,10 @@ import (
 // the Auth middleware. ComposioCallback is the exception: it is a public route
 // (outside the Auth group, see router.go / MUL-3843) because the browser often
 // arrives without a session cookie — its identity comes from the signed state,
-// not requireUserID. The whole block returns 503 when h.Composio is nil
+// not requireUserID. The whole block returns 403 when h.Composio is nil
 // (COMPOSIO_API_KEY unset), matching the Lark/GitHub "integration not
-// configured" convention.
+// configured" convention. A missing deployment capability is a non-retryable
+// 403, not a transient 503.
 
 // ComposioConnectInitRequest is the POST /connect/init body.
 type ComposioConnectInitRequest struct {
@@ -60,12 +61,11 @@ func (h *Handler) composioMCPAppsEnabled(ctx context.Context) bool {
 	return featureflags.ComposioMCPAppsEnabled(ctx, h.FeatureFlags)
 }
 
-// ComposioConnectInit (POST /api/integrations/composio/connect/init) starts a
-// hosted Composio auth flow for the requested toolkit and returns the redirect
-// URL. An unsupported toolkit slug is a 400 (the MVP only wires Notion).
+// ComposioConnectInit starts hosted auth for a toolkit with an enabled project
+// auth config. An unsupported toolkit slug returns 400.
 func (h *Handler) ComposioConnectInit(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -105,12 +105,13 @@ func (h *Handler) ComposioConnectInit(w http.ResponseWriter, r *http.Request) {
 // session cookie (expired session, SameSite/ITP stripping, private window,
 // self-hosted callback subdomain). Identity therefore comes solely from the
 // HMAC-signed `state` query param, which CompleteCallback verifies before
-// doing anything. On success the row is upserted and the browser is redirected
-// to the settings page; any failure redirects to the same page with a stable
+// doing anything. On success the row is upserted, connection requests waiting
+// on this account resume their agents, and the browser is redirected to where
+// the flow started (the settings page by default); any failure redirects to the same page with a stable
 // error code so the user is never left on a blank API response.
 func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	q := r.URL.Query()
@@ -118,22 +119,34 @@ func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 	status := q.Get("status")
 	connectedAccountID := q.Get("connected_account_id")
 
-	slug, err := h.Composio.CompleteCallback(r.Context(), state, status, connectedAccountID)
-	if err != nil {
-		// Every failure (tampered/expired state, non-success status, write
-		// error) collapses to the generic failure redirect — we never tell the
-		// browser which check failed.
-		http.Redirect(w, r, h.Composio.CallbackRedirect(slug, false), http.StatusFound)
+	result, err := h.Composio.CompleteCallback(r.Context(), state, status, connectedAccountID)
+	if errors.Is(err, composio.ErrTeamConnectRefused) {
+		// The handshake was verified and only the workspace's plan refused
+		// the account: say so, so the page offers the upgrade instead of a
+		// retry that would fail the same way.
+		http.Redirect(w, r, h.Composio.CallbackRedirectFailure(result, composio.CallbackFeatureLockedReason), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, h.Composio.CallbackRedirect(slug, true), http.StatusFound)
+	if err != nil {
+		// Every other failure (tampered/expired state, non-success status,
+		// write error) collapses to the generic failure redirect — we never
+		// tell the browser which check failed.
+		http.Redirect(w, r, h.Composio.CallbackRedirect(result, false), http.StatusFound)
+		return
+	}
+	if h.ConnectedApps != nil && !result.Team() {
+		if userID, perr := parseUUIDStrict(result.UserID); perr == nil {
+			h.ConnectedApps.ResolveConnectRequests(r.Context(), userID, result.ToolkitSlug)
+		}
+	}
+	http.Redirect(w, r, h.Composio.CallbackRedirect(result, true), http.StatusFound)
 }
 
 // ListComposioConnections (GET /api/integrations/composio/connections) returns
 // the caller's active connections.
 func (h *Handler) ListComposioConnections(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -172,7 +185,7 @@ func (h *Handler) ListComposioConnections(w http.ResponseWriter, r *http.Request
 // load-failed state rather than a misleading empty catalog.
 func (h *Handler) ListComposioToolkits(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	if _, ok := requireUserID(w, r); !ok {
@@ -201,7 +214,7 @@ func (h *Handler) ListComposioToolkits(w http.ResponseWriter, r *http.Request) {
 // a connection that does not belong to the caller is a 404.
 func (h *Handler) DeleteComposioConnection(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)

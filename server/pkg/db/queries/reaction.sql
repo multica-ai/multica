@@ -40,3 +40,8 @@ SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
 SELECT * FROM comment_reaction
 WHERE comment_id = ANY($1::uuid[])
 ORDER BY created_at ASC;
+
+-- name: DeleteCommentReactions :exec
+-- Part of the comment delete transaction: reactions go with the comment.
+DELETE FROM comment_reaction
+WHERE comment_id = @comment_id AND workspace_id = @workspace_id;

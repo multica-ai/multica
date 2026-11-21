@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -22,11 +24,54 @@ func TestMain(m *testing.M) {
 		"MULTICA_WORKSPACE_ID",
 		"MULTICA_SERVER_URL",
 		"MULTICA_TASK_CONFIG_ROOT",
+		"MULTICA_TASK_WORKSPACES_ROOT",
+		"MULTICA_AGENT_NAME",
+		devEnvHomeEnv,
+		devEnvNameEnv,
 	} {
 		os.Unsetenv(key)
 	}
-	os.Exit(m.Run())
+
+	// Redirect both home environment variables to one scratch directory for the
+	// whole binary. On Windows os.UserHomeDir reads USERPROFILE, not HOME, so a
+	// test that redirects only HOME still resolves ~/.multica against the real
+	// home — which is how a full-suite run wrote SaveCLIConfig fixtures over a
+	// real default-profile config.json. Process-wide redirection isolates tests
+	// that forget their own redirect on every platform; per-test t.Setenv
+	// overrides still take precedence.
+	scratchHome, err := testutil.IsolateUserHome("multica-cli-tests-home-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "isolate cmd/multica test home: %v\n", err)
+		os.Exit(1)
+	}
+
+	// The daemon-task marker lookup walks up from the working directory. Run
+	// from a checkout inside an agent task workdir, the package directory sits
+	// below that task's real marker, and every API, config and daemon path
+	// refuses. Tests that need a marker create one and t.Chdir into it.
+	testLaunchDir, err = os.Getwd()
+	if err == nil {
+		err = os.Chdir(scratchHome)
+	}
+	if err != nil {
+		_ = os.RemoveAll(scratchHome)
+		fmt.Fprintf(os.Stderr, "move cmd/multica tests into scratch home: %v\n", err)
+		os.Exit(1)
+	}
+
+	code := m.Run()
+	// Windows cannot remove the current working directory.
+	_ = os.Chdir(os.TempDir())
+	_ = os.RemoveAll(scratchHome)
+	os.Exit(code)
 }
+
+// testLaunchDir is the working directory the test binary started in, before
+// TestMain moved it into the scratch home. A helper process whose parent set
+// exec.Cmd.Dir reads its fixtures from there.
+var testLaunchDir string
+
+var redirectTestHome = testutil.RedirectUserHome
 
 // testCmd returns a minimal cobra.Command with the --profile persistent flag
 // registered, matching the rootCmd setup used in production.
@@ -66,7 +111,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 	}
 	failing := func(string) net.IP { return nil }
 
-	cases := []struct {
+	type bindingCase struct {
 		name         string
 		flagHost     string
 		serverURL    string
@@ -74,7 +119,17 @@ func TestResolveCallbackBinding(t *testing.T) {
 		detect       func(string) net.IP
 		wantCallback string
 		wantBind     string
-	}{
+		wantError    bool
+	}
+	cases := []bindingCase{
+		{
+			name:         "IPv6 app URL uses a supported loopback callback",
+			appURL:       "http://[fd00::1]:3000",
+			detect:       failing,
+			wantCallback: "localhost",
+			wantBind:     "127.0.0.1",
+		},
+
 		{
 			name:         "public app URL stays on loopback",
 			appURL:       "https://multica.ai",
@@ -117,19 +172,35 @@ func TestResolveCallbackBinding(t *testing.T) {
 		},
 		{
 			name:         "--callback-host flag overrides everything",
-			flagHost:     "cli.internal.example",
+			flagHost:     "10.0.0.5",
 			appURL:       "https://multica.ai",
 			serverURL:    "https://api.multica.ai",
 			detect:       fixed("10.0.0.5"),
-			wantCallback: "cli.internal.example",
+			wantCallback: "10.0.0.5",
 			wantBind:     "0.0.0.0",
 		},
+	}
+
+	for _, host := range []string{"198.18.0.1", "8.8.8.8", "100.64.0.1", "169.254.1.1", "::1", "fd00::1", "::ffff:192.168.0.1", "cli.internal.example", "localhost:1234", "127.0.0.1@evil.example"} {
+		cases = append(cases, bindingCase{name: "unsupported explicit host " + host, flagHost: host, wantError: true})
+	}
+	for _, ip := range []string{"198.18.0.1", "8.8.8.8", "100.64.0.1", "169.254.1.1"} {
+		cases = append(cases, bindingCase{name: "unsupported outbound IP " + ip, appURL: "http://192.168.0.28:3000", detect: fixed(ip), wantError: true})
 	}
 
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			gotCallback, gotBind := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.detect)
+			gotCallback, gotBind, err := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.detect)
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "--callback-host") {
+					t.Fatalf("expected actionable callback error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			if gotCallback != tc.wantCallback {
 				t.Errorf("callback host = %q, want %q", gotCallback, tc.wantCallback)
 			}
@@ -333,7 +404,7 @@ func TestLoginTokenFlagParsing(t *testing.T) {
 
 func TestRunAuthStatusTaskContextDoesNotPrintCredential(t *testing.T) {
 	const fakeTaskToken = "mat_task_status_sentinel"
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TOKEN", fakeTaskToken)
@@ -372,7 +443,7 @@ func TestRunAuthStatusTaskContextDoesNotPrintCredential(t *testing.T) {
 
 func TestRunAuthStatusTaskContextRequiresTaskToken(t *testing.T) {
 	ownerHome := t.TempDir()
-	t.Setenv("HOME", ownerHome)
+	redirectTestHome(t, ownerHome)
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
@@ -433,7 +504,7 @@ func TestRunAuthStatusTaskContextRequiresTaskToken(t *testing.T) {
 
 func TestHumanAuthCommandsFailClosedInTaskContext(t *testing.T) {
 	ownerHome := t.TempDir()
-	t.Setenv("HOME", ownerHome)
+	redirectTestHome(t, ownerHome)
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TOKEN", "mat_task_sentinel")
@@ -536,5 +607,76 @@ func TestValidateLoginTokenPrefix(t *testing.T) {
 		if !strings.Contains(err.Error(), p) {
 			t.Errorf("error %q does not mention prefix %q", err.Error(), p)
 		}
+	}
+}
+
+func TestRunAuthStatusDistinguishesVerificationFailure(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+	t.Setenv("MULTICA_DEBUG", "")
+
+	debugOption := rootCmd.PersistentFlags().Lookup("debug")
+	originalDebug, originalDebugChanged := debugFlag, debugOption.Changed
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+		debugFlag, debugOption.Changed = originalDebug, originalDebugChanged
+	})
+
+	for _, tc := range []struct {
+		name    string
+		status  int
+		message string
+		relogin bool
+		task    bool
+		debug   bool
+	}{
+		{"unauthorized", http.StatusUnauthorized, "Token is invalid or expired", true, false, false},
+		{"task unauthorized", http.StatusUnauthorized, "This task token was rejected", false, true, false},
+		{"unavailable", http.StatusServiceUnavailable, "Could not verify the token", false, false, false},
+		{"unavailable with debug", http.StatusServiceUnavailable, "Could not verify the token", false, false, true},
+		{"task unauthorized with debug", http.StatusUnauthorized, "This task token was rejected", false, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token := "mul_test_auth_status"
+			if tc.task {
+				token = "mat_test_auth_status"
+				t.Setenv("MULTICA_AGENT_ID", "agent-test")
+				t.Setenv("MULTICA_TASK_ID", "task-test")
+				t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+			}
+			t.Setenv("MULTICA_TOKEN", token)
+			const responseBody = "test verification failure"
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/me" {
+					t.Errorf("unexpected request path %q", r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, responseBody)
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			stderr := captureStderr(t)
+			defer stderr.restore()
+			args := []string{"auth", "status"}
+			debugFlag = false
+			if tc.debug {
+				args = append(args, "--debug")
+			}
+			rootCmd.SetArgs(args)
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			out := stderr.read()
+			if !strings.Contains(out, tc.message) || strings.Contains(out, "multica login") != tc.relogin || strings.Contains(out, token) {
+				t.Fatalf("unexpected auth status output: %q", out)
+			}
+			if tc.debug {
+				detail := fmt.Sprintf("[debug] http: GET /api/me status=%d body=%s", tc.status, responseBody)
+				if !strings.Contains(out, detail) {
+					t.Fatalf("expected %q in auth status output: %q", detail, out)
+				}
+			} else if strings.Contains(out, "[debug]") || strings.Contains(out, responseBody) {
+				t.Fatalf("unexpected debug details in auth status output: %q", out)
+			}
+		})
 	}
 }

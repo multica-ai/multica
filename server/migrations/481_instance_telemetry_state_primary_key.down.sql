@@ -1,0 +1,1 @@
+ALTER TABLE instance_telemetry_state DROP CONSTRAINT IF EXISTS instance_telemetry_state_pkey;

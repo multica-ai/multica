@@ -8,6 +8,7 @@ import {
   bucketedListEntries,
   flatListEntries,
   invalidateIssueDerivatives,
+  invalidateSidebarListsForIssue,
   invalidateLastActivitySortedIssueLists,
   invalidateStaleListKeys,
   invalidateUpdatedAtSortedIssueLists,
@@ -21,6 +22,7 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
+import { patchInboxIssueProjection, refreshArchivedInboxMatches } from "../inbox/ws-updaters";
 import type {
   Issue,
   IssueLabelsResponse,
@@ -407,6 +409,7 @@ export function onIssueCreated(
   // because a fresh issue isn't necessarily scheduled yet; the active Gantt
   // page (if any) will refetch and pick it up if it qualifies.
   qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
   if (issue.parent_issue_id) {
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issue.parent_issue_id) });
     qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
@@ -499,7 +502,9 @@ export function onIssueUpdated(
   invalidateIssueDerivatives(qc, wsId, {
     statusOrProjectChanged:
       issue.status !== undefined || issue.project_id !== undefined,
+    refreshSidebar: false,
   });
+  invalidateSidebarListsForIssue(qc, wsId, issue.id, [oldProjectId, issue.project_id]);
   // Group counts, branch membership and hierarchy are server-owned. Never
   // guess deltas from a partial branch; refetch the active Table queries.
   qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
@@ -552,6 +557,9 @@ export function onIssueLabelsChanged(
   labels: Label[],
   revision?: number,
 ) {
+  // Runs after the change is committed (event or mutation success), so the
+  // archive can be asked again; the optimistic patch below cannot.
+  void refreshArchivedInboxMatches(qc, wsId);
   if (refetchForUnversionedIssueEvent(qc, wsId, issueId, revision)) {
     qc.invalidateQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
     return;
@@ -581,6 +589,7 @@ export function patchIssueLabels(
     return;
   }
   patchIssueSnapshot(qc, wsId, issueId, { labels }, revision);
+  patchInboxIssueProjection(qc, wsId, issueId, { label_ids: labels.map((label) => label.id) });
   qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), (old) =>
     old &&
     !(
@@ -753,12 +762,31 @@ export function invalidatePropertyWindowQueries(qc: QueryClient, wsId: string) {
   });
 }
 
+/**
+ * Refreshes the duplicate relations an issue:updated event touched: the issue
+ * itself and the originals it was marked against before and after the write.
+ */
+export function onIssueDuplicateMarkChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  next: string | null | undefined,
+  prev: string | null | undefined,
+) {
+  if ((next ?? null) === (prev ?? null)) return;
+  for (const id of [issueId, next, prev]) {
+    if (id) qc.invalidateQueries({ queryKey: issueKeys.duplicates(wsId, id) });
+  }
+}
+
 export function onIssueDeleted(
   qc: QueryClient,
   wsId: string,
   issueId: string,
 ) {
   cleanupDeletedIssueCaches(qc, wsId, issueId);
+  // Deleting an original clears its duplicates' marks server-side.
+  qc.invalidateQueries({ queryKey: issueKeys.duplicatesAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });

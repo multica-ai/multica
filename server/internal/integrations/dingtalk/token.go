@@ -43,6 +43,7 @@ type Client struct {
 	// minting collapses concurrent cache misses for the same AppKey into a
 	// single in-flight token request.
 	minting singleflight.Group
+	sources replySourceCache
 }
 
 type cachedToken struct {

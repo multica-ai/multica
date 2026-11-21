@@ -1,7 +1,4 @@
-import {
-  matchLocale,
-  type SupportedLocale,
-} from "@multica/core/i18n";
+import { matchLocale, type SupportedLocale } from "@multica/core/i18n";
 
 export {
   INSTALL_RUNTIME_ISSUE_TITLE,
@@ -17,8 +14,16 @@ type ContentLang = "en" | "zh" | "ko" | "ja";
 const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   en: "en",
   "zh-Hans": "zh",
+  // No Traditional Chinese variant yet; the Simplified copy is closer to
+  // readable than the English fallback.
+  "zh-Hant": "zh",
   ko: "ko",
   ja: "ja",
+  // Mika's onboarding content has no French, Spanish or Russian variant yet.
+  // Those users read the English copy rather than an untranslated placeholder.
+  fr: "en",
+  es: "en",
+  ru: "en",
 };
 
 /**

@@ -3,11 +3,40 @@ package migrations
 import (
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestMigrationNumericPrefixesAreUnique(t *testing.T) {
+	files := migrationFilesForLint(t, "*.up.sql")
+
+	// Migrations through 128 contain historical duplicate numeric prefixes.
+	// From 129 onward, keep the numeric sequence unique so release tooling and
+	// operators can identify one schema change unambiguously by its number.
+	const firstUniqueMigrationNumber = 129
+	stemByNumber := make(map[int]string)
+	for _, file := range files {
+		stem, _, ok := splitMigrationFilename(filepath.Base(file))
+		if !ok {
+			continue
+		}
+		prefix, _, ok := strings.Cut(stem, "_")
+		if !ok {
+			continue
+		}
+		number, err := strconv.Atoi(prefix)
+		if err != nil || number < firstUniqueMigrationNumber {
+			continue
+		}
+		if previous, exists := stemByNumber[number]; exists {
+			t.Errorf("migrations %s and %s share numeric prefix %s", previous, stem, prefix)
+			continue
+		}
+		stemByNumber[number] = stem
+	}
+}
 
 func TestMigrationFilesHaveMatchingDirections(t *testing.T) {
 	files := migrationFilesForLint(t, "*.sql")
@@ -49,11 +78,13 @@ func migrationFilesForLint(t *testing.T, pattern string) []string {
 func realMigrationsDir(t *testing.T) string {
 	t.Helper()
 
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve migration lint test path")
+	// Relative to the package directory go test runs in; runtime.Caller
+	// would return a module path under -trimpath.
+	dir, err := filepath.Abs(filepath.Join("..", "..", "migrations"))
+	if err != nil {
+		t.Fatalf("resolve migrations dir: %v", err)
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(self), "..", "..", "migrations"))
+	return dir
 }
 
 func splitMigrationFilename(name string) (stem, direction string, ok bool) {

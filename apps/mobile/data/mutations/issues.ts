@@ -15,7 +15,6 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
-  AgentTask,
   CreateIssueRequest,
   Issue,
   IssueReaction,
@@ -25,8 +24,14 @@ import type {
   TimelineEntry,
   UpdateIssueRequest,
 } from "@multica/core/types";
+import type { AppConfigResponse } from "@multica/core/api/schemas";
+import {
+  applyCommentDeletion,
+  removeCommentSubtree,
+} from "@multica/core/issues/comment-deletion";
 import { api } from "@/data/api";
-import { isIssueStatusCategory } from "@/lib/issue-status";
+import { isBuiltInIssueStatus, statusCategoryOfKey } from "@/lib/issue-status";
+import { appConfigOptions } from "@/data/queries/billing";
 import { issueKeys } from "@/data/queries/issues";
 import { inboxKeys } from "@/data/queries/inbox";
 import { useAuthStore } from "@/data/auth-store";
@@ -38,6 +43,7 @@ import {
 } from "@/data/revision";
 import {
   advanceCommentRevision,
+  invalidateIssueOwnerProjections,
   onIssueAuxiliaryRevision,
   reconcileIssueFullSnapshotRevision,
   commentToTimelineEntry,
@@ -313,36 +319,52 @@ export function useEditComment(issueId: string) {
 }
 
 /**
- * Delete a comment. Strips the matching TimelineEntry (and any replies
- * with parent_id === commentId) from the timeline cache optimistically.
- * Backend cascades reply deletion server-side; we mirror the cascade
- * locally so the optimistic patch leaves no orphans on screen.
+ * Whether the server keeps a deleted comment's replies (#8296). Older servers
+ * omit `comment_delete_keep_replies_supported` and delete the replies too, so
+ * anything but an explicit `true` — including a config that has not loaded —
+ * fails closed. Shared by the confirm copy and `useDeleteComment`.
+ */
+export function commentDeleteKeepsReplies(
+  config: AppConfigResponse | undefined,
+): boolean {
+  return config?.comment_delete_keep_replies_supported === true;
+}
+
+/**
+ * Delete a comment. On a server that declares
+ * `comment_delete_keep_replies_supported`, only that comment goes (#8296): one
+ * with replies stays as a tombstone so they keep their parent. Older servers
+ * delete the replies too. Not optimistic — which outcome applies depends on
+ * replies only the server sees for certain. Once it confirms, mirror its
+ * outcome with the same pure helpers web uses (`useDeleteComment` in
+ * packages/core/issues/mutations.ts); realtime events and the settle refetch
+ * reconcile the rest.
  */
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
   return useMutation({
-    mutationFn: (commentId: string) => api.deleteComment(commentId),
-    onMutate: async (commentId) => {
-      const key = issueKeys.timeline(wsId, issueId);
-      await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<TimelineEntry[]>(key);
-      qc.setQueryData<TimelineEntry[]>(key, (old) =>
-        old?.filter(
-          (entry) =>
-            !(
-              entry.type === "comment" &&
-              (entry.id === commentId || entry.parent_id === commentId)
-            ),
-        ),
+    // The capability is read when the delete runs, from the same config cache
+    // the confirm copy reads, so the route matches what the user was told.
+    mutationFn: async (commentId: string) => {
+      const keepReplies = commentDeleteKeepsReplies(
+        qc.getQueryData(appConfigOptions().queryKey),
       );
-      return { prev, key };
+      await api.deleteComment(commentId, { keepReplies });
+      return keepReplies;
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined && ctx.key) {
-        qc.setQueryData(ctx.key, ctx.prev);
-      }
+    onSuccess: (keptReplies, commentId) => {
+      qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(wsId, issueId), (old) => {
+        if (!old) return old;
+        return keptReplies
+          ? applyCommentDeletion(old, commentId, new Date().toISOString())
+          : removeCommentSubtree(old, commentId);
+      });
+      // The endpoint remains 204 for compatibility, so the local caller has
+      // no body carrying issue_revision. The realtime event narrows this
+      // with its revision when connected; this is the no-WS safety net.
+      if (wsId) invalidateIssueOwnerProjections(qc, wsId, issueId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
@@ -481,7 +503,7 @@ export function useToggleIssueReaction(issueId: string) {
  * Keeps `status_category` consistent with an optimistic `status` write
  * (MUL-6243).
  *
- * A cached issue looks like `{status: "todo", status_category: "todo"}` while a
+ * A cached issue looks like `{status: "todo", status_category: "unstarted"}` while a
  * patch carries only `{status: "human_review"}`, so a bare spread would leave
  * the STALE category on an issue that no longer behaves that way — and category
  * is what every list groups on. A custom key this response cannot resolve gets
@@ -492,7 +514,7 @@ export function useToggleIssueReaction(issueId: string) {
 function statusCategoryPatch(status: IssueStatus | undefined): Partial<Issue> {
   if (status === undefined) return {};
   return {
-    status_category: isIssueStatusCategory(status) ? status : undefined,
+    status_category: isBuiltInIssueStatus(status) ? statusCategoryOfKey(status) : undefined,
   };
 }
 
@@ -673,27 +695,8 @@ export function useCreateIssue() {
 }
 
 /**
- * Cancel an in-flight agent task. Optimistically removes the task from the
- * active-tasks cache so the RunRow disappears immediately; the WS
- * `task:cancelled` event then invalidates both task queries (see
- * `use-issue-realtime.ts`) so the task reappears in the past list with the
- * authoritative server state. On error we restore the snapshot.
- */
-/**
- * Delete an issue. Mirrors `useDeleteProject` (mutations/projects.ts:103-128)
- * but the cache surface is wider:
- *   - issueKeys.list(wsId)             — workspace-wide flat list
- *   - issueKeys.myList(wsId, ...)      — three scopes × N filter combos
- *
- * Both are flat `Issue[]` caches. We use `setQueriesData` with the
- * `myAll(wsId)` prefix to filter the issue out of every `myList` key in one
- * pass, snapshot the previous data for rollback, and remove the detail /
- * timeline / tasks caches on settle so a stale return-trip can't surface
- * 404-y data.
- *
- * The WS `issue:deleted` event is already handled in `use-issue-realtime.ts`
- * (callers like the detail screen pass `() => router.back()`), so the other
- * tab/client case is covered.
+ * Keep the issue visible until the server confirms deletion. A rejected delete
+ * leaves list, detail, timeline and run caches intact for retry.
  */
 export function useDeleteIssue() {
   const qc = useQueryClient();
@@ -701,44 +704,25 @@ export function useDeleteIssue() {
 
   return useMutation({
     mutationFn: (id: string) => api.deleteIssue(id),
-    onMutate: async (id) => {
+    onSuccess: async (_data, id) => {
       const listKey = issueKeys.list(wsId);
       const myAllKey = issueKeys.myAll(wsId);
       await Promise.all([
         qc.cancelQueries({ queryKey: listKey }),
         qc.cancelQueries({ queryKey: myAllKey }),
       ]);
-
-      // Snapshot every matching cache (flat list + each my-issues scope×filter)
-      // so we can roll back per-key on error.
-      const prevList = qc.getQueryData<Issue[]>(listKey);
-      const prevMy = qc.getQueriesData<Issue[]>({ queryKey: myAllKey });
-
       qc.setQueryData<Issue[]>(listKey, (old) =>
-        old ? old.filter((i) => i.id !== id) : old,
+        old ? old.filter((issue) => issue.id !== id) : old,
       );
       qc.setQueriesData<Issue[]>({ queryKey: myAllKey }, (old) =>
-        old ? old.filter((i) => i.id !== id) : old,
+        old ? old.filter((issue) => issue.id !== id) : old,
       );
-
-      return { prevList, prevMy, listKey, myAllKey };
-    },
-    onError: (_err, _id, ctx) => {
-      if (!ctx) return;
-      if (ctx.prevList !== undefined) {
-        qc.setQueryData(ctx.listKey, ctx.prevList);
-      }
-      for (const [key, value] of ctx.prevMy) {
-        qc.setQueryData(key, value);
-      }
-    },
-    onSettled: (_data, _err, id) => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
       qc.removeQueries({ queryKey: issueKeys.timeline(wsId, id) });
       qc.removeQueries({ queryKey: issueKeys.activeTasks(wsId, id) });
       qc.removeQueries({ queryKey: issueKeys.tasks(wsId, id) });
+      qc.invalidateQueries({ queryKey: listKey });
+      qc.invalidateQueries({ queryKey: myAllKey });
     },
   });
 }
@@ -749,21 +733,15 @@ export function useCancelTask(issueId: string) {
 
   return useMutation({
     mutationFn: (taskId: string) => api.cancelTaskById(taskId),
-    onMutate: async (taskId) => {
-      const activeKey = issueKeys.activeTasks(wsId, issueId);
-      await qc.cancelQueries({ queryKey: activeKey });
-      const prev = qc.getQueryData<AgentTask[]>(activeKey);
-      qc.setQueryData<AgentTask[]>(activeKey, (old) =>
-        old ? old.filter((t) => t.id !== taskId) : old,
-      );
-      return { prev, activeKey };
-    },
-    onError: (_err, _taskId, ctx) => {
-      if (ctx?.prev) qc.setQueryData(ctx.activeKey, ctx.prev);
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.activeTasks(wsId, issueId) });
-      qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
+    // Pending mutation options can change when the workspace changes.
+    onMutate: () => ({
+      activeKey: issueKeys.activeTasks(wsId, issueId),
+      tasksKey: issueKeys.tasks(wsId, issueId),
+    }),
+    onSettled: (_data, _err, _taskId, context) => {
+      if (!context) return;
+      qc.invalidateQueries({ queryKey: context.activeKey });
+      qc.invalidateQueries({ queryKey: context.tasksKey });
     },
   });
 }

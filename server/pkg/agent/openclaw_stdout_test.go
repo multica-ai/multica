@@ -51,9 +51,7 @@ cat <<'JSON'
 JSON
 ` + tail + `
 `
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write openclaw stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	return bin
 }
 
@@ -96,6 +94,8 @@ func (b *syncBuffer) String() string {
 // TestOpenclawExecuteCompletesWhenCLINeverExits is the assertion that would have
 // caught the undelivered-reply incident.
 func TestOpenclawExecuteCompletesWhenCLINeverExits(t *testing.T) {
+	t.Parallel()
+
 	bin := writeOpenclawStub(t, completeOpenclawResult, true)
 	b := newOpenclawTestBackend(bin)
 
@@ -188,6 +188,8 @@ func TestOpenclawExecuteStillWorksWhenCLIExits(t *testing.T) {
 // that pipe), while the descendant keeps stderr open for 5s, well past the
 // 500ms delay.
 func TestOpenclawExecuteToleratesLingeringStderrHolder(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "openclaw")
 	script := `#!/bin/sh
@@ -208,9 +210,7 @@ cat <<'JSON'
 JSON
 exit 0
 `
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write openclaw stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	b, logs := newOpenclawTestBackendWithLog(bin)
 
 	session, err := b.Execute(context.Background(), "hi", ExecOptions{})
@@ -373,6 +373,8 @@ func TestReadOpenclawStdoutCutsShortWhenCLILingers(t *testing.T) {
 // throw away work the agent has already done, which is worse than the hang this
 // change fixes.
 func TestReadOpenclawStdoutWaitsForCompleteResult(t *testing.T) {
+	t.Parallel()
+
 	r := &stagedOpenclawEOFReader{
 		prefix:        `{"payloads":[{"text":"half`,
 		suffix:        `"}],"meta":{"durationMs":1}}`,

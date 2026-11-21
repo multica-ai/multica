@@ -279,33 +279,27 @@ return 1
 
 var webhookLimiterCheckScript = redis.NewScript(webhookLimiterCheckSrc)
 
-// webhookLimiterAllowSource exposes the script body for tests that want to
-// assert structural invariants (e.g. trim before count before insert)
-// without spinning up a real Redis. Lower-cased "Source" makes the
-// test-only intent explicit.
-func webhookLimiterAllowSource() string { return webhookLimiterAllowSrc }
-
 type redisWebhookRateLimiter struct {
 	cfg       SlidingWindowRateLimit
-	rdb       *redis.Client
+	rdb       redis.UniversalClient
 	keyPrefix string
 }
 
-func newRedisSlidingWindowRateLimiter(rdb *redis.Client, cfg SlidingWindowRateLimit, keyPrefix string) SlidingWindowRateLimiter {
+func newRedisSlidingWindowRateLimiter(rdb redis.UniversalClient, cfg SlidingWindowRateLimit, keyPrefix string) SlidingWindowRateLimiter {
 	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: keyPrefix}
 }
 
-func NewRedisWebhookRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+func NewRedisWebhookRateLimiter(rdb redis.UniversalClient, cfg WebhookRateLimit) WebhookRateLimiter {
 	return newRedisSlidingWindowRateLimiter(rdb, cfg, webhookLimiterKeyPrefix)
 }
 
 // NewRedisWebhookIPRateLimiter is the per-IP variant: same sliding-window
 // Lua script, different key namespace so the two budgets don't interfere.
-func NewRedisWebhookIPRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+func NewRedisWebhookIPRateLimiter(rdb redis.UniversalClient, cfg WebhookRateLimit) WebhookRateLimiter {
 	return newRedisSlidingWindowRateLimiter(rdb, cfg, webhookIPLimiterKeyPrefix)
 }
 
-func NewRedisWebhookAbsoluteIPRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+func NewRedisWebhookAbsoluteIPRateLimiter(rdb redis.UniversalClient, cfg WebhookRateLimit) WebhookRateLimiter {
 	return newRedisSlidingWindowRateLimiter(rdb, cfg, webhookAbsoluteIPLimiterKeyPrefix)
 }
 

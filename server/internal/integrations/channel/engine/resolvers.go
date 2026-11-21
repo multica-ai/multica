@@ -31,6 +31,10 @@ const (
 	OutcomeIssueUsage    Outcome = "issue_usage"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
+	// OutcomeInvokeDenied — the sender may not run this agent. The web chat
+	// refuses the same person at the same point; this is that verdict on the
+	// channel side.
+	OutcomeInvokeDenied Outcome = "invoke_denied"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
@@ -44,25 +48,29 @@ const (
 	DropReasonDuplicate           DropReason = "duplicate"
 	DropReasonRevokedInstallation DropReason = "revoked_installation"
 	DropReasonInvalidEvent        DropReason = "invalid_event"
+	DropReasonInvokeDenied        DropReason = "invocation_not_allowed"
 )
 
 // Result is the typed verdict the Router produces for one inbound message,
 // consumed by the outbound side (OutboundReplier / typing). It mirrors the
 // legacy lark.DispatchResult.
 type Result struct {
-	Outcome              Outcome
-	DropReason           DropReason
-	InstallationID       pgtype.UUID
-	ChatSessionID        pgtype.UUID
+	Outcome        Outcome
+	DropReason     DropReason
+	InstallationID pgtype.UUID
+	ChatSessionID  pgtype.UUID
+	// ChatMessageID identifies this persisted input, including before debounce creates a task.
+	ChatMessageID        pgtype.UUID
 	ChannelBindingID     pgtype.UUID
 	ChannelRouteRevision int64
 	// Sender is the platform-native sender id (e.g. Lark open_id), so the
 	// replier can target a binding prompt back to the sender.
-	Sender          string
-	IssueID         pgtype.UUID
-	IssueNumber     int32
-	IssueIdentifier string
-	IssueTitle      string
+	Sender             string
+	IssueID            pgtype.UUID
+	IssueNumber        int32
+	IssueIdentifier    string
+	IssueWorkspaceSlug string
+	IssueTitle         string
 	// IssueDuplicate marks an /issue command that did not create a new issue
 	// because the shared duplicate guard found the active IssueID above.
 	// Repliers render this as a business conflict, never as an internal error.
@@ -311,6 +319,56 @@ type MediaResolver interface {
 	ResolveMedia(ctx context.Context, inst ResolvedInstallation, sender ResolvedIdentity, sessionID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage
 }
 
+// MediaAbandonNotifier is an optional extra a MediaResolver may implement, for
+// the one failure it cannot see for itself.
+//
+// ResolveMedia owns telling the sender about the attachments it tried and
+// could not fetch. But the Router wraps the whole call in a media budget of
+// its own, and when THAT expires the resolver either never ran or was cut off
+// mid-way, and the Router then discards even the refs it did return. The
+// resolver cannot see that last step, so neither the notice nor any count it
+// keeps covers it. The user is left with the bot answering the line they typed
+// beside the picture as if there were no picture, and nothing telling them to
+// send it again.
+//
+// The Router calls this on that path, on a goroutine of its own and a context
+// of its own with a deadline (mediaAbandonNoticeTimeout): database
+// finalization does not wait for it, and the context that expired cannot carry
+// a message out. Implementing it is optional, and a resolver that does not is
+// left exactly as it was: the type assertion simply misses, which is what
+// keeps the budget path unchanged for every channel that has not opted in.
+type MediaAbandonNotifier interface {
+	NotifyMediaAbandoned(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, a MediaAbandonment)
+}
+
+// MediaNoticeDrainer is an optional extra for a MediaResolver whose
+// ResolveMedia sends its failure notice on a goroutine of its own, so that the
+// Router's bind does not wait on a chat write. The Router's Drain calls it
+// after every media job has finished, which is after every ResolveMedia has
+// returned and so after every such notice has been started; it blocks until
+// those notices are done. Each notice carries its own deadline, which is what
+// bounds the wait.
+type MediaNoticeDrainer interface {
+	DrainMediaNotices()
+}
+
+// MediaAbandonment is what the Router knows about the attachments it gave up
+// on, and the resolver does not.
+type MediaAbandonment struct {
+	// Cause is the media budget's own error: context.DeadlineExceeded when the
+	// budget ran out, context.Canceled when the Router is draining for
+	// shutdown.
+	Cause error
+	// Started is false when the budget was gone before ResolveMedia was
+	// called, so the resolver saw none of this message's attachments. When it
+	// is true, ResolveMedia ran and returned, and every attachment it failed on
+	// is already its own to account for.
+	Started bool
+	// Dropped are the refs ResolveMedia returned that the Router is discarding
+	// instead of binding: stored, but too late to reach the agent.
+	Dropped []channel.MediaRef
+}
+
 // MediaIntentLedger persists upload intent BEFORE the object is written. The
 // row is the only artifact any failure path leaves behind: upload error,
 // resolve deadline, bind failure, ambiguous commit, or a crash all simply
@@ -380,14 +438,14 @@ type OutboundReplier interface {
 // it.
 type TypingNotifier interface {
 	// OnIngested shows the indicator for a successfully ingested message.
-	OnIngested(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID)
+	OnIngested(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, chatMessageID pgtype.UUID)
 	// OnSettled clears the indicator for a session whose run trigger produced no
 	// task (agent offline / archived, or an enqueue failure). In that case no
 	// task lifecycle event is ever published, so the platform's own bus-driven
 	// clear (on chat-done / task-failed) would never fire and the indicator would
 	// stick. The Router calls this from the debounced flush. Idempotent: a
 	// session with no indicator is a no-op.
-	OnSettled(ctx context.Context, sessionID pgtype.UUID)
+	OnSettled(ctx context.Context, sessionID pgtype.UUID, scope TypingSettlement)
 }
 
 // ResolverSet is the per-platform bundle the Router runs the pipeline through.
@@ -422,6 +480,15 @@ type TaskEnqueuer interface {
 	FinalizeChatTaskEnqueue(ctx context.Context, task db.AgentTaskQueue)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
 	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
+	// MemberMayInvokeAgent applies the invocation policy by agent id: the
+	// Router has the installation's agent id, not the loaded row.
+	//
+	// An agent that no longer exists admits nobody, and so does a member who is
+	// not a target — both are (false, nil). A query that FAILED is an error,
+	// never false, because the Router reads false as "tell this person no" and
+	// marks the message processed. The scheduled triggers use the fail-closed
+	// wrapper instead; they can wait for the next tick, a person cannot.
+	MemberMayInvokeAgent(ctx context.Context, agentID, userID pgtype.UUID) (bool, error)
 }
 
 // SessionReader reads the rows the debounced flush + /issue identifier need.
@@ -429,4 +496,11 @@ type TaskEnqueuer interface {
 type SessionReader interface {
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+}
+
+// TypingSettlement identifies the failed flush's immutable input boundary.
+// It excludes later arrivals and other context generations in the same session.
+type TypingSettlement struct {
+	WorkspaceID, InstallationID, ThroughMessageID pgtype.UUID
+	ContextRevision                               int64
 }

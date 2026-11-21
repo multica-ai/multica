@@ -219,7 +219,7 @@ export function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; pat
             onClick={() => setShowAll(true)}
             // Opaque: the gradient alone does not clear the clipped line, so a
             // transparent label lands on top of it and both become unreadable.
-            className="mb-1.5 rounded border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+            className="mb-1.5 rounded-xs border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
           >
             {t(($) => $.transcript.show_all)}
           </button>
@@ -229,19 +229,64 @@ export function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; pat
   );
 }
 
-export function ToolDetailSurface({ text, language }: { text: string; language?: string }) {
+/**
+ * A command tool's input: the command verbatim, line by line, with any
+ * remaining arguments as JSON under it. Laid flat like every other body in the
+ * inspector, so an input reads with the same weight as its result; the command
+ * takes the foreground colour and the arguments stay muted.
+ */
+export function CommandDetailSurface({
+  command,
+  params,
+}: {
+  command: string;
+  params: string | null;
+}) {
+  return (
+    <div>
+      <ToolDetailSurface text={command} emphasis className={params ? "pb-1.5" : undefined} />
+      {params && <ToolDetailSurface text={params} className="pt-0" />}
+    </div>
+  );
+}
+
+export function ToolDetailSurface({
+  text,
+  language,
+  emphasis = false,
+  className,
+  note,
+}: {
+  text: string;
+  language?: string;
+  /**
+   * Foreground text that wraps at spaces, for a command a reviewer reads as
+   * prose. Other bodies stay muted and may break anywhere (long JSON tokens).
+   */
+  emphasis?: boolean;
+  className?: string;
+  /**
+   * A remark about the body, shown at its end once the whole body is on
+   * screen. Withheld while the fade is up: a note that answers "was that all
+   * of it?" is only an answer to a reader who has reached the bottom.
+   */
+  note?: string;
+}) {
   const { t } = useT("agents");
   const [showAll, setShowAll] = useState(false);
   const isLong = text.length > 1600 || text.split("\n").length > 14;
-  // Only file bodies carry a language; command output and JSON stay plain.
+  const revealed = !isLong || showAll;
+  // Only file bodies carry a language; commands, output and JSON stay plain.
   const html = useMemo(() => (language ? highlightBlock(text, language) : null), [text, language]);
 
   return (
     <div className="relative">
       <pre
         className={cn(
-          "transcript-code p-3 font-mono text-micro text-muted-foreground whitespace-pre-wrap break-all",
+          "transcript-code p-3 font-mono text-micro whitespace-pre-wrap",
+          emphasis ? "text-foreground wrap-anywhere" : "text-muted-foreground break-all",
           isLong && !showAll && "max-h-52 overflow-hidden",
+          className,
         )}
       >
         {html === null ? (
@@ -259,12 +304,13 @@ export function ToolDetailSurface({ text, language }: { text: string; language?:
             onClick={() => setShowAll(true)}
             // Opaque: the gradient alone does not clear the clipped line, so a
             // transparent label lands on top of it and both become unreadable.
-            className="mb-1.5 rounded border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+            className="mb-1.5 rounded-xs border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
           >
             {t(($) => $.transcript.show_all)}
           </button>
         </div>
       )}
+      {note && revealed && <p className="px-3 pb-2 text-micro text-faint-foreground">{note}</p>}
     </div>
   );
 }

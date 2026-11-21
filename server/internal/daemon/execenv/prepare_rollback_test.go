@@ -76,13 +76,15 @@ func TestPrepareRollsBackSidecarsWhenPrepareFailsInPlace(t *testing.T) {
 
 // TestPrepareRollsBackWhenWriteContextFilesFailsAfterMarker covers the earliest
 // failure window there is: writeContextFiles lays the marker down as its very
-// first act, then creates .agent_context, writes skills and writes project
-// resources — any of which can fail with the marker already on disk.
+// first act, then writes skills and project resources — either of which can
+// fail with the marker already on disk.
 //
 // The first version of the MUL-6132 fix armed the rollback only after
 // writeContextFiles returned, so exactly these failures still stranded a marker
 // in the user's repository with nothing else beside it (MUL-6132 review). The
-// induced failure is a plain file where .agent_context must be a directory.
+// induced failure is a plain file where .agent_context must be a directory;
+// the task carries a skill because the default provider's skills tree
+// (.agent_context/skills) is now the only thing that opens that directory.
 func TestPrepareRollsBackWhenWriteContextFilesFailsAfterMarker(t *testing.T) {
 	workspacesRoot := t.TempDir()
 	userDir := t.TempDir()
@@ -101,8 +103,9 @@ func TestPrepareRollsBackWhenWriteContextFilesFailsAfterMarker(t *testing.T) {
 		AgentName:      "Test Agent",
 		LocalWorkDir:   userDir,
 		Task: TaskContextForEnv{
-			IssueID: "33333333-4444-5555-6666-777777777777",
-			AgentID: "77777777-6666-5555-4444-333333333333",
+			IssueID:     "33333333-4444-5555-6666-777777777777",
+			AgentID:     "77777777-6666-5555-4444-333333333333",
+			AgentSkills: []SkillContextForEnv{{Name: "Go Conventions", Content: "Follow Go conventions."}},
 		},
 	}, testLogger())
 	if err == nil {

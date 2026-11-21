@@ -34,9 +34,9 @@ func stubNotExecutableProbe(t *testing.T, path string) {
 // counts as confirmation immediately. Two rounds are still required.
 func stubConfirmWindow(t *testing.T, window time.Duration) {
 	t.Helper()
-	orig := notExecutableConfirmWindow
-	t.Cleanup(func() { notExecutableConfirmWindow = orig })
-	notExecutableConfirmWindow = window
+	orig := condemnedConfirmWindow
+	t.Cleanup(func() { condemnedConfirmWindow = orig })
+	condemnedConfirmWindow = window
 }
 
 // npmPackagedCLI stages the layout an npm-installed agent CLI has — a bin entry
@@ -132,18 +132,18 @@ func TestConfirmNotExecutable_WindowStartsAtFirstSighting(t *testing.T) {
 	d := freshDaemon("")
 	start := time.Now()
 
-	if d.confirmNotExecutable("claude", start) {
+	if d.confirmCondemned(builtinProbeNotExecutable, "claude", start) {
 		t.Fatal("first sighting confirmed the verdict on its own")
 	}
-	if d.confirmNotExecutable("claude", start.Add(59*time.Second)) {
+	if d.confirmCondemned(builtinProbeNotExecutable, "claude", start.Add(59*time.Second)) {
 		t.Error("confirmed before the window elapsed")
 	}
-	if !d.confirmNotExecutable("claude", start.Add(time.Minute)) {
+	if !d.confirmCondemned(builtinProbeNotExecutable, "claude", start.Add(time.Minute)) {
 		t.Error("did not confirm after the window elapsed")
 	}
 
-	d.clearNotExecutable("claude")
-	if d.confirmNotExecutable("claude", start.Add(time.Hour)) {
+	d.clearCondemned("claude")
+	if d.confirmCondemned(builtinProbeNotExecutable, "claude", start.Add(time.Hour)) {
 		t.Error("a recovered provider must start a fresh window, not inherit the old one")
 	}
 }
@@ -154,6 +154,7 @@ func TestConfirmNotExecutable_WindowStartsAtFirstSighting(t *testing.T) {
 // repair, without a daemon restart.
 func TestRefreshAgentVersions_TakesNotExecutableRuntimeOfflineAndBack(t *testing.T) {
 	stubConfirmWindow(t, 0)
+	stubProbeRetry(t, time.Millisecond, time.Second)
 	fx := newVersionRefreshFixture(t)
 	d := fx.daemon
 
@@ -235,6 +236,7 @@ func TestDetectBuiltinRuntimes_HealthyProbeClearsPendingVerdict(t *testing.T) {
 // (MUL-6164).
 func TestDeregisterRevivedRuntimes_ReattachesTheUnusableReason(t *testing.T) {
 	stubConfirmWindow(t, 0)
+	stubProbeRetry(t, time.Millisecond, time.Second)
 	// Stable ids before the first registration: the interleave only exists when
 	// the stale response names the same row the demotion took offline.
 	fx := newVersionRefreshFixtureWith(t, func(fx *batchFixture) { fx.enableStableRuntimeIDs() })

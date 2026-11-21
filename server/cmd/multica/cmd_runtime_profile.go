@@ -13,24 +13,23 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
-// ---------------------------------------------------------------------------
 // `multica runtime profile ...` — custom runtime profiles (MUL-3284)
 //
 // A runtime profile lets a workspace declare a custom agent runtime built on
 // top of a supported protocol family (the routing backend) but launched via a
 // site-specific command_name (e.g. a wrapper that injects credentials). The
-// profile lives server-side and is workspace-scoped; the daemon resolves the
-// command_name on each host's PATH at registration time.
+// profile lives server-side and is bound to one machine in the workspace;
+// only that machine's daemon resolves command_name at registration time.
 //
 // `set-path` / `unset-path` are the per-machine escape hatch: they record a
 // profile_id -> absolute executable path mapping in this machine's local CLI
 // config so the daemon can launch a profile whose command isn't on PATH (or
 // pick a specific install among several). That mapping never leaves the
 // machine — it is not sent to the server.
-// ---------------------------------------------------------------------------
 
 var runtimeProfileCmd = &cobra.Command{
 	Use:   "profile",
@@ -90,13 +89,16 @@ func init() {
 	runtimeProfileListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// create
-	runtimeProfileCreateCmd.Flags().String("protocol-family", "", "Supported backend the profile routes to (required)")
+	runtimeProfileCreateCmd.Flags().String("daemon-id", "", "Machine for this profile (defaults to this machine)")
+	runtimeProfileCreateCmd.Flags().String("runtime-type", "", "Base runtime compatibility target (e.g. pi or omp)")
+	runtimeProfileCreateCmd.Flags().String("protocol-family", "", "Legacy base protocol family (use --runtime-type for Oh-My-Pi)")
 	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required)")
 	runtimeProfileCreateCmd.Flags().String("display-name", "", "Human-readable profile name (required)")
 	runtimeProfileCreateCmd.Flags().String("description", "", "Optional description")
 	runtimeProfileCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
+	runtimeProfileUpdateCmd.Flags().String("daemon-id", "", "Bind a legacy profile to this registered local machine")
 	runtimeProfileUpdateCmd.Flags().String("display-name", "", "New display name")
 	runtimeProfileUpdateCmd.Flags().String("command-name", "", "New command name")
 	runtimeProfileUpdateCmd.Flags().String("description", "", "New description")
@@ -166,8 +168,20 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 	displayName, _ := cmd.Flags().GetString("display-name")
 	description, _ := cmd.Flags().GetString("description")
 
-	if strings.TrimSpace(family) == "" {
-		return fmt.Errorf("--protocol-family is required")
+	runtimeType, _ := cmd.Flags().GetString("runtime-type")
+	runtimeType = strings.TrimSpace(runtimeType)
+	if runtimeType == "" && strings.TrimSpace(family) == "" {
+		return fmt.Errorf("--runtime-type or --protocol-family is required")
+	}
+	if runtimeType != "" {
+		resolved, ok := agent.RuntimeProtocolFamily(runtimeType)
+		if !ok {
+			return fmt.Errorf("unsupported --runtime-type %q", runtimeType)
+		}
+		if family != "" && family != resolved {
+			return fmt.Errorf("--protocol-family does not match --runtime-type")
+		}
+		family = resolved
 	}
 	if strings.TrimSpace(commandName) == "" {
 		return fmt.Errorf("--command-name is required")
@@ -193,6 +207,21 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 		"protocol_family": family,
 		"command_name":    commandName,
 	}
+	daemonID, _ := cmd.Flags().GetString("daemon-id")
+	if daemonID = strings.TrimSpace(daemonID); daemonID == "" {
+		daemonID = strings.TrimSpace(os.Getenv("MULTICA_DAEMON_ID"))
+	}
+	if daemonID == "" {
+		daemonID, err = daemon.EnsureDaemonID(resolveProfile(cmd))
+		if err != nil {
+			return fmt.Errorf("resolve local machine: %w", err)
+		}
+	}
+	body["daemon_id"] = daemonID
+	if runtimeType != "" {
+		body["runtime_type"] = runtimeType
+		delete(body, "protocol_family")
+	}
 	if description != "" {
 		body["description"] = description
 	}
@@ -211,6 +240,10 @@ func runRuntimeProfileUpdate(cmd *cobra.Command, args []string) error {
 	profileID := args[0]
 
 	body := map[string]any{}
+	if cmd.Flags().Changed("daemon-id") {
+		v, _ := cmd.Flags().GetString("daemon-id")
+		body["daemon_id"] = v
+	}
 	if cmd.Flags().Changed("display-name") {
 		v, _ := cmd.Flags().GetString("display-name")
 		body["display_name"] = v
@@ -269,16 +302,17 @@ func runRuntimeProfileDelete(cmd *cobra.Command, args []string) error {
 
 	path := runtimeProfilesPath(workspaceID) + "/" + profileID
 	if err := client.DeleteJSON(ctx, path); err != nil {
-		// 409 means the server refused because active agents are still bound
-		// to this profile. Surface the server's explanation verbatim rather
-		// than the generic HTTP wrapper so the user sees what to unbind.
+		// 409 means the server refused — usually because active agents are
+		// still bound to this profile, on machines it names. Surface that
+		// sentence rather than the raw response body: it already reads as
+		// guidance, and it is what tells the user the blockers may be sitting
+		// on a machine other than the one they were cleaning up.
+		if _, msg, isConflict := serverConflictMessage(err); isConflict {
+			return errors.New(msg)
+		}
 		var httpErr *cli.HTTPError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
-			msg := strings.TrimSpace(httpErr.Body)
-			if msg == "" {
-				msg = "profile still has active agents bound to it"
-			}
-			return fmt.Errorf("cannot delete runtime profile %s: %s", profileID, msg)
+			return fmt.Errorf("cannot delete runtime profile %s: profile still has active agents bound to it", profileID)
 		}
 		return fmt.Errorf("delete runtime profile: %w", err)
 	}

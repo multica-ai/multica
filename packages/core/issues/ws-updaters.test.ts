@@ -17,7 +17,10 @@ import {
   patchIssueProperties,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
+import { NO_PROJECT_SIDEBAR_SOURCE } from "./sidebar-list";
 import { labelKeys } from "../labels/queries";
+import { EMPTY_INBOX_FILTERS } from "../inbox/filters";
+import { archivedInboxFacetsOptions, archivedInboxPagesOptions } from "../inbox/queries";
 import { projectKeys } from "../projects/queries";
 import type {
   AgentActivityBucket,
@@ -101,7 +104,7 @@ const otherIssue: Issue = {
 function makeListCache(...issues: Issue[]): ListIssuesCache {
   return {
     byStatus: {
-      todo: { issues, total: issues.length },
+      unstarted: { issues, total: issues.length },
     },
   };
 }
@@ -205,6 +208,28 @@ describe("onIssueLabelsChanged", () => {
     });
   });
 
+  it("re-asks a label-filtered archive and its facets once a label change lands", () => {
+    const filters = { ...EMPTY_INBOX_FILTERS, labels: [labelB.id] };
+    const pages = archivedInboxPagesOptions(WS_ID, filters).queryKey;
+    const facets = archivedInboxFacetsOptions(WS_ID, filters).queryKey;
+    qc.setQueryData(pages, { pages: [{ items: [], nextCursor: null, hasMore: false }], pageParams: [null] });
+    qc.setQueryData(facets, { statuses: {}, priorities: {}, actors: {}, types: {}, projects: {}, assignees: {}, labels: {}, unreadCount: 0 });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 2);
+
+    expectInvalidated(qc, pages);
+    expectInvalidated(qc, facets);
+  });
+
+  it("leaves the archive alone for an optimistic label patch", () => {
+    const pages = archivedInboxPagesOptions(WS_ID, EMPTY_INBOX_FILTERS).queryKey;
+    qc.setQueryData(pages, { pages: [{ items: [], nextCursor: null, hasMore: false }], pageParams: [null] });
+
+    patchIssueLabels(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    expect(qc.getQueryState(pages)?.isInvalidated).toBe(false);
+  });
+
   it("leaves the per-issue label cache untouched when the picker has not fetched", () => {
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
 
@@ -213,7 +238,7 @@ describe("onIssueLabelsChanged", () => {
 
   it("still patches the list, Table row, and detail caches", () => {
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
-      byStatus: { todo: { issues: [baseIssue], total: 1 } },
+      byStatus: { unstarted: { issues: [baseIssue], total: 1 } },
     });
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), baseIssue);
     seedTableRow(qc);
@@ -221,7 +246,7 @@ describe("onIssueLabelsChanged", () => {
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
 
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
-    expect(list?.byStatus.todo?.issues[0]?.labels).toEqual([labelB]);
+    expect(list?.byStatus.unstarted?.issues[0]?.labels).toEqual([labelB]);
 
     const detail = qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID));
     expect(detail?.labels).toEqual([labelB]);
@@ -322,7 +347,7 @@ describe("onIssueMetadataChanged", () => {
     });
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: {
-        todo: {
+        unstarted: {
           issues: [{ ...baseIssue, metadata: { pr_number: 1 } }],
           total: 1,
         },
@@ -338,7 +363,7 @@ describe("onIssueMetadataChanged", () => {
     const detail = qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID));
     expect(detail?.metadata).toEqual({ pr_number: 2 });
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
-    expect(list?.byStatus.todo?.issues[0]?.metadata).toEqual({ pr_number: 2 });
+    expect(list?.byStatus.unstarted?.issues[0]?.metadata).toEqual({ pr_number: 2 });
     expect(
       qc.getQueryData<IssueTableRowsResponse>(tableRowKey)?.rows[0]?.issue
         .metadata,
@@ -549,7 +574,7 @@ describe("onIssueCreated — carries the label snapshot into list cache", () => 
     onIssueCreated(qc, WS_ID, { ...baseIssue, labels: [labelA, labelB] });
 
     const cache = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
-    const cached = cache?.byStatus.todo?.issues.find((i) => i.id === ISSUE_ID);
+    const cached = cache?.byStatus.unstarted?.issues.find((i) => i.id === ISSUE_ID);
     expect(cached?.labels).toEqual([labelA, labelB]);
   });
 });
@@ -602,7 +627,7 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
 
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
     // Surgically reordered into its new slot: proof the patch alone suffices.
-    expect(list?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["issue-2", "issue-1"]);
+    expect(list?.byStatus.unstarted?.issues.map((i) => i.id)).toEqual(["issue-2", "issue-1"]);
     // The old redundant `position -> invalidate(list)` is gone — no full-board
     // refetch on top of the surgical patch (that was the flicker source).
     expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
@@ -616,7 +641,7 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
     onIssueUpdated(qc, WS_ID, { ...issueA, position: 20 });
 
     const my = qc.getQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID));
-    expect(my?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["issue-2", "issue-1"]);
+    expect(my?.byStatus.unstarted?.issues.map((i) => i.id)).toEqual(["issue-2", "issue-1"]);
     // Reconciled in place — no full-list refetch on My Issues (that was the
     // remaining drag flicker on filtered boards).
     expect(qc.getQueryState(issueKeys.myAll(WS_ID))?.isInvalidated).toBe(false);
@@ -642,8 +667,8 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
     // The card LEAVES the loaded list surgically — the fix for the residue
     // that used to wait on a refetch (and on the mutation path never came).
     const list = qc.getQueryData<ListIssuesCache>(assignedKey);
-    expect(list?.byStatus.todo?.issues).toEqual([]);
-    expect(list?.byStatus.todo?.total).toBe(0);
+    expect(list?.byStatus.unstarted?.issues).toEqual([]);
+    expect(list?.byStatus.unstarted?.total).toBe(0);
     expect(qc.getQueryState(assignedKey)?.isInvalidated).toBe(false);
   });
 
@@ -662,7 +687,7 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
     // Union membership (assigned ∪ created ∪ involved) is server knowledge:
     // the card is patched in place and the list refetches to reconcile.
     const list = qc.getQueryData<ListIssuesCache>(myAllListKey);
-    expect(list?.byStatus.todo?.issues[0]?.assignee_id).toBe("user-2");
+    expect(list?.byStatus.unstarted?.issues[0]?.assignee_id).toBe("user-2");
     expectInvalidated(qc, myAllListKey);
   });
 
@@ -683,7 +708,7 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
     // Never hard-inserted (its page/slot is server knowledge) — the loaded
     // target list is refetched instead.
     expect(
-      qc.getQueryData<ListIssuesCache>(targetKey)?.byStatus.todo?.issues,
+      qc.getQueryData<ListIssuesCache>(targetKey)?.byStatus.unstarted?.issues,
     ).toEqual([]);
     expectInvalidated(qc, targetKey);
   });
@@ -707,7 +732,7 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
     onIssueUpdated(qc, WS_ID, moved, { projectChanged: true });
 
     expect(
-      qc.getQueryData<ListIssuesCache>(oldProjectKey)?.byStatus.todo?.issues,
+      qc.getQueryData<ListIssuesCache>(oldProjectKey)?.byStatus.unstarted?.issues,
     ).toEqual([]);
   });
 
@@ -753,7 +778,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     // arrays are the loaded window — the moved issue lives beyond it.
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: {
-        in_review: { issues: [], total: 1 },
+        started: { issues: [], total: 1 },
         done: { issues: [], total: 60 },
       },
     });
@@ -795,7 +820,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, "off-screen"), offScreen);
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: {
-        in_review: { issues: [], total: 1 },
+        started: { issues: [], total: 1 },
         done: { issues: [], total: 60 },
       },
     });
@@ -808,7 +833,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     );
 
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
-    expect(list?.byStatus.in_review?.total).toBe(0);
+    expect(list?.byStatus.started?.total).toBe(0);
     expect(list?.byStatus.done?.total).toBe(61);
     expectInvalidated(qc, issueKeys.list(WS_ID));
   });
@@ -817,7 +842,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     const loaded: Issue = { ...baseIssue, id: "loaded", status: "in_review" };
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: {
-        in_review: { issues: [loaded], total: 1 },
+        started: { issues: [loaded], total: 1 },
         done: { issues: [], total: 60 },
       },
     });
@@ -830,7 +855,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     );
 
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
-    expect(list?.byStatus.in_review?.total).toBe(0);
+    expect(list?.byStatus.started?.total).toBe(0);
     expect(list?.byStatus.done?.total).toBe(61);
     // Reconciled in place — the no-flicker fast path from #4415 must hold.
     expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
@@ -964,14 +989,14 @@ describe("onIssueDeleted", () => {
     const myList = qc.getQueryData<ListIssuesCache>(
       issueKeys.myList(WS_ID, "assigned", myFilter),
     );
-    expect(list?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
+    expect(list?.byStatus.unstarted?.issues.map((i) => i.id)).toEqual([
       OTHER_ISSUE_ID,
     ]);
-    expect(list?.byStatus.todo?.total).toBe(1);
-    expect(myList?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
+    expect(list?.byStatus.unstarted?.total).toBe(1);
+    expect(myList?.byStatus.unstarted?.issues.map((i) => i.id)).toEqual([
       OTHER_ISSUE_ID,
     ]);
-    expect(myList?.byStatus.todo?.total).toBe(1);
+    expect(myList?.byStatus.unstarted?.total).toBe(1);
     expectInvalidated(qc, issueKeys.list(WS_ID));
     expectInvalidated(qc, issueKeys.myList(WS_ID, "assigned", myFilter));
   });
@@ -1030,7 +1055,7 @@ describe("onIssueDeleted", () => {
     const myList = qc.getQueryData<ListIssuesCache>(
       issueKeys.myList(WS_ID, "assigned", myFilter),
     );
-    expect(myList?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
+    expect(myList?.byStatus.unstarted?.issues.map((i) => i.id)).toEqual([
       OTHER_ISSUE_ID,
     ]);
     expectInvalidated(qc, issueKeys.children(WS_ID, PARENT_ISSUE_ID));
@@ -1069,6 +1094,8 @@ describe("onIssueDeleted", () => {
           bucket_at: "2025-01-01T00:00:00Z",
           task_count: 1,
           failed_count: 0,
+          completed_count: 1,
+          cancelled_count: 0,
         },
       ],
     );
@@ -1122,5 +1149,69 @@ describe("project gantt cache invalidation", () => {
   it("invalidates the project Gantt cache on issue:deleted", () => {
     onIssueDeleted(qc, WS_ID, ISSUE_ID);
     expectInvalidated(qc, issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+});
+
+// Expanded sidebar rows list issues from these caches. An update refetches
+// only the lists it can reorder or move the issue across.
+describe("sidebar issue lists", () => {
+  const PROJECT_ID = "project-1";
+  const sort = { field: "updated_at", direction: "desc" } as const;
+  const projectRequest = (projectId: string) => ({
+    table: { scope: { kind: "project", project_id: projectId }, filters: {}, sort },
+  }) as const;
+  const ownKey = issueKeys.sidebar(WS_ID, `project:${PROJECT_ID}`, projectRequest(PROJECT_ID), 5);
+  const otherKey = issueKeys.sidebar(WS_ID, "project:project-9", projectRequest("project-9"), 5);
+  const viewKey = issueKeys.sidebar(WS_ID, "view:view-1", { table: { scope: { kind: "workspace" }, filters: {}, sort } }, 5);
+  const builtinKey = issueKeys.sidebar(
+    WS_ID,
+    "builtin:all_issues",
+    { table: { scope: { kind: "workspace" }, filters: {}, sort: { field: "updated_at", direction: "desc" } } },
+    5,
+  );
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+    qc.setQueryData(ownKey, { issues: [{ ...baseIssue, revision: 1 }], total: 1 });
+    qc.setQueryData(otherKey, { issues: [], total: 0 });
+    qc.setQueryData(viewKey, { issues: [], total: 0 });
+    qc.setQueryData(builtinKey, { issues: [], total: 0 });
+  });
+
+  const invalidated = (key: readonly unknown[]) => qc.getQueryState(key)?.isInvalidated;
+
+  it("refetches the issue's own lists and views, leaving other projects alone", () => {
+    onIssueUpdated(qc, WS_ID, { id: ISSUE_ID, title: "Renamed", revision: 2 });
+    expect(invalidated(ownKey)).toBe(true);
+    expect(invalidated(viewKey)).toBe(true);
+    expect(invalidated(builtinKey)).toBe(true);
+    expect(invalidated(otherKey)).toBe(false);
+  });
+
+  it("refetches the project an issue moves into", () => {
+    onIssueUpdated(qc, WS_ID, { id: ISSUE_ID, project_id: "project-9", revision: 2 }, { projectChanged: true });
+    expect(invalidated(otherKey)).toBe(true);
+  });
+
+  it("refetches No project when an issue leaves its project", () => {
+    const noProjectKey = issueKeys.sidebar(
+      WS_ID,
+      NO_PROJECT_SIDEBAR_SOURCE,
+      { table: { scope: { kind: "workspace" }, filters: { include_no_project: true }, sort } },
+      5,
+    );
+    qc.setQueryData(noProjectKey, { issues: [], total: 0 });
+    onIssueUpdated(qc, WS_ID, { id: ISSUE_ID, project_id: null, revision: 2 }, { projectChanged: true });
+    expect(invalidated(noProjectKey)).toBe(true);
+  });
+
+  it("refetches every list when an issue is created or deleted", () => {
+    onIssueCreated(qc, WS_ID, otherIssue);
+    expect(invalidated(otherKey)).toBe(true);
+
+    qc.setQueryData(otherKey, { issues: [], total: 0 });
+    onIssueDeleted(qc, WS_ID, ISSUE_ID);
+    expect(invalidated(otherKey)).toBe(true);
   });
 });

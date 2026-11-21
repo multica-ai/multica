@@ -71,7 +71,7 @@ const lastActivityBoardKey = issueKeys.listSorted("ws-1", {
 });
 
 function bucketed(): ListIssuesCache {
-  return { byStatus: { todo: { issues: [], total: 1 } } };
+  return { byStatus: { unstarted: { issues: [], total: 1 } } };
 }
 
 describe("useRealtimeSync — comment activity cache coherence", () => {

@@ -4,7 +4,10 @@
  * per Sharing Principles (no runtime imports from @multica/core mutations).
  *
  * Behavioral parity:
- *   - mark-read: flip `read` to true locally; rollback on error; settle invalidate.
+ *   - mark-read: flip `read` to true locally on the item AND on every other
+ *     non-archived row that shares its `issue_id` — the server reads the whole
+ *     issue (MUL-8618), so an assignment under a later comment is read with
+ *     it; rollback on error; settle invalidate.
  *     `onMutate` writes setQueryData BEFORE awaiting cancelQueries — this is
  *     load-bearing for iOS Stack push transitions: when the user taps an
  *     inbox row and we router.push to issue/[id], iOS captures a snapshot of
@@ -26,10 +29,37 @@
  *     Just invalidate on settle. Matches web.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import type { InboxItem } from "@multica/core/types";
 import { api } from "@/data/api";
 import { inboxKeys } from "@/data/queries/inbox";
+import {
+  refreshInboxList,
+  refreshInboxUnreadSummary,
+} from "@/data/realtime/inbox-ws-updaters";
 import { useWorkspaceStore } from "@/data/workspace-store";
+
+/**
+ * Re-read both inbox caches a write can change: the workspace list and the
+ * cross-workspace unread summary that backs the tab badge. The summary lives
+ * under its own account-level key, so refreshing the list does not reach it —
+ * every mutation here can change the number it holds.
+ *
+ * Deliberately the shared entry points rather than local copies: a mutation
+ * racing a first load hits exactly the same in-flight hole a WS event does,
+ * and a plain invalidate of the list would let it fall behind the badge.
+ * Not awaited by `onSettled` — the mutation is done once the server answers.
+ *
+ * Rows are optimistic, the badge is not: it follows the server's confirmation.
+ * Mirrors the same decision in packages/core/inbox/mutations.ts, whose comment
+ * carries the reasoning — recomputing the count from the list cache and
+ * writing it back cannot be made correct once the list is paginated, and races
+ * an in-flight summary response that no `cancelQueries` here covers.
+ */
+function refreshInboxAfterWrite(qc: QueryClient, wsId: string | null) {
+  if (wsId) void refreshInboxList(qc, wsId);
+  void refreshInboxUnreadSummary(qc);
+}
 
 export function useMarkInboxRead() {
   const qc = useQueryClient();
@@ -40,19 +70,24 @@ export function useMarkInboxRead() {
     onMutate: async (id) => {
       const key = inboxKeys.list(wsId);
       // Synchronous patch FIRST — see the file-level doc comment for why.
-      qc.setQueryData<InboxItem[]>(key, (old) =>
-        old?.map((item) => (item.id === id ? { ...item, read: true } : item)),
-      );
-      // Then the standard cancel + snapshot dance for rollback.
-      await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<InboxItem[]>(key);
+      const issueId = prev?.find((item) => item.id === id)?.issue_id ?? null;
+      qc.setQueryData<InboxItem[]>(key, (old) =>
+        old?.map((item) =>
+          item.id === id || (issueId != null && item.issue_id === issueId && !item.archived)
+            ? { ...item, read: true }
+            : item,
+        ),
+      );
+      // Then the standard cancel for rollback.
+      await qc.cancelQueries({ queryKey: key });
       return { prev, key };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -87,7 +122,7 @@ export function useArchiveInbox() {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -113,7 +148,7 @@ export function useMarkAllInboxRead() {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -121,14 +156,15 @@ export function useMarkAllInboxRead() {
 // Batch archive mutations — invalidate-only, matching web. The optimistic
 // path isn't worth the complexity: archive-completed depends on the issue
 // status of each linked issue (not carried on InboxItem), and predicting
-// that on the client risks divergence with the server's SQL filter.
+// that on the client risks divergence with the server's SQL filter. The badge
+// therefore catches up on settle rather than moving instantly.
 export function useArchiveAllInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   return useMutation({
     mutationFn: () => api.archiveAllInbox(),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -139,7 +175,7 @@ export function useArchiveAllReadInbox() {
   return useMutation({
     mutationFn: () => api.archiveAllReadInbox(),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -150,7 +186,7 @@ export function useArchiveCompletedInbox() {
   return useMutation({
     mutationFn: () => api.archiveCompletedInbox(),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }

@@ -5,6 +5,8 @@ description: 了解 Multica 的客户端、Go 服务、执行守护进程和共�
 
 Multica 由一个 Go backend、多种客户端和运行在执行电脑上的守护进程组成。PostgreSQL 保存协作数据；守护进程领取 task，并调用本机的 AI 编程工具。
 
+本页聚焦实现，因此正文中的 **task** 指产品 **Run**（运行）背后的内部调度、API 和数据库实体。界面与产品文档统一称为 Run；`TaskService`、`task_id` 等标识为兼容性保持不变。
+
 ```text
 Web / Desktop / Mobile / CLI
  │

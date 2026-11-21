@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ChatChannelHistoryReader reads a chat session's bound IM-channel history. The
@@ -31,10 +32,17 @@ type ChatChannelHistoryReader interface {
 	Thread(ctx context.Context, chatSessionID pgtype.UUID, threadID string, opts channel.HistoryOptions) (channel.HistoryPage, error)
 }
 
+type slackTaskSourceReader interface {
+	TaskSource(context.Context, db.ChannelTaskDelivery, pgtype.UUID) *protocol.ChatSource
+}
+
 // ChatChannelHistoryResponse is the unified payload for both commands — the SAME
 // shape no matter which channel backs the session, the agent never sees a
 // per-platform API.
 type ChatChannelHistoryResponse struct {
+	ChannelID   string `json:"channel_id,omitempty"`
+	ChannelName string `json:"channel_name,omitempty"`
+	Permalink   string `json:"permalink,omitempty"`
 	ChannelType string `json:"channel_type"`
 	// ThreadID is set on a thread read: which thread the messages belong to.
 	ThreadID   string                   `json:"thread_id,omitempty"`
@@ -214,11 +222,15 @@ func (h *Handler) GetChatThread(w http.ResponseWriter, r *http.Request) {
 }
 
 // chatHistorySession authorizes the request and returns the caller's own chat
-// session. It is authorized by the task-scoped token alone: middleware stamps
-// the token's task into X-Actor-Source=task_token + X-Task-ID (a normal JWT /
-// mul_ PAT leaves X-Actor-Source empty and does NOT strip a client-forged
-// X-Task-ID), so requiring the task-token actor is load-bearing — without it a
-// member could forge X-Task-ID and read another session's history.
+// session. It is authorized by the task-scoped token alone: the auth middleware
+// deletes client-supplied X-Actor-Source / X-Agent-ID / X-Task-ID from every
+// request and re-stamps them only on the mat_ branch (MUL-3428), so a normal
+// JWT / mul_ PAT arrives here carrying no task context at all.
+//
+// The actor check stays anyway, and stays load-bearing: this endpoint returns
+// another member's chat history if its task binding is ever wrong, so it names
+// the credential it requires rather than inheriting that guarantee silently
+// from a middleware two layers away.
 type chatHistoryScope struct {
 	sessionID       pgtype.UUID
 	contextRevision pgtype.Int8
@@ -330,6 +342,9 @@ func (h *Handler) respondChatHistory(w http.ResponseWriter, r *http.Request, ses
 	}
 	writeJSON(w, http.StatusOK, ChatChannelHistoryResponse{
 		ChannelType: page.ChannelType,
+		ChannelID:   page.ChannelID,
+		ChannelName: page.ChannelName,
+		Permalink:   page.Permalink,
 		ThreadID:    page.ThreadID,
 		Messages:    messages,
 		NextCursor:  page.NextCursor,

@@ -12,13 +12,14 @@ import {
   Server,
   Trash2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import type {
   RuntimeProfile,
-  RuntimeProtocolFamily,
+  RuntimeProfileType,
 } from "@multica/core/types";
 import {
   runtimeProfileListOptions,
@@ -26,6 +27,7 @@ import {
   useUpdateRuntimeProfile,
 } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogClose,
@@ -37,14 +39,24 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import { buildRuntimeMachines } from "./runtime-machines";
 import { cn } from "@multica/ui/lib/utils";
 import { ProviderLogo } from "./provider-logo";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
-  PROTOCOL_FAMILIES,
+  RUNTIME_TYPES,
   buildRuntimeCatalog,
   formatCommandLine,
   parseCommandLine,
+  profileRuntimeType,
+  runtimeTypeLabel,
   validateProfileForm,
   type ProfileFormErrorField,
   type ProfileFormValues,
@@ -65,6 +77,7 @@ type DialogState =
 export function RuntimeProfilesDialog({
   wsId,
   intent = "manage",
+  daemonId,
   machineName,
   initialProfile,
   onProfileCreated,
@@ -72,6 +85,7 @@ export function RuntimeProfilesDialog({
 }: {
   wsId: string;
   intent?: "create" | "edit" | "manage";
+  daemonId?: string;
   machineName?: string;
   initialProfile?: RuntimeProfile;
   onProfileCreated?: (profile: RuntimeProfile) => void;
@@ -94,7 +108,7 @@ export function RuntimeProfilesDialog({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Carries the chosen family from create-step-1 into the form.
   const [draftFamily, setDraftFamily] =
-    useState<RuntimeProtocolFamily>(PROTOCOL_FAMILIES[0] ?? "claude");
+    useState<RuntimeProfileType>(RUNTIME_TYPES[0] ?? "claude");
 
   const catalog = useMemo(() => buildRuntimeCatalog(profiles), [profiles]);
   const entries = useMemo(
@@ -111,7 +125,7 @@ export function RuntimeProfilesDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         className={cn(
-          "flex max-h-[88vh] flex-col gap-0 overscroll-contain p-0",
+          "flex max-h-[88%] flex-col gap-0 overscroll-contain p-0",
           intent === "manage" ? "sm:max-w-3xl" : "sm:max-w-2xl",
         )}
         showCloseButton={false}
@@ -145,17 +159,17 @@ export function RuntimeProfilesDialog({
               )}
               <DialogClose
                 render={
-                  <Button
+                  <IconButton
                     type="button"
                     variant="ghost"
                     size="icon-sm"
                     className="shrink-0"
-                    aria-label={t(($) => $.profiles.close)}
+                    label={t(($) => $.profiles.close)}
+                    tooltipSide="bottom"
                   />
                 }
               >
                 <X aria-hidden="true" className="h-4 w-4" />
-                <span className="sr-only">{t(($) => $.profiles.close)}</span>
               </DialogClose>
             </div>
           </div>
@@ -182,10 +196,13 @@ export function RuntimeProfilesDialog({
         {state.surface === "form" ? (
           <ProfileFormView
             wsId={wsId}
+            daemonId={daemonId}
             mode={state.mode}
             step={state.mode === "create" ? state.step : "details"}
             family={
-              state.mode === "edit" ? state.profile.protocol_family : draftFamily
+              state.mode === "edit"
+                ? profileRuntimeType(state.profile)
+                : draftFamily
             }
             profile={state.mode === "edit" ? state.profile : null}
             standaloneCreate={intent === "create"}
@@ -244,9 +261,7 @@ export function RuntimeProfilesDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Master list — custom profiles first, built-in families as collapsed reference.
-// ---------------------------------------------------------------------------
 
 function CatalogList({
   catalog,
@@ -413,7 +428,9 @@ function CatalogRow({
 }) {
   const { t } = useT("runtimes");
   const label =
-    entry.kind === "custom" ? entry.profile.display_name : entry.protocolFamily;
+    entry.kind === "custom"
+      ? entry.profile.display_name
+      : runtimeTypeLabel(entry.protocolFamily);
   const disabled = entry.kind === "custom" && !entry.profile.enabled;
   const isBuiltin = entry.kind === "builtin";
   return (
@@ -446,14 +463,14 @@ function CatalogRow({
             {label}
           </span>
           {disabled && (
-            <span className="shrink-0 rounded bg-muted px-1 text-micro font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground">
               {t(($) => $.profiles.badge_disabled)}
             </span>
           )}
         </span>
         {entry.kind === "custom" && (
           <span className="block truncate text-caption capitalize text-muted-foreground">
-            {entry.protocolFamily}
+            {runtimeTypeLabel(entry.protocolFamily)}
           </span>
         )}
       </span>
@@ -466,10 +483,8 @@ function CatalogRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Detail panel — adaptive: built-in is read-only, custom shows fields +
 // Edit / Delete.
-// ---------------------------------------------------------------------------
 
 function DetailPanel({
   entry,
@@ -512,7 +527,7 @@ function DetailPanel({
           </span>
           <div className="min-w-0">
             <h3 className="truncate text-title-sm font-semibold capitalize">
-              {entry.protocolFamily}
+              {runtimeTypeLabel(entry.protocolFamily)}
             </h3>
             <span className="text-caption text-muted-foreground">
               {t(($) => $.profiles.builtin_detail.read_only)}
@@ -521,7 +536,7 @@ function DetailPanel({
         </div>
         <p className="mt-4 text-body text-muted-foreground">
           {t(($) => $.profiles.builtin_detail.description, {
-            family: entry.protocolFamily,
+            family: runtimeTypeLabel(entry.protocolFamily),
           })}
         </p>
       </div>
@@ -541,7 +556,7 @@ function DetailPanel({
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
               <ProviderLogo
-                provider={profile.protocol_family}
+                provider={profileRuntimeType(profile)}
                 className="h-5 w-5"
               />
             </span>
@@ -550,7 +565,7 @@ function DetailPanel({
                 {profile.display_name}
               </h3>
               <span className="text-caption capitalize text-muted-foreground">
-                {profile.protocol_family}
+                {runtimeTypeLabel(profileRuntimeType(profile))}
               </span>
             </div>
           </div>
@@ -558,7 +573,9 @@ function DetailPanel({
 
         <dl className="mt-5 space-y-4">
           <DetailRow label={t(($) => $.profiles.detail.base_family)}>
-            <span className="capitalize">{profile.protocol_family}</span>
+            <span className="capitalize">
+              {runtimeTypeLabel(profileRuntimeType(profile))}
+            </span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.command)}>
             <span className="font-mono text-caption">{commandLine}</span>
@@ -628,12 +645,11 @@ function DetailRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Create / edit form.
-// ---------------------------------------------------------------------------
 
 function ProfileFormView({
   wsId,
+  daemonId,
   mode,
   step,
   family,
@@ -646,13 +662,14 @@ function ProfileFormView({
   onSaved,
 }: {
   wsId: string;
+  daemonId?: string;
   mode: "create" | "edit";
   step: "family" | "details";
-  family: RuntimeProtocolFamily;
+  family: RuntimeProfileType;
   profile: RuntimeProfile | null;
   standaloneCreate: boolean;
   standaloneEdit: boolean;
-  onPickFamily: (family: RuntimeProtocolFamily) => void;
+  onPickFamily: (family: RuntimeProfileType) => void;
   onBack: () => void;
   onCancel: () => void;
   onSaved: (profile: RuntimeProfile) => void;
@@ -676,7 +693,7 @@ function ProfileFormView({
             className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3"
             aria-label={t(($) => $.profiles.form.family_label)}
           >
-            {PROTOCOL_FAMILIES.map((option) => (
+            {RUNTIME_TYPES.map((option) => (
               <button
                 key={option}
                 type="button"
@@ -684,7 +701,9 @@ function ProfileFormView({
                 className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <ProviderLogo provider={option} className="h-4 w-4 shrink-0" />
-                <span className="truncate capitalize">{option}</span>
+                <span className="truncate capitalize">
+                  {runtimeTypeLabel(option)}
+                </span>
               </button>
             ))}
           </div>
@@ -713,6 +732,7 @@ function ProfileFormView({
   return (
     <ProfileDetailsForm
       wsId={wsId}
+      daemonId={daemonId}
       mode={mode}
       family={family}
       profile={profile}
@@ -726,6 +746,7 @@ function ProfileFormView({
 
 function ProfileDetailsForm({
   wsId,
+  daemonId,
   mode,
   family,
   profile,
@@ -735,8 +756,9 @@ function ProfileDetailsForm({
   onSaved,
 }: {
   wsId: string;
+  daemonId?: string;
   mode: "create" | "edit";
-  family: RuntimeProtocolFamily;
+  family: RuntimeProfileType;
   profile: RuntimeProfile | null;
   hideEditHeading: boolean;
   onBack: () => void;
@@ -747,6 +769,23 @@ function ProfileDetailsForm({
   const idPrefix = `runtime-profile-${useId().replace(/:/g, "")}`;
   const createProfile = useCreateRuntimeProfile(wsId);
   const updateProfile = useUpdateRuntimeProfile(wsId);
+  const canBindMachine = mode === "edit" && !profile?.daemon_id;
+  const { data: runtimes = [] } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: canBindMachine,
+  });
+  const machineOptions = useMemo(
+    () => [
+      { value: "", label: t(($) => $.profiles.form.machine_placeholder) },
+      ...buildRuntimeMachines(runtimes, { now: Date.now() }).flatMap((machine) =>
+        machine.mode === "local" && machine.daemonId
+          ? [{ value: machine.daemonId, label: machine.title }]
+          : [],
+      ),
+    ],
+    [runtimes, t],
+  );
+  const [bindingMachine, setBindingMachine] = useState("");
 
   const [values, setValues] = useState<ProfileFormValues>({
     displayName: profile?.display_name ?? "",
@@ -790,8 +829,9 @@ function ProfileDetailsForm({
     try {
       if (mode === "create") {
         const created = await createProfile.mutateAsync({
+          ...(daemonId ? { daemon_id: daemonId } : {}),
           display_name: values.displayName.trim(),
-          protocol_family: family,
+          runtime_type: family,
           command_name: commandName,
           fixed_args: fixedArgs,
           ...(description ? { description } : {}),
@@ -802,6 +842,7 @@ function ProfileDetailsForm({
         const updated = await updateProfile.mutateAsync({
           profileId: profile.id,
           patch: {
+            ...(canBindMachine && bindingMachine ? { daemon_id: bindingMachine } : {}),
             display_name: values.displayName.trim(),
             command_name: commandName,
             fixed_args: fixedArgs,
@@ -812,8 +853,14 @@ function ProfileDetailsForm({
         onSaved(updated);
       }
     } catch (err) {
-      // 409 from create/patch means the display name collides.
-      if (err instanceof ApiError && err.status === 409) {
+      const conflictCode =
+        err instanceof ApiError && err.body &&
+        typeof err.body === "object" && "code" in err.body
+          ? err.body.code : undefined;
+      if (
+        err instanceof ApiError && err.status === 409 &&
+        conflictCode !== "runtime_profile_machine_conflict"
+      ) {
         setDuplicateName(true);
         return;
       }
@@ -864,13 +911,52 @@ function ProfileDetailsForm({
           </h3>
         )}
 
+        {canBindMachine && (
+          <div className="space-y-1.5">
+            <Label
+              htmlFor={`${idPrefix}-machine`}
+              className="text-caption text-muted-foreground"
+            >
+              {t(($) => $.profiles.form.machine_label)}
+            </Label>
+            <Select
+              items={machineOptions}
+              value={bindingMachine}
+              onValueChange={(value) => {
+                setBindingMachine(value ?? "");
+              }}
+              disabled={submitting}
+            >
+              <SelectTrigger
+                id={`${idPrefix}-machine`}
+                className="w-full"
+                aria-describedby={`${idPrefix}-machine-hint`}
+              >
+                <SelectValue placeholder={t(($) => $.profiles.form.machine_placeholder)} />
+              </SelectTrigger>
+              <SelectContent>
+                {machineOptions.map((machine) => (
+                  <SelectItem key={machine.value} value={machine.value}>
+                    {machine.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p id={`${idPrefix}-machine-hint`} className="text-caption text-muted-foreground">
+              {t(($) => $.profiles.form.machine_hint)}
+            </p>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <Label className="text-caption text-muted-foreground">
             {t(($) => $.profiles.form.family_label)}
           </Label>
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <ProviderLogo provider={family} className="h-4 w-4 shrink-0" />
-            <span className="text-body capitalize">{family}</span>
+            <span className="text-body capitalize">
+              {runtimeTypeLabel(family)}
+            </span>
           </div>
           <p className="text-micro text-muted-foreground">
             {t(($) => $.profiles.form.family_locked_hint)}
@@ -957,7 +1043,7 @@ function ProfileDetailsForm({
                   {parsedCommand.fixedArgs.map((arg, index) => (
                     <span
                       key={`${arg}-${index}`}
-                      className="rounded bg-background px-1 font-mono text-foreground"
+                      className="rounded-xs bg-background px-1 font-mono text-foreground"
                     >
                       {arg}
                     </span>

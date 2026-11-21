@@ -13,6 +13,7 @@ import (
 )
 
 func TestAgentRuntimeLastSeenAtIndexRetirement(t *testing.T) {
+	t.Parallel()
 	adminPool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

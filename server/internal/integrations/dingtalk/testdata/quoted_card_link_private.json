@@ -1,0 +1,60 @@
+{
+  "conversationType": "1",
+  "msgtype": "text",
+  "senderStaffId": "test-sender",
+  "text": {
+    "content": "QUOTE-CAPTURE-7429",
+    "repliedMsg": {
+      "msgType": "interactiveCard",
+      "content": {
+        "cardContent": [
+          {
+            "children": [
+              {
+                "elementType": "TEXT",
+                "value": "DingTalk quote test"
+              },
+              {
+                "elementType": "TEXT",
+                "value": "Paragraph one: Apples are red."
+              },
+              {
+                "elementType": "TEXT",
+                "value": "Paragraph two: Bananas are yellow. Marker: QUOTE-CONTEXT-7429."
+              },
+              {
+                "elementType": "TEXT",
+                "value": "Literal HTML: "
+              },
+              {
+                "elementType": "TEXT",
+                "value": "keep this visible"
+              },
+              {
+                "elementType": "TEXT",
+                "value": " Literal operators: primary || fallback Escaped entity: <already-escaped>"
+              },
+              {
+                "elementType": "TEXT",
+                "value": "Link: "
+              },
+              {
+                "elementType": "LINK",
+                "value": "https://example.com/a_(b)?x=a_b+c&y=2#part_2"
+              },
+              {
+                "elementType": "TEXT",
+                "value": "const selected = primary || fallback;\nconst html = \"<span>keep me</span>\";\nconsole.log(selected, html);\n"
+              },
+              {
+                "elementType": "TEXT",
+                "value": "Paragraph three: Cherries are sweet."
+              }
+            ],
+            "elementType": "RICHTEXT"
+          }
+        ]
+      }
+    }
+  }
+}

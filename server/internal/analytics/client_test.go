@@ -68,13 +68,15 @@ func TestPostHogClient_Batching(t *testing.T) {
 }
 
 func TestPostHogClient_DropsWhenFull(t *testing.T) {
-	// Handler blocks so batches never flush — queue will fill up.
-	block := make(chan struct{})
+	// Hold the first request so the worker is observably busy before filling the
+	// queue. Releasing it during cleanup avoids paying the client's flush timeout.
+	started := make(chan struct{})
+	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-block
+		close(started)
+		<-release
 	}))
 	defer srv.Close()
-	defer close(block)
 
 	c := NewPostHogClient(PostHogConfig{
 		APIKey:     "test-key",
@@ -83,15 +85,22 @@ func TestPostHogClient_DropsWhenFull(t *testing.T) {
 		BatchSize:  1,
 		FlushEvery: time.Hour,
 	})
-	defer c.Close()
+	defer func() {
+		close(release)
+		c.Close()
+	}()
 
-	// First event may be consumed by the worker (which is now blocked in send).
-	// Next events will sit in the queue (cap=2) until it's full and then drop.
-	for i := 0; i < 20; i++ {
+	// The first event is consumed by the worker and blocks in the handler. Two
+	// more fill the queue, so the final capture must be dropped.
+	c.Capture(Event{Name: "spam", DistinctID: "u"})
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not start the first request")
+	}
+	for i := 0; i < 3; i++ {
 		c.Capture(Event{Name: "spam", DistinctID: "u"})
 	}
-	// Give the worker a chance to pick up at least one.
-	time.Sleep(50 * time.Millisecond)
 	if c.dropped.Load() == 0 {
 		t.Fatalf("expected some drops when queue saturated")
 	}
@@ -99,11 +108,11 @@ func TestPostHogClient_DropsWhenFull(t *testing.T) {
 
 func TestEmailDomain(t *testing.T) {
 	cases := map[string]string{
-		"a@example.com":       "example.com",
-		"user@Company.co.uk":  "company.co.uk",
-		"":                    "",
-		"no-at":               "",
-		"trailing@":           "",
+		"a@example.com":      "example.com",
+		"user@Company.co.uk": "company.co.uk",
+		"":                   "",
+		"no-at":              "",
+		"trailing@":          "",
 	}
 	for in, want := range cases {
 		if got := emailDomain(in); got != want {

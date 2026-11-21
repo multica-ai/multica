@@ -2,21 +2,29 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/imagemetadata"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/thumbnail"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -33,8 +41,6 @@ var extContentTypes = map[string]string{
 	".wasm": "application/wasm",
 }
 
-const maxUploadSize = 100 << 20 // 100 MB
-
 const defaultAttachmentDownloadURLTTL = 30 * time.Minute
 
 type attachmentDownloadMode string
@@ -46,15 +52,7 @@ const (
 	attachmentDownloadModeProxy      attachmentDownloadMode = "proxy"
 )
 
-// maxPreviewTextSize caps the body the preview proxy will load into memory
-// for text-based types. Anything larger returns 413 and the UI falls back
-// to "please download". Sized so a typical README/source-file fits but a
-// 100 MB log dump can't blow up the renderer.
-const maxPreviewTextSize = 2 << 20 // 2 MB
-
-// ---------------------------------------------------------------------------
 // Response types
-// ---------------------------------------------------------------------------
 
 type AttachmentResponse struct {
 	ID            string  `json:"id"`
@@ -82,31 +80,43 @@ type AttachmentResponse struct {
 	// SHOULD persist into markdown bodies (issue descriptions, comments,
 	// chat messages). It is computed per deployment policy by
 	// buildMarkdownURL — preferring the storage URL when it is already a
-	// public, durable absolute URL (public CDN / LocalStorage with
-	// MULTICA_LOCAL_UPLOAD_BASE_URL), and otherwise prefixing
+	// public, durable absolute URL (public CDN), and otherwise prefixing
 	// MULTICA_PUBLIC_URL onto the stable per-attachment endpoint that the
 	// server self-resigns / proxies on every request.
 	//
 	// Why a separate field from URL / DownloadURL:
-	//   - URL is the raw storage object URL — fine for avatar/logo
-	//     surfaces but may be private (S3 + CloudFront-signed mode) or
-	//     site-relative (LocalStorage with no base URL configured).
+	//   - URL retains the storage URL for avatar/logo uploads. Bound local
+	//     attachments use the stable authenticated API URL so installed
+	//     clients enter their existing authenticated image-fetch path.
 	//   - DownloadURL is the URL the renderer uses for THIS response — it
 	//     can be a short-lived signed URL (CloudFront, S3 presign) and
 	//     therefore must NOT be persisted. It expires.
 	//   - MarkdownURL is contracted to be persistable: it never carries a
-	//     TTL, and on every supported deployment shape it is loadable as
-	//     a native browser resource fetch (no Authorization header required
-	//     beyond the cookies/credentials the client already has on the
-	//     resolved host).
+	//     TTL. Private attachments require cookies or an authenticated byte
+	//     fetch; token-mode clients cannot use this URL as a bare native src.
 	//
 	// MUL-3192 — fixes the Desktop / mobile-webview regression where the
 	// previous site-relative `/api/attachments/<id>/download` link only
 	// resolved when the document origin proxied /api to the API host.
 	MarkdownURL string `json:"markdown_url"`
-	ContentType string `json:"content_type"`
-	SizeBytes   int64  `json:"size_bytes"`
-	CreatedAt   string `json:"created_at"`
+	// Comment origin, set only by the issue attachment list: who posted the
+	// comment this file belongs to, and when. Absent for description files and
+	// for a comment that is gone. Lets the issue's file inventory label every
+	// historical file without loading the comments that carry it.
+	CommentAuthorType *string `json:"comment_author_type,omitempty"`
+	CommentAuthorID   *string `json:"comment_author_id,omitempty"`
+	CommentCreatedAt  *string `json:"comment_created_at,omitempty"`
+	ContentType       string  `json:"content_type"`
+	SizeBytes         int64   `json:"size_bytes"`
+	CreatedAt         string  `json:"created_at"`
+	// Displayed image dimensions, absent for non-images and older uploads.
+	Width  *int32 `json:"width,omitempty"`
+	Height *int32 `json:"height,omitempty"`
+	// ThumbnailURL is the stable, auth-gated path of a downscaled copy for
+	// grid tiles, set only for large raster images. Durable like the stable
+	// download path; never a substitute for the original in viewers or
+	// downloads.
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
 }
 
 // attachmentURLMode selects how DownloadURL is rendered on a response.
@@ -169,15 +179,24 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 		URL:          a.Url,
 		DownloadURL:  util.AttachmentDownloadPath(id),
 		MarkdownURL:  h.buildMarkdownURL(a, id),
+		ThumbnailURL: h.attachmentThumbnailURL(a, id),
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	// Installed clients recognize this API shape and fetch private image bytes
+	// with credentials. Keep unbound upload URLs intact for avatar setters.
+	if _, local := h.Storage.(*storage.LocalStorage); local && attachmentIsBound(a) {
+		resp.URL = resp.MarkdownURL
 	}
 	// Only CloudFront mode overrides the stable path here; the presign and proxy
 	// modes already leave DownloadURL as the stable path and resolve it at
 	// download time, so stable mode is a no-op for them.
 	if h.CFSigner != nil && mode != attachmentURLModeStable {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(h.attachmentDownloadURLTTL()))
+	}
+	if a.Width.Valid && a.Height.Valid {
+		resp.Width, resp.Height = &a.Width.Int32, &a.Height.Int32
 	}
 	if a.IssueID.Valid {
 		s := uuidToString(a.IssueID)
@@ -199,16 +218,16 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 }
 
 // buildMarkdownURL chooses the durable URL the client persists into
-// markdown bodies. The contract is "absolute, no TTL, loadable as a native
-// browser resource fetch on every supported client" (MUL-3192).
+// markdown bodies. It has no TTL; private URLs require cookies or an
+// authenticated client fetch rather than exposing the raw storage object.
 //
 // Decision:
 //
 //  1. Persist `a.Url` only when the deployment has signaled the storage
 //     backend serves URLs publicly without per-request auth:
 //     - `Storage.CdnDomain()` is non-empty (operator configured a
-//     public-facing base URL — `S3_CDN_DOMAIN` for the S3 backend or
-//     `LOCAL_UPLOAD_BASE_URL` for LocalStorage), AND
+//     public-facing base URL — `S3_CDN_DOMAIN` for the S3 backend), AND
+//     - the backend is not LocalStorage (always private), AND
 //     - `h.CFSigner` is nil (no per-request CloudFront signing — when
 //     signing is on, the same CDN domain serves PRIVATE content via
 //     time-bounded signed URLs and the raw `a.Url` is unauth-deny),
@@ -220,7 +239,7 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 //
 //  2. Every other shape — CloudFront-signed mode, S3 presign /proxy
 //     against a private bucket without a CDN domain, raw S3 / R2 /
-//     MinIO, LocalStorage with no `LOCAL_UPLOAD_BASE_URL` — uses the
+//     MinIO, and all LocalStorage deployments — uses the
 //     stable per-attachment endpoint that the server self-signs /
 //     proxies on every request, anchored on `MULTICA_PUBLIC_URL` so the
 //     persisted URL keeps working for clients that don't share the
@@ -250,6 +269,9 @@ func (h *Handler) buildMarkdownURL(a db.Attachment, id string) string {
 // fetch — the only case where it is safe to persist `a.Url` into a markdown
 // body that will outlive the current session.
 func (h *Handler) storageURLIsPubliclyReadable(rawURL string) bool {
+	if _, local := h.Storage.(*storage.LocalStorage); local {
+		return false
+	}
 	if h.Storage == nil || h.CFSigner != nil {
 		// CFSigner != nil is per-request signing; the CDN domain serves
 		// private content via signed URLs and `a.Url` is the raw S3 URL.
@@ -370,13 +392,12 @@ func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID s
 	return grouped
 }
 
-// ---------------------------------------------------------------------------
 // UploadFile — POST /api/upload-file
-// ---------------------------------------------------------------------------
 
 func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	if h.Storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "file upload not configured")
+		writeFeatureDisabled(w, "file_upload_not_configured", "file upload not configured")
 		return
 	}
 
@@ -387,13 +408,19 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := h.resolveWorkspaceID(r)
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
-		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
+	err := parseUploadForm(w, r)
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	if err != nil {
+		var sizeErr *http.MaxBytesError
+		if errors.As(err, &sizeErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "file exceeds the 100 MiB upload limit")
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid multipart form")
+		}
 		return
 	}
-	defer r.MultipartForm.RemoveAll()
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -443,7 +470,8 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	// If workspace context is available, validate membership before uploading.
 	if workspaceID != "" {
-		if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+		member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+		if err != nil {
 			writeError(w, http.StatusForbidden, "not a member of this workspace")
 			return
 		}
@@ -473,7 +501,17 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusForbidden, "invalid issue_id")
 				return
 			}
-			params.IssueID = issue.ID
+			if !h.requireProjectVisible(w, r, workspaceID, issue.ProjectID, http.StatusForbidden, "invalid issue_id") {
+				return
+			}
+			// A guest's upload (MUL-9420) is a draft for its next comment, not
+			// a change to the issue: it stays unbound, visible only to the
+			// guest, until CreateComment links it with the comment
+			// (LinkAttachmentsToComment accepts unbound rows). A member's
+			// upload still attaches to the issue at once.
+			if uploaderType != "member" || !h.isGuest(r, workspaceID, userID) {
+				params.IssueID = issue.ID
+			}
 		}
 		if commentID := r.FormValue("comment_id"); commentID != "" {
 			commentUUID, ok := parseUUIDOrBadRequest(w, commentID, "comment_id")
@@ -481,7 +519,18 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			comment, err := h.Queries.GetComment(r.Context(), commentUUID)
-			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID {
+			// A deleted comment's tombstone takes no attachments.
+			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID || comment.DeletedAt.Valid {
+				writeError(w, http.StatusForbidden, "invalid comment_id")
+				return
+			}
+			if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusForbidden, "invalid comment_id") {
+				return
+			}
+			// A guest attaches files only to its own comments (MUL-9420);
+			// seeing a comment is not enough to add to it.
+			if uploaderType == "member" && h.isGuest(r, workspaceID, userID) &&
+				(comment.AuthorType != "member" || uuidToString(comment.AuthorID) != userID) {
 				writeError(w, http.StatusForbidden, "invalid comment_id")
 				return
 			}
@@ -506,14 +555,13 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		if taskID := r.FormValue("task_id"); taskID != "" {
 			// Authoritative task-token boundary (load-bearing, mirrors
 			// chat_history.go:chatHistorySession). X-Task-ID is only trustworthy
-			// when the auth middleware set it from a task-scoped `mat_` token —
-			// that path is also the ONLY one that stamps X-Actor-Source=task_token
-			// and strips a client-forged X-Task-ID. A normal JWT / `mul_` PAT
-			// leaves X-Actor-Source empty and does NOT strip a forged X-Task-ID,
-			// and resolveActor's fallback will accept a real X-Agent-ID +
-			// X-Task-ID pair. So without this gate a member who learns a task ID
-			// could forge both headers and inject an attachment onto another chat
-			// task's assistant reply — a cross-session/privacy leak.
+			// when the auth middleware set it from a task-scoped `mat_` token:
+			// that is the only branch that stamps it, because the middleware
+			// deletes any client-supplied agent/task identity first (MUL-3428).
+			// The gate is kept explicit because of what it protects — an
+			// attachment injected onto another chat task's assistant reply is a
+			// cross-session privacy leak, and this endpoint should say which
+			// credential it requires rather than rely on a distant strip.
 			if r.Header.Get("X-Actor-Source") != "task_token" {
 				writeError(w, http.StatusForbidden, "task_id upload is only available from within an agent task")
 				return
@@ -554,20 +602,63 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			params.ChatSessionID = task.ChatSessionID
 		}
 
+		// Every field is validated; check the storage limit before writing
+		// the object, so a refused upload stores nothing.
+		if err := h.storageQuota().Admit(r.Context(), params.WorkspaceID, params.SizeBytes, service.StorageSourceUpload); err != nil {
+			// The role read with membership above decides, so a failed
+			// second lookup cannot show a guest the workspace's usage.
+			if !writeStorageLimitReached(w, err, !projectaccess.IsGuestRole(member.Role)) {
+				writeError(w, http.StatusInternalServerError, "upload failed")
+			}
+			return
+		}
+
+		if dimensions, ok := imagemetadata.Dimensions(data); ok {
+			params.Width = pgtype.Int4{Int32: dimensions.Width, Valid: true}
+			params.Height = pgtype.Int4{Int32: dimensions.Height, Valid: true}
+		}
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
+			if writeRequestCancellation(w, r, err) {
+				return
+			}
 			slog.Error("file upload failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "upload failed")
 			return
 		}
 		params.Url = link
 
-		att, err := h.Queries.CreateAttachment(r.Context(), params)
+		var att db.CreateAttachmentRow
+		if params.CommentID.Valid {
+			// A comment attachment is written under the comment's lock, so a
+			// delete that commits while the object uploaded cannot leave it on
+			// a tombstone. A refused upload takes its stored object with it.
+			err = h.withLiveCommentLock(r.Context(), params.CommentID, params.WorkspaceID, func(qtx *db.Queries) error {
+				var createErr error
+				att, createErr = qtx.CreateAttachment(r.Context(), params)
+				return createErr
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				h.deleteS3Objects(r.Context(), []string{link})
+				writeError(w, http.StatusForbidden, "invalid comment_id")
+				return
+			}
+		} else {
+			att, err = wakeupWrite(h, r, func(q *db.Queries) (db.CreateAttachmentRow, error) {
+				return q.CreateAttachment(r.Context(), params)
+			})
+		}
 		if err != nil {
+			if writeRequestCancellation(w, r, err) {
+				// The record write may have committed. Deleting uploaded bytes
+				// could leave a committed attachment pointing at a missing object.
+				return
+			}
 			slog.Error("failed to create attachment record", "error", err)
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
 		} else {
+			h.prewarmAttachmentThumbnail(att.Attachment())
 			if att.IssueRevision > 0 && att.IssueID.Valid {
 				h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, uploaderType, uploaderID, map[string]any{
 					"issue_id":       uuidToString(att.IssueID),
@@ -602,6 +693,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	// No workspace context (e.g. avatar upload) — upload directly.
 	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 	if err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		slog.Error("file upload failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "upload failed")
 		return
@@ -613,9 +707,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // ListAttachments — GET /api/issues/{id}/attachments
-// ---------------------------------------------------------------------------
 
 func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
@@ -634,23 +726,75 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	origins, err := h.attachmentCommentOrigins(r.Context(), issue, attachments)
+	if err != nil {
+		slog.Error("failed to load attachment comment origins", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list attachments")
+		return
+	}
+
 	mode := attachmentURLModeFromRequest(r)
 	resp := make([]AttachmentResponse, len(attachments))
 	for i, a := range attachments {
 		resp[i] = h.attachmentToResponse(a, mode)
+		if origin, ok := origins[a.CommentID]; ok {
+			authorType, authorID, createdAt := origin.AuthorType, uuidToString(origin.AuthorID), timestampToString(origin.CreatedAt)
+			resp[i].CommentAuthorType, resp[i].CommentAuthorID, resp[i].CommentCreatedAt = &authorType, &authorID, &createdAt
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
+// attachmentCommentOrigins loads, in one query, the author and time of each
+// live comment the attachments belong to, scoped to the issue and workspace.
+func (h *Handler) attachmentCommentOrigins(ctx context.Context, issue db.Issue, attachments []db.Attachment) (map[pgtype.UUID]db.ListCommentOriginsForIssueRow, error) {
+	ids := make([]pgtype.UUID, 0)
+	seen := make(map[pgtype.UUID]bool)
+	for _, a := range attachments {
+		if a.CommentID.Valid && !seen[a.CommentID] {
+			seen[a.CommentID] = true
+			ids = append(ids, a.CommentID)
+		}
+	}
+	origins := make(map[pgtype.UUID]db.ListCommentOriginsForIssueRow, len(ids))
+	if len(ids) == 0 {
+		return origins, nil
+	}
+	rows, err := h.Queries.ListCommentOriginsForIssue(ctx, db.ListCommentOriginsForIssueParams{
+		Ids: ids, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		origins[row.ID] = row
+	}
+	return origins, nil
+}
+
 // GetAttachmentByID — GET /api/attachments/{id}
-// ---------------------------------------------------------------------------
 
 func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	att, ok := h.loadAttachmentForRequest(w, r)
 	if !ok {
 		return
 	}
+	h.writeSignedAttachmentMetadata(w, r, att)
+}
+
+// GetAttachmentForDownload resolves the workspace from the attachment, as the
+// durable Markdown download URL does. A link can be pasted into a different
+// workspace; the current workspace header must not change its target. The
+// membership check is the same one used by the protected download endpoint.
+func (h *Handler) GetAttachmentForDownload(w http.ResponseWriter, r *http.Request) {
+	att, ok := h.loadAttachmentForDownload(w, r)
+	if !ok {
+		return
+	}
+	h.writeSignedAttachmentMetadata(w, r, att)
+}
+
+func (h *Handler) writeSignedAttachmentMetadata(w http.ResponseWriter, r *http.Request, att db.Attachment) {
 
 	// Always signed, regardless of what the caller advertised: this endpoint is
 	// the single source of fresh, natively-loadable URLs. Stable-mode callers
@@ -750,6 +894,9 @@ func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
+	if !h.requireAttachmentVisible(w, r, workspaceID, att) {
+		return db.Attachment{}, false
+	}
 
 	return att, true
 }
@@ -768,10 +915,8 @@ func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Reques
 // workspace. This helper keeps the URL clean (`/api/attachments/{id}/download`)
 // and treats the attachment id + cookie/Bearer auth as sufficient.
 //
-// Membership uses the same 404-on-deny shape as ServeLocalUpload so the
-// route does not act as an IDOR oracle for attachment IDs that happen to
-// belong to a different workspace. The membership cache fast path mirrors
-// canReadWorkspaceUpload exactly.
+// A denied membership check returns 404 so the route does not reveal
+// attachment IDs belonging to a different workspace.
 func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Request) (db.Attachment, bool) {
 	attachmentID := chi.URLParam(r, "id")
 	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
@@ -780,9 +925,7 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 	}
 	att, err := h.Queries.GetAttachmentByIDOnly(r.Context(), attUUID)
 	if err != nil {
-		// 404 (not 403/401) so non-member and non-existent look identical
-		// to outside callers. Same shape as ServeLocalUpload's
-		// canReadWorkspaceUpload deny path.
+		// Non-member and non-existent look identical to outside callers.
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
@@ -797,20 +940,32 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
-		return att, true
-	}
-	if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+	// A task token acts only in the workspace it is bound to; Auth stamps
+	// that workspace into X-Workspace-ID. Membership alone is not enough:
+	// the task's user may belong to the attachment's other workspace too.
+	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Workspace-ID") != workspaceID {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
+		if !h.requireAttachmentVisible(w, r, workspaceID, att) {
+			return db.Attachment{}, false
+		}
+		return att, true
+	}
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return db.Attachment{}, false
+	}
+	h.cacheMembership(r.Context(), member)
+	if !h.requireAttachmentVisible(w, r, workspaceID, att) {
+		return db.Attachment{}, false
+	}
 	return att, true
 }
 
-// ---------------------------------------------------------------------------
 // DownloadAttachment — GET /api/attachments/{id}/download
-// ---------------------------------------------------------------------------
 //
 // Workspace context is derived from the attachment row itself, not from
 // X-Workspace-Slug / X-Workspace-ID headers. This is what lets a markdown
@@ -830,7 +985,7 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
 		return
 	}
 
@@ -930,24 +1085,6 @@ func shouldProxyAttachmentURL(rawURL string) bool {
 	return false
 }
 
-// ServeLocalUpload serves a local-disk object from the public /uploads/*
-// route. It carries the same preview security headers as the authenticated
-// download endpoint so self-hosted deployments — same-origin or split
-// frontend/backend origins — can inline-render images and iframe-preview
-// documents (PDF/HTML) fetched straight from the static route. Without these
-// headers the global "frame-ancestors 'none'" policy blocks those previews.
-// See MUL-3821 / #4477.
-func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
-	local, ok := h.Storage.(*storage.LocalStorage)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	h.setAttachmentPreviewSecurityHeaders(w)
-	key := strings.TrimPrefix(r.URL.Path, "/uploads/")
-	local.ServeFile(w, r, key)
-}
-
 // proxyAttachmentDownload streams an attachment through the API instead of
 // redirecting to a signed storage URL (used for local-disk / private-host
 // backends, see resolveAttachmentDownloadMode).
@@ -967,11 +1104,17 @@ func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string, forceAttachment bool) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		slog.Error("failed to open attachment for download", "id", uuidToString(att.ID), "key", key, "error", err)
 		writeError(w, http.StatusNotFound, "attachment object not found")
 		return
 	}
 	defer reader.Close()
+	if writeRequestCancellation(w, r, r.Context().Err()) {
+		return
+	}
 
 	if att.ContentType != "" {
 		w.Header().Set("Content-Type", att.ContentType)
@@ -1002,6 +1145,22 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 
 	// Non-seekable backend: single-range fallback.
 	h.serveProxyRange(w, r, att, reader)
+}
+
+// A socket write can report a closed connection instead of context.Canceled.
+// Preserve unrelated write errors and distinguish them from storage reads.
+type attachmentStreamWriter struct {
+	http.ResponseWriter
+	request *http.Request
+}
+
+func (w attachmentStreamWriter) Write(data []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(data)
+	if errors.Is(w.request.Context().Err(), context.Canceled) &&
+		(errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, net.ErrClosed)) {
+		err = errors.Join(context.Canceled, err)
+	}
+	return n, err
 }
 
 // serveProxyRange streams a (possibly partial) attachment body from a
@@ -1048,10 +1207,18 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	}
 
 	if serveFull {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		if total >= 0 {
 			w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
 		}
-		if _, err := io.Copy(w, reader); err != nil {
+		w.WriteHeader(http.StatusOK)
+		if _, err := io.Copy(attachmentStreamWriter{ResponseWriter: w, request: r}, reader); err != nil {
+			if isRequestCancellation(r, err) {
+				slog.Info("attachment download cancelled", "id", uuidToString(att.ID))
+				return
+			}
 			slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
 		}
 		return
@@ -1063,6 +1230,9 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	// ServeContent path above).
 	if start > 0 {
 		if _, err := io.CopyN(io.Discard, reader, start); err != nil {
+			if writeRequestCancellation(w, r, err) {
+				return
+			}
 			// The skip failed BEFORE any response header was written. We must send
 			// an explicit error status here: a bare `return` would let net/http
 			// emit its default 200 OK + empty body, which a resuming client reads
@@ -1079,7 +1249,11 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, total))
 	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	w.WriteHeader(http.StatusPartialContent)
-	if _, err := io.CopyN(w, reader, length); err != nil {
+	if _, err := io.CopyN(attachmentStreamWriter{ResponseWriter: w, request: r}, reader, length); err != nil {
+		if isRequestCancellation(r, err) {
+			slog.Info("attachment range download cancelled", "id", uuidToString(att.ID))
+			return
+		}
 		slog.Error("failed to stream attachment range", "id", uuidToString(att.ID), "error", err)
 	}
 }
@@ -1245,7 +1419,6 @@ func normalizeFrameAncestorSource(raw string) (string, bool) {
 	return scheme + "://" + strings.ToLower(u.Host), true
 }
 
-// ---------------------------------------------------------------------------
 // GetAttachmentContent — GET /api/attachments/{id}/content
 //
 // Streams the raw bytes of a text-previewable attachment back to the client.
@@ -1256,9 +1429,8 @@ func normalizeFrameAncestorSource(raw string) (string, bool) {
 // the explicit /download route signs redirects as attachment downloads and
 // proxy mode streams with the same media-type policy as storage uploads.
 //
-// Hard cap: 2 MB. Larger files return 413. Anything outside the text
-// whitelist returns 415.
-// ---------------------------------------------------------------------------
+// Files above the configured preview limit return 413. Anything outside the
+// text whitelist returns 415.
 
 func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	att, ok := h.loadAttachmentForRequest(w, r)
@@ -1273,7 +1445,12 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.Storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
+		return
+	}
+	limit := h.maxPreviewSizeBytes()
+	if att.SizeBytes > limit {
+		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
 		return
 	}
 	key := h.Storage.KeyFromURL(att.Url)
@@ -1285,15 +1462,15 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	// LimitReader to maxPreviewTextSize+1 so we can detect "exactly at the
-	// limit" vs "exceeds the limit" by checking the returned length.
-	body, err := io.ReadAll(io.LimitReader(reader, maxPreviewTextSize+1))
+	// Check actual bytes as well as metadata. The hard maximum keeps limit+1
+	// safe, while the extra byte distinguishes the exact boundary from overflow.
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
 	if err != nil {
 		slog.Error("failed to read attachment body for preview", "id", attachmentID, "error", err)
 		writeError(w, http.StatusBadGateway, "failed to read attachment body")
 		return
 	}
-	if len(body) > maxPreviewTextSize {
+	if int64(len(body)) > limit {
 		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
 		return
 	}
@@ -1306,7 +1483,7 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	// No-store: workspace membership / attachment ACL can change between
 	// requests (member removed, attachment deleted). A cached body would
 	// stay readable past the revocation window. The redundant request is
-	// fine here — bodies are capped at 2 MB and the endpoint is only hit
+	// fine here — bodies are bounded by the preview limit and the endpoint is only hit
 	// when a user explicitly opens a preview.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -1319,76 +1496,17 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 
 // isTextPreviewable is the whitelist for the text preview proxy.
 //
-// IMPORTANT — KEEP IN SYNC with the client-side mirror in
-// packages/views/editor/utils/preview.ts (TEXT_EXTENSIONS / TEXT_CONTENT_TYPES
-// / TEXT_BASENAMES + extensionToLanguage). If a type is allowed here but not
-// mapped client-side the user sees raw unhighlighted text; if mapped client-side
-// but rejected here the user sees a 415 fallback.
-//
-// TODO(follow-up): extract this list to a JSON single-source-of-truth and
-// generate the TS side, mirroring the reserved-slugs pattern (see
-// server/internal/handler/reserved_slugs.json + scripts/generate-reserved-slugs.mjs).
-// Drift severity here is low (worst case: Eye button visible but proxy 415s,
-// modal shows the unsupported fallback — still functional, just confusing),
-// so it ships as manual hand-sync for v1.
-//
-// We check both content_type and extension because http.DetectContentType
-// regularly returns "text/plain" for Markdown / source code, so a pure
-// content-type check would 415 those.
+// The Go handler embeds attachment_text_preview.json directly. The client
+// imports a generated representation of the same source, and CI rejects stale
+// generated output.
 func isTextPreviewable(contentType, filename string) bool {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	// Strip params (e.g. "text/plain; charset=utf-8")
-	if idx := strings.Index(ct, ";"); idx >= 0 {
-		ct = strings.TrimSpace(ct[:idx])
-	}
-	if strings.HasPrefix(ct, "text/") {
-		return true
-	}
-	switch ct {
-	case "application/json",
-		"application/javascript",
-		"application/xml",
-		"application/x-yaml",
-		"application/yaml",
-		"application/toml",
-		"application/x-sh",
-		"application/x-httpd-php":
-		return true
-	}
-
-	ext := strings.ToLower(path.Ext(filename))
-	switch ext {
-	case ".md", ".markdown",
-		".txt", ".log",
-		".csv", ".tsv",
-		".html", ".htm",
-		".json", ".xml",
-		".yml", ".yaml", ".toml", ".ini", ".conf",
-		".sh", ".bash", ".zsh",
-		".py", ".rb", ".go", ".rs",
-		".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-		".css", ".scss", ".sass", ".less",
-		".sql",
-		".java", ".kt", ".swift",
-		".c", ".cc", ".cpp", ".h", ".hpp",
-		".cs", ".php", ".lua", ".vim",
-		".dockerfile", ".makefile", ".gitignore":
-		return true
-	}
-	// Filenames without extension that match well-known build files.
-	base := strings.ToLower(path.Base(filename))
-	switch base {
-	case "dockerfile", "makefile", ".env":
-		return true
-	}
-	return false
+	return attachmentTextPreview.allows(contentType, filename)
 }
 
-// ---------------------------------------------------------------------------
 // DeleteAttachment — DELETE /api/attachments/{id}
-// ---------------------------------------------------------------------------
 
 func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	attachmentID := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
@@ -1418,6 +1536,9 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return
 	}
+	if !h.requireAttachmentVisible(w, r, workspaceID, att) {
+		return
+	}
 	// Captured-context attachments are immutable historical copies. They are
 	// deleted only with their target issue, workspace, or abandoned context.
 	if att.SourceContextID.Valid {
@@ -1436,10 +1557,19 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deleted, err := h.Queries.DeleteAttachment(r.Context(), db.DeleteAttachmentParams{
-		ID:          att.ID,
-		WorkspaceID: att.WorkspaceID,
+	var deleted db.DeleteAttachmentRow
+	deleteParams := db.DeleteAttachmentParams{ID: att.ID, WorkspaceID: att.WorkspaceID}
+	err = h.withAttachmentOwnerLock(r.Context(), att, func(qtx *db.Queries) error {
+		var deleteErr error
+		deleted, deleteErr = qtx.DeleteAttachment(r.Context(), deleteParams)
+		return deleteErr
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The attachment is gone — with its comment, with its issue, or on its
+		// own — while this waited for the owner lock.
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
 	if err != nil {
 		slog.Error("failed to delete attachment", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete attachment")
@@ -1469,50 +1599,110 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---------------------------------------------------------------------------
 // Attachment linking
-// ---------------------------------------------------------------------------
 
-// linkAttachmentsByIssueIDs links unbound attachments to an issue. A caller
-// that did not already advance the issue revision can ask this visible change
-// to advance it exactly once.
-func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []pgtype.UUID, bumpRevision bool) (db.LinkAttachmentsToIssueRow, error) {
-	return h.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
-		IssueID:       issueID,
-		WorkspaceID:   workspaceID,
-		AttachmentIds: ids,
-		BumpRevision:  bumpRevision,
-	})
-}
+// attachmentOwnerLockAttempts bounds the re-read below. An attachment gains an
+// owner once, when the issue or comment it was uploaded for links it, so one
+// retry is enough in practice; the bound is what keeps a pathological
+// interleaving from looping.
+const attachmentOwnerLockAttempts = 3
 
-// linkAttachmentsByIDs links the given attachment IDs to a comment.
-// Only updates attachments that belong to the same issue and have no comment_id yet.
-func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID pgtype.UUID, ids []pgtype.UUID) {
-	if err := h.Queries.LinkAttachmentsToComment(ctx, db.LinkAttachmentsToCommentParams{
-		CommentID: commentID,
-		IssueID:   issueID,
-		Column3:   ids,
-	}); err != nil {
-		slog.Error("failed to link attachments to comment", "error", err)
+// withAttachmentOwnerLock runs write in a transaction that locks the
+// attachment's owners first — the issue, then the comment when it has one —
+// which is the issue -> comment -> child order LockIssueForDelete,
+// UpdateComment, LockLiveComment and CreateComment all take. Locking the
+// attachment row and then touching its issue is the opposite order, and closes
+// a deadlock cycle with issue teardown: teardown holds the issue and reaches
+// the same attachment through the issue_id cascade.
+//
+// The row is re-read under those locks, so a link that committed while this
+// waited is seen before the write; an attachment that gained an owner is
+// retried with that owner locked. Returns pgx.ErrNoRows when the attachment,
+// or the comment owning it, is gone.
+func (h *Handler) withAttachmentOwnerLock(ctx context.Context, att db.Attachment, write func(*db.Queries) error) error {
+	for attempt := 0; ; attempt++ {
+		fresh, err := h.attachmentOwnerLockAttempt(ctx, att, write)
+		if !errors.Is(err, errAttachmentOwnerChanged) {
+			return err
+		}
+		if attempt+1 >= attachmentOwnerLockAttempts {
+			return errors.New("attachment owner kept changing under the lock")
+		}
+		att = fresh
 	}
 }
 
-// deleteS3Object removes a single file from S3 by its CDN URL.
+// errAttachmentOwnerChanged reports that the attachment gained or changed an
+// owner while the transaction was waiting, so the locks it took are the wrong
+// ones and the attempt must be retried against the new owner.
+var errAttachmentOwnerChanged = errors.New("attachment owner changed")
+
+func (h *Handler) attachmentOwnerLockAttempt(ctx context.Context, att db.Attachment, write func(*db.Queries) error) (db.Attachment, error) {
+	tx, err := h.beginWakeupWrite(ctx)
+	if err != nil {
+		return db.Attachment{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if att.IssueID.Valid {
+		// A missing issue is not an error here: its cascade took the attachment
+		// with it, which the re-read below reports as pgx.ErrNoRows.
+		if _, err := qtx.LockIssueForAttachmentWrite(ctx, db.LockIssueForAttachmentWriteParams{
+			ID:          att.IssueID,
+			WorkspaceID: att.WorkspaceID,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return db.Attachment{}, err
+		}
+	}
+	if att.CommentID.Valid {
+		if _, err := qtx.LockLiveComment(ctx, db.LockLiveCommentParams{
+			ID:          att.CommentID,
+			WorkspaceID: att.WorkspaceID,
+		}); err != nil {
+			return db.Attachment{}, err
+		}
+	}
+	var fresh db.Attachment
+	if att.IssueID.Valid || att.CommentID.Valid {
+		fresh, err = qtx.GetAttachment(ctx, db.GetAttachmentParams{ID: att.ID, WorkspaceID: att.WorkspaceID})
+	} else {
+		// Nothing to lock above: take the row itself so it cannot gain an owner
+		// between this read and the write.
+		fresh, err = qtx.LockAttachmentRow(ctx, db.LockAttachmentRowParams{ID: att.ID, WorkspaceID: att.WorkspaceID})
+	}
+	if err != nil {
+		return db.Attachment{}, err
+	}
+	if fresh.IssueID != att.IssueID || fresh.CommentID != att.CommentID {
+		return fresh, errAttachmentOwnerChanged
+	}
+	if err := write(qtx); err != nil {
+		return db.Attachment{}, err
+	}
+	return fresh, tx.Commit(ctx)
+}
+
+// deleteS3Object removes a single file, and its thumbnail, from S3 by its CDN URL.
 func (h *Handler) deleteS3Object(ctx context.Context, url string) {
 	if h.Storage == nil || url == "" {
 		return
 	}
-	h.Storage.Delete(ctx, h.Storage.KeyFromURL(url))
+	h.deleteS3Objects(ctx, []string{url})
 }
 
-// deleteS3Objects removes multiple files from S3 by their CDN URLs.
+// deleteS3Objects removes multiple files, and their thumbnails, from S3 by
+// their CDN URLs.
 func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
 	if h.Storage == nil || len(urls) == 0 {
 		return
 	}
-	keys := make([]string, len(urls))
-	for i, u := range urls {
-		keys[i] = h.Storage.KeyFromURL(u)
+	keys := make([]string, 0, len(urls))
+	for _, u := range urls {
+		key := h.Storage.KeyFromURL(u)
+		keys = append(keys, key)
+		if thumbKey, ok := thumbnail.StorageKey(key); ok {
+			keys = append(keys, thumbKey)
+		}
 	}
 	h.Storage.DeleteKeys(ctx, keys)
 }

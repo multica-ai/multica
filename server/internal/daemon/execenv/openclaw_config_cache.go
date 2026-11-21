@@ -41,7 +41,10 @@ const (
 
 	// openclawDiscoveryCacheVersion guards the on-disk shape. A daemon that
 	// reads an entry written by a different version treats it as a miss.
-	openclawDiscoveryCacheVersion = 1
+	// 2 — the stored rows changed shape: the source is recorded explicitly
+	// (`agents_source`) and an `agents.entries` row is the id marker alone, not a
+	// copy of the redacted entry (see openclawResolvedAgentsEntriesOrRegistry).
+	openclawDiscoveryCacheVersion = 2
 
 	// openclawDiscoveryCacheTTL bounds how long a hit can be served. The
 	// fingerprint catches the changes we can observe cheaply (binary swap,
@@ -94,10 +97,14 @@ type openclawDiscoveryCacheEntry struct {
 	Fingerprint      openclawDiscoveryFingerprint `json:"fingerprint"`
 	CachedAtNano     int64                        `json:"cached_at_nano"`
 	ActiveConfigPath string                       `json:"active_config_path"`
-	// AgentsList is the resolved `agents.list` array, stored verbatim so a hit
-	// reproduces exactly what the CLI returned.
-	AgentsList         json.RawMessage `json:"agents_list"`
-	AgentsFromRegistry bool            `json:"agents_from_registry"`
+	// AgentsList is the resolved per-agent rows, stored so a hit reproduces
+	// exactly what the source returned.
+	AgentsList json.RawMessage `json:"agents_list"`
+	// AgentsSource is the openclawAgentsSource those rows came from, which
+	// decides whether and how they may be written back into the wrapper. It is
+	// part of the cached evidence for the same reason the rows are: a hit has to
+	// rebuild the same wrapper the live run would have built.
+	AgentsSource string `json:"agents_source"`
 }
 
 // openclawDiscoveryEnvVars are the environment variables that change which
@@ -258,7 +265,7 @@ func loadOpenclawDiscoveryCache(cachePath, bin string, now time.Time) (openclawD
 // either the old entry or the new one, never a half-written file. Two tasks
 // racing to store simply leave the later winner in place — both entries are
 // equally valid.
-func storeOpenclawDiscoveryCache(cachePath, bin, activeConfigPath string, agentsList []any, agentsFromRegistry bool, now time.Time) error {
+func storeOpenclawDiscoveryCache(cachePath, bin, activeConfigPath string, agentsList []any, agentsSource openclawAgentsSource, now time.Time) error {
 	if cachePath == "" {
 		return nil
 	}
@@ -274,11 +281,11 @@ func storeOpenclawDiscoveryCache(cachePath, bin, activeConfigPath string, agents
 		return fmt.Errorf("marshal openclaw agents list: %w", err)
 	}
 	entry := openclawDiscoveryCacheEntry{
-		Fingerprint:        fingerprint,
-		CachedAtNano:       now.UnixNano(),
-		ActiveConfigPath:   activeConfigPath,
-		AgentsList:         listBytes,
-		AgentsFromRegistry: agentsFromRegistry,
+		Fingerprint:      fingerprint,
+		CachedAtNano:     now.UnixNano(),
+		ActiveConfigPath: activeConfigPath,
+		AgentsList:       listBytes,
+		AgentsSource:     string(agentsSource),
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {

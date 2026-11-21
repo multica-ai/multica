@@ -89,6 +89,9 @@ type fakeSessionQueries struct {
 	lastCreate            db.CreateChatMessageParams
 	touched               int
 	replyTargets          int
+	lastReplyTarget       db.UpdateChannelChatSessionBindingReplyTargetParams
+	contextReplyTargets   int
+	lastContextReply      db.SetChannelChatContextReplyTargetParams
 	lockedWorkspace       int    // count of LockWorkspaceForChatSessionCreate calls
 	lastConfig            []byte // config of the most recent CreateChannelChatSessionBinding
 	attachments           []db.CreateAttachmentParams
@@ -352,8 +355,15 @@ func (f *fakeSessionQueries) SetChannelChatContextInitiator(_ context.Context, a
 	return arg.InitiatorUserID, nil
 }
 
-func (f *fakeSessionQueries) UpdateChannelChatSessionBindingReplyTarget(context.Context, db.UpdateChannelChatSessionBindingReplyTargetParams) error {
+func (f *fakeSessionQueries) UpdateChannelChatSessionBindingReplyTarget(_ context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error {
 	f.replyTargets++
+	f.lastReplyTarget = arg
+	return nil
+}
+
+func (f *fakeSessionQueries) SetChannelChatContextReplyTarget(_ context.Context, arg db.SetChannelChatContextReplyTargetParams) error {
+	f.contextReplyTargets++
+	f.lastContextReply = arg
 	return nil
 }
 
@@ -410,6 +420,9 @@ func TestStartSessionCreatesExplicitEmptyGeneration(t *testing.T) {
 	if !result.SessionID.Valid || len(f.messages) != 0 {
 		t.Fatalf("session=%v messages=%v", result.SessionID.Valid, f.messages)
 	}
+	if f.lastSessionCreate.Title != "" || result.Append.InitialTitle != "" {
+		t.Fatalf("empty Chat title = stored %q result %q, want empty", f.lastSessionCreate.Title, result.Append.InitialTitle)
+	}
 	if f.createdSessions != 1 || f.markRows != 1 {
 		t.Fatalf("created=%d markRows=%d", f.createdSessions, f.markRows)
 	}
@@ -433,6 +446,9 @@ func TestStartSessionBodyCreatesOrdinaryFirstMessageAndTitle(t *testing.T) {
 	}
 	if len(f.messages) != 1 || f.messages[0] != "# 发布检查" {
 		t.Fatalf("messages=%v", f.messages)
+	}
+	if f.lastSessionCreate.Title != "发布检查" || result.Append.InitialTitle != "发布检查" {
+		t.Fatalf("first-turn title = stored %q result %q, want body-derived fallback", f.lastSessionCreate.Title, result.Append.InitialTitle)
 	}
 	if f.lastCreate.MessageKind.Valid {
 		t.Fatalf("message kind=%q, want ordinary", f.lastCreate.MessageKind.String)
@@ -1345,5 +1361,99 @@ func TestAppendUserMessage_ClaimLost(t *testing.T) {
 	})
 	if err != ErrClaimLost {
 		t.Errorf("zero Mark rows must return ErrClaimLost, got %v", err)
+	}
+}
+
+// TestAppendUserMessage_ReplyTargetCarriesSender pins that the trigger's
+// channel-native sender is recorded in the SAME write as its message and
+// thread ids. They have to move together: the outbound side reads all three
+// as one snapshot, so a sender written by a different turn than the message
+// it accompanies would let a reply to one member carry another's @-mention.
+func TestAppendUserMessage_ReplyTargetCarriesSender(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	if _, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Body: "hi", MessageID: "om_1", ThreadID: "omt_1", SenderChannelID: "ou_sender",
+	}); err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	got := f.lastContextReply
+	if got.LastMessageID.String != "om_1" {
+		t.Fatalf("context reply target = %+v, want the trigger message", got)
+	}
+	// The thread is NOT recorded here: it is route, carried by the binding,
+	// so that a generation with no trigger still routes into its topic.
+	if f.lastReplyTarget.LastThreadID.String != "omt_1" {
+		t.Errorf("binding cursor thread = %+v, want the route to stay on the binding",
+			f.lastReplyTarget.LastThreadID)
+	}
+	if !got.LastSenderID.Valid || got.LastSenderID.String != "ou_sender" {
+		t.Errorf("last_sender_id = %+v, want ou_sender recorded alongside the message", got.LastSenderID)
+	}
+	if got.Revision != f.contextRevision {
+		t.Errorf("snapshot revision = %d, want the generation this message belongs to (%d)",
+			got.Revision, f.contextRevision)
+	}
+}
+
+// TestAppendUserMessage_ReplyTargetSenderNullWhenAbsent covers adapters that
+// do not supply a channel-native sender (every channel but Lark today): the
+// column goes NULL rather than empty string, so the outbound side reads it as
+// "no identity" and sends without a mention.
+func TestAppendUserMessage_ReplyTargetSenderNullWhenAbsent(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	if _, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Body: "hi", MessageID: "om_1",
+	}); err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if f.lastContextReply.LastSenderID.Valid {
+		t.Errorf("absent sender must be NULL; got %+v", f.lastContextReply.LastSenderID)
+	}
+}
+
+// Channel media is never refused for storage; the server's hook only records
+// it, once the attachments are committed (MUL-9489).
+func TestBindMediaRefs_RunsMediaStoredHookAfterCommit(t *testing.T) {
+	var stored []pgtype.UUID
+	var deadlines []bool
+	SetMediaStoredHook(func(ctx context.Context, workspaceID pgtype.UUID) {
+		stored = append(stored, workspaceID)
+		_, ok := ctx.Deadline()
+		deadlines = append(deadlines, ok)
+	})
+	t.Cleanup(func() { SetMediaStoredHook(nil) })
+
+	f := newFake()
+	s := newTestSession(f)
+	res, err := s.AppendUserMessage(context.Background(), AppendInput{SessionID: uid(1), Sender: uid(7), Body: "[File]", MessageID: "om_file"})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID: res.MessageID, SessionID: uid(1), WorkspaceID: uid(9), Sender: uid(7), Body: "[File]",
+		MediaRefs: []channel.MediaRef{{
+			Type: channel.MsgTypeFile, StorageKey: "slack/f.pdf", StorageURL: "https://cdn.example.test/slack/f.pdf",
+			Filename: "f.pdf", MimeType: "application/pdf", SizeBytes: 10,
+		}},
+	}); err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if len(stored) != 1 || stored[0] != uid(9) {
+		t.Fatalf("hook calls = %+v, want one for the workspace", stored)
+	}
+	// The hook runs on a bounded budget so it cannot hold up the task start.
+	if !deadlines[0] {
+		t.Fatal("hook context has no deadline")
+	}
+	// A bind without media stores nothing and records nothing.
+	if err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID: res.MessageID, SessionID: uid(1), WorkspaceID: uid(9), Sender: uid(7), Body: "[File]",
+	}); err != nil {
+		t.Fatalf("BindMediaRefs without media: %v", err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("hook calls = %d after an empty bind, want 1", len(stored))
 	}
 }

@@ -52,7 +52,8 @@ token's specific platform trap.
 content (string)
   ↓ preprocessMobileMarkdown
      legacy mention shortcode  →  [@name](mention://type/id)
-     legacy file-card lines    →  [📎 name](url)
+     image file-card lines     →  ![name](url)
+     other file-card lines     →  [📎 name](url)
      HTML <br>                 →  CommonMark "  \n" hard break
   ↓ splitMarkdown                 (marked@18 lexer; we use the AST only)
      code fence          → { type:'code',  lang, code }
@@ -255,4 +256,4 @@ React-tree renderer:
 - `apps/mobile/lib/markdown/markdown-style.ts` — `useMarkdownStyle()` theme bridge
 - `apps/mobile/lib/markdown/code-block.tsx` — Shiki-powered code segment
 - `apps/mobile/lib/markdown/markdown-image.tsx` — lightbox-aware image segment
-- `apps/mobile/CLAUDE.md` — mobile-wide rules including theme/CSS-variable system
+- `apps/mobile/AGENTS.md` — mobile-wide rules including theme/CSS-variable system

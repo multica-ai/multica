@@ -3,7 +3,7 @@
 import { useId, useMemo, useState } from "react";
 import type { FormEvent, HTMLAttributes } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Cloud, Loader2, RefreshCw, Rocket, Trash2 } from "lucide-react";
+import { Cloud, Loader2, RefreshCw, Rocket, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { CloudRuntimeNode } from "@multica/core/runtimes";
 import {
@@ -94,7 +94,7 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex max-h-[88vh] flex-col gap-0 p-0 sm:max-w-3xl">
+      <DialogContent className="flex max-h-[88%] flex-col gap-0 p-0 sm:max-w-3xl">
         <DialogHeader className="border-b px-6 py-5">
           <DialogTitle className="flex items-center gap-2 text-title-sm">
             <Cloud className="h-4 w-4 text-muted-foreground" />
@@ -112,9 +112,6 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
                 <h3 className="text-body font-medium">
                   {t(($) => $.cloud_runtime.create_title)}
                 </h3>
-                <p className="mt-1 text-caption text-muted-foreground">
-                  {t(($) => $.cloud_runtime.create_hint)}
-                </p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">

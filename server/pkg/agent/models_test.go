@@ -494,6 +494,12 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			want:     false,
 		},
 		{
+			name:     "codex bundled gpt-6-astra is compatible",
+			provider: "codex",
+			model:    "gpt-6-astra",
+			want:     false,
+		},
+		{
 			name:     "codex model is incompatible with claude",
 			provider: "claude",
 			model:    "o3",
@@ -524,10 +530,10 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			want:     true,
 		},
 		{
-			name:     "unknown claude base stays incompatible after context normalization",
+			name:     "future claude model stays compatible after context normalization",
 			provider: "claude",
-			model:    "claude-fake-9[1m]",
-			want:     true,
+			model:    "claude-opus-5-5[1m]",
+			want:     false,
 		},
 		{
 			name:     "provider-prefixed openai model is incompatible with codex",
@@ -542,10 +548,10 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			want:     true,
 		},
 		{
-			name:     "known openai-looking model outside codex catalog is incompatible",
+			name:     "future codex model is not rejected by the static fallback catalog",
 			provider: "codex",
-			model:    "gpt-99",
-			want:     true,
+			model:    "gpt-6-sol",
+			want:     false,
 		},
 		{
 			name:     "unknown custom model is not classified",
@@ -1014,6 +1020,50 @@ bareword
 	}
 	if models[0].ID != "openai/gpt-4o" {
 		t.Errorf("expected colon normalized to slash: %+v", models[0])
+	}
+}
+
+func TestParsePiModelsQualifiedIDs(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		input    string
+		want     string
+		provider string
+	}{
+		{"openrouter:anthropic/claude-sonnet-4", "openrouter/anthropic/claude-sonnet-4", "openrouter"},
+		{"custom:org/model:version", "custom/org/model:version", "custom"},
+		{"openrouter/anthropic/claude-sonnet-4", "openrouter/anthropic/claude-sonnet-4", "openrouter"},
+		{"custom/org/model:version", "custom/org/model:version", "custom"},
+		{"custom/model:version", "custom/model:version", "custom"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			models := parsePiModels(tc.input + "\n")
+			if len(models) != 1 || models[0].ID != tc.want || models[0].Provider != tc.provider {
+				t.Fatalf("parsePiModels(%q) = %+v, want ID %q and provider %q", tc.input, models, tc.want, tc.provider)
+			}
+		})
+	}
+}
+
+func TestParsePiModelsRejectsProseAlongsideCatalog(t *testing.T) {
+	input := `Some random log lines printed at the starting of the sandbox
+Disallowing sandbox creation from $HOME
+provider model context max-out thinking images
+custom my/model:version 128K 8K yes no
+Some random log lines printed at the starting of the sandbox
+/private/config: permission denied
+custom/legacy-model
+custom/legacy:version
+custom:legacy-colon
+`
+	models := parsePiModels(input)
+	want := []string{"custom/my/model:version", "custom/legacy-model", "custom/legacy:version", "custom/legacy-colon"}
+	var got []string
+	for _, model := range models {
+		got = append(got, model.ID)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %v, want %v", got, want)
 	}
 }
 
@@ -1869,5 +1919,40 @@ func TestModelSelectorMustBeProviderQualifiedIsAnExecutionContract(t *testing.T)
 					tt.provider, got, tt.want, tt.why)
 			}
 		})
+	}
+}
+
+// This fixture accepts OMP's discovery surface and rejects Pi-only flags (#8379).
+func TestCustomOmpCompatibilityTargetDiscovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture")
+	}
+	path := filepath.Join(t.TempDir(), "custom-wrapper")
+	writeTestExecutable(t, path, []byte(`#!/bin/sh
+[ "$1" = "launch" ] || exit 3
+shift
+if [ "$1 $2" = "models --json" ]; then
+ echo '{"models":[{"provider":"commandcode","id":"deepseek/deepseek-v4.1-flash","selector":"commandcode/deepseek/deepseek-v4.1-flash"}]}'
+ exit 0
+fi
+echo "Error: unknown flags: $*" >&2
+exit 2
+`))
+	cmd := NewCommand(path, []string{"launch"})
+	if _, err := ListModels(context.Background(), "pi", cmd); err == nil || !strings.Contains(err.Error(), "unknown flags") {
+		t.Fatalf("Pi compatibility target must report failed probes, got %v", err)
+	}
+	catalog, err := ListModels(context.Background(), "omp", cmd)
+	if err != nil || len(catalog.Models) != 1 || catalog.Models[0].ID != "commandcode/deepseek/deepseek-v4.1-flash" {
+		t.Fatalf("OMP discovery lost selector or command prefix: %+v, %v", catalog, err)
+	}
+}
+
+func TestOmpProfileLaunchPrefixUsesProtocolBlocklist(t *testing.T) {
+	prefix := []string{"launch", "--mode", "text", "--model", "commandcode/deepseek/model"}
+	got := FilterLaunchPrefix("omp", prefix, nil)
+	want := FilterLaunchPrefix("pi", prefix, nil)
+	if strings.Join(got, " ") != strings.Join(want, " ") || len(got) == len(prefix) || got[0] != "launch" {
+		t.Fatalf("OMP prefix = %v; Pi prefix = %v", got, want)
 	}
 }

@@ -26,9 +26,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     orientation: "portrait",
     userInterfaceStyle: "automatic",
     scheme: "multica",
-    // 1024x1024 source shared with the desktop client
-    // (apps/desktop/build/icon.png). Expo prebuild generates every required
-    // iOS icon size from this single PNG.
+    // 1024x1024 full-bleed, no-alpha source that belongs to mobile alone. Do
+    // not point this back at the desktop icon (apps/desktop/build/icon.png):
+    // that one is padded for macOS, and iOS would mask it a second time, which
+    // is the white ring from #6995. Expo prebuild generates every required iOS
+    // icon size from this single PNG.
     icon: "./assets/icon.png",
     ios: {
       // Expo keeps the top-level portrait policy for iPhone while adding all
@@ -57,11 +59,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       bundleIdentifier: isProd
         ? (process.env.EXPO_BUNDLE_IDENTIFIER_PROD ?? "ai.multica.mobile")
         : isStaging
-          ? "ai.multica.mobile.staging"
+          ? (process.env.EXPO_BUNDLE_IDENTIFIER_STAGING ?? "ai.multica.mobile.staging")
           : (process.env.EXPO_BUNDLE_IDENTIFIER_DEV ?? "ai.multica.mobile.dev"),
     },
     plugins: [
       "expo-router",
+      "expo-image",
+      "expo-localization",
       "expo-secure-store",
       "@react-native-community/datetimepicker",
       "react-native-enriched-markdown",
@@ -83,6 +87,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         {
           ios: {
             buildReactNativeFromSource: true,
+            // SDK 57's supported scene runtime is required for Xcode 27 builds.
+            // Keep this in prebuild config so clean native generations retain it.
+            enableSceneSupport: true,
           },
         },
       ],

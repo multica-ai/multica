@@ -73,6 +73,9 @@ type Comment struct {
 	Type       string `json:"type"`
 	ParentID   string `json:"parent_id,omitempty"`
 	CreatedAt  string `json:"created_at"`
+	// DeletedAt is set only on a tombstone: a comment deleted while it still
+	// had replies, kept with empty content so those replies keep their parent.
+	DeletedAt string `json:"deleted_at,omitempty"`
 }
 
 type CommentListResponse struct {

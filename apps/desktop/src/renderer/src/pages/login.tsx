@@ -26,7 +26,7 @@ export function DesktopLoginPage() {
     <div className="flex h-screen flex-col">
       <DragStrip />
       <LoginPage
-        logo={<MulticaIcon bordered size="lg" />}
+        logo={<MulticaIcon mode="intro" size={48} />}
         onSuccess={() => {
           // Auth store update triggers AppContent re-render → shows DesktopShell.
           // Initial workspace navigation happens in routes.tsx via IndexRedirect.

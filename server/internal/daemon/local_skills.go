@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/skill"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -21,7 +23,7 @@ const (
 	// Kept in lockstep with the server-side importer's maxImportFileCount so a
 	// skill that imports from a URL/archive also imports from a runtime-local
 	// directory. The 8 MiB bundle cap is the real guard on skill size.
-	maxLocalSkillFileCount = 256
+	maxLocalSkillFileCount = 512
 	// Cap how deep skill discovery descends below a runtime root. opencode
 	// stores skills two levels deep (e.g. `release/reporter/SKILL.md`); a
 	// few extra levels covers any realistic future layout while bounding
@@ -105,8 +107,10 @@ const (
 //   - Pi: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/skills.md
 //   - Cursor: official forum guidance referencing the built-in /create-skill flow
 //     (https://forum.cursor.com/t/cursor-doesnt-know-new-skills-arens-saved/158507)
-//   - Hermes: ~/.hermes/skills is Hermes Agent's primary skill directory
-//     (https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)
+//   - Hermes: <HERMES_HOME>/skills is Hermes Agent's primary skill directory
+//     (https://hermes-agent.nousresearch.com/docs/user-guide/features/skills);
+//     the home is resolved as for a task without agent-level overrides
+//     (see hermesLocalSkillsRoot)
 //   - Kimi: ~/.kimi/skills mirrors Kimi CLI's project-level .kimi/skills layout
 //   - Kiro: project and user-level .kiro/skills directories discovered by Kiro CLI
 //   - Qoder: ~/.qoder/skills mirrors Qoder CLI's project-level .qoder/skills layout
@@ -129,6 +133,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	}
 
 	var providerRoot string
+	var claudeConfigDir string
+	var additionalProviderRoots []string
 	// Built-in runtime identities (e.g. "omp") declare their user skills dir
 	// in the descriptor; resolve to providerRoot and fall through to the
 	// common construction below so universal roots, merging, and fallback
@@ -138,7 +144,13 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	} else {
 		switch provider {
 		case "claude":
-			providerRoot = filepath.Join(home, ".claude", "skills")
+			claudeConfigDir = filepath.Join(home, ".claude")
+			// Relative overrides depend on the task working directory, which
+			// the runtime-level list and import requests do not have.
+			if configured := os.Getenv("CLAUDE_CONFIG_DIR"); filepath.IsAbs(configured) {
+				claudeConfigDir = configured
+			}
+			providerRoot = filepath.Join(claudeConfigDir, "skills")
 		case "codebuddy":
 			// CodeBuddy Code is a Claude Code fork but ships its own native
 			// config directory; it does NOT read ~/.claude/skills unless the
@@ -170,7 +182,7 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		case "cursor":
 			providerRoot = filepath.Join(home, ".cursor", "skills")
 		case "hermes":
-			providerRoot = filepath.Join(home, ".hermes", "skills")
+			providerRoot = hermesLocalSkillsRoot()
 		case "kimi":
 			providerRoot = filepath.Join(home, ".kimi", "skills")
 		case "reasonix":
@@ -216,6 +228,11 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				qwenHome = filepath.Join(home, ".qwen")
 			}
 			providerRoot = filepath.Join(qwenHome, "skills")
+		case "amp":
+			providerRoot = filepath.Join(home, ".config", "amp", "skills")
+			additionalProviderRoots = []string{filepath.Join(home, ".config", "agents", "skills")}
+		case "droid":
+			providerRoot = filepath.Join(home, ".factory", "skills")
 		case "qwenpaw":
 			// QWENPAW_WORKING_DIR (or legacy COPAW_WORKING_DIR) overrides
 			// QwenPaw's global ~/.qwenpaw directory, which owns settings,
@@ -241,17 +258,33 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			// directly below it. Project skills are injected separately under
 			// <workDir>/.minimax/skills.
 			providerRoot = filepath.Join(home, ".minimax", "skills")
+		case "devin":
+			providerRoot, additionalProviderRoots = devinLocalSkillRoots(home, runtime.GOOS, os.Getenv("XDG_CONFIG_HOME"), os.Getenv("APPDATA"))
+		case "muse":
+			configHome := os.Getenv("XDG_CONFIG_HOME")
+			if configHome == "" {
+				configHome = filepath.Join(home, ".config")
+			}
+			providerRoot = filepath.Join(configHome, "muse", "skills")
+		case "zcode":
+			providerRoot = filepath.Join(home, ".zcode", "skills")
 		default:
 			return nil, false, nil
 		}
 	}
 
-	roots := []localSkillRoot{
-		{path: providerRoot, kind: localSkillRootProvider},
-		{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal},
+	roots := make([]localSkillRoot, 0, 2)
+	// An empty providerRoot means the runtime has no home it would run under;
+	// skip it rather than resolve skill keys against the daemon's cwd.
+	if providerRoot != "" {
+		roots = append(roots, localSkillRoot{path: providerRoot, kind: localSkillRootProvider})
 	}
+	for _, path := range additionalProviderRoots {
+		roots = append(roots, localSkillRoot{path: path, kind: localSkillRootProvider})
+	}
+	roots = append(roots, localSkillRoot{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal})
 	if provider == "claude" {
-		for _, plugin := range listEnabledClaudePlugins(home) {
+		for _, plugin := range listEnabledClaudePlugins(claudeConfigDir) {
 			manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 			for _, path := range claudePluginComponentPaths(
 				plugin.InstallPath,
@@ -268,6 +301,41 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		}
 	}
 	return roots, true, nil
+}
+
+// Include the documented Windsurf channels after Devin/Cognition roots and
+// before the universal fallback. The order is deterministic for import/listing
+// collisions; the explicit inputs keep OS resolution testable.
+func devinLocalSkillRoots(home, goos, configHome, appData string) (string, []string) {
+	if goos == "windows" {
+		configHome = appData
+		if configHome == "" {
+			configHome = filepath.Join(home, "AppData", "Roaming")
+		}
+	} else if configHome == "" {
+		configHome = filepath.Join(home, ".config")
+	}
+	additional := []string{filepath.Join(configHome, "cognition", "skills")}
+	for _, channel := range []string{"windsurf", "windsurf-next", "windsurf-insiders"} {
+		additional = append(additional, filepath.Join(home, ".codeium", channel, "skills"))
+	}
+	return filepath.Join(configHome, "devin", "skills"), additional
+}
+
+// hermesLocalSkillsRoot returns the skills dir of the Hermes home a task runs
+// against when its agent sets no HERMES_HOME or profile of its own. It goes
+// through execenv.ResolveHermesProfile — the resolver the task path uses — so
+// discovery follows the daemon's HERMES_HOME, the platform default
+// (%LOCALAPPDATA%\hermes on native Windows, ~/.hermes elsewhere) and the sticky
+// active_profile instead of a hardcoded ~/.hermes, which hid every skill Hermes
+// actually loads on Windows (GH #8310). A selection Hermes would refuse to start
+// under returns "": there is no home whose skills it would load.
+func hermesLocalSkillsRoot() string {
+	res := execenv.ResolveHermesProfile("", "", false, false)
+	if res.Err != nil {
+		return ""
+	}
+	return filepath.Join(res.SourceHome, "skills")
 }
 
 func isIgnoredLocalSkillEntry(name string) bool {

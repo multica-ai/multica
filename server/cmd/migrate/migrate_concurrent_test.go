@@ -57,6 +57,19 @@ import (
 // schema_migrations table and never blocks behind a real production
 // migration runner sharing the same database. The schema is dropped
 // during cleanup.
+//
+// The same isolation is what lets the other database tests in this package
+// run in parallel. What they still share is the database itself: a CREATE
+// INDEX CONCURRENTLY waits out every older snapshot in it, so one test's
+// build can wait on another test's open transaction — briefly, since none
+// of them holds one for long, and never in a cycle, since a build only
+// waits for snapshots older than its own. Extensions are the one
+// database-wide object they create; createTestExtension serializes that.
+//
+// The four race tests below stay serial. Each fills a pool of one
+// connection per CPU with its sixteen runners, and four of those beside
+// the package's parallel tests would take a many-core machine to the
+// server's connection limit.
 
 const (
 	defaultTestDatabaseURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
@@ -328,7 +341,7 @@ func TestRunMigrationsConcurrentAlreadyApplied(t *testing.T) {
 // acquire. The expectation:
 //
 //   - While the side connection holds the lock, zero goroutines have
-//     completed (we observe via a small delay + count-check).
+//     completed (we observe a blocked contender in pg_locks).
 //   - The moment the side connection releases the lock, the goroutines
 //     start unblocking and finish in well under the test timeout.
 //
@@ -373,20 +386,44 @@ func TestRunMigrationsAdvisoryLockSerializes(t *testing.T) {
 		})
 	}
 
-	// Watchdog: while the side holder still has the lock, no
-	// runMigrations goroutine should have completed. We sample for a
-	// generous window (1 s) — much longer than the trivial migration
-	// set takes to apply on the unlocked path — to give a regressed
-	// implementation room to incorrectly succeed.
-	const observeWindow = 1 * time.Second
-	const observeStep = 50 * time.Millisecond
+	// Wait until PostgreSQL confirms that a contender is blocked on this exact
+	// advisory lock. This proves serialization directly without making the
+	// passing path pay a fixed observation delay.
+	const observeWindow = 2 * time.Second
+	const observeStep = 10 * time.Millisecond
 	deadline := time.Now().Add(observeWindow)
+	blocked := false
 	for time.Now().Before(deadline) {
 		if n := atomic.LoadInt64(&done); n != 0 {
 			t.Fatalf("advisory lock did not block: %d/%d goroutines finished while side connection held the lock for %s",
 				n, concurrentRunners, time.Since(startedAt))
 		}
+		if err := holder.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_locks AS held
+				JOIN pg_locks AS waiter
+				  ON waiter.locktype = held.locktype
+				 AND waiter.database IS NOT DISTINCT FROM held.database
+				 AND waiter.classid IS NOT DISTINCT FROM held.classid
+				 AND waiter.objid IS NOT DISTINCT FROM held.objid
+				 AND waiter.objsubid IS NOT DISTINCT FROM held.objsubid
+				 AND waiter.mode = held.mode
+				WHERE held.pid = pg_backend_pid()
+				  AND held.locktype = 'advisory'
+				  AND held.granted
+				  AND NOT waiter.granted
+			)
+		`).Scan(&blocked); err != nil {
+			t.Fatalf("observe advisory-lock waiter: %v", err)
+		}
+		if blocked {
+			break
+		}
 		time.Sleep(observeStep)
+	}
+	if !blocked {
+		t.Fatal("no runMigrations contender reached the held advisory lock")
 	}
 
 	// Release the side lock and wait for all goroutines to finish.
@@ -482,6 +519,7 @@ func equalStrings(a, b []string) bool {
 // The check runs ahead of any pool/conn use, so passing nil is safe
 // and lets this case execute without a live Postgres.
 func TestRunMigrationsRejectsInvalidDirection(t *testing.T) {
+	t.Parallel()
 	bad := []string{"", "UP", "DOWN", "rollback", "x", " up "}
 	for _, dir := range bad {
 		err := runMigrations(context.Background(), nil, runOptions{Direction: dir})

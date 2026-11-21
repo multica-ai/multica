@@ -168,7 +168,7 @@ type OwnerLookupFunc func(ctx context.Context, ownerID string) (bool, error)
 type CloudPATVerifier struct {
 	baseURL string
 	http    *http.Client
-	rdb     *redis.Client // may be nil — disables caching
+	rdb     redis.UniversalClient // may be nil — disables caching
 }
 
 // CloudPATVerifierConfig assembles the dependencies for
@@ -190,7 +190,7 @@ type CloudPATVerifierConfig struct {
 	// Redis backs the positive-result cache. Nil disables caching —
 	// every Verify call hits Fleet. Same nil-safe contract as
 	// PATCache / DaemonTokenCache.
-	Redis *redis.Client
+	Redis redis.UniversalClient
 }
 
 // NewCloudPATVerifier returns a verifier for cfg.FleetBaseURL. If the

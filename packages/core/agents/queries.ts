@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   WorkspaceWorkingAgentMineRelation,
@@ -123,14 +123,15 @@ export const agentTasksKeys = {
     [...agentTasksKeys.all(wsId), agentId] as const,
 };
 
-// All tasks for a single agent (the agent detail page consumer). Powers both
-// the inspector's 7-day throughput stats and the Tasks tab list — shared so
-// they don't fetch twice. WS task events invalidate this via the existing
-// task-prefix invalidation in useRealtimeSync.
+// History is fetched one bounded page at a time. Aggregate metrics use
+// agentActivity30dOptions so they do not depend on how many pages were opened.
 export function agentTasksOptions(wsId: string, agentId: string) {
-  return queryOptions({
-    queryKey: agentTasksKeys.detail(wsId, agentId),
-    queryFn: () => api.listAgentTasks(agentId),
+  return infiniteQueryOptions({
+    queryKey: [...agentTasksKeys.detail(wsId, agentId), "pages"],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      api.listAgentTasksPage(agentId, { limit: 200, before: pageParam, signal }),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
@@ -154,5 +155,25 @@ export function agentBuilderSessionListOptions(wsId: string) {
     // mount on demand. Cached forever it would show the state of the first
     // visit: a user who just held a conversation comes back to "no drafts".
     staleTime: 0,
+  });
+}
+
+export const taskContextReceiptKeys = {
+  all: (wsId: string) => ["workspaces", wsId, "task-context-receipt"] as const,
+  detail: (wsId: string, taskId: string) =>
+    [...taskContextReceiptKeys.all(wsId), taskId] as const,
+};
+
+/**
+ * A run's context receipt (MUL-9013). The daemon writes it once before the
+ * agent starts (and again for a fresh-session retry), so a finished run's
+ * receipt never changes; a live run's is refetched whenever the dialog opens.
+ */
+export function taskContextReceiptOptions(wsId: string, taskId: string) {
+  return queryOptions({
+    queryKey: taskContextReceiptKeys.detail(wsId, taskId),
+    queryFn: () => api.getTaskContextReceipt(taskId),
+    enabled: !!wsId && !!taskId,
+    staleTime: 60_000,
   });
 }

@@ -104,6 +104,8 @@ function clip(value: string, max: number): string {
  * keeps the fallback safe rather than blank.
  */
 export interface TraceSummaryLabels {
+  /** Resolve known entity IDs before a summary is clipped; evidence stays raw. */
+  formatText?: (text: string) => string;
   /**
    * Phrase a multi-file patch, e.g. `src/a.go +2 more`.
    *
@@ -124,7 +126,7 @@ export function traceToolArgSummary(
   labels?: TraceSummaryLabels,
 ): string {
   if (!input) return "";
-  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  const str = (v: unknown): string => (typeof v === "string" ? labels?.formatText?.(v) ?? v : "");
   if (str(input.query)) return str(input.query);
   // A multi-file patch has no single path field; without this the row's
   // summary would fall through to the generic scan and come back empty.
@@ -134,11 +136,12 @@ export function traceToolArgSummary(
   if (str(input.path)) return shortenTracePath(str(input.path));
   if (str(input.pattern)) return str(input.pattern);
   if (str(input.description)) return str(input.description);
-  if (str(input.command)) return clip(stripShellWrapper(str(input.command)), 120);
+  const command = str(input.command) || str(input.cmd);
+  if (command) return clip(stripShellWrapper(command), 120);
   if (str(input.prompt)) return clip(str(input.prompt), 120);
   if (str(input.skill)) return str(input.skill);
   for (const v of Object.values(input)) {
-    if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
+    if (typeof v === "string" && v.length > 0 && str(v).length < 120) return str(v);
   }
   return "";
 }
@@ -166,7 +169,7 @@ export function traceEventSummary(event: TraceEvent, labels?: TraceSummaryLabels
     case "tool_result":
       // Unwrap first: the collapsed row is the one people read without
       // clicking, so it must not show transport escaping.
-      return clip(collapseWhitespace(unwrapToolOutput(event.output ?? "")), 200);
+      return clip(collapseWhitespace(labels?.formatText?.(unwrapToolOutput(event.output ?? "")) ?? unwrapToolOutput(event.output ?? "")), 200);
     default:
       return firstLine(event.content ?? event.output);
   }
@@ -234,6 +237,11 @@ export type TraceEventDetail =
   | { kind: "diff"; path: string; lines: TraceDiffLine[] }
   | { kind: "file"; path: string; text: string; lineCount: number }
   | { kind: "patch"; files: TracePatchFile[]; truncated: boolean }
+  /**
+   * A shell command, verbatim. Any other arguments (description, timeout…)
+   * stay as JSON under it, so nothing the input carried is hidden.
+   */
+  | { kind: "command"; command: string; params: string | null }
   | { kind: "text"; text: string };
 
 /** Body of one file inside a multi-file patch. */
@@ -510,6 +518,31 @@ function readFileMutation(input: Record<string, unknown>): FileMutation | null {
 }
 
 /**
+ * A shell command and the call's other arguments, or null when the input is
+ * not a shell command. Keyed on shape like the summary, not on tool name:
+ * every backend names its shell differently, but they all pass a non-empty
+ * `command` (or `cmd`) string.
+ *
+ * A file editor such as `str_replace_editor` uses the same key for an
+ * operation (`view`, `create`) on a `path`, so a call that targets a file
+ * is not a command — the precedence the summary gives `path` over `command`.
+ */
+export function readCommandInput(
+  input: Record<string, unknown> | undefined,
+): { command: string; params: string | null } | null {
+  if (!input) return null;
+  if (typeof input.path === "string" || typeof input.file_path === "string") return null;
+  for (const key of ["command", "cmd"]) {
+    const command = input[key];
+    if (typeof command !== "string" || command.trim().length === 0) continue;
+    const { [key]: _, ...rest } = input;
+    const params = Object.keys(rest).length > 0 ? JSON.stringify(rest, null, 2) : null;
+    return { command, params };
+  }
+  return null;
+}
+
+/**
  * Structured body for the expanded row. Edits become a diff so a reviewer sees
  * what changed rather than two escaped string literals; results are unwrapped;
  * every other tool call falls back to pretty JSON.
@@ -538,6 +571,8 @@ export function traceEventDetail(event: TraceEvent): TraceEventDetail {
           lineCount: toLines(mutation.content).length,
         };
       }
+      const command = readCommandInput(event.input);
+      if (command !== null) return { kind: "command", ...command };
       return { kind: "text", text: JSON.stringify(event.input, null, 2) };
     }
     case "tool_result":

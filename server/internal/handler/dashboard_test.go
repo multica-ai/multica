@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // dashboardFixtureTZ is the zone the day-boundary fixtures in this file are
@@ -365,6 +367,60 @@ func TestDashboardEndpoints(t *testing.T) {
 	}
 }
 
+// TestDashboardAgentRunTimeReportsMeteredTaskCoverage proves the runtime
+// rollup distinguishes terminal runs from the subset that reported usage.
+func TestDashboardAgentRunTimeReportsMeteredTaskCoverage(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var agentID, runtimeID string
+	dbfx.QueryRow(t, `
+		SELECT id, runtime_id FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
+
+	readCoverage := func() (int32, int32) {
+		rows, err := testHandler.Queries.ListDashboardAgentRunTime(context.Background(), db.ListDashboardAgentRunTimeParams{
+			WorkspaceID: parseUUID(testWorkspaceID),
+			Since:       pgtype.Timestamptz{Time: time.Now().Add(-24 * time.Hour), Valid: true},
+		})
+		if err != nil {
+			t.Fatalf("list dashboard agent runtime: %v", err)
+		}
+		for _, row := range rows {
+			if uuidToString(row.AgentID) == agentID {
+				return row.TaskCount, row.MeteredTaskCount
+			}
+		}
+		return 0, 0
+	}
+	baseTasks, baseMetered := readCoverage()
+
+	issueID := dbfx.Issue(t, "dashboard usage coverage")
+	finished := testutil.Cols{
+		"issue_id":     issueID,
+		"runtime_id":   runtimeID,
+		"started_at":   testutil.Raw("now() - interval '2 minutes'"),
+		"completed_at": testutil.Raw("now() - interval '1 minute'"),
+	}
+	meteredTaskID := dbfx.Task(t, agentID, finished, testutil.Cols{"status": "completed"})
+	dbfx.Task(t, agentID, finished, testutil.Cols{"status": "failed"})
+	dbfx.Insert(t, "task_usage", testutil.Cols{
+		"task_id":       meteredTaskID,
+		"provider":      "qoderclicn",
+		"model":         "bailian/tp/qwen3.8-max",
+		"input_tokens":  120,
+		"output_tokens": 30,
+	})
+
+	tasks, metered := readCoverage()
+	if tasks-baseTasks != 2 || metered-baseMetered != 1 {
+		t.Fatalf("coverage delta = terminal:%d metered:%d, want 2/1", tasks-baseTasks, metered-baseMetered)
+	}
+}
+
 // TestDashboardUsageDailyBucketsByViewerTimezone proves the `?tz=` query
 // param drives the calendar-day boundary: the same UTC instant lands under
 // a different `date` for a UTC viewer vs an America/Los_Angeles viewer.
@@ -393,7 +449,7 @@ func TestDashboardUsageDailyBucketsByViewerTimezone(t *testing.T) {
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
 		)
 		VALUES (
-			((CURRENT_DATE - 2)::timestamp + interval '4 hours') AT TIME ZONE 'UTC',
+			(((now() AT TIME ZONE 'UTC')::date - 2)::timestamp + interval '4 hours') AT TIME ZONE 'UTC',
 			$1, $2, $3, NULL, 'tz-bucket-test', 'tz-bucket-model',
 			999, 0, 0, 0, 1
 		)
@@ -474,8 +530,8 @@ func TestDashboardRunTimeDailyBucketsByViewerTimezone(t *testing.T) {
 		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
 		VALUES (
 			$1, $2, $3, 'completed',
-			((CURRENT_DATE - 2)::timestamp + interval '3 hours 50 minutes') AT TIME ZONE 'UTC',
-			((CURRENT_DATE - 2)::timestamp + interval '4 hours') AT TIME ZONE 'UTC',
+			(((now() AT TIME ZONE 'UTC')::date - 2)::timestamp + interval '3 hours 50 minutes') AT TIME ZONE 'UTC',
+			(((now() AT TIME ZONE 'UTC')::date - 2)::timestamp + interval '4 hours') AT TIME ZONE 'UTC',
 			now()
 		)
 		RETURNING id, completed_at
@@ -1295,14 +1351,15 @@ func TestDashboardUsageDailyCrossMidnightFullPipeline(t *testing.T) {
 	// Raw task_usage at 00:30 UTC two days ago — genuinely near UTC
 	// midnight. 00:30 UTC is still the PRIOR evening (~16:30/17:30) in
 	// America/Los_Angeles (UTC-7/-8), so the UTC viewer and the LA viewer
-	// must see this row under different calendar days. Using CURRENT_DATE
-	// keeps the row inside the days=10 window without a fixed-date drift.
+	// must see this row under different calendar days. Anchoring on today's
+	// UTC date keeps the row inside the days=10 window without a fixed-date
+	// drift.
 	var usageAt time.Time
 	dbfx.QueryRow(t, `
 		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 		VALUES (
 			$1, 'claude', 'cross-midnight-model', 8888, 0,
-			((CURRENT_DATE - 2)::timestamp + interval '30 minutes') AT TIME ZONE 'UTC'
+			(((now() AT TIME ZONE 'UTC')::date - 2)::timestamp + interval '30 minutes') AT TIME ZONE 'UTC'
 		)
 		RETURNING created_at
 	`, taskID).Scan(&usageAt)
@@ -1582,13 +1639,15 @@ func TestDashboardFailuresByAgentUsesExactWindow(t *testing.T) {
 
 	// One failure at noon YESTERDAY (UTC). days=1 means "today", so neither
 	// endpoint may count it. Noon avoids the midnight edge in either
-	// direction.
+	// direction. Fixtures in this file derive dates from now() in UTC, not
+	// CURRENT_DATE, which follows the session timezone and is already UTC
+	// tomorrow on a UTC+8 server between 00:00 and 08:00 local.
 	dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id":       issueID,
 		"runtime_id":     runtimeID,
 		"status":         "failed",
-		"started_at":     testutil.Raw("((CURRENT_DATE - 1)::timestamp + interval '11 hours') AT TIME ZONE 'UTC'"),
-		"completed_at":   testutil.Raw("((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC'"),
+		"started_at":     testutil.Raw("(((now() AT TIME ZONE 'UTC')::date - 1)::timestamp + interval '11 hours') AT TIME ZONE 'UTC'"),
+		"completed_at":   testutil.Raw("(((now() AT TIME ZONE 'UTC')::date - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC'"),
 		"failure_reason": "timeout",
 		"created_at":     testutil.Raw("now()"),
 	})
@@ -1683,7 +1742,7 @@ func TestDashboardPerAgentRollupsUseExactWindow(t *testing.T) {
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
 		)
 		VALUES (
-			((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC',
+			(((now() AT TIME ZONE 'UTC')::date - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC',
 			$1, $2, $3, NULL, $4, $5,
 			7777, 0, 0, 0, 1
 		)
@@ -1698,8 +1757,8 @@ func TestDashboardPerAgentRollupsUseExactWindow(t *testing.T) {
 		"issue_id":     issueID,
 		"runtime_id":   runtimeID,
 		"status":       "completed",
-		"started_at":   testutil.Raw("((CURRENT_DATE - 1)::timestamp + interval '11 hours 45 minutes') AT TIME ZONE 'UTC'"),
-		"completed_at": testutil.Raw("((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC'"),
+		"started_at":   testutil.Raw("(((now() AT TIME ZONE 'UTC')::date - 1)::timestamp + interval '11 hours 45 minutes') AT TIME ZONE 'UTC'"),
+		"completed_at": testutil.Raw("(((now() AT TIME ZONE 'UTC')::date - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC'"),
 		"created_at":   testutil.Raw("now()"),
 	})
 

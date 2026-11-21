@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -24,15 +25,21 @@ func init() { register(gitlabProvider{}) }
 
 func (gitlabProvider) Kind() Kind { return KindGitLab }
 
-func (gitlabProvider) EventKind(h http.Header) EventKind {
+func (gitlabProvider) EventKind(h http.Header, body []byte) EventKind {
 	switch h.Get("X-Gitlab-Event") {
 	case "Merge Request Hook":
 		return EventPullRequest
 	case "Pipeline Hook":
 		return EventCIStatus
-	default:
-		return EventOther
+	case "System Hook":
+		var event struct {
+			ObjectKind string `json:"object_kind"`
+		}
+		if json.Unmarshal(body, &event) == nil && event.ObjectKind == "merge_request" {
+			return EventPullRequest
+		}
 	}
+	return EventOther
 }
 
 // VerifySignature compares the X-Gitlab-Token header to the stored secret in
@@ -234,6 +241,42 @@ func (gitlabProvider) ValidateToken(ctx context.Context, instanceURL, token stri
 		return Account{}, errors.New("gitlab: user response missing username")
 	}
 	return Account{Login: u.Username}, nil
+}
+
+// RepositoryReadable checks the exact project named by a system-hook event.
+// /user validation only proves that the token is valid, not that it can read
+// every private project listed in a workspace.
+func (gitlabProvider) RepositoryReadable(ctx context.Context, instanceURL, owner, name, token string) (bool, error) {
+	// Finish authorization before GitLab's webhook delivery window expires.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	project := url.PathEscape(owner + "/" + name)
+	endpoint := NormalizeInstanceURL(instanceURL) + "/api/v4/projects/" + project
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return false, fmt.Errorf("gitlab: build project request: %w", err)
+	}
+	req.Header.Set("PRIVATE-TOKEN", token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("gitlab: project request: %w", err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var projectInfo struct {
+			PathWithNamespace string `json:"path_with_namespace"`
+		}
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&projectInfo); err != nil {
+			return false, fmt.Errorf("gitlab: decode project: %w", err)
+		}
+		return projectInfo.PathWithNamespace == owner+"/"+name, nil
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("gitlab: GET project: status %d", resp.StatusCode)
+	}
 }
 
 // splitNamespace splits a GitLab path_with_namespace ("group/subgroup/repo")

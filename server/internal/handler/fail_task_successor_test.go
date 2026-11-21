@@ -76,7 +76,7 @@ func failTaskSuccessorCase(t *testing.T, failureReason string) {
 
 	// The operator reruns while that task is still running: allowed now, and it
 	// takes the single queued/dispatched slot the unique index permits.
-	rerun, err := testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(testUserID), nil)
+	rerun, err := testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(testUserID), false, nil)
 	if err != nil {
 		t.Fatalf("RerunIssue behind running task: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestFailTaskAndRerunConcurrently_NeverStrandsRunningTask(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, rerunErr = testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(testUserID), nil)
+			_, rerunErr = testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(testUserID), false, nil)
 		}()
 		close(start)
 		wg.Wait()
@@ -322,23 +322,18 @@ func TestPromoteDueDeferred_CancelsSupersededRetry(t *testing.T) {
 	}
 }
 
-// TestPromoteDueDeferred_LeavesNonRetryDeferredRowsAlone bounds the cancellation
-// above. Assignee-fallback escalations are deferred rows that are SUPPOSED to
-// coexist with an active primary task — they own their own fire_at lifecycle and
-// exist precisely to fire when the primary goes quiet. Cancelling those would
-// silently disable escalation, so the sweep is scoped to auto-retry clones.
-//
-// The index fence still applies to them: they stay deferred while the slot is
-// occupied rather than colliding on promotion.
+// TestPromoteDueDeferred_LeavesNonRetryDeferredRowsAlone keeps the superseded
+// retry sweep scoped to auto-retry clones. Other scheduled tasks still wait for
+// their queue slot without being cancelled.
 func TestPromoteDueDeferred_LeavesNonRetryDeferredRowsAlone(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 
-	runtimeID := dbfx.Runtime(t, "promote-escalation-runtime")
-	agentID := dbfx.Agent(t, "promote-escalation-agent", runtimeID)
-	issueID := dbfx.Issue(t, "escalation survives an active primary", testutil.Cols{
+	runtimeID := dbfx.Runtime(t, "promote-scheduled-runtime")
+	agentID := dbfx.Agent(t, "promote-scheduled-agent", runtimeID)
+	issueID := dbfx.Issue(t, "scheduled task waits for its queue slot", testutil.Cols{
 		"assignee_type": "agent",
 		"assignee_id":   agentID,
 	})
@@ -349,19 +344,18 @@ func TestPromoteDueDeferred_LeavesNonRetryDeferredRowsAlone(t *testing.T) {
 	primaryID := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id": issueID, "runtime_id": runtimeID, "status": "queued",
 	})
-	escalationID := dbfx.Task(t, agentID, testutil.Cols{
-		"issue_id":               issueID,
-		"runtime_id":             runtimeID,
-		"status":                 "deferred",
-		"fire_at":                testutil.Raw("now() - interval '1 minute'"),
-		"escalation_for_task_id": primaryID,
+	scheduledID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":   issueID,
+		"runtime_id": runtimeID,
+		"status":     "deferred",
+		"fire_at":    testutil.Raw("now() - interval '1 minute'"),
 	})
 
 	if err := testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, parseUUID(runtimeID)); err != nil {
 		t.Fatalf("promotion: %v", err)
 	}
-	if got := taskStatusByID(t, escalationID); got != "deferred" {
-		t.Fatalf("an escalation must be neither cancelled nor promoted into an occupied slot, got %q", got)
+	if got := taskStatusByID(t, scheduledID); got != "deferred" {
+		t.Fatalf("a scheduled task must be neither cancelled nor promoted into an occupied slot, got %q", got)
 	}
 	if got := taskStatusByID(t, primaryID); got != "queued" {
 		t.Fatalf("primary must be untouched, got %q", got)
@@ -436,7 +430,7 @@ func TestFailTaskAndRerunConcurrently_NonAssigneeTarget(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, rerunErr = testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), parseUUID(sourceTaskID), pgtype.UUID{}, parseUUID(testUserID), nil)
+			_, rerunErr = testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), parseUUID(sourceTaskID), pgtype.UUID{}, parseUUID(testUserID), false, nil)
 		}()
 		close(start)
 		wg.Wait()
@@ -480,7 +474,8 @@ func TestPromoteDueDeferred_ToleratesConcurrentUncommittedEnqueue(t *testing.T) 
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	runtimeID := dbfx.Runtime(t, "promote-uncommitted-runtime")
 	agentID := dbfx.Agent(t, "promote-uncommitted-agent", runtimeID)
@@ -494,7 +489,7 @@ func TestPromoteDueDeferred_ToleratesConcurrentUncommittedEnqueue(t *testing.T) 
 
 	// A due deferred row with no visible competitor: neither the supersede sweep
 	// nor the promotion fence has any reason to leave it alone.
-	dbfx.Task(t, agentID, testutil.Cols{
+	deferredID := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id":   issueID,
 		"runtime_id": runtimeID,
 		"status":     "deferred",
@@ -508,25 +503,72 @@ func TestPromoteDueDeferred_ToleratesConcurrentUncommittedEnqueue(t *testing.T) 
 		t.Fatalf("begin holder tx: %v", err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, err := tx.Exec(ctx, `
+	var competitorID string
+	if err := tx.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, issueID); err != nil {
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&competitorID); err != nil {
 		t.Fatalf("insert uncommitted competitor: %v", err)
 	}
 
-	// Commit the competitor shortly after promotion starts, so promotion is
-	// already blocked on the index and is handed 23505 when the lock releases.
-	committed := make(chan error, 1)
+	// Commit the competitor only once some backend is waiting on its
+	// transaction, so promotion is handed 23505 when the lock releases. In this
+	// test only promotion writes the contended index entry, so that waiter is
+	// promotion parked on it; a fixed delay could elapse before promotion even
+	// reached the index and pass without exercising the race.
+	holderPID := holderBackendPID(t, ctx, tx)
+	promoted := make(chan error, 1)
+	finished := make(chan struct{})
 	go func() {
-		time.Sleep(150 * time.Millisecond)
-		committed <- tx.Commit(context.Background())
+		defer close(finished)
+		promoted <- testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, parseUUID(runtimeID))
 	}()
-
-	if err := testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, parseUUID(runtimeID)); err != nil {
+	defer func() {
+		cancel()
+		tx.Rollback(context.Background())
+		<-finished
+	}()
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		select {
+		case err := <-promoted:
+			t.Logf("promotion returned before the expected index wait: %v", err)
+		default:
+			t.Log("promotion has not returned")
+		}
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), time.Second)
+		defer probeCancel()
+		var activity string
+		err := testPool.QueryRow(probeCtx, `
+			SELECT COALESCE(jsonb_agg(jsonb_build_object(
+				'pid', pid, 'state', state, 'wait_type', wait_event_type,
+				'wait', wait_event, 'blockers', pg_blocking_pids(pid), 'query', query
+			))::text, '[]') FROM pg_stat_activity
+			WHERE datname = current_database()
+			  AND (pid = $1 OR cardinality(pg_blocking_pids(pid)) > 0)
+		`, holderPID).Scan(&activity)
+		t.Logf("pool acquired=%d max=%d; activity=%s; probe error=%v",
+			testPool.Stat().AcquiredConns(), testPool.Stat().MaxConns(), activity, err)
+		t.Fatal("promotion never blocked on the uncommitted competitor's index entry")
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatalf("commit competitor: %v", err)
+	}
+	if err := <-promoted; err != nil {
 		t.Fatalf("a single contended row must not fail the claim: %v", err)
 	}
-	if err := <-committed; err != nil {
-		t.Fatalf("commit competitor: %v", err)
+	if got := taskStatusByID(t, deferredID); got != "deferred" {
+		t.Fatalf("contended task must stay deferred, got %q", got)
+	}
+	if got := taskStatusByID(t, competitorID); got != "queued" {
+		t.Fatalf("competitor must keep the pending slot, got %q", got)
+	}
+	var pending int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND comment_thread_id IS NULL
+		  AND status IN ('queued', 'dispatched')
+	`, issueID, agentID).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("expected exactly one pending task in the contended slot, got %d: %v", pending, err)
 	}
 }

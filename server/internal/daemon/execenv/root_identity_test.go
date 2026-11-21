@@ -1,8 +1,10 @@
 package execenv
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +158,112 @@ func TestPruneTaskRootIndexReclaimsAbandonedStagingDirs(t *testing.T) {
 	}
 	if _, err := os.Stat(pending); !os.IsNotExist(err) {
 		t.Fatalf("abandoned staging dir survived; stat err = %v", err)
+	}
+}
+
+func TestRenameTaskRootRecordRetriesTransientFailure(t *testing.T) {
+	t.Parallel()
+
+	transientErr := errors.New("transient rename conflict")
+	attempts := 0
+	var delays []time.Duration
+	err := renameTaskRootRecordWithRetry(
+		filepath.Join(t.TempDir(), "pending"),
+		filepath.Join(t.TempDir(), "record"),
+		func(_, _ string) error {
+			attempts++
+			if attempts < 3 {
+				return transientErr
+			}
+			return nil
+		},
+		func(err error) bool { return errors.Is(err, transientErr) },
+		func(delay time.Duration) { delays = append(delays, delay) },
+	)
+	if err != nil {
+		t.Fatalf("renameTaskRootRecordWithRetry: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("rename attempts = %d, want 3", attempts)
+	}
+	if want := taskRootRenameRetryDelays[:2]; !slices.Equal(delays, want) {
+		t.Fatalf("retry delays = %v, want %v", delays, want)
+	}
+}
+
+func TestRenameTaskRootRecordDoesNotRetryPermanentFailure(t *testing.T) {
+	t.Parallel()
+
+	permanentErr := errors.New("permanent rename failure")
+	attempts := 0
+	err := renameTaskRootRecordWithRetry(
+		filepath.Join(t.TempDir(), "pending"),
+		filepath.Join(t.TempDir(), "record"),
+		func(_, _ string) error {
+			attempts++
+			return permanentErr
+		},
+		func(error) bool { return false },
+		func(time.Duration) { t.Fatal("slept for a permanent failure") },
+	)
+	if !errors.Is(err, permanentErr) {
+		t.Fatalf("error = %v, want %v", err, permanentErr)
+	}
+	if attempts != 1 {
+		t.Fatalf("rename attempts = %d, want 1", attempts)
+	}
+}
+
+func TestRenameTaskRootRecordStopsAfterRetryBudget(t *testing.T) {
+	t.Parallel()
+
+	transientErr := errors.New("transient rename conflict")
+	attempts := 0
+	var delays []time.Duration
+	err := renameTaskRootRecordWithRetry(
+		filepath.Join(t.TempDir(), "pending"),
+		filepath.Join(t.TempDir(), "record"),
+		func(_, _ string) error {
+			attempts++
+			return transientErr
+		},
+		func(err error) bool { return errors.Is(err, transientErr) },
+		func(delay time.Duration) { delays = append(delays, delay) },
+	)
+	if !errors.Is(err, transientErr) {
+		t.Fatalf("error = %v, want %v", err, transientErr)
+	}
+	if want := len(taskRootRenameRetryDelays) + 1; attempts != want {
+		t.Fatalf("rename attempts = %d, want %d", attempts, want)
+	}
+	if !slices.Equal(delays, taskRootRenameRetryDelays[:]) {
+		t.Fatalf("retry delays = %v, want %v", delays, taskRootRenameRetryDelays)
+	}
+}
+
+func TestRenameTaskRootRecordAcceptsConcurrentWinner(t *testing.T) {
+	t.Parallel()
+
+	recordDir := filepath.Join(t.TempDir(), "record")
+	if err := os.MkdirAll(recordDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recordDir, taskRootRecordFile), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	attempts := 0
+	err := renameTaskRootRecordWithRetry(
+		filepath.Join(t.TempDir(), "pending"),
+		recordDir,
+		func(_, _ string) error {
+			attempts++
+			return errors.New("destination exists")
+		},
+		func(error) bool { return false },
+		func(time.Duration) { t.Fatal("slept after concurrent winner") },
+	)
+	if err != nil || attempts != 1 {
+		t.Fatalf("rename result = %v after %d attempts, want success after one", err, attempts)
 	}
 }
 

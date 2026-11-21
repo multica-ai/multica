@@ -20,6 +20,7 @@
  * code incident.
  */
 import { useMemo } from "react";
+import { MOBILE_RADIUS } from "@/lib/radius";
 import { THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
 
@@ -178,46 +179,10 @@ export function useMarkdownStyle() {
         color: t.brand,
         underline: true,
       },
-      // Inline code — monospace + muted-foreground tint, NO background chip.
-      //
-      // Why no background: on iOS, NSAttributedString draws
-      // NSBackgroundColorAttributeName as a rectangle spanning the full
-      // line-box height (24pt for our CJK-tuned body leading). PingFang
-      // SC places the baseline at ~75-80% of the line-box, so monospaced
-      // glyphs sit low inside that rectangle, leaving ~11pt empty at the
-      // top vs ~6pt at the bottom — a visible 2:1 asymmetry in CJK
-      // paragraphs. This is a platform-level constraint, not a library
-      // bug: the library's STYLES.md exposes only fontFamily / fontSize /
-      // color / backgroundColor / borderColor for inline code — no
-      // padding, lineHeight, or baselineOffset knob. Confirmed 2026-05-21
-      // (researcher brief): zero open PRs / forks / prereleases touching
-      // inline-code vertical geometry; upstream issue #255 has no
-      // maintainer response since 2026-04-20. The only real fixes are at
-      // the native layer (custom NSLayoutManager.drawBackground override
-      // or TextKit 2 NSTextLayoutManager.enumerateTextSegments(.highlight))
-      // which would require forking the library — not worth the perpetual
-      // patch-rebase cost for a polish issue.
-      //
-      // Visual identification stays strong without the chip: monospace
-      // font + muted-foreground tint matches Apple Notes / iA Writer.
-      //
-      // Color choice — mutedForeground (NOT brand):
-      //   - mutedForeground is a neutral gray, reads as "subdued prose".
-      //   - brand is reserved for links; tinting code blue confused users
-      //     into tapping it as if it were a link (tried 2026-05-19, then
-      //     reverted same day for this reason).
-      //
-      // fontFamily intentionally NOT set: enriched-markdown's default is
-      // the platform system monospace (SF Mono on iOS, monospace on
-      // Android), which has a larger visual x-height than the previously-
-      // explicit "Menlo" override.
-      //
-      // Revisit when:
-      //   - upstream #255 ships a paddingVertical / lineHeight knob, OR
-      //   - we contribute the TextKit 2 fix upstream (the right hook is
-      //     NSTextLayoutManager.enumerateTextSegments(in:type:.highlight:))
-      // Either way, switch back to a tinted-chip style for cross-platform
-      // visual parity with web/desktop.
+      // Keep inline code backgrounds transparent: native attributed-string chips
+      // span the line box and cannot be vertically padded by this renderer. Monospace
+      // and a neutral tint identify code without making it look like a link.
+      // Leave fontFamily unset to use the platform's system monospace.
       code: {
         color: t.mutedForeground,
         backgroundColor: "transparent",
@@ -249,7 +214,7 @@ export function useMarkdownStyle() {
         backgroundColor: t.surface2,
         borderColor: t.border,
         padding: 12,
-        borderRadius: 8,
+        borderRadius: MOBILE_RADIUS.md,
         marginBottom: MD_GAP.paragraph,
       },
       // Blockquote — `color` is REQUIRED: enriched's default is a hardcoded
@@ -285,7 +250,7 @@ export function useMarkdownStyle() {
         marginLeft: 16,
       },
       image: {
-        borderRadius: 8,
+        borderRadius: MOBILE_RADIUS.md,
         marginBottom: MD_GAP.paragraph,
       },
       // Task lists. `checkedTextColor` REQUIRED: enriched default is `#000000`,
@@ -308,9 +273,8 @@ export function useMarkdownStyle() {
         fontSize: MD_FONT.body,
         lineHeight: MD_LINE.body,
         borderColor: t.border,
-        // borderRadius: 8 (was 6) — aligns with codeBlock and image (both 8).
-        // No reason for table to be the odd one out.
-        borderRadius: 8,
+        // Match the compact medium radius used by codeBlock and image.
+        borderRadius: MOBILE_RADIUS.md,
         headerBackgroundColor: t.surface2,
         headerTextColor: t.foreground,
         // Transparent rows let the page background show through — works in

@@ -8,6 +8,7 @@ import (
 
 	redismock "github.com/go-redis/redismock/v9"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestRedisLeaseStoreRequiresSafeNamespace(t *testing.T) {
@@ -82,7 +83,8 @@ func TestRedisLeaseStoreListsOnlyHeldKeys(t *testing.T) {
 	}
 	id1 := uuidFromString(t, "13131313-1313-1313-1313-131313131313")
 	id2 := uuidFromString(t, "14141414-1414-1414-1414-141414141414")
-	mock.ExpectMGet(store.key(id1), store.key(id2)).SetVal([]interface{}{"owner", nil})
+	mock.ExpectGet(store.key(id1)).SetVal("owner")
+	mock.ExpectGet(store.key(id2)).SetErr(redis.Nil)
 	held, err := store.ListHeldWSLeases(context.Background(), []pgtype.UUID{id1, id2})
 	if err != nil {
 		t.Fatal(err)

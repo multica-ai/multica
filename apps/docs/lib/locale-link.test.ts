@@ -4,8 +4,10 @@ import { prefixLocale } from "./locale-link";
 describe("prefixLocale", () => {
   it("prefixes root-relative paths with the active non-default locale", () => {
     expect(prefixLocale("/workspaces", "zh")).toBe("/zh/workspaces");
+    expect(prefixLocale("/workspaces", "zh-Hant")).toBe("/zh-Hant/workspaces");
     expect(prefixLocale("/workspaces", "ko")).toBe("/ko/workspaces");
     expect(prefixLocale("/workspaces", "ja")).toBe("/ja/workspaces");
+    expect(prefixLocale("/workspaces", "fr")).toBe("/fr/workspaces");
     expect(prefixLocale("/agents-create", "zh")).toBe("/zh/agents-create");
   });
 
@@ -29,9 +31,11 @@ describe("prefixLocale", () => {
 
   it("does not double-prefix paths that already carry a known locale", () => {
     expect(prefixLocale("/zh/workspaces", "zh")).toBe("/zh/workspaces");
+    expect(prefixLocale("/zh-Hant/workspaces", "zh-Hant")).toBe("/zh-Hant/workspaces");
     expect(prefixLocale("/en/workspaces", "zh")).toBe("/en/workspaces");
     expect(prefixLocale("/ko/workspaces", "zh")).toBe("/ko/workspaces");
     expect(prefixLocale("/ja/workspaces", "zh")).toBe("/ja/workspaces");
+    expect(prefixLocale("/fr/workspaces", "zh")).toBe("/fr/workspaces");
   });
 
   it("leaves external URLs alone", () => {

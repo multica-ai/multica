@@ -5,7 +5,9 @@ import { act, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
-import { ApiError, type ApiClient } from "../api/client";
+import { ApiClient, ApiError } from "../api/client";
+import { configStore } from "../config";
+import { daemonCommands } from "../runtimes/commands";
 import {
   createAuthStore,
   registerAuthStore,
@@ -13,6 +15,10 @@ import {
 } from "../auth";
 import type { StorageAdapter, User, Workspace } from "../types";
 import { workspaceKeys } from "../workspace/queries";
+import {
+  registerDraftCleanup,
+  __clearDraftCleanupRegistryForTest,
+} from "../drafts/cleanup-registry";
 import { AuthInitializer } from "./auth-initializer";
 
 const logger = vi.hoisted(() => ({
@@ -55,6 +61,7 @@ function makeStorage(initial: Record<string, string> = {}): StorageAdapter & {
     removeItem: (key) => {
       delete values[key];
     },
+    keys: () => Object.keys(values),
     snapshot: () => ({ ...values }),
   };
 }
@@ -67,6 +74,12 @@ function makeApi(overrides: Partial<ApiClient> = {}): ApiClient {
     setToken: vi.fn(),
     ...overrides,
   } as unknown as ApiClient;
+}
+
+function makeApiWithConfigResponse(config: unknown): ApiClient {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(config))));
+  const configApi = new ApiClient("https://api.example.test");
+  return makeApi({ getConfig: () => configApi.getConfig() });
 }
 
 function renderInitializer({
@@ -96,7 +109,6 @@ function renderInitializer({
         cookieAuth={cookieAuth}
         identity={{ platform }}
         onLogin={onLogin}
-        onLogout={onLogout}
         storage={storage}
       >
         <div>child</div>
@@ -109,13 +121,168 @@ function renderInitializer({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  configStore.setState({
+    daemonConfigStatus: "loading",
+    daemonSetupTarget: "unknown",
+    daemonServerUrl: "",
+    daemonAppUrl: "",
+  });
+  __clearDraftCleanupRegistryForTest();
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe("AuthInitializer recovery", () => {
+  it("keeps self-host commands available when an older API omits the target", async () => {
+    renderInitializer({ api: makeApiWithConfigResponse({
+      daemon_server_url: " https://api.example.com/// ",
+      daemon_app_url: "https://app.example.com/",
+    }) });
+
+    await waitFor(() => {
+      expect(configStore.getState().daemonConfigStatus).toBe("ready");
+    });
+    const config = configStore.getState();
+    expect(config.daemonSetupTarget).toBe("self_host");
+    const commands = daemonCommands({
+      status: config.daemonConfigStatus,
+      target: config.daemonSetupTarget,
+      serverUrl: config.daemonServerUrl,
+      appUrl: config.daemonAppUrl,
+    });
+    expect(commands).toMatchObject({
+      status: "ready",
+      setupCmd: "multica setup self-host --server-url https://api.example.com --app-url https://app.example.com",
+    });
+    if (commands.status !== "ready") throw new Error("expected self-host commands");
+    expect(commands.tokenCmd).toContain("server_url https://api.example.com");
+    expect(commands.tokenCmd).toContain("app_url https://app.example.com");
+    expect(commands.tokenCmd).not.toContain("multica.ai");
+  });
+
+  it.each([
+    { name: "both URLs absent", response: {} },
+    { name: "app URL absent", response: { daemon_server_url: "https://api.example.com" } },
+    { name: "server URL absent", response: { daemon_app_url: "https://app.example.com" } },
+    {
+      name: "blank server URL",
+      response: { daemon_server_url: " / ", daemon_app_url: "https://app.example.com" },
+    },
+    {
+      name: "blank app URL",
+      response: { daemon_server_url: "https://api.example.com", daemon_app_url: "  " },
+    },
+    {
+      name: "malformed server URL",
+      response: { daemon_server_url: {}, daemon_app_url: "https://app.example.com" },
+    },
+    {
+      name: "malformed app URL",
+      response: { daemon_server_url: "https://api.example.com", daemon_app_url: 123 },
+    },
+    ...["unknown", "future_target", null].map((target) => ({
+      name: `explicit target ${JSON.stringify(target)}`,
+      response: {
+        daemon_setup_target: target,
+        daemon_server_url: "https://api.example.com",
+        daemon_app_url: "https://app.example.com",
+      },
+    })),
+    {
+      name: "unreadable config",
+      response: {
+        cdn_domain: 123,
+        daemon_server_url: "https://api.example.com",
+        daemon_app_url: "https://app.example.com",
+      },
+    },
+  ])("keeps commands unavailable for $name", async ({ response }) => {
+    renderInitializer({ api: makeApiWithConfigResponse(response) });
+    await waitFor(() => {
+      expect(configStore.getState().daemonConfigStatus).toBe("ready");
+    });
+    const config = configStore.getState();
+    expect(config.daemonSetupTarget).toBe("unknown");
+    expect(daemonCommands({
+      status: config.daemonConfigStatus,
+      target: config.daemonSetupTarget,
+      serverUrl: config.daemonServerUrl,
+      appUrl: config.daemonAppUrl,
+    })).toEqual({ status: "unknown" });
+  });
+
+  it("honors an explicit Cloud target even when both URLs are present", async () => {
+    renderInitializer({ api: makeApiWithConfigResponse({
+      daemon_setup_target: "cloud",
+      daemon_server_url: "https://api.example.com",
+      daemon_app_url: "https://app.example.com",
+    }) });
+    await waitFor(() => {
+      expect(configStore.getState().daemonConfigStatus).toBe("ready");
+    });
+    expect(configStore.getState().daemonSetupTarget).toBe("cloud");
+  });
+
+  it("keeps setup unavailable until a delayed config response confirms the target", async () => {
+    let resolveConfig!: (config: Awaited<ReturnType<ApiClient["getConfig"]>>) => void;
+    const getConfig = vi.fn(() => new Promise<Awaited<ReturnType<ApiClient["getConfig"]>>>(
+      (resolve) => { resolveConfig = resolve; },
+    ));
+    renderInitializer({ api: makeApi({ getConfig }) });
+    expect(configStore.getState().daemonConfigStatus).toBe("loading");
+    expect(configStore.getState().daemonSetupTarget).toBe("unknown");
+    await act(async () => resolveConfig({
+      cdn_domain: "",
+      allow_signup: true,
+      daemon_setup_target: "self_host",
+      daemon_server_url: "https://api.example.com",
+      daemon_app_url: "https://app.example.com",
+    }));
+    expect(configStore.getState()).toMatchObject({
+      daemonConfigStatus: "ready",
+      daemonSetupTarget: "self_host",
+      daemonServerUrl: "https://api.example.com",
+      daemonAppUrl: "https://app.example.com",
+    });
+  });
+
+  it("exposes config failure and recovers the setup target on the existing retry", async () => {
+    vi.useFakeTimers();
+    const getConfig = vi.fn()
+      .mockRejectedValueOnce(new TypeError("network unavailable"))
+      .mockResolvedValue({ daemon_setup_target: "cloud" });
+    renderInitializer({ api: makeApi({ getConfig }) });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(configStore.getState().daemonConfigStatus).toBe("error");
+    expect(configStore.getState().daemonSetupTarget).toBe("unknown");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(getConfig).toHaveBeenCalledTimes(2);
+    expect(configStore.getState()).toMatchObject({
+      daemonConfigStatus: "ready",
+      daemonSetupTarget: "cloud",
+    });
+  });
+
+  it("publishes the API origin used by persisted attachment links", async () => {
+    const api = makeApi({
+      getConfig: vi.fn().mockResolvedValue({
+        attachment_public_url: "https://api.example.test",
+      }),
+    });
+    renderInitializer({ api });
+
+    await waitFor(() => {
+      expect(configStore.getState().attachmentPublicUrl).toBe("https://api.example.test");
+    });
+  });
+
   it("keeps the token and recovers on the online event after a network failure", async () => {
     const storage = makeStorage({ multica_token: "token-1" });
     const getMe = vi
@@ -269,6 +436,117 @@ describe("AuthInitializer recovery", () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
     expect(getConfig).toHaveBeenCalledTimes(3);
+  });
+
+  // A → 401 → B, where B shares a workspace with A so the post-login stale-tab
+  // validator prunes nothing. B must find none of A's client state. What
+  // exactly gets cleared is pinned in platform/session-cleanup.test.ts; this
+  // asserts the 401 is wired to it at all.
+  it("erases the previous user's client state when a live session is rejected", async () => {
+    const shared = "acme";
+    const storage = makeStorage({
+      multica_token: "token-1",
+      "multica_comment_drafts:acme": '{"issue-1":"A private draft"}',
+      multica_tabs: '[{"path":"/acme/issues/secret"}]',
+    });
+    const resetInMemory = vi.fn();
+    registerDraftCleanup({
+      storageKey: "multica_comment_drafts",
+      workspaceScoped: true,
+      resetInMemory,
+    });
+    const api = makeApi({
+      listWorkspaces: vi
+        .fn()
+        .mockResolvedValue([{ id: "ws-1", slug: shared }] as Workspace[]),
+    });
+    const { queryClient } = renderInitializer({ api, storage });
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().status).toBe("authenticated");
+    });
+    await waitFor(() => {
+      expect(queryClient.getQueryData(workspaceKeys.list())).toHaveLength(1);
+    });
+    queryClient.setQueryData(["issues", "ws-1"], [{ id: "i-1" }]);
+
+    act(() => {
+      useAuthStore.getState().sessionExpired();
+    });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryData(["issues", "ws-1"])).toBeUndefined();
+    });
+    expect(storage.snapshot()).toEqual({});
+    expect(resetInMemory).toHaveBeenCalled();
+    expect(useAuthStore.getState().expired).toBe(true);
+  });
+
+  // Elon's cold-start repro: A closes the app, the token expires while it is
+  // shut, and the next launch is rejected at the identity probe. This never
+  // passes through `authenticated`, and there is no workspace list to
+  // enumerate slugs from — so both the trigger and the sweep have to work
+  // without either.
+  // The failure mode that must never happen: a laptop with no connectivity
+  // gets signed out and asked for credentials it cannot verify. Only a 401
+  // ends a session — everything else waits.
+  it.each([
+    ["offline", new TypeError("fetch failed")],
+    ["server error", new ApiError("boom", 500, "Internal Server Error")],
+    ["gateway timeout", new ApiError("slow", 504, "Gateway Timeout")],
+  ])("keeps the session and every draft when getMe fails: %s", async (_label, error) => {
+    const before = {
+      multica_token: "token-1",
+      "multica_comment_drafts:acme": '{"issue-1":"unsent work"}',
+      multica_tabs: '[{"path":"/acme/issues/1"}]',
+    };
+    const storage = makeStorage(before);
+    const resetInMemory = vi.fn();
+    registerDraftCleanup({
+      storageKey: "multica_comment_drafts",
+      workspaceScoped: true,
+      resetInMemory,
+    });
+    const api = makeApi({ getMe: vi.fn().mockRejectedValue(error) });
+    renderInitializer({ api, storage });
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().status).toBe("recovering");
+    });
+
+    expect(useAuthStore.getState().status).not.toBe("unauthenticated");
+    expect(storage.snapshot()).toEqual(before);
+    expect(resetInMemory).not.toHaveBeenCalled();
+  });
+
+  it("erases the previous session on a cold start with a stale token", async () => {
+    const storage = makeStorage({
+      multica_token: "stale-token",
+      "multica_comment_drafts:acme": '{"issue-1":"A private draft"}',
+      "multica:chat:activeSessionId:acme": "session-1",
+      multica_tabs: '[{"path":"/acme/issues/secret"}]',
+      multica_locale: "zh-Hans",
+    });
+    registerDraftCleanup({
+      storageKey: "multica_comment_drafts",
+      workspaceScoped: true,
+      resetInMemory: vi.fn(),
+    });
+    const api = makeApi({
+      getMe: vi
+        .fn()
+        .mockRejectedValue(new ApiError("unauthorized", 401, "Unauthorized")),
+    });
+    const { queryClient } = renderInitializer({ api, storage });
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().status).toBe("unauthenticated");
+    });
+    await waitFor(() => {
+      // Only the device preference survives.
+      expect(storage.snapshot()).toEqual({ multica_locale: "zh-Hans" });
+    });
+    expect(queryClient.getQueryData(workspaceKeys.list())).toBeUndefined();
   });
 
   it("publishes a definitive logout for a genuine 401", async () => {

@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // TestCreateAgent_ThinkingLevel_ValidationConsistency exercises the
@@ -772,13 +774,13 @@ func TestAcpThinkingDecision(t *testing.T) {
 	withoutEffort := []ModelEntry{{ID: "hermes-4"}}
 
 	t.Run("jcode-shaped catalog keeps the level accepted", func(t *testing.T) {
-		if got := withCatalog(t, withEffort).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortPresent {
+		if got := withCatalog(t, withEffort).acpThinkingDecision(ctx, "hermes", runtimeID, "", ""); got != acpEffortPresent {
 			t.Errorf("decision = %v, want acpEffortPresent", got)
 		}
 	})
 
 	t.Run("Hermes-Agent-shaped catalog restores the capability answer", func(t *testing.T) {
-		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortAbsent {
+		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "hermes", runtimeID, "", ""); got != acpEffortAbsent {
 			t.Errorf("decision = %v, want acpEffortAbsent", got)
 		}
 	})
@@ -787,13 +789,13 @@ func TestAcpThinkingDecision(t *testing.T) {
 	// The catalog is only written once a client asks for a model list, so this
 	// state persists indefinitely for CLI-only callers.
 	t.Run("no cache is unknown for hermes", func(t *testing.T) {
-		if got := (&Handler{}).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortUnknown {
+		if got := (&Handler{}).acpThinkingDecision(ctx, "hermes", runtimeID, "", ""); got != acpEffortUnknown {
 			t.Errorf("decision = %v, want acpEffortUnknown", got)
 		}
 	})
 
 	t.Run("empty catalog is unknown for hermes", func(t *testing.T) {
-		if got := withCatalog(t, nil).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortUnknown {
+		if got := withCatalog(t, nil).acpThinkingDecision(ctx, "hermes", runtimeID, "", ""); got != acpEffortUnknown {
 			t.Errorf("decision = %v, want acpEffortUnknown", got)
 		}
 	})
@@ -802,7 +804,7 @@ func TestAcpThinkingDecision(t *testing.T) {
 	// an undiscovered reasonix runtime is allowed rather than blocked before its
 	// first discovery. Tightening hermes must not tighten this.
 	t.Run("no cache still allows reasonix", func(t *testing.T) {
-		if got := (&Handler{}).acpThinkingDecision(ctx, "reasonix", runtimeID); got != acpEffortPresent {
+		if got := (&Handler{}).acpThinkingDecision(ctx, "reasonix", runtimeID, "", ""); got != acpEffortPresent {
 			t.Errorf("decision = %v, want acpEffortPresent — reasonix is unambiguous", got)
 		}
 	})
@@ -810,7 +812,7 @@ func TestAcpThinkingDecision(t *testing.T) {
 	// Providers outside the ACP-catalog set are answered by name alone; this
 	// check must not start second-guessing them from a catalog.
 	t.Run("non-ACP provider is not consulted", func(t *testing.T) {
-		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "claude", runtimeID); got != acpEffortPresent {
+		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "claude", runtimeID, "", ""); got != acpEffortPresent {
 			t.Errorf("decision = %v, want acpEffortPresent — claude is decided by provider", got)
 		}
 	})
@@ -953,4 +955,275 @@ func createAgentOnRuntimeWithModel(t *testing.T, name, runtimeID, model string) 
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 	return agentID
+}
+
+// createOmpAgent inserts an omp-bound agent with an explicit model and level.
+// Neither shared helper sets both, and the combination is exactly what the
+// clear-the-model case needs.
+func createOmpAgent(t *testing.T, name, runtimeID, model, level string) string {
+	t.Helper()
+	var agentID string
+	var levelArg any
+	if level != "" {
+		levelArg = level
+	}
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, model, thinking_level
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, $5, $6)
+		RETURNING id
+	`, testWorkspaceID, name, runtimeID, testUserID, model, levelArg).Scan(&agentID)
+	if err != nil {
+		t.Fatalf("create omp agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+	return agentID
+}
+
+// TestAgent_OmpThinkingLevelRequiresExplicitModel is the API half of MUL-7412.
+// An omp effort with no pinned model must never reach storage: omp resolves its
+// own default role model at task time and clamps the level to what THAT model
+// supports, so a stored level would save cleanly, read back as set, and then run
+// at a different level. Hiding the picker in the inspector does not cover
+// `multica agent create/update` or a direct API call, so the refusal has to live
+// here.
+func TestAgent_OmpThinkingLevelRequiresExplicitModel(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	ompRuntimeID := createProviderRuntime(t, "omp")
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx,
+			`DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'omp-model-gate-%'`,
+			testWorkspaceID,
+		)
+	})
+
+	t.Run("create with a level and no model is 400", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "omp-model-gate-nomodel",
+			"runtime_id":           ompRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "max",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+		// Nothing may persist from a rejected create.
+		var count int
+		if err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent WHERE workspace_id = $1 AND name = 'omp-model-gate-nomodel'`,
+			testWorkspaceID).Scan(&count); err != nil {
+			t.Fatalf("count agents: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("rejected create persisted %d agent(s)", count)
+		}
+	})
+
+	t.Run("create with a level and a pinned model succeeds", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "omp-model-gate-pinned",
+			"runtime_id":           ompRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"model":                "devin/swe-2",
+			"thinking_level":       "max",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("create with a whitespace-only model is 400", func(t *testing.T) {
+		// A blank model is stored as non-empty but resolves to nothing, so it
+		// must not be a way around the gate.
+		body := map[string]any{
+			"name":                 "omp-model-gate-blank",
+			"runtime_id":           ompRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"model":                "   ",
+			"thinking_level":       "max",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("setting a level on a model-less agent is 400", func(t *testing.T) {
+		agentID := createOmpAgent(t, "omp-model-gate-set", ompRuntimeID, "", "")
+		body := map[string]any{"thinking_level": "high"}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("clearing the model while a level persists is 400", func(t *testing.T) {
+		// The level is untouched by this request — the model change alone creates
+		// the invalid pair, so validating only the submitted field would miss it.
+		agentID := createOmpAgent(t, "omp-model-gate-clearmodel", ompRuntimeID, "devin/swe-2", "max")
+		body := map[string]any{"model": ""}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+		// The stored pair must be untouched by the rejection.
+		var model, level string
+		if err := testPool.QueryRow(ctx,
+			`SELECT coalesce(model, ''), coalesce(thinking_level, '') FROM agent WHERE id = $1`,
+			agentID).Scan(&model, &level); err != nil {
+			t.Fatalf("read agent: %v", err)
+		}
+		if model != "devin/swe-2" || level != "max" {
+			t.Errorf("rejected update mutated state: model=%q level=%q", model, level)
+		}
+	})
+
+	t.Run("clearing model and level together succeeds", func(t *testing.T) {
+		agentID := createOmpAgent(t, "omp-model-gate-clearboth", ompRuntimeID, "devin/swe-2", "max")
+		body := map[string]any{"model": "", "thinking_level": ""}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("an unrelated edit on a valid agent still succeeds", func(t *testing.T) {
+		// The gate must not lock an agent out of ordinary edits.
+		agentID := createOmpAgent(t, "omp-model-gate-rename", ompRuntimeID, "devin/swe-2", "max")
+		body := map[string]any{"name": "omp-model-gate-rename-2"}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("a level with no model is still storable on codex", func(t *testing.T) {
+		// codex shares the execution constraint but is deliberately grandfathered:
+		// agents already hold this pair and the daemon drops the level at launch.
+		// Rejecting it here would block unrelated edits to them. Pinned so the
+		// carve-out is a decision on record rather than an oversight.
+		codexRuntimeID := createCodexProviderRuntime(t)
+		body := map[string]any{
+			"name":                 "omp-model-gate-codex",
+			"runtime_id":           codexRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "high",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("codex empty-model create: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
+func TestAgentSaveWithPartialHermesEffortCatalog(t *testing.T) {
+	ctx := context.Background()
+	cache := withModelListStores(t)
+	runtimeID := dbfx.Runtime(t, "Hermes with partial effort discovery", testutil.Cols{"provider": "hermes"})
+	if err := cache.Put(ctx, runtimeID, []ModelEntry{
+		{ID: "confirmed", Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "low"}}}},
+		{ID: "previously-confirmed", Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "high"}}}},
+		{ID: "older"},
+	}, nil, true); err != nil {
+		t.Fatal(err)
+	}
+
+	modelsPath := "/api/runtimes/" + runtimeID + "/models"
+	request := testutil.Decode[ModelListRequest](t, testHandler.InitiateListModels, withURLParam(
+		newRequest(http.MethodPost, modelsPath+"?force=true", nil), "runtimeId", runtimeID,
+	), http.StatusOK)
+	report := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/models/"+request.ID+"/result", map[string]any{
+		"status":                      "completed",
+		"supported":                   true,
+		"fallback":                    true,
+		"effort_discovery_incomplete": true,
+		"models": []ModelEntry{
+			{ID: "confirmed", Default: true, Thinking: &ModelThinking{
+				SupportedLevels: []ThinkingLevel{{Value: "high"}, {Value: "medium"}},
+			}},
+			{ID: "previously-confirmed"},
+			{ID: "unprobed"},
+		},
+	})
+	testutil.Call(t, testHandler.ReportModelListResult, testutil.WithURLParams(
+		report, "runtimeId", runtimeID, "requestId", request.ID,
+	)).Want(http.StatusOK)
+
+	created := httptest.NewRecorder()
+	testHandler.CreateAgent(created, newRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name": "partial-hermes-thinking", "runtime_id": runtimeID, "visibility": "private",
+		"max_concurrent_tasks": 1, "model": "confirmed", "thinking_level": "high",
+	}))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create with advertised level: got %d: %s", created.Code, created.Body.String())
+	}
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(created.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, "DELETE FROM agent WHERE id = $1", result.ID) })
+
+	for _, tc := range []struct {
+		model, level string
+		status       int
+	}{
+		{"unprobed", "medium", http.StatusBadRequest},
+		{"confirmed", "low", http.StatusBadRequest},
+		{"confirmed", "medium", http.StatusOK},
+		{"previously-confirmed", "high", http.StatusOK},
+	} {
+		w := httptest.NewRecorder()
+		req := newRequest(http.MethodPatch, "/api/agents/"+result.ID, map[string]any{
+			"model": tc.model, "thinking_level": tc.level,
+		})
+		testHandler.UpdateAgent(w, withURLParam(req, "id", result.ID))
+		if w.Code != tc.status {
+			t.Fatalf("%s/%s: got %d, want %d: %s", tc.model, tc.level, w.Code, tc.status, w.Body.String())
+		}
+	}
+
+	refreshed := testutil.Decode[ModelListRequest](t, testHandler.GetModelListRequest, testutil.WithURLParams(
+		newRequest(http.MethodGet, modelsPath+"/"+request.ID, nil), "runtimeId", runtimeID, "requestId", request.ID,
+	), http.StatusOK)
+	cached := testutil.Decode[ModelListRequest](t, testHandler.InitiateListModels, withURLParam(
+		newRequest(http.MethodPost, modelsPath, nil), "runtimeId", runtimeID,
+	), http.StatusOK)
+	for _, result := range []ModelListRequest{refreshed, cached} {
+		if len(result.Models) != 3 || result.Models[0].ID != "confirmed" || result.Models[1].ID != "previously-confirmed" || result.Models[2].ID != "unprobed" {
+			t.Fatalf("picker must preserve the latest model list, got %+v", result.Models)
+		}
+		thinking := result.Models[1].Thinking
+		if thinking == nil || len(thinking.SupportedLevels) != 1 || thinking.SupportedLevels[0].Value != "high" {
+			t.Fatalf("picker must retain previously confirmed effort, got %+v", thinking)
+		}
+	}
 }

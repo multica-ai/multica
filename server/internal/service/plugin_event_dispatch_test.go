@@ -7,9 +7,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -236,20 +234,14 @@ func TestNewDispatcherDoesNotTouchTheDatabase(t *testing.T) {
 	// A Queries over a nil pool: exactly what NewRouter holds in a test that
 	// never opens one.
 	dispatcher := NewPluginEventDispatcher(&PluginService{Queries: db.New(nil)})
-	t.Cleanup(dispatcher.Close)
 
-	// Long enough that a construction-time sweep would already have panicked and
-	// taken the process with it.
-	time.Sleep(150 * time.Millisecond)
+	// Close waits for the dispatcher's goroutines, so anything a construction-
+	// time sweep did — including panicking the process — has happened by the
+	// time it returns. No sleep has to guess how long that takes.
+	dispatcher.Close()
 
 	// And the sweep itself, called directly, must survive the same pool.
 	dispatcher.sweepOnce()
-}
-
-func testFlagService(enabled bool) *featureflag.Service {
-	provider := featureflag.NewStaticProvider()
-	provider.Set(featureflags.PluginsV1, featureflag.Rule{Default: enabled})
-	return featureflag.NewService(provider)
 }
 
 // Nil flags read as disabled. A deployment that never wired the flag service

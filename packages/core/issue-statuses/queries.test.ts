@@ -18,6 +18,18 @@ function entry(key: string, category: string, name = key, archivedAt: string | n
 }
 
 describe("buildIssueStatusCatalog", () => {
+  it("resolves custom geometry including archived statuses but never overrides built-ins", () => {
+    const catalog = buildIssueStatusCatalog([
+      { ...entry("qa", "started"), icon: "three_quarters" },
+      { ...entry("retired", "started", "Retired", "2026-01-01"), icon: "slash" },
+      { ...entry("todo", "unstarted"), is_system: true, icon: "check" },
+    ]);
+    expect(catalog.iconOf("qa")).toBe("three_quarters");
+    expect(catalog.iconOf("retired")).toBe("slash");
+    expect(catalog.iconOf("todo")).toBeNull();
+    expect(catalog.iconOf("unknown")).toBeNull();
+    expect(buildIssueStatusCatalog(undefined).iconOf("qa")).toBeNull();
+  });
   // The catalog is fetched async, but a status must render on the very first
   // paint. Built-in keys are their own category, so an unloaded catalog still
   // resolves all 7 — which is what keeps the default workspace identical
@@ -25,15 +37,19 @@ describe("buildIssueStatusCatalog", () => {
   it("resolves every built-in with no catalog loaded", () => {
     const c = buildIssueStatusCatalog(undefined);
     expect(c.isLoaded).toBe(false);
-    for (const key of ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"]) {
-      expect(c.categoryOf(key)).toBe(key);
-    }
+    expect(c.categoryOf("backlog")).toBe("unstarted");
+    expect(c.categoryOf("todo")).toBe("unstarted");
+    expect(c.categoryOf("in_progress")).toBe("started");
+    expect(c.categoryOf("in_review")).toBe("started");
+    expect(c.categoryOf("blocked")).toBe("started");
+    expect(c.categoryOf("done")).toBe("done");
+    expect(c.categoryOf("cancelled")).toBe("closed");
     expect(c.labelOf("in_review")).toBe("In Review");
   });
 
   it("maps a custom status to its category and name", () => {
     const c = buildIssueStatusCatalog([entry("human_review", "in_review", "Human Review")]);
-    expect(c.categoryOf("human_review")).toBe("in_review");
+    expect(c.categoryOf("human_review")).toBe("started");
     expect(c.labelOf("human_review")).toBe("Human Review");
     expect(c.entryOf("human_review")?.key).toBe("human_review");
   });
@@ -42,14 +58,14 @@ describe("buildIssueStatusCatalog", () => {
   // back to a renderable category beats dropping the issue.
   it("falls back for a status the catalog does not know", () => {
     const c = buildIssueStatusCatalog([]);
-    expect(c.categoryOf("ghost")).toBe("todo");
+    expect(c.categoryOf("ghost")).toBe("unstarted");
     expect(c.labelOf("ghost")).toBe("ghost");
     expect(c.entryOf("ghost")).toBeUndefined();
   });
 
   it("ignores a corrupt category rather than trusting it", () => {
-    const c = buildIssueStatusCatalog([entry("weird", "started")]);
-    expect(c.categoryOf("weird")).toBe("todo");
+    const c = buildIssueStatusCatalog([entry("weird", "not_a_category")]);
+    expect(c.categoryOf("weird")).toBe("unstarted");
   });
 
   // The 7 built-ins carry a seeded hex the server refuses to let anyone edit,
@@ -80,12 +96,13 @@ describe("buildIssueStatusCatalog", () => {
       entry("human_review", "in_review"),
       entry("gate_approved", "done"),
     ]);
-    expect(c.inCategory("in_review").map((e) => e.key)).toEqual(["human_review"]);
-    expect(c.inCategory("backlog")).toEqual([]);
+    expect(c.inCategory("started").map((e) => e.key)).toEqual(["human_review"]);
+    expect(c.inCategory("unstarted")).toEqual([]);
   });
 
-  it("isIssueStatusCategory accepts exactly the 7", () => {
-    expect(isIssueStatusCategory("in_review")).toBe(true);
+  it("isIssueStatusCategory accepts exactly the 5", () => {
+    expect(isIssueStatusCategory("started")).toBe(true);
+    expect(isIssueStatusCategory("in_review")).toBe(false);
     expect(isIssueStatusCategory("human_review")).toBe(false);
   });
 });
@@ -112,7 +129,7 @@ describe("archived statuses stay resolvable", () => {
 
   it("excludes archived from a category's pickable list", () => {
     expect(c.inCategory("done")).toEqual([]);
-    expect(c.inCategory("in_review").map((e) => e.key)).toEqual(["human_review"]);
+    expect(c.inCategory("started").map((e) => e.key)).toEqual(["human_review"]);
   });
 });
 
@@ -147,13 +164,17 @@ describe("compareIssueStatusEntries", () => {
     expect(sorted.map((e) => e.key)).toEqual(["alpha", "zeta"]);
   });
 
-  // The built-in is seeded at position 0 and cannot be PATCHed, so it is
-  // permanently the head of its category. Reorder writes start at 1 for that
-  // reason; if the comparator ever let a custom status sort ahead of it, the
-  // picker would open on a status the workspace never chose as its default.
-  it("keeps the built-in ahead of custom statuses in its category", () => {
+  it("preserves the initial seeded order", () => {
     const builtIn = { ...at("in_review", "in_review", 0), is_system: true };
     const sorted = [at("qa", "in_review", 1), builtIn].sort(compareIssueStatusEntries);
     expect(sorted.map((e) => e.key)).toEqual(["in_review", "qa"]);
+  });
+  it("honors saved positions before built-in rank", () => {
+    const sorted = [
+      { ...at("in_progress", "started", 3), is_system: true },
+      { ...at("in_review", "started", 1), is_system: true },
+      at("qa", "started", 2),
+    ].sort(compareIssueStatusEntries);
+    expect(sorted.map((e) => e.key)).toEqual(["in_review", "qa", "in_progress"]);
   });
 });

@@ -123,6 +123,19 @@ WHERE status = 'active'
   AND assignee_id = @squad_id
 RETURNING *;
 
+-- name: PauseAutopilotsByArchivedProject :many
+-- An archived project accepts no new issues, so an automation filing into it
+-- would fail every run. Pause it, keeping the configuration; restoring the
+-- project leaves it paused for an explicit resume.
+UPDATE autopilot
+SET status = 'paused',
+    pause_reason = 'project_archived',
+    updated_at = now()
+WHERE status = 'active'
+  AND workspace_id = @workspace_id
+  AND project_id = @project_id
+RETURNING *;
+
 -- name: UpdateAutopilotLastRunAt :exec
 UPDATE autopilot SET last_run_at = now(), updated_at = now()
 WHERE id = $1;
@@ -316,15 +329,25 @@ RETURNING *;
 -- index uq_autopilot_run_trigger_planned, this gives dispatch-layer
 -- idempotency: a stale-steal retry at the same plan_time cannot create
 -- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
+--
+-- idempotency_key is set only for a run that is not metered against the
+-- autopilot run quota; uq_autopilot_run_idempotency_key makes a retried
+-- request reuse its run.
 INSERT INTO autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at,
-    webhook_delivery_id, quota_reservation_id, reason_code, id
+    webhook_delivery_id, quota_reservation_id, reason_code, idempotency_key, id
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
     sqlc.narg('squad_id'), sqlc.narg('planned_at'),
     sqlc.narg('webhook_delivery_id'), sqlc.narg('quota_reservation_id'),
-    sqlc.narg('reason_code'), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    sqlc.narg('reason_code'), sqlc.narg('idempotency_key'),
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 ) RETURNING *;
+
+-- name: GetAutopilotRunByIdempotencyKey :one
+SELECT * FROM autopilot_run
+WHERE autopilot_id = $1
+  AND idempotency_key = $2;
 
 -- name: GetAutopilotRunByTriggerAndPlanned :one
 -- Idempotent lookup used by DispatchAutopilotForPlan to detect a
@@ -343,7 +366,35 @@ LIMIT 1;
 -- name: GetAutopilotRunByWebhookDelivery :one
 SELECT * FROM autopilot_run
 WHERE webhook_delivery_id = $1
+   OR id = (SELECT autopilot_run_id FROM webhook_delivery WHERE id = $1)
 LIMIT 1;
+
+-- name: ResumeFailedWebhookIssueDelivery :one
+-- Keep the original run, issue, and consumed quota. The old delivery retains
+-- its audit link to the run when the new delivery takes over dispatch.
+WITH candidate AS (
+    SELECT retry.id AS retry_id, prior.id AS prior_id,
+           linked.status = 'failed' AND linked.task_id IS NULL AND NOT EXISTS (
+               SELECT 1 FROM agent_task_queue task WHERE task.issue_id = linked.issue_id
+           ) AS reopen
+    FROM webhook_delivery retry
+    JOIN webhook_delivery prior ON prior.trigger_id = retry.trigger_id
+      AND prior.workspace_id = retry.workspace_id AND prior.dedupe_key = retry.dedupe_key
+    JOIN autopilot_run linked ON linked.webhook_delivery_id = prior.id
+    WHERE retry.id = $1 AND retry.status = 'queued' AND prior.status = 'failed'
+      AND linked.issue_id IS NOT NULL
+    ORDER BY prior.created_at DESC, prior.id DESC
+    LIMIT 1
+)
+UPDATE autopilot_run r
+SET webhook_delivery_id = candidate.retry_id,
+    status = CASE WHEN candidate.reopen THEN 'issue_created' ELSE r.status END,
+    completed_at = CASE WHEN candidate.reopen THEN NULL ELSE r.completed_at END,
+    failure_reason = CASE WHEN candidate.reopen THEN NULL ELSE r.failure_reason END,
+    reason_code = CASE WHEN candidate.reopen THEN NULL ELSE r.reason_code END
+FROM candidate
+WHERE r.webhook_delivery_id = candidate.prior_id
+RETURNING r.*;
 
 -- name: GetAutopilotRunByQuotaReservation :one
 SELECT * FROM autopilot_run
@@ -426,26 +477,18 @@ SET status = 'issue_created', issue_id = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: SetAutopilotRunDispatchTask :execrows
+-- Records the agent task a create_issue run actually enqueued, so lifecycle
+-- sync can tell the run's own dispatch apart from mention/comment tasks on
+-- the same issue. Status stays issue_created; only an unlinked active run is
+-- written. (MUL-8200)
+UPDATE autopilot_run
+SET task_id = $2
+WHERE id = $1 AND status = 'issue_created' AND task_id IS NULL;
+
 -- name: UpdateAutopilotRunRunning :one
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
-WHERE id = $1
-RETURNING *;
-
--- name: UpdateAutopilotRunCompleted :one
--- Quota safety: only use for a run known to have no reservation. Normal
--- terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
-UPDATE autopilot_run
-SET status = 'completed', completed_at = now(), result = sqlc.narg('result')
-WHERE id = $1
-RETURNING *;
-
--- name: UpdateAutopilotRunFailed :one
--- Quota safety: only use for a run known to have no reservation. Normal
--- terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
-UPDATE autopilot_run
-SET status = 'failed', completed_at = now(), failure_reason = $2,
-    reason_code = sqlc.narg('reason_code')
 WHERE id = $1
 RETURNING *;
 
@@ -523,17 +566,6 @@ WITH updated_run AS (
 )
 SELECT * FROM updated_run;
 
--- name: UpdateAutopilotRunSkippedWithResult :one
--- Quota safety: legacy no-reservation helper. New terminal paths must call
--- UpdateAutopilotRunTerminalWithQuota instead.
-UPDATE autopilot_run
-SET status = 'skipped',
-    completed_at = now(),
-    failure_reason = $2,
-    result = sqlc.narg('result')
-WHERE id = $1
-RETURNING *;
-
 -- =====================
 -- Scheduler Queries
 -- =====================
@@ -589,6 +621,13 @@ ORDER BY t.id;
 -- When no version/publisher resolves on the non-manual path, the caller passes NULL
 -- accountable + originator_source='unattributed' so the row is still not a
 -- NULL-source bypass (MUL-4302 §2).
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = sqlc.arg(agent_id)
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+    FOR KEY SHARE OF a
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
@@ -596,7 +635,7 @@ INSERT INTO agent_task_queue (
     id
 )
 SELECT
-    $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
+    sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL, 'queued', sqlc.arg(priority), sqlc.narg(autopilot_run_id), sqlc.narg(trigger_summary),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(rule_version_id),
@@ -604,7 +643,7 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, NULL, $2)
+FROM enqueue_agent
 RETURNING *;
 
 -- name: GetAutopilotTaskByRun :one
@@ -622,6 +661,15 @@ LIMIT 1;
 -- name: GetAutopilotRunByIssue :one
 SELECT * FROM autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
+LIMIT 1;
+
+-- name: GetLatestAutopilotRunForIssueAttribution :one
+-- Attribution survives run completion; lifecycle callers still use the active-run lookup.
+SELECT r.* FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.issue_id = sqlc.arg(issue_id) AND r.autopilot_id = sqlc.arg(autopilot_id)
+  AND a.workspace_id = sqlc.arg(workspace_id)
+ORDER BY r.created_at DESC, r.id DESC
 LIMIT 1;
 
 -- name: FailAutopilotRunsByIssue :many

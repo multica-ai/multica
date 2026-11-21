@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/thumbnail"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -146,6 +147,10 @@ type SourceContextCommentSnapshot struct {
 	UpdatedAt   string                    `json:"updated_at"`
 	Revision    int64                     `json:"revision"`
 	Attachments []SourceContextAttachment `json:"attachments"`
+	// Deleted marks a tombstone: a comment deleted while it still had replies,
+	// kept in the thread only so those replies keep their parent. Its Content
+	// is empty. Omitted otherwise, so existing snapshot digests are unchanged.
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 type SourceContextSnapshot struct {
@@ -339,7 +344,7 @@ func buildSourceContextCommentSnapshots(
 			ID: commentID, ParentID: parentID, Type: row.Type, Content: row.Content,
 			Author:    SourceContextAuthor{Type: row.AuthorType, ID: util.UUIDToString(row.AuthorID), Name: authorName},
 			CreatedAt: sourceContextTime(row.CreatedAt), UpdatedAt: sourceContextTime(row.UpdatedAt), Revision: row.Revision,
-			Attachments: attachments,
+			Attachments: attachments, Deleted: row.DeletedAt.Valid,
 		})
 	}
 	return commentThread, commentAttachments, nil
@@ -404,6 +409,9 @@ func BuildSourceContext(ctx context.Context, q *db.Queries, workspaceID, anchorC
 	}
 	if err != nil {
 		return SourceContextBuild{}, fmt.Errorf("load anchor comment: %w", err)
+	}
+	if anchor.DeletedAt.Valid {
+		return SourceContextBuild{}, ErrAnchorCommentDeleted
 	}
 	if anchor.Type != "comment" {
 		return SourceContextBuild{}, ErrSourceContextInvalid
@@ -771,6 +779,9 @@ func (s *TaskService) CleanupAbandonedSourceContexts(ctx context.Context, limit 
 			key := s.SourceContextStorage.KeyFromURL(attachment.Url)
 			deleteCtx, cancel := context.WithTimeout(ctx, sourceContextObjectDeleteTimeout)
 			err := s.SourceContextStorage.DeleteObject(deleteCtx, key)
+			if thumbKey, ok := thumbnail.StorageKey(key); ok && err == nil {
+				err = s.SourceContextStorage.DeleteObject(deleteCtx, thumbKey)
+			}
 			cancel()
 			if err != nil {
 				deleteFailed = true

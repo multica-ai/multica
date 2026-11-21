@@ -2,11 +2,23 @@
 import { describe, expect, it } from "vitest";
 import {
   listManagedMcpServers,
+  mcpTransportLabel,
   removeManagedMcpServer,
   upsertManagedMcpServer,
 } from "./mcp-config-model";
 
 describe("mcp config compatibility model", () => {
+  it("uses the same user-facing transport names across MCP surfaces", () => {
+    expect(mcpTransportLabel("stdio")).toBe("STDIO");
+    expect(mcpTransportLabel("LOCAL")).toBe("STDIO");
+    expect(mcpTransportLabel("http")).toBe("Streamable HTTP");
+    expect(mcpTransportLabel("remote")).toBe("Streamable HTTP");
+    expect(mcpTransportLabel("streamable-http")).toBe("Streamable HTTP");
+    expect(mcpTransportLabel("sse")).toBe("SSE");
+    expect(mcpTransportLabel(" websocket ")).toBe("websocket");
+    expect(mcpTransportLabel("   ")).toBe("Unknown");
+  });
+
   it("reads canonical and historical OpenCode-native containers without duplication", () => {
     const servers = listManagedMcpServers({
       mcpServers: { shared: { command: "canonical" } },

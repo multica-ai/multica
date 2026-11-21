@@ -27,6 +27,9 @@ func stubLLMCompletion(t *testing.T, status int, content string) *httptest.Serve
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if status != http.StatusOK {
+			// A retryable status still exercises the SDK's retries; Retry-After: 0
+			// only stops them from sleeping through the backoff curve.
+			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(status)
 			_, _ = io.WriteString(w, `{"error":{"message":"stub upstream error"}}`)
 			return

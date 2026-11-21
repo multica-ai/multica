@@ -2,17 +2,287 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
+	dbfx "github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestPendingDelegatedFailureSweepDoesNotStarveOtherWorkspaces(t *testing.T) {
+	ctx := context.Background()
+	var paused []pgtype.UUID
+	for _, status := range []string{issuestatus.Cancelled, issuestatus.Backlog} {
+		f, svc := seedDelegatedFailureFixture(t)
+		fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+		if err := issuestatus.Ensure(ctx, svc.Queries, util.MustParseUUID(f.workspaceID)); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 50; i++ {
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+			if err != nil || target == nil || !created {
+				t.Fatalf("seed interrupted recovery: created=%v err=%v", created, err)
+			}
+			paused = append(paused, target.comment.ID)
+		}
+		fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, status)
+	}
+	// The 101st signal is newer and belongs to a different, executable workspace.
+	f, svc := seedDelegatedFailureFixture(t)
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+	if err != nil || target == nil || !created {
+		t.Fatalf("seed executable recovery: created=%v err=%v", created, err)
+	}
+	sweepDelegatedFailureRecoveries(t, svc)
+	if covered, err := svc.Queries.HasTaskCoveringDelegatedFailureComment(ctx, db.HasTaskCoveringDelegatedFailureCommentParams{
+		IssueID: target.issue.ID, AgentID: target.agent.ID, CommentID: target.comment.ID,
+	}); err != nil || !covered {
+		t.Fatalf("recovery behind 100 paused signals has a task = %v, %v; want true", covered, err)
+	}
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
+		t.Fatalf("recovery tasks after repeat sweep = %d, want 1 without a duplicate dispatch", n)
+	}
+	for _, id := range paused {
+		if f.settled(t, id) {
+			t.Fatal("pausing an issue must not settle its undelivered recovery")
+		}
+	}
+}
+
+func TestDelegatedFailureRecoveryStatusEligibility(t *testing.T) {
+	for _, seeded := range []bool{true, false} {
+		name := "seeded_catalog"
+		if !seeded {
+			name = "missing_builtin_catalog"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			f, svc := seedDelegatedFailureFixture(t)
+			fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+			if seeded {
+				if err := issuestatus.Ensure(ctx, svc.Queries, util.MustParseUUID(f.workspaceID)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+			if err != nil || target == nil || !created {
+				t.Fatalf("seed recovery: created=%v err=%v", created, err)
+			}
+			cases := []struct {
+				status, category              string
+				allowed, archived, unresolved bool
+			}{
+				{status: "backlog"},
+				{status: "todo", allowed: true},
+				{status: "in_progress", allowed: true},
+				{status: "in_review", allowed: true},
+				{status: "blocked", allowed: true},
+				{status: "done"},
+				{status: "cancelled"},
+				{status: "missing_recovery_status", unresolved: true},
+				{status: "custom_unstarted", category: "unstarted", allowed: true},
+				{status: "custom_started", category: "started", allowed: true},
+				{status: "custom_done", category: "done"},
+				{status: "custom_closed", category: "closed"},
+				{status: "archived_done", category: "done", archived: true},
+				{status: "archived_open", category: "started", allowed: true, archived: true},
+			}
+			for _, tc := range cases {
+				t.Run(tc.status, func(t *testing.T) {
+					if tc.category != "" {
+						cols := dbfx.Cols{"workspace_id": f.workspaceID, "key": tc.status, "name": tc.status,
+							"category": tc.category, "color": "#22c55e", "position": 1}
+						if tc.archived {
+							cols["archived_at"] = dbfx.Raw("now()")
+						}
+						fx.Insert(t, "issue_status", cols)
+					}
+					fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, tc.status)
+					pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(ctx, 100)
+					if err != nil {
+						t.Fatal(err)
+					}
+					included := false
+					for _, comment := range pending {
+						included = included || comment.ID == target.comment.ID
+					}
+					if included != tc.allowed {
+						t.Errorf("SQL selected recovery = %v, want %v", included, tc.allowed)
+					}
+					loaded, err := loadDelegatedFailureRecoveryTarget(ctx, svc.Queries, target.failed)
+					if err != nil || loaded == nil {
+						t.Fatalf("lifecycle must not prevent loading the signal target: %v", err)
+					}
+					allowed, err := canDispatchDelegatedFailureRecovery(ctx, svc.Queries, loaded.issue)
+					if (err != nil) != tc.unresolved {
+						t.Errorf("Go eligibility error = %v, want unresolved=%v", err, tc.unresolved)
+					}
+					if allowed != tc.allowed {
+						t.Errorf("Go allowed recovery = %v, want %v", allowed, tc.allowed)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestDelegatedFailureRecoveryRechecksStatusAndResumes(t *testing.T) {
+	for _, status := range []string{"backlog", "cancelled", "done", "recovery_closed"} {
+		t.Run(status, func(t *testing.T) {
+			ctx := context.Background()
+			f, svc := seedDelegatedFailureFixture(t)
+			fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+			if status == "recovery_closed" {
+				fx.Insert(t, "issue_status", dbfx.Cols{"workspace_id": f.workspaceID, "key": status,
+					"name": "Closed", "category": "closed", "color": "#22c55e", "position": 1})
+			}
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+			if err != nil || target == nil || !created {
+				t.Fatalf("seed recovery: created=%v err=%v", created, err)
+			}
+			if !f.pending(t, svc, target.comment.ID) {
+				t.Fatal("initial candidates do not include this recovery")
+			}
+			// Change the issue after selection, before the same dispatch entry
+			// point used by the sweeper and completion reconciliation runs.
+			fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, status)
+			if err := svc.DispatchDelegatedFailureRecoveryComment(ctx, target.comment, pgtype.UUID{}); err != nil {
+				t.Fatal(err)
+			}
+			if count := f.recoveryTasks(t, failedID); count != 0 || f.settled(t, target.comment.ID) {
+				t.Fatalf("paused recovery: tasks=%d; want no task or permanent receipt", count)
+			}
+			fx.Exec(t, `UPDATE issue SET status = 'todo' WHERE id = $1`, f.issueID)
+			for _, phase := range []string{"reopened recovery", "repeat sweep"} {
+				sweepDelegatedFailureRecoveries(t, svc)
+				if count := f.recoveryTasks(t, failedID); count != 1 {
+					t.Fatalf("%s: recovery tasks = %d, want one replay and no duplicate", phase, count)
+				}
+			}
+		})
+	}
+}
+
+type recoveryCatalogErrorDB struct {
+	db.DBTX
+	err error
+}
+
+func (d recoveryCatalogErrorDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if strings.Contains(sql, "FROM issue_status") {
+		return recoveryCatalogErrorRow{d.err}
+	}
+	return d.DBTX.QueryRow(ctx, sql, args...)
+}
+
+type recoveryCatalogErrorRow struct{ err error }
+
+func (r recoveryCatalogErrorRow) Scan(...any) error { return r.err }
+
+func TestDelegatedFailureRecoveryPreservesSignalWhenStatusUnavailable(t *testing.T) {
+	for _, readError := range []bool{false, true} {
+		name := "missing_catalog_entry"
+		if readError {
+			name = "catalog_read_error"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			f, svc := seedDelegatedFailureFixture(t)
+			fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+			const status = "recovery_custom_status"
+			createStatus := func() {
+				fx.Insert(t, "issue_status", dbfx.Cols{"workspace_id": f.workspaceID, "key": status,
+					"name": "Active", "category": "started", "color": "#22c55e", "position": 1})
+			}
+			fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, status)
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			queries := svc.Queries
+			failed, err := queries.GetAgentTask(ctx, failedID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantErr := error(pgx.ErrNoRows)
+			if readError {
+				createStatus()
+				wantErr = errors.New("catalog temporarily unavailable")
+				svc.Queries = db.New(recoveryCatalogErrorDB{DBTX: f.pool, err: wantErr})
+			}
+			// This post-terminal hook runs only once. A failure to read lifecycle
+			// must pause dispatch without losing the durable obligation to retry.
+			if handled, err := svc.recoverDelegatedTaskFailure(ctx, failed); !handled || !errors.Is(err, wantErr) {
+				t.Errorf("initial recovery: handled=%v err=%v; want handled and %v", handled, err, wantErr)
+			}
+			comment, err := queries.GetDelegatedFailureRecoveryComment(ctx, db.GetDelegatedFailureRecoveryCommentParams{
+				IssueID: util.MustParseUUID(f.issueID), WorkspaceID: util.MustParseUUID(f.workspaceID), SourceTaskID: failedID,
+			})
+			if err != nil {
+				t.Fatalf("recovery signal must survive status resolution failure: %v", err)
+			}
+			var count int
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue
+				WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 || f.settled(t, comment.ID) {
+				t.Fatalf("unresolved recovery: tasks=%d; want no dispatch or permanent receipt", count)
+			}
+			if !readError {
+				pending, err := queries.ListPendingDelegatedFailureRecoveries(ctx, 100)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, candidate := range pending {
+					if candidate.ID == comment.ID {
+						t.Fatal("unresolved signal occupies the batch")
+					}
+				}
+				if _, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil {
+					t.Fatalf("sweep with unresolved signal: %v", err)
+				}
+				createStatus()
+			}
+			// Packages share DATABASE_URL in CI. Keep another workspace's
+			// signal pending to exercise the global sweep without assuming
+			// this fixture is its only candidate.
+			other, otherSvc := seedDelegatedFailureFixture(t)
+			otherFailedID := other.insertWorkerTask(t, "failed", "comment", 1, 2)
+			if target, created, err := otherSvc.ensureDelegatedFailureRecoveryComment(ctx, otherFailedID); err != nil || target == nil || !created {
+				t.Fatalf("seed unrelated recovery signal: created=%v err=%v", created, err)
+			}
+			svc.Queries = queries
+			for _, phase := range []string{"catalog repaired", "repeat sweep"} {
+				result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
+				if err != nil {
+					t.Fatalf("%s: %+v, %v", phase, result, err)
+				}
+				// Sweep totals include other workspaces. Each signal must have
+				// exactly one recovery task, including after the second sweep.
+				for _, sourceID := range []pgtype.UUID{failedID, otherFailedID} {
+					fx.QueryRow(t, `SELECT count(*) FROM agent_task_queue
+						WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, sourceID).Scan(&count)
+					if count != 1 {
+						t.Fatalf("%s: source %s has %d recovery tasks; want one replay without repeating the failure hook",
+							phase, util.UUIDToString(sourceID), count)
+					}
+				}
+			}
+		})
+	}
+}
 
 type delegatedFailureFixture struct {
 	pool          *pgxpool.Pool
@@ -29,7 +299,11 @@ type delegatedFailureFixture struct {
 
 func seedDelegatedFailureFixture(t *testing.T) (*delegatedFailureFixture, *TaskService) {
 	t.Helper()
-	pool := newResolveOriginatorPool(t)
+	return seedDelegatedFailureFixtureIn(t, newResolveOriginatorPool(t))
+}
+
+func seedDelegatedFailureFixtureIn(t *testing.T, pool *pgxpool.Pool) (*delegatedFailureFixture, *TaskService) {
+	t.Helper()
 	ctx := context.Background()
 	workspaceID, userID, coordinatorID, issueID := seedAttributionFixture(t, pool)
 	if _, err := pool.Exec(ctx, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, issueID); err != nil {
@@ -108,6 +382,42 @@ func (f *delegatedFailureFixture) insertWorkerTask(t *testing.T, status, evidenc
 		t.Fatalf("seed worker task: %v", err)
 	}
 	return taskID
+}
+
+// The recovery sweep is not workspace-scoped, and packages share DATABASE_URL
+// in CI, so its totals can include another test's signal. Tests run it through
+// sweepDelegatedFailureRecoveries and assert on their own rows with the
+// helpers below.
+func sweepDelegatedFailureRecoveries(t *testing.T, svc *TaskService) {
+	t.Helper()
+	if result, err := svc.RecoverPendingDelegatedFailures(context.Background(), 100); err != nil {
+		t.Fatalf("recovery sweep = %+v, %v", result, err)
+	}
+}
+
+func (f *delegatedFailureFixture) recoveryTasks(t *testing.T, failedID pgtype.UUID) int {
+	t.Helper()
+	var n int
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_task_queue
+		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&n); err != nil {
+		t.Fatalf("count recovery tasks: %v", err)
+	}
+	return n
+}
+
+func (f *delegatedFailureFixture) pending(t *testing.T, svc *TaskService, commentID pgtype.UUID) bool {
+	t.Helper()
+	pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(context.Background(), 1000)
+	if err != nil {
+		t.Fatalf("list pending recoveries: %v", err)
+	}
+	for _, comment := range pending {
+		if comment.ID == commentID {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFailTaskFinalDelegatedFailureWakesCoordinatorOnce(t *testing.T) {
@@ -221,8 +531,9 @@ func TestPendingDelegatedFailureSweepRepairsCommittedCommentWithoutTask(t *testi
 	// The durable outbox starts at the explicit platform comment. Do not
 	// retroactively wake arbitrary historical delegated failures that predate
 	// this recovery mechanism.
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("pre-comment recovery sweep = %+v, %v; want zero result, nil", result, err)
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 0 {
+		t.Fatalf("pre-comment recovery sweep created %d recovery tasks, want 0", n)
 	}
 
 	// This is the durable intermediate state left when comment creation commits
@@ -231,34 +542,19 @@ func TestPendingDelegatedFailureSweepRepairsCommittedCommentWithoutTask(t *testi
 	if err != nil || target == nil || !created {
 		t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
 	}
-	var tasksBefore int
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&tasksBefore); err != nil {
-		t.Fatalf("count recovery tasks before sweep: %v", err)
-	}
-	if tasksBefore != 0 {
-		t.Fatalf("recovery tasks before sweep = %d, want 0", tasksBefore)
+	if n := f.recoveryTasks(t, failedID); n != 0 {
+		t.Fatalf("recovery tasks before sweep = %d, want 0", n)
 	}
 
-	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-	if err != nil || result.Replayed != 1 || result.Exhausted != 0 {
-		t.Fatalf("RecoverPendingDelegatedFailures = %+v, %v; want one replay, nil", result, err)
-	}
-	var comments, tasks int
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE type = 'progress_update' AND source_task_id = $1`, failedID).Scan(&comments); err != nil {
-		t.Fatalf("count recovery comments: %v", err)
-	}
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&tasks); err != nil {
-		t.Fatalf("count recovery tasks after sweep: %v", err)
-	}
-	if comments != 1 || tasks != 1 {
-		t.Fatalf("comments/tasks after sweep = %d/%d, want 1/1", comments, tasks)
-	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("second recovery sweep = %+v, %v; want zero result, nil", result, err)
+	for _, phase := range []string{"first sweep", "second sweep"} {
+		sweepDelegatedFailureRecoveries(t, svc)
+		var comments int
+		if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE type = 'progress_update' AND source_task_id = $1`, failedID).Scan(&comments); err != nil {
+			t.Fatalf("count recovery comments: %v", err)
+		}
+		if tasks := f.recoveryTasks(t, failedID); comments != 1 || tasks != 1 {
+			t.Fatalf("%s: comments/tasks = %d/%d, want 1/1", phase, comments, tasks)
+		}
 	}
 }
 
@@ -288,17 +584,111 @@ func TestPendingDelegatedFailureSweepSkipsCustomTerminalSourceIssue(t *testing.T
 		t.Fatalf("move source issue to custom done status: %v", err)
 	}
 
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("terminal-source recovery sweep = %+v, %v; want zero result, nil", result, err)
-	}
-	var recoveryTasks int
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&recoveryTasks); err != nil {
-		t.Fatalf("count recovery tasks: %v", err)
-	}
-	if recoveryTasks != 0 {
+	sweepDelegatedFailureRecoveries(t, svc)
+	if recoveryTasks := f.recoveryTasks(t, failedID); recoveryTasks != 0 {
 		t.Fatalf("recovery tasks = %d, want none for a custom terminal source issue", recoveryTasks)
+	}
+}
+
+// The SQL prefilter is what keeps the recovery outbox scan from growing with
+// history. A signal whose source issue can never resume has to be dropped
+// THERE: the Go gate downstream discards it without stamping
+// recovery_settled_at, so anything that reaches Go stays in the scan forever
+// and spends part of maxPerTick on every tick.
+//
+// MUL-7240 disabled most of it silently. The predicate read
+// issue_status.category but compared it against the old seven-value key
+// vocabulary, and once a workspace's catalog is seeded — every production
+// workspace, per migration 469 — COALESCE returns that category: 'cancelled'
+// arrives as 'closed' and 'backlog' as 'unstarted', leaving only 'done' still
+// excluded. An unseeded workspace falls back to the raw key, so both are
+// covered here: the two vocabularies are each only reachable in one of them.
+// (MUL-7364)
+func TestPendingDelegatedFailureSweepPrefiltersUnresumableSourceIssues(t *testing.T) {
+	ctx := context.Background()
+	for _, catalog := range []struct {
+		name   string
+		seeded bool
+	}{
+		{"seeded catalog", true},
+		{"unseeded catalog", false},
+	} {
+		t.Run(catalog.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name string
+				// status the source issue ends up on. customCategory, when set,
+				// makes it a custom key created with that lifecycle first.
+				status         string
+				customCategory string
+				wantScanned    bool
+			}{
+				{name: "built-in cancelled", status: "cancelled"},
+				{name: "built-in backlog", status: "backlog"},
+				{name: "built-in done", status: "done"},
+				{name: "custom closed-category status", status: "shelved", customCategory: "closed"},
+				{name: "converted cancelled category", status: "legacy_shelved", customCategory: "closed"},
+				{name: "converted custom backlog stays live", status: "legacy_later", customCategory: "unstarted", wantScanned: true},
+				{name: "source issue still live", status: "in_progress", wantScanned: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					f, svc := seedDelegatedFailureFixture(t)
+					workspaceUUID, err := util.ParseUUID(f.workspaceID)
+					if err != nil {
+						t.Fatalf("parse workspace id: %v", err)
+					}
+					if catalog.seeded {
+						if err := svc.Queries.SeedIssueStatusEntries(ctx, workspaceUUID); err != nil {
+							t.Fatalf("seed status catalog: %v", err)
+						}
+					}
+					if tc.customCategory != "" {
+						if _, err := f.pool.Exec(ctx, `
+							INSERT INTO issue_status (
+								workspace_id, key, name, description, category, color, is_system, position
+							) VALUES ($1, $2, 'Shelved', '', $3, '#6b7280', false, 1)`,
+							f.workspaceID, tc.status, tc.customCategory); err != nil {
+							t.Fatalf("insert custom status: %v", err)
+						}
+					}
+
+					failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+					if _, err := f.pool.Exec(ctx, `
+						UPDATE agent_task_queue
+						SET failure_reason = 'agent_error.process_failure', error = 'worker exited', completed_at = now()
+						WHERE id = $1`, failedID); err != nil {
+						t.Fatalf("stamp failed task: %v", err)
+					}
+					// The signal has to exist before the source issue moves:
+					// creating it runs the same Go gate being bypassed here.
+					target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+					if err != nil || target == nil || !created {
+						t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
+					}
+					if _, err := f.pool.Exec(ctx, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, tc.status); err != nil {
+						t.Fatalf("move source issue to %q: %v", tc.status, err)
+					}
+
+					// Asserted against this fixture's own signal rather than the
+					// sweep's totals: the scan is not workspace-scoped.
+					pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(ctx, 1000)
+					if err != nil {
+						t.Fatalf("list pending recoveries: %v", err)
+					}
+					scanned := false
+					for _, comment := range pending {
+						if comment.ID == target.comment.ID {
+							scanned = true
+							break
+						}
+					}
+					if scanned != tc.wantScanned {
+						t.Fatalf("recovery signal scanned = %v, want %v — a source issue on %q %s",
+							scanned, tc.wantScanned, tc.status,
+							map[bool]string{true: "must stay in the outbox scan", false: "can never resume, so the row is rescanned and re-discarded forever"}[tc.wantScanned])
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -339,23 +729,19 @@ func TestPendingDelegatedFailureSweepRequeuesTerminalUndeliveredTask(t *testing.
 				t.Fatalf("terminalize recovery before delivery: %v", err)
 			}
 
-			result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-			if err != nil || result.Replayed != 1 || result.Exhausted != 0 {
-				t.Fatalf("RecoverPendingDelegatedFailures = %+v, %v; want one replay, nil", result, err)
-			}
-			var active, total int
-			if err := f.pool.QueryRow(ctx, `
-				SELECT count(*) FILTER (WHERE status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')),
-				       count(*)
-				FROM agent_task_queue
-				WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&active, &total); err != nil {
-				t.Fatalf("count recovery tasks: %v", err)
-			}
-			if active != 1 || total != 2 {
-				t.Fatalf("active/total recovery tasks = %d/%d, want 1/2", active, total)
-			}
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-				t.Fatalf("second recovery sweep = %+v, %v; want zero result, nil", result, err)
+			for _, phase := range []string{"first sweep", "second sweep"} {
+				sweepDelegatedFailureRecoveries(t, svc)
+				var active, total int
+				if err := f.pool.QueryRow(ctx, `
+					SELECT count(*) FILTER (WHERE status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')),
+					       count(*)
+					FROM agent_task_queue
+					WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&active, &total); err != nil {
+					t.Fatalf("count recovery tasks: %v", err)
+				}
+				if active != 1 || total != 2 {
+					t.Fatalf("%s: active/total recovery tasks = %d/%d, want 1/2", phase, active, total)
+				}
 			}
 		})
 	}
@@ -388,7 +774,11 @@ func TestUserCancelledDelegatedFailureRecoveryStaysCancelled(t *testing.T) {
 		  AND task.trigger_evidence_ref_id = $1`, failedID).Scan(&recoveryTaskID, &recoveryCommentID); err != nil {
 		t.Fatalf("load recovery task/comment: %v", err)
 	}
-	cancelled, err := svc.CancelTaskByUser(ctx, recoveryTaskID)
+	cancelled, err := svc.CancelTaskByUser(ctx, recoveryTaskID, TaskCancellationActor{
+		Type: "member",
+		ID:   util.MustParseUUID(f.userID),
+		Name: "Recovery owner",
+	})
 	if err != nil {
 		t.Fatalf("CancelTaskByUser: %v", err)
 	}
@@ -405,17 +795,22 @@ func TestUserCancelledDelegatedFailureRecoveryStaysCancelled(t *testing.T) {
 	if !acknowledged {
 		t.Fatal("user cancellation did not terminally acknowledge the recovery signal")
 	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("recovery sweep after user cancel = %+v, %v; want zero result, nil", result, err)
+	// Keep another workspace's signal pending so the global sweep has a
+	// candidate besides this fixture, as it can in CI.
+	other, otherSvc := seedDelegatedFailureFixture(t)
+	otherFailedID := other.insertWorkerTask(t, "failed", "comment", 1, 2)
+	if target, created, err := otherSvc.ensureDelegatedFailureRecoveryComment(ctx, otherFailedID); err != nil || target == nil || !created {
+		t.Fatalf("seed unrelated recovery signal: created=%v err=%v", created, err)
 	}
-	var taskCount int
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&taskCount); err != nil {
-		t.Fatalf("count recovery tasks: %v", err)
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
+		t.Fatalf("recovery tasks after user cancel = %d, want 1", n)
 	}
-	if taskCount != 1 {
-		t.Fatalf("recovery tasks after user cancel = %d, want 1", taskCount)
+	if f.pending(t, svc, recoveryCommentID) {
+		t.Fatal("sweep reopened the user-cancelled recovery signal")
+	}
+	if n := other.recoveryTasks(t, otherFailedID); n != 1 {
+		t.Fatalf("unrelated recovery tasks = %d, want the sweep to replay it once", n)
 	}
 }
 
@@ -452,7 +847,7 @@ func TestManualRerunKeepsDelegatedFailureRecoveryReplayable(t *testing.T) {
 		util.MustParseUUID(f.issueID),
 		util.MustParseUUID(f.sourceTask),
 		pgtype.UUID{},
-		util.MustParseUUID(f.userID),
+		util.MustParseUUID(f.userID), false,
 		nil,
 	)
 	if err != nil {
@@ -469,9 +864,12 @@ func TestManualRerunKeepsDelegatedFailureRecoveryReplayable(t *testing.T) {
 		t.Fatalf("rerun-cancelled recovery = status %q acknowledged %v, want cancelled and replayable", firstStatus, acknowledged)
 	}
 
-	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-	if err != nil || result.Replayed != 1 || result.Exhausted != 0 {
-		t.Fatalf("recovery sweep after rerun = %+v, %v; want one replay", result, err)
+	if !f.pending(t, svc, recoveryCommentID) {
+		t.Fatal("rerun-cancelled recovery is not pending replay")
+	}
+	sweepDelegatedFailureRecoveries(t, svc)
+	if f.pending(t, svc, recoveryCommentID) {
+		t.Fatal("recovery sweep after rerun did not replay the signal")
 	}
 	var rerunTrigger string
 	if err := f.pool.QueryRow(ctx, `SELECT COALESCE(trigger_comment_id::text, '') FROM agent_task_queue WHERE id = $1`, rerun.ID).Scan(&rerunTrigger); err != nil {
@@ -480,17 +878,15 @@ func TestManualRerunKeepsDelegatedFailureRecoveryReplayable(t *testing.T) {
 	if rerunTrigger != util.UUIDToString(recoveryCommentID) {
 		t.Fatalf("rerun trigger = %q, want recovery comment %s", rerunTrigger, util.UUIDToString(recoveryCommentID))
 	}
-	var dedicatedRecoveryTasks int
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&dedicatedRecoveryTasks); err != nil {
-		t.Fatalf("count dedicated recovery tasks: %v", err)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
+		t.Fatalf("dedicated recovery task count after rerun = %d, want original cancelled task only", n)
 	}
-	if dedicatedRecoveryTasks != 1 {
-		t.Fatalf("dedicated recovery task count after rerun = %d, want original cancelled task only", dedicatedRecoveryTasks)
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
+		t.Fatalf("dedicated recovery task count after second sweep = %d, want original cancelled task only", n)
 	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("second recovery sweep after rerun = %+v, %v; want zero result", result, err)
+	if f.pending(t, svc, recoveryCommentID) {
+		t.Fatal("second recovery sweep left the rerun recovery pending")
 	}
 }
 
@@ -531,17 +927,8 @@ func TestDelegatedFailureRecoveryStopsAfterBoundedUndeliveredAttempts(t *testing
 			t.Fatalf("fail recovery attempt %d: %v", attempt, err)
 		}
 
-		result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-		if err != nil {
-			t.Fatalf("recovery sweep after attempt %d = %+v, %v", attempt, result, err)
-		}
-		if attempt < delegatedFailureRecoveryMaxTaskAttempts {
-			if result.Replayed != 1 || result.Exhausted != 0 {
-				t.Fatalf("recovery sweep after attempt %d = %+v, want one replay", attempt, result)
-			}
-		} else if result.Replayed != 0 || result.Exhausted != 1 {
-			t.Fatalf("recovery sweep after final attempt = %+v, want one exhaustion", result)
-		}
+		sweepDelegatedFailureRecoveries(t, svc)
+		// A replay leaves one new active attempt; exhaustion leaves none.
 		var active, total int
 		if err := f.pool.QueryRow(ctx, `
 			SELECT count(*) FILTER (WHERE status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')),
@@ -592,9 +979,7 @@ func TestDelegatedFailureRecoveryStopsAfterBoundedUndeliveredAttempts(t *testing
 	if inboxItems != 1 || inboxSeverity != "action_required" || inboxBody != exhaustionContent {
 		t.Fatalf("exhaustion inbox = count %d severity %q body %q, want one action-required copy of explanation", inboxItems, inboxSeverity, inboxBody)
 	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("post-exhaustion recovery sweep = %+v, %v; want zero result, nil", result, err)
-	}
+	sweepDelegatedFailureRecoveries(t, svc)
 	if err := f.pool.QueryRow(ctx, `
 		SELECT count(*) FROM inbox_item
 		WHERE workspace_id = $1 AND recipient_id = $2 AND issue_id = $3
@@ -646,6 +1031,100 @@ func TestHandleFailedTasksFinalDelegatedFailureWakesCoordinator(t *testing.T) {
 	}
 }
 
+// insertOrphanedWorkerTask seeds a non-delegated task on the worker's issue
+// that orphan recovery has just failed with runtime_recovery.
+func (f *delegatedFailureFixture) insertOrphanedWorkerTask(t *testing.T, attempt, maxAttempts int32) db.AgentTaskQueue {
+	t.Helper()
+	taskID := dbfx.New(f.pool, f.workspaceID, f.userID).Task(t, f.worker, dbfx.Cols{
+		"runtime_id":          f.runtimeID,
+		"issue_id":            f.workerIssue,
+		"status":              "failed",
+		"attempt":             attempt,
+		"max_attempts":        maxAttempts,
+		"originator_user_id":  f.userID,
+		"accountable_user_id": f.userID,
+		"originator_source":   "direct_human",
+		"failure_reason":      "runtime_recovery",
+		"error":               "daemon restarted while task was in flight",
+		"completed_at":        dbfx.Raw("now()"),
+	})
+	task, err := db.New(f.pool).GetAgentTask(context.Background(), util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load orphaned task: %v", err)
+	}
+	return task
+}
+
+func TestHandleFailedTasksUnconfirmedCleanupDoesNotDelegate(t *testing.T) {
+	for _, reason := range []string{"cleanup_unconfirmed", "cleanup_blocked"} {
+		t.Run(reason, func(t *testing.T) {
+			f, svc := seedDelegatedFailureFixture(t)
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			if _, err := f.pool.Exec(t.Context(), `UPDATE agent_task_queue SET failure_reason=$2, error='worker stop unconfirmed', completed_at=now() WHERE id=$1`, failedID, reason); err != nil {
+				t.Fatal(err)
+			}
+			failed, err := svc.Queries.GetAgentTask(t.Context(), failedID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc.HandleFailedTasks(t.Context(), []db.AgentTaskQueue{failed})
+			var recoveryTasks, recoveryComments int
+			if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM agent_task_queue WHERE trigger_evidence_kind='delegated_failure' AND trigger_evidence_ref_id=$1`, failedID).Scan(&recoveryTasks); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM comment WHERE issue_id=$1 AND type='progress_update' AND source_task_id=$2`, f.issueID, failedID).Scan(&recoveryComments); err != nil {
+				t.Fatal(err)
+			}
+			if recoveryTasks != 0 || recoveryComments != 0 {
+				t.Fatalf("cleanup failure dispatched coordinator work: tasks=%d comments=%d", recoveryTasks, recoveryComments)
+			}
+		})
+	}
+}
+
+func TestHandleFailedTasksTerminalFailureCommentsOnTaskIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failed := f.insertOrphanedWorkerTask(t, 2, 2)
+
+	if retried := svc.HandleFailedTasks(ctx, []db.AgentTaskQueue{failed}); retried != 0 {
+		t.Fatalf("HandleFailedTasks retried = %d, want 0", retried)
+	}
+
+	var comments int
+	var content string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(max(content), '')
+		FROM comment
+		WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`, f.workerIssue, failed.ID).
+		Scan(&comments, &content); err != nil {
+		t.Fatalf("read failure comment: %v", err)
+	}
+	if comments != 1 || content != "daemon restarted while task was in flight" {
+		t.Fatalf("terminal failure comments = %d content %q, want one system comment with the task error", comments, content)
+	}
+}
+
+func TestHandleFailedTasksRetryPendingDoesNotCommentOnTaskIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failed := f.insertOrphanedWorkerTask(t, 1, 2)
+
+	if retried := svc.HandleFailedTasks(ctx, []db.AgentTaskQueue{failed}); retried != 1 {
+		t.Fatalf("HandleFailedTasks retried = %d, want 1", retried)
+	}
+
+	var comments int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*) FROM comment WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`,
+		f.workerIssue, failed.ID).Scan(&comments); err != nil {
+		t.Fatalf("count failure comments: %v", err)
+	}
+	if comments != 0 {
+		t.Fatalf("retry-pending failure comments = %d, want 0", comments)
+	}
+}
+
 func TestFailTaskRetryPendingDoesNotWakeCoordinator(t *testing.T) {
 	f, svc := seedDelegatedFailureFixture(t)
 	ctx := context.Background()
@@ -680,10 +1159,10 @@ func TestFinalDelegatedFailureMergesIntoPendingCoordinatorTask(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority,
 			originator_user_id, accountable_user_id, originator_source,
-			trigger_evidence_kind, trigger_evidence_ref_id
+			trigger_evidence_kind, trigger_evidence_ref_id, trigger_comment_id
 		)
-		VALUES ($1, $2, $3, 'queued', 0, $4, $4, 'direct_human', 'issue_assignment', $3)
-		RETURNING id`, f.coordinator, f.runtimeID, f.issueID, f.userID).Scan(&pendingID); err != nil {
+		VALUES ($1, $2, $3, 'queued', 0, $4, $4, 'direct_human', 'issue_assignment', $3, $5)
+		RETURNING id`, f.coordinator, f.runtimeID, f.issueID, f.userID, f.sourceTrigger).Scan(&pendingID); err != nil {
 		t.Fatalf("seed pending coordinator task: %v", err)
 	}
 
@@ -741,10 +1220,10 @@ func TestDelegatedFailurePlannedBehindDispatchedCoordinatorGetsFollowUp(t *testi
 	if err := f.pool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority, dispatched_at,
-			originator_user_id, accountable_user_id, originator_source
+			originator_user_id, accountable_user_id, originator_source, trigger_comment_id
 		)
-		VALUES ($1, $2, $3, 'dispatched', 0, now(), $4, $4, 'direct_human')
-		RETURNING id`, f.coordinator, f.runtimeID, f.issueID, f.userID).Scan(&activeID); err != nil {
+		VALUES ($1, $2, $3, 'dispatched', 0, now(), $4, $4, 'direct_human', $5)
+		RETURNING id`, f.coordinator, f.runtimeID, f.issueID, f.userID, f.sourceTrigger).Scan(&activeID); err != nil {
 		t.Fatalf("seed active coordinator task: %v", err)
 	}
 
@@ -811,5 +1290,53 @@ func TestDelegatedFailureRecoveryTaskDoesNotRecursivelyWake(t *testing.T) {
 	}
 	if comments != 0 {
 		t.Fatalf("recursive recovery comments = %d, want 0", comments)
+	}
+}
+
+// A worker failure must not wake a coordinator whose issue is in Triage: that
+// coordinator is the issue's own assignee, the derived executor Triage does not
+// have (MUL-7189 §2.3).
+//
+// Both the pending-recovery query and canDispatchDelegatedFailureRecovery
+// exclude a Triage source, which is why the sweep does not even scan the
+// comment. This test is what keeps that true.
+//
+// The obligation is not discharged either: the comment stays in the outbox and
+// dispatches once the issue is accepted.
+func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET failure_reason = 'agent_error.process_failure', error = 'worker exited', completed_at = now()
+		WHERE id = $1`, failedID); err != nil {
+		t.Fatalf("stamp failed task: %v", err)
+	}
+	target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+	if err != nil || target == nil || !created {
+		t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
+	}
+
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET triage_state = 'pending' WHERE id = $1`, f.issueID); err != nil {
+		t.Fatalf("move source issue into triage: %v", err)
+	}
+	if f.pending(t, svc, target.comment.ID) {
+		t.Fatal("triage-source recovery selected by the outbox scan")
+	}
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 0 {
+		t.Fatalf("recovery tasks = %d, want none while the source issue is in Triage", n)
+	}
+
+	// Accept clears the marker and the same pending comment wakes the
+	// coordinator — which is what makes the zero above the column's doing and
+	// not an inert fixture. The status never moved: only triage_state did.
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET triage_state = NULL WHERE id = $1`, f.issueID); err != nil {
+		t.Fatalf("accept source issue: %v", err)
+	}
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
+		t.Fatalf("recovery tasks after accept = %d, want 1", n)
 	}
 }

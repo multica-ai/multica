@@ -14,6 +14,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import type { IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { useUpdateIssue, useBatchUpdateIssues } from "@multica/core/issues/mutations";
+import { useBatchResultToast } from "../issues/components/batch-result-toast";
 import { errorCode } from "@multica/core/api";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -67,6 +68,8 @@ interface RunConfirmData {
   assigneeId?: string;
   assigneeName?: string;
   issueRevision?: number;
+  /** Runs after every write applies; never on dismiss, failure, or a partial batch. */
+  onApplied?: () => void;
 }
 
 /**
@@ -82,7 +85,8 @@ interface RunConfirmData {
  *
  * Completion is silent: the assignee/status change and any run it starts
  * surface through the issue's normal updates, so the confirm adds no result
- * toast. Whether a run starts stays the server's existing decision at write
+ * toast; only a batch the server applied partially warns with the real count.
+ * Whether a run starts stays the server's existing decision at write
  * time. Dismissing the dialog (X / Esc / click-outside) cancels without any
  * write. Shared by single assign (1 id), batch assign (N ids), and the
  * single-issue promotion out of backlog.
@@ -108,6 +112,7 @@ export function RunConfirmModal({
 
   const updateIssue = useUpdateIssue();
   const batchUpdate = useBatchUpdateIssues();
+  const { report: reportBatch } = useBatchResultToast();
 
   const wsId = useWorkspaceId();
   // Built-ins resolve through i18n, custom statuses through the catalog, so the
@@ -150,8 +155,16 @@ export function RunConfirmModal({
           ...payload,
         });
       } else {
-        await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });
+        const response = await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });
+        // A partial batch still closes (the applied writes are real), but it
+        // names the skipped issues and skips onApplied so the caller keeps
+        // its selection for a retry.
+        if (!reportBatch(response, issueIds.length, { successMessage: null })) {
+          onClose();
+          return;
+        }
       }
+      d.onApplied?.();
       onClose();
     } catch (err) {
       toast.error(
@@ -213,7 +226,11 @@ export function RunConfirmModal({
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
-      <DialogContent onKeyDown={onDialogKeyDown}>
+      {/* Wider than the primitive's sm:max-w-sm: the two actions are long
+          phrases, not "Cancel"/"Save". In French they measure ~435px with the
+          send-shortcut keycaps against the 352px the default leaves, so the
+          dialog's overflow-auto showed a horizontal scrollbar. */}
+      <DialogContent className="sm:max-w-lg" onKeyDown={onDialogKeyDown}>
         <DialogHeader>
           <DialogTitle>
             {isPromote
@@ -225,7 +242,9 @@ export function RunConfirmModal({
 
         {/* The only spinner left is on the button the user just pressed, and it
             reflects the write in flight — never a pre-flight check. */}
-        <DialogFooter>
+        {/* flex-wrap keeps a longer translation, or a larger text size, from
+            bringing the scrollbar back: the actions stack instead. */}
+        <DialogFooter className="sm:flex-wrap">
           <Button type="button" variant="outline" disabled={submitting} onClick={() => submit(true)}>
             {pendingAction === "suppress" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.dont_start)}
           </Button>

@@ -71,9 +71,8 @@ type BuiltinRuntime struct {
 
 // ModelDiscoveryFunc discovers available models for a runtime identity.
 // It receives the context and the resolved command — executable plus the
-// runtime's launch prefix — and returns a model catalog. When the binary is
-// missing or too old, it returns an empty slice (ListModels swallows the
-// error and degrades to manual entry).
+// runtime's launch prefix — and returns a model catalog. Discovery failures
+// propagate to the picker, which shows the reason and supports manual entry.
 type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, error)
 
 // BuiltinRuntimes is the registry of built-in runtime identities that are
@@ -184,4 +183,21 @@ func NewRuntime(runtimeID string, cfg Config) (Backend, error) {
 	}
 	applicator.applyBuiltinRuntimeOverrides(desc)
 	return backend, nil
+}
+
+// ProfileRuntimeType preserves profiles authored before runtime identity was stored.
+func ProfileRuntimeType(runtimeType, protocolFamily string) string {
+	if runtimeType != "" {
+		return runtimeType
+	}
+	return protocolFamily
+}
+
+// RuntimeProtocolFamily resolves the compatibility target using the same registry
+// as backend construction and model discovery.
+func RuntimeProtocolFamily(runtimeType string) (string, bool) {
+	if desc, ok := BuiltinRuntimeByID(runtimeType); ok {
+		return desc.ProtocolFamily, true
+	}
+	return runtimeType, IsSupportedType(runtimeType)
 }

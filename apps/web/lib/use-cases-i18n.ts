@@ -33,6 +33,15 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
     cardReadMore: "阅读 →",
     tableOfContents: "目录",
   },
+  "zh-Hant": {
+    indexTitle: "案例",
+    indexSubtitle: "看看團隊怎麼用 Multica 把人和 agent 一起組織起來。",
+    indexMetadataTitle: "案例",
+    indexMetadataDescription:
+      "看看團隊怎麼用 Multica 把人和 agent 一起組織起來。",
+    cardReadMore: "閱讀 →",
+    tableOfContents: "目錄",
+  },
   ko: {
     indexTitle: "사용 사례",
     indexSubtitle:
@@ -52,5 +61,35 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
       "チームが Multica で人とエージェントを一緒に働かせる方法をご覧ください。",
     cardReadMore: "続きを読む →",
     tableOfContents: "このページの内容",
+  },
+  es: {
+    indexTitle: "Casos de uso",
+    indexSubtitle:
+      "Descubre cómo los equipos organizan a personas y agentes con Multica.",
+    indexMetadataTitle: "Casos de uso",
+    indexMetadataDescription:
+      "Descubre cómo los equipos hacen trabajar juntas a personas y agentes con Multica.",
+    cardReadMore: "Leer →",
+    tableOfContents: "En esta página",
+  },
+  fr: {
+    indexTitle: "Cas d'usage",
+    indexSubtitle:
+      "Découvrez comment les équipes organisent humains et agents ensemble avec Multica.",
+    indexMetadataTitle: "Cas d'usage",
+    indexMetadataDescription:
+      "Découvrez comment les équipes font travailler humains et agents ensemble avec Multica.",
+    cardReadMore: "Lire →",
+    tableOfContents: "Sur cette page",
+  },
+  ru: {
+    indexTitle: "Сценарии использования",
+    indexSubtitle:
+      "Посмотрите, как команды объединяют людей и агентов в Multica.",
+    indexMetadataTitle: "Сценарии использования",
+    indexMetadataDescription:
+      "Посмотрите, как команды заставляют людей и агентов работать вместе в Multica.",
+    cardReadMore: "Читать →",
+    tableOfContents: "На этой странице",
   },
 };

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,25 +23,7 @@ import (
 
 func newPluginStoragePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.New(ctx, dbURL)
-	if err != nil {
-		t.Skipf("database unavailable: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("database unreachable: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return sharedTestPool(t)
 }
 
 // seedPluginInstallation creates the one row the storage tables hang off. There

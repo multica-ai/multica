@@ -26,7 +26,7 @@ import { useMemo } from "react";
 import { FlatList, Pressable, View } from "react-native";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import type { Agent, Issue, MemberWithUser, Squad } from "@multica/core/types";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
+import { canAssignAgentToIssue } from "@multica/core/permissions/rules";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -36,6 +36,7 @@ import {
   issueColumnCategory,
 } from "@/lib/issue-status";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import { useT } from "@/lib/i18n";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
@@ -50,6 +51,7 @@ import {
 import type { MentionMarker } from "@/lib/mention-serialize";
 import { cn } from "@/lib/utils";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { isGuestRole } from "@/lib/member-role";
 
 type Mode = "comment" | "chat";
 
@@ -85,6 +87,7 @@ export function MentionSuggestionBar({
   // Rows are icon-only, so colour is the only thing that can carry a custom
   // status's identity here. (MUL-6243)
   const catalog = useIssueStatuses();
+  const { t } = useT("issues");
 
   // Comment-mode data — disabled in chat mode to avoid wasted fetches.
   const { data: members = [] } = useQuery({
@@ -147,11 +150,11 @@ export function MentionSuggestionBar({
 
       const out: Row[] = [];
       if (matchedRecent.length > 0) {
-        out.push({ kind: "section", label: "Recent" });
+        out.push({ kind: "section", label: t("suggestions.recent") });
         for (const i of matchedRecent) out.push({ kind: "issue", issue: i });
       }
       if (matchedMine.length > 0) {
-        out.push({ kind: "section", label: "My issues" });
+        out.push({ kind: "section", label: t("suggestions.my_issues") });
         for (const i of matchedMine) out.push({ kind: "issue", issue: i });
       }
       if (out.length === 0) out.push({ kind: "empty" });
@@ -159,7 +162,11 @@ export function MentionSuggestionBar({
     }
 
     // Comment mode.
-    const showAll = !q || "all".startsWith(q);
+    const myRole =
+      members.find((m) => m.user_id === userId)?.role ?? null;
+    // A guest (MUL-9420) mentions people only — see comment-mention-candidates.
+    const guest = isGuestRole(myRole);
+    const showAll = !guest && (!q || "all".startsWith(q));
     const matchedMembers = [...members]
       .filter((m) => !q || m.name.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -167,8 +174,6 @@ export function MentionSuggestionBar({
     // mirrors web (packages/views/editor/extensions/mention-suggestion.tsx:418-424).
     // A private agent shown in the suggestion list would create a mention the
     // assignee can never act on; web hides them, mobile must too.
-    const myRole =
-      members.find((m) => m.user_id === userId)?.role ?? null;
     const runnableAgentIds = new Set(
       agents
         .filter(
@@ -180,6 +185,7 @@ export function MentionSuggestionBar({
     const matchedAgents = [...agents]
       .filter(
         (a) =>
+          !guest &&
           !a.archived_at &&
           isAgentRuntimeBound(a) &&
           (!q || a.name.toLowerCase().includes(q)) &&
@@ -191,6 +197,7 @@ export function MentionSuggestionBar({
     const matchedSquads = [...squads]
       .filter(
         (s) =>
+          !guest &&
           !s.archived_at &&
           runnableAgentIds.has(s.leader_id) &&
           (!q || s.name.toLowerCase().includes(q)),
@@ -200,20 +207,20 @@ export function MentionSuggestionBar({
     const out: Row[] = [];
     if (showAll) out.push({ kind: "all" });
     if (matchedMembers.length > 0) {
-      out.push({ kind: "section", label: "Members" });
+      out.push({ kind: "section", label: t("picker.people") });
       for (const m of matchedMembers) out.push({ kind: "member", member: m });
     }
     if (matchedAgents.length > 0) {
-      out.push({ kind: "section", label: "Agents" });
+      out.push({ kind: "section", label: t("picker.agents") });
       for (const a of matchedAgents) out.push({ kind: "agent", agent: a });
     }
     if (matchedSquads.length > 0) {
-      out.push({ kind: "section", label: "Squads" });
+      out.push({ kind: "section", label: t("picker.squads") });
       for (const s of matchedSquads) out.push({ kind: "squad", squad: s });
     }
     if (out.length === 0) out.push({ kind: "empty" });
     return out;
-  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId]);
+  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId, t]);
 
   if (!visible) return null;
 
@@ -263,7 +270,7 @@ export function MentionSuggestionBar({
             return (
               <View className="px-3 py-3">
                 <Text className="text-xs text-muted-foreground">
-                  No matches.
+                  {t("picker.no_matches")}
                 </Text>
               </View>
             );
@@ -280,9 +287,9 @@ export function MentionSuggestionBar({
                   <Text className="text-xs font-medium text-brand">@</Text>
                 </View>
                 <Text className="flex-1 text-sm text-foreground">
-                  Everyone
+                  {t("suggestions.everyone")}
                 </Text>
-                <Badge label="All" />
+                <Badge label={t("suggestions.all")} />
               </Pressable>
             );
           }
@@ -306,7 +313,7 @@ export function MentionSuggestionBar({
                 <Text className="flex-1 text-sm text-foreground">
                   {item.member.name}
                 </Text>
-                <Badge label="Member" />
+                <Badge label={t("suggestions.member")} />
               </Pressable>
             );
           }
@@ -332,7 +339,9 @@ export function MentionSuggestionBar({
                   {item.agent.name}
                 </Text>
                 <Badge
-                  label={runtimeBound ? "Agent" : "Needs runtime"}
+                  label={runtimeBound
+                    ? t("picker.agent")
+                    : t("picker.needs_runtime")}
                   tone={runtimeBound ? "brand" : "outline"}
                 />
               </Pressable>
@@ -354,12 +363,12 @@ export function MentionSuggestionBar({
                 <Text className="flex-1 text-sm text-foreground">
                   {item.squad.name}
                 </Text>
-                <Badge label="Squad" tone="outline" />
+                <Badge label={t("picker.squad")} tone="outline" />
               </Pressable>
             );
           }
           // issue
-          // By CATEGORY, not by key: a custom status in the done category IS
+          // By CATEGORY, not by key: a custom status in the completed category is
           // done, and `status === "done"` silently disagrees — the row would
           // render at full opacity as though the work were still open.
           // (MUL-6243)
@@ -382,7 +391,7 @@ export function MentionSuggestionBar({
                 <StatusIcon
                   status={item.issue.status}
                   category={issueColumnCategory(item.issue)}
-                  color={catalog.colorOf(item.issue.status)}
+                  icon={catalog.iconOf(item.issue.status)} color={catalog.colorOf(item.issue.status)}
                   size={16}
                 />
               </View>
@@ -413,7 +422,7 @@ function Badge({
   return (
     <View
       className={cn(
-        "px-1.5 py-0.5 rounded",
+        "px-1.5 py-0.5 rounded-xs",
         tone === "brand"
           ? "bg-brand/10"
           : tone === "outline"

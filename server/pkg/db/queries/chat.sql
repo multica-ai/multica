@@ -19,6 +19,12 @@ WHERE id = $1;
 SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: ListChatSessionCreators :many
+-- Owners of a page of chat tasks, so task lists can hide the content of chat
+-- tasks the viewer did not start.
+SELECT id, creator_id FROM chat_session
+WHERE id = ANY(@ids::uuid[]);
+
 -- name: GetPublicChatSessionInWorkspace :one
 -- A channel command is a durable control-plane record, not a public chat turn.
 -- Channel-created sessions therefore become public only after they contain a
@@ -331,6 +337,12 @@ WHERE id = sqlc.arg('id')
 -- makes the late pin safe: a NEWER task on this chat that already recorded a
 -- session owns the pointer, and a straggler must not drag the conversation
 -- backwards onto the turn the user interrupted.
+--
+-- The newer-task lookup depends on
+-- idx_agent_task_queue_chat_session (migration 472). Neither chat_pending_v3
+-- nor chat_terminal_resume can replace it: this guard spans both in-flight and
+-- terminal tasks and compares created_at; the broader index also serves the
+-- chat_session foreign-key delete lookup.
 UPDATE chat_session cs
 SET session_id = t.session_id,
     runtime_id = t.runtime_id,
@@ -479,7 +491,7 @@ WHERE id = $1;
 INSERT INTO chat_message (
     chat_session_id, role, content, task_id, failure_reason, elapsed_ms,
     message_kind, quick_actions, channel_media_pending_until, channel_ingested,
-    channel_context_revision, id
+    channel_context_revision, id, wakeup_id
 )
 VALUES (
     $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms),
@@ -495,7 +507,8 @@ VALUES (
          ELSE now() + make_interval(secs => sqlc.narg(channel_media_pending_secs)::float8) END,
     COALESCE(sqlc.narg(channel_ingested)::boolean, FALSE),
     sqlc.narg(channel_context_revision),
-    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+    sqlc.narg(wakeup_id)::uuid
 )
 RETURNING *;
 
@@ -515,6 +528,73 @@ SELECT EXISTS (
       AND role = 'user'
       AND channel_ingested
 ) AS channel_ingested;
+
+-- name: GetTaskChannelOrigin :one
+-- The whole origin question for one completed task in one round trip: is the
+-- task row still there, and did its input arrive over a channel?
+--
+-- This answers exactly what engine.TaskInputIsChannelIngested answers, in one
+-- read instead of two (GetAgentTask, then TaskHasChannelIngestedMessages). That
+-- function is the definition; this is a transcription of it, not an improvement
+-- on it. Both halves are load-bearing:
+--
+--   * A task with NO input batch owner is channel-ingested. Migration 158 left
+--     both legacy direct rows and channel tasks NULL here, so the owner cannot
+--     say which one a row was, and the adapters that read this deliver by
+--     default — the behaviour #5645 shipped. Keying the EXISTS on the task's
+--     own id instead (COALESCE(chat_input_task_id, id)) silently stops
+--     delivering the auto-retry of a legacy channel task: CreateRetryTask
+--     copies a NULL owner verbatim, on purpose (see agent.sql), and the clone
+--     owns no messages — so it reads as web UI while CopyChannelTaskDelivery
+--     has already given it the room's route.
+--   * Otherwise the verdict is the batch OWNER'S, not the task's. An auto-retry
+--     clone inherits its parent's chat_input_task_id while the user's message
+--     stays tagged with the parent, so reading the owner is what lets the clone
+--     reach the verdict its parent already has (MUL-4351).
+--
+-- NO ROW means the task is gone — cancelled and reaped while its ending was in
+-- flight. Callers receive pgx.ErrNoRows and must not fold that into "asked in
+-- the web UI": it is the absence of a verdict, not a negative one, and the two
+-- are recorded differently.
+--
+-- One round trip rather than two because this read is SYNCHRONOUS ON THE
+-- COMPLETION RESPONSE. It runs inside events.Bus.Publish
+-- (internal/events/bus.go:61-76), below TaskService.broadcastChatDone
+-- (internal/service/task.go:7330) and CompleteTaskWithTransition
+-- (internal/service/task.go:4518), which the daemon's POST /tasks/{id}/complete
+-- waits for before it answers (internal/handler/daemon.go:4269).
+--
+-- batch_owner_unknown IS THE SAME FACT, REPORTED SEPARATELY, and it exists for
+-- one reader: the log level on a turn that has no delivery row.
+--
+-- channel_ingested above says "deliver this", and for a NULL owner it says so
+-- without evidence — which is right, because delivering is the safe side and
+-- the auto-retry of a legacy channel turn depends on it. Warning is the other
+-- direction: a missing route is worth paging an operator about only when
+-- something actually established the turn was a channel's. A NULL owner
+-- establishes nothing, so a missing route on one of those is not evidence of a
+-- lost reply; migration 158 left legacy web rows and channel rows alike NULL
+-- here, and reading it as "channel" would put the loudest line this adapter has
+-- on a pre-158 web turn that auto-retried.
+--
+-- So one verdict, two readings: deliver on the open side, warn on the closed
+-- one. The query reports both and chooses neither.
+--
+-- Plan: agent_task_queue_pkey for the row, idx_chat_message_input_owner for the
+-- EXISTS. Neither side scans.
+SELECT (
+    task.chat_input_task_id IS NULL
+    OR EXISTS (
+        SELECT 1
+        FROM chat_message
+        WHERE task_id = task.chat_input_task_id
+          AND role = 'user'
+          AND channel_ingested
+    )
+)::boolean AS channel_ingested,
+    (task.chat_input_task_id IS NULL)::boolean AS batch_owner_unknown
+FROM agent_task_queue AS task
+WHERE task.id = $1;
 
 -- name: SetChatMessageChannelOutboundProvenanceByTask :execrows
 -- The assistant row is committed before EventChatDone is published. Attach the
@@ -702,11 +782,19 @@ RETURNING task.*;
 -- member the product's internal prompt as their restored draft, and silently
 -- drop what they actually typed. Callers release the kickoff separately
 -- (ReleaseOnboardingKickoffFromTask) so the next send re-adopts it.
-DELETE FROM chat_message
-WHERE task_id = $1
-  AND role = 'user'
-  AND message_kind <> 'onboarding_kickoff'
-RETURNING *;
+DELETE FROM chat_message AS message
+WHERE message.task_id = $1
+  AND message.role = 'user'
+  AND message.message_kind <> 'onboarding_kickoff'
+  -- A wakeup turn's input is the platform's, never a draft to restore.
+  AND message.message_kind <> 'wakeup'
+  -- Guidance already accepted into a run is conversation history, not the
+  -- original draft restored by Stop. A requeued message is editable normally.
+  AND NOT EXISTS (
+      SELECT 1 FROM chat_task_supplement s
+      WHERE s.message_id = message.id AND s.status <> 'requeued'
+  )
+RETURNING message.*;
 
 -- name: ReleaseOnboardingKickoffFromTask :exec
 -- Hands an adopted kickoff on to the session's next un-started turn when its
@@ -1059,16 +1147,23 @@ WHERE id = $1;
 -- The chat sender (initiator) is a direct_human originator and accountable;
 -- attribution provenance is stamped so this path is not a NULL-source enqueue
 -- bypass (MUL-4302 §2).
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = sqlc.arg(agent_id)
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+    FOR KEY SHARE OF a
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    fire_at, channel_context_revision, id
+    fire_at, channel_context_revision, id, context
 )
 SELECT
-    $1, $2, NULL,
+    sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL,
     CASE WHEN sqlc.narg('fire_at')::timestamptz IS NULL THEN 'queued' ELSE 'deferred' END,
-    $3, $4, $5,
+    sqlc.arg(priority), sqlc.narg(chat_session_id), sqlc.narg(initiator_user_id),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
@@ -1079,8 +1174,9 @@ SELECT
     sqlc.narg(trigger_evidence_ref_id),
     sqlc.narg('fire_at')::timestamptz,
     sqlc.narg('channel_context_revision')::bigint,
-    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, NULL, $2)
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+    sqlc.narg('context')::jsonb
+FROM enqueue_agent
 RETURNING *;
 
 -- name: PromoteChannelChatTasksIfMediaReady :many
@@ -1188,7 +1284,10 @@ WITH retired_sessions AS (
       )
 ), latest_per_session AS (
     SELECT DISTINCT ON (t.session_id)
-        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error, t.completed_at
+        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason,
+        -- Match the issue resume query and taskfailure.WithoutCodebuddyProtocolSummary.
+        regexp_replace(COALESCE(t.error, ''), '^\[codebuddy protocol: exit_code=-?[0-9]+ stdout_bytes=[0-9]+ stderr_bytes=[0-9]+ event_count=[0-9]+ invalid_event_count=[0-9]+ assistant_event_count=[0-9]+ tool_use_count=[0-9]+ saw_result=(true|false) result_is_error=(true|false) result_bytes=[0-9]+ last_assistant_bytes=[0-9]+ scanner_error=(true|false)\]$', '', 'gn') AS error,
+        t.completed_at
     FROM agent_task_queue t
     WHERE t.chat_session_id = sqlc.arg('chat_session_id')
       AND (
@@ -1205,7 +1304,7 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
     status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized', 'opencode_clock_skew')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       -- Mirrors the GetLastTaskSession auth-resolution guard: a provider that
       -- cannot resolve its auth method fails deterministically on resume, and
@@ -1219,6 +1318,10 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
       AND NOT (COALESCE(error, '') ILIKE '%could not resolve authentication method%')
       AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
                AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+      -- MUL-8188: a runtime that names its own transcript invalid (Kiro panics
+      -- with "invalid conversation history received" on every prompt) replays
+      -- the same failure on every resume. Mirrors taskfailure.UnresumableHistory.
+      AND NOT (COALESCE(error, '') ILIKE '%invalid conversation history%')
     )
   )
   -- MUL-5722, mirroring GetLastTaskSession: an overflowed resume records no
@@ -1303,10 +1406,12 @@ SELECT
     -- renderer reads it only for the waiting one.
     task.wait_reason,
     message.id AS message_id,
-    COALESCE(message.content, '')::text AS content
+    COALESCE(message.content, '')::text AS content,
+    COALESCE(message.message_kind, 'message')::text AS message_kind,
+    message.wakeup_id
 FROM agent_task_queue AS task
 LEFT JOIN LATERAL (
-    SELECT input.id, input.content
+    SELECT input.id, input.content, input.message_kind, input.wakeup_id
     FROM chat_message AS input
     WHERE input.task_id = COALESCE(task.chat_input_task_id, task.id)
       AND input.role = 'user'

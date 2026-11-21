@@ -2,19 +2,25 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/multica-ai/multica/server/internal/issueproperty"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -189,6 +195,425 @@ func TestPropertyDefinitionCRUD(t *testing.T) {
 	}
 }
 
+// usage_count is a per-definition census of issues carrying a value; the
+// include_usage=false catalog skips it but must list the same definitions.
+func TestListPropertiesUsageCount(t *testing.T) {
+	suffix := uuid.NewString()[:8]
+	propA := createTestProperty(t, map[string]any{"name": "Usage A " + suffix, "type": "text"})
+	propB := createTestProperty(t, map[string]any{"name": "Usage B " + suffix, "type": "text"})
+	unused := createTestProperty(t, map[string]any{"name": "Usage C " + suffix, "type": "text"})
+
+	both := createPropertyTestIssue(t, "usage both "+suffix)
+	onlyA := createPropertyTestIssue(t, "usage only A "+suffix)
+	createPropertyTestIssue(t, "usage none "+suffix)
+	for _, set := range []struct{ issue, prop string }{{both, propA.ID}, {both, propB.ID}, {onlyA, propA.ID}} {
+		if w := setIssuePropertyRaw(t, set.issue, set.prop, "v"); w.Code != http.StatusOK {
+			t.Fatalf("SetIssueProperty: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Archived definitions keep their count in the include_archived list.
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PATCH", "/api/properties/"+propB.ID, map[string]any{"archived": true}), "id", propB.ID)
+	testHandler.UpdateProperty(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("archive: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	counts := func(query string) map[string]int64 {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.ListProperties(w, newRequest("GET", "/api/properties"+query, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListProperties%s: expected 200, got %d: %s", query, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Properties []PropertyResponse `json:"properties"`
+		}
+		json.NewDecoder(w.Body).Decode(&resp)
+		out := make(map[string]int64)
+		for _, p := range resp.Properties {
+			out[p.ID] = p.UsageCount
+		}
+		return out
+	}
+
+	withUsage := counts("?include_archived=true")
+	want := map[string]int64{propA.ID: 2, propB.ID: 1, unused.ID: 0}
+	for id, n := range want {
+		got, ok := withUsage[id]
+		if !ok || got != n {
+			t.Fatalf("usage_count for %s: got %d (present=%v), want %d", id, got, ok, n)
+		}
+	}
+
+	catalog := counts("?include_archived=true&include_usage=false")
+	for id := range want {
+		got, ok := catalog[id]
+		if !ok || got != 0 {
+			t.Fatalf("include_usage=false for %s: got %d (present=%v), want listed with 0", id, got, ok)
+		}
+	}
+	if _, ok := counts("?include_usage=false")[propB.ID]; ok {
+		t.Fatalf("archived property listed without include_archived")
+	}
+
+	// Definitions past one scan's column budget are counted by further scans;
+	// put real definitions on both sides of the split.
+	defs := []db.IssueProperty{{ID: parseUUID(propA.ID)}}
+	for len(defs) < propertyUsageKeysPerScan {
+		defs = append(defs, db.IssueProperty{ID: parseUUID(uuid.NewString())})
+	}
+	defs = append(defs, db.IssueProperty{ID: parseUUID(propB.ID)}, db.IssueProperty{ID: parseUUID(unused.ID)})
+	usage, err := testHandler.countPropertyUsage(context.Background(), parseUUID(testWorkspaceID), projectaccess.Hidden{}, defs)
+	if err != nil {
+		t.Fatalf("countPropertyUsage across scans: %v", err)
+	}
+	if len(usage) != len(defs) {
+		t.Fatalf("countPropertyUsage across scans: %d counts, want %d", len(usage), len(defs))
+	}
+	for id, n := range want {
+		if usage[id] != n {
+			t.Fatalf("usage_count across scans for %s: got %d, want %d", id, usage[id], n)
+		}
+	}
+}
+
+// propertyQueryObserver sits under both h.DB and h.Queries. It counts the
+// definition rows the catalog query returns and, for every usage-count query,
+// records the largest row count any plan node produced.
+type propertyQueryObserver struct {
+	dbExecutor
+	t           *testing.T
+	catalogRows int
+	usageScans  []int64
+}
+
+type propertyCatalogRows struct {
+	pgx.Rows
+	observer *propertyQueryObserver
+}
+
+func (r *propertyCatalogRows) Next() bool {
+	ok := r.Rows.Next()
+	if ok {
+		r.observer.catalogRows++
+	}
+	return ok
+}
+
+var usageQueryPattern = regexp.MustCompile(`FROM issue i\b`)
+
+func (o *propertyQueryObserver) observe(ctx context.Context, sql string, args []any) {
+	if !usageQueryPattern.MatchString(sql) {
+		return
+	}
+	var plan []struct {
+		Plan json.RawMessage `json:"Plan"`
+	}
+	var raw []byte
+	if err := o.dbExecutor.QueryRow(ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+sql, args...).Scan(&raw); err != nil {
+		o.t.Fatalf("explain usage query: %v", err)
+	}
+	if err := json.Unmarshal(raw, &plan); err != nil || len(plan) != 1 {
+		o.t.Fatalf("decode usage plan: %v", err)
+	}
+	o.usageScans = append(o.usageScans, maxPlanRows(o.t, plan[0].Plan))
+}
+
+func maxPlanRows(t *testing.T, raw json.RawMessage) int64 {
+	var node struct {
+		ActualRows  float64           `json:"Actual Rows"`
+		ActualLoops float64           `json:"Actual Loops"`
+		Plans       []json.RawMessage `json:"Plans"`
+	}
+	if err := json.Unmarshal(raw, &node); err != nil {
+		t.Fatalf("decode plan node: %v", err)
+	}
+	most := int64(node.ActualRows * node.ActualLoops)
+	for _, child := range node.Plans {
+		most = max(most, maxPlanRows(t, child))
+	}
+	return most
+}
+
+func (o *propertyQueryObserver) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	o.observe(ctx, sql, args)
+	rows, err := o.dbExecutor.Query(ctx, sql, args...)
+	if err != nil || !strings.Contains(sql, "FROM issue_property") {
+		return rows, err
+	}
+	return &propertyCatalogRows{Rows: rows, observer: o}, nil
+}
+
+func (o *propertyQueryObserver) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	o.observe(ctx, sql, args)
+	return o.dbExecutor.QueryRow(ctx, sql, args...)
+}
+
+// Counting usage must read each of the workspace's issues once, never build a
+// row per (issue, key): with most issues carrying the counted keys, those rows
+// made the count slower than the per-definition scans it replaced. A
+// catalog-only request reads only the definitions it returns.
+func TestListPropertiesUsageSingleScan(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	suffix := uuid.NewString()[:8]
+	ws := dbfx.Workspace(t, "Property usage "+suffix, "prop-usage-"+suffix)
+	addProperty := func(name string, archived bool) string {
+		t.Helper()
+		cols := testutil.Cols{"workspace_id": ws, "name": name, "type": "number"}
+		if archived {
+			cols["archived_at"] = testutil.Raw("now()")
+		}
+		return dbfx.Insert(t, "issue_property", cols)
+	}
+	addIssue := func(propertyIDs ...string) {
+		t.Helper()
+		props := map[string]int{}
+		for i, id := range propertyIDs {
+			props[id] = i
+		}
+		raw, _ := json.Marshal(props)
+		dbfx.Issue(t, "property usage "+suffix, testutil.Cols{"workspace_id": ws, "properties": string(raw)})
+	}
+
+	// Nine active definitions, all filled on most property-carrying issues —
+	// the distribution where a row per (issue, key) costs the most.
+	var active []string
+	for i := 0; i < 9; i++ {
+		active = append(active, addProperty(fmt.Sprintf("Active %d", i), false))
+	}
+	archived := []string{addProperty("Archived 0", true), addProperty("Archived 1", true)}
+	for i := 0; i < 3; i++ {
+		addIssue(append(append([]string{}, active...), archived[0])...)
+	}
+	addIssue(archived[1])
+	addIssue()
+	const issuesInWorkspace = 5
+
+	list := func(query string) (*propertyQueryObserver, map[string]int64) {
+		t.Helper()
+		observer := &propertyQueryObserver{dbExecutor: testPool, t: t}
+		h := *testHandler
+		h.DB = observer
+		h.Queries = db.New(observer)
+		var resp struct {
+			Properties []PropertyResponse `json:"properties"`
+		}
+		req := testutil.WithHeaders(testutil.JSONRequest(http.MethodGet, "/api/properties"+query, nil),
+			"X-User-ID", testUserID, "X-Workspace-ID", ws)
+		testutil.Call(t, h.ListProperties, req).Want(http.StatusOK).JSON(&resp)
+		counts := make(map[string]int64, len(resp.Properties))
+		for _, p := range resp.Properties {
+			counts[p.ID] = p.UsageCount
+		}
+		return observer, counts
+	}
+
+	for _, tc := range []struct {
+		query string
+		want  map[string]int64
+	}{
+		{"", map[string]int64{}},
+		{"?include_archived=true", map[string]int64{archived[0]: 3, archived[1]: 1}},
+	} {
+		for _, id := range active {
+			tc.want[id] = 3
+		}
+		observer, counts := list(tc.query)
+		if len(counts) != len(tc.want) {
+			t.Fatalf("ListProperties%s: %d definitions, want %d", tc.query, len(counts), len(tc.want))
+		}
+		for id, n := range tc.want {
+			if counts[id] != n {
+				t.Fatalf("ListProperties%s: usage_count for %s = %d, want %d", tc.query, id, counts[id], n)
+			}
+		}
+		if len(observer.usageScans) != 1 {
+			t.Fatalf("ListProperties%s: %d usage queries, want one scan", tc.query, len(observer.usageScans))
+		}
+		if rows := observer.usageScans[0]; rows > issuesInWorkspace {
+			t.Fatalf("ListProperties%s: a usage plan node produced %d rows for %d issues in the workspace; want no row per (issue, key)",
+				tc.query, rows, issuesInWorkspace)
+		}
+	}
+
+	for _, tc := range []struct {
+		query string
+		want  int
+	}{
+		{"?include_usage=false", len(active)},
+		{"?include_archived=true&include_usage=false", len(active) + len(archived)},
+	} {
+		observer, counts := list(tc.query)
+		if len(observer.usageScans) != 0 || observer.catalogRows != tc.want || len(counts) != tc.want {
+			t.Fatalf("ListProperties%s: %d usage queries, %d definition rows read, %d listed; want 0, %d, %d",
+				tc.query, len(observer.usageScans), observer.catalogRows, len(counts), tc.want, tc.want)
+		}
+	}
+}
+
+// Counting usage must not read property bags more often than the
+// per-definition `properties ? id` queries it replaced, nor read other
+// workspaces' bags at all. Under a sequential scan, bags past the TOAST
+// threshold are fetched from the TOAST table on every read, so extra reads
+// show up as buffer accesses. Large bags both carry and miss the counted
+// keys, and another workspace stores large bags too.
+func TestPropertyUsageReadsBagsNoMoreThanPerDefinitionScans(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	suffix := uuid.NewString()[:8]
+	ws := dbfx.Workspace(t, "Property usage TOAST "+suffix, "prop-toast-"+suffix)
+	activeA := dbfx.Insert(t, "issue_property", testutil.Cols{"workspace_id": ws, "name": "Active A", "type": "text"})
+	activeB := dbfx.Insert(t, "issue_property", testutil.Cols{"workspace_id": ws, "name": "Active B", "type": "text"})
+	archived := dbfx.Insert(t, "issue_property", testutil.Cols{
+		"workspace_id": ws, "name": "Archived", "type": "text", "archived_at": testutil.Raw("now()"),
+	})
+	// Random hex does not compress, so each bag is stored out of line.
+	addLargeIssue := func(extraKeys ...string) {
+		t.Helper()
+		noise := make([]byte, 4096)
+		if _, err := rand.Read(noise); err != nil {
+			t.Fatal(err)
+		}
+		props := map[string]string{archived: hex.EncodeToString(noise)}
+		for _, key := range extraKeys {
+			props[key] = "v"
+		}
+		raw, _ := json.Marshal(props)
+		dbfx.Issue(t, "large property bag", testutil.Cols{"workspace_id": ws, "properties": string(raw)})
+	}
+	for i := 0; i < 3; i++ {
+		addLargeIssue()
+		addLargeIssue(activeA, activeB)
+	}
+	other := dbfx.Workspace(t, "Property usage TOAST other "+suffix, "prop-toast-other-"+suffix)
+	for i := 0; i < 3; i++ {
+		noise := make([]byte, 4096)
+		if _, err := rand.Read(noise); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(map[string]string{uuid.NewString(): hex.EncodeToString(noise)})
+		dbfx.Issue(t, "other workspace bag", testutil.Cols{"workspace_id": other, "properties": string(raw)})
+	}
+
+	tx, err := testPool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	for _, setting := range []string{"enable_indexscan", "enable_bitmapscan", "enable_indexonlyscan"} {
+		if _, err := tx.Exec(ctx, "SET LOCAL "+setting+" = off"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
+		t.Fatal(err)
+	}
+	explain := func(sql string, args ...any) json.RawMessage {
+		t.Helper()
+		var raw []byte
+		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+sql, args...).Scan(&raw); err != nil {
+			t.Fatalf("explain: %v", err)
+		}
+		var plan []struct {
+			Plan json.RawMessage `json:"Plan"`
+		}
+		if err := json.Unmarshal(raw, &plan); err != nil || len(plan) != 1 {
+			t.Fatalf("decode plan: %v", err)
+		}
+		return plan[0].Plan
+	}
+	buffers := func(sql string, args ...any) int64 {
+		t.Helper()
+		var root struct {
+			Hit  int64 `json:"Shared Hit Blocks"`
+			Read int64 `json:"Shared Read Blocks"`
+		}
+		if err := json.Unmarshal(explain(sql, args...), &root); err != nil {
+			t.Fatalf("decode plan root: %v", err)
+		}
+		return root.Hit + root.Read
+	}
+	usageBuffers := func(keys ...string) int64 {
+		t.Helper()
+		defs := make([]db.IssueProperty, len(keys))
+		for i, key := range keys {
+			defs[i] = db.IssueProperty{ID: parseUUID(key)}
+		}
+		query, args := propertyUsageQuery(parseUUID(ws), projectaccess.Hidden{}, defs)
+		counts := make([]int64, len(keys))
+		dest := make([]any, len(keys))
+		for i := range counts {
+			dest[i] = &counts[i]
+		}
+		if err := tx.QueryRow(ctx, query, args...).Scan(dest...); err != nil {
+			t.Fatalf("usage query for %d definitions: %v", len(keys), err)
+		}
+		for i, n := range counts {
+			if n != 3 {
+				t.Fatalf("usage query for %d definitions: count %d = %d, want 3", len(keys), i, n)
+			}
+		}
+		// The scan of issue must filter on workspace_id alone, so no other
+		// workspace's bag is ever read; JSON checks belong above it.
+		for _, cond := range issueScanConditions(t, explain(query, args...)) {
+			if strings.Contains(cond, "properties") {
+				t.Fatalf("usage query for %d definitions checks JSON while scanning issue: %s", len(keys), cond)
+			}
+		}
+		return buffers(query, args...)
+	}
+	perDefinitionBuffers := func(key string) int64 {
+		t.Helper()
+		return buffers(`SELECT COUNT(*) FROM issue i WHERE i.workspace_id = $1::uuid AND i.properties ? $2::text`, parseUUID(ws), key)
+	}
+
+	// Measure the usage queries first: rows other tests add later can only
+	// make the per-definition queries read more.
+	one := usageBuffers(activeA)
+	two := usageBuffers(activeA, activeB)
+	scanA, scanB := perDefinitionBuffers(activeA), perDefinitionBuffers(activeB)
+	if one > scanA {
+		t.Fatalf("one definition: usage count read %d buffers under a sequential scan, more than the %d of one `properties ? id` scan", one, scanA)
+	}
+	if two > scanA+scanB {
+		t.Fatalf("two definitions: usage count read %d buffers under a sequential scan, more than the %d of two `properties ? id` scans", two, scanA+scanB)
+	}
+}
+
+// issueScanConditions returns the filter and index conditions of every plan
+// node that scans the issue table.
+func issueScanConditions(t *testing.T, raw json.RawMessage) []string {
+	t.Helper()
+	var node struct {
+		Relation    string            `json:"Relation Name"`
+		Filter      string            `json:"Filter"`
+		IndexCond   string            `json:"Index Cond"`
+		RecheckCond string            `json:"Recheck Cond"`
+		Plans       []json.RawMessage `json:"Plans"`
+	}
+	if err := json.Unmarshal(raw, &node); err != nil {
+		t.Fatalf("decode plan node: %v", err)
+	}
+	var conds []string
+	if node.Relation == "issue" {
+		for _, c := range []string{node.Filter, node.IndexCond, node.RecheckCond} {
+			if c != "" {
+				conds = append(conds, c)
+			}
+		}
+	}
+	for _, child := range node.Plans {
+		conds = append(conds, issueScanConditions(t, child)...)
+	}
+	return conds
+}
+
 func TestPropertyDefinitionValidation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -215,6 +640,114 @@ func TestPropertyDefinitionValidation(t *testing.T) {
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
 			t.Fatalf("%s: expected 400 containing %q, got %d: %s", tc.name, tc.want, w.Code, w.Body.String())
 		}
+	}
+}
+
+func TestPropertySelectOptionLimit(t *testing.T) {
+	for _, propertyType := range []string{"select", "multi_select"} {
+		t.Run(propertyType, func(t *testing.T) {
+			options := make([]PropertyOption, 201)
+			for i := range options {
+				options[i] = PropertyOption{Name: fmt.Sprintf("Service %03d", i), Color: "#3b82f6"}
+			}
+			body := map[string]any{
+				"name": "Services" + uuid.NewString()[:8], "type": propertyType,
+				"config": PropertyConfig{Options: options[:51]},
+			}
+			created := createTestProperty(t, body)
+			if len(created.Config.Options) != 51 {
+				t.Fatalf("created option count = %d, want 51", len(created.Config.Options))
+			}
+			copy(options, created.Config.Options)
+			var updated PropertyResponse
+			testutil.Call(t, testHandler.UpdateProperty,
+				withURLParam(newRequest(http.MethodPatch, "/api/properties/"+created.ID, map[string]any{
+					"config": PropertyConfig{Options: options[:200]},
+				}), "id", created.ID),
+			).Want(http.StatusOK).JSON(&updated)
+			if len(updated.Config.Options) != 200 || updated.Config.Options[0].ID != created.Config.Options[0].ID {
+				t.Fatalf("expanding to 200 did not preserve options: %+v", updated.Config)
+			}
+
+			body["name"] = "OverLimit" + uuid.NewString()[:8]
+			body["config"] = PropertyConfig{Options: options}
+			response := testutil.Call(t, testHandler.CreateProperty,
+				newRequest(http.MethodPost, "/api/properties", body),
+			).Want(http.StatusBadRequest)
+			if !strings.Contains(response.Body.String(), "more than 200 options") {
+				t.Fatalf("unexpected create limit error: %s", response.Body.String())
+			}
+			response = testutil.Call(t, testHandler.UpdateProperty,
+				withURLParam(newRequest(http.MethodPatch, "/api/properties/"+created.ID, map[string]any{
+					"config": PropertyConfig{Options: options},
+				}), "id", created.ID),
+			).Want(http.StatusBadRequest)
+			if !strings.Contains(response.Body.String(), "more than 200 options") {
+				t.Fatalf("unexpected update limit error: %s", response.Body.String())
+			}
+
+			issueID := dbfx.Issue(t, "large select option list")
+			lastID := updated.Config.Options[199].ID
+			var value any = lastID
+			if propertyType == "multi_select" {
+				value = []string{lastID}
+			}
+			if response := setIssuePropertyRaw(t, issueID, created.ID, value); response.Code != http.StatusOK {
+				t.Fatalf("selecting option 200: %d: %s", response.Code, response.Body.String())
+			}
+			filter, _ := json.Marshal(map[string][]string{created.ID: {lastID}})
+			var listed struct {
+				Issues []IssueResponse `json:"issues"`
+			}
+			testutil.Call(t, testHandler.ListIssues,
+				newRequest(http.MethodGet, "/api/issues?properties="+url.QueryEscape(string(filter)), nil),
+			).Want(http.StatusOK).JSON(&listed)
+			if len(listed.Issues) != 1 || listed.Issues[0].ID != issueID {
+				t.Fatalf("filtering by option 200 did not return the issue: %+v", listed.Issues)
+			}
+		})
+	}
+}
+
+func TestIssuePropertyMultiSelectValueLimit(t *testing.T) {
+	options := make([]PropertyOption, 200)
+	for i := range options {
+		options[i] = PropertyOption{Name: fmt.Sprintf("Service %03d", i), Color: "#3b82f6"}
+	}
+	property := createTestProperty(t, map[string]any{
+		"name": "SelectionLimit" + uuid.NewString()[:8], "type": "multi_select",
+		"config": PropertyConfig{Options: options},
+	})
+	ids := make([]string, 51)
+	for i := range ids {
+		ids[i] = property.Config.Options[149+i].ID
+	}
+	title := "selection limit " + uuid.NewString()
+	body := map[string]any{"title": title, "properties": map[string]any{property.ID: ids}}
+	response := testutil.Call(t, testHandler.CreateIssue,
+		newRequest(http.MethodPost, "/api/issues", body),
+	).Want(http.StatusBadRequest)
+	if !strings.Contains(response.Body.String(), "more than 50 options") || countIssuesWithAtomicPropertyTitle(t, title) != 0 {
+		t.Fatalf("over-limit create should fail atomically: %s", response.Body.String())
+	}
+	body["properties"] = map[string]any{property.ID: ids[:50]}
+	created := createIssueWithPropertyBody(t, body)
+	if values, ok := created.Properties[property.ID].([]any); !ok || len(values) != 50 {
+		t.Fatalf("50 selections not preserved on create: %#v", created.Properties)
+	}
+	if response := setIssuePropertyRaw(t, created.ID, property.ID, ids[:50]); response.Code != http.StatusOK {
+		t.Fatalf("50 selections rejected: %d: %s", response.Code, response.Body.String())
+	}
+	if response := setIssuePropertyRaw(t, created.ID, property.ID, ids); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "more than 50 options") {
+		t.Fatalf("51 selections should fail: %d: %s", response.Code, response.Body.String())
+	}
+	var stored []byte
+	if err := testPool.QueryRow(context.Background(), `SELECT properties -> $2 FROM issue WHERE id = $1`, created.ID, property.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	var values []string
+	if err := json.Unmarshal(stored, &values); err != nil || len(values) != 50 {
+		t.Fatalf("rejected write changed saved values: %s, %v", stored, err)
 	}
 }
 
@@ -313,6 +846,30 @@ func TestIssuePropertyValues(t *testing.T) {
 		t.Fatalf("good number: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// multi_text: duplicates dropped, caller order kept.
+	listText := createTestProperty(t, map[string]any{"name": "Aliases" + uuid.NewString()[:8], "type": "multi_text"})
+	wl := setIssuePropertyRaw(t, issueID, listText.ID, []string{"beta", "alpha", "beta"})
+	if wl.Code != http.StatusOK {
+		t.Fatalf("multi_text set: expected 200, got %d: %s", wl.Code, wl.Body.String())
+	}
+	var listResp struct {
+		Properties map[string]any `json:"properties"`
+	}
+	json.NewDecoder(wl.Body).Decode(&listResp)
+	storedList, _ := listResp.Properties[listText.ID].([]any)
+	if len(storedList) != 2 || storedList[0] != "beta" || storedList[1] != "alpha" {
+		t.Fatalf("multi_text not stored in caller order: %v", storedList)
+	}
+
+	// multi_url: entry-level http(s) validation.
+	listURL := createTestProperty(t, map[string]any{"name": "Links" + uuid.NewString()[:8], "type": "multi_url"})
+	if w := setIssuePropertyRaw(t, issueID, listURL.ID, []string{"https://example.com/a", "https://example.com/b"}); w.Code != http.StatusOK {
+		t.Fatalf("good multi_url: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, issueID, listURL.ID, []string{"https://example.com/a", "ftp://example.com"}); w.Code != http.StatusBadRequest {
+		t.Fatalf("non-http(s) multi_url entry: expected 400, got %d", w.Code)
+	}
+
 	// Archived definitions reject new values but allow unset.
 	warch := httptest.NewRecorder()
 	req := newRequest("PATCH", "/api/properties/"+sel.ID, map[string]any{"archived": true})
@@ -359,6 +916,52 @@ func TestValidatePropertyValueUnit(t *testing.T) {
 	}
 	if _, err := validatePropertyValue(boolDef, json.RawMessage(`false`)); err != nil {
 		t.Fatalf("false rejected: %v", err)
+	}
+}
+
+func TestValidatePropertyListValuesUnit(t *testing.T) {
+	validate := func(def db.IssueProperty, raw string) ([]byte, error) {
+		return issueproperty.ValidateValue(def, json.RawMessage(raw))
+	}
+	textList := makePropertyDef("multi_text", nil)
+	if _, err := validate(textList, `[]`); err == nil {
+		t.Fatalf("empty multi_text array accepted")
+	}
+	if _, err := validate(textList, `"alpha"`); err == nil {
+		t.Fatalf("bare string into multi_text accepted")
+	}
+	if _, err := validate(textList, `["alpha", 3]`); err == nil {
+		t.Fatalf("non-string multi_text entry accepted")
+	}
+	if _, err := validate(textList, `["alpha", "  "]`); err == nil {
+		t.Fatalf("blank multi_text entry accepted")
+	}
+	stored, err := validate(textList, `["alpha", "beta", "alpha"]`)
+	if err != nil {
+		t.Fatalf("valid multi_text rejected: %v", err)
+	}
+	if string(stored) != `["alpha","beta"]` {
+		t.Fatalf("multi_text not deduped in caller order: %s", stored)
+	}
+	over := make([]string, issueproperty.MaxListValues+1)
+	for i := range over {
+		over[i] = fmt.Sprintf("v%d", i)
+	}
+	overRaw, _ := json.Marshal(over)
+	if _, err := validate(textList, string(overRaw)); err == nil {
+		t.Fatalf("over-cap multi_text accepted")
+	}
+
+	urlList := makePropertyDef("multi_url", nil)
+	if _, err := validate(urlList, `["https://a.example", "javascript:alert(1)"]`); err == nil {
+		t.Fatalf("non-http(s) multi_url entry accepted")
+	}
+	stored, err = validate(urlList, `["  https://a.example/x ", "https://b.example", "https://a.example/x"]`)
+	if err != nil {
+		t.Fatalf("valid multi_url rejected: %v", err)
+	}
+	if string(stored) != `["https://a.example/x","https://b.example"]` {
+		t.Fatalf("multi_url not trimmed and deduped: %s", stored)
 	}
 }
 

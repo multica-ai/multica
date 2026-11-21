@@ -56,14 +56,14 @@ describe("Desktop daemon localization with real zh-Hans resources", () => {
 
     expect(
       await screen.findByText(
-        "登录时启动守护进程。应用打开期间，它会同时监控自动启动和手动启动的守护进程。",
+        "打开桌面端时自动启动守护进程。",
       ),
     ).toBeInTheDocument();
-    const command = screen.getByText("multica daemon stop");
+    const command = await screen.findByText("multica daemon stop");
     expect(command.closest("p")).toHaveTextContent(/multica daemon stop。$/);
   });
 
-  it("renders repeated log messages with straight double quotes", async () => {
+  it("renders repeated log messages with corner quotes", async () => {
     installDaemonAPI({ state: "running" });
     renderInSimplifiedChinese(
       <DaemonPanel

@@ -75,6 +75,13 @@ type CLIConfig struct {
 	// MULTICA_DAEMON_POLL_INTERVAL env, this field, DefaultPollInterval.
 	PollInterval string `json:"poll_interval,omitempty"`
 
+	// WSClaimPollInterval is the upper bound for missed-event safety polls
+	// while task claims use a healthy WebSocket. The daemon applies
+	// downward-only jitter, and retains PollInterval for old servers and
+	// uncertain claims. Resolution precedence: --ws-claim-poll-interval,
+	// MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL, this field, 3m default.
+	WSClaimPollInterval string `json:"ws_claim_poll_interval,omitempty"`
+
 	// HeartbeatInterval is how often the daemon sends heartbeat pings to
 	// the server (Go duration string). Same persist-once motivation as
 	// PollInterval. Empty ("") means "not set — use env / built-in
@@ -96,6 +103,13 @@ type CLIConfig struct {
 	// explicit 0), MULTICA_AGENT_TIMEOUT env, this field,
 	// DefaultAgentTimeout.
 	AgentTimeout *string `json:"agent_timeout,omitempty"`
+
+	// AgentIdleWatchdog is the no-message safety window. Empty means unset;
+	// 0s disables the watchdog.
+	AgentIdleWatchdog string `json:"agent_idle_watchdog,omitempty"`
+	// AgentToolWatchdog is the maximum silent in-flight tool window. Empty
+	// means unset; 0s disables the tool-specific bound.
+	AgentToolWatchdog string `json:"agent_tool_watchdog,omitempty"`
 
 	// CodexSemanticInactivityTimeout is the Codex-specific inactivity
 	// watchdog window (Go duration string). Persist-once semantics match

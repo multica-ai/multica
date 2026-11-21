@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, ScrollText } from "lucide-react";
+import { Loader2, ScrollText } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -37,7 +37,19 @@ interface TranscriptButtonProps {
   title?: string;
   renderButton?: boolean;
   open?: boolean;
-  onOpenChange?: (open: boolean) => void;
+  /**
+   * `fromKeyboard` reports how the open was requested, so a parent that hosts
+   * the dialog on another instance can hand it back as `finalFocus`.
+   */
+  onOpenChange?: (open: boolean, fromKeyboard?: boolean) => void;
+  /**
+   * Whether focus returns to the trigger on close. Only a dialog-owning
+   * instance needs this: one that renders the dialog for a trigger living
+   * somewhere else never sees the click that would tell it.
+   */
+  finalFocus?: boolean;
+  /** Host a terminal transcript outside a row that may be virtualized away. */
+  onOpenTranscript?: (items: TimelineItem[], fromKeyboard: boolean) => void;
   /**
    * Optional content rendered above the transcript event list. Used to
    * surface autopilot webhook payloads inline with the run history.
@@ -69,9 +81,18 @@ export function TranscriptButton({
   renderButton = true,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
+  finalFocus,
+  onOpenTranscript,
   headerSlot,
 }: TranscriptButtonProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  // A click carrying no detail count came from Enter/Space. Only that reader
+  // gets focus handed back when the dialog closes: after a pointer open it
+  // would return a focus ring and this button's tooltip on Esc.
+  const [fromKeyboard, setFromKeyboard] = useState(false);
+  // A dialog-owning parent knows better than this instance's own clicks —
+  // when the trigger lives elsewhere, those never happen.
+  const returnFocus = finalFocus ?? fromKeyboard;
   const [loading, setLoading] = useState(false);
   const [loadedItems, setLoadedItems] = useState<TimelineItem[] | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
@@ -105,30 +126,37 @@ export function TranscriptButton({
     (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      const keyboard = e.detail === 0;
+      setFromKeyboard(keyboard);
       if (liveCacheMode) {
         setLiveSession(true);
-        setOpen(true);
+        setOpen(true, keyboard);
         return;
       }
+      const openTerminal = (timeline: TimelineItem[]) => {
+        if (onOpenTranscript) onOpenTranscript(timeline, keyboard);
+        else setOpen(true, keyboard);
+      };
       if (providedItems !== undefined || loadedItems !== null) {
-        setOpen(true);
+        openTerminal(providedItems ?? loadedItems ?? []);
         return;
       }
       setLoading(true);
       api
         .listTaskMessages(task.id)
         .then((msgs) => {
-          setLoadedItems(buildTimeline(msgs));
-          setOpen(true);
+          const timeline = buildTimeline(msgs);
+          setLoadedItems(timeline);
+          openTerminal(timeline);
         })
         .catch((err) => {
           console.error(err);
           setLoadedItems([]);
-          setOpen(true);
+          openTerminal([]);
         })
         .finally(() => setLoading(false));
     },
-    [liveCacheMode, providedItems, loadedItems, setOpen, task.id],
+    [liveCacheMode, providedItems, loadedItems, setOpen, task.id, onOpenTranscript],
   );
 
   useEffect(() => {
@@ -154,7 +182,7 @@ export function TranscriptButton({
             disabled={loading}
             aria-label={title}
             className={cn(
-              "flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50",
+              "flex items-center justify-center rounded-xs p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50",
               className,
             )}
           >
@@ -175,6 +203,7 @@ export function TranscriptButton({
             agentName={agentName}
             isLive={isLive}
             onOpenChange={setOpen}
+            finalFocus={returnFocus}
             headerSlot={headerSlot}
           />
         ) : (
@@ -185,6 +214,7 @@ export function TranscriptButton({
             items={items}
             agentName={agentName}
             isLive={isLive}
+            finalFocus={returnFocus}
             headerSlot={headerSlot}
           />
         ))}
@@ -197,6 +227,7 @@ interface LiveTranscriptDialogProps {
   agentName: string;
   isLive: boolean;
   onOpenChange: (open: boolean) => void;
+  finalFocus: boolean;
   headerSlot?: React.ReactNode;
 }
 
@@ -216,6 +247,7 @@ function LiveTranscriptDialog({
   agentName,
   isLive,
   onOpenChange,
+  finalFocus,
   headerSlot,
 }: LiveTranscriptDialogProps) {
   const queryClient = useQueryClient();
@@ -260,6 +292,7 @@ function LiveTranscriptDialog({
       items={items}
       agentName={agentName}
       isLive={isLive}
+      finalFocus={finalFocus}
       headerSlot={headerSlot}
     />
   );

@@ -12,20 +12,54 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 const preparationHelperTestMode = "execenv-preparation-helper"
 
-func preparationHelperTestCommand() []string {
-	return []string{
-		os.Args[0],
-		"-test.run=^TestPreparationHelperProcess$",
-		"--",
-		preparationHelperTestMode,
+// TestMain drops the race runtime's exit delay for the children these tests
+// re-exec from the test binary itself (the preparation helper, the git lock
+// holder). A -race binary sleeps atexit_sleep_ms — a full second by default —
+// on every clean exit, which made each helper round trip cost a second of
+// wall time. A race the child detects while it runs is still reported and
+// still fails its exit status; what goes is the grace period for surfacing a
+// race in a goroutine still running at exit, and these children exit as soon
+// as their one job is done. The parent read GORACE at startup, so it keeps
+// its own settings.
+//
+// It also clears TaskConfigRootEnv, which the daemon sets for every task it
+// runs. Tests here isolate themselves by pointing HOME at a t.TempDir(), but
+// cli.ProfileDir consults that variable first and never reaches HOME while it
+// is set — so a test asserting a path under $HOME/.multica passed in CI and
+// failed for any agent running the suite from inside a Multica task. Clearing
+// it once here makes the package resolve profile dirs the same way everywhere,
+// and keeps working for parallel tests, which cannot call t.Setenv. A test
+// that wants the task-local branch sets the variable itself.
+//
+// It also removes the template repository newTestRepo copies from.
+func TestMain(m *testing.M) {
+	os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
+	os.Unsetenv(cli.TaskConfigRootEnv)
+	code := m.Run()
+	if testRepoTemplate.dir != "" {
+		os.RemoveAll(testRepoTemplate.dir)
 	}
+	os.Exit(code)
+}
+
+// preparationHelperTestCommand re-execs this test binary as the preparation
+// helper. setenv holds KEY=VALUE pairs the helper applies to its own
+// environment first, so a test can configure the child without t.Setenv and
+// still run in parallel.
+func preparationHelperTestCommand(setenv ...string) []string {
+	command := []string{os.Args[0], "-test.run=^TestPreparationHelperProcess$", "--"}
+	command = append(command, setenv...)
+	return append(command, preparationHelperTestMode)
 }
 
 // TestPreparationHelperProcess is both a no-op parent-side test and the child
@@ -34,6 +68,10 @@ func preparationHelperTestCommand() []string {
 func TestPreparationHelperProcess(t *testing.T) {
 	if len(os.Args) == 0 || os.Args[len(os.Args)-1] != preparationHelperTestMode {
 		return
+	}
+	for _, kv := range os.Args[slices.Index(os.Args, "--")+1 : len(os.Args)-1] {
+		key, value, _ := strings.Cut(kv, "=")
+		os.Setenv(key, value)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if err := RunPreparationHelper(os.Stdin, os.Stdout, logger); err != nil {
@@ -137,6 +175,63 @@ func TestPreparationHelperRoundTripsProjectResources(t *testing.T) {
 	}
 }
 
+// TestPreparationHelperAcceptsFieldsFromAnOlderParent pins the version-skew
+// half of the helper protocol. The parent is the running daemon process and
+// the helper is the binary currently at its executable path, so an upgrade
+// that replaces that file under a live daemon has an older parent feeding a
+// newer helper until the daemon re-execs. Rejecting the fields the newer build
+// dropped failed every task on the host for the whole window: removing
+// TaskContextForEnv.HandoffNote (#7626) left installed daemons sending an
+// untagged, non-omitempty `"HandoffNote": ""` and the helper answered
+// `json: unknown field "HandoffNote"` (MUL-7029).
+func TestPreparationHelperAcceptsFieldsFromAnOlderParent(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	workDir := filepath.Join(t.TempDir(), "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("seed workdir: %v", err)
+	}
+
+	payload, err := marshalPreparationRequest(preparationRequest{
+		Action: preparationActionReuse,
+		Reuse: &ReuseParams{
+			WorkDir:  workDir,
+			Provider: "claude",
+			Task:     TaskContextForEnv{IssueID: "issue-helper-old-parent"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal preparation request: %v", err)
+	}
+	// Re-add the fields an older build put on the wire: one the removed
+	// handoff note actually occupied, and one on the params struct itself.
+	var wire map[string]any
+	if err := json.Unmarshal(payload, &wire); err != nil {
+		t.Fatalf("open payload: %v", err)
+	}
+	reuse := wire["reuse"].(map[string]any)
+	reuse["Task"].(map[string]any)["HandoffNote"] = "scope this run to the parser"
+	reuse["RetiredParamFromAnOlderBuild"] = true
+	oldParentPayload, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("reseal payload: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunPreparationHelper(bytes.NewReader(oldParentPayload), &out, logger); err != nil {
+		t.Fatalf("RunPreparationHelper on an older parent's payload: %v", err)
+	}
+	var response preparationResponse
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatalf("decode preparation response: %v", err)
+	}
+	if response.Error != "" {
+		t.Fatalf("helper reported error %q, want the reuse to succeed", response.Error)
+	}
+	if response.Environment == nil || response.Environment.WorkDir != workDir {
+		t.Fatalf("environment = %#v, want workdir %q", response.Environment, workDir)
+	}
+}
+
 func TestPreparationRequestPreservesOpenclawGatewayForHelper(t *testing.T) {
 	t.Parallel()
 	want := OpenclawGatewayPin{
@@ -207,20 +302,20 @@ func TestPreparationHelperPreservesOpenclawTimeoutKind(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim shape is covered by the windows-tagged tests")
 	}
+	t.Parallel()
 	sleepBin, err := exec.LookPath("sleep")
 	if err != nil {
 		t.Skipf("no sleep binary available to build a slow shim: %v", err)
 	}
-	// A CLI slower than the deadline, which the child process inherits through
-	// the environment. openclawCLIMinTimeout is the floor, so the shim has to
-	// outlast a full second.
+	// A CLI slower than the deadline the helper process is given.
+	// openclawCLIMinTimeout is the floor, so the shim has to outlast a full
+	// second.
 	shim := writeShim(t, t.TempDir(), "#!/bin/sh\n"+sleepBin+" 5\n", "")
-	t.Setenv(OpenclawCLITimeoutEnv, "1s")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_, err = PrepareIsolated(ctx, preparationHelperTestCommand(), PrepareParams{
+	_, err = PrepareIsolated(ctx, preparationHelperTestCommand(OpenclawCLITimeoutEnv+"=1s"), PrepareParams{
 		WorkspacesRoot: t.TempDir(),
 		WorkspaceID:    "ws-helper-openclaw-timeout",
 		TaskID:         "11111111-2222-3333-4444-555555555555",

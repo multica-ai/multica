@@ -31,15 +31,14 @@ import type {
   ChatQuickActionsPayload,
   ChatSession,
   ChatSessionDeletedPayload,
+  SendChatMessageResponse,
   TaskMessagePayload,
   TaskQueuedPayload,
   TaskDispatchPayload,
 } from "@multica/core/types";
 import { chatKeys } from "@/data/queries/chat";
 
-// =====================================================
 // Sessions list (ChatSession[] keyed by wsId)
-// =====================================================
 
 export function patchSessionListAfterRename(
   qc: QueryClient,
@@ -90,9 +89,7 @@ export function flipSessionUnread(
   );
 }
 
-// =====================================================
 // Messages cache (ChatMessage[] keyed by sessionId)
-// =====================================================
 
 /**
  * Apply `chat:done` to the messages cache.
@@ -205,9 +202,7 @@ export async function applyChatQuickActionsToCache(
   );
 }
 
-// =====================================================
 // Pending task (ChatPendingTask keyed by sessionId)
-// =====================================================
 
 export function seedPendingTaskFromQueued(
   qc: QueryClient,
@@ -217,6 +212,19 @@ export function seedPendingTaskFromQueued(
   // A follow-up can be queued while another task is active. The event does
   // not carry enough queue state to replace that active head safely.
   invalidatePendingTask(qc, payload.chat_session_id);
+  // Guidance the running reply could not take is re-queued by moving its
+  // message to a new turn. Only the refetched row carries that owner, which
+  // is what moves it out of the transcript and into the queued rows. A turn
+  // whose message already names it (this device's reconciled send) needs no
+  // second refetch.
+  const messages = qc.getQueryData<ChatMessage[]>(
+    chatKeys.messages(payload.chat_session_id),
+  );
+  if (!messages?.some((message) => message.task_id === payload.task_id)) {
+    qc.invalidateQueries({
+      queryKey: chatKeys.messages(payload.chat_session_id),
+    });
+  }
 }
 
 export function promotePendingTaskToRunning(
@@ -296,9 +304,63 @@ export function seedAcceptedPendingTask(
   invalidatePendingTask(qc, payload.chat_session_id);
 }
 
-// =====================================================
+/**
+ * Reconcile this device's optimistic send with the server's acceptance.
+ *
+ * The message row takes its own input owner and timestamp: guidance that
+ * joins a reply belongs to that reply's root request (which differs from
+ * `task_id` when the reply is a retry) and is newer than the task. Servers
+ * before steering omit both fields, and for a new turn the task's values are
+ * the message's own.
+ *
+ * Steered guidance creates no turn, so only the local placeholder leaves the
+ * pending cache; the active head keeps its identity and elapsed timer. Every
+ * other acceptance is a turn the pending state must track.
+ */
+export function reconcileAcceptedChatSend(
+  qc: QueryClient,
+  payload: {
+    chat_session_id: string;
+    optimistic_message_id: string;
+    optimistic_task_id: string;
+    content: string;
+    result: SendChatMessageResponse;
+  },
+) {
+  const { chat_session_id: sessionId, result } = payload;
+  qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
+    old?.map((message) =>
+      message.id === payload.optimistic_message_id
+        ? {
+            ...message,
+            id: result.message_id,
+            task_id: result.message_task_id ?? result.task_id,
+            created_at: result.message_created_at ?? result.created_at,
+          }
+        : message,
+    ),
+  );
+  if (result.steered === true) {
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), (old) =>
+      removePendingChatTask(old, payload.optimistic_task_id),
+    );
+    invalidatePendingTask(qc, sessionId);
+  } else {
+    seedAcceptedPendingTask(qc, {
+      chat_session_id: sessionId,
+      task_id: result.task_id,
+      created_at: result.created_at,
+      message_id: result.message_id,
+      content: payload.content,
+      optimistic_task_id: payload.optimistic_task_id,
+      supports_queue: result.supports_queue,
+      queued: result.queued,
+    });
+  }
+  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+}
+
 // Task messages (live timeline, keyed by taskId)
-// =====================================================
 
 /**
  * Append a `task:message` payload into the per-task timeline cache.
@@ -326,4 +388,12 @@ export function appendTaskMessage(
       return [...old, payload].sort((a, b) => a.seq - b.seq);
     },
   );
+}
+
+export async function refreshTaskMessages(qc: QueryClient, taskId: string) {
+  const queryKey = chatKeys.taskMessages(taskId);
+  // Invalidation alone reuses an unfinished first load. Cancel it first,
+  // retaining any WS rows received since it began instead of reverting them.
+  await qc.cancelQueries({ queryKey }, { revert: false, silent: true });
+  await qc.invalidateQueries({ queryKey });
 }

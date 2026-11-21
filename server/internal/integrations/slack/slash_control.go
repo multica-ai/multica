@@ -73,7 +73,7 @@ func (s *slackDMControlStarter) StartSlackDMChat(ctx context.Context, inst engin
 				Sender: userID, BindingKey: cmd.ChannelID, ChatType: channel.ChatTypeP2P,
 			},
 			Initiator: userID,
-			Body:      body, DedupMessageID: envelopeID, ClaimToken: claim,
+			Body:      body, CommandText: body, DedupMessageID: envelopeID, ClaimToken: claim,
 			PersistMessage: body != "", HistoryBoundaryPending: true,
 			BeforeCommit: func(ctx context.Context, tx pgx.Tx, session db.ChatSession) error {
 				if body == "" {
@@ -158,7 +158,7 @@ func (s *slackDMControlStarter) ClearSlackDMContext(ctx context.Context, inst en
 		} else {
 			_, err = s.session.AppendUserMessage(ctx, engine.AppendInput{
 				SessionID: sessionID, Sender: userID, InstallationID: inst.ID,
-				Body: body, CommandText: clearSlashCommand,
+				Body: body, CommandText: clearSlashCommand + " " + body,
 				DedupMessageID: envelopeID, ClaimToken: claim, ForceFresh: true,
 				BeforeCommit: func(ctx context.Context, tx pgx.Tx, session db.ChatSession, contextRevision int64, _ pgtype.UUID, _ int64) error {
 					var enqueueErr error

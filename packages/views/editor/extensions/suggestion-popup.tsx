@@ -5,6 +5,7 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from "@floatin
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 
 interface SuggestionPopupRenderOptions<
   TItem,
@@ -15,10 +16,14 @@ interface SuggestionPopupRenderOptions<
   pluginKey: PluginKey;
   component: ComponentType<TComponentProps>;
   getProps: (props: SuggestionProps<TItem, TSelected>) => TComponentProps;
+  /** Refresh an active popup when its externally supplied catalog changes. */
+  subscribe?: (refresh: () => void) => () => void;
   onKeyDown?: (
     ref: TRef | null | undefined,
     props: SuggestionKeyDownProps,
   ) => boolean;
+  /** Preferred side; `flip` still moves it when that side lacks room. */
+  placement?: "top-start" | "bottom-start";
 }
 
 export function createSuggestionPopupRender<
@@ -30,15 +35,22 @@ export function createSuggestionPopupRender<
   pluginKey,
   component,
   getProps,
+  subscribe,
   onKeyDown,
+  placement = "top-start",
 }: SuggestionPopupRenderOptions<TItem, TSelected, TRef, TComponentProps>) {
   return () => {
     let renderer: ReactRenderer<TRef> | null = null;
     let popup: HTMLDivElement | null = null;
     let removeOutsideListeners: (() => void) | null = null;
     let removeAutoUpdate: (() => void) | null = null;
+    let unsubscribe: (() => void) | undefined;
+    let currentProps: SuggestionProps<TItem, TSelected> | null = null;
 
     const cleanup = () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      currentProps = null;
       removeOutsideListeners?.();
       removeOutsideListeners = null;
       removeAutoUpdate?.();
@@ -54,9 +66,10 @@ export function createSuggestionPopupRender<
     };
 
     const isInsideSuggestionSurface = (
-      target: EventTarget | null,
+      eventTarget: EventTarget | null,
       props: SuggestionProps<TItem, TSelected>,
     ) => {
+      const target = contextMenuOrigin(eventTarget);
       if (!(target instanceof Node)) return false;
       return props.editor.view.dom.contains(target) || !!popup?.contains(target);
     };
@@ -110,7 +123,8 @@ export function createSuggestionPopupRender<
         // squashed". Document-body editors (issue/project description, agent
         // instructions) also host this popup; there the caret usually has room
         // both ways, so `flip` keeps them on-screen regardless of the default.
-        placement: "top-start",
+        // The Docs block menu opts into `bottom-start`: it reads down the page.
+        placement,
         strategy: "fixed",
         middleware: [
           offset(6),
@@ -164,6 +178,7 @@ export function createSuggestionPopupRender<
 
     return {
       onStart: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer = new ReactRenderer(component, {
           props: getProps(props),
           editor: props.editor,
@@ -173,15 +188,23 @@ export function createSuggestionPopupRender<
         popup = doc.createElement("div");
         popup.style.position = "fixed";
         popup.style.zIndex = "50";
+        const owner = props.editor.view.dom.closest("[data-editor-overlay-owner]")?.getAttribute("data-editor-overlay-owner");
+        if (owner) popup.setAttribute("data-editor-overlay-owner", owner);
         popup.appendChild(renderer.element);
         doc.body.appendChild(popup);
 
         installOutsideListeners(props);
         trackPosition(popup, props.clientRect);
         updatePosition(popup, props.clientRect);
+        unsubscribe = subscribe?.(() => {
+          if (!currentProps || !renderer) return;
+          renderer.updateProps(getProps(currentProps));
+          if (popup) updatePosition(popup, currentProps.clientRect);
+        });
       },
 
       onUpdate: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer?.updateProps(getProps(props));
         if (popup) {
           trackPosition(popup, props.clientRect);

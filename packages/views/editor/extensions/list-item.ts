@@ -1,5 +1,5 @@
-import { type Editor, InputRule } from "@tiptap/core";
-import { ListItem, TaskItem } from "@tiptap/extension-list";
+import { type Editor, InputRule, type JSONContent } from "@tiptap/core";
+import { ListItem, OrderedList, TaskItem } from "@tiptap/extension-list";
 import { sinkListItem as pmSinkListItem } from "@tiptap/pm/schema-list";
 import { type Command, TextSelection } from "@tiptap/pm/state";
 import type { NodeType } from "@tiptap/pm/model";
@@ -86,32 +86,75 @@ function sinkListItemRange(itemType: NodeType): Command {
  * and must be swallowed even when the structural indent is a no-op (first child
  * with nothing to nest under, or already at max depth). Otherwise the unhandled
  * Tab falls through to the browser and moves focus out of the editor to the
- * next control. So the return value tracks "is the caret in this list?"
- * (`editor.isActive(name)`), NOT "did the indent move anything?": indent
- * best-effort, then swallow while in a list, fall through (focus nav) when not.
+ * next control. Handle only the nearest list range containing the selection:
+ * `isActive` also matches ancestor items, so a checkbox keymap would otherwise
+ * swallow Tab or lift the parent checkbox while editing a nested bullet.
  */
 function listItemKeymap(editor: Editor, name: string) {
+  const ownsSelection = () => {
+    const { $from, $to } = editor.state.selection;
+    const range = $from.blockRange($to, (node) => {
+      const itemName = node.firstChild?.type.name;
+      return itemName === "listItem" || itemName === "taskItem";
+    });
+    return range?.parent.firstChild?.type.name === name;
+  };
+
   return {
     Enter: () =>
+      ownsSelection() &&
       editor.commands.first(({ commands }) => [
         () => commands.splitListItem(name),
         () => commands.liftListItem(name),
       ]),
     Tab: () => {
+      if (!ownsSelection()) return false;
       const itemType = editor.schema.nodes[name];
       if (!itemType) return false;
       sinkListItemRange(itemType)(editor.state, (tr) =>
         editor.view.dispatch(tr),
       );
-      return editor.isActive(name);
+      return true;
     },
-    "Shift-Tab": () => editor.commands.liftListItem(name),
+    "Shift-Tab": () => ownsSelection() && editor.commands.liftListItem(name),
   };
+}
+
+/**
+ * Drops indentation that leaked into the start of a list item's paragraphs.
+ * Children are written 3 spaces deep, but Tiptap's list tokenizers strip only
+ * the marker's width (2 for `- `, and 2 for `8. ` as they skip the period), so
+ * a paragraph after a nested list kept a space, and every save added another
+ * until the paragraph turned into a code block. Leading spaces of a Markdown
+ * paragraph are never content.
+ */
+function trimItemParagraphs<T>(item: T): T {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+  const node = item as JSONContent;
+  const content = node.content?.map((child) => {
+    const first = child.content?.[0];
+    if (child.type !== "paragraph" || first?.type !== "text" || !/^[ \t]/.test(first.text ?? "")) return child;
+    const text = first.text!.replace(/^[ \t]+/, "");
+    const rest = child.content!.slice(1);
+    return { ...child, content: text ? [{ ...first, text }, ...rest] : rest };
+  });
+  return (content ? { ...node, content } : node) as T;
 }
 
 export const PatchedListItem = ListItem.extend({
   addKeyboardShortcuts() {
     return listItemKeymap(this.editor, this.name);
+  },
+  parseMarkdown: (token, helpers) => trimItemParagraphs(ListItem.config.parseMarkdown!(token, helpers)),
+});
+
+/** Ordered lists build their items without ListItem's parser, so they get the
+ *  same trim here. */
+export const PatchedOrderedList = OrderedList.extend({
+  parseMarkdown: (token, helpers) => {
+    const list = OrderedList.config.parseMarkdown!(token, helpers);
+    if (!list || typeof list !== "object" || Array.isArray(list) || !list.content) return list;
+    return { ...list, content: list.content.map((item) => trimItemParagraphs(item)) };
   },
 });
 

@@ -60,15 +60,6 @@ func (f *registrationFake) stubBegin(resp map[string]any) {
 	})
 }
 
-// rewriteHandler replaces /oauth/v1/app/registration with a fresh
-// handler — used to install a poll script after Begin has been
-// exercised.
-func (f *registrationFake) rewriteHandler(h http.HandlerFunc) {
-	f.mux = http.NewServeMux()
-	f.mux.HandleFunc(registrationEndpoint, h)
-	f.srv.Config.Handler = f.mux
-}
-
 func TestRegistrationClient_Begin_HappyPath(t *testing.T) {
 	fake := newRegistrationFake(t)
 	fake.stubBegin(map[string]any{
@@ -223,8 +214,34 @@ func TestRegistrationClient_Begin_RegionFeishuBeginsOnFeishu(t *testing.T) {
 	}
 }
 
+func TestRegistrationClient_Begin_HonorsExpiresInWireField(t *testing.T) {
+	// MUL-7340: the wire field accounts.feishu.cn and
+	// accounts.larksuite.com actually send is `expires_in` (RFC 8628
+	// §3.2), currently 3600 — NOT the `expire_in` spelling the upstream
+	// Go SDK types. Parsing only `expire_in` made every real begin
+	// response look like "server omitted the expiry", silently
+	// collapsing a 1-hour QR to the 10-minute fallback.
+	fake := newRegistrationFake(t)
+	fake.stubBegin(map[string]any{
+		"device_code":               "dc_expires_in",
+		"verification_uri_complete": "https://open.feishu.cn/page/launcher?user_code=ABCD-EFGH",
+		"user_code":                 "ABCD-EFGH",
+		"interval":                  5,
+		"expires_in":                3600,
+	})
+
+	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
+	res, err := c.Begin(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if res.ExpiresIn != 3600*time.Second {
+		t.Errorf("ExpiresIn: got %v want 1h — the server's expires_in must win over the fallback", res.ExpiresIn)
+	}
+}
+
 func TestRegistrationClient_Begin_DefaultsWhenServerOmitsTimers(t *testing.T) {
-	// When Lark's response omits `interval` / `expire_in` (the empty
+	// When Lark's response omits `interval` / `expires_in` (the empty
 	// path the upstream SDK accepts), the client falls back to its
 	// documented defaults rather than zero-second polling that would
 	// hammer the endpoint or zero-second expiry that would fail the
@@ -485,11 +502,11 @@ func TestRegistrationClient_Poll_DomainSwitchOnFeishuTenant(t *testing.T) {
 // gate flips on only one side.
 func TestRegistrationClient_Poll_NoSwitchWhenAlreadyOnMatchingHost(t *testing.T) {
 	cases := []struct {
-		name        string
-		brand       string
-		begunOn     string
-		feishuHost  string
-		larkHost    string
+		name       string
+		brand      string
+		begunOn    string
+		feishuHost string
+		larkHost   string
 	}{
 		{
 			name:       "lark brand on lark host is a no-op",

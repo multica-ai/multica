@@ -2,7 +2,9 @@ package wecom
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/yuin/goldmark"
@@ -308,7 +310,28 @@ func TestContainerPrefixHalvesAgree(t *testing.T) {
 //
 // Self-checking the way linkReferenceAttacks is. A combination is only asserted
 // on after it has been shown to resolve unguarded, and the number that do is
-// pinned, so the sweep cannot come to pass by testing nothing.
+// pinned, so the sweep cannot come to pass by testing nothing. live counts the
+// combinations whose LF spelling resolves — 4,533 of the 30,976 swept today —
+// and the floor sits just under it: the count is deterministic for a given
+// goldmark and scaffold alphabet, so falling past the floor means the sweep now
+// proves less than it did, and that is worth someone's look.
+//
+// Line endings are swept without parsing every body twice. CommonMark reads
+// "\r\n" as the same line ending as "\n", so a CRLF body is mostly a question
+// for the guard, and that one is asked of every combination: the guard's CRLF
+// output, read back with "\n" line endings, must be exactly its LF output — the
+// same decision in the same place. The parser is then asked about the guard's
+// CRLF output of every combination that resolved.
+//
+// What that leaves is the parser's half: that a CRLF body resolves exactly when
+// its LF twin does. It is checked rather than assumed, on every seventh
+// combination, by parsing the CRLF body unguarded too — a combination live in
+// one spelling and not the other fails the sweep, since the CRLF half can then
+// no longer be read off the LF one. Seventh rather than eighth: a stride that
+// shared a factor with the four destinations would only ever sample one.
+//
+// Each definition prefix is its own parallel subtest: the sweep is some
+// forty-five thousand parses under the race detector, and they share nothing.
 func TestBreakLinkReferenceDefinitionsAcrossBlockScaffolding(t *testing.T) {
 	prefixes := scaffoldPrefixes(2)
 	destinations := []string{
@@ -317,30 +340,50 @@ func TestBreakLinkReferenceDefinitionsAcrossBlockScaffolding(t *testing.T) {
 		"<https://evil.example>",
 		`https\://evil.example`,
 	}
-	live := 0
-	for _, def := range prefixes {
-		if _, ok := containerPrefixBefore(def+"[", len(def)); !ok {
-			continue
-		}
-		for _, cont := range prefixes {
-			for _, dest := range destinations {
-				for _, nl := range []string{"\n", "\r\n"} {
-					body := def + "[重置密码]:" + nl + cont + dest + nl + nl + "[重置密码]"
-					if !sendsReaderTo(markdownDestinations(body), "evil.example") {
-						continue
-					}
-					live++
-					guarded := breakMemberLinks(body)
-					if sendsReaderTo(markdownDestinations(guarded), "evil.example") {
-						t.Fatalf("definition behind %q with its destination behind %q survived the guard:\n%q → %q",
-							def, cont, body, guarded)
+	const crossCheckStride = 7
+	crlf := func(s string) string { return strings.ReplaceAll(s, "\n", "\r\n") }
+	var live atomic.Int64
+	t.Run("sweep", func(t *testing.T) {
+		for d, def := range prefixes {
+			if _, ok := containerPrefixBefore(def+"[", len(def)); !ok {
+				continue
+			}
+			t.Run(strconv.Quote(def), func(t *testing.T) {
+				t.Parallel()
+				for c, cont := range prefixes {
+					for k, dest := range destinations {
+						body := def + "[重置密码]:\n" + cont + dest + "\n\n[重置密码]"
+						bodyCRLF := crlf(body)
+						guarded, guardedCRLF := breakMemberLinks(body), breakMemberLinks(bodyCRLF)
+						if asLF := strings.ReplaceAll(guardedCRLF, "\r\n", "\n"); asLF != guarded {
+							t.Fatalf("the guard decides CRLF differently from LF for a definition behind %q with its destination behind %q:\n%q → %q, which reads %q as LF, want %q",
+								def, cont, bodyCRLF, guardedCRLF, asLF, guarded)
+						}
+						resolves := sendsReaderTo(markdownDestinations(body), "evil.example")
+						if ((d*len(prefixes)+c)*len(destinations)+k)%crossCheckStride == 0 {
+							if resolvesCRLF := sendsReaderTo(markdownDestinations(bodyCRLF), "evil.example"); resolvesCRLF != resolves {
+								t.Fatalf("a definition behind %q with its destination behind %q resolves %v as LF and %v as CRLF — "+
+									"the CRLF half of this sweep can no longer be read off the LF one:\n%q",
+									def, cont, resolves, resolvesCRLF, bodyCRLF)
+							}
+						}
+						if !resolves {
+							continue
+						}
+						live.Add(1)
+						for _, g := range []string{guarded, guardedCRLF} {
+							if sendsReaderTo(markdownDestinations(g), "evil.example") {
+								t.Fatalf("definition behind %q with its destination behind %q survived the guard:\n%q → %q",
+									def, cont, body, g)
+							}
+						}
 					}
 				}
-			}
+			})
 		}
-	}
-	if live < 4000 {
-		t.Fatalf("only %d swept combinations defined a link at all — the sweep has stopped testing anything", live)
+	})
+	if n := live.Load(); n < 4400 {
+		t.Fatalf("only %d swept combinations defined a link at all, against 4,533 when the floor was set — the sweep has stopped testing what it did", n)
 	}
 }
 
@@ -365,6 +408,13 @@ func TestBreakMemberLinksIsIdempotent(t *testing.T) {
 	}
 }
 
+// commonMark is the one parser markdownDestinations reads with. goldmark keeps
+// everything a parse learns — the reference map included — in a per-call
+// context rather than on the parser, which is how goldmark.Convert shares a
+// single package-level instance; building a fresh parser per call made the
+// sweep above pay for construction on every one of its parses.
+var commonMark = goldmark.New().Parser()
+
 // markdownDestinations parses md as CommonMark and returns the destination of
 // every link and image — that is, every place a reader can be sent by clicking
 // text the member chose the wording of.
@@ -377,7 +427,7 @@ func TestBreakMemberLinksIsIdempotent(t *testing.T) {
 // an Image, never an AutoLink.
 func markdownDestinations(md string) []string {
 	source := []byte(md)
-	doc := goldmark.New().Parser().Parse(text.NewReader(source))
+	doc := commonMark.Parse(text.NewReader(source))
 	var out []string
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {

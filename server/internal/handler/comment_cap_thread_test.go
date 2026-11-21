@@ -63,6 +63,7 @@ func assertNoOrphanCommentRows(t *testing.T, rows []CommentResponse) {
 // exactly commentHardCap comments is complete, so the fold must still run —
 // inferring truncation from the row count would silently stop folding here.
 func TestListComments_ExactlyAtCapStillFolds(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "exactly at cap still folds")
 
 	base := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
@@ -100,6 +101,7 @@ func TestListComments_ExactlyAtCapStillFolds(t *testing.T) {
 // folding, so folded_count reflects the complete thread rather than a partial
 // window.
 func TestListComments_TruncatedCompleteThreadStillFolds(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "truncated complete thread still folds")
 
 	base := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Second)
@@ -157,6 +159,7 @@ func TestListComments_TruncatedCompleteThreadStillFolds(t *testing.T) {
 // TestListComments_RootResolvedTruncatedUsesCompleteFoldedCount is the
 // root-resolved variant: completion restores all six replies before folding.
 func TestListComments_RootResolvedTruncatedUsesCompleteFoldedCount(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "root resolved truncated")
 
 	base := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Second)
@@ -198,8 +201,10 @@ func TestListComments_RootResolvedTruncatedUsesCompleteFoldedCount(t *testing.T)
 }
 
 // TestListComments_RootsOnlyHardCapKeepsNewestRoots pins the roots-only window:
-// the API must not retain the oldest 2000 roots and silently lose new discussion.
+// the API must not retain the oldest commentHardCap roots and silently lose new
+// discussion.
 func TestListComments_RootsOnlyHardCapKeepsNewestRoots(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "roots only keeps newest")
 
 	base := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Second)
@@ -230,6 +235,7 @@ func TestListComments_RootsOnlyHardCapKeepsNewestRoots(t *testing.T) {
 }
 
 func TestListComments_RootsOnlyExactCapIsNotTruncated(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "roots only exact cap")
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	bulkSeedComments(t, issueID, base, commentHardCap)
@@ -247,6 +253,7 @@ func TestListComments_RootsOnlyExactCapIsNotTruncated(t *testing.T) {
 // --thread read cannot lose the newest resolution reply. The returned thread is
 // partial, so fold must remain suppressed even though the resolution is visible.
 func TestListComments_UntailedThreadHardCapKeepsNewestReplies(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "thread keeps newest replies")
 
 	base := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Second)
@@ -285,6 +292,7 @@ func TestListComments_UntailedThreadHardCapKeepsNewestReplies(t *testing.T) {
 }
 
 func TestListComments_UntailedThreadExactCapStillFolds(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "thread exact cap still folds")
 
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -309,6 +317,7 @@ func TestListComments_UntailedThreadExactCapStillFolds(t *testing.T) {
 // affected reply is dropped rather than returned as an unrenderable orphan. The
 // response must stay bounded and must terminate.
 func TestListComments_DeepChainBeyondBudgetIsPrunedNotOrphaned(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "deep chain beyond budget")
 
 	base := time.Now().UTC().Add(-6 * time.Hour).Truncate(time.Second)
@@ -347,6 +356,7 @@ func TestListComments_DeepChainBeyondBudgetIsPrunedNotOrphaned(t *testing.T) {
 // TestListComments_SharedAncestorFetchedOnce checks the dedup in the walk: many
 // replies pointing at one old root must not duplicate that root.
 func TestListComments_SharedAncestorFetchedOnce(t *testing.T) {
+	shrinkListCapsForTest(t)
 	issueID := createIssueForTimeline(t, "shared ancestor")
 
 	base := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Second)
@@ -389,6 +399,7 @@ func TestListComments_SharedAncestorFetchedOnce(t *testing.T) {
 // The walk filters on issue_id and workspace_id at every level, so the foreign
 // comment must never appear and the anomalous reply must be pruned.
 func TestListComments_CrossIssueParentNeverCrossesBoundary(t *testing.T) {
+	shrinkListCapsForTest(t)
 	otherIssueID := createIssueForTimeline(t, "other issue")
 	issueID := createIssueForTimeline(t, "cross issue parent")
 
@@ -422,6 +433,7 @@ func TestListComments_CrossIssueParentNeverCrossesBoundary(t *testing.T) {
 // but a different workspace_id, so retaining issue_id filtering while removing
 // workspace_id filtering must still make this test fail.
 func TestListComments_CrossWorkspaceParentNeverCrossesBoundary(t *testing.T) {
+	shrinkListCapsForTest(t)
 	ctx := context.Background()
 	issueID := createIssueForTimeline(t, "cross workspace parent")
 
@@ -485,6 +497,7 @@ func TestListComments_CrossWorkspaceParentNeverCrossesBoundary(t *testing.T) {
 // workspace, but one of its stored children does not; the batched descendant
 // query must not pull that child into the response.
 func TestListComments_CrossWorkspaceDescendantNeverCrossesBoundary(t *testing.T) {
+	shrinkListCapsForTest(t)
 	ctx := context.Background()
 	issueID := createIssueForTimeline(t, "cross workspace descendant")
 

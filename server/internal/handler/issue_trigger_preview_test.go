@@ -1,12 +1,18 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/daemon"
+	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // seededReadyAgentID returns a workspace agent that has a runtime bound (the
@@ -217,6 +223,111 @@ func TestUpdateIssueSuppressRunSkipsEnqueue(t *testing.T) {
 	}
 	if got := taskCountFor(t, control.ID, agentID); got == 0 {
 		t.Fatalf("control (no suppress_run) should enqueue, got 0 tasks")
+	}
+}
+
+// Both write paths explain declined agent runs in Triage (#10845), while
+// member assignments never imply that a run could have started.
+func TestIssueWritesLogWhyARunDidNotStart(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	inTriage := func(title string) IssueResponse {
+		issue := createIssueForTest(t, map[string]any{"title": title, "status": "todo"})
+		dbfx.Exec(t, `UPDATE issue SET triage_state = 'pending' WHERE id = $1`, issue.ID)
+		return issue
+	}
+	for _, tc := range []struct {
+		assigneeType string
+		assigneeID   string
+		wantLog      bool
+	}{
+		{assigneeType: "agent", assigneeID: agentID, wantLog: true},
+		{assigneeType: "member", assigneeID: testUserID},
+	} {
+		t.Run(tc.assigneeType, func(t *testing.T) {
+			assign := map[string]any{"assignee_type": tc.assigneeType, "assignee_id": tc.assigneeID}
+			single := inTriage("triage single write " + tc.assigneeType)
+			testutil.Call(t, testHandler.UpdateIssue,
+				withURLParam(newRequest("PUT", "/api/issues/"+single.ID, assign), "id", single.ID)).Want(http.StatusOK)
+			batch := inTriage("triage batch write " + tc.assigneeType)
+			testutil.Call(t, testHandler.BatchUpdateIssues, newRequest("PATCH", "/api/issues/batch?workspace_id="+testWorkspaceID,
+				map[string]any{"issue_ids": []string{batch.ID}, "updates": assign})).Want(http.StatusOK)
+
+			for _, issue := range []IssueResponse{single, batch} {
+				if got := taskCountFor(t, issue.ID, agentID); got != 0 {
+					t.Fatalf("issue %s in triage got %d tasks, want none", issue.ID, got)
+				}
+				if got := hasLogLine(logs.String(), `msg="issue write did not start a run"`, "issue_id="+issue.ID); got != tc.wantLog {
+					t.Fatalf("decline log for issue %s = %v, want %v; logs:\n%s", issue.ID, got, tc.wantLog, logs.String())
+				}
+				if tc.wantLog && !hasLogLine(logs.String(), `msg="issue write did not start a run"`, "issue_id="+issue.ID, "reason=issue_in_triage") {
+					t.Fatalf("no triage decline reason for issue %s; logs:\n%s", issue.ID, logs.String())
+				}
+			}
+		})
+	}
+}
+
+func hasLogLine(logs string, parts ...string) bool {
+	for _, line := range strings.Split(logs, "\n") {
+		found := true
+		for _, part := range parts {
+			found = found && strings.Contains(line, part)
+		}
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+// TestLegacyV0438HandoffPayloadReachesTaskPrompt is the cross-version guard
+// for installed clients: the v0.4.38 update payload must survive the current
+// API, task queue, claim wire shape, and daemon prompt rendering.
+func TestLegacyV0438HandoffPayloadReachesTaskPrompt(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	note := "Only touch the login flow."
+	issue := createIssueForTest(t, map[string]any{
+		"title":  "legacy handoff compatibility",
+		"status": "todo",
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+		"handoff_note":  note,
+	}), "id", issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue with v0.4.38 handoff payload: %d %s", w.Code, w.Body.String())
+	}
+
+	tasks, err := testHandler.Queries.ListTasksByIssue(context.Background(), util.MustParseUUID(issue.ID))
+	if err != nil {
+		t.Fatalf("ListTasksByIssue: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("legacy handoff update queued %d tasks, want 1", len(tasks))
+	}
+
+	claimJSON, err := json.Marshal(taskToResponse(tasks[0], testWorkspaceID))
+	if err != nil {
+		t.Fatalf("marshal claim response: %v", err)
+	}
+	var claimed daemon.Task
+	if err := json.Unmarshal(claimJSON, &claimed); err != nil {
+		t.Fatalf("decode daemon task: %v", err)
+	}
+	if claimed.HandoffNote != note {
+		t.Fatalf("claimed handoff note = %q, want %q", claimed.HandoffNote, note)
+	}
+	if prompt := daemon.BuildPrompt(claimed, "codex"); !strings.Contains(prompt, note) {
+		t.Fatalf("daemon prompt dropped legacy handoff note:\n%s", prompt)
 	}
 }
 
