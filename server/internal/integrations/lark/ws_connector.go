@@ -423,6 +423,7 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 		// pipeline. Most messages need no enrichment and return
 		// immediately without any network call.
 		if c.cfg.Enricher != nil {
+			msg.InstallationID = inst.ID
 			enrichCtx, cancelEnrich := context.WithTimeout(ctx, c.cfg.EnrichTimeout)
 			msg = c.cfg.Enricher.Enrich(enrichCtx, msg, creds)
 			cancelEnrich()

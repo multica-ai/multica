@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
@@ -82,6 +84,16 @@ type InboundEnricherConfig struct {
 	// Logger receives best-effort warnings about fetch failures. Nil
 	// uses slog.Default().
 	Logger *slog.Logger
+	// Quotes, when set, lets the enricher inline a quoted message once per
+	// conversation context instead of on every reply. Nil always inlines.
+	Quotes QuoteHistory
+}
+
+// QuoteHistory reports whether the current conversation context of a Chat
+// route already holds a user message containing marker. routeKey is the
+// route's channel chat id (see larkRouteKey).
+type QuoteHistory interface {
+	QuoteInCurrentContext(ctx context.Context, installationID pgtype.UUID, routeKey, marker string) (bool, error)
 }
 
 type inboundEnricher struct {
@@ -89,6 +101,7 @@ type inboundEnricher struct {
 	maxForwardChildren int
 	recentContextSize  int
 	logger             *slog.Logger
+	quotes             QuoteHistory
 }
 
 // NewInboundEnricher builds an Enricher backed by the given Lark API
@@ -106,6 +119,7 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 		maxForwardChildren: cfg.MaxForwardChildren,
 		recentContextSize:  cfg.RecentContextSize,
 		logger:             cfg.Logger,
+		quotes:             cfg.Quotes,
 	}
 }
 
@@ -149,7 +163,7 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 // never creates its own session row, and is only ever surfaced as read-
 // context attached to a turn a workspace member explicitly directed at
 // the Bot.
-func (e *inboundEnricher) selectContext(msg InboundMessage) (InboundMessage, bool) {
+func (e *inboundEnricher) selectContext(msg InboundMessage) (InboundMessage, bool, bool) {
 	freshSource := msg.CommandBody
 	if freshSource == "" {
 		freshSource = msg.Body
@@ -173,11 +187,13 @@ func (e *inboundEnricher) selectContext(msg InboundMessage) (InboundMessage, boo
 	}
 
 	wantRecent := !startChat && !bareFresh && e.recentContextSize > 0 && msg.ChatType == ChatTypeGroup && msg.AddressedToBot
-	return msg, wantRecent
+	// /new and /clear start a conversation context that has seen nothing yet.
+	freshContext := startChat || msg.ForceFreshSession
+	return msg, wantRecent, freshContext
 }
 
 func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage {
-	msg, wantRecent := e.selectContext(msg)
+	msg, wantRecent, freshContext := e.selectContext(msg)
 	isForward := msg.MessageType == larkMsgTypeMergeForward
 	if msg.ParentID == "" && !isForward && !wantRecent {
 		// Nothing to expand and no group prefetch wanted — no network call.
@@ -189,6 +205,12 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	if e.client == nil || !e.client.IsConfigured() {
 		return msg
 	}
+
+	// In a Lark topic every reply carries the topic's first message as its
+	// parent, so a forward that opened the topic would otherwise be fetched
+	// and inlined again on every turn. Once the current conversation context
+	// holds it, a short reference replaces it.
+	quoteShown := msg.ParentID != "" && !freshContext && e.quoteShownEarlier(ctx, msg)
 
 	// Phase 1 — fetch every set of messages we may render. Each is
 	// best-effort; its error is handled where the block is rendered. We
@@ -211,7 +233,7 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	}
 	var quotedItems []LarkMessage
 	var quotedErr error
-	if msg.ParentID != "" {
+	if msg.ParentID != "" && !quoteShown {
 		fetches.Add(1)
 		go func() {
 			defer fetches.Done()
@@ -266,7 +288,11 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 			if b.Len() > 0 {
 				b.WriteString("\n\n")
 			}
-			b.WriteString(e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names, media))
+			if quoteShown {
+				b.WriteString(quotedShownBlock(msg.ParentID))
+			} else {
+				b.WriteString(e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names, media))
+			}
 		}
 
 		var core string
@@ -367,6 +393,23 @@ func addMentionNames(names map[string]string, batches ...[]LarkMessage) map[stri
 		}
 	}
 	return names
+}
+
+// quoteShownEarlier reports whether the parent was already inlined in full
+// in the route's current conversation context. Any lookup failure inlines
+// the quote again: repeating it is safer than hiding it.
+func (e *inboundEnricher) quoteShownEarlier(ctx context.Context, msg InboundMessage) bool {
+	if e.quotes == nil || !msg.InstallationID.Valid {
+		return false
+	}
+	routeKey := larkRouteKey(string(msg.ChatID), msg.ChatType, msg.ThreadID)
+	shown, err := e.quotes.QuoteInCurrentContext(ctx, msg.InstallationID, routeKey, quotedFullMarker(msg.ParentID))
+	if err != nil {
+		e.logger.Warn("lark enricher: quote history lookup failed; inlining quote",
+			"message_id", msg.MessageID, "parent_id", msg.ParentID, "err", err)
+		return false
+	}
+	return shown
 }
 
 // fetchRecentItems pulls the recent group window and returns the
@@ -748,6 +791,16 @@ func restMentionsToEvent(ms []LarkMessageMention) []larkMention {
 func wrapQuoted(messageID, sender, msgType, inner string) string {
 	return fmt.Sprintf("<quoted_message message_id=%q sender=%q type=%q>\n%s\n</quoted_message>",
 		messageID, sender, msgType, inner)
+}
+
+// quotedFullMarker is the prefix of a fully rendered quote (wrapQuoted).
+// Error and shown-earlier blocks carry no sender, so they never match.
+func quotedFullMarker(messageID string) string {
+	return fmt.Sprintf("<quoted_message message_id=%q sender=", messageID)
+}
+
+func quotedShownBlock(messageID string) string {
+	return fmt.Sprintf("<quoted_message message_id=%q type=\"shown_earlier\">[Shown earlier in this conversation; not repeated.]</quoted_message>", messageID)
 }
 
 func quotedErrorBlock(messageID string) string {
