@@ -32,6 +32,12 @@ function profile(
 }
 
 describe("buildRuntimeCatalog", () => {
+  it("includes Tomcat in the existing built-in catalog", () => {
+    expect(buildRuntimeCatalog([]).builtins).toContainEqual(
+      expect.objectContaining({ id: "builtin:tomcat", protocolFamily: "tomcat" }),
+    );
+  });
+
   it("keeps custom profiles separate from built-in protocol families", () => {
     const catalog = buildRuntimeCatalog([
       profile("prof-1", "Team Codex", "2026-01-02T00:00:00Z"),

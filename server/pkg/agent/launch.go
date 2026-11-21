@@ -526,6 +526,7 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"amp":         ampBlockedArgs,
 	"reasonix":    reasonixBlockedArgs,
 	"traecli":     traecliBlockedArgs,
+	"tomcat":      tomcatBlockedArgs,
 	"dim":         dimBlockedArgs,
 	"devin":       devinBlockedArgs,
 	"zeroclaw":    zeroclawBlockedArgs,

@@ -27,6 +27,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "mcode",
   "devin",
   "traecli",
+  "tomcat",
   "dim",
   "omp",
   "zcode",

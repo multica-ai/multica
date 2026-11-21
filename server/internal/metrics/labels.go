@@ -180,6 +180,7 @@ var (
 		"droid":         "droid",
 		"amp":           "amp",
 		"traecli":       "traecli",
+		"tomcat":        "tomcat",
 		"other":         "other",
 	}
 	knownTerminalStatuses = map[string]string{

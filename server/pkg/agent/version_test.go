@@ -244,6 +244,8 @@ func TestCheckMinVersion(t *testing.T) {
 		{"opencode", "1.1.53", true},
 		{"opencode", "1.1.49", true},
 		{"opencode", "0.15.0", true},
+		{"tomcat", "tomcat 0.1.97", false},
+		{"tomcat", "tomcat 0.1.96", true},
 		{"unknown", "1.0.0", false},
 	}
 	for _, tt := range tests {

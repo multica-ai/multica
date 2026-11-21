@@ -295,6 +295,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
 | [Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/product-overview/what-is-qoder-cli-cn) | `qoderclicn` | Qoder CN ACP coding agent |
 | [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
+| [Tomcat](https://github.com/teisun/tomcat-agent) | `tomcat` | CLI 0.1.97 baseline; ACP sessions, model discovery, thinking levels, and MCP; configure credentials in Tomcat and restart its shared service after upgrades. |
 | [Grok Build CLI](https://docs.x.ai/) | `grok` | xAI Grok Build CLI (ACP via `grok agent stdio`) |
 | [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` | Alibaba Qwen Code (`qwen -p` with stream-json) |
 | [Amp](https://ampcode.com/docs/cli) | `amp` | Local `amp --execute --stream-json`; requires an access token in `AMP_API_KEY` for unattended execution. Model configuration selects an Amp mode. Managed MCP and live supplements are unsupported. |
@@ -457,6 +458,8 @@ Agent-specific overrides:
 | `MULTICA_OPENCLAW_CLI_TIMEOUT` | Deadline for each `openclaw config ...` call during task preparation (default 30s; accepts `45s` or `45`). Raise it when the local CLI is slow to start; the daemon also reads it from `backends.openclaw.cli_timeout` in the CLI config |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
+| `MULTICA_TOMCAT_PATH` | Custom path to the `tomcat` executable |
+| `MULTICA_TOMCAT_MODEL` | Default Tomcat model ID; an agent's explicit model takes precedence |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
 | `MULTICA_PI_MODEL` | Override the Pi model used |
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |

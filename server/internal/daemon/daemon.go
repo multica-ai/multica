@@ -8034,6 +8034,7 @@ func skillRefFromBundle(bundle SkillData) SkillRefData {
 // taskModelSelection is what a task actually launches with: the model
 // selector plus the capability overrides that survived validation.
 type taskModelSelection struct {
+	Resume               bool
 	Model                string
 	ThinkingLevel        string
 	ServiceTier          string
@@ -8127,7 +8128,10 @@ func resolveTaskModelSelection(
 	// drop a level: on a lookup error or a fallback/empty catalog we keep the
 	// persisted level and let the CLI object, unless the binary itself has no
 	// such effort flag (MUL-7691).
-	if sel.ThinkingLevel != "" {
+	// A resumed Tomcat session owns its model. Without an explicit override,
+	// the global default is not evidence about that model's supported effort.
+	// Let the adapter validate against session/load before sending a prompt.
+	if sel.ThinkingLevel != "" && !(provider == "tomcat" && sel.Resume && sel.Model == "") {
 		check, err := agent.CheckThinkingLevelWith(loadCatalog, provider, sel.Model, sel.ThinkingLevel)
 		if err != nil {
 			taskLog.Warn("thinking_level: catalog cannot validate; passing through",
@@ -9343,7 +9347,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		serviceTier = task.Agent.ServiceTier
 	}
 	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
-		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+		taskModelSelection{Resume: task.PriorSessionID != "", Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
 	var idleWatchdogTimeout time.Duration
