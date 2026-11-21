@@ -334,6 +334,31 @@ func TestPreparationHelperPreservesOpenclawTimeoutKind(t *testing.T) {
 	}
 }
 
+func TestPreparationHelperPreservesLocalWorktreePrerequisites(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	dir := t.TempDir()
+	params := PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-worktree-prerequisites",
+		TaskID:         "11111111-2222-3333-4444-555555555555",
+		Provider:       "opencode",
+		LocalWorktree:  &LocalWorktreeParams{LocalPath: dir},
+	}
+	check := func(want error) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		_, err := PrepareIsolated(ctx, preparationHelperTestCommand(), params, worktreeTestLogger())
+		if !errors.Is(err, want) {
+			t.Fatalf("helper failure = %v, want %v", err, want)
+		}
+	}
+	check(ErrLocalWorktreeRepositoryMissing)
+	gitRun(t, dir, "init", "-b", "main")
+	check(ErrLocalWorktreeHeadMissing)
+}
+
 // TestRehydratePreparationErrorUnknownKind pins the mixed-version direction of
 // the same wire: a helper newer than the daemon may name a kind this build has
 // never heard of, and the error must still arrive with its message intact

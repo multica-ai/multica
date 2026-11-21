@@ -180,6 +180,10 @@ const (
 	// session was touched.
 	ReasonEnvironmentPrepareFailed Reason = "environment_prepare_failed"
 
+	// ReasonLocalWorktreePrerequisiteMissing means Git could not find a
+	// repository or a commit to use as HEAD before the agent was started.
+	ReasonLocalWorktreePrerequisiteMissing Reason = "local_worktree_prerequisite_missing"
+
 	// ReasonLocalDirectoryMissing: the project links a local_directory to
 	// the daemon that claimed the task, and that directory no longer exists
 	// on the machine — the user deleted or moved it after linking it. The
@@ -320,6 +324,7 @@ var allReasons = []Reason{
 	ReasonSkillBundleUnavailable,
 	ReasonRuntimeCLITimeout,
 	ReasonEnvironmentPrepareFailed,
+	ReasonLocalWorktreePrerequisiteMissing,
 	ReasonLocalDirectoryMissing,
 	ReasonInvalidTaskIdentity,
 	ReasonRuntimeAccessDenied,

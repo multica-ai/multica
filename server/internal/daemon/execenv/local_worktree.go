@@ -17,6 +17,11 @@ import (
 	"time"
 )
 
+var (
+	ErrLocalWorktreeRepositoryMissing = errors.New("local worktree repository missing")
+	ErrLocalWorktreeHeadMissing       = errors.New("local worktree HEAD missing")
+)
+
 // Local worktree mode gives every task on a local_directory resource its own
 // git worktree of the user's repo, created inside the daemon-owned env root.
 // Tasks on the same directory then run concurrently instead of queueing on the
@@ -381,10 +386,17 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	}
 	pruneOrphanedStateRefs(gitRoot, logger)
 
-	headSHA, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "HEAD")
+	headSHA, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
 	if err != nil {
-		return nil, fmt.Errorf("execenv: repository %q has no commit to branch from "+
-			"(worktree mode needs at least one commit; make an initial commit or switch the resource back to in_place): %w", gitRoot, err)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, &preparationKindError{
+				kind: ErrLocalWorktreeHeadMissing,
+				msg: fmt.Sprintf("execenv: repository %q has no commit to branch from "+
+					"(worktree mode needs at least one commit; make an initial commit or switch the resource back to in_place): %v", gitRoot, err),
+			}
+		}
+		return nil, fmt.Errorf("execenv: resolve HEAD for repository %q: %w", gitRoot, err)
 	}
 
 	// Refuse an untracked payload too large to reproduce BEFORE snapshotting it:
@@ -1121,11 +1133,22 @@ func deleteBranch(gitRoot, branch string, logger *slog.Logger) {
 // than silently degrading to the in-place lock, which would leave the user
 // wondering why their tasks still queue.
 func resolveGitRoot(dir string) (string, error) {
-	root, err := runGitTrimmed(dir, "rev-parse", "--show-toplevel")
-	if err != nil || root == "" {
-		return "", fmt.Errorf("execenv: local_directory %q is not a git repository, "+
-			"but its project resource is set to execution_mode=worktree; "+
-			"initialise a repository there or switch the resource back to in_place", dir)
+	output, err := runGitTrimmed(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		diagnostic, _ := runGitEnv(dir, []string{"LC_ALL=C"}, "rev-parse", "--show-toplevel")
+		if strings.HasPrefix(strings.TrimSpace(diagnostic), "fatal: not a git repository (or any of the parent directories)") {
+			return "", &preparationKindError{
+				kind: ErrLocalWorktreeRepositoryMissing,
+				msg: fmt.Sprintf("execenv: local_directory %q is not a git repository, "+
+					"but its project resource is set to execution_mode=worktree; "+
+					"initialise a repository there or switch the resource back to in_place", dir),
+			}
+		}
+		return "", fmt.Errorf("execenv: find Git repository for local_directory %q: %s: %w", dir, strings.TrimSpace(diagnostic), err)
+	}
+	root := strings.TrimSpace(output)
+	if root == "" {
+		return "", fmt.Errorf("execenv: Git returned an empty repository root for local_directory %q", dir)
 	}
 	// EvalSymlinks so the root matches the path git reports from inside the
 	// worktree later — on macOS /tmp vs /private/tmp otherwise produce two

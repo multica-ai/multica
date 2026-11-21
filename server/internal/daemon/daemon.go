@@ -6376,8 +6376,11 @@ func taskRunFailureReason(err error) string {
 	if errors.Is(err, execenv.ErrOpenclawCLITimeout) {
 		return taskfailure.ReasonRuntimeCLITimeout.String()
 	}
+	if errors.Is(err, execenv.ErrLocalWorktreeRepositoryMissing) || errors.Is(err, execenv.ErrLocalWorktreeHeadMissing) {
+		return taskfailure.ReasonLocalWorktreePrerequisiteMissing.String()
+	}
 	// Everything else that failed while building or re-opening the execution
-	// environment. Last of the structural branches: the four sentinels above
+	// environment. Last of the structural branches: the specific failures above
 	// each name a cause the daemon already recognises on its own (task
 	// identity, the prepare budget, skill downloads, the local runtime CLI)
 	// and stay the better label. What is left is the rest of preparation on
