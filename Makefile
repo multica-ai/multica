@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-start selfhost-build selfhost-build-start selfhost-stop up down status list destroy gc env-exec api-dev web-dev collab-dev desktop-dev
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-start selfhost-build selfhost-build-start selfhost-stop up down status list destroy gc env-exec web-prod api-dev web-dev collab-dev desktop-dev
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -192,6 +192,9 @@ gc: ## Collect environments whose directory is gone or whose TTL expired
 
 env-exec: ## Run a command with this environment's variables (ARGS="-- pnpm dev:desktop")
 	@bash scripts/dev-env.sh exec $(ARGS)
+
+web-prod: ## Serve this environment's web port from a production build, then restore dev (ARGS="-- <command>")
+	@bash scripts/dev-env.sh exec -- node scripts/web-prod.mjs $(ARGS)
 
 # Single-component entry points. No database preflight: `up` has already proven
 # the database is reachable before it launches anything, and repeating the
