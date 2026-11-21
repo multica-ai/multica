@@ -67,8 +67,12 @@ var patterns = []secretPattern{
 	// Connection strings with embedded passwords
 	{regexp.MustCompile(`(?i)(?:postgres|mysql|mongodb|redis|amqp)(?:ql)?://[^:\s]+:[^@\s]+@`), "[REDACTED CONNECTION STRING]@"},
 
-	// Generic key=value patterns for common secret env var names
-	{regexp.MustCompile(`(?i)(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*\S+`), "[REDACTED CREDENTIAL]"},
+	// Generic key=value patterns for common secret env var names.
+	// The name and the separator are captured and put back: the keyword list is
+	// not anchored, so matching the keyword alone would erase the tail of a
+	// prefixed name and leave "GITEA_TOKEN=..." as "GITEA_[REDACTED CREDENTIAL]".
+	// Only the value is secret; the name is what the reader needs to act on.
+	{regexp.MustCompile(`(?i)(\b[A-Z0-9_]*(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*)\S+`), "${1}[REDACTED CREDENTIAL]"},
 }
 
 // maxRedactDepth bounds the walk in redactValue. Tool inputs are decoded from
