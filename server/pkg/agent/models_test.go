@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -829,6 +830,38 @@ exit 1
 	}
 	if models[0].ID != "openai/gpt-4o" || models[0].Thinking != nil {
 		t.Fatalf("unexpected fallback model: %+v", models[0])
+	}
+}
+
+func TestDiscoverOpenCodeModelsFallsBackAfterAPITimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	apiMarker := filepath.Join(dir, "api-called")
+	t.Setenv("MULTICA_TEST_OPENCODE_API_MARKER", apiMarker)
+	fake := filepath.Join(dir, "opencode")
+	writeTestExecutable(t, fake, []byte(`#!/bin/sh
+case "$1" in
+  --version) echo '2.0.26' ;;
+  api) : > "$MULTICA_TEST_OPENCODE_API_MARKER"; exec sleep 60 ;;
+  models)
+    [ "$#" -eq 1 ] || exit 2
+    echo 'openai/gpt-4o'
+    ;;
+  *) exit 2 ;;
+esac
+`))
+	models, err := discoverOpenCodeModelsWithin(t.Context(), Command{Path: fake}, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(apiMarker); err != nil {
+		t.Fatalf("2.x metadata probe was not invoked: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "openai/gpt-4o" || models[0].Thinking != nil {
+		t.Fatalf("plain fallback after a timed-out 2.x model API: got %+v", models)
 	}
 }
 

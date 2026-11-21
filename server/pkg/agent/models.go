@@ -817,19 +817,23 @@ func isOpenAIReasoningSeriesID(id string) bool {
 // the model API on 2.x, and verbose model rows on 1.x. Plain IDs remain a
 // fallback when metadata discovery fails; no reasoning levels are invented.
 func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	// Newer opencode (1.15+) syncs its hosted free-model catalog over the
+	// network on `opencode models`, which can take ~6s; the previous 5s cap
+	// timed out and returned an empty list, so the runtime showed online but
+	// the model picker was empty. See multica-ai/multica#3627.
+	return discoverOpenCodeModelsWithin(ctx, runtimeCmd, 15*time.Second)
+}
+
+func discoverOpenCodeModelsWithin(ctx context.Context, runtimeCmd Command, attemptTimeout time.Duration) ([]Model, error) {
 	if runtimeCmd.Path == "" {
 		runtimeCmd.Path = "opencode"
 	}
 	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
 		return []Model{}, nil
 	}
-	// Newer opencode (1.15+) syncs its hosted free-model catalog over the
-	// network on `opencode models`, which can take ~6s; the previous 5s cap
-	// timed out and returned an empty list, so the runtime showed online but
-	// the model picker was empty. See multica-ai/multica#3627.
-	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	version, _ := detectCLIVersion(runCtx, runtimeCmd)
+	metadataCtx, cancelMetadata := context.WithTimeout(ctx, attemptTimeout)
+	defer cancelMetadata()
+	version, _ := detectCLIVersion(metadataCtx, runtimeCmd)
 	parsed, versionErr := parseSemver(version)
 	var models []Model
 	if versionErr == nil && parsed.Major >= 2 {
@@ -843,21 +847,24 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 			if server == "" && !standalone {
 				args = append(args, "--standalone")
 			}
-			cmd := runtimeCmd.exec(runCtx, args...)
+			cmd := runtimeCmd.exec(metadataCtx, args...)
 			hideAgentWindow(cmd)
 			if out, err := outputOwned(cmd, runtimeCmd.logger); err == nil {
 				models = parseOpenCodeV2Models(out)
 			}
 		}
 	} else {
-		cmd := runtimeCmd.exec(runCtx, "models", "--verbose")
+		cmd := runtimeCmd.exec(metadataCtx, "models", "--verbose")
 		hideAgentWindow(cmd)
 		// A stale config can produce a non-zero exit with a usable catalog.
 		out, _ := outputOwned(cmd, runtimeCmd.logger)
 		models = parseOpenCodeModels(string(out))
 	}
 	if len(models) == 0 {
-		cmd := runtimeCmd.exec(runCtx, "models")
+		// A timed-out metadata probe must not expire the plain listing.
+		fallbackCtx, cancelFallback := context.WithTimeout(ctx, attemptTimeout)
+		defer cancelFallback()
+		cmd := runtimeCmd.exec(fallbackCtx, "models")
 		hideAgentWindow(cmd)
 		out, _ := outputOwned(cmd, runtimeCmd.logger)
 		models = parseOpenCodeModels(string(out))
