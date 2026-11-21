@@ -1,0 +1,32 @@
+---
+title: Workspace docs
+description: Keep team notes, decisions, and reference material together, and recover earlier versions.
+---
+
+Docs must be enabled on your deployment to appear in the workspace. For self-hosted testing, set `FF_DOCS_V1=true` in the server environment.
+
+Open **Docs** in the workspace rail on web or desktop. Use it for information your team will revisit, such as an onboarding checklist or project decisions.
+
+## Create and share a doc
+
+Docs and folders are scoped to the workspace. Linking a doc from a private project or naming a folder after that project does not limit access to its members.
+
+1. In the Docs sidebar, choose **New** and then **New doc** or **New folder**. Use the plus button beside a folder to create a doc in it.
+2. Add a title and start writing. Type `/` to insert a heading, checklist, table, or another block. Paste or drop an image to add it as a workspace attachment.
+3. Wait for **Saved** before sharing. Copy the link from the top bar, or type `@` and the doc's title in an issue, comment, or chat to link it there.
+
+To reorganize Docs, drag a doc or folder to its destination, or choose **Move to...** in its menu. You can delete an empty folder. Deleting a doc also deletes its version history.
+
+Workspace owners and admins can delete any doc or empty folder. Other members can delete items they or their agents created.
+
+Use workspace search to find words in a doc's title or content.
+
+## Recover drafts and versions
+
+If someone saves a newer version while you are editing, Multica keeps your draft and asks you to **Reload latest**. Your previous draft remains available next to the current content. Copy over the parts you want to keep.
+
+Open **History** to preview an earlier version. Choose **Restore this version** to make that content current. Restoring records a new version and keeps the existing history. Autosaves during a continuous edit can share a history entry.
+
+## Work with docs from an agent
+
+Ask an agent to read a linked doc or update it, and tell it what to preserve. With the [CLI](/cli), use `multica doc search "<query>"` to find a doc and `multica doc get` to read its Markdown and revision. To update a doc, pass that revision to `multica doc update` with `--base-revision`. If someone saved in the meantime, fetch the current version and merge your changes before retrying.
