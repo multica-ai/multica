@@ -613,3 +613,26 @@ describe("traceToolArgSummary / traceEventHasDetail — Codex changes[]", () => 
     );
   });
 });
+
+describe("context events", () => {
+  it("keep their own kind and label", () => {
+    expect(traceEventKind({ type: "context" })).toBe("context");
+    expect(traceEventLabel({ type: "context" })).toBe("Context");
+  });
+
+  // The daemon leaves `content` empty on these so older clients cannot splice
+  // it into a reply, so the figures are the only body the event has.
+  it("open their figures, not an empty box", () => {
+    const event = { type: "context", input: { phase: "compacted", pre_tokens: 180_000 } };
+    expect(traceEventHasDetail(event)).toBe(true);
+    expect(traceEventDetail(event)).toEqual({
+      kind: "text",
+      text: JSON.stringify(event.input, null, 2),
+    });
+    expect(traceEventCopyText(event)).toContain('"pre_tokens": 180000');
+  });
+
+  it("has no detail when the payload is empty", () => {
+    expect(traceEventHasDetail({ type: "context", input: {} })).toBe(false);
+  });
+});

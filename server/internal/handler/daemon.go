@@ -6054,6 +6054,25 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Keep the run's latest context occupancy on the task row.
+	// Surfaces that LIST runs — the issue timeline, the execution log — must
+	// show the figure without reading each run's transcript, and a historical
+	// collapsed run deliberately never fetches its messages. The daemon
+	// already throttles these events to meaningful changes, so this write is
+	// rare compared with the batches that carry none.
+	//
+	// Display metadata: a failure here must not fail the ingest, which has no
+	// retry on the daemon side and would lose the whole transcript batch.
+	if usage, ok := latestContextUsageInBatch(req.Messages); ok {
+		if err := h.Queries.UpdateTaskContextUsage(r.Context(), db.UpdateTaskContextUsageParams{
+			TaskID:      task.ID,
+			UsedTokens:  pgtype.Int8{Int64: usage.usedTokens, Valid: true},
+			LimitTokens: usage.limitTokens,
+		}); err != nil {
+			slog.Warn("failed to record task context usage", "task_id", taskID, "error", err)
+		}
+	}
+
 	if workspaceID != "" {
 		// CreateTaskMessages orders its result by seq, which is the daemon's
 		// own within-batch ordering — so this publishes in the same order the
@@ -6273,6 +6292,57 @@ func taskMessageCreatedAt(v *time.Time, serverNow time.Time) string {
 		return ""
 	}
 	return v.UTC().Format(time.RFC3339Nano)
+}
+
+// taskContextUsage is one run's context-window occupancy, as the transcript
+// reported it. limitTokens is 0 when the runtime reported no window.
+type taskContextUsage struct {
+	usedTokens  int64
+	limitTokens int64
+}
+
+// latestContextUsageInBatch returns the newest occupancy observation a report
+// batch carries, if any.
+//
+// Only occupancy counts: a compaction event carries no figure of its own, and
+// a batch whose context events are all compactions must leave the stored value
+// alone rather than overwrite it with nothing. The messages arrive in seq
+// order, so the last one wins.
+func latestContextUsageInBatch(messages []TaskMessageRequest) (taskContextUsage, bool) {
+	var found bool
+	var usage taskContextUsage
+	for _, msg := range messages {
+		if msg.Type != "context" || msg.Input == nil {
+			continue
+		}
+		used, ok := jsonNumberField(msg.Input["used_tokens"])
+		if !ok || used <= 0 {
+			continue
+		}
+		limit, _ := jsonNumberField(msg.Input["limit_tokens"])
+		if limit < 0 {
+			limit = 0
+		}
+		usage = taskContextUsage{usedTokens: used, limitTokens: limit}
+		found = true
+	}
+	return usage, found
+}
+
+// jsonNumberField reads an integer out of a decoded JSON value, which arrives
+// as float64 through encoding/json and may be any shape at all — the daemon
+// sends a tool's arguments through the same field.
+func jsonNumberField(v any) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true
+	case int64:
+		return n, true
+	case json.Number:
+		parsed, err := n.Int64()
+		return parsed, err == nil
+	}
+	return 0, false
 }
 
 // taskMessageCreatedAts keeps every timestamp in a report batch on the same

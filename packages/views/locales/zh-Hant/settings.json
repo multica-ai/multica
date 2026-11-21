@@ -162,6 +162,18 @@
     "sticky_comment_bar": {
       "title": "固定底部評論欄"
     },
+    "context_usage": {
+      "title": "上下文用量",
+      "description": "執行佔用了多少模型上下文視窗，僅對回報該資料的執行階段有效。",
+      "enabled": {
+        "title": "顯示上下文用量",
+        "description": "在聊天每輪和 issue 的執行裡顯示佔用數值和上下文壓縮。"
+      },
+      "issue_row": {
+        "title": "在 issue 的執行那一列顯示",
+        "description": "關閉後只在執行內部顯示——完整記錄和展開的步驟裡。"
+      }
+    },
     "running_agent_reply": {
       "title": "回覆正在執行的 AI 代理時",
       "steer": "插話到當前執行",

@@ -39,6 +39,10 @@ export function buildRunTranscript(
 ): TaskMessagePayload[] {
   const items: TaskMessagePayload[] = [];
   for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
+    // Context-window observations are state for a usage chip mobile does not
+    // render yet; dropping them before coalescing keeps them from splitting
+    // one text run into two rows.
+    if (message.type === "context") continue;
     const previous = items[items.length - 1];
     if (
       previous &&

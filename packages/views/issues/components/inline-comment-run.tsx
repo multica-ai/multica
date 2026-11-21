@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "@multica/ui/icons";
+import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, Loader2, MessageSquare, Minimize2, RotateCcw, ScrollText, Square, Terminal } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useContextUsageSettingsStore } from "@multica/core/agents/stores";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
@@ -20,6 +21,9 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
+import { ContextUsageChip } from "../../common/task-transcript/context-usage-chip";
+import { readContextEvent, taskContextUsage } from "../../common/task-transcript/context-usage";
+import { formatTokens } from "../../runtimes/utils";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
 import { traceEventSummary, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
@@ -109,7 +113,12 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, loadTranscript);
   const items = useMemo(() => buildTimeline(data ?? []), [data]);
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
-  const steps = useMemo(() => buildSteps(items), [items]);
+  // Compactions belong to the opt-in context feature: off, they are not steps.
+  const showContext = useContextUsageSettingsStore((state) => state.enabled);
+  const steps = useMemo(
+    () => buildSteps(showContext ? items : items.filter((item) => item.type !== "context")),
+    [items, showContext],
+  );
   const rows = useMemo(() => groupSteps(steps), [steps]);
   // Messages that steered this turn, placed in its step list where it read them.
   const { data: steers = NO_STEERS } = useQuery({
@@ -168,11 +177,17 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     </Button>} />
     <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
   </Tooltip>;
+  // How full the model's context window was, without opening the run. A
+  // historical run never loads its transcript, so the figure comes off the
+  // task row; while one is loaded (live, or expanded) the stream is newer and
+  // wins inside the chip.
+  const contextUsage = taskContextUsage(task);
   // Before the agent session starts there is no transcript to open.
   const hasTranscript = !PRE_RUN_STATUSES.includes(task.status);
   if (presentation === "header" && showCommentRunInHeader(run)) {
-    return <span className="inline-flex shrink-0" data-comment-actions data-run-id={task.id}>
+    return <span className="inline-flex shrink-0 items-center gap-1" data-comment-actions data-run-id={task.id}>
       {fullLogButton}
+      <ContextUsageChip items={data} usage={contextUsage} surface="issue_row" />
       {transcript}
     </span>;
   }
@@ -223,6 +238,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         </button>
         <span className={cn("shrink-0 whitespace-nowrap text-label tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
         {hasTranscript && fullLogButton}
+        {/* Yields the narrow row to identity like the elapsed time beside it. */}
+        <ContextUsageChip items={data} usage={contextUsage} surface="issue_row" className={cn(showIdentity && !active && "@max-[32rem]/run:hidden")} />
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button
           size="xs" variant="outline" className={cn(showIdentity && "@max-[32rem]/run:size-6 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}
@@ -330,6 +347,9 @@ function InlineSteer({ steer }: { steer: DeliveredSteer }) {
 
 function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; formatText: (text: string) => string }) {
   const { t } = useT("issues");
+  // A compaction is worded by the transcript, which owns this vocabulary on
+  // every surface; the run's own namespace has no copy of it.
+  const { t: tAgents } = useT("agents");
   const [open, setOpen] = useState(false);
   const disclosure = useRunDisclosureMotion(open);
   const [limit, setLimit] = useState(12);
@@ -338,7 +358,12 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
   const call = isCallStep(row);
   const pending = call && live && !row.result;
   const error = !grouped && !call && row.kind === "error";
-  const Icon = grouped || call ? Terminal : row.kind === "text" ? MessageSquare : row.kind === "thinking" ? Brain : AlertCircle;
+  const context = !grouped && !call && row.kind === "context" ? readContextEvent(row.item) : null;
+  const Icon = grouped || call ? Terminal
+    : row.kind === "text" ? MessageSquare
+    : row.kind === "thinking" ? Brain
+    : row.kind === "context" ? Minimize2
+    : AlertCircle;
   const previewCall = grouped ? row.steps[0] : call ? row : undefined;
   const toolSummary = previewCall
     ? redactSecrets(traceToolArgSummary(previewCall.call?.input, { formatText }) || (previewCall.result ? traceEventSummary(previewCall.result, { formatText }) : ""))
@@ -348,7 +373,14 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
     : grouped ? toolSummary ? `${row.tool} · ${toolSummary}` : row.tool
     : row.kind === "text" ? traceEventSummary({ ...row.item, content: redactSecrets(formatText(row.item.content ?? "")) }) || t(($) => $.inline_run.message)
     : row.kind === "thinking" ? thinkingPreview(row.item.content, formatText) || t(($) => $.inline_run.thinking)
+    : context?.kind === "compaction"
+      ? context.preTokens !== undefined
+        ? tAgents(($) => $.transcript.context_compacted_before, { tokens: formatTokens(context.preTokens) })
+        : tAgents(($) => $.transcript.context_compacted)
     : t(($) => $.inline_run.error);
+  // A context event this client cannot read is neither an error nor a step
+  // worth a row; the full log still lists it with its raw fields.
+  if (row.kind === "context" && context?.kind !== "compaction") return null;
   return <details className="min-w-0 text-caption" onToggle={onToggle}>
     <TruncatedTooltip content={summary}>
       <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">

@@ -31,6 +31,7 @@ export type TraceEventKind =
   | "tool_use"
   | "tool_result"
   | "error"
+  | "context"
   | "generic";
 
 export function traceEventKind(event: TraceEvent): TraceEventKind {
@@ -45,6 +46,8 @@ export function traceEventKind(event: TraceEvent): TraceEventKind {
       return "tool_result";
     case "error":
       return "error";
+    case "context":
+      return "context";
     default:
       return "generic";
   }
@@ -67,6 +70,8 @@ export function traceEventLabel(event: TraceEvent): string {
       return event.tool && event.tool.length > 0 ? event.tool : "Result";
     case "error":
       return "Error";
+    case "context":
+      return "Context";
     default:
       return event.type && event.type.length > 0 ? event.type : "Event";
   }
@@ -186,6 +191,7 @@ export function traceEventCopyText(event: TraceEvent): string {
   let body: string;
   switch (traceEventKind(event)) {
     case "tool_use":
+    case "context":
       body = event.input ? JSON.stringify(event.input, null, 2) : "";
       break;
     case "tool_result":
@@ -577,6 +583,11 @@ export function traceEventDetail(event: TraceEvent): TraceEventDetail {
     }
     case "tool_result":
       return { kind: "text", text: unwrapToolOutput(event.output ?? "") };
+    case "context":
+      // A context event carries no prose at all — the daemon deliberately
+      // leaves `content` empty so clients that predate the type cannot splice
+      // it into the agent's reply — so its figures ARE its body.
+      return { kind: "text", text: event.input ? JSON.stringify(event.input, null, 2) : "" };
     default:
       return { kind: "text", text: event.content ?? "" };
   }
@@ -635,6 +646,7 @@ export function base64ByteLength(base64: string): number {
 export function traceEventHasDetail(event: TraceEvent): boolean {
   switch (traceEventKind(event)) {
     case "tool_use":
+    case "context":
       return !!event.input && Object.keys(event.input).length > 0;
     case "tool_result":
       return !!event.output && event.output.length > 0;

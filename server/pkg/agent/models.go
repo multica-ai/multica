@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -535,6 +536,38 @@ func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
 // generic bracket suffix: capability lookup may inherit the base model's
 // effort catalog only when the modifier is syntactically a context size.
 var claudeContextWindowTagRe = regexp.MustCompile(`\[[1-9][0-9]*[km]\]$`)
+
+// defaultClaudeContextWindowTokens is the window every Claude model ships
+// with when its id carries no context modifier. A run whose model is unknown
+// gets no limit at all rather than this default: the percentage a wrong window
+// produces reads as authoritative and is not recoverable by the viewer.
+const defaultClaudeContextWindowTokens int64 = 200_000
+
+// ClaudeContextWindowTokens is the context window a Claude model string
+// denotes, or 0 when none can be established. The `[1m]` / `[200k]` modifier
+// wins because that is precisely what it selects; a bare `claude-*` id falls
+// back to the family default.
+func ClaudeContextWindowTokens(model string) int64 {
+	model = strings.TrimSpace(model)
+	if tag := claudeContextWindowTagRe.FindString(model); tag != "" {
+		digits := tag[1 : len(tag)-2]
+		n, err := strconv.ParseInt(digits, 10, 64)
+		if err != nil {
+			return 0
+		}
+		switch tag[len(tag)-2] {
+		case 'k':
+			return n * 1_000
+		case 'm':
+			return n * 1_000_000
+		}
+		return 0
+	}
+	if strings.HasPrefix(model, "claude-") {
+		return defaultClaudeContextWindowTokens
+	}
+	return 0
+}
 
 // modelIDForCapabilityLookup returns the catalog identity for a runtime-native
 // model string. It never changes the value persisted on the agent or passed to

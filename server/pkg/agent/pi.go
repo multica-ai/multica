@@ -719,6 +719,12 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					u.CacheReadTokens += msg.Usage.CacheRead
 					u.CacheWriteTokens += msg.Usage.CacheWrite
 					usage[model] = u
+					// One turn is one model request, so its input plus both
+					// cache classes is the window's occupancy. The totals above
+					// accumulate across turns and mean something else. Pi
+					// reports no window, so none is claimed.
+					sendContextUsage(msgCh, model,
+						msg.Usage.Input+msg.Usage.CacheRead+msg.Usage.CacheWrite, 0)
 				}
 				// A turn Pi ends on an error is only terminal when nothing
 				// follows it. Pi emits the same stopReason before an automatic

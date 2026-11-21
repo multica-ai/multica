@@ -588,6 +588,10 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 					usage.OutputTokens += u.OutputTokens
 					usage.CacheReadTokens += u.CacheReadTokens
 					usage.CacheWriteTokens += u.CacheWriteTokens
+					// One step is one model request, so its prompt — input
+					// plus both cache classes — is the window's occupancy.
+					sendContextUsage(ch, "",
+						u.InputTokens+u.CacheReadTokens+u.CacheWriteTokens, 0)
 				}
 			}
 			continue

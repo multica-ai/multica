@@ -202,9 +202,18 @@ func TestDevecoProcessEventsHappyPath(t *testing.T) {
 	for m := range ch {
 		msgs = append(msgs, m)
 	}
-	// status(running), text, tool-use, tool-result = 4 messages.
-	if len(msgs) != 4 {
-		t.Fatalf("expected 4 messages, got %d: %+v", len(msgs), msgs)
+	// status(running), text, tool-use, tool-result, context = 5 messages.
+	if len(msgs) != 5 {
+		t.Fatalf("expected 5 messages, got %d: %+v", len(msgs), msgs)
+	}
+	// The step's own prompt is the window's occupancy; DevEco reports no
+	// window, so the figure carries none rather than a borrowed default.
+	last := msgs[len(msgs)-1]
+	if last.Type != MessageContext || last.Context == nil {
+		t.Fatalf("expected a context observation, got %+v", last)
+	}
+	if last.Context.UsedTokens != 7 || last.Context.LimitTokens != 0 {
+		t.Fatalf("context = %+v, want 7 used and no window", *last.Context)
 	}
 }
 

@@ -266,7 +266,48 @@ const (
 	MessageStatus     MessageType = "status"
 	MessageError      MessageType = "error"
 	MessageLog        MessageType = "log"
+	// MessageContext reports how much of the model's context window the run
+	// occupies, and the compaction events the runtime announces. It is
+	// observational: a backend that cannot see either emits none, and no
+	// consumer may read its absence as "the window is empty".
+	MessageContext MessageType = "context"
 )
+
+// Context phases of a MessageContext. Only phases a runtime actually reports
+// exist here: Claude Code announces a finished compaction and says nothing at
+// its start, so there is no "compacting" phase to invent.
+const (
+	// ContextPhaseUsage is a plain occupancy observation, no lifecycle event.
+	ContextPhaseUsage = ""
+	// ContextPhaseCompacted marks a compaction the runtime has completed.
+	ContextPhaseCompacted = "compacted"
+)
+
+// ContextInfo is one observation of a run's context window.
+type ContextInfo struct {
+	// UsedTokens is the prompt the provider actually sent for the latest
+	// request — fresh input plus cache reads plus cache writes. It is the
+	// window's occupancy at that moment, NOT a per-turn cost: consecutive
+	// turns re-send the same conversation, so these values must never be
+	// summed the way TokenUsage counters are.
+	UsedTokens int64
+	// LimitTokens is the window UsedTokens is measured against. Zero means
+	// no limit could be established, and consumers must then show the
+	// absolute figure with no percentage rather than assume a default — a
+	// percentage against a guessed window is worse than no percentage.
+	LimitTokens int64
+	// Model is the provider's own model identifier for this observation.
+	Model string
+	// Phase is ContextPhaseUsage or a lifecycle marker such as
+	// ContextPhaseCompacted.
+	Phase string
+	// PreTokens is the occupancy immediately before a compaction, when the
+	// runtime reported it. Meaningful for ContextPhaseCompacted only.
+	PreTokens int64
+	// Trigger is the runtime's own word for what started a compaction
+	// ("auto", "manual"), verbatim and unmapped.
+	Trigger string
+}
 
 // Message is a unified event emitted by an agent during execution.
 type Message struct {
@@ -279,6 +320,7 @@ type Message struct {
 	Status    string         // agent status string (Status)
 	Level     string         // log level (Log)
 	SessionID string         // backend session id (Status), for early resume-pointer pinning
+	Context   *ContextInfo   // context-window observation (Context)
 }
 
 // TokenUsage tracks token consumption for a single model.

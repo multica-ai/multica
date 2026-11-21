@@ -162,6 +162,18 @@
     "sticky_comment_bar": {
       "title": "固定底部评论栏"
     },
+    "context_usage": {
+      "title": "上下文用量",
+      "description": "运行占用了多少模型上下文窗口，仅对上报该数据的运行时有效。",
+      "enabled": {
+        "title": "显示上下文用量",
+        "description": "在聊天每轮和 issue 的运行里显示占用数值和上下文压缩。"
+      },
+      "issue_row": {
+        "title": "在 issue 的运行那一行显示",
+        "description": "关闭后只在运行内部显示——完整记录和展开的步骤里。"
+      }
+    },
     "running_agent_reply": {
       "title": "回复正在运行的智能体时",
       "steer": "插话到当前运行",

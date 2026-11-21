@@ -392,3 +392,21 @@ describe("toolKindTotals", () => {
     });
   });
 });
+
+describe("buildSteps with context events", () => {
+  it("drops occupancy snapshots and keeps the compaction that happened", () => {
+    const items: TimelineItem[] = [
+      { seq: 1, type: "context", input: { used_tokens: 10_000, limit_tokens: 200_000 } },
+      { seq: 2, type: "text", content: "working" },
+      { seq: 3, type: "context", input: { used_tokens: 180_000, limit_tokens: 200_000 } },
+      { seq: 4, type: "context", input: { phase: "compacted", pre_tokens: 180_000 } },
+      { seq: 5, type: "text", content: "done" },
+    ];
+
+    expect(buildSteps(items).map((step) => [step.kind, step.seq])).toEqual([
+      ["text", 2],
+      ["context", 4],
+      ["text", 5],
+    ]);
+  });
+});

@@ -26,6 +26,7 @@ import {
   ArrowUpRight,
   Copy,
   RotateCw,
+  Minimize2,
 } from "@multica/ui/icons";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
@@ -36,6 +37,7 @@ import { AttachmentList } from "../../issues/components/comment-card";
 import { PreviewSequenceProvider, collectPreviewSequence } from "../../editor";
 import type { AgentAvailability } from "@multica/core/agents";
 import { resolveFailureReasonKey } from "@multica/core/agents";
+import { useContextUsageSettingsStore } from "@multica/core/agents/stores";
 import type {
   ChatMessage,
   ChatPendingTask,
@@ -44,7 +46,14 @@ import type {
   TaskMessagePayload,
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { buildTimeline } from "../../common/task-transcript";
+import {
+  buildTimeline,
+  ContextUsageChip,
+  isContextUsageItem,
+  latestContextUsage,
+  readContextEvent,
+} from "../../common/task-transcript";
+import { formatTokens } from "../../runtimes/utils";
 import { readCommandInput, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
@@ -674,9 +683,21 @@ function AssistantMessage({
   // Memoized on the cache array identity: mergeTaskMessagesBySeq preserves the
   // array reference when a duplicate event arrives, so this recomputes only
   // when a genuinely new message lands.
+  // Occupancy snapshots are state, not steps: only the newest one is true, so
+  // the chip reads them off the raw stream and they never become rows — which
+  // also keeps them out of the fold's step count. A compaction stays, because
+  // it happened at that point in the turn — unless the opt-in context feature
+  // is off, which hides compactions too.
+  const showContext = useContextUsageSettingsStore((state) => state.enabled);
   const timeline: ChatTimelineItem[] = useMemo(
-    () => transformTimeline(buildTimeline(taskMessages ?? []), transformContent),
-    [taskMessages, transformContent],
+    () =>
+      transformTimeline(
+        buildTimeline(taskMessages ?? []).filter((item) =>
+          showContext ? !isContextUsageItem(item) : item.type !== "context",
+        ),
+        transformContent,
+      ),
+    [taskMessages, transformContent, showContext],
   );
 
   // Content is settled once the persisted message exists; until then text is
@@ -745,6 +766,7 @@ function AssistantMessage({
           <MessageFooter
             message={message}
             timeline={timeline}
+            contextItems={taskMessages}
             isPending={isPending}
             transformContent={transformContent}
           />
@@ -968,11 +990,14 @@ function NoResponseNotice() {
 function MessageFooter({
   message,
   timeline,
+  contextItems,
   isPending,
   transformContent,
 }: {
   message: ChatMessage;
   timeline: ChatTimelineItem[];
+  /** The turn's raw stream, which carries its context observations. */
+  contextItems?: readonly TaskMessagePayload[];
   isPending: boolean;
   transformContent?: (content: string) => string;
 }) {
@@ -981,7 +1006,12 @@ function MessageFooter({
   const isNoResponse = message.message_kind === "no_response";
   const copyContent = extractCopyText(message, timeline, transformContent);
   const showCopy = !isPending && !isNoResponse && copyContent.trim().length > 0;
-  if (message.elapsed_ms == null && !showCopy) return null;
+  // The turn's meta row is where the context figure lives once the turn has
+  // settled — one place for every turn. Putting it on the process fold would
+  // hide it on the turns that have no tool calls to fold, which is exactly
+  // where a reader last saw it on the status pill a second earlier.
+  const contextUsage = useMemo(() => latestContextUsage(contextItems ?? []), [contextItems]);
+  if (message.elapsed_ms == null && !showCopy && !contextUsage) return null;
   return (
     <div className="flex items-center gap-1.5">
       {message.elapsed_ms != null && (
@@ -990,6 +1020,7 @@ function MessageFooter({
           elapsedMs={message.elapsed_ms}
         />
       )}
+      <ContextUsageChip items={contextItems} />
       {showCopy && (
         <MessageCopyButton content={copyContent} />
       )}
@@ -1348,9 +1379,35 @@ function ItemRow({ item }: { item: ChatTimelineItem }) {
       return <ThinkingRow item={item} />;
     case "error":
       return <ErrorRow item={item} />;
+    case "context":
+      return <ContextRow item={item} />;
     default:
       return null;
   }
+}
+
+/**
+ * A compaction, where it happened. The turn continues with an agent that has
+ * lost detail it had a moment ago, and this row is the only thing on the
+ * surface that says so. Occupancy snapshots never reach here — they are
+ * filtered upstream and read by the chip instead.
+ */
+function ContextRow({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("agents");
+  const event = readContextEvent(item);
+  if (event?.kind !== "compaction") return null;
+  return (
+    <div className="flex items-center gap-1.5 px-1 py-0.5 text-caption text-muted-foreground">
+      <Minimize2 className="size-3 shrink-0" />
+      <span className="truncate">
+        {event.preTokens !== undefined
+          ? t(($) => $.transcript.context_compacted_before, {
+              tokens: formatTokens(event.preTokens),
+            })
+          : t(($) => $.transcript.context_compacted)}
+      </span>
+    </div>
+  );
 }
 
 function ToolCallRow({ item }: { item: ChatTimelineItem }) {

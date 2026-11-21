@@ -6,6 +6,10 @@ import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
 import { issueKeys } from "@multica/core/issues/queries";
+import {
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  useContextUsageSettingsStore,
+} from "@multica/core/agents/stores";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
@@ -514,5 +518,95 @@ describe("InlineCommentRun", () => {
       await user.tab();
       expect(screen.getByRole("button", { name: /View activity/ })).toHaveFocus();
     });
+  });
+});
+
+describe("InlineCommentRun context window", () => {
+  // Off by default; these cases describe an issue run with it on.
+  beforeEach(() => {
+    useContextUsageSettingsStore.setState({ enabled: true, showOnIssueRow: true });
+  });
+  afterEach(() => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+  });
+
+  // A finished run in the timeline never fetches its transcript, so the figure
+  // has to come off the task row — otherwise it is only readable after opening
+  // the full log, which is what it used to be.
+  it("shows the run's context figure without loading its transcript", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({
+      status: "completed",
+      completed_at: "2026-09-07T00:01:00Z",
+      context_usage: { used_tokens: 75_200, limit_tokens: 258_400 },
+    }));
+
+    expect(await screen.findByText("29%")).toBeInTheDocument();
+    expect(screen.getByText("75.2K/258.4K")).toBeInTheDocument();
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+  });
+
+  // A compaction is a step of the run, and the run's step list has its own
+  // renderer: before this it fell through to the error branch and read
+  // "Error" under an alert icon.
+  it("names a compaction in the run's step list", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Working." },
+      { task_id: id, issue_id: "issue", seq: 2, type: "context",
+        input: { phase: "compacted", pre_tokens: 180_000, trigger: "auto" } },
+    ]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /View activity/ }));
+    expect(await screen.findByText("Compacted the context window (180K before)")).toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+  });
+
+  it("leaves the compaction out of the step list while the feature is off", async () => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Working." },
+      { task_id: id, issue_id: "issue", seq: 2, type: "context",
+        input: { phase: "compacted", pre_tokens: 180_000, trigger: "auto" } },
+    ]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /View activity/ }));
+    expect(await screen.findByText("Working.")).toBeInTheDocument();
+    expect(screen.queryByText(/Compacted the context window/)).not.toBeInTheDocument();
+  });
+
+  it("skips a context event it cannot read instead of calling it an error", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Working." },
+      { task_id: id, issue_id: "issue", seq: 2, type: "context", input: { phase: "unknown" } },
+    ]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /View activity/ }));
+    expect(await screen.findByText("Working.")).toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+  });
+
+  it("puts the full-log entry before the figure on the run's row", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({
+      status: "completed",
+      completed_at: "2026-09-07T00:01:00Z",
+      context_usage: { used_tokens: 75_200, limit_tokens: 258_400 },
+    }));
+
+    const fullLog = await screen.findByRole("button", { name: "Open full log" });
+    const figure = screen.getByText("29%");
+    expect(fullLog.compareDocumentPosition(figure) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+  });
+
+  it("renders nothing for a run whose runtime reported no occupancy", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    await screen.findByRole("button", { name: /View activity/ });
+    expect(screen.queryByText(/258.4K/)).not.toBeInTheDocument();
   });
 });

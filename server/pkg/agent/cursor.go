@@ -326,6 +326,11 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					u.OutputTokens += int64(part.Tokens.Output)
 					u.CacheReadTokens += int64(part.Tokens.Cache.Read)
 					stepUsage[model] = u
+					// One step is one model request: its input plus the cache
+					// it read back is what occupied the window then. The map
+					// above accumulates across steps and is not that figure.
+					sendContextUsage(msgCh, model,
+						int64(part.Tokens.Input)+int64(part.Tokens.Cache.Read), 0)
 				}
 
 			default:

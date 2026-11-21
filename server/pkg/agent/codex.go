@@ -3923,6 +3923,20 @@ func (c *codexClient) updateThreadTokenUsage(params map[string]any) {
 
 	total := codexRawTokenUsageFromV2(totalMap)
 	delta := codexRawTokenUsageFromV2(last)
+	// `last` is the most recent request's own usage, which is exactly the
+	// window's occupancy: its inputTokens is the whole prompt, cache reads and
+	// cache writes included. The cost path below turns it into a delta against
+	// the running total — a different quantity — so the observation is taken
+	// here, before that conversion.
+	if c.onMessage != nil {
+		if msg, ok := contextMessage(
+			codexStringField(params, "model"),
+			delta.InputTokens,
+			codexContextWindowFromV2(params, tokenUsage),
+		); ok {
+			c.onMessage(msg)
+		}
+	}
 	c.usageMu.Lock()
 	if c.usageTotalSet {
 		delta = subtractCodexRawTokenUsage(total, c.usageTotal)
@@ -4005,6 +4019,24 @@ func codexPlainInputTokens(inputTokens, cacheReadTokens, cacheWriteTokens int64)
 		codexUncachedInputTokens(inputTokens, cacheReadTokens),
 		cacheWriteTokens,
 	)
+}
+
+// codexStringField reads a string member, or "" when absent or another type.
+func codexStringField(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
+}
+
+// codexContextWindowFromV2 reads the window the app-server reported alongside
+// a usage notification, checking both the notification and the usage object
+// because the field has moved between app-server versions. Zero means this
+// build did not report one: the surfaces then show the absolute figure with no
+// percentage, which is the honest reading.
+func codexContextWindowFromV2(params, tokenUsage map[string]any) int64 {
+	if window := codexInt64(params, "contextWindow", "modelContextWindow", "model_context_window"); window > 0 {
+		return window
+	}
+	return codexInt64(tokenUsage, "contextWindow", "modelContextWindow", "model_context_window")
 }
 
 // codexInt64 returns the first non-zero int64 value from the map for the given keys.

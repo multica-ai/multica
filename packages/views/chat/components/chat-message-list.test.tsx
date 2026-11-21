@@ -1,10 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
+import {
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  useContextUsageSettingsStore,
+} from "@multica/core/agents/stores";
 import type { Attachment, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
+import enAgents from "../../locales/en/agents.json";
 import enChat from "../../locales/en/chat.json";
 import zhHansAgents from "../../locales/zh-Hans/agents.json";
 import zhHansChat from "../../locales/zh-Hans/chat.json";
@@ -50,7 +55,9 @@ vi.mock("react-virtuoso", () => ({
 
 import { ChatMessageList } from "./chat-message-list";
 
-const TEST_RESOURCES = { en: { chat: enChat } };
+// The context chip and the compaction row live in the `agents` namespace: the
+// transcript owns that wording and the chat panel reuses it verbatim.
+const TEST_RESOURCES = { en: { chat: enChat, agents: enAgents } };
 const TASK_ID = "6af44cbe-80ab-4dfe-b07d-bd3cfd588f4d";
 
 function taskMsg(
@@ -1129,5 +1136,103 @@ describe("ChatMessageList onboarding starter cards", () => {
       await screen.findByRole("button", { name: "Get a board up in minutes" }),
     ).toBeEnabled();
     expect(screen.getByRole("button", { name: "Later chip" })).toBeEnabled();
+  });
+});
+
+describe("ChatMessageList context window", () => {
+  // The feature ships off; these cases describe chat with it on.
+  beforeEach(() => {
+    useContextUsageSettingsStore.setState({ enabled: true, showOnIssueRow: true });
+  });
+  afterEach(() => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+  });
+
+  const CONTEXT_MESSAGES: TaskMessagePayload[] = [
+    taskMsg(0, "text", { content: "Looking into it. " }),
+    taskMsg(1, "context", { input: { used_tokens: 10_000, limit_tokens: 200_000 } }),
+    taskMsg(2, "tool_use", { tool: "Bash", input: { command: "go test ./..." } }),
+    taskMsg(3, "tool_result", { tool: "Bash", output: "ok" }),
+    taskMsg(4, "context", { input: { phase: "compacted", pre_tokens: 180_000 } }),
+    taskMsg(5, "context", { input: { used_tokens: 60_000, limit_tokens: 200_000 } }),
+  ];
+
+  function renderWithContext() {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), CONTEXT_MESSAGES);
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability={undefined}
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it("shows the turn's current occupancy and the compaction that happened", async () => {
+    renderWithContext();
+
+    // Newest snapshot, not the first and not their sum.
+    expect(await screen.findAllByText("30%")).not.toHaveLength(0);
+    expect(screen.getAllByText("60K/200K")).not.toHaveLength(0);
+    expect(
+      screen.getAllByText("Compacted the context window (180K before)"),
+    ).not.toHaveLength(0);
+  });
+
+  it("does not count occupancy snapshots as steps of the turn", async () => {
+    renderWithContext();
+
+    // tool_use + tool_result + the compaction — the two snapshots are state,
+    // not steps, so they never inflate this count or render an empty row.
+    expect(await screen.findByText("3 steps")).toBeInTheDocument();
+  });
+
+  it("hides the compaction and its step while the feature is off", async () => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+    renderWithContext();
+
+    expect(await screen.findByText("2 steps")).toBeInTheDocument();
+    expect(screen.queryByText(/Compacted the context window/)).not.toBeInTheDocument();
+    expect(screen.queryByText("60K/200K")).not.toBeInTheDocument();
+  });
+
+  // A turn that called no tools has no process fold to hang the figure on, so
+  // the reader watched it on the status pill and then lost it the moment the
+  // turn settled. The settled figure lives in the turn's meta row instead,
+  // which every turn has.
+  it("keeps the figure on a settled turn that called no tools", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "text", { content: "hi there" }),
+      taskMsg(1, "context", { input: { used_tokens: 30_300, limit_tokens: 258_400 } }),
+    ]);
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[{
+              id: "settled-no-tools",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "hi there",
+              task_id: TASK_ID,
+              created_at: "2026-11-20T00:00:00Z",
+              elapsed_ms: 8000,
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Replied in 8s")).toBeInTheDocument();
+    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.getByText("30.3K/258.4K")).toBeInTheDocument();
   });
 });

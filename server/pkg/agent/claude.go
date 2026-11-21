@@ -233,6 +233,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
 		rateLimits := newRateLimitTracker(opts.OnRateLimits)
+		contextLimit := ClaudeContextWindowTokens(opts.Model)
 		eventCount := 0
 		invalidEventCount := 0
 		assistantEventCount := 0
@@ -321,7 +322,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			switch msg.Type {
 			case "assistant":
 				assistantEventCount++
-				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
+				turn := b.handleAssistant(msg, msgCh, usage, seenUsage, contextLimit)
 				toolUseCount += turn.toolUses
 				if !turn.understood {
 					unreadableAssistantCount++
@@ -338,6 +339,23 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
+				}
+				// A compaction is the one moment a reader cannot otherwise
+				// explain: the transcript continues but the agent has lost
+				// detail it had a turn ago. Claude Code announces the boundary
+				// after the fact and nothing at its start, so this is reported
+				// as a completed event — there is no "compacting" state to show.
+				if msg.Subtype == "compact_boundary" {
+					info := ContextInfo{
+						Phase:       ContextPhaseCompacted,
+						LimitTokens: contextLimit,
+						Model:       opts.Model,
+					}
+					if msg.CompactMetadata != nil {
+						info.PreTokens = msg.CompactMetadata.PreTokens
+						info.Trigger = msg.CompactMetadata.Trigger
+					}
+					trySend(msgCh, Message{Type: MessageContext, Context: &info})
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
@@ -552,7 +570,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return session, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}) assistantTurn {
+// handleAssistant renders one assistant event and accounts its usage.
+//
+// contextLimit is the window resolved from the configured model, or 0 when
+// that id carried none (an alias such as "sonnet", or no model at all). The
+// stream's own model id is deliberately not consulted: it reports the base
+// model and so loses Claude Code's `[1m]` modifier, which would measure a
+// 1M-token run (an alias or the CLI default can select one) against 200K.
+func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}, contextLimit int64) assistantTurn {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		// Unreadable body: understood stays false so the caller drops any
@@ -582,6 +607,18 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		u.CacheReadTokens += content.Usage.CacheReadInputTokens
 		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
 		usage[content.Model] = u
+
+		// The same once-per-response guard decides the context observation:
+		// every block of one response shares the prompt that produced it, so
+		// re-emitting per block would report the same occupancy several times.
+		// Subagents are excluded above (ParentToolUseID), and that matters
+		// twice over here — their prompt is a different conversation, so its
+		// size says nothing about the main session's window.
+		sendContextUsage(ch, content.Model,
+			content.Usage.InputTokens+
+				content.Usage.CacheReadInputTokens+
+				content.Usage.CacheCreationInputTokens,
+			contextLimit)
 	}
 
 	for _, block := range content.Content {
@@ -756,6 +793,9 @@ type claudeSDKMessage struct {
 	Usage          *claudeUsage                      `json:"usage,omitempty"`
 	ModelUsage     map[string]claudeResultModelUsage `json:"modelUsage,omitempty"`
 
+	// compact_boundary system fields
+	CompactMetadata *claudeCompactMetadata `json:"compact_metadata,omitempty"`
+
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
 
@@ -766,6 +806,14 @@ type claudeSDKMessage struct {
 	RequestID string          `json:"request_id,omitempty"`
 	Request   json.RawMessage `json:"request,omitempty"`
 	Response  json.RawMessage `json:"response,omitempty"`
+}
+
+// claudeCompactMetadata is the compact_boundary system event's payload.
+// `pre_tokens` is the occupancy Claude Code measured before compacting; it
+// reports no post-compaction figure, which the next assistant event supplies.
+type claudeCompactMetadata struct {
+	Trigger   string `json:"trigger,omitempty"`
+	PreTokens int64  `json:"pre_tokens,omitempty"`
 }
 
 type claudeLogEntry struct {

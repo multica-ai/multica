@@ -1,0 +1,84 @@
+package daemon
+
+import (
+	"github.com/multica-ai/multica/server/pkg/agent"
+)
+
+// contextUsageReporter decides which of a backend's context observations reach
+// the transcript.
+//
+// A backend reports occupancy once per model response, which on a long run is
+// hundreds of rows that mostly repeat the previous figure — the window grows
+// by a few hundred tokens per turn while a reader only ever acts on the
+// change. Lifecycle events (a compaction) are never throttled: they are the
+// events, not samples of a value.
+//
+// Not safe for concurrent use; the transcript drain loop owns one per
+// execution and is its only caller.
+type contextUsageReporter struct {
+	reportedUsed int64
+	reported     bool
+}
+
+// contextUsageReportStepFraction is the share of the window occupancy must
+// move by before the change is worth a row: 2% of a 200K window is ~4K tokens,
+// about one substantial file read.
+const contextUsageReportStepFraction = 50
+
+// contextUsageReportStepTokens is the step used when no window is known. The
+// row then carries an absolute figure only, so the threshold has to be one in
+// absolute terms too.
+const contextUsageReportStepTokens int64 = 4_000
+
+func (r *contextUsageReporter) shouldReport(info agent.ContextInfo) bool {
+	if info.Phase != agent.ContextPhaseUsage {
+		return true
+	}
+	if info.UsedTokens <= 0 {
+		return false
+	}
+	if !r.reported {
+		r.reported = true
+		r.reportedUsed = info.UsedTokens
+		return true
+	}
+	step := contextUsageReportStepTokens
+	if info.LimitTokens > 0 {
+		step = info.LimitTokens / contextUsageReportStepFraction
+	}
+	delta := info.UsedTokens - r.reportedUsed
+	if delta < 0 {
+		delta = -delta
+	}
+	if delta < step {
+		return false
+	}
+	r.reportedUsed = info.UsedTokens
+	return true
+}
+
+// contextEventInput is the structured payload clients render from. Zero and
+// empty fields are omitted so a reader can tell "not reported" from a real
+// zero — an unknown window must not arrive as `limit_tokens: 0`.
+func contextEventInput(info agent.ContextInfo) map[string]any {
+	input := map[string]any{}
+	if info.UsedTokens > 0 {
+		input["used_tokens"] = info.UsedTokens
+	}
+	if info.LimitTokens > 0 {
+		input["limit_tokens"] = info.LimitTokens
+	}
+	if info.Model != "" {
+		input["model"] = info.Model
+	}
+	if info.Phase != agent.ContextPhaseUsage {
+		input["phase"] = info.Phase
+	}
+	if info.PreTokens > 0 {
+		input["pre_tokens"] = info.PreTokens
+	}
+	if info.Trigger != "" {
+		input["trigger"] = info.Trigger
+	}
+	return input
+}
