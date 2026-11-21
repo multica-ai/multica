@@ -32,6 +32,7 @@ import TableCell from "@tiptap/extension-table-cell";
 import { Table } from "@tiptap/extension-table";
 import { TaskList } from "@tiptap/extension-list";
 import { Markdown } from "@tiptap/markdown";
+import { Marked, type marked } from "marked";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -268,7 +269,18 @@ export function createEditorExtensions(
     InlineMathExtension,
     HighlightExtension,
     // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
-    Markdown.configure({ indentation: { style: "space", size: 3 } }),
+    // Each editor gets its own marked instance. Without one, @tiptap/markdown
+    // registers every editor's tokenizers on the global `marked` with `use()`
+    // and never removes them: the list grows by one editor's worth per mount,
+    // every inline parse runs all of them, and each tokenizer keeps its editor,
+    // the React refs its extensions close over and the unmounted DOM alive
+    // (MUL-9634: ~1,000 DOM nodes retained per issue opened).
+    Markdown.configure({
+      indentation: { style: "space", size: 3 },
+      // A Marked instance has every member MarkdownManager uses (use, Lexer,
+      // defaults, lexer, setOptions); the option is typed as the global's.
+      marked: new Marked() as unknown as typeof marked,
+    }),
     // Make Cmd+C / Cmd+X / drag write Markdown source to clipboard text/plain
     // so users can copy rich content out as the original Markdown.
     createMarkdownCopyExtension(),

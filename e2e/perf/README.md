@@ -327,6 +327,25 @@ make up C=api,desktop ARGS="--ephemeral --cdp"
 make env-exec ARGS="-- node scripts/perf-desktop.mjs --attach --scenarios desktop-memory --out $PWD/perf/dev"
 ```
 
+## Retained memory while switching Inbox rows
+
+`desktop-memory` says whether the app grows; `inbox-heap.spec.ts` says what
+is kept. It drives the same Work-panel switches on the web build (or the
+Desktop renderer with `PERF_PLATFORM=desktop`) and, at each switch count in
+`PERF_HEAP_CHECKPOINTS` (default `0,40,80,160,320`), forces GC and records
+the JS heap, DOM nodes and event listeners. A count that keeps rising with
+the switches is a leak; caches level off. `PERF_HEAP_SNAPSHOT_DIR` also writes
+a heap snapshot at each checkpoint, to diff two counts in DevTools.
+
+```bash
+PERF_SCENARIO=inbox-heap PLAYWRIGHT_BASE_URL=http://localhost:3000 \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts inbox-heap.spec.ts"
+```
+
+MUL-9634 found this way that every editor's Markdown tokenizers stayed on the
+global `marked`, with the unmounted issue behind them: ~1,000 DOM nodes per
+switch, until each editor got its own instance.
+
 ## Inbox jump
 
 `inbox-jump.spec.ts` opens a notification about a reply deep in a long issue
