@@ -1957,24 +1957,49 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
     previousCommentRuns.current = next.runs;
     return next;
   }, [commentTasks, timeline]);
+  // Scope entering run IDs per thread and reuse unchanged Sets so a new run in
+  // one thread never busts React.memo on sibling CommentCards.
+  const prevThreadEnteringRef = useRef(new Map<string, ReadonlySet<string>>());
+  const enteringRunIdsByThread = useMemo(() => {
+    const next = new Map<string, ReadonlySet<string>>();
+    if (enteringRunIds.size > 0) {
+      const prev = prevThreadEnteringRef.current;
+      for (const [rootId, runs] of commentRuns) {
+        const matched = runs.filter((run) => enteringRunIds.has(run.task.id)).map((run) => run.task.id);
+        if (matched.length === 0) continue;
+        const prior = prev.get(rootId);
+        if (prior && prior.size === matched.length && matched.every((taskId) => prior.has(taskId))) {
+          next.set(rootId, prior);
+        } else {
+          next.set(rootId, new Set(matched));
+        }
+      }
+    }
+    prevThreadEnteringRef.current = next;
+    return next;
+  }, [commentRuns, enteringRunIds]);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
   // expand Set is keyed only on commentId, not on resolution state). Without
   // this wrapper, an expand → unresolve → resolve sequence keeps the thread
-  // visually expanded after the second resolve.
+  // visually expanded after the second resolve. Read displayTimeline via ref
+  // so every timeline mutation does not mint a new callback and bust React.memo
+  // on every mounted CommentCard.
+  const displayTimelineRef = useRef(displayTimeline);
+  displayTimelineRef.current = displayTimeline;
   const handleResolveToggle = useCallback(
     (commentId: string, resolved: boolean) => {
       // Fold the thread back on any resolve change: clear the thread ROOT's
       // expand entry (expand state is keyed on root id, but a resolve target
       // can be a reply). Walk parent_id up to the root.
-      const byId = new Map(displayTimeline.map((e) => [e.id, e]));
+      const byId = new Map(displayTimelineRef.current.map((e) => [e.id, e]));
       let cur = byId.get(commentId);
       while (cur?.parent_id && byId.get(cur.parent_id)) cur = byId.get(cur.parent_id)!;
       clearResolvedExpand(cur?.id ?? commentId);
       toggleResolveComment(commentId, resolved);
     },
-    [displayTimeline, clearResolvedExpand, toggleResolveComment],
+    [clearResolvedExpand, toggleResolveComment],
   );
 
   // Memoized timeline grouping. Each render rebuilds the per-parent map from
@@ -2328,16 +2353,29 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   // The extra `offset` lifts the row's bottom clear of the sticky composer.
   // `scrollContainerEl` stays out of the deps: a container re-measure would
   // cancel the scroll mid-flight.
+  const scrollContainerElRef = useRef<HTMLDivElement | null>(null);
+  scrollContainerElRef.current = scrollContainerEl;
   useEffect(() => {
     if (!pendingPostedCommentId) return;
     const rootId = replyToRoot.get(pendingPostedCommentId) ?? pendingPostedCommentId;
     const index = items.findIndex((item) => item.id === rootId);
     if (index < 0) return;
     let timer: number | undefined;
+    let cancelled = false;
     const scrollEnd = () => {
+      if (cancelled) return;
       const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 0;
       virtuosoRef.current?.scrollToIndex({ index, align: "end", offset: composerHeight });
     };
+    const container = scrollContainerElRef.current;
+    const stopOnUserInput = () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      if (timer !== undefined) window.clearTimeout(timer);
+      setPendingPostedCommentId(null);
+    };
+    const userEvents = ["wheel", "touchstart", "pointerdown"] as const;
+    for (const type of userEvents) container?.addEventListener(type, stopOnUserInput, { passive: true });
     const frame = requestAnimationFrame(() => {
       scrollEnd();
       timer = window.setTimeout(() => {
@@ -2346,8 +2384,10 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
       }, 100);
     });
     return () => {
+      cancelled = true;
       cancelAnimationFrame(frame);
       if (timer !== undefined) window.clearTimeout(timer);
+      for (const type of userEvents) container?.removeEventListener(type, stopOnUserInput);
     };
   }, [pendingPostedCommentId, items, replyToRoot]);
   const jumpFlashTimerRef = useRef<number | null>(null);
@@ -2772,15 +2812,24 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
     const container = scrollContainerEl;
     if (!container) return;
     if (targetIdx < 0) return;
+    const markUserCancelled = () => {
+      completed = true;
+      interruptedLandingRef.current = null;
+      didHighlightRef.current = highlightCommentId;
+      writeViewState(issueHighlightMementoKey(id), highlightCommentId);
+      onHighlightLandedRef.current?.();
+      releaseLandingChrome();
+      releaseLandingOverscan();
+    };
+    let completed = false;
     if (!timelineSized) {
       // Virtuoso measures nothing while the list is below the viewport, and
       // without height estimates it cannot place the target until it does.
       const list = virtualTimelineRef.current;
-      return list ? revealTimelineList(container, list) : undefined;
+      return list ? revealTimelineList(container, list, markUserCancelled) : undefined;
     }
 
     interruptedLandingRef.current = null;
-    let completed = false;
     const cancel = scrollToTimelineComment({
       container, virtualizer: virtuosoRef.current,
       index: targetIdx, commentId: landingId,
@@ -2799,6 +2848,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
         // After the aligned frame paints, not inside it.
         window.setTimeout(releaseLandingOverscan, 0);
       },
+      onUserCancel: markUserCancelled,
     });
     return () => {
       cancel();
@@ -3718,7 +3768,8 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
             expandedResolvedIds: expandedResolved, onResolvedExpandChange: toggleResolvedExpand,
             highlightedCommentId: highlightedId,
-            runs: commentRuns.get(reply.id) ?? EMPTY_COMMENT_RUNS, enteringRunIds,
+            runs: commentRuns.get(reply.id) ?? EMPTY_COMMENT_RUNS,
+            enteringRunIds: enteringRunIdsByThread.get(reply.id),
           } : undefined} />}
       </div>;
     }
@@ -3741,7 +3792,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             issueId={id}
             replyScrollParent={scrollContainerEl}
             runs={commentRuns.get(item.id) ?? EMPTY_COMMENT_RUNS}
-            enteringRunIds={enteringRunIds}
+            enteringRunIds={enteringRunIdsByThread.get(item.id)}
             entry={item.entry}
             replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
             currentUserId={user?.id}

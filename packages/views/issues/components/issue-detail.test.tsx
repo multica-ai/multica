@@ -3110,6 +3110,55 @@ describe("IssueDetail (shared)", () => {
       }
     });
 
+    it("does not restart a comment landing after the user scrolls away and another thread receives a reply", async () => {
+      mockApiObj.listTasksByIssue.mockResolvedValue([]);
+      let driftStart = 0;
+      const drift = () => {
+        driftStart ||= performance.now();
+        return Math.min(performance.now() - driftStart, 300);
+      };
+      let userScrolled = false;
+      const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const container = this.closest<HTMLElement>("[data-tab-scroll-root]");
+        if (this === container) return new DOMRect(0, 0, 400, 200);
+        if (this.id === "comment-comment-2" && container) {
+          return new DOMRect(0, 250 + drift() - container.scrollTop, 400, 100);
+        }
+        return new DOMRect(0, 0, 0, 0);
+      });
+      try {
+        const { queryClient } = renderIssueDetailWithHighlight("comment-2");
+        await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
+        const container = document.querySelector<HTMLElement>("[data-tab-scroll-root]")!;
+
+        // User scrolls up to read/annotate an earlier thread before landing settles.
+        container.scrollTop = 40;
+        container.dispatchEvent(new Event("wheel"));
+        userScrolled = true;
+
+        // An agent posts a new reply in another thread, rebuilding timeline items.
+        act(() => {
+          queryClient.setQueryData<TimelineEntry[]>(["issues", "timeline", "issue-1"], (old) => [
+            ...(old ?? []),
+            {
+              ...mockTimeline[0]!,
+              id: "agent-reply-other-thread",
+              parent_id: "comment-2",
+              actor_type: "agent",
+              actor_id: "agent-1",
+              content: "Fast agent reply in thread 2",
+              created_at: "2026-01-18T00:00:00Z",
+            },
+          ]);
+        });
+        await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 120)); });
+        expect(userScrolled).toBe(true);
+        expect(container.scrollTop).toBe(40);
+      } finally {
+        rect.mockRestore();
+      }
+    });
+
     it("folds an assignment reply with its resolved parent and unfolds that thread for a notification", async () => {
       const run: AgentTask = { id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
         kind: "direct", status: "completed", priority: 0, created_at: "2026-01-16T00:00:00Z", started_at: null, dispatched_at: null,

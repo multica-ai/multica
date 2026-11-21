@@ -110,6 +110,7 @@ export function AnnotationComposer({
           placeholder={t(($) => $.reply.annotations.note_placeholder)}
           className="min-h-8 max-h-32 overflow-y-auto px-2 py-1.5"
           currentIssueId={issueId} showBubbleMenu={false} debounceMs={100}
+          flushPendingOnUnmount
           onUpdate={onChange} onEnter={save} onSubmit={send} />
       </div>
       <VoiceHud voice={voice} />
