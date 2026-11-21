@@ -11,7 +11,16 @@ import (
 
 const hermesGatewayStateMarker = ".multica-gateway-state-v1"
 
+// ResidentHermesGatewayEnabled opts into one long-lived owner with per-task ACP viewers.
+// Its gateway records must remain visible rather than isolated per task.
+func ResidentHermesGatewayEnabled() bool {
+	return os.Getenv("MULTICA_HERMES_RESIDENT_GATEWAY") == "1"
+}
+
 func isHermesGatewayStateEntry(name string) bool {
+	if ResidentHermesGatewayEnabled() {
+		return false
+	}
 	return name == "logs" || name == "sessions" || name == "cron" ||
 		strings.HasPrefix(name, "gateway.") || strings.HasPrefix(name, "gateway_")
 }
@@ -19,6 +28,9 @@ func isHermesGatewayStateEntry(name string) bool {
 // Older overlays mirrored these paths, including the host's live PID records
 // and cron jobs. Detach them once, without following links into the source home.
 func prepareHermesGatewayState(home string) error {
+	if ResidentHermesGatewayEnabled() {
+		return nil
+	}
 	marker := filepath.Join(home, hermesGatewayStateMarker)
 	if _, err := os.Stat(marker); err == nil {
 		return nil

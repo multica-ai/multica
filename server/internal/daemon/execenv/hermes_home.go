@@ -82,6 +82,10 @@ var hermesOverriddenEntries = map[string]struct{}{
 // separately can produce an inconsistent snapshot, exposes host conversation
 // history, and fails on Windows when SQLite byte-range-locks state.db-shm.
 func isHermesOverlayOwnedEntry(name string) bool {
+	// These directories belong to the resident owner, not the task viewer.
+	if ResidentHermesGatewayEnabled() && (name == "logs" || name == "sessions" || name == "cron") {
+		return false
+	}
 	if _, owned := hermesOverriddenEntries[name]; owned {
 		return true
 	}
