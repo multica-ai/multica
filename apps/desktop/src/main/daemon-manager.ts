@@ -1046,11 +1046,11 @@ async function startDaemon(
       current: active,
     })
   ) {
-    return { success: false, error: "Daemon recovery was superseded" };
+    return { success: false, error: getDaemonErrorCopy(currentLanguage()).recoverySuperseded };
   }
 
   if (desiredRunningBeforeUpdateStop !== null) return updateInProgressResult();
-  if (quitting) return { success: false, error: "Application is quitting" };
+  if (quitting) return { success: false, error: getDaemonErrorCopy(currentLanguage()).appQuitting };
   if (recoveryProfile) recoveryPolicy.recordRecoveryAttempt(Date.now());
   currentState = "starting";
   // Begin a fresh auth-probe window for this attempt.
@@ -1115,7 +1115,7 @@ async function stopDaemon(
   if (await lifecycleBlockedByForeignDaemon()) return { success: true };
 
   const bin = await resolveCliBinary();
-  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  if (!bin) return { success: false, error: getDaemonErrorCopy(currentLanguage()).cliNotInstalled };
 
   const active = await ensureActiveProfile();
   if (!active) return { success: true };
@@ -1145,7 +1145,7 @@ async function stopDaemon(
 
 async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
   if (desiredRunningBeforeUpdateStop !== null) return updateInProgressResult();
-  if (quitting) return { success: false, error: "Application is quitting" };
+  if (quitting) return { success: false, error: getDaemonErrorCopy(currentLanguage()).appQuitting };
   // Same central, live-preflighted guard as stopDaemon: we can neither stop nor
   // start a daemon we don't manage, so don't try (user-switch, reauth,
   // first-workspace, and any future restart caller all route through here).

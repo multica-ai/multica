@@ -24,7 +24,9 @@
     "resources": "資源",
     "lead": "負責人",
     "no_resources": "尚未新增資源。",
-    "add_resource": "新增資源"
+    "add_resource": "新增資源",
+    "add_description": "新增描述",
+    "progress": "進度"
   },
   "form": {
     "icon_emoji": "圖示（emoji）",

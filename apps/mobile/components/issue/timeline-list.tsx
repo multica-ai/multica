@@ -83,6 +83,7 @@ export function TimelineList({
   highlightCommentId,
   highlightNonce,
 }: Props) {
+  const { t } = useT("issues");
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to comment cards / chip rows / reactions normally.
@@ -310,7 +311,7 @@ export function TimelineList({
       <IssueReactionRow issue={issue} />
       <View className="px-4 pt-4 pb-2 border-t border-border">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-          Activity
+          {t("detail.activity")}
         </Text>
       </View>
       {timelineLoading && (!entries || entries.length === 0) ? (
@@ -500,7 +501,7 @@ function NewCommentChip({
     >
       <Ionicons name="arrow-down" size={14} color={fg} />
       <Text className="text-xs font-semibold text-primary-foreground">
-        {count} new
+        {t(count === 1 ? "jump_new_one" : "jump_new_other", { count })}
       </Text>
     </Pressable>
   );

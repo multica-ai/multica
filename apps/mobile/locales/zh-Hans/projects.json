@@ -24,7 +24,9 @@
     "resources": "资源",
     "lead": "负责人",
     "no_resources": "尚未添加资源。",
-    "add_resource": "添加资源"
+    "add_resource": "添加资源",
+    "add_description": "添加描述",
+    "progress": "进度"
   },
   "form": {
     "icon_emoji": "图标（emoji）",

@@ -49,7 +49,8 @@
   "list": {
     "empty": "没有符合筛选条件的任务",
     "count_other": "{{count}} 个任务",
-    "search_placeholder": "搜索任务和项目"
+    "search_placeholder": "搜索任务和项目",
+    "search_no_results": "未找到与 \"{{query}}\" 相关的结果"
   },
   "detail": {
     "properties": "属性",
@@ -59,6 +60,7 @@
     "reply": "回复",
     "add_comment": "添加评论...",
     "description": "描述",
+    "no_description": "暂无描述。",
     "add_description": "添加描述...",
     "runs": "运行",
     "copy_link": "复制链接",
@@ -199,6 +201,8 @@
     "delete_keep_replies": "该评论将被永久删除。其回复会保留在讨论中。此操作无法撤销。",
     "delete_with_replies": "该评论将被永久删除，讨论中的回复也会一并移除。此操作无法撤销。",
     "more_reactions": "更多表情...",
+    "add_reaction": "添加表情回应",
+    "deleted": "该评论已删除",
     "fallback_actor": "评论",
     "composer_placeholder": "添加评论...",
     "composer_pill": "添加评论，输入 @ 提及..."
@@ -316,5 +320,6 @@
     "retry_upload": "重试上传 {{name}}",
     "open_file": "打开 {{name}}",
     "remove_file": "移除 {{name}}"
-  }
+  },
+  "jump_new_other": "{{count}} 条新消息"
 }

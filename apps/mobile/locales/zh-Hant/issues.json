@@ -49,7 +49,8 @@
   "list": {
     "empty": "沒有符合篩選條件的任務",
     "count_other": "{{count}} 個任務",
-    "search_placeholder": "搜尋任務和專案"
+    "search_placeholder": "搜尋任務和專案",
+    "search_no_results": "找不到與「{{query}}」相關的結果"
   },
   "detail": {
     "properties": "屬性",
@@ -65,7 +66,8 @@
     "open_on_web": "在網頁開啟",
     "delete_comment": "刪除評論",
     "edit_comment": "編輯評論",
-    "no_runs": "暫無執行"
+    "no_runs": "暫無執行",
+    "no_description": "暫無描述。"
   },
   "new": {
     "title": "新建任務",
@@ -199,6 +201,8 @@
     "delete_keep_replies": "該評論將被永久刪除。其回覆會保留在討論中。此操作無法撤銷。",
     "delete_with_replies": "該評論將被永久刪除，討論中的回覆也會一併移除。此操作無法撤銷。",
     "more_reactions": "更多表情…",
+    "add_reaction": "新增表情回應",
+    "deleted": "該留言已刪除",
     "fallback_actor": "評論",
     "composer_placeholder": "新增評論…",
     "composer_pill": "新增評論，輸入 @ 提及…"
@@ -316,5 +320,6 @@
     "retry_upload": "重試上傳 {{name}}",
     "open_file": "開啟 {{name}}",
     "remove_file": "移除 {{name}}"
-  }
+  },
+  "jump_new_other": "{{count}} 則新訊息"
 }

@@ -436,6 +436,7 @@ function CommentBody({
   // normal server-backed comment OR an in-flight optimistic. Only set when
   // the matching `useCreateComment` mutation errored and the entry was
   // intentionally left in the cache to surface inline retry.
+  const { t } = useT("issues");
   const failed = useFailedCommentsStore((s) => s.failed[entry.id]);
   // Same query as IssueDescription — TanStack dedupes so this fires once
   // per issue regardless of how many comments need to resolve attachments.
@@ -525,7 +526,7 @@ function CommentBody({
     // placeholder in packages/views/issues/components/comment-card.tsx.
     return (
       <Text className="text-sm italic text-muted-foreground">
-        This comment was deleted
+        {t("comments.deleted")}
       </Text>
     );
   }

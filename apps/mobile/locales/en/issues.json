@@ -49,7 +49,8 @@
   "list": {
     "empty": "No issues match your filters",
     "count_other": "{{count}} issues",
-    "search_placeholder": "Search issues and projects"
+    "search_placeholder": "Search issues and projects",
+    "search_no_results": "No results for \"{{query}}\""
   },
   "detail": {
     "properties": "Properties",
@@ -59,6 +60,7 @@
     "reply": "Reply",
     "add_comment": "Add comment...",
     "description": "Description",
+    "no_description": "No description.",
     "add_description": "Add description...",
     "runs": "Runs",
     "copy_link": "Copy link",
@@ -201,6 +203,8 @@
     "delete_keep_replies": "This comment will be permanently deleted. Any replies to it stay in the thread. This cannot be undone.",
     "delete_with_replies": "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
     "more_reactions": "More reactions...",
+    "add_reaction": "Add reaction",
+    "deleted": "This comment was deleted",
     "fallback_actor": "comment",
     "composer_placeholder": "Add a comment...",
     "composer_pill": "Add a comment, type @ to mention..."
@@ -315,6 +319,8 @@
   "new_badge": "New",
   "jump_a11y_one": "Jump to {{count}} new message",
   "jump_a11y_other": "Jump to {{count}} new messages",
+  "jump_new_one": "{{count}} new",
+  "jump_new_other": "{{count}} new",
   "a11y": {
     "agent_working": "Agent working — open runs",
     "remove_mention": "Remove mention {{name}}",

@@ -13,6 +13,13 @@ const MOBILE_I18N_ATTRIBUTE_GUARD = {
     "User-visible copy in placeholder/title/aria-label/alt/accessibilityLabel must come from useTranslation().",
 };
 
+const MOBILE_I18N_JSX_TEXT_GUARD = {
+  selector:
+    ":not(JSXElement[openingElement.name.name='code']) > JSXText[value=/[A-Za-z]{2,}/]",
+  message:
+    "User-visible JSX text must come from useT() / useTranslation() rather than a hardcoded string literal.",
+};
+
 const MOBILE_I18N_TOAST_GUARD = {
   selector: [
     ":matches(CallExpression[callee.name='toast'], CallExpression[callee.object.name='toast']) > Literal[value=/[A-Za-z]/]:not([value=/^https?:/])",
@@ -62,6 +69,7 @@ module.exports = defineConfig([
       "no-restricted-syntax": [
         "error",
         MOBILE_I18N_ATTRIBUTE_GUARD,
+        MOBILE_I18N_JSX_TEXT_GUARD,
         MOBILE_I18N_TOAST_GUARD,
       ],
     },
