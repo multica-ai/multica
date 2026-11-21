@@ -313,6 +313,10 @@ func call(ctx context.Context, client *http.Client, endpoint *url.URL, headers h
 	if err != nil {
 		return rpcResponse{}, nil, err
 	}
+	var outgoing struct {
+		ID json.RawMessage `json:"id"`
+	}
+	_ = json.Unmarshal(body, &outgoing)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
 		return rpcResponse{}, nil, err
@@ -335,7 +339,7 @@ func call(ctx context.Context, client *http.Client, endpoint *url.URL, headers h
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return rpcResponse{}, response.Header, fmt.Errorf("remote MCP returned HTTP %d", response.StatusCode)
 	}
-	raw, err := readResponse(response)
+	raw, err := readResponse(response, outgoing.ID)
 	if err != nil {
 		return rpcResponse{}, response.Header, err
 	}
@@ -349,26 +353,11 @@ func call(ctx context.Context, client *http.Client, endpoint *url.URL, headers h
 	return decoded, response.Header, nil
 }
 
-func readResponse(response *http.Response) ([]byte, error) {
-	limited := io.LimitReader(response.Body, MaxResponseBytes+1)
-	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		scanner := bufio.NewScanner(limited)
-		scanner.Buffer(make([]byte, 4096), MaxResponseBytes+1)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "data:") {
-				data := bytes.TrimSpace([]byte(strings.TrimPrefix(line, "data:")))
-				if len(data) > 0 {
-					return data, nil
-				}
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			return nil, err
-		}
-		return nil, errors.New("remote MCP SSE response contained no data")
+func readResponse(response *http.Response, requestID json.RawMessage) ([]byte, error) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(response.Header.Get("Content-Type"))), "text/event-stream") {
+		return readSSEResponse(response.Body, MaxResponseBytes, requestID)
 	}
-	raw, err := io.ReadAll(limited)
+	raw, err := io.ReadAll(io.LimitReader(response.Body, MaxResponseBytes+1))
 	if err != nil {
 		return nil, err
 	}
@@ -376,6 +365,144 @@ func readResponse(response *http.Response) ([]byte, error) {
 		return nil, errors.New("remote MCP response exceeds size limit")
 	}
 	return raw, nil
+}
+
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+func DecodeSSEResponse(raw []byte, requestID json.RawMessage) ([]byte, error) {
+	return readSSEResponse(bytes.NewReader(raw), len(raw), requestID)
+}
+
+func readSSEResponse(r io.Reader, maxBytes int, requestID json.RawMessage) ([]byte, error) {
+	if maxBytes < 0 {
+		maxBytes = MaxResponseBytes
+	}
+	wantID := bytes.TrimSpace(requestID)
+	if isNullJSON(wantID) {
+		wantID = nil
+	}
+	cr := &countingReader{r: io.LimitReader(r, int64(maxBytes)+1)}
+	scanner := bufio.NewScanner(cr)
+	bufMax := maxBytes + 1
+	if bufMax < 4096 {
+		bufMax = 4096
+	}
+	scanner.Buffer(make([]byte, 4096), bufMax)
+
+	var (
+		eventType    string
+		dataLines    [][]byte
+		firstInvalid []byte
+	)
+	dispatch := func() ([]byte, bool) {
+		defer func() {
+			eventType = ""
+			dataLines = nil
+		}()
+		if len(dataLines) == 0 || (eventType != "" && eventType != "message") {
+			return nil, false
+		}
+		payload := bytes.TrimSpace(bytes.Join(dataLines, []byte("\n")))
+		if len(payload) == 0 {
+			return nil, false
+		}
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Error  json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal(payload, &msg); err != nil {
+			if firstInvalid == nil {
+				firstInvalid = payload
+			}
+			return nil, false
+		}
+		if msg.Method != "" {
+			return nil, false
+		}
+		if len(wantID) > 0 && !sameJSONRPCID(msg.ID, wantID) && !(isNullJSON(msg.ID) && len(bytes.TrimSpace(msg.Error)) > 0) {
+			return nil, false
+		}
+		return payload, true
+	}
+
+	for scanner.Scan() {
+		if cr.n > int64(maxBytes) {
+			return nil, errors.New("remote MCP response exceeds size limit")
+		}
+		line := scanner.Text()
+		if line == "" {
+			if payload, ok := dispatch(); ok {
+				return payload, nil
+			}
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		field, value, _ := strings.Cut(line, ":")
+		value = strings.TrimPrefix(value, " ")
+		switch field {
+		case "event":
+			eventType = value
+		case "data":
+			dataLines = append(dataLines, []byte(value))
+		}
+	}
+	if cr.n > int64(maxBytes) || errors.Is(scanner.Err(), bufio.ErrTooLong) {
+		return nil, errors.New("remote MCP response exceeds size limit")
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if payload, ok := dispatch(); ok {
+		return payload, nil
+	}
+	if firstInvalid != nil {
+		return firstInvalid, nil
+	}
+	return nil, errors.New("remote MCP SSE response contained no data")
+}
+
+func isNullJSON(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
+func sameJSONRPCID(a, b json.RawMessage) bool {
+	a = bytes.TrimSpace(a)
+	b = bytes.TrimSpace(b)
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	if bytes.Equal(a, b) {
+		return true
+	}
+	var av, bv any
+	if err := json.Unmarshal(a, &av); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(b, &bv); err != nil {
+		return false
+	}
+	switch lhs := av.(type) {
+	case string:
+		rhs, ok := bv.(string)
+		return ok && lhs == rhs
+	case float64:
+		rhs, ok := bv.(float64)
+		return ok && lhs == rhs
+	default:
+		return false
+	}
 }
 
 func canonicalJSON(raw json.RawMessage) (json.RawMessage, error) {

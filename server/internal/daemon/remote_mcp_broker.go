@@ -325,7 +325,7 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 		return
 	}
 	if rpcRequest.Method == "tools/list" {
-		responseBody, err = decodeRemoteMCPSSEData(response.Header.Get("Content-Type"), responseBody)
+		responseBody, err = decodeRemoteMCPSSEData(response.Header.Get("Content-Type"), responseBody, rpcRequest.ID)
 		if err != nil {
 			resultClass = "remote_error"
 			writeRemoteMCPError(w, rpcRequest.ID, -32000, "Remote MCP service returned an invalid response")
@@ -351,19 +351,11 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 	resultClass = "success"
 }
 
-func decodeRemoteMCPSSEData(contentType string, raw []byte) ([]byte, error) {
-	if !strings.HasPrefix(strings.ToLower(contentType), "text/event-stream") {
+func decodeRemoteMCPSSEData(contentType string, raw []byte, requestID json.RawMessage) ([]byte, error) {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream") {
 		return raw, nil
 	}
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		if bytes.HasPrefix(line, []byte("data:")) {
-			data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-			if len(data) > 0 {
-				return data, nil
-			}
-		}
-	}
-	return nil, errors.New("Remote MCP SSE response contained no data")
+	return remotemcp.DecodeSSEResponse(raw, requestID)
 }
 
 func allowedRemoteMCPMethod(method string) bool {
