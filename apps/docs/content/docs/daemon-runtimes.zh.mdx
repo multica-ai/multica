@@ -230,6 +230,14 @@ Hermes 在任务和聊天中的运行会将会话持久目录作为隔离的 `HE
 
 Multica 每次运行都会刷新其中的 skill 和派生配置。模型服务认证会保留，托管运行的消息平台适配器和 HTTP 入口会关闭。宿主的 Gateway 状态、日志、会话和定时任务各自隔离。运行结束时会停止本次运行的 Gateway，确保后续运行使用自己的执行环境。
 
+### Codex 项目指令大小限制 [#codex-instructions]
+
+开始或恢复 Codex 运行前，守护进程会检查 Codex 是否选中了生成的 `AGENTS.md`，以及能否在 `project_doc_max_bytes` 限制内完整读取它。默认限制为 32 KiB，由项目的所有指令文件共享。如果文件被其他文件覆盖、超出剩余大小限制，或无法确认实际生效的配置，运行会在模型回合开始前停止。诊断会标明文件和限制，不输出指令正文。
+
+如果 Codex 将当前项目标记为不受信任，或被禁用的项目配置可能在会话开始时改变指令加载方式，守护进程会停止，并提示你在 Codex 中检查项目的信任设置。Multica 不会自动授予信任。
+
+可以精简智能体或仓库指令，检查是否有优先级更高的 `AGENTS.override.md`，或在 Codex 配置或智能体自定义参数中明确提高限制，例如 `-c project_doc_max_bytes=65536`。Multica 会保留你设置的限制和仓库文件。详见 [Codex 指令发现规则](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
+
 ### Codex 原生记忆与子智能体 [#codex-memory]
 
 守护进程管理的 Codex 运行默认关闭 Codex 原生记忆，避免本机或前一次运行留下的记忆带进别的工作区。设置只写入这次运行专用的 `CODEX_HOME/config.toml`（`features.memories` 和 `memories.generate_memories`、`memories.use_memories` 均为 `false`），不改你的 `~/.codex/config.toml`。需要保留原生记忆时，在守护进程的环境中设置 `MULTICA_CODEX_MEMORY=1`。
