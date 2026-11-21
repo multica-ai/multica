@@ -36,7 +36,11 @@ export function getInboxDisplayTitle(item: InboxItem): string {
   const details = item.details ?? {};
 
   if (item.type === "quick_create_done") {
-    const cleanedTitle = stripQuickCreatePrefix(currentTitle(item), details.identifier);
+    // The live issue title never carries the "Created MUL-1:" wrapper; only
+    // the notification snapshot does, so clean just the fallback.
+    const issueTitle = singleLine(item.issue_title);
+    if (issueTitle) return issueTitle;
+    const cleanedTitle = stripQuickCreatePrefix(item.title, details.identifier);
     if (cleanedTitle) return cleanedTitle;
 
     const prompt = singleLine(details.original_prompt);

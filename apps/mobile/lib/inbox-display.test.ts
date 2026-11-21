@@ -89,6 +89,19 @@ describe("getInboxDisplayTitle", () => {
     expect(getInboxDisplayTitle(item({ title: "Before rename" }))).toBe("Before rename");
   });
 
+  it("shows a renamed quick-create issue's current title as is", () => {
+    const quickCreate = {
+      type: "quick_create_done" as const,
+      title: "Created OPS-42: Old",
+      details: { identifier: "OPS-42" },
+    };
+    expect(getInboxDisplayTitle(item({ ...quickCreate, issue_title: "New name" }))).toBe("New name");
+    expect(
+      getInboxDisplayTitle(item({ ...quickCreate, issue_title: "Created OPS-42: Investigate timeout" })),
+    ).toBe("Created OPS-42: Investigate timeout");
+    expect(getInboxDisplayTitle(item(quickCreate))).toBe("Old");
+  });
+
   it("uses the same stable quota title as web instead of backend fallback copy", () => {
     expect(
       getInboxDisplayTitle(

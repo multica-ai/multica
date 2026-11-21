@@ -60,6 +60,19 @@ describe("inbox display helpers", () => {
     ).toBe("New name");
   });
 
+  it("keeps a current issue title that itself looks like a created prefix", () => {
+    expect(
+      getInboxDisplayTitle(
+        item({
+          type: "quick_create_done",
+          title: "Created MUL-1: Old",
+          issue_title: "Created MUL-1: migration",
+          details: { identifier: "MUL-1" },
+        }),
+      ),
+    ).toBe("Created MUL-1: migration");
+  });
+
   it("removes legacy quick-create created prefixes from list titles", () => {
     expect(
       stripQuickCreatePrefix(
