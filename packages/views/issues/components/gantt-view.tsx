@@ -369,7 +369,7 @@ function ScheduledRow({
         {/* Sticky label cell — it also carries the peeked mark, since its
             opaque background covers the row's own. */}
         <AppLink
-          href={p.issueDetail(issue.id)}
+          href={p.issueDetail(issue.identifier)}
           newTabTitle={issue.identifier}
           className={cn(
             "sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-body min-w-0",
@@ -411,7 +411,7 @@ function ScheduledRow({
               <TooltipTrigger
                 render={
                   <AppLink
-                    href={p.issueDetail(issue.id)}
+                    href={p.issueDetail(issue.identifier)}
                     newTabTitle={issue.identifier}
                     {...peekLinkProps}
                     className={cn(

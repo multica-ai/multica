@@ -138,7 +138,7 @@ describe("DraggableBoardCard side peek", () => {
   it("still navigates on a plain click", () => {
     renderCard();
     fireEvent.click(link());
-    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/issue-1");
+    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/MUL-1");
     expect(peek.toggle).not.toHaveBeenCalled();
   });
 
@@ -167,7 +167,7 @@ describe("DraggableBoardCard side peek", () => {
     expect(navigation.push).not.toHaveBeenCalled();
     act(() => useIssueOpeningStore.getState().setOpenMode("page"));
     fireEvent.click(link());
-    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/issue-1");
+    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/MUL-1");
   });
 
   it("opens the full page in place on Shift+Click when the preference is peek", () => {
@@ -184,7 +184,7 @@ describe("DraggableBoardCard side peek", () => {
     useIssueOpeningStore.getState().setOpenMode("peek");
     renderCard({ withPeek: false });
     fireEvent.click(link());
-    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/issue-1");
+    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/MUL-1");
     expect(peek.open).not.toHaveBeenCalled();
   });
 

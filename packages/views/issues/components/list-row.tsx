@@ -138,7 +138,7 @@ function ListRowContent({
           />
         </div>
         <AppLink
-          href={p.issueDetail(issue.id)}
+          href={p.issueDetail(issue.identifier)}
           newTabTitle={issue.identifier}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
           {...peekLinkProps}
