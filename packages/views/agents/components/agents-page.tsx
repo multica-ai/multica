@@ -17,6 +17,7 @@ import {
   agentRunCounts30dOptions,
   effectiveAccessScope,
   isAgentRuntimeBound,
+  agentEffectiveRuntimeId,
   useWorkspaceActivityMap,
   useWorkspacePresenceMap,
   VISIBILITY_TOOLTIP,
@@ -47,6 +48,7 @@ import {
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useNavigation } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { SmartRuntimeAgentBadge } from "./agent-runtime-hover";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   CollectionCreateButton,
@@ -137,7 +139,7 @@ export function rowMatchesFilters(
   }
   if (
     filters.runtimes.length > 0 &&
-    !filters.runtimes.includes(row.agent.runtime_id)
+    !filters.runtimes.includes(agentEffectiveRuntimeId(row.agent) ?? "")
   ) {
     return false;
   }
@@ -239,6 +241,10 @@ function NameCell({ row }: { row: AgentListRow }) {
       muted={isArchived}
       badges={
         <>
+          <SmartRuntimeAgentBadge
+            shareRuntime={agent.share_runtime}
+            archived={isArchived}
+          />
           {isPrivate && !isArchived && (
             <Tooltip>
               <TooltipTrigger
@@ -475,7 +481,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       const activity = activityMap.get(agent.id) ?? null;
       return {
         agent,
-        runtime: runtimesById.get(agent.runtime_id) ?? null,
+        runtime: runtimesById.get(agentEffectiveRuntimeId(agent) ?? "") ?? null,
         presence: presenceMap.get(agent.id) ?? null,
         activity,
         runCount: runCountsById.get(agent.id) ?? 0,

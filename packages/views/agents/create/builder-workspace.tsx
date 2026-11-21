@@ -30,6 +30,7 @@ import type { AgentBuilderSessionSummary } from "@multica/core/types";
 import { AgentConfigurationPanel } from "./agent-configuration-panel";
 import { BuilderConversation } from "./builder-conversation";
 import { CreateAgentFooter } from "./create-agent-footer";
+import { useRuntimeStrategy } from "./use-runtime-strategy";
 import { useBuilderDraftSync } from "./use-builder-draft-sync";
 import { useBuilderSession } from "./use-builder-session";
 import { useCreateAgentForm } from "./use-create-agent-form";
@@ -155,12 +156,16 @@ export function BuilderWorkspace({
     },
   });
 
+  const runtimeStrategy = useRuntimeStrategy();
+
   const submit = useCreateAgentSubmit({
     draft,
     runtimeId: selectedRuntime?.id ?? null,
+    runtimeCli: selectedRuntime?.provider,
     runtimeProvider: selectedRuntime?.provider,
     squadId,
     template: "agent_builder",
+    shareRuntime: runtimeStrategy.shareRuntime,
     // The agent is already committed here, so builder cleanup must never turn
     // a successful create into a retryable create error.
     onCreated: () => builder.archiveAfterCreate(),
@@ -376,6 +381,10 @@ export function BuilderWorkspace({
                   // picker cannot offer a switch it would refuse to perform.
                   runtimeSwitchInFlight={
                     builder.switchingRuntime || !runtimeResolved
+                  }
+                  shareRuntime={runtimeStrategy.shareRuntime}
+                  onShareRuntimeChange={
+                    runtimeStrategy.setShareRuntime
                   }
                 />
               </div>

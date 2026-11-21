@@ -1,5 +1,6 @@
 "use client";
 
+import { useCommentRuntimeOriginator } from "./comment-runtime-originator";
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
 import { annotationsWithPending, type AnnotationComposerSlot } from "./annotation-composer";
 import { ReplyAnnotations } from "./reply-annotations";
@@ -55,7 +56,13 @@ interface ReplyInputProps {
   avatarId: string;
   /** Resolves true on success, false on failure — the reply box keeps its text
    *  (locked + spinning) until then, clearing only on success. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
+  onSubmit: (
+    content: string,
+    attachmentIds?: string[],
+    suppressAgentIds?: string[],
+    steerTaskIds?: string[],
+    ...routingArgs: import("./comment-runtime-originator").CommentRoutingArgs
+  ) => Promise<string | boolean>;
   /** Called after the server accepts the reply and the composer is cleared. */
   onAccepted?: (commentId: string) => void;
   size?: "sm" | "default";
@@ -95,6 +102,7 @@ function ReplyInput({
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
+  const runtimeOriginator = useCommentRuntimeOriginator(draftKey);
   const editorRef = useRef<ContentEditorRef>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   // See CommentInput — replying mid-upload posts without the file.
@@ -237,12 +245,14 @@ function ReplyInput({
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
         steerTaskIds.length > 0 ? steerTaskIds : undefined,
+        ...runtimeOriginator.requestArgs(content),
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;
       });
     },
     onAccepted: () => {
+      runtimeOriginator.clear();
       // Success may only consume the entry it submitted — see CommentInput.
       if (draftKey) {
         const lateMd = editorRef.current?.flushPendingUpdate?.();
@@ -329,6 +339,7 @@ function ReplyInput({
             onReady={lazy.onReady}
             placeholder={placeholderText}
             onUpdate={(md) => {
+            runtimeOriginator.prune(md);
               setContent(md);
               setIsEmpty(!md.trim());
               // setDraft keeps any pending attachments and drops the entry only
@@ -340,6 +351,8 @@ function ReplyInput({
             onUploadingChange={uploadGate.onUploadingChange}
             debounceMs={100}
             currentIssueId={issueId}
+            enableRuntimeAgentMentions
+          onMentionSelect={runtimeOriginator.select}
             attachments={pendingAttachments}
             enableSlashCommands
             slashCommandMode="command"

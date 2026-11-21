@@ -1,5 +1,7 @@
 "use client";
 
+import { isAgentRuntimeBound, useRecentAgents } from "@multica/core/agents";
+import { SmartRuntimeAgentBadge } from "../agents/components/agent-runtime-hover";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, UserPlus, X } from "@multica/ui/icons";
@@ -66,7 +68,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
 
   const activeAgents = useMemo(
-    () => agents.filter((a: Agent) => !a.archived_at && a.runtime_id),
+    () => agents.filter((a: Agent) => !a.archived_at),
     [agents],
   );
 
@@ -89,7 +91,8 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const canSubmit = !!name.trim() && !!leaderId && !creating;
+  const leader = activeAgents.find((agent) => agent.id === leaderId);
+  const canSubmit = !!name.trim() && !!leader && isAgentRuntimeBound(leader) && !creating;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -255,6 +258,11 @@ function LeaderPicker({
   const { t } = useT("modals");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const { t: tCommon } = useT("common");
+  const workspaceId = useWorkspaceId();
+  const { recentAgents, recentIds, recordRecentAgent } = useRecentAgents({
+    agents, userId: currentUserId, wsId: workspaceId, enabled: open,
+  });
 
   const myAgents = useMemo(
     () => (currentUserId ? agents.filter((a) => a.owner_id === currentUserId) : []),
@@ -271,11 +279,31 @@ function LeaderPicker({
   const q = filter.trim().toLowerCase();
   const matches = (a: Agent) =>
     !q || a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q);
-  const filteredMine = myAgents.filter(matches);
-  const filteredOthers = otherAgents.filter(matches);
+  const visible = (agent: Agent) => !recentIds.has(agent.id) && matches(agent);
+  const filteredMine = myAgents.filter(visible);
+  const filteredOthers = otherAgents.filter(visible);
+  const filteredRecent = recentAgents.filter(matches);
 
   const selected = agents.find((a) => a.id === value) ?? null;
   const noAgents = agents.length === 0;
+
+  const renderAgent = (agent: Agent) => (
+    <PickerItem
+      key={agent.id}
+      selected={agent.id === value}
+      disabled={!isAgentRuntimeBound(agent)}
+      onClick={() => {
+        recordRecentAgent(agent.id);
+        onChange(agent.id);
+        setOpen(false);
+        setFilter("");
+      }}
+    >
+      <ActorAvatar actorType="agent" actorId={agent.id} size="sm" showStatusDot />
+      <span className="truncate">{agent.name}</span>
+      <SmartRuntimeAgentBadge shareRuntime={agent.share_runtime} />
+    </PickerItem>
+  );
 
   return (
     <div>
@@ -332,43 +360,22 @@ function LeaderPicker({
               />
             </div>
             <div className="max-h-72 overflow-y-auto p-1">
+              {filteredRecent.length > 0 && (
+                <PickerSection label={tCommon(($) => $.recently_used)}>
+                  {filteredRecent.map(renderAgent)}
+                </PickerSection>
+              )}
               {filteredMine.length > 0 && (
                 <PickerSection label={t(($) => $.create_squad.group_my_agents)}>
-                  {filteredMine.map((a) => (
-                    <PickerItem
-                      key={a.id}
-                      selected={value === a.id}
-                      onClick={() => {
-                        onChange(a.id);
-                        setOpen(false);
-                        setFilter("");
-                      }}
-                    >
-                      <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
-                      <span className="truncate">{a.name}</span>
-                    </PickerItem>
-                  ))}
+                  {filteredMine.map(renderAgent)}
                 </PickerSection>
               )}
               {filteredOthers.length > 0 && (
                 <PickerSection label={t(($) => $.create_squad.group_workspace_agents)}>
-                  {filteredOthers.map((a) => (
-                    <PickerItem
-                      key={a.id}
-                      selected={value === a.id}
-                      onClick={() => {
-                        onChange(a.id);
-                        setOpen(false);
-                        setFilter("");
-                      }}
-                    >
-                      <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
-                      <span className="truncate">{a.name}</span>
-                    </PickerItem>
-                  ))}
+                  {filteredOthers.map(renderAgent)}
                 </PickerSection>
               )}
-              {filteredMine.length === 0 && filteredOthers.length === 0 && (
+              {filteredRecent.length === 0 && filteredMine.length === 0 && filteredOthers.length === 0 && (
                 <PickerEmpty />
               )}
             </div>
@@ -401,6 +408,11 @@ function AdditionalMembersPicker({
   const { t } = useT("modals");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const { t: tCommon } = useT("common");
+  const workspaceId = useWorkspaceId();
+  const { recentAgents, recentIds, recordRecentAgent } = useRecentAgents({
+    agents, userId: currentUserId, wsId: workspaceId, enabled: open,
+  });
 
   const isSelected = (type: "agent" | "member", id: string) =>
     value.some((m) => m.type === type && m.id === id);
@@ -440,11 +452,29 @@ function AdditionalMembersPicker({
   const memberMatches = (m: MemberWithUser) =>
     !q || m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q);
 
-  const filteredMine = myAgents.filter(agentMatches);
-  const filteredOthers = otherAgents.filter(agentMatches);
+  const visible = (agent: Agent) => !recentIds.has(agent.id) && agentMatches(agent);
+  const filteredMine = myAgents.filter(visible);
+  const filteredOthers = otherAgents.filter(visible);
+  const filteredRecent = recentAgents.filter((agent) => agent.id !== leaderId && agentMatches(agent));
   const filteredMembers = members.filter(memberMatches);
   const anyResults =
-    filteredMine.length + filteredOthers.length + filteredMembers.length > 0;
+    filteredRecent.length + filteredMine.length + filteredOthers.length + filteredMembers.length > 0;
+
+  const renderAgent = (agent: Agent) => (
+    <PickerItem
+      key={agent.id}
+      selected={isSelected("agent", agent.id)}
+      disabled={!isAgentRuntimeBound(agent)}
+      onClick={() => {
+        recordRecentAgent(agent.id);
+        toggle({ type: "agent", id: agent.id, name: agent.name });
+      }}
+    >
+      <ActorAvatar actorType="agent" actorId={agent.id} size="sm" showStatusDot />
+      <span className="truncate">{agent.name}</span>
+      <SmartRuntimeAgentBadge shareRuntime={agent.share_runtime} />
+    </PickerItem>
+  );
 
   return (
     <div>
@@ -525,36 +555,19 @@ function AdditionalMembersPicker({
             />
           </div>
           <div id="squad-member-listbox" role="listbox" className="max-h-72 overflow-y-auto p-1">
-            {filteredMine.length > 0 && (
+            {filteredRecent.length > 0 && (
+                <PickerSection label={tCommon(($) => $.recently_used)}>
+                  {filteredRecent.map(renderAgent)}
+                </PickerSection>
+              )}
+              {filteredMine.length > 0 && (
               <PickerSection label={t(($) => $.create_squad.group_my_agents)}>
-                {filteredMine.map((a) => (
-                  <PickerItem
-                    key={a.id}
-                    selected={isSelected("agent", a.id)}
-                    onClick={() =>
-                      toggle({ type: "agent", id: a.id, name: a.name })
-                    }
-                  >
-                    <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
-                    <span className="truncate">{a.name}</span>
-                  </PickerItem>
-                ))}
+                {filteredMine.map(renderAgent)}
               </PickerSection>
             )}
             {filteredOthers.length > 0 && (
               <PickerSection label={t(($) => $.create_squad.group_workspace_agents)}>
-                {filteredOthers.map((a) => (
-                  <PickerItem
-                    key={a.id}
-                    selected={isSelected("agent", a.id)}
-                    onClick={() =>
-                      toggle({ type: "agent", id: a.id, name: a.name })
-                    }
-                  >
-                    <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
-                    <span className="truncate">{a.name}</span>
-                  </PickerItem>
-                ))}
+                {filteredOthers.map(renderAgent)}
               </PickerSection>
             )}
             {filteredMembers.length > 0 && (

@@ -25,6 +25,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"agent_builder_draft":                workspaceDelete,
 	"agent_invocation_target":            workspaceDelete,
 	"agent_runtime":                      workspaceDelete,
+	"agent_user_runtime_config":          workspaceDelete,
 	"agent_skill":                        workspaceDelete,
 	"agent_task_queue":                   workspaceDelete,
 	"agent_to_label":                     workspaceDelete,
@@ -116,6 +117,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"member_search_access":               workspaceDelete,
 	"member_delegation_day":              workspaceDeleteKeep, // user-scoped telemetry ledger, no workspace_id
 	"agent_mcp_server":                   workspaceDelete,
+	"recent_agent_selection":             workspaceDelete,
 	"workspace_mcp_server":               workspaceDelete,
 	"notification_preference":            workspaceDelete,
 	"personal_access_token":              workspaceDeleteKeep,

@@ -318,7 +318,7 @@ func resolveWakeTarget(ctx context.Context, q *db.Queries, issue db.Issue) (wake
 		return wakeTarget{Type: "none"}, nil
 	}
 	target := wakeTarget{Type: issue.AssigneeType.String, ID: issue.AssigneeID}
-	usable := func(a db.Agent) bool { return a.RuntimeID.Valid && !a.ArchivedAt.Valid }
+	usable := func(a db.Agent) bool { return AgentHasRuntimeBinding(a) && !a.ArchivedAt.Valid }
 	switch target.Type {
 	case "member":
 		return target, nil
@@ -695,11 +695,26 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err = guardIssueNotInTriage(ctx, q, issue.ID, OriginDerived); err != nil {
 		return err
 	}
+	effective, err := resolveTaskRuntimeConfigOn(ctx, q, agent, attr.UserID, s.Tasks.LiveRuntimeModels)
+	if err != nil {
+		reason, ok := RuntimeConfigDispatchReason(err)
+		if !ok {
+			return err
+		}
+		facts["outcome"], facts["reason"] = "none", string(reason)
+		if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityTriggered, facts); err != nil {
+			return err
+		}
+		return commit()
+	}
 	overlay := s.Tasks.buildRuntimeMCPOverlay(ctx, attr.UserID, agent)
 	source, delegatedFrom, _, _ := attributionCreateParams(attr)
 	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": SystemRuleChildDone})
 	task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{
-		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, IssueID: issue.ID, Priority: priorityToInt(issue.Priority),
+		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: effective.RuntimeID, EffectiveModel: TaskEffectiveModel(effective), EffectiveThinkingLevel: TaskEffectiveThinkingLevel(effective), EffectiveServiceTier: TaskEffectiveServiceTier(effective), EffectiveRuntimeConfig: effective.RuntimeConfig, EffectiveMaxConcurrentTasks: TaskEffectiveMaxConcurrentTasks(effective), RuntimeConfigSource: TaskRuntimeConfigSource(effective), RuntimeConfigHint: RuntimeConfigHintJSON(effective.Hint), IssueID: issue.ID, Priority: priorityToInt(issue.Priority),
 		TriggerSummary: pgtype.Text{String: "Wakeup: sub-issues closed", Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true},
 		IsLeaderTask: pgtype.Bool{Bool: current.Type == "squad", Valid: current.Type == "squad"}, SquadID: current.SquadID,
 		OriginatorUserID: attr.UserID, AccountableUserID: attr.AccountableUserID, OriginatorSource: source, DelegatedFromTaskID: delegatedFrom,

@@ -21,6 +21,12 @@ const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector?: (state: { user: { id: string } }) => unknown) =>
+    selector
+      ? selector({ user: { id: "user-1" } })
+      : { user: { id: "user-1" } },
+}));
 
 vi.mock("@multica/core/api", () => ({ api: {
   getIssue: vi.fn((id: string) => Promise.resolve({ id, title: `Issue ${id}`, identifier: id })),
@@ -213,6 +219,9 @@ function historyTask(index: number): AgentTask {
     completed_at: new Date(Date.now() - index * 60000).toISOString(),
     created_at: new Date(Date.now() - index * 60000).toISOString(),
     result: null, error: null,
+    // The tab defaults to the signed-in caller's runs; rows must carry the
+    // attribution or the caller filter hides every fixture row.
+    originator_user_id: "user-1",
   };
 }
 

@@ -12,6 +12,7 @@ const cancelTaskById = vi.fn();
 let detail: { autopilot: Autopilot; triggers: AutopilotTrigger[]; collaborators: [] };
 let runs: AutopilotRun[];
 
+vi.mock("@multica/core/auth", () => ({ useAuthStore: () => undefined }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({

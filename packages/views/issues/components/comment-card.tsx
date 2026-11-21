@@ -1,5 +1,6 @@
 "use client";
 
+import { useCommentRuntimeOriginator } from "./comment-runtime-originator";
 import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquare, MessageSquarePlus, MoreHorizontal, Pencil, Plus, RotateCcw, SmilePlus, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -139,9 +140,23 @@ interface CommentCardProps {
    * `CommentRow` has to rerun the rule per row.
    */
   canModerate?: boolean;
-  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
+  onReply: (
+    parentId: string,
+    content: string,
+    attachmentIds?: string[],
+    suppressAgentIds?: string[],
+    steerTaskIds?: string[],
+    ...routingArgs: import("./comment-runtime-originator").CommentRoutingArgs
+  ) => Promise<string | boolean>;
   onReplyAccepted?: (commentId: string) => void;
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
+  onEdit: (
+    commentId: string,
+    content: string,
+    attachmentIds: string[],
+    suppressAgentIds: string[] | undefined,
+    contentBase: string | undefined,
+    ...routingArgs: import("./comment-runtime-originator").CommentRoutingArgs
+  ) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string, prompt?: string) => void;
@@ -368,7 +383,14 @@ const NEVER_STEER = () => false;
 function useEditAttachmentState(
   issueId: string,
   entry: TimelineEntry,
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>,
+  onEdit: (
+    commentId: string,
+    content: string,
+    attachmentIds: string[],
+    suppressAgentIds: string[] | undefined,
+    contentBase: string | undefined,
+    ...routingArgs: import("./comment-runtime-originator").CommentRoutingArgs
+  ) => Promise<void>,
 ) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
@@ -376,6 +398,7 @@ function useEditAttachmentState(
   const [initialValue, setInitialValue] = useState(entry.content ?? "");
   const [initialContentBase, setInitialContentBase] = useState(entry.content ?? "");
   const [revisionConflict, setRevisionConflict] = useState(false);
+  const runtimeOriginator = useCommentRuntimeOriginator(`edit:${issueId}:${entry.id}` as const);
   const editorRef = useRef<ContentEditorRef>(null);
   // Saving mid-upload would persist the edit without the file the user just
   // pasted in — same failure as posting a new comment.
@@ -428,6 +451,7 @@ function useEditAttachmentState(
   );
 
   const resetState = () => {
+    runtimeOriginator.clear();
     setEditing(false);
     setRevisionConflict(false);
     setContent(entry.content ?? "");
@@ -503,7 +527,7 @@ function useEditAttachmentState(
       const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
       // Nothing changed — close the editor without a write. Accepted, so
       // onAccepted resets the edit state.
-      if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
+      if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged && runtimeOriginator.requestArgs(trimmed).length === 0) {
         return true;
       }
       const { suppressAgentIds } = routing;
@@ -514,6 +538,7 @@ function useEditAttachmentState(
           activeIds,
           suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
           initialContentBase,
+          ...runtimeOriginator.requestArgs(trimmed),
         );
         setRevisionConflict(false);
         return true;
@@ -550,6 +575,7 @@ function useEditAttachmentState(
 
   return {
     editing,
+    runtimeOriginator,
     saving,
     uploading: gate.uploading,
     onUploadingChange: gate.onUploadingChange,
@@ -779,7 +805,14 @@ function CommentRow({
   hasReplies?: boolean;
   /** True when this row is the deep-link target currently being highlighted. */
   isHighlighted?: boolean;
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
+  onEdit: (
+    commentId: string,
+    content: string,
+    attachmentIds: string[],
+    suppressAgentIds: string[] | undefined,
+    contentBase: string | undefined,
+    ...routingArgs: import("./comment-runtime-originator").CommentRoutingArgs
+  ) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string, prompt?: string) => void;
@@ -950,6 +983,7 @@ function CommentRow({
               placeholder={t(($) => $.comment.edit_placeholder)}
               onUpdate={(md) => {
                 edit.setContent(md);
+                      edit.runtimeOriginator.prune(md);
                 if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
                 else edit.clearDraft(edit.draftKey);
               }}
@@ -958,6 +992,8 @@ function CommentRow({
               onUploadingChange={edit.onUploadingChange}
               debounceMs={100}
               currentIssueId={issueId}
+              enableRuntimeAgentMentions
+                    onMentionSelect={edit.runtimeOriginator.select}
               attachments={edit.editorAttachments}
             />
           </div>
@@ -1563,6 +1599,7 @@ function CommentCardImpl({
                     placeholder={t(($) => $.comment.edit_placeholder)}
                     onUpdate={(md) => {
                       edit.setContent(md);
+                      edit.runtimeOriginator.prune(md);
                       if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
                       else edit.clearDraft(edit.draftKey);
                     }}
@@ -1571,6 +1608,8 @@ function CommentCardImpl({
                     onUploadingChange={edit.onUploadingChange}
                     debounceMs={100}
                     currentIssueId={issueId}
+                    enableRuntimeAgentMentions
+                    onMentionSelect={edit.runtimeOriginator.select}
                     attachments={edit.editorAttachments}
                   />
                 </div>
@@ -1718,11 +1757,11 @@ function CommentCardImpl({
                   draftKey={`reply:${issueId}:${entry.id}`}
                   onEditAnnotation={(id) => annotation.editAnnotation(id, true)}
                   steerByDefault={steerThreadRunByDefault}
-                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds) => {
+                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds, ...routingArgs) => {
                     // The popup can save the first annotation and submit in the same event.
                     const targetId = useCommentDraftStore.getState().drafts[`reply:${issueId}:${entry.id}`]?.replyTarget?.commentId ?? entry.id;
                     return isReplyTargetMissing(targetId) ? Promise.resolve(false)
-                      : onReply(targetId, content, attachmentIds, suppressAgentIds, steerTaskIds);
+                      : onReply(targetId, content, attachmentIds, suppressAgentIds, steerTaskIds, ...routingArgs);
                   }}
                   onAccepted={onReplyAccepted}
                 />

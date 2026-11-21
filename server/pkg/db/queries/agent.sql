@@ -62,19 +62,25 @@ WHERE id = $1 AND workspace_id = $2 AND kind = 'user'
 FOR SHARE;
 
 -- name: CreateAgent :one
+-- share_runtime selects the runtime strategy: TRUE (fixed) binds one machine
+-- for every member; FALSE (smart) stores only a recommended CLI and resolves
+-- each task to the originator's own machine at enqueue time. A smart agent
+-- leaves runtime_id NULL — an empty runtime_id is the contract, not an unbind.
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier, conversation_starters,
-    composio_toolkit_allowlist, permission_mode
+    composio_toolkit_allowlist, permission_mode, share_runtime, recommended_cli
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    COALESCE(sqlc.narg('share_runtime')::boolean, TRUE),
+    COALESCE(sqlc.narg('recommended_cli'), '')
 )
 RETURNING *;
 
@@ -139,7 +145,7 @@ UPDATE agent SET
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
     runtime_config = COALESCE(sqlc.narg('runtime_config'), runtime_config),
     runtime_mode = COALESCE(sqlc.narg('runtime_mode'), runtime_mode),
-    runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
+    runtime_id = CASE WHEN NOT COALESCE(sqlc.narg('share_runtime')::boolean, share_runtime) THEN NULL ELSE COALESCE(sqlc.narg('runtime_id'), runtime_id) END,
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
     status = COALESCE(sqlc.narg('status'), status),
@@ -153,7 +159,17 @@ UPDATE agent SET
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    share_runtime = COALESCE(sqlc.narg('share_runtime')::boolean, share_runtime),
+    recommended_cli = COALESCE(sqlc.narg('recommended_cli'), recommended_cli),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentRuntimeID :one
+-- Smart-runtime recommendation is CLI-only. COALESCE cannot write NULL through
+-- UpdateAgent, so this dedicated clear drops the leftover machine binding.
+UPDATE agent
+SET runtime_id = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -325,6 +341,37 @@ WHERE agent_id = @agent_id
 ORDER BY created_at DESC, id DESC
 LIMIT @page_limit;
 
+-- name: GetLatestIssueTaskOriginator :one
+SELECT originator_user_id
+FROM agent_task_queue
+WHERE issue_id = $1
+  AND originator_user_id IS NOT NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- name: GetLatestIssueTaskRuntimeOriginator :one
+-- Attribution for the "executed on" display: a shared (fixed) task belongs to
+-- the human who initiated it, while a personal task's machine owner is the
+-- effective runtime originator. NULL predates the runtime_config_source stamp
+-- and preserves the legacy task-originator behavior.
+SELECT (CASE
+    WHEN atq.runtime_config_source IS NULL
+      OR atq.runtime_config_source = 'shared'
+      THEN atq.originator_user_id
+    ELSE ar.owner_id
+  END)::uuid AS runtime_originator_user_id
+FROM agent_task_queue atq
+LEFT JOIN agent_runtime ar ON ar.id = atq.runtime_id
+WHERE atq.issue_id = $1
+  AND CASE
+    WHEN atq.runtime_config_source IS NULL
+      OR atq.runtime_config_source = 'shared'
+      THEN atq.originator_user_id
+    ELSE ar.owner_id
+  END IS NOT NULL
+ORDER BY atq.created_at DESC, atq.id DESC
+LIMIT 1;
+
 -- name: CreateAgentTask :one
 -- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
 -- locks the owners' workspace rows in the writer's own transaction and returns
@@ -362,6 +409,8 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
+    effective_model, effective_thinking_level, effective_service_tier, effective_runtime_config,
+    effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint,
     workflow_step, fire_at, id
 )
 SELECT
@@ -386,7 +435,7 @@ SELECT
         WHEN sqlc.narg(workflow_handoff_revision)::bigint IS NOT NULL
         THEN jsonb_build_object('workflow_handoff_revision', sqlc.narg(workflow_handoff_revision)::bigint)
         ELSE '{}'::jsonb
-    END, '{}'::jsonb),
+    END || COALESCE(sqlc.narg('sticky_inheritance')::jsonb, '{}'::jsonb), '{}'::jsonb),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
@@ -397,6 +446,13 @@ SELECT
     sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(effective_model),
+    sqlc.narg(effective_thinking_level),
+    sqlc.narg(effective_service_tier),
+    sqlc.narg(effective_runtime_config),
+    sqlc.narg(effective_max_concurrent_tasks),
+    sqlc.narg(runtime_config_source),
+    sqlc.narg(runtime_config_hint),
     -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
     COALESCE(sqlc.narg(workflow_step)::text, (SELECT i.status FROM issue i WHERE i.id = sqlc.narg(issue_id))),
     sqlc.narg(fire_at),
@@ -412,6 +468,8 @@ RETURNING *;
 -- Channel /issue media resolves after issue creation. Persist the assigned
 -- issue task up front for crash safety, but keep it inert until attachment
 -- binding settles or the fire_at fallback is promoted by the normal sweeper.
+-- Lock the selected agent tuple so a rebind that commits during the owner-fence
+-- wait refreshes the runtime used by INSERT. Materialize that locked route once.
 WITH enqueue_agent AS MATERIALIZED (
     SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
     FROM agent a
@@ -425,6 +483,8 @@ INSERT INTO agent_task_queue (
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id,
     trigger_evidence_kind, trigger_evidence_ref_id, fire_at,
+    effective_model, effective_thinking_level, effective_service_tier, effective_runtime_config,
+    effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint,
     workflow_step, id
 )
 SELECT
@@ -450,6 +510,13 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     @fire_at,
+    sqlc.narg(effective_model),
+    sqlc.narg(effective_thinking_level),
+    sqlc.narg(effective_service_tier),
+    sqlc.narg(effective_runtime_config),
+    sqlc.narg(effective_max_concurrent_tasks),
+    sqlc.narg(runtime_config_source),
+    sqlc.narg(runtime_config_hint),
     -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
     (SELECT i.status FROM issue i WHERE i.id = sqlc.narg(issue_id)),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
@@ -488,6 +555,8 @@ WHERE id = @id
 -- The requester who opened the quick-create modal is a direct_human originator
 -- and accountable; attribution provenance is stamped so this path is not a
 -- NULL-source enqueue bypass (MUL-4302 §2).
+-- Lock the selected agent tuple so a rebind that commits during the owner-fence
+-- wait refreshes the runtime used by INSERT. Materialize that locked route once.
 WITH enqueue_agent AS MATERIALIZED (
     SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
     FROM agent a
@@ -499,6 +568,8 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
     accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    effective_model, effective_thinking_level, effective_service_tier, effective_runtime_config,
+    effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint,
     id
 )
 SELECT
@@ -510,6 +581,13 @@ SELECT
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(effective_model),
+    sqlc.narg(effective_thinking_level),
+    sqlc.narg(effective_service_tier),
+    sqlc.narg(effective_runtime_config),
+    sqlc.narg(effective_max_concurrent_tasks),
+    sqlc.narg(runtime_config_source),
+    sqlc.narg(runtime_config_hint),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 FROM enqueue_agent
 RETURNING *;
@@ -535,14 +613,14 @@ WHERE id = $1 AND issue_id IS NULL
 -- Preserve a NULL chat_input_task_id for legacy/channel parents rather than
 -- promoting untagged history to the task-owned input path.
 --
--- The retry is stamped with the agent's current runtime, as an enqueue is.
--- Claims fence on agent.runtime_id = task.runtime_id, so a retry stamped with a
--- runtime the agent moved off while the parent ran would be claimable by neither
--- daemon (#10717); UpdateAgent re-stamps only rows queued at switch time. An
--- unbound agent keeps the parent's runtime. A retry that moves leaves the
--- parent's session behind: it belongs to the runtime that recorded it, and an
--- attempt that ends before reporting its own would file it under the new one,
--- where the next claim would be told to resume it.
+-- The retry inherits the parent's runtime and effective configuration stamp.
+-- For a smart agent the caller may pass runtime_id explicitly: the resolved
+-- effective runtime inside the same transaction as the parent's terminal
+-- write. A NULL parameter keeps the parent's runtime. Claims fence on the
+-- task's own runtime plus the smart-runtime binding branches, so a retry
+-- stamped with the runtime the parent actually ran on stays claimable. A retry
+-- that moves leaves the parent's session behind: it belongs to the runtime
+-- that recorded it.
 --
 -- Keep work_dir for every retry, but clear resume context for unsafe sessions.
 -- Keep failure predicates aligned with resumeUnsafeFailureReason and resume lookups.
@@ -551,6 +629,11 @@ WHERE id = $1 AND issue_id IS NULL
 -- Owner-row locks fence workspace teardown. Slot conflicts yield no row instead
 -- of aborting the caller's failure transaction; pgx.ErrNoRows means commit the
 -- parent transition without a retry. Pending human reruns retain their slot.
+--
+-- Fail closed on a NULL runtime: p.runtime_id is read at statement time, so
+-- teardown that NULLed it before this statement can make the COALESCE resolve
+-- to NULL. Writing zero rows (ErrNoRows, the caller's "no retry" contract)
+-- beats a fresh active row that violates the runtime-required constraint.
 --
 -- Chat retry priority keeps older input ahead of newer turns. A non-NULL fire_at
 -- defers dispatch until promotion. max_attempts optionally persists the effective
@@ -564,15 +647,40 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
+    effective_model, effective_thinking_level, effective_service_tier, effective_runtime_config,
+    effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint,
     channel_context_revision, handoff_note, workflow_step, id
 )
 SELECT
-    p.agent_id, COALESCE(a.runtime_id, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id, COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
-    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
+    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary,
+    -- A retry is a fresh routing decision: strip a fixed-runtime batch
+    -- retention marker inherited from the parent so the clone is not treated
+    -- as retained on a runtime the retry no longer targets. A sticky
+    -- runtime-inheritance marker is rewritten instead of stripped when the
+    -- retry keeps the run's machine — the retry still claims there under the
+    -- run's own authorization, and the fence re-checks the source anyway.
+    NULLIF(
+        (p.context - ARRAY[
+        'fixed_runtime_batch_retained',
+        'fixed_runtime_batch_retained_runtime_id',
+        'fixed_runtime_batch_retained_task_id'
+    ])
+        || CASE
+            WHEN p.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                AND p.context->>'sticky_runtime_inherited_runtime_id' = COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id)::text
+            THEN jsonb_build_object(
+                'sticky_runtime_inherited', true,
+                'sticky_runtime_inherited_runtime_id', COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id)::text,
+                'sticky_runtime_inherited_task_id', retry.retry_id::text,
+                'sticky_runtime_source_task_id', p.context->>'sticky_runtime_source_task_id')
+            ELSE '{}'::jsonb
+        END,
+    '{}'::jsonb),
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
-              OR COALESCE(a.runtime_id, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
+              OR COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
          ELSE p.session_id END,
     p.work_dir,
     p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
@@ -586,6 +694,13 @@ SELECT
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at),
+    p.effective_model,
+    p.effective_thinking_level,
+    p.effective_service_tier,
+    p.effective_runtime_config,
+    p.effective_max_concurrent_tasks,
+    p.runtime_config_source,
+    p.runtime_config_hint,
     p.channel_context_revision,
     -- Carried for a wakeup's prompt and a workflow handoff's brief (MUL-7420);
     -- rows from before workflow_step existed may hold a retired assignment note.
@@ -593,11 +708,15 @@ SELECT
     -- A retry continues its parent's work, so it keeps the parent's step (MUL-7420).
     p.workflow_step,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
-    COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
+    retry.retry_id
 FROM agent_task_queue p
-LEFT JOIN agent a ON a.id = p.agent_id
+JOIN agent a ON a.id = p.agent_id
+CROSS JOIN LATERAL (
+    SELECT COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid()) AS retry_id
+) retry
 WHERE p.id = $1
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(a.runtime_id, p.runtime_id))
+  AND COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id) IS NOT NULL
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id))
 ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-0000-0000-000000000000'::uuid))) WHERE status IN ('queued', 'dispatched')
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
@@ -617,29 +736,223 @@ UPDATE agent_task_queue SET workflow_step = @workflow_step WHERE id = @id;
 --
 -- The caller locks and transfers the pending issue_source_context in the same
 -- transaction. lock_task_owner_rows provides the usual workspace-teardown
--- fence; a deleted workspace therefore yields pgx.ErrNoRows and no task. Like
--- CreateRetryTask, the run is stamped with the agent's current runtime (#10717).
+-- fence; a deleted workspace therefore yields pgx.ErrNoRows and no task. The
+-- rerun inherits the parent's runtime — for a smart agent that is the runtime
+-- the failed parent resolved to while that machine still belongs to the
+-- original requester. Fixed agents follow their current binding.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, status, priority, context,
     force_fresh_session, is_leader_task, squad_id,
     originator_user_id, accountable_user_id,
     runtime_mcp_overlay, runtime_connected_apps,
-    originator_source, rerun_of_task_id, id
+    originator_source, rerun_of_task_id, id,
+    effective_model, effective_thinking_level, effective_service_tier,
+    effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint
 )
 SELECT
-    p.agent_id, COALESCE(a.runtime_id, p.runtime_id), 'queued', p.priority, p.context,
+    p.agent_id, selected.runtime_id, 'queued', p.priority,
+    -- Same sticky rule as the automatic retry: a manual rerun keeping the
+    -- run's machine rewrites the inheritance marker to itself; a rerun that
+    -- resolves elsewhere (fixed rebinding) strips it.
+    NULLIF(
+        (p.context - ARRAY[
+            'fixed_runtime_batch_retained',
+            'fixed_runtime_batch_retained_runtime_id',
+            'fixed_runtime_batch_retained_task_id'
+        ])
+        || CASE
+            WHEN p.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                AND p.context->>'sticky_runtime_inherited_runtime_id' = selected.runtime_id::text
+            THEN jsonb_build_object(
+                'sticky_runtime_inherited', true,
+                'sticky_runtime_inherited_runtime_id', selected.runtime_id::text,
+                'sticky_runtime_inherited_task_id', to_jsonb(sqlc.arg(new_task_id)::uuid),
+                'sticky_runtime_source_task_id', p.context->>'sticky_runtime_source_task_id')
+            ELSE '{}'::jsonb
+        END,
+    '{}'::jsonb),
     TRUE, p.is_leader_task, p.squad_id,
     sqlc.arg(actor_user_id), sqlc.arg(actor_user_id),
     sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
-    'direct_human', p.id, sqlc.arg(new_task_id)
+    'direct_human', p.id, sqlc.arg(new_task_id),
+    CASE WHEN NOT a.share_runtime THEN p.effective_model END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_thinking_level END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_service_tier END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_runtime_config END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_max_concurrent_tasks END,
+    CASE WHEN NOT a.share_runtime THEN p.runtime_config_source END,
+    CASE WHEN NOT a.share_runtime THEN p.runtime_config_hint END
 FROM agent_task_queue p
-LEFT JOIN agent a ON a.id = p.agent_id
+JOIN agent a ON a.id = p.agent_id
+CROSS JOIN LATERAL (SELECT CASE WHEN a.share_runtime THEN COALESCE(a.runtime_id, p.runtime_id) ELSE p.runtime_id END AS runtime_id) selected
+JOIN agent_runtime r ON r.id = selected.runtime_id AND r.workspace_id = a.workspace_id
 WHERE p.id = sqlc.arg(source_task_id)
   AND p.status = 'failed'
   AND p.issue_id IS NULL
   AND p.chat_session_id IS NULL
   AND p.autopilot_run_id IS NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(a.runtime_id, p.runtime_id))
+  AND (a.share_runtime OR r.owner_id = sqlc.arg(actor_user_id))
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, selected.runtime_id)
+RETURNING *;
+
+-- name: ListAgentsByIDsForWorkspace :many
+-- Workspace-scoped lookup for personal runtime migration dry runs. Missing and
+-- cross-workspace IDs deliberately collapse to the same result so the bulk API
+-- cannot be used as an existence oracle.
+SELECT * FROM agent
+WHERE id = ANY(@agent_ids::uuid[])
+  AND workspace_id = @workspace_id
+  AND kind = 'user'
+  AND archived_at IS NULL
+ORDER BY id;
+
+-- name: ListAgentsByIDsForWorkspaceForUpdate :many
+-- Committing variant of ListAgentsByIDsForWorkspace. Stable ID order prevents
+-- two overlapping bulk personal-config writes from taking agent locks in
+-- opposite orders.
+SELECT * FROM agent
+WHERE id = ANY(@agent_ids::uuid[])
+  AND workspace_id = @workspace_id
+  AND kind = 'user'
+  AND archived_at IS NULL
+ORDER BY id
+FOR UPDATE;
+
+-- name: CountPersonalAgentTasksByMigrationGroup :one
+-- Only tasks whose runtime was resolved for this human's personal configuration
+-- participate. queued/deferred are unclaimed and may move; daemon-owned states
+-- remain on their original runtime.
+SELECT
+    COUNT(*) FILTER (
+        WHERE status IN ('queued', 'deferred')
+          AND runtime_id IS DISTINCT FROM @to_runtime_id
+    )::bigint AS unclaimed_count,
+    COUNT(*) FILTER (
+        WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
+    )::bigint AS active_count
+FROM agent_task_queue
+WHERE agent_id = ANY(@agent_ids::uuid[])
+  AND originator_user_id = @user_id
+  AND runtime_config_source IN ('user_override', 'recommended_match', 'default_user_runtime');
+
+-- name: RepointPersonalUnclaimedTasksToRuntime :many
+-- Runtime migration follows the same personal-config identity used at enqueue:
+-- originator_user_id. Never move another member's work on the same agent, and
+-- never move a task a daemon already owns.
+UPDATE agent_task_queue
+SET runtime_id = @to_runtime_id,
+    context = CASE
+        WHEN context ? 'fixed_runtime_batch_retained'
+        THEN NULLIF(context - ARRAY[
+            'fixed_runtime_batch_retained',
+            'fixed_runtime_batch_retained_runtime_id',
+            'fixed_runtime_batch_retained_task_id'
+        ], '{}'::jsonb)
+        ELSE context
+    END
+WHERE agent_id = ANY(@agent_ids::uuid[])
+  AND originator_user_id = @user_id
+  AND runtime_config_source IN ('user_override', 'recommended_match', 'default_user_runtime')
+  AND status IN ('queued', 'deferred')
+  AND runtime_id IS DISTINCT FROM @to_runtime_id
+  AND lock_task_owner_rows(agent_id, issue_id, @to_runtime_id)
+RETURNING *;
+
+-- name: MarkAgentLevelTasksRetainedOnRuntime :many
+-- A fixed Agent's batch migration is authorized only for the initiating user's
+-- queued work. Mark every task that deliberately stays on its enqueue-time
+-- runtime so the claim fences can distinguish it from an arbitrary stale task
+-- left behind by an unrelated Agent rebind. Bind the grant to both this runtime
+-- and this task so a runtime rewrite or retry clone cannot transfer it. In-flight
+-- tasks need the marker too: a dispatched task may need to be reclaimed after
+-- the Agent config changes.
+UPDATE agent_task_queue
+SET context = COALESCE(context, '{}'::jsonb) || jsonb_build_object(
+        'fixed_runtime_batch_retained', true,
+        'fixed_runtime_batch_retained_runtime_id', runtime_id::text,
+        'fixed_runtime_batch_retained_task_id', id::text
+    )
+WHERE agent_id = ANY(@agent_ids::uuid[])
+  AND (
+      (status IN ('queued', 'deferred') AND originator_user_id IS DISTINCT FROM @user_id)
+      OR status IN ('dispatched', 'waiting_local_directory', 'running')
+  )
+  AND runtime_id IS DISTINCT FROM @to_runtime_id
+RETURNING *;
+
+-- name: CountAgentLevelTasksByMigrationGroup :one
+-- Agent-level configuration is shared, but this user-initiated batch operation
+-- may only move work originated by the current authority. Other members' tasks
+-- keep the enqueue-time runtime; daemon-owned rows also stay until completion.
+SELECT
+    COUNT(*) FILTER (
+        WHERE status IN ('queued', 'deferred')
+          AND runtime_id IS DISTINCT FROM @to_runtime_id
+    )::bigint AS unclaimed_count,
+    COUNT(*) FILTER (
+        WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
+    )::bigint AS active_count
+FROM agent_task_queue
+WHERE agent_id = ANY(@agent_ids::uuid[])
+  AND originator_user_id = @user_id;
+
+-- name: RepointAgentLevelUnclaimedTasksToRuntime :many
+-- The fixed Agent config changes for everyone, but a member's explicit batch
+-- migration is not authority to rewrite another member's queued work.
+UPDATE agent_task_queue
+SET runtime_id = @to_runtime_id,
+    context = CASE
+        WHEN context ? 'fixed_runtime_batch_retained'
+        THEN NULLIF(context - ARRAY[
+            'fixed_runtime_batch_retained',
+            'fixed_runtime_batch_retained_runtime_id',
+            'fixed_runtime_batch_retained_task_id'
+        ], '{}'::jsonb)
+        ELSE context
+    END
+WHERE agent_id = ANY(@agent_ids::uuid[])
+  AND originator_user_id = @user_id
+  AND status IN ('queued', 'deferred')
+  AND runtime_id IS DISTINCT FROM @to_runtime_id
+  AND lock_task_owner_rows(agent_id, issue_id, @to_runtime_id)
+RETURNING *;
+
+-- name: RepointUnclaimedTasksForFixedRuntimeStrategy :many
+-- Switching a smart Agent to fixed is a workspace-wide policy change. Every
+-- unclaimed task must follow the Agent recommendation or the fixed-runtime
+-- claim binding will reject it forever. Claimed tasks keep their daemon.
+UPDATE agent_task_queue
+SET runtime_id = @to_runtime_id,
+    context = CASE
+        WHEN context ? 'fixed_runtime_batch_retained'
+        THEN NULLIF(context - ARRAY[
+            'fixed_runtime_batch_retained',
+            'fixed_runtime_batch_retained_runtime_id',
+            'fixed_runtime_batch_retained_task_id'
+        ], '{}'::jsonb)
+        ELSE context
+    END
+WHERE agent_id = @agent_id
+  AND status IN ('queued', 'deferred')
+  AND runtime_id IS DISTINCT FROM @to_runtime_id
+  AND lock_task_owner_rows(agent_id, issue_id, @to_runtime_id)
+RETURNING *;
+
+-- name: MigrateAgentLevelRuntimeConfigs :many
+-- The caller has locked and ownership-filtered these ordinary agents. Empty
+-- model/thinking/service-tier values are the existing single-agent form's
+-- "runtime default" representation. A NULL runtime_config preserves each
+-- agent's current value; an explicit '{}' applies the runtime default.
+UPDATE agent
+SET runtime_id = @runtime_id,
+    runtime_mode = @runtime_mode,
+    model = @model,
+    thinking_level = NULLIF(@thinking_level::text, ''),
+    service_tier = NULLIF(@service_tier::text, ''),
+    max_concurrent_tasks = @max_concurrent_tasks,
+    runtime_config = COALESCE(sqlc.narg('runtime_config')::jsonb, runtime_config),
+    updated_at = now()
+WHERE id = ANY(@agent_ids::uuid[])
 RETURNING *;
 
 -- name: DeleteUnstartedQuickCreateRetryTask :execrows
@@ -840,7 +1153,41 @@ WHERE id = (
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
-            AND a.runtime_id = atq.runtime_id
+            AND r.workspace_id = a.workspace_id
+            AND (
+                (a.share_runtime AND (
+                    a.runtime_id = atq.runtime_id
+                    OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                        AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                        AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+                ))
+                OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
+            )
             -- Queued private-runtime rows are claimable so the handler can
             -- settle an owner mismatch through the existing FailTask path
             -- before daemon delivery. Public runtimes remain shareable across
@@ -849,6 +1196,12 @@ WHERE id = (
                 r.visibility = 'public'
                 OR r.visibility = 'private'
             )
+            AND (a.share_runtime OR (
+                SELECT count(*) FROM agent_task_queue active
+                WHERE active.agent_id = atq.agent_id
+                  AND active.originator_user_id = atq.originator_user_id
+                  AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+            ) < COALESCE(atq.effective_max_concurrent_tasks, a.max_concurrent_tasks))
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => @runtime_stale_secs::double precision)
@@ -970,7 +1323,41 @@ WHERE id = (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            AND r.workspace_id = a.workspace_id
+            AND (
+                (a.share_runtime AND (
+                    a.runtime_id = atq.runtime_id
+                    OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                        AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                        AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+                ))
+                OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
+            )
             AND (
                 r.visibility = 'public'
                 OR (
@@ -980,6 +1367,32 @@ WHERE id = (
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
                         OR a.owner_id = ANY(r.shared_with)
+                        OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
                     )
                 )
             )
@@ -1017,7 +1430,41 @@ WITH candidates AS MATERIALIZED (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            AND r.workspace_id = a.workspace_id
+            AND (
+                (a.share_runtime AND (
+                    a.runtime_id = atq.runtime_id
+                    OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                        AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                        AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+                ))
+                OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
+            )
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1027,6 +1474,32 @@ WITH candidates AS MATERIALIZED (
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
                         OR a.owner_id = ANY(r.shared_with)
+                        OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
                     )
                 )
             )
@@ -1878,7 +2351,16 @@ WHERE context->>'wakeup_id' IS NULL AND issue_id = @issue_id
 -- case — a dispatched sibling would trip the unique index — it defers to
 -- completion reconciliation unless no active task exists at all.
 UPDATE agent_task_queue
-SET coalesced_comment_ids = (
+SET runtime_id = COALESCE(sqlc.narg('new_runtime_id')::uuid, runtime_id),
+    effective_model = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_model') ELSE effective_model END,
+    effective_thinking_level = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_thinking_level') ELSE effective_thinking_level END,
+    effective_service_tier = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_service_tier') ELSE effective_service_tier END,
+    effective_runtime_config = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_runtime_config') ELSE effective_runtime_config END,
+    effective_max_concurrent_tasks = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_max_concurrent_tasks') ELSE effective_max_concurrent_tasks END,
+    runtime_config_source = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('runtime_config_source') ELSE runtime_config_source END,
+    runtime_config_hint = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('runtime_config_hint') ELSE runtime_config_hint END,
+    session_id = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL AND runtime_id IS DISTINCT FROM sqlc.narg('new_runtime_id')::uuid THEN NULL ELSE session_id END,
+    coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
         FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
         WHERE e IS NOT NULL AND e <> @new_trigger_comment_id::uuid
@@ -1888,26 +2370,28 @@ SET coalesced_comment_ids = (
     squad_id = COALESCE(sqlc.narg('new_leader_squad_id')::uuid, squad_id),
     trigger_comment_id = @new_trigger_comment_id::uuid,
     trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
-    -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
+    -- A continuation keeps the existing execution authorization snapshot.
+    -- Otherwise, re-attribution is atomic: folding a newly-arrived comment moves the
     -- WHOLE attribution snapshot to that comment's human — person columns, source
     -- label, delegation lineage, rule version, and evidence — computed by the caller
     -- as one attribution.Result. Re-stamping only the person columns would leave a
     -- run showing B accountable while still pointing at A's stale source / evidence /
     -- level. accountable comes from the resolved Result (finalizeAttribution already
     -- guaranteed originator ⟹ accountable == originator; the cross-column CHECK backs it).
-    originator_user_id = sqlc.narg('new_originator_user_id')::uuid,
-    accountable_user_id = sqlc.narg('new_accountable_user_id')::uuid,
-    originator_source = sqlc.narg('new_originator_source'),
-    delegated_from_task_id = sqlc.narg('new_delegated_from_task_id')::uuid,
-    rule_version_id = sqlc.narg('new_rule_version_id')::uuid,
-    trigger_evidence_kind = sqlc.narg('new_trigger_evidence_kind'),
-    trigger_evidence_ref_id = sqlc.narg('new_trigger_evidence_ref_id')::uuid,
-    runtime_mcp_overlay = sqlc.narg('new_runtime_mcp_overlay'),
-    runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
+    originator_user_id = CASE WHEN @keep_execution_snapshot::boolean THEN originator_user_id ELSE sqlc.narg('new_originator_user_id')::uuid END,
+    accountable_user_id = CASE WHEN @keep_execution_snapshot::boolean THEN accountable_user_id ELSE sqlc.narg('new_accountable_user_id')::uuid END,
+    originator_source = CASE WHEN @keep_execution_snapshot::boolean THEN originator_source ELSE sqlc.narg('new_originator_source') END,
+    delegated_from_task_id = CASE WHEN @keep_execution_snapshot::boolean THEN delegated_from_task_id ELSE sqlc.narg('new_delegated_from_task_id')::uuid END,
+    rule_version_id = CASE WHEN @keep_execution_snapshot::boolean THEN rule_version_id ELSE sqlc.narg('new_rule_version_id')::uuid END,
+    trigger_evidence_kind = CASE WHEN @keep_execution_snapshot::boolean THEN trigger_evidence_kind ELSE sqlc.narg('new_trigger_evidence_kind') END,
+    trigger_evidence_ref_id = CASE WHEN @keep_execution_snapshot::boolean THEN trigger_evidence_ref_id ELSE sqlc.narg('new_trigger_evidence_ref_id')::uuid END,
+    runtime_mcp_overlay = CASE WHEN @keep_execution_snapshot::boolean THEN runtime_mcp_overlay ELSE sqlc.narg('new_runtime_mcp_overlay') END,
+    runtime_connected_apps = CASE WHEN @keep_execution_snapshot::boolean THEN runtime_connected_apps ELSE sqlc.narg('new_runtime_connected_apps') END
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      AND (sqlc.narg('new_runtime_id')::uuid IS NULL OR lock_task_owner_rows(t.agent_id, t.issue_id, sqlc.narg('new_runtime_id')::uuid))
       -- An unclaimed generic turn can become a leader turn. Never overwrite
       -- a worker obligation or a different squad's leader context.
       AND (
@@ -1967,7 +2451,28 @@ SET coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
         FROM unnest(array_append(coalesced_comment_ids, @comment_id::uuid)) AS e
         WHERE e IS NOT NULL
-    )
+    ),
+    -- A claim-receipt task cannot adopt a newly-arrived requester's runtime:
+    -- its dispatch payload is already built. Persist the per-comment requester
+    -- instead so completion reconciliation can apply the same takeover to the
+    -- bounded follow-up task.
+    context = CASE
+        WHEN sqlc.narg('runtime_originator_user_id')::uuid IS NULL AND sqlc.narg('runtime_source_task_id')::uuid IS NULL THEN context
+        ELSE COALESCE(context, '{}'::jsonb) || jsonb_build_object(
+            'planned_runtime_originators',
+            COALESCE(context->'planned_runtime_originators', '{}'::jsonb)
+                || jsonb_build_object(
+                    @comment_id::text,
+                    to_jsonb(sqlc.narg('runtime_originator_user_id')::uuid)
+                ),
+            'planned_runtime_source_tasks',
+            COALESCE(context->'planned_runtime_source_tasks', '{}'::jsonb)
+                || jsonb_build_object(
+                    @comment_id::text,
+                    to_jsonb(sqlc.narg('runtime_source_task_id')::uuid)
+                )
+        )
+    END
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
@@ -1983,6 +2488,85 @@ WHERE id = (
 )
 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING id, coalesced_comment_ids;
+
+-- name: MarkTaskStickyRuntimeInheritance :one
+-- A sticky "current task" replay inherits the authorization of the run it
+-- continues: the completed run claimed and delivered on this machine, so the
+-- replay may claim there too even though the joining member owns nothing on
+-- it. The marker carries the replay task's own id (so a copied context cannot
+-- vouch for another task) and the source task's id; the claim fence re-checks
+-- that the source really dispatched on the same machine. Queued only: once
+-- claimed, the normal fences take over.
+UPDATE agent_task_queue
+SET context = COALESCE(context, '{}'::jsonb) || jsonb_build_object(
+    'sticky_runtime_inherited', true,
+    'sticky_runtime_inherited_runtime_id', runtime_id::text,
+    'sticky_runtime_inherited_task_id', id::text,
+    'sticky_runtime_source_task_id', sqlc.arg('source_task_id')::uuid
+)
+WHERE id = sqlc.arg('task_id')::uuid
+  AND status = 'queued'
+  AND runtime_id IS NOT NULL
+RETURNING id;
+
+-- name: GetQueuedFollowUpTaskForAgent :one
+-- Locates the follow-up a completion replay just queued, so the caller can
+-- stamp its sticky runtime inheritance. Newest first; nothing matches when the
+-- replay merged into an existing task instead of enqueueing one.
+SELECT id
+FROM agent_task_queue
+WHERE agent_id = @agent_id
+  AND issue_id = @issue_id
+  AND trigger_comment_id = @trigger_comment_id
+  AND status = 'queued'
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetLatestIssueTaskStickyRuntime :one
+-- The full execution snapshot of the issue's latest personal run, with that
+-- run's id as the authorization source. A sticky "current task" continuation
+-- adopts this snapshot wholesale instead of re-resolving: with two online
+-- machines of the same CLI a fresh resolution would drift to whichever
+-- heartbeated last, and a personal configuration saved after the run would
+-- swap the model under a machine that never reported it.
+SELECT atq.id AS source_task_id, atq.runtime_id, COALESCE(ar.name, '') AS runtime_name,
+       atq.effective_model, atq.effective_thinking_level,
+       atq.effective_service_tier, atq.effective_runtime_config,
+       atq.effective_max_concurrent_tasks, atq.runtime_config_source
+FROM agent_task_queue atq
+LEFT JOIN agent_runtime ar ON ar.id = atq.runtime_id
+WHERE atq.issue_id = $1
+  AND atq.agent_id = sqlc.arg('agent_id')::uuid
+  AND atq.runtime_id IS NOT NULL
+  AND atq.runtime_config_source IS NOT NULL
+  AND atq.runtime_config_source <> 'shared'
+-- Sort by the same key the mention popover uses (agentTaskSortTime:
+-- started_at ?? dispatched_at ?? completed_at ?? created_at), so the server's
+-- snapshot and the row the member picked in the popover are always the same
+-- run — started_at ranks a late-claimed run above an earlier-claimed one even
+-- when the latter was enqueued later.
+ORDER BY COALESCE(atq.started_at, atq.dispatched_at, atq.completed_at, atq.created_at) DESC, atq.id DESC
+LIMIT 1;
+
+-- name: GetStickyContinuationSourceTask :one
+-- Loads the run an explicit "current task" pick names, scoped to the same
+-- issue and agent, with its dispatch proven intact — the authorization the
+-- continuation inherits. No row means the pick is stale (the run was deleted
+-- or never dispatched); the caller refuses with an explainable error instead
+-- of silently continuing on the latest run.
+SELECT atq.id AS source_task_id, atq.runtime_id, COALESCE(ar.name, '') AS runtime_name,
+       atq.effective_model, atq.effective_thinking_level,
+       atq.effective_service_tier, atq.effective_runtime_config,
+       atq.effective_max_concurrent_tasks, atq.runtime_config_source
+FROM agent_task_queue atq
+LEFT JOIN agent_runtime ar ON ar.id = atq.runtime_id
+WHERE atq.id = sqlc.arg('source_task_id')::uuid
+  AND atq.issue_id = sqlc.arg('issue_id')::uuid
+  AND atq.agent_id = sqlc.arg('agent_id')::uuid
+  AND atq.runtime_id IS NOT NULL
+  AND atq.dispatched_at IS NOT NULL
+  AND atq.runtime_config_source IS NOT NULL
+  AND atq.runtime_config_source <> 'shared';
 
 -- name: MergeDelegatedFailureCommentIntoPendingTask :one
 -- A delegated failure is a platform-owned input, not a new human instruction:
@@ -2271,7 +2855,41 @@ WHERE atq.runtime_id = $1
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND r.workspace_id = a.workspace_id
+        AND (
+            (a.share_runtime AND (
+                a.runtime_id = atq.runtime_id
+                OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                    AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+            ))
+            OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'
@@ -2392,7 +3010,41 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND r.workspace_id = a.workspace_id
+        AND (
+            (a.share_runtime AND (
+                a.runtime_id = atq.runtime_id
+                OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                    AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+            ))
+            OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'
@@ -2582,6 +3234,7 @@ JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at > now() - INTERVAL '30 days'
+  AND (sqlc.narg('originator_user_id')::uuid IS NULL OR atq.originator_user_id = sqlc.narg('originator_user_id'))
 GROUP BY atq.agent_id, bucket
 ORDER BY atq.agent_id, bucket;
 

@@ -8,7 +8,9 @@
   "filter": {
     "project_label": "專案",
     "all_projects": "全部專案",
-    "period_label": "時間範圍"
+    "period_label": "時間範圍",
+    "caller_label": "调用人",
+    "all_callers": "全部"
   },
   "history_limit": {
     "note": "目前方案可以查看最近 {{days}} 天。升級後可以查看更早的資料，資料一直保留。",

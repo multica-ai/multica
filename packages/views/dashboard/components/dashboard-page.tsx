@@ -73,7 +73,7 @@ import {
   dimsForDays,
   type TimeRange,
 } from "./dashboard-shared";
-import { ProjectFilter, TimeRangeFilter } from "./dashboard-filters";
+import { CallerFilter, ProjectFilter, TimeRangeFilter, ALL_CALLERS } from "./dashboard-filters";
 import { UsageTrendCard } from "./usage-trend-card";
 import { Leaderboard } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
@@ -84,6 +84,7 @@ import {
   planForRange,
 } from "../history-range";
 import { dashboardTimeRanges } from "./dashboard-shared";
+import { useAuthStore } from "@multica/core/auth";
 
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
@@ -248,6 +249,19 @@ export function DashboardPage() {
     return projects.some((p) => p.id === projectValue) ? projectValue : null;
   }, [projectValue, projects]);
 
+  // Caller filter. Defaults to the signed-in member — a dashboard answers
+  // "what did I and my agents run" first — with an explicit anyone option
+  // (`ALL_CALLERS`) that drops the server-side originator filter.
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+  const [callerOverride, setCallerOverride] = useState<string | "all">();
+  const originatorUserId =
+    callerOverride === undefined
+      ? currentUserId
+      : callerOverride === "all"
+        ? null
+        : callerOverride;
+  const callerValue = originatorUserId ?? ALL_CALLERS;
+
   // The weekly charts paint `ceil(days / 7)` trailing calendar weeks anchored
   // at today-in-UTC. In the worst case (today = Sunday) the leftmost Monday
   // sits `weekCount * 7 - 1` days back, so a vanilla `days=30` request would
@@ -265,7 +279,7 @@ export function DashboardPage() {
   const chartFetchDays = weekCount * 7;
 
   const dailyQuery = useQuery(
-    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, viewTZ, historyLimit),
+    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, originatorUserId, viewTZ, historyLimit),
   );
   // The three per-agent rollups carry no date, so `dailyCutoffIso` below
   // cannot trim them — their window is closed server-side at exactly `days`
@@ -275,19 +289,19 @@ export function DashboardPage() {
   // and the Run time / Tasks KPIs silently widen by one day while the chart
   // and the Cost / Tokens KPIs beside them do not (MUL-5551).
   const byAgentQuery = useQuery(
-    dashboardUsageByAgentOptions(wsId, days, projectId, viewTZ, historyLimit),
+    dashboardUsageByAgentOptions(wsId, days, projectId, originatorUserId, viewTZ, historyLimit),
   );
   const runTimeQuery = useQuery(
-    dashboardAgentRunTimeOptions(wsId, days, projectId, viewTZ, historyLimit),
+    dashboardAgentRunTimeOptions(wsId, days, projectId, originatorUserId, viewTZ, historyLimit),
   );
   const runTimeDailyQuery = useQuery(
-    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ, historyLimit),
+    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, originatorUserId, viewTZ, historyLimit),
   );
   const failuresDailyQuery = useQuery(
-    dashboardFailuresDailyOptions(wsId, chartFetchDays, projectId, viewTZ, historyLimit),
+    dashboardFailuresDailyOptions(wsId, chartFetchDays, projectId, originatorUserId, viewTZ, historyLimit),
   );
   const failuresByAgentQuery = useQuery(
-    dashboardFailuresByAgentOptions(wsId, days, projectId, viewTZ, historyLimit),
+    dashboardFailuresByAgentOptions(wsId, days, projectId, originatorUserId, viewTZ, historyLimit),
   );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
@@ -572,6 +586,12 @@ export function DashboardPage() {
             planForDays={(range) => planForRange(range, planLimits)}
             onViewPlans={billingEnabled ? viewPlans : null}
             ranges={ranges}
+          />
+          <CallerFilter
+            callerValue={callerValue}
+            onCallerChange={(value) =>
+              setCallerOverride(value === ALL_CALLERS ? "all" : value)
+            }
           />
           <ProjectFilter
             projects={projects}

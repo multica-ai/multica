@@ -1083,7 +1083,11 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		}
 		return fmt.Errorf("resolve leader: %w", err)
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
+	runtimeUser := actorUserID
+	if !runtimeUser.Valid {
+		runtimeUser = ResolveAutopilotTriggerPrincipal(ctx, s.Queries, run.TriggerID, ap.ID, ap.WorkspaceID)
+	}
+	verdict, err := EffectiveAgentReadiness(ctx, s.runtimeLookup(), agent, runtimeUser)
 	if err != nil {
 		return fmt.Errorf("check agent readiness: %w", err)
 	}
@@ -1124,13 +1128,27 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	if err != nil {
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "workspace fail-closed: no accountable human for autopilot run"), code: dispatch.ReasonAttributionBlocked}
 	}
+	effective, err := s.TaskSvc.ResolveEffectiveRuntimeConfig(ctx, agent, autopilotAttr.UserID)
+	if err != nil {
+		if code, ok := RuntimeConfigDispatchReason(err); ok {
+			return &errDispatchSkipped{reason: formatAdmissionReason(ap, err.Error()), code: code}
+		}
+		return err
+	}
 	apSource, _, apEvidenceKind, apEvidenceRef := attributionCreateParams(autopilotAttr)
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
-		ID:             dbid.NewV7(),
-		AgentID:        agent.ID,
-		RuntimeID:      agent.RuntimeID,
-		Priority:       0,
-		AutopilotRunID: run.ID,
+		ID:                          dbid.NewV7(),
+		AgentID:                     agent.ID,
+		RuntimeID:                   effective.RuntimeID,
+		EffectiveModel:              TaskEffectiveModel(effective),
+		EffectiveThinkingLevel:      TaskEffectiveThinkingLevel(effective),
+		EffectiveServiceTier:        TaskEffectiveServiceTier(effective),
+		EffectiveRuntimeConfig:      effective.RuntimeConfig,
+		EffectiveMaxConcurrentTasks: TaskEffectiveMaxConcurrentTasks(effective),
+		RuntimeConfigSource:         TaskRuntimeConfigSource(effective),
+		RuntimeConfigHint:           RuntimeConfigHintJSON(effective.Hint),
+		Priority:                    0,
+		AutopilotRunID:              run.ID,
 		// Snapshot the autopilot title so task rows self-describe later
 		// without joining back to autopilot. Truncated for the same
 		// transmission-cost reason as comment-driven summaries.
@@ -1671,7 +1689,11 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		// chance to succeed.
 		return "", "", false
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
+	runtimeUser := actorUserID
+	if !runtimeUser.Valid {
+		runtimeUser = ResolveAutopilotTriggerPrincipal(ctx, s.Queries, triggerID, ap.ID, ap.WorkspaceID)
+	}
+	verdict, err := EffectiveAgentReadiness(ctx, s.runtimeLookup(), agent, runtimeUser)
 	if err != nil {
 		slog.Warn("autopilot admission: failed to load runtime",
 			"autopilot_id", util.UUIDToString(ap.ID),

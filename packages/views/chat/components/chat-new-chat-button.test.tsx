@@ -1,9 +1,13 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { Agent } from "@multica/core/types";
 import enChat from "../../locales/en/chat.json";
 import enIssues from "../../locales/en/issues.json";
+
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/api", () => ({ api: { getRecentAgentSelections: async () => ({ agentIds: [] }), recordRecentAgentSelection: async (id: string) => ({ agentIds: [id] }) } }));
 
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: { actorId: string }) => (
@@ -56,7 +60,9 @@ const NEW_CHAT_LABEL = enChat.window.new_chat_tooltip;
 function renderPicker(onStart = vi.fn()) {
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <NewChatButton agents={agents} userId="user-1" onStart={onStart} />
+      <QueryClientProvider client={new QueryClient()}>
+        <NewChatButton agents={agents} userId="user-1" onStart={onStart} />
+      </QueryClientProvider>
     </I18nProvider>,
   );
   fireEvent.click(screen.getByRole("button", { name: NEW_CHAT_LABEL }));

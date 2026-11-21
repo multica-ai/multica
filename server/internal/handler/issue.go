@@ -2858,7 +2858,8 @@ type QuickCreateIssueRequest struct {
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
 // correlate the eventual inbox item, even though completion is fully async.
 type QuickCreateIssueResponse struct {
-	TaskID string `json:"task_id"`
+	TaskID            string                     `json:"task_id"`
+	RuntimeConfigHint *service.RuntimeConfigHint `json:"runtime_config_hint,omitempty"`
 }
 
 func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -2975,12 +2976,23 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// — but with the verdict's own code, so "CLI cannot run" no longer arrives
 	// as "runtime is offline" and sends the user to reconnect a machine that is
 	// already connected (MUL-6164).
-	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent); err != nil {
+	if verdict, err := service.EffectiveAgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent, requesterUUID, h.liveRuntimeModels()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check agent runtime")
 		return
 	} else if !verdict.Ready() {
 		writeAgentUnavailable(w, verdict.Detail, verdict.Reason)
 		return
+	}
+
+	if !agent.ShareRuntime {
+		runtime, err := h.resolveEffectiveAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent, requesterUUID)
+		if err != nil {
+			if !writeRuntimeConfigResolutionHTTPError(w, err) {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime")
+			}
+			return
+		}
+		agent.RuntimeID = runtime.ID
 	}
 
 	// Daemon CLI version gate. The agent-side prompt + create-flow rely on
@@ -3072,6 +3084,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
+		if writeRuntimeConfigResolutionHTTPError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrProjectAccessDenied) {
 			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonProjectAccessBlocked)
 			return
@@ -3081,7 +3096,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, QuickCreateIssueResponse{TaskID: uuidToString(task.ID)})
+	writeJSON(w, http.StatusAccepted, QuickCreateIssueResponse{TaskID: uuidToString(task.ID), RuntimeConfigHint: runtimeConfigHintFromTask(task)})
 }
 
 // writeAgentUnavailable returns 422 with a stable error code so the modal
@@ -4572,7 +4587,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 		return db.Agent{}, false, false
 	}
 	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !service.AgentHasRuntimeBinding(agent) || agent.ArchivedAt.Valid {
 		return db.Agent{}, false, false
 	}
 	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {

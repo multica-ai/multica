@@ -1967,3 +1967,128 @@ func TestDashboardMismatchedRequestTimezoneHidesTheRun(t *testing.T) {
 			mismatched, dashboardFixtureTZ)
 	}
 }
+
+// TestDashboardOriginatorFilter covers the caller filter across both query
+// shapes: the queue-backed series (agent run time, a sqlc.narg filter on the
+// same query) and the token rollups (a raw task_usage join, because the
+// hourly rollup carries no originator dimension). A request without the param
+// spans every caller.
+func TestDashboardOriginatorFilter(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	dbfx.QueryRow(t, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID)
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
+
+	var issueID string
+	dbfx.QueryRow(t, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'originator filter test', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// Arbitrary UUIDs stand in for two callers: the column carries no foreign
+	// key, and the filter only compares against the request param.
+	const callerA = "5b1f6e1a-0000-4000-8000-0000000000a1"
+	const callerB = "5b1f6e1a-0000-4000-8000-0000000000b2"
+
+	mkTask := func(caller string, tokens int64) {
+		taskID := dbfx.Task(t, agentID, testutil.Cols{
+			"issue_id":           issueID,
+			"runtime_id":         runtimeID,
+			"status":             "completed",
+			"originator_user_id":   caller,
+			"accountable_user_id":  caller,
+			"started_at":           testutil.Raw("now() - interval '5 minutes'"),
+			"completed_at":       testutil.Raw("now()"),
+			"created_at":         testutil.Raw("now()"),
+		})
+		dbfx.Exec(t, `
+			INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+			VALUES ($1, 'originator-filter-test', 'originator-filter-model', $2, 0, now())
+		`, taskID, tokens)
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM task_usage WHERE task_id = $1`, taskID) })
+	}
+	mkTask(callerA, 1000)
+	mkTask(callerB, 500)
+
+	dbfx.Exec(t, `
+		SELECT rollup_task_usage_hourly_window('1970-01-01'::timestamptz, now() + interval '1 hour')
+	`)
+
+	agentRuntimeTasks := func(originator string) int32 {
+		suffix := ""
+		if originator != "" {
+			suffix = "&originator_user_id=" + originator
+		}
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?days=10&tz=UTC"+suffix, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("agent-runtime %q: expected 200, got %d: %s", originator, w.Code, w.Body.String())
+		}
+		var rows []struct {
+			AgentID   string `json:"agent_id"`
+			TaskCount int32  `json:"task_count"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+			t.Fatalf("decode agent run time: %v", err)
+		}
+		for _, r := range rows {
+			if r.AgentID == agentID {
+				return r.TaskCount
+			}
+		}
+		return 0
+	}
+
+	if got := agentRuntimeTasks(callerA); got != 1 {
+		t.Errorf("caller A task_count = %d, want 1", got)
+	}
+	if got := agentRuntimeTasks(callerB); got != 1 {
+		t.Errorf("caller B task_count = %d, want 1", got)
+	}
+	if got := agentRuntimeTasks(""); got != 2 {
+		t.Errorf("unfiltered task_count = %d, want 2", got)
+	}
+
+	usageTokens := func(originator string) int64 {
+		suffix := ""
+		if originator != "" {
+			suffix = "&originator_user_id=" + originator
+		}
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=10&tz=UTC"+suffix, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("usage/daily %q: expected 200, got %d: %s", originator, w.Code, w.Body.String())
+		}
+		var rows []struct {
+			Provider    string `json:"provider"`
+			InputTokens int64  `json:"input_tokens"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+			t.Fatalf("decode usage daily: %v", err)
+		}
+		var total int64
+		for _, r := range rows {
+			if r.Provider == "originator-filter-test" {
+				total += r.InputTokens
+			}
+		}
+		return total
+	}
+
+	if got := usageTokens(callerA); got != 1000 {
+		t.Errorf("caller A input tokens = %d, want 1000", got)
+	}
+	if got := usageTokens(callerB); got != 500 {
+		t.Errorf("caller B input tokens = %d, want 500", got)
+	}
+	if got := usageTokens(""); got != 1500 {
+		t.Errorf("unfiltered input tokens = %d, want 1500", got)
+	}
+}

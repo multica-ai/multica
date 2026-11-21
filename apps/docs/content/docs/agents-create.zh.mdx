@@ -16,7 +16,7 @@ import { CreateAgentDemo } from "@/components/demos/create-agent-demo";
 <Steps>
 <Step>
 
-**选择运行时。** 页面会列出各台机器上的 AI 编程工具（harness），只有在线的才能进入下一步。后面能选哪些模型、能不能用 skill，都取决于这一步的选择。
+**选择运行时策略**。固定运行时选择指定机器上的在线工具。智能运行时选择推荐 CLI，每个成员使用自己保存的配置或自己拥有的可用运行时执行。
 
 </Step>
 <Step>
@@ -38,7 +38,7 @@ import { CreateAgentDemo } from "@/components/demos/create-agent-demo";
 创建智能体只要求两项：
 
 - **名称**：在当前工作区中必须唯一。
-- **运行时**：选择实际运行的环境。
+- **运行时策略**：固定运行时选择机器，智能运行时选择推荐 CLI。
 
 其他字段可以先使用默认值，创建后再调整。新智能体默认只有创建者可以运行。
 

@@ -105,20 +105,29 @@ describe("unbound Builder runtime recovery", () => {
     expect(apiMocks.switchRuntime).not.toHaveBeenCalled();
 
     fireEvent.click(view.trigger());
-    fireEvent.click(await screen.findByRole("button", { name: /Claude.*available\.local/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Claude(?: Code)?$/ }));
     expect(apiMocks.switchRuntime).toHaveBeenCalledExactlyOnceWith(session.session_id, { runtime_id: runtime.id });
     expect(view.trigger()).toHaveTextContent("Select a runtime first");
     expect(view.trigger()).toBeDisabled();
 
     await act(async () => resolveBinding({ runtime_id: runtime.id }));
-    await waitFor(() => expect(view.trigger()).toHaveTextContent("Available machine"));
+    await waitFor(() => expect(view.trigger()).toHaveTextContent("Claude"));
     expect(view.trigger()).toBeEnabled();
   });
 
-  it("keeps the empty picker state when there are no runtimes", () => {
+  it("offers the fallback CLI catalog when there are no runtimes", () => {
     const view = mount([]);
     expect(view.trigger()).toHaveTextContent("No runtime available");
-    expect(view.trigger()).toBeDisabled();
+    // The smart-runtime picker recommends a CLI, not a machine, so an empty
+    // runtime list still opens and offers the common harnesses.
+    expect(view.trigger()).toBeEnabled();
+    expect(apiMocks.switchRuntime).not.toHaveBeenCalled();
+
+    fireEvent.click(view.trigger());
+    for (const cli of ["Claude", "Codex", "Cursor", "Opencode"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${cli}`) }))
+        .toBeInTheDocument();
+    }
     expect(apiMocks.switchRuntime).not.toHaveBeenCalled();
   });
 });

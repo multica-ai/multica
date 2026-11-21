@@ -67,6 +67,11 @@ const (
 	// ReasonAttributionBlocked: a fail-closed workspace could not resolve a
 	// responsible human for the run, so it was refused.
 	ReasonAttributionBlocked ReasonCode = "attribution_blocked"
+	// ReasonStaleRuntimePick: the "current task" run a member picked can no
+	// longer vouch for a continuation (deleted, never dispatched, or switched
+	// strategies). The task is not lost — the client asks the member to
+	// re-open the @ menu and pick again.
+	ReasonStaleRuntimePick ReasonCode = "stale_runtime_pick"
 	// ReasonAlreadyActive: a run is already active/pending for this target and
 	// this trigger did not coalesce.
 	ReasonAlreadyActive ReasonCode = "already_active"

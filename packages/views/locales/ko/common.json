@@ -144,5 +144,13 @@
   },
   "navigation": {
     "open_in_new_tab": "새 탭에서 열기"
-  }
+  },
+  "agents": {
+    "recent": {
+      "load_failed": "최근 사용한 에이전트를 불러오지 못했습니다.",
+      "retry": "다시 시도",
+      "sync_failed": "에이전트는 선택했지만 최근 사용 기록을 기기 간에 동기화하지 못했습니다."
+    }
+  },
+  "recently_used": "최근 사용"
 }

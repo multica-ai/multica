@@ -40,6 +40,7 @@ export function ModelDropdown({
   onChange,
   onAutomaticChange = onChange,
   disabled,
+  label,
 }: {
   runtimeId: string | null;
   /** Target workspace when rendered before a workspace route is active. */
@@ -50,6 +51,7 @@ export function ModelDropdown({
   /** Automatic value cleanup, separate from explicit user selections. */
   onAutomaticChange?: (value: string) => void;
   disabled?: boolean;
+  label?: string;
 }) {
   const { t } = useT("agents");
   const queryClient = useQueryClient();
@@ -137,7 +139,7 @@ export function ModelDropdown({
     return (
       <div className="flex flex-col min-w-0">
         <div className="flex h-6 items-center">
-          <Label className="text-caption text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
+          <Label className="text-caption text-muted-foreground">{label ?? t(($) => $.model_dropdown.label)}</Label>
         </div>
         <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-body text-muted-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
@@ -155,7 +157,7 @@ export function ModelDropdown({
   return (
     <div className="flex flex-col min-w-0">
       <div className="flex h-6 items-center justify-between">
-        <Label className="text-caption text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
+        <Label className="text-caption text-muted-foreground">{label ?? t(($) => $.model_dropdown.label)}</Label>
         {modelsQuery.isError && (
           <span
             className="text-caption text-muted-foreground"

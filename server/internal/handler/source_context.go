@@ -864,7 +864,11 @@ func (h *Handler) prepareAgentCommentSubIssue(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return nil, sourceContextBadRequest("agent not found")
 	}
-	verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceSourceContext), agent)
+	requesterID, err := util.ParseUUID(requestUserID(r))
+	if err != nil {
+		return nil, sourceContextBadRequest("invalid requester")
+	}
+	verdict, err := service.EffectiveAgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceSourceContext), agent, requesterID, h.liveRuntimeModels())
 	if err != nil {
 		return nil, err
 	}
@@ -872,11 +876,22 @@ func (h *Handler) prepareAgentCommentSubIssue(w http.ResponseWriter, r *http.Req
 		writeAgentUnavailable(w, verdict.Detail, verdict.Reason)
 		return nil, errSourceContextResponseWritten
 	}
-	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, agent.RuntimeID); status != 0 {
+	runtimeID := agent.RuntimeID
+	if !agent.ShareRuntime {
+		runtime, err := h.resolveEffectiveAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, agent, requesterID)
+		if err != nil {
+			if writeRuntimeConfigResolutionHTTPError(w, err) {
+				return nil, errSourceContextResponseWritten
+			}
+			return nil, err
+		}
+		runtimeID = runtime.ID
+	}
+	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, runtimeID); status != 0 {
 		writeJSON(w, status, payload)
 		return nil, errSourceContextResponseWritten
 	}
-	runtime, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, agent.RuntimeID)
+	runtime, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, runtimeID)
 	if err != nil || !runtimeHasCapability(runtime.Metadata, protocol.DaemonCapabilitySourceContextQuickCreateV1) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"code": "source_context_quick_create_unsupported", "error": "selected agent runtime must be updated before using captured context"})
 		return nil, errSourceContextResponseWritten
@@ -890,7 +905,7 @@ func (h *Handler) prepareAgentCommentSubIssue(w http.ResponseWriter, r *http.Req
 		dueDate = parsed.Time.Format("2006-01-02")
 	}
 	if priority != "" || dueDate != "" {
-		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion); status != 0 {
+		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, runtimeID, agentpkg.MinQuickCreateFieldsCLIVersion); status != 0 {
 			writeJSON(w, status, payload)
 			return nil, errSourceContextResponseWritten
 		}
@@ -918,7 +933,7 @@ func (h *Handler) prepareAgentCommentSubIssue(w http.ResponseWriter, r *http.Req
 		projectID = parsed
 	}
 	return &preparedAgentCommentSubIssue{
-		agentID: agentID, squadID: squadID, runtimeID: agent.RuntimeID,
+		agentID: agentID, squadID: squadID, runtimeID: runtimeID,
 		prompt: prompt, priority: priority, dueDate: dueDate,
 		projectID: projectID, attachmentIDs: attachmentIDs,
 	}, nil

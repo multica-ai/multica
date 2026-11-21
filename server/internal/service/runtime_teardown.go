@@ -120,6 +120,9 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 		return out, fmt.Errorf("%w: %d", ErrRuntimeNotDrained, undrained)
 	}
 
+	if _, err := qtx.ClearAgentUserRuntimeConfigsByRuntime(ctx, runtimeID); err != nil {
+		return out, fmt.Errorf("clear personal runtime bindings: %w", err)
+	}
 	unbound, err := qtx.UnbindUserAgentsFromRuntime(ctx, runtimeID)
 	if err != nil {
 		return out, fmt.Errorf("unbind agents: %w", err)

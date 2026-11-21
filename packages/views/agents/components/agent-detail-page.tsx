@@ -1,5 +1,6 @@
 "use client";
 
+import { SmartRuntimeAgentBadge } from "./agent-runtime-hover";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import {
@@ -24,6 +25,8 @@ import type { Agent, UpdateAgentRequest } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
   isAgentRuntimeBound,
+  agentEffectiveRuntimeId,
+  agentRuntimeConfigKeys,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
@@ -94,7 +97,7 @@ import { describeCancelImpact } from "./agent-row-actions";
 import { AgentChannelLinks, AgentChannelsSection } from "./agent-channels-section";
 import { AgentSkillsSection } from "./agent-skills-section";
 import { AgentWorkDialog } from "./agent-work-dialog";
-import { AgentWorkSections } from "./tabs/activity-tab";
+import { AgentWorkSections, resolveAgentCallerId } from "./tabs/activity-tab";
 
 const AGENT_DETAIL_LAYOUT_ID = "multica_agent_detail_layout";
 
@@ -174,6 +177,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     isLoading: permissionsLoading,
   } = useAgentPermissions(agent, wsId);
 
+  // The caller filter is page-level so the Recent work list and the
+  // properties panel's 30-day summary always follow the same caller. Kept
+  // with the other hooks, above the early returns further down.
+  const [callerOverride, setCallerOverride] = useState<string | "all">();
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancelRuns, setConfirmCancelRuns] = useState(false);
 
@@ -242,8 +249,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       // resolves last (e.g. flipping visibility then runtime simultaneously
       // and only the visibility PATCH fails).
       const optimisticData =
-        typeof data.runtime_id === "string"
-          ? { ...data, runtime_bound: data.runtime_id.trim().length > 0 }
+        typeof data.runtime_id === "string" && data.runtime_id.trim().length > 0
+          ? { ...data, runtime_bound: true }
           : data;
       const queryKey = workspaceKeys.agents(wsId);
       const detailQueryKey = workspaceKeys.agent(wsId, id);
@@ -277,6 +284,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         );
         cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
         void qc.invalidateQueries({ queryKey });
+        void qc.invalidateQueries({ queryKey: agentRuntimeConfigKeys.agent(wsId, id) });
         toast.success(t(($) => $.detail.agent_updated_toast));
       } catch (e) {
         if (prevListAgent) {
@@ -437,12 +445,14 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const isArchived = !!agent.archived_at;
   const runtimeBound = isAgentRuntimeBound(agent);
   const runtime = runtimeBound
-    ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
+    ? runtimes.find((r) => r.id === agentEffectiveRuntimeId(agent)) ?? null
     : null;
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
   const currentUserId = currentUser?.id ?? null;
+  // Both surfaces below follow this one caller.
+  const callerId = resolveAgentCallerId(callerOverride, currentUserId);
   const runningCount = presence?.runningCount ?? 0;
   const queuedCount = presence?.queuedCount ?? 0;
   const hasActiveWork = runningCount + queuedCount > 0;
@@ -657,6 +667,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               profileLink={false}
             />
             <span className="truncate">{agent.name}</span>
+            <SmartRuntimeAgentBadge shareRuntime={agent.share_runtime} archived={isArchived} />
           </span>
         }
         actions={actions}
@@ -669,6 +680,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             owner={owner}
             members={members}
             currentUserId={currentUserId}
+            callerId={callerId}
             canEdit={canEdit.allowed}
             onUpdate={handleUpdate}
             onEditAccess={() => openAdvanced("access")}
@@ -698,6 +710,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             key={`${wsId}:${agent.id}`}
             agent={agent}
             scrollParent={scrollParent}
+            callerOverride={callerOverride}
+            onCallerChange={setCallerOverride}
             onViewAll={() => openWork(true)}
           />
 

@@ -1,7 +1,15 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { autoUpdate, computePosition, flip, offset, shift, size } from "@floating-ui/dom";
+import {
+  autoUpdate,
+  computePosition,
+  flip,
+  offset,
+  shift,
+  size,
+  type Middleware,
+} from "@floating-ui/dom";
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
@@ -24,6 +32,49 @@ interface SuggestionPopupRenderOptions<
   ) => boolean;
   /** Preferred side; `flip` still moves it when that side lacks room. */
   placement?: "top-start" | "bottom-start";
+  /** Cap the popup height so flip/shift use the real max footprint, not the current row count. */
+  maxHeightCap?: number;
+  /**
+   * below this viewport width the popup anchors to the bottom of the
+   * screen as a sheet (12px side/bottom margins) instead of following the
+   * caret, and publishes `--mention-row-h: 56px` for taller touch rows.
+   * Undefined keeps the caret-anchored behaviour everywhere.
+   */
+  bottomSheetBelowPx?: number;
+  /**
+   * stamp the ARIA combobox pattern onto the editor's
+   * contenteditable while the picker is open (role="combobox",
+   * aria-expanded, aria-controls → the popup container). The active-option
+   * pointer itself is maintained by the list component, which knows the
+   * highlight index. All stamped attributes are removed on exit.
+   */
+  combobox?: boolean;
+}
+
+/** Bias flip toward the capped max height so a short first paint still flips near the viewport edge. */
+function flipHeightHint(maxHeightCap?: number): Middleware {
+  return {
+    name: "flipHeightHint",
+    fn({ rects, elements }) {
+      if (!maxHeightCap) return {};
+      const hintedHeight = Math.min(
+        maxHeightCap,
+        Math.max(rects.floating.height, elements.floating.scrollHeight),
+      );
+      if (hintedHeight <= rects.floating.height) return {};
+      return {
+        reset: {
+          rects: {
+            ...rects,
+            floating: {
+              ...rects.floating,
+              height: hintedHeight,
+            },
+          },
+        },
+      };
+    },
+  };
 }
 
 export function createSuggestionPopupRender<
@@ -38,14 +89,44 @@ export function createSuggestionPopupRender<
   subscribe,
   onKeyDown,
   placement = "top-start",
+  maxHeightCap,
+  bottomSheetBelowPx,
+  combobox = false,
 }: SuggestionPopupRenderOptions<TItem, TSelected, TRef, TComponentProps>) {
   return () => {
     let renderer: ReactRenderer<TRef> | null = null;
     let popup: HTMLDivElement | null = null;
     let removeOutsideListeners: (() => void) | null = null;
     let removeAutoUpdate: (() => void) | null = null;
+    let comboboxDom: HTMLElement | null = null;
     let unsubscribe: (() => void) | undefined;
     let currentProps: SuggestionProps<TItem, TSelected> | null = null;
+
+    const wantsBottomSheet = (doc: Document): boolean =>
+      bottomSheetBelowPx != null &&
+      doc.documentElement.clientWidth < bottomSheetBelowPx;
+
+    const applyBottomSheet = (el: HTMLDivElement) => {
+      el.dataset.sheet = "true";
+      el.style.setProperty("--mention-row-h", "56px");
+      // the sheet anchors to the viewport and never runs the
+      // `size` middleware, so the fixed-height shell would keep its 420px
+      // fallback and overflow short viewports. Publish the same viewport
+      // budget the caret path gets: the design max clamped to the viewport
+      // minus the sheet's 12px top and bottom margins. Floor at 0 — a
+      // negative custom property would invalidate the `min()` height.
+      const viewportBudget = Math.max(0, window.innerHeight - 24);
+      el.style.setProperty(
+        "--suggestion-available-height",
+        `${Math.min(420, viewportBudget)}px`,
+      );
+      // Clear anything the caret-anchored path may have set earlier.
+      el.style.top = "";
+      el.style.bottom = "12px";
+      el.style.left = "12px";
+      el.style.right = "12px";
+      el.style.removeProperty("max-height");
+    };
 
     const cleanup = () => {
       unsubscribe?.();
@@ -55,6 +136,15 @@ export function createSuggestionPopupRender<
       removeOutsideListeners = null;
       removeAutoUpdate?.();
       removeAutoUpdate = null;
+      // Only strip what we stamped: the editor dom predates the picker.
+      if (comboboxDom) {
+        comboboxDom.removeAttribute("role");
+        comboboxDom.removeAttribute("aria-expanded");
+        comboboxDom.removeAttribute("aria-haspopup");
+        comboboxDom.removeAttribute("aria-controls");
+        comboboxDom.removeAttribute("aria-activedescendant");
+        comboboxDom = null;
+      }
       renderer?.destroy();
       renderer = null;
       popup?.remove();
@@ -108,6 +198,18 @@ export function createSuggestionPopupRender<
       el: HTMLDivElement,
       clientRect: (() => DOMRect | null) | null | undefined,
     ) => {
+      const doc = el.ownerDocument;
+      if (wantsBottomSheet(doc)) {
+        applyBottomSheet(el);
+        return;
+      }
+      el.dataset.sheet = "false";
+      el.style.removeProperty("--mention-row-h");
+      // Drop the sheet's viewport budget so a stale value from a prior sheet
+      // layout can't win the frame before `size` publishes the caret one.
+      el.style.removeProperty("--suggestion-available-height");
+      el.style.bottom = "";
+      el.style.right = "";
       if (!clientRect) return;
       const virtualEl = {
         getBoundingClientRect: () => clientRect() ?? new DOMRect(),
@@ -128,6 +230,7 @@ export function createSuggestionPopupRender<
         strategy: "fixed",
         middleware: [
           offset(6),
+          ...(maxHeightCap ? [flipHeightHint(maxHeightCap)] : []),
           flip({ padding: 8 }),
           shift({ padding: 8 }),
           size({
@@ -164,6 +267,8 @@ export function createSuggestionPopupRender<
     ) => {
       removeAutoUpdate?.();
       removeAutoUpdate = null;
+      // The sheet anchors to the viewport, not the caret — nothing to track.
+      if (wantsBottomSheet(el.ownerDocument)) return;
       if (!clientRect) return;
       const virtualEl = {
         getBoundingClientRect: () => clientRect() ?? new DOMRect(),
@@ -188,10 +293,23 @@ export function createSuggestionPopupRender<
         popup = doc.createElement("div");
         popup.style.position = "fixed";
         popup.style.zIndex = "50";
+        popup.style.display = "flex";
+        popup.style.flexDirection = "column";
+        popup.style.overflow = "hidden";
         const owner = props.editor.view.dom.closest("[data-editor-overlay-owner]")?.getAttribute("data-editor-overlay-owner");
         if (owner) popup.setAttribute("data-editor-overlay-owner", owner);
         popup.appendChild(renderer.element);
         doc.body.appendChild(popup);
+
+        if (combobox) {
+          const editorDom = props.editor.view.dom;
+          comboboxDom = editorDom;
+          editorDom.setAttribute("role", "combobox");
+          editorDom.setAttribute("aria-expanded", "true");
+          editorDom.setAttribute("aria-haspopup", "listbox");
+          popup.id = "mention-popup";
+          editorDom.setAttribute("aria-controls", popup.id);
+        }
 
         installOutsideListeners(props);
         trackPosition(popup, props.clientRect);

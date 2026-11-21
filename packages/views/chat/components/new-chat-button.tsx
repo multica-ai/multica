@@ -14,9 +14,14 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import type { Agent } from "@multica/core/types";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import { useRecentAgents } from "@multica/core/agents";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { SmartRuntimeAgentBadge } from "../../agents/components/agent-runtime-hover";
+import { isAgentRuntimeBound } from "@multica/core/agents";
+import { useRecentAgentRecordError } from "../../common/use-recent-agent-record-error";
+import { RecentAgentLoadError } from "../../common/recent-agent-load-error";
 
 /**
  * Agent picker: a searchable, grouped (My agents / Others) list of agents in a
@@ -46,25 +51,48 @@ export function AgentPicker({
   align?: "start" | "center" | "end";
 }) {
   const { t } = useT("chat");
+  const { t: tCommon } = useT("common");
+  const wsId = useWorkspaceId();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const onRecentAgentRecordError = useRecentAgentRecordError();
+  const selectableAgents = useMemo(
+    () => agents.filter(isAgentRuntimeBound),
+    [agents],
+  );
+  const {
+    recentAgents,
+    recentIds,
+    recordRecentAgent,
+    isRecentAgentsError,
+    refetchRecentAgents,
+  } = useRecentAgents({
+    agents: selectableAgents,
+    userId,
+    wsId,
+    enabled: open,
+    onRecordError: onRecentAgentRecordError,
+  });
   const { mine, others } = useMemo(() => {
     const mine: Agent[] = [];
     const others: Agent[] = [];
     for (const a of agents) {
+      if (recentIds.has(a.id)) continue;
       if (a.owner_id === userId) mine.push(a);
       else others.push(a);
     }
     return { mine, others };
-  }, [agents, userId]);
+  }, [agents, recentIds, userId]);
 
   const query = filter.trim().toLowerCase();
   const matches = (name: string) =>
     !query || name.toLowerCase().includes(query) || matchesPinyin(name, query);
   const filteredMine = mine.filter((agent) => matches(agent.name));
   const filteredOthers = others.filter((agent) => matches(agent.name));
+  const filteredRecent = recentAgents.filter((agent) => matches(agent.name));
 
   const handlePick = (agent: Agent) => {
+    recordRecentAgent(agent.id);
     onSelect(agent);
     setOpen(false);
   };
@@ -83,10 +111,27 @@ export function AgentPicker({
       trigger={trigger}
       tooltip={tooltip}
     >
-      {filteredMine.length === 0 && filteredOthers.length === 0 ? (
+      {isRecentAgentsError && (
+        <RecentAgentLoadError onRetry={refetchRecentAgents} />
+      )}
+      {filteredRecent.length === 0 &&
+      filteredMine.length === 0 &&
+      filteredOthers.length === 0 ? (
         <PickerEmpty />
       ) : (
         <>
+          {filteredRecent.length > 0 && (
+            <PickerSection label={tCommon(($) => $.recently_used)}>
+              {filteredRecent.map((agent) => (
+                <AgentPickerItem
+                  key={agent.id}
+                  agent={agent}
+                  isCurrent={agent.id === currentAgentId}
+                  onSelect={handlePick}
+                />
+              ))}
+            </PickerSection>
+          )}
           {filteredMine.length > 0 && (
             <PickerSection label={t(($) => $.window.my_agents)}>
               {filteredMine.map((agent) => (
@@ -145,6 +190,7 @@ function AgentPickerItem({
         showStatusDot
       />
       <span className="truncate flex-1">{agent.name}</span>
+      <SmartRuntimeAgentBadge shareRuntime={agent.share_runtime} />
       {!runtimeBound && (
         <span className="shrink-0 text-micro text-amber-600 dark:text-amber-400">
           {t(($) => $.window.agent_needs_runtime)}
@@ -188,7 +234,10 @@ export function NewChatButton({
               className="text-muted-foreground"
               aria-label={label}
               onClick={() => {
-                if (only && !isAgentRuntimeBound(only)) {
+                if (
+                  only &&
+                  !isAgentRuntimeBound(only)
+                ) {
                   toast.error(t(($) => $.input.runtime_required_toast));
                   return;
                 }

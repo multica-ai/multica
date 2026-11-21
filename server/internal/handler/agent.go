@@ -60,11 +60,14 @@ type AgentResponse struct {
 	// runtime before it can run again (MUL-5559). The wire type stays a string
 	// so installed clients keep parsing; RuntimeBound is the explicit signal.
 	RuntimeID string `json:"runtime_id"`
+	CLI       string `json:"cli,omitempty"`
 	// RuntimeBound is false exactly when the agent has no runtime. UI should
 	// branch on this rather than on RuntimeID being falsy, and must not confuse
 	// it with a bound-but-offline runtime (a different user story: reconnect the
 	// machine vs. pick a new one).
-	RuntimeBound bool `json:"runtime_bound"`
+	RuntimeBound         bool                       `json:"runtime_bound"`
+	ShareRuntime         bool                       `json:"share_runtime"`
+	RuntimeConfigSummary *AgentRuntimeConfigSummary `json:"runtime_config_summary,omitempty"`
 	// RuntimeAvailability is the coarse liveness projection for a runtime that
 	// may be hidden from the caller's runtime list. It deliberately carries no
 	// timestamp, device, owner, configuration, or credential fields; clients
@@ -213,7 +216,9 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ID:                       uuidToString(a.ID),
 		WorkspaceID:              uuidToString(a.WorkspaceID),
 		RuntimeID:                uuidToString(a.RuntimeID),
-		RuntimeBound:             a.RuntimeID.Valid,
+		RuntimeBound:             service.AgentHasRuntimeBinding(a),
+		ShareRuntime:             a.ShareRuntime,
+		CLI:                      service.RecommendedCLI(a),
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
@@ -407,9 +412,14 @@ type AgentTaskResponse struct {
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
+	ID                string                     `json:"id"`
+	AgentID           string                     `json:"agent_id"`
+	RuntimeID         string                     `json:"runtime_id"`
+	RuntimeOwnerID    string                     `json:"runtime_owner_id,omitempty"`
+	RuntimeProvider   string                     `json:"runtime_provider,omitempty"`
+	EffectiveModel    string                     `json:"effective_model,omitempty"`
+	RuntimeConfigHint *service.RuntimeConfigHint `json:"runtime_config_hint,omitempty"`
+
 	IssueID              string                 `json:"issue_id"`
 	WorkspaceID          string                 `json:"workspace_id"`
 	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
@@ -930,13 +940,19 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),
+		EffectiveModel:         t.EffectiveModel.String,
+		RuntimeConfigHint:      service.DecodeRuntimeConfigHint(t.RuntimeConfigHint),
 		IssueID:                uuidToString(t.IssueID),
 		WorkspaceID:            workspaceID,
 		Status:                 t.Status,
 		Priority:               t.Priority,
-		DispatchedAt:           timestampToPtr(t.DispatchedAt),
-		StartedAt:              timestampToPtr(t.StartedAt),
-		CompletedAt:            timestampToPtr(t.CompletedAt),
+		// Sub-second precision keeps the mention popover's run ordering
+		// (agentTaskSortTime) distinguishable within one second — the sticky
+		// continuation recovery sorts by the same instants server-side, so
+		// both must see the same granularity.
+		DispatchedAt:           timestampToNanoPtr(t.DispatchedAt),
+		StartedAt:              timestampToNanoPtr(t.StartedAt),
+		CompletedAt:            timestampToNanoPtr(t.CompletedAt),
 		Result:                 result,
 		Error:                  textToPtr(t.Error),
 		FailureReason:          failureReason,
@@ -1328,6 +1344,9 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		} else if actorType == "agent" || uuidToString(a.OwnerID) != userID {
 			redactComposioToolkitAllowlist(&resp)
 		}
+		if actorType != "agent" && !alwaysRedact && !a.ShareRuntime {
+			h.attachRuntimeConfigSummaryForMember(r.Context(), &resp, a, member)
+		}
 		visible = append(visible, resp)
 	}
 
@@ -1355,6 +1374,9 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	viewerRole := ""
 	if member, ok := ctxMember(r.Context()); ok {
 		viewerRole = member.Role
+		if actorType != "agent" && !agent.ShareRuntime {
+			h.attachRuntimeConfigSummaryForMember(r.Context(), &resp, agent, member)
+		}
 	}
 	runtimeAvailability, err := h.loadAgentRuntimeAvailability(r.Context(), []db.Agent{agent}, workspaceID, userID, viewerRole, time.Now())
 	if err != nil {
@@ -1405,6 +1427,8 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
+	ShareRuntime         *bool                      `json:"share_runtime"`
+	CLI                  string                     `json:"cli"`
 	Name                 string                     `json:"name"`
 	Description          string                     `json:"description"`
 	Instructions         string                     `json:"instructions"`
@@ -1513,10 +1537,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxAgentDescriptionLength))
 		return
 	}
-	if req.RuntimeID == "" {
-		writeError(w, http.StatusBadRequest, "runtime_id is required")
-		return
-	}
 	conversationStarters, err := normaliseAgentConversationStarters(req.ConversationStarters)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -1530,9 +1550,26 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
-	if !ok {
-		return
+	share := req.ShareRuntime == nil || *req.ShareRuntime
+	var runtimeUUID pgtype.UUID
+	var cli string
+	if share {
+		if req.RuntimeID == "" {
+			writeError(w, http.StatusBadRequest, "runtime_id is required")
+			return
+		}
+		var ok bool
+		runtimeUUID, ok = parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
+		if !ok {
+			return
+		}
+	} else {
+		var ok bool
+		cli, ok = service.NormalizeRecommendedCLI(req.CLI)
+		if !ok || req.RuntimeID != "" {
+			writeError(w, http.StatusBadRequest, "smart strategy requires a CLI and no runtime_id")
+			return
+		}
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
@@ -1550,20 +1587,24 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, permErr.Error())
 		return
 	}
-	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-		ID:          runtimeUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid runtime_id")
-		return
+	runtime := db.AgentRuntime{Provider: cli, RuntimeMode: "local"}
+	if share {
+		runtime, err = h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+			ID:          runtimeUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+
 	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	if !canUseRuntimeForAgent(member, runtime) {
+	if share && !canUseRuntimeForAgent(member, runtime) {
 		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
 		return
 	}
@@ -1714,14 +1755,17 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtimeUUID)
-	if err != nil || runtime.WorkspaceID != wsUUID {
-		writeError(w, http.StatusBadRequest, "invalid runtime_id")
-		return
-	}
-	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
-		return
+	if share {
+		runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtimeUUID)
+		if err != nil || runtime.WorkspaceID != wsUUID {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if share && !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
+			return
+		}
+
 	}
 
 	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
@@ -1733,6 +1777,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		RuntimeMode:              runtime.RuntimeMode,
 		RuntimeConfig:            rc,
 		RuntimeID:                runtime.ID,
+		ShareRuntime:             pgtype.Bool{Bool: share, Valid: true},
+		RecommendedCli:           cli,
 		Visibility:               perm.legacyVisibility(),
 		PermissionMode:           perm.mode,
 		MaxConcurrentTasks:       req.MaxConcurrentTasks,
@@ -1790,6 +1836,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := h.agentToResponse(created)
+	if !created.ShareRuntime && !isMachineCredentialActor(r) {
+		h.attachRuntimeConfigSummaryForMember(r.Context(), &resp, created, member)
+	}
 	if err := h.attachAgentSkills(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load skills for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
 	}
@@ -1817,6 +1866,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
+	ShareRuntime         *bool                       `json:"share_runtime"`
+	CLI                  *string                     `json:"cli"`
 	Name                 *string                     `json:"name"`
 	Description          *string                     `json:"description"`
 	Instructions         *string                     `json:"instructions"`
@@ -1924,6 +1975,7 @@ func canViewAgentSecrets(agent db.Agent, userID string, memberRole string) bool 
 // broadcast copy.
 func broadcastAgentResponse(resp AgentResponse) AgentResponse {
 	out := resp
+	out.RuntimeConfigSummary = nil
 	redactMcpConfig(&out)
 	redactComposioToolkitAllowlist(&out)
 	// Belt-and-suspenders: agentToResponse already masks gateway.token on
@@ -2129,7 +2181,31 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
 	targetProvider := ""
-	if req.RuntimeID != nil {
+	share := existing.ShareRuntime
+	if req.ShareRuntime != nil {
+		share = *req.ShareRuntime
+		params.ShareRuntime = pgtype.Bool{Bool: share, Valid: true}
+	}
+	if !share {
+		targetProvider = service.RecommendedCLI(existing)
+		if req.CLI != nil {
+			targetProvider, _ = service.NormalizeRecommendedCLI(*req.CLI)
+		}
+		if targetProvider == "" || (req.RuntimeID != nil && *req.RuntimeID != "") {
+			writeError(w, http.StatusBadRequest, "smart strategy requires a CLI and no runtime_id")
+			return
+		}
+		params.RecommendedCli = pgtype.Text{String: targetProvider, Valid: true}
+		targetRuntimeID = pgtype.UUID{}
+		params.RuntimeMode = pgtype.Text{String: "local", Valid: true}
+	} else if req.ShareRuntime != nil || req.CLI != nil {
+		if !existing.RuntimeID.Valid && req.RuntimeID == nil {
+			writeError(w, http.StatusBadRequest, "fixed strategy requires runtime_id")
+			return
+		}
+		params.RecommendedCli = pgtype.Text{Valid: true}
+	}
+	if share && req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
 			return
@@ -2653,6 +2729,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	invocationAdmission.admitted(r.Context())
 
 	resp := h.agentToResponse(updated)
+	if viewer, ok := ctxMember(r.Context()); ok && !updated.ShareRuntime && !isMachineCredentialActor(r) {
+		h.attachRuntimeConfigSummaryForMember(r.Context(), &resp, updated, viewer)
+	}
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, updated.ID); err != nil {
 		slog.Warn("update agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
@@ -3126,6 +3205,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 			taskIDs[i] = t.ID
 		}
 	}
+	h.hydrateTaskRuntimeIdentity(r.Context(), agent.WorkspaceID, tasks, resp)
 	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), tasks, resp); err != nil {
 		if writeQueryCancellation(w, r, err) {
 			return
@@ -3395,8 +3475,18 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
+	// Optional caller filter (?originator_user_id=<uuid>): absent spans every
+	// caller, so the Agents-list sparkline reads the same workspace-wide
+	// series as before.
+	originatorUserID, ok := parseOriginatorUserIDParam(w, r)
+	if !ok {
+		return
+	}
 
-	rows, err := h.Queries.GetWorkspaceAgentActivity30d(r.Context(), parseUUID(workspaceID))
+	rows, err := h.Queries.GetWorkspaceAgentActivity30d(r.Context(), db.GetWorkspaceAgentActivity30dParams{
+		WorkspaceID:      parseUUID(workspaceID),
+		OriginatorUserID: originatorUserID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get agent activity")
 		return
@@ -3471,6 +3561,7 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 		resp = append(resp, taskToResponse(t, workspaceID))
 		kept = append(kept, t)
 	}
+	h.hydrateTaskRuntimeIdentity(r.Context(), parseUUID(workspaceID), kept, resp)
 	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), kept, resp); err != nil {
 		slog.Warn("agent task snapshot: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
@@ -3484,4 +3575,31 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// hydrateTaskRuntimeIdentity projects the machine recorded on each task.
+func (h *Handler) hydrateTaskRuntimeIdentity(ctx context.Context, workspaceID pgtype.UUID, tasks []db.AgentTaskQueue, responses []AgentTaskResponse) {
+	ids := make([]pgtype.UUID, 0, len(tasks))
+	seen := make(map[pgtype.UUID]bool)
+	for _, task := range tasks {
+		if task.RuntimeID.Valid && !seen[task.RuntimeID] {
+			ids = append(ids, task.RuntimeID)
+			seen[task.RuntimeID] = true
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	runtimes, err := h.runtimeLookup(obsmetrics.RuntimeLookupSourceTask).GetMany(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "load task runtime identity", "error", err)
+		return
+	}
+	for i, response := range responses {
+		runtime, ok := runtimes[response.RuntimeID]
+		if ok && runtime.WorkspaceID == workspaceID {
+			responses[i].RuntimeOwnerID = uuidToString(runtime.OwnerID)
+			responses[i].RuntimeProvider = runtime.Provider
+		}
+	}
 }

@@ -293,16 +293,18 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, $12::uuid) AS runtime_id
+    SELECT a.id, COALESCE(a.runtime_id, $19::uuid) AS runtime_id
     FROM agent a
     WHERE a.id = $1
-      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, $12::uuid))
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, $19::uuid))
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    effective_model, effective_thinking_level, effective_service_tier, effective_runtime_config,
+    effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint,
     id
 )
 SELECT
@@ -313,24 +315,38 @@ SELECT
     $8,
     $9,
     $10,
-    COALESCE($11::uuid, gen_random_uuid())
+    $11,
+    $12,
+    $13,
+    $14,
+    $15,
+    $16,
+    $17,
+    COALESCE($18::uuid, gen_random_uuid())
 FROM enqueue_agent
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, effective_model, effective_thinking_level, effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint, effective_service_tier
 `
 
 type CreateAutopilotTaskParams struct {
-	AgentID              pgtype.UUID `json:"agent_id"`
-	Priority             int32       `json:"priority"`
-	AutopilotRunID       pgtype.UUID `json:"autopilot_run_id"`
-	TriggerSummary       pgtype.Text `json:"trigger_summary"`
-	OriginatorUserID     pgtype.UUID `json:"originator_user_id"`
-	AccountableUserID    pgtype.UUID `json:"accountable_user_id"`
-	RuleVersionID        pgtype.UUID `json:"rule_version_id"`
-	OriginatorSource     pgtype.Text `json:"originator_source"`
-	TriggerEvidenceKind  pgtype.Text `json:"trigger_evidence_kind"`
-	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
-	ID                   pgtype.UUID `json:"id"`
-	RuntimeID            pgtype.UUID `json:"runtime_id"`
+	AgentID                     pgtype.UUID `json:"agent_id"`
+	Priority                    int32       `json:"priority"`
+	AutopilotRunID              pgtype.UUID `json:"autopilot_run_id"`
+	TriggerSummary              pgtype.Text `json:"trigger_summary"`
+	OriginatorUserID            pgtype.UUID `json:"originator_user_id"`
+	AccountableUserID           pgtype.UUID `json:"accountable_user_id"`
+	RuleVersionID               pgtype.UUID `json:"rule_version_id"`
+	OriginatorSource            pgtype.Text `json:"originator_source"`
+	TriggerEvidenceKind         pgtype.Text `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID        pgtype.UUID `json:"trigger_evidence_ref_id"`
+	EffectiveModel              pgtype.Text `json:"effective_model"`
+	EffectiveThinkingLevel      pgtype.Text `json:"effective_thinking_level"`
+	EffectiveServiceTier        pgtype.Text `json:"effective_service_tier"`
+	EffectiveRuntimeConfig      []byte      `json:"effective_runtime_config"`
+	EffectiveMaxConcurrentTasks pgtype.Int4 `json:"effective_max_concurrent_tasks"`
+	RuntimeConfigSource         pgtype.Text `json:"runtime_config_source"`
+	RuntimeConfigHint           []byte      `json:"runtime_config_hint"`
+	ID                          pgtype.UUID `json:"id"`
+	RuntimeID                   pgtype.UUID `json:"runtime_id"`
 }
 
 // =====================
@@ -352,6 +368,13 @@ type CreateAutopilotTaskParams struct {
 // When no version/publisher resolves on the non-manual path, the caller passes NULL
 // accountable + originator_source='unattributed' so the row is still not a
 // NULL-source bypass (MUL-4302 §2).
+// The effective_* / runtime_config_* columns carry the resolved smart-runtime
+// personal config of the run's originator (the "run now" member, or the rule
+// owner's config for schedule/webhook dispatch), the same stamp the other
+// enqueue paths write. The daemon claim handler keys its model selection on
+// runtime_config_source: with the stamp present it uses effective_model (empty
+// = the CLI's default model); with it NULL it falls back to the agent's
+// template model.
 func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAutopilotTask,
 		arg.AgentID,
@@ -364,6 +387,13 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		arg.OriginatorSource,
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
+		arg.EffectiveModel,
+		arg.EffectiveThinkingLevel,
+		arg.EffectiveServiceTier,
+		arg.EffectiveRuntimeConfig,
+		arg.EffectiveMaxConcurrentTasks,
+		arg.RuntimeConfigSource,
+		arg.RuntimeConfigHint,
 		arg.ID,
 		arg.RuntimeID,
 	)
@@ -429,6 +459,13 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.CancelledByName,
 		&i.IssueSnapshot,
 		&i.WorkflowStep,
+		&i.EffectiveModel,
+		&i.EffectiveThinkingLevel,
+		&i.EffectiveRuntimeConfig,
+		&i.EffectiveMaxConcurrentTasks,
+		&i.RuntimeConfigSource,
+		&i.RuntimeConfigHint,
+		&i.EffectiveServiceTier,
 	)
 	return i, err
 }
@@ -1000,7 +1037,7 @@ func (q *Queries) GetAutopilotRunByWebhookDelivery(ctx context.Context, webhookD
 }
 
 const getAutopilotTaskByRun = `-- name: GetAutopilotTaskByRun :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, effective_model, effective_thinking_level, effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint, effective_service_tier FROM agent_task_queue
 WHERE autopilot_run_id = $1
 ORDER BY created_at
 LIMIT 1
@@ -1072,6 +1109,13 @@ func (q *Queries) GetAutopilotTaskByRun(ctx context.Context, autopilotRunID pgty
 		&i.CancelledByName,
 		&i.IssueSnapshot,
 		&i.WorkflowStep,
+		&i.EffectiveModel,
+		&i.EffectiveThinkingLevel,
+		&i.EffectiveRuntimeConfig,
+		&i.EffectiveMaxConcurrentTasks,
+		&i.RuntimeConfigSource,
+		&i.RuntimeConfigHint,
+		&i.EffectiveServiceTier,
 	)
 	return i, err
 }

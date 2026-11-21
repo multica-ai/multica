@@ -29,9 +29,10 @@ const dashboardKey = (
   part: DashboardKeyPart,
   days: number,
   projectId: string | null,
+  originatorUserId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam = null,
-) => ["dashboard", wsId, part, days, projectId, tz, historyLimit ?? null] as const;
+) => ["dashboard", wsId, part, days, projectId, originatorUserId, tz, historyLimit ?? null] as const;
 
 export const dashboardKeys = {
   all: (wsId: string) => ["dashboard", wsId] as const,
@@ -39,44 +40,50 @@ export const dashboardKeys = {
     wsId: string,
     days: number,
     projectId: string | null,
+    originatorUserId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "daily", days, projectId, tz, historyLimit),
+  ) => dashboardKey(wsId, "daily", days, projectId, originatorUserId, tz, historyLimit),
   byAgent: (
     wsId: string,
     days: number,
     projectId: string | null,
+    originatorUserId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "by-agent", days, projectId, tz, historyLimit),
+  ) => dashboardKey(wsId, "by-agent", days, projectId, originatorUserId, tz, historyLimit),
   agentRuntime: (
     wsId: string,
     days: number,
     projectId: string | null,
+    originatorUserId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "agent-runtime", days, projectId, tz, historyLimit),
+  ) => dashboardKey(wsId, "agent-runtime", days, projectId, originatorUserId, tz, historyLimit),
   runTimeDaily: (
     wsId: string,
     days: number,
     projectId: string | null,
+    originatorUserId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "runtime-daily", days, projectId, tz, historyLimit),
+  ) => dashboardKey(wsId, "runtime-daily", days, projectId, originatorUserId, tz, historyLimit),
   failuresDaily: (
     wsId: string,
     days: number,
     projectId: string | null,
+    originatorUserId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "failures-daily", days, projectId, tz, historyLimit),
+  ) => dashboardKey(wsId, "failures-daily", days, projectId, originatorUserId, tz, historyLimit),
   failuresByAgent: (
     wsId: string,
     days: number,
     projectId: string | null,
+    originatorUserId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "failures-by-agent", days, projectId, tz, historyLimit),
+  ) => dashboardKey(wsId, "failures-by-agent", days, projectId, originatorUserId, tz, historyLimit),
 };
 
 // The server materializes these rollups on a 5-minute cadence, so a mounted
@@ -122,10 +129,11 @@ function dashboardOptions<T>(
   wsId: string,
   days: number,
   projectId: string | null,
+  originatorUserId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
 ) {
-  const queryKey = dashboardKey(wsId, part, days, projectId, tz, historyLimit);
+  const queryKey = dashboardKey(wsId, part, days, projectId, originatorUserId, tz, historyLimit);
   return queryOptions({
     queryKey,
     queryFn: async ({ client }: { client: QueryClient }) => {
@@ -134,6 +142,7 @@ function dashboardOptions<T>(
       const rows = await fetcher({
         days,
         project_id: projectId ?? undefined,
+        originator_user_id: originatorUserId ?? undefined,
         tz,
         onHistoryLimit: (limit) => {
           served = limit;
@@ -167,6 +176,7 @@ export function dashboardUsageDailyOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  originatorUserId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
 ) {
@@ -176,6 +186,7 @@ export function dashboardUsageDailyOptions(
     wsId,
     days,
     projectId,
+    originatorUserId,
     tz,
     historyLimit,
   );
@@ -185,6 +196,7 @@ export function dashboardUsageByAgentOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  originatorUserId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
 ) {
@@ -194,6 +206,7 @@ export function dashboardUsageByAgentOptions(
     wsId,
     days,
     projectId,
+    originatorUserId,
     tz,
     historyLimit,
   );
@@ -203,6 +216,7 @@ export function dashboardAgentRunTimeOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  originatorUserId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
 ) {
@@ -212,6 +226,7 @@ export function dashboardAgentRunTimeOptions(
     wsId,
     days,
     projectId,
+    originatorUserId,
     tz,
     historyLimit,
   );
@@ -221,6 +236,7 @@ export function dashboardRunTimeDailyOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  originatorUserId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
 ) {
@@ -230,6 +246,7 @@ export function dashboardRunTimeDailyOptions(
     wsId,
     days,
     projectId,
+    originatorUserId,
     tz,
     historyLimit,
   );
@@ -239,6 +256,7 @@ export function dashboardFailuresDailyOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  originatorUserId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
 ) {
@@ -248,6 +266,7 @@ export function dashboardFailuresDailyOptions(
     wsId,
     days,
     projectId,
+    originatorUserId,
     tz,
     historyLimit,
   );
@@ -257,6 +276,7 @@ export function dashboardFailuresByAgentOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  originatorUserId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
 ) {
@@ -266,6 +286,7 @@ export function dashboardFailuresByAgentOptions(
     wsId,
     days,
     projectId,
+    originatorUserId,
     tz,
     historyLimit,
   );

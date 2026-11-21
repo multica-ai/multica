@@ -57,6 +57,13 @@ func (l RuntimeLookup) Get(ctx context.Context, id pgtype.UUID) (db.AgentRuntime
 	return rt, err
 }
 
+// GetForWorkspace preserves workspace isolation while attributing the lookup.
+func (l RuntimeLookup) GetForWorkspace(ctx context.Context, arg db.GetAgentRuntimeForWorkspaceParams) (db.AgentRuntime, error) {
+	rt, err := l.Queries.GetAgentRuntimeForWorkspace(ctx, arg)
+	l.Metrics.RecordAgentRuntimeLookup(l.Source, runtimeLookupResult(err))
+	return rt, err
+}
+
 // GetMany reads the requested agent_runtime rows in one query and keeps the
 // per-source attribution GetAgentRuntime callers get, without issuing N point
 // reads (MUL-6788). It returns the rows keyed by their canonical UUID string
@@ -111,6 +118,13 @@ func (s *IssueService) runtimeLookup(q *db.Queries) RuntimeLookup {
 // usage provider backfill.
 func (s *TaskService) runtimeLookup() RuntimeLookup {
 	return RuntimeLookup{Queries: s.Queries, Metrics: s.Metrics, Source: obsmetrics.RuntimeLookupSourceTask}
+}
+
+// runtimeLookup returns the wakeup-sourced lookup, bound to the caller's
+// connection so the admission read inside a create/update transaction stays
+// inside it.
+func (s *IssueWakeupService) runtimeLookup(q *db.Queries) RuntimeLookup {
+	return RuntimeLookup{Queries: q, Metrics: s.Tasks.Metrics, Source: obsmetrics.RuntimeLookupSourceWakeup}
 }
 
 // runtimeLookup returns the autopilot-sourced lookup. AutopilotService holds no

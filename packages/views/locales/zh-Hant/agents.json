@@ -191,7 +191,9 @@
     "rename_required": "名稱必填",
     "edit_description_title": "編輯描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "cancel": "取消"
+    "cancel": "取消",
+    "prop_recommended_runtime": "推薦 CLI",
+    "section_execution_hint": "选择运行时、模型、思考强度、速度和并行运行上限。"
   },
   "overview": {
     "attention_title": "需要處理的執行",
@@ -248,7 +250,11 @@
     "service_tier_standard_description": "明確使用標準速度和標準用量",
     "service_tier_tooltip": "速度 · {{value}}",
     "service_tier_clear": "執行時預設",
-    "service_tier_clear_title": "清除速度覆蓋，交由本地 Codex 配置決定"
+    "service_tier_clear_title": "清除速度覆蓋，交由本地 Codex 配置決定",
+    "cli_empty": "暂无 CLI",
+    "cli_none": "未选择 CLI",
+    "cli_tooltip": "CLI · {{name}}",
+    "cli_tooltip_none": "CLI · 未选择"
   },
   "model_dropdown": {
     "label": "模型",
@@ -258,7 +264,8 @@
     "managed_by_runtime_title": "模型選擇由該執行時管理。",
     "managed_by_runtime_hint": "請在執行時主機上配置模型（例如 Hermes 會從自身配置檔案讀取）。",
     "discovery_failed": "發現失敗",
-    "clear_full": "清除選擇（使用提供方預設）"
+    "clear_full": "清除選擇（使用提供方預設）",
+    "recommended_label": "推荐模型"
   },
   "tabs": {
     "work": "工作",
@@ -421,7 +428,8 @@
       "member_fix": "需要管理員處理",
       "footer_selected": "已選：",
       "cancel": "取消",
-      "next": "下一步"
+      "next": "下一步",
+      "continue_smart": "沒有機器？使用智慧執行時"
     }
   },
   "create_dialog": {
@@ -473,6 +481,14 @@
       "remove_aria": "移除頭像",
       "select_image_toast": "請選擇圖片檔案。",
       "upload_failed_toast": "頭像上傳失敗"
+    },
+    "recommended_runtime_label": "推薦 CLI",
+    "share_runtime": {
+      "fixed_desc": "所有人调用该智能体时使用它绑定的运行时配置。",
+      "fixed_title": "固定运行时",
+      "label": "运行时策略",
+      "smart_desc": "呼叫者使用自己的執行環境。設定的模型必須能在該執行環境中使用。",
+      "smart_title": "智能运行时"
     }
   },
   "conversation_starters": {
@@ -779,7 +795,14 @@
       "cancel_failed_toast": "取消執行失敗",
       "started_prefix": "{{when}}啟動",
       "dispatched_prefix": "{{when}}派發",
-      "queued_prefix": "{{when}}排隊"
+      "queued_prefix": "{{when}}排隊",
+      "caller_filter_label": "调用人",
+      "caller_filter_all": "全部",
+      "caller_filter_search": "搜索成员",
+      "caller_filter_members": "成员",
+      "caller_filter_clear_aria": "清除调用人筛选",
+      "summary_load_failed": "無法載入該調用人近 30 天的摘要。",
+      "retry": "重試"
     },
     "connected_apps": {
       "loading": "正在載入應用…",
@@ -1071,5 +1094,34 @@
       "comment": "修好了：價格卡片在 375px 下改為單欄。已開 PR，測試通過。",
       "step_read": "讀取 {{file}}"
     }
+  },
+  "runtime_config": {
+    "confirm_notice": "知道了",
+    "confirming_notice": "保存中…",
+    "current_concurrency": "并发",
+    "current_model": "模型",
+    "current_runtime": "运行时",
+    "current_section": "我的当前配置",
+    "current_speed": "速度",
+    "current_strategy": "配置策略",
+    "current_thinking": "思考",
+    "load_failed": "当前配置加载失败。",
+    "loading": "正在加载当前配置…",
+    "not_editable": "请先添加运行时。",
+    "notice_required": "该智能体已使用你的运行时和推荐或默认配置运行。你可以在这里检查并保存自己的配置。",
+    "notice_seen_failed_toast": "确认运行时提示失败",
+    "resolution": {
+      "model_unavailable": "运行时模型不可用",
+      "no_user_runtime": "请先添加运行时",
+      "runtime_offline": "运行时离线",
+      "runtime_unavailable": "运行时不可用"
+    },
+    "save_failed_toast": "保存当前配置失败",
+    "saved_toast": "已保存我的当前配置",
+    "strategy_custom": "自定义",
+    "strategy_recommended": "推荐"
+  },
+  "runtime_policy": {
+    "smart": "智能"
   }
 }

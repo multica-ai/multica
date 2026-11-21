@@ -67,7 +67,10 @@ import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import { agentEffectiveRuntimeId, isAgentRuntimeBound, mergeRecentCreatorActors, useRecentAgents, useRecentCreatorActors } from "@multica/core/agents";
+import { SmartRuntimeAgentBadge } from "../agents/components/agent-runtime-hover";
+import { useRecentAgentRecordError } from "../common/use-recent-agent-record-error";
+import { RecentAgentLoadError } from "../common/recent-agent-load-error";
 import {
   PropertyPicker,
   PickerItem,
@@ -339,13 +342,8 @@ export function AgentCreatePanel({
   // (git-describe shape) are exempted inside checkQuickCreateCliVersion
   // — frontend and server share the same signal there, so they agree by
   // construction across web/desktop/staging without comparing env flags.
-  const selectedRuntime = useMemo(
-    () =>
-      selectedAgent?.runtime_id
-        ? runtimes.find((r) => r.id === selectedAgent.runtime_id)
-        : undefined,
-    [runtimes, selectedAgent?.runtime_id],
-  );
+  const effectiveRuntimeId = selectedAgent ? agentEffectiveRuntimeId(selectedAgent) : null;
+  const selectedRuntime = runtimes.find((runtime) => runtime.id === effectiveRuntimeId);
   // We can only pre-check a version we can actually see. A non-admin member's
   // runtime list (ListVisibleAgentRuntimes) omits other members' private
   // machines, so a selected agent bound to such a runtime yields no row here.
@@ -357,7 +355,6 @@ export function AgentCreatePanel({
   // role) instead of failing closed in the UI.
   // Qoder Cloud Agents runs through the managed bridge, which has no CLI.
   const canPrecheckVersion =
-    selectedAgent?.runtime_id != null &&
     selectedRuntime != null &&
     selectedRuntime.provider !== "qoder_cloud";
   const runtimeCliVersion = readRuntimeCliVersion(selectedRuntime?.metadata);
@@ -743,6 +740,8 @@ export function AgentCreatePanel({
         <div className="px-5 pt-1 pb-2 shrink-0">
           <ActorPicker
             actor={actor}
+            userId={userId}
+            wsId={wsId}
             visibleAgents={visibleAgents}
             visibleSquads={visibleSquads}
             selectedAgent={selectedAgent}
@@ -1028,6 +1027,8 @@ function ActorPicker({
   actor,
   visibleAgents,
   visibleSquads,
+  userId,
+  wsId,
   selectedAgent,
   selectedSquad,
   onPick,
@@ -1036,23 +1037,118 @@ function ActorPicker({
   actor: ActorSelection | null;
   visibleAgents: Agent[];
   visibleSquads: Squad[];
+  userId: string | undefined;
+  wsId: string;
   selectedAgent: Agent | undefined;
   selectedSquad: Squad | undefined;
   onPick: (next: ActorSelection) => void;
   t: ReturnType<typeof useT<"modals">>["t"];
 }) {
+  const { t: tCommon } = useT("common");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const onRecentAgentRecordError = useRecentAgentRecordError();
   const query = filter.trim().toLowerCase();
 
+  const {
+    recentAgents,
+    recordRecentAgent,
+    isRecentAgentsError,
+    refetchRecentAgents,
+  } = useRecentAgents({
+    agents: visibleAgents,
+    userId,
+    wsId,
+    enabled: open,
+    onRecordError: onRecentAgentRecordError,
+  });
+  const { localActors, recordRecentCreator } = useRecentCreatorActors({
+    userId,
+    wsId,
+    enabled: true,
+  });
+  const agentsById = useMemo(
+    () => new Map(visibleAgents.map((agent) => [agent.id, agent])),
+    [visibleAgents],
+  );
+  const squadsById = useMemo(
+    () => new Map(visibleSquads.map((squad) => [squad.id, squad])),
+    [visibleSquads],
+  );
+  const recentCreatorRefs = useMemo(
+    () =>
+      mergeRecentCreatorActors(
+        localActors,
+        recentAgents.map((agent) => agent.id),
+      ),
+    [localActors, recentAgents],
+  );
+  const recentSquadIds = useMemo(
+    () =>
+      new Set(
+        recentCreatorRefs
+          .filter((item) => item.type === "squad")
+          .map((item) => item.id),
+      ),
+    [recentCreatorRefs],
+  );
+
+  const recentAgentIds = useMemo(
+    () =>
+      new Set(
+        recentCreatorRefs
+          .filter((item) => item.type === "agent")
+          .map((item) => item.id),
+      ),
+    [recentCreatorRefs],
+  );
   const filteredAgents = useMemo(
-    () => visibleAgents.filter((a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)),
-    [visibleAgents, query],
+    () =>
+      visibleAgents.filter(
+        (agent) =>
+          !recentAgentIds.has(agent.id) &&
+          (agent.name.toLowerCase().includes(query) ||
+            matchesPinyin(agent.name, query)),
+      ),
+    [query, recentAgentIds, visibleAgents],
   );
   const filteredSquads = useMemo(
-    () => visibleSquads.filter((s) => s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
-    [visibleSquads, query],
+    () =>
+      visibleSquads.filter(
+        (s) =>
+          !recentSquadIds.has(s.id) &&
+          (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
+      ),
+    [visibleSquads, query, recentSquadIds],
   );
+  type RecentCreatorItem =
+    | { type: "agent"; agent: Agent }
+    | { type: "squad"; squad: Squad };
+  const filteredRecentCreators = useMemo((): RecentCreatorItem[] => {
+    const items: RecentCreatorItem[] = [];
+    for (const item of recentCreatorRefs) {
+      if (item.type === "agent") {
+        const agent = agentsById.get(item.id);
+        if (
+          agent &&
+          (agent.name.toLowerCase().includes(query) ||
+            matchesPinyin(agent.name, query))
+        ) {
+          items.push({ type: "agent", agent });
+        }
+        continue;
+      }
+      const squad = squadsById.get(item.id);
+      if (
+        squad &&
+        (squad.name.toLowerCase().includes(query) ||
+          matchesPinyin(squad.name, query))
+      ) {
+        items.push({ type: "squad", squad });
+      }
+    }
+    return items;
+  }, [agentsById, query, recentCreatorRefs, squadsById]);
 
   const displayLabel = selectedSquad?.name ?? selectedAgent?.name;
   const displayActor: ActorSelection | null = selectedSquad
@@ -1060,6 +1156,37 @@ function ActorPicker({
     : selectedAgent
       ? { type: "agent", id: selectedAgent.id }
       : null;
+
+  const renderAgent = (agent: Agent) => (
+    <PickerItem
+      key={agent.id}
+      selected={actor?.type === "agent" && actor.id === agent.id}
+      onClick={() => {
+        recordRecentAgent(agent.id);
+        recordRecentCreator({ type: "agent", id: agent.id });
+        onPick({ type: "agent", id: agent.id });
+        setOpen(false);
+      }}
+    >
+      <ActorAvatar actorType="agent" actorId={agent.id} size="sm" />
+      <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+      <SmartRuntimeAgentBadge shareRuntime={agent.share_runtime} />
+    </PickerItem>
+  );
+  const renderSquad = (squad: Squad) => (
+    <PickerItem
+      key={squad.id}
+      selected={actor?.type === "squad" && actor.id === squad.id}
+      onClick={() => {
+        recordRecentCreator({ type: "squad", id: squad.id });
+        onPick({ type: "squad", id: squad.id });
+        setOpen(false);
+      }}
+    >
+      <ActorAvatar actorType="squad" actorId={squad.id} size="sm" />
+      <span className="truncate">{squad.name}</span>
+    </PickerItem>
+  );
 
   return (
     <PropertyPicker
@@ -1091,7 +1218,12 @@ function ActorPicker({
         </span>
       }
     >
-      {filteredAgents.length === 0 && filteredSquads.length === 0 ? (
+      {isRecentAgentsError && (
+        <RecentAgentLoadError onRetry={refetchRecentAgents} />
+      )}
+      {filteredRecentCreators.length === 0 &&
+      filteredAgents.length === 0 &&
+      filteredSquads.length === 0 ? (
         query ? (
           <PickerEmpty />
         ) : (
@@ -1101,38 +1233,23 @@ function ActorPicker({
         )
       ) : (
         <>
+          {filteredRecentCreators.length > 0 && (
+            <PickerSection label={tCommon(($) => $.recently_used)}>
+              {filteredRecentCreators.map((item) =>
+                item.type === "agent"
+                  ? renderAgent(item.agent)
+                  : renderSquad(item.squad),
+              )}
+            </PickerSection>
+          )}
           {filteredAgents.length > 0 && (
             <PickerSection label={t(($) => $.create_issue.agent.agents_group)}>
-              {filteredAgents.map((a) => (
-                <PickerItem
-                  key={a.id}
-                  selected={actor?.type === "agent" && actor.id === a.id}
-                  onClick={() => {
-                    onPick({ type: "agent", id: a.id });
-                    setOpen(false);
-                  }}
-                >
-                  <ActorAvatar actorType="agent" actorId={a.id} size="sm" />
-                  <span className="truncate">{a.name}</span>
-                </PickerItem>
-              ))}
+              {filteredAgents.map(renderAgent)}
             </PickerSection>
           )}
           {filteredSquads.length > 0 && (
             <PickerSection label={t(($) => $.create_issue.agent.squads_group)}>
-              {filteredSquads.map((s) => (
-                <PickerItem
-                  key={s.id}
-                  selected={actor?.type === "squad" && actor.id === s.id}
-                  onClick={() => {
-                    onPick({ type: "squad", id: s.id });
-                    setOpen(false);
-                  }}
-                >
-                  <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
-                  <span className="truncate">{s.name}</span>
-                </PickerItem>
-              ))}
+              {filteredSquads.map(renderSquad)}
             </PickerSection>
           )}
         </>

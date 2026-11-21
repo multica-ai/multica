@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Globe, Lock, Settings2, Users } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import type {
@@ -16,6 +17,7 @@ import {
   useWorkspaceActivityMap,
 } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { providerDisplayName } from "@multica/core/runtimes";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ObjectPanelSection, ObjectProperty } from "../../layout/object-page";
@@ -47,6 +49,7 @@ export function AgentPropertiesPanel({
   owner,
   members,
   currentUserId,
+  callerId,
   canEdit,
   onUpdate,
   onEditAccess,
@@ -59,12 +62,15 @@ export function AgentPropertiesPanel({
   owner: MemberWithUser | null;
   members: MemberWithUser[];
   currentUserId: string | null;
+  /** The caller the 30-day summary scopes to (`null` = anyone). */
+  callerId?: string | null;
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   /** Opens the full access form; access is a draft-and-save choice. */
   onEditAccess: () => void;
   onOpenSettings: () => void;
 }) {
+  const qc = useQueryClient();
   const { t } = useT("agents");
   const { t: tl } = useT("layout");
   const { t: tr } = useT("runtimes");
@@ -79,8 +85,40 @@ export function AgentPropertiesPanel({
     canDiscoverRuntimeModels,
     runtimeOptions,
     changeModel,
+    changeThinking,
     changeRuntime,
-  } = useExecutionControls({ agent, runtime, runtimes, currentUserId, update });
+  } = useExecutionControls({
+    agent,
+    runtime,
+    runtimes,
+    currentUserId,
+    update,
+    // The saved response is authoritative immediately: patch the shared
+    // agents cache (exactly what the Settings section does) so this panel
+    // and the Settings entry point never merge against stale values.
+    onSaved: (summary) => {
+      qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (old) =>
+        old?.map((a) =>
+          a.id === agent.id
+            ? ({ ...a, runtime_config_summary: summary } as Agent)
+            : a,
+        ),
+      );
+      void qc.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+
+  // Smart agents carry no template runtime/model: display what the viewer's
+  // personal configuration resolves to (the pickers above write to it too).
+  const isSmart = agent.share_runtime === false;
+  const currentConfig = agent.runtime_config_summary?.current ?? null;
+  const effectiveRuntimeId =
+    (isSmart ? currentConfig?.runtime_id : agent.runtime_id) ?? "";
+  const displayModel = isSmart && currentConfig?.model ? currentConfig.model : agent.model;
+  const displayThinkingLevel =
+    isSmart && currentConfig?.thinking_level
+      ? currentConfig.thinking_level
+      : agent.thinking_level;
 
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const week = summarizeActivityWindow(activityMap.get(agent.id), 7);
@@ -122,12 +160,12 @@ export function AgentPropertiesPanel({
 
         <ObjectProperty label={t(($) => $.inspector.prop_runtime)}>
           <RuntimePicker
-            value={agent.runtime_id}
+            value={effectiveRuntimeId || agent.runtime_id}
             runtimes={runtimeOptions}
             members={members}
             currentUserId={currentUserId}
             canEdit={canEdit && !qoderRuntime}
-            onChange={changeRuntime}
+            onChange={(runtimeId) => void changeRuntime(runtimeId)}
           />
         </ObjectProperty>
 
@@ -158,21 +196,21 @@ export function AgentPropertiesPanel({
           <>
             <ObjectProperty label={t(($) => $.inspector.prop_model)}>
               <ModelPicker
-                runtimeId={agent.runtime_id}
+                runtimeId={effectiveRuntimeId || agent.runtime_id}
                 runtimeOnline={canDiscoverRuntimeModels}
-                value={agent.model ?? ""}
+                value={displayModel ?? ""}
                 canEdit={canEdit}
-                onChange={changeModel}
+                onChange={(next) => void changeModel(next)}
               />
             </ObjectProperty>
             <ThinkingPropRow
-              runtimeId={agent.runtime_id}
+              runtimeId={effectiveRuntimeId || agent.runtime_id}
               runtimeOnline={canDiscoverRuntimeModels}
               provider={runtime?.provider ?? ""}
-              model={agent.model ?? ""}
-              value={agent.thinking_level ?? ""}
+              model={displayModel ?? ""}
+              value={displayThinkingLevel ?? ""}
               canEdit={canEdit}
-              onChange={(thinkingLevel) => update({ thinking_level: thinkingLevel })}
+              onChange={(next) => void changeThinking(next)}
             />
           </>
         )}
@@ -232,7 +270,7 @@ export function AgentPropertiesPanel({
         defaultOpen={false}
       >
         <div className="py-1">
-          <AgentPerformanceSummary agent={agent} />
+          <AgentPerformanceSummary agent={agent} callerId={callerId} />
         </div>
       </ObjectPanelSection>
     </div>

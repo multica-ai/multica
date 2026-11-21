@@ -201,6 +201,10 @@ export function ActivityHeatmap({
     };
 
     return { cells: cellsWithLevel, monthLabels: months, insights };
+    // pricings is consulted indirectly (estimateCost reads the user-override
+    // store inside this memo's body), so a saved custom rate must invalidate
+    // the cells even though the identifier never appears in the body.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usage, pricings, tz, locale]);
 
   const labelWidth = 28;

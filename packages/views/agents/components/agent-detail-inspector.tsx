@@ -1,5 +1,7 @@
 "use client";
 
+import { buildSmartRecommendedRuntimeUpdate, catalogRuntimeForCli, recommendedRuntimeCli } from "@multica/core/agents";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   Agent,
@@ -32,6 +34,9 @@ import { ConversationStartersEditor } from "./conversation-starters-editor";
 import { NewChatPreview } from "./new-chat-preview";
 import { useConversationStartersFocus } from "./use-conversation-starters-focus";
 import { ModelPicker } from "./inspector/model-picker";
+import { RuntimeStrategySection } from "./runtime-strategy-section";
+import { CurrentRuntimeConfigSection } from "./current-runtime-config-section";
+import { RuntimeCliPicker } from "./inspector/runtime-cli-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
@@ -93,6 +98,11 @@ export function AgentDetailInspector({
     [agent.id, onUpdate],
   );
 
+  const smart = agent.share_runtime === false;
+  const recommendedCli = recommendedRuntimeCli(agent, smart ? null : runtime);
+  const [selectingFixedRuntime, setSelectingFixedRuntime] = useState(false);
+  const catalogRuntime = smart ? catalogRuntimeForCli(runtimes, recommendedCli, currentUserId) : runtime;
+  const modelRuntimeId = smart ? catalogRuntime?.id ?? "" : agent.runtime_id;
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
   const [starters, setStarters] = useState<AgentConversationStarter[]>(
@@ -100,6 +110,7 @@ export function AgentDetailInspector({
   );
 
   useEffect(() => {
+    setSelectingFixedRuntime(false);
     setName(agent.name);
     setDescription(agent.description ?? "");
     setStarters(agent.conversation_starters ?? []);
@@ -288,10 +299,32 @@ export function AgentDetailInspector({
             }
           >
             <SettingsCard>
+              {canEdit && (smart || recommendedCli) && (
+                <div className="px-4 py-4">
+                  <RuntimeStrategySection
+                    shareRuntime={!smart || selectingFixedRuntime}
+                    onShareRuntimeChange={(fixed) => {
+                      if (smart) {
+                        setSelectingFixedRuntime(fixed);
+                      } else if (!fixed && recommendedCli) {
+                        void update({ share_runtime: false, cli: recommendedCli }).catch(() => undefined);
+                      }
+                    }}
+                  />
+                </div>
+              )}
               <SettingsRow
-                label={t(($) => $.inspector.prop_runtime)}
+                label={smart && !selectingFixedRuntime ? t(($) => $.inspector.prop_recommended_runtime) : t(($) => $.inspector.prop_runtime)}
                 size="select-wide"
               >
+                {smart && !selectingFixedRuntime ? (
+                  <RuntimeCliPicker
+                    value={recommendedCli}
+                    runtimes={runtimes}
+                    canEdit={canEdit}
+                    onChange={(cli) => update(buildSmartRecommendedRuntimeUpdate(cli))}
+                  />
+                ) : (
                 <RuntimePicker
                   variant="field"
                   showLabel={false}
@@ -300,8 +333,18 @@ export function AgentDetailInspector({
                   members={members}
                   currentUserId={currentUserId}
                   canEdit={canEdit && !qoderRuntime}
-                  onChange={changeRuntime}
+                  onChange={selectingFixedRuntime ? async (runtimeId): Promise<void> => {
+                    await update({
+                      share_runtime: true,
+                      runtime_id: runtimeId,
+                      model: "",
+                      thinking_level: "",
+                      service_tier: "",
+                    });
+                    setSelectingFixedRuntime(false);
+                  } : (runtimeId) => void changeRuntime(runtimeId)}
                 />
+                )}
               </SettingsRow>
               {qoderRuntime ? null : (
                 <>
@@ -312,18 +355,18 @@ export function AgentDetailInspector({
                     <ModelPicker
                       variant="field"
                       showLabel={false}
-                      runtimeId={agent.runtime_id}
-                      runtimeOnline={canDiscoverRuntimeModels}
+                      runtimeId={modelRuntimeId}
+                      runtimeOnline={smart ? catalogRuntime?.status === "online" : canDiscoverRuntimeModels}
                       value={agent.model ?? ""}
                       canEdit={canEdit}
-                      onChange={changeModel}
+                      onChange={(next) => void changeModel(next)}
                     />
                   </SettingsRow>
                   <ThinkingSettingField
                     label={t(($) => $.inspector.prop_thinking)}
-                    runtimeId={agent.runtime_id}
-                    runtimeOnline={canDiscoverRuntimeModels}
-                    provider={runtime?.provider ?? ""}
+                    runtimeId={modelRuntimeId}
+                    runtimeOnline={smart ? catalogRuntime?.status === "online" : canDiscoverRuntimeModels}
+                    provider={catalogRuntime?.provider ?? ""}
                     model={agent.model ?? ""}
                     value={agent.thinking_level ?? ""}
                     canEdit={canEdit}
@@ -333,9 +376,9 @@ export function AgentDetailInspector({
                   />
                   <ServiceTierSettingField
                     label={t(($) => $.inspector.prop_speed)}
-                    runtimeId={agent.runtime_id}
-                    runtimeOnline={canDiscoverRuntimeModels}
-                    provider={runtime?.provider ?? ""}
+                    runtimeId={modelRuntimeId}
+                    runtimeOnline={smart ? catalogRuntime?.status === "online" : canDiscoverRuntimeModels}
+                    provider={catalogRuntime?.provider ?? ""}
                     model={agent.model ?? ""}
                     value={agent.service_tier ?? ""}
                     canEdit={canEdit}
@@ -357,6 +400,14 @@ export function AgentDetailInspector({
               </SettingsRow>
             </SettingsCard>
           </SettingsSection>
+          {smart && (
+            <CurrentRuntimeConfigSection
+              agent={agent}
+              runtimes={runtimes}
+              members={members}
+              currentUserId={currentUserId}
+            />
+          )}
         </div>
 
         <SettingsSection

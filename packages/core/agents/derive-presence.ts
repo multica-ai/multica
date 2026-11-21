@@ -13,6 +13,7 @@
 
 import { deriveRuntimeHealth } from "../runtimes/derive-health";
 import type { Agent, AgentRuntime, AgentTask } from "../types";
+import { agentEffectiveRuntimeId } from "./effective-runtime";
 import type {
   AgentAvailability,
   AgentPresenceDetail,
@@ -122,9 +123,14 @@ export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPres
     };
   }
 
+  // Smart-runtime agents resolve per viewer. When their effective runtime is
+  // absent, the recommended runtime's compatibility projection is not a valid
+  // fallback for this viewer — read it as offline.
   const availability = input.runtime
     ? deriveAgentAvailability(input.runtime, input.now)
-    : runtimeAvailabilityFromAgent(input.agent) ?? "offline";
+    : input.agent.share_runtime === false
+      ? "offline"
+      : runtimeAvailabilityFromAgent(input.agent) ?? "offline";
   const detail = deriveWorkloadDetail(input.tasks);
 
   return {
@@ -163,7 +169,10 @@ export function buildPresenceMap(args: {
   }
 
   for (const agent of args.agents) {
-    const runtime = runtimesById.get(agent.runtime_id) ?? null;
+    // Smart runtime: availability follows the viewer's current runtime config,
+    // not the template's recommended runtime.
+    const runtimeId = agentEffectiveRuntimeId(agent);
+    const runtime = runtimeId ? runtimesById.get(runtimeId) ?? null : null;
     const tasks = tasksByAgent.get(agent.id) ?? [];
     out.set(agent.id, deriveAgentPresenceDetail({ agent, runtime, tasks, now: args.now }));
   }

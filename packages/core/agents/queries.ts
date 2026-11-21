@@ -10,6 +10,21 @@ export const agentTaskSnapshotKeys = {
   list: (wsId: string) => [...agentTaskSnapshotKeys.all(wsId), "list"] as const,
 };
 
+export const recentAgentSelectionKeys = {
+  all: (userId: string, wsId: string) =>
+    ["users", userId, "workspaces", wsId, "recent-agents"] as const,
+  current: (userId: string, wsId: string) =>
+    [...recentAgentSelectionKeys.all(userId, wsId), "current"] as const,
+};
+
+export function recentAgentSelectionOptions(userId: string, wsId: string) {
+  return queryOptions({
+    queryKey: recentAgentSelectionKeys.current(userId, wsId),
+    queryFn: () => api.getRecentAgentSelections(wsId),
+    staleTime: 0,
+  });
+}
+
 export const workspaceWorkingAgentsKeys = {
   all: (wsId: string) => ["workspaces", wsId, "working-agents"] as const,
   list: (
@@ -39,6 +54,25 @@ export const agentRunCountsKeys = {
   all: (wsId: string) => ["workspaces", wsId, "agent-run-counts"] as const,
   last30d: (wsId: string) => [...agentRunCountsKeys.all(wsId), "30d"] as const,
 };
+
+export const agentRuntimeConfigKeys = {
+  agent: (wsId: string, agentId: string) =>
+    ["workspaces", wsId, "agent-runtime-config", agentId] as const,
+  current: (wsId: string, agentId: string, userId: string) =>
+    [...agentRuntimeConfigKeys.agent(wsId, agentId), "current", userId] as const,
+};
+
+export function agentRuntimeCurrentConfigOptions(
+  wsId: string,
+  agentId: string,
+  userId: string,
+) {
+  return queryOptions({
+    queryKey: agentRuntimeConfigKeys.current(wsId, agentId, userId),
+    queryFn: () => api.getAgentRuntimeCurrentConfig(agentId),
+    enabled: !!wsId && !!agentId && !!userId,
+  });
+}
 
 // Workspace-scoped agent task snapshot — every active task plus each agent's
 // most recent terminal task. This is the single shared source of truth that
@@ -95,10 +129,12 @@ export function workspaceWorkingAgentsOptions(
 // the agent detail "Last 30 days" panel. WS task lifecycle events
 // invalidate this query in useRealtimeSync; the staleTime is a
 // tab-focus safety net.
-export function agentActivity30dOptions(wsId: string) {
+export function agentActivity30dOptions(wsId: string, originatorUserId?: string | null) {
   return queryOptions({
-    queryKey: agentActivityKeys.last30d(wsId),
-    queryFn: () => api.getWorkspaceAgentActivity30d(),
+    queryKey: originatorUserId
+      ? [...agentActivityKeys.last30d(wsId), "caller", originatorUserId]
+      : agentActivityKeys.last30d(wsId),
+    queryFn: () => api.getWorkspaceAgentActivity30d(originatorUserId),
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,

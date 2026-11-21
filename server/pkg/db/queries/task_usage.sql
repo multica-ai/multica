@@ -196,6 +196,68 @@ WHERE workspace_id = $1
 GROUP BY agent_id, LOWER(provider), model
 ORDER BY agent_id, LOWER(provider), model;
 
+-- name: ListDashboardUsageDailyByOriginator :many
+-- Caller-filtered daily token aggregates. `task_usage_hourly` has no
+-- originator dimension, so this reads raw `task_usage` joined to the queue
+-- when `?originator_user_id=` is set. Same output shape as
+-- ListDashboardUsageDaily so the handler can swap the source without a
+-- second response type.
+SELECT
+    DATE(tu.created_at AT TIME ZONE sqlc.arg('tz')::text) AS date,
+    LOWER(tu.provider) AS provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int     AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= sqlc.arg('since')::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('originator_user_id')::uuid IS NULL OR atq.originator_user_id = sqlc.narg('originator_user_id'))
+  AND atq.originator_user_id = sqlc.arg('originator_user_id')
+GROUP BY DATE(tu.created_at AT TIME ZONE sqlc.arg('tz')::text), LOWER(tu.provider), tu.model
+ORDER BY DATE(tu.created_at AT TIME ZONE sqlc.arg('tz')::text) DESC, LOWER(tu.provider), tu.model;
+
+-- name: ListDashboardUsageByAgentByOriginator :many
+-- Caller-filtered per-(agent, provider, model) token aggregates. Same
+-- rationale as ListDashboardUsageDailyByOriginator: the hourly rollup cannot
+-- filter by originator, so this joins raw usage to the queue.
+SELECT
+    atq.agent_id,
+    LOWER(tu.provider) AS provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int     AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= sqlc.arg('since')::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('originator_user_id')::uuid IS NULL OR atq.originator_user_id = sqlc.narg('originator_user_id'))
+  AND atq.originator_user_id = sqlc.arg('originator_user_id')
+GROUP BY atq.agent_id, LOWER(tu.provider), tu.model
+ORDER BY atq.agent_id, LOWER(tu.provider), tu.model;
+
 -- name: ListDashboardRunTimeDaily :many
 -- Daily per-date run time + task counts for the workspace, optionally
 -- scoped to a single project. Powers the workspace dashboard's "Time"
@@ -235,6 +297,7 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= sqlc.arg('since')::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('originator_user_id')::uuid IS NULL OR atq.originator_user_id = sqlc.narg('originator_user_id'))
 GROUP BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
 
@@ -276,6 +339,7 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= @since::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('originator_user_id')::uuid IS NULL OR atq.originator_user_id = sqlc.narg('originator_user_id'))
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC;
 
@@ -317,6 +381,7 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= sqlc.arg('since')::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('originator_user_id')::uuid IS NULL OR atq.originator_user_id = sqlc.narg('originator_user_id'))
 GROUP BY 1, 2
 ORDER BY 1 DESC, 2;
 
@@ -344,5 +409,6 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= @since::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('originator_user_id')::uuid IS NULL OR atq.originator_user_id = sqlc.narg('originator_user_id'))
 GROUP BY atq.agent_id, 2
 ORDER BY atq.agent_id, 2;

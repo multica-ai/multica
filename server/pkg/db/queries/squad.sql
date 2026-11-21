@@ -185,8 +185,10 @@ SELECT
 FROM squad_member sm
 LEFT JOIN agent a
        ON sm.member_type = 'agent' AND a.id = sm.member_id
+LEFT JOIN agent_user_runtime_config urc
+       ON urc.agent_id = a.id AND urc.user_id = sqlc.arg('viewer_user_id')::uuid
 LEFT JOIN agent_runtime ar
-       ON ar.id = a.runtime_id
+       ON ar.id = COALESCE(a.runtime_id, urc.runtime_id)
 LEFT JOIN agent_task_queue atq
        ON sm.member_type = 'agent'
       AND atq.agent_id = sm.member_id

@@ -8,7 +8,9 @@
   "filter": {
     "project_label": "Проект",
     "all_projects": "Все проекты",
-    "period_label": "Период"
+    "period_label": "Период",
+    "caller_label": "Caller",
+    "all_callers": "Anyone"
   },
   "history_limit": {
     "note": "Ваш тариф охватывает последние {{days}} дн. Перейдите на другой тариф, чтобы увидеть более ранние данные. Данные не удаляются.",
