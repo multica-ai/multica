@@ -74,6 +74,14 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 自託管部署需要設定 `FRONTEND_ORIGIN`。缺少它時，邀請連結、cookie 安全屬性和 WebSocket origin 校驗都可能與實際網域不一致。
 </Callout>
 
+## Skill 註冊表匯入
+
+| 變數 | 預設值 | 說明 |
+|---|---|---|
+| `MULTICA_SKILL_REGISTRY_HOSTS` | 空 | 允許作為 ClawHub 相容 skill 匯入與更新來源的註冊表主機名稱，以逗號分隔，支援可選的 `:連接埠`，例如 `registry.example.com`。可依主機指定 API 來源：`registry.example.com=http://registry.example.com`。在 API 程序中設定。 |
+
+「從 URL 匯入」支援 `https://registry.example.com/skill`、`https://registry.example.com/owner/skill`，以及 `https://registry.example.com/space/team/skill` 這類註冊表網頁連結。網頁連結對應到規範 slug `team--skill`，`/space/global/skill` 則對應到 `skill`。更新時仍保留並使用原本貼上的連結。未指定 API 來源時，依連結的協定發出請求：省略協定時預設使用 HTTPS；只有明確輸入 `http://` 時才使用 HTTP（僅適用於受信任的內部網路註冊表）。指定來源後，探索、API 呼叫和同源重新導向檢查都使用該來源；HTTP 僅能用於受信任的內部網路。伺服器會從 `/.well-known/clawhub.json` 讀取相對路徑 `apiBase`，探索失敗時改用 `/api/v1`。若註冊表不支援逐檔讀取，可透過 `/download?slug=...` 提供 ZIP 壓縮檔；重新導向必須留在選定的 API 來源。原有的 ClawHub、Skills.sh 和 GitHub 匯入行為不變。只加入可信任的主機：匯入的 skill 指令會進入 AI 代理的工作流程。
+
 ## 郵件與登入
 
 ### Resend

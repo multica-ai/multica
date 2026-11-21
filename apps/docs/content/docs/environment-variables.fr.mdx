@@ -74,6 +74,14 @@ Lorsque le frontend et l'API s'exécutent sur des hôtes différents et que le n
 Les déploiements auto-hébergés doivent définir `FRONTEND_ORIGIN`. Sans cette variable, les liens d'invitation, les attributs de sécurité des cookies et les vérifications d'origine WebSocket peuvent tous diverger de votre domaine réel.
 </Callout>
 
+## Import de skills depuis un registre
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `MULTICA_SKILL_REGISTRY_HOSTS` | vide | Noms d'hôte exacts de registres (avec `:port` facultatif), séparés par des virgules, autorisés comme sources supplémentaires compatibles ClawHub pour l'import et l'actualisation de skills, par exemple `registry.example.com`. Vous pouvez définir une origine d'API par hôte : `registry.example.com=http://registry.example.com`. À définir sur le processus API. |
+
+L'import depuis une URL accepte `https://registry.example.com/skill`, `https://registry.example.com/owner/skill` ou une URL web de registre comme `https://registry.example.com/space/team/skill`. L'URL web correspond au slug canonique `team--skill` ; `/space/global/skill` correspond à `skill`. L'URL collée d'origine reste la source d'actualisation. Sans origine d'API définie, les requêtes utilisent le schéma de l'URL : HTTPS par défaut s'il est omis, et HTTP uniquement si vous saisissez explicitement `http://` (réservé aux registres de confiance sur un réseau privé). Une origine définie est utilisée pour la découverte et les appels d'API, y compris pour vérifier que les redirections restent sur la même origine ; n'utilisez HTTP que sur un réseau privé de confiance. Le serveur interroge `/.well-known/clawhub.json` pour obtenir un `apiBase` relatif et se rabat sur `/api/v1` si la découverte échoue. Si un registre ne permet pas de lire les fichiers un par un, il peut servir `/download?slug=...` sous forme d'archive ZIP ; les redirections doivent rester sur l'origine d'API sélectionnée. Les imports existants depuis ClawHub, Skills.sh et GitHub ne changent pas. N'ajoutez que des hôtes de registre de confiance : les instructions d'une skill importée s'exécutent dans les workflows des agents.
+
 ## E-mail et connexion
 
 ### Resend
