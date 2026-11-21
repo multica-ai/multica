@@ -163,6 +163,13 @@
     "export_svg": "Descargar SVG",
     "export_source": "Descargar .mmd"
   },
+  "alert": {
+    "note": "Nota",
+    "tip": "Consejo",
+    "important": "Importante",
+    "warning": "Advertencia",
+    "caution": "Precaución"
+  },
   "dynamic_block": {
     "preview": "Vista previa",
     "source": "Fuente",
