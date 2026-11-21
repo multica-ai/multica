@@ -66,7 +66,7 @@ describe("inbox deletion confirmation", () => {
 
   it("explains that deleting active issue notifications makes old archived history visible again", () => {
     setup(undefined, "issue-1", "inbox");
-    expect(screen.getByRole("alertdialog")).toHaveTextContent("Previously archived notifications remain and will be visible again in Archived.");
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Previously archived notifications, the issue, and its runs are kept.");
   });
 
   it("explains the archived group scope without promising to retain the deleted history", () => {

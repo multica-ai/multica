@@ -19,7 +19,7 @@ export interface WhatsNewHighlight {
   /** Stable within its release; used as the React key and in tests. */
   id: string;
   icon: IconComponent;
-  /** English is required; a missing locale falls back to it. */
+  /** English is required; production entries in WHATS_NEW_RELEASES must cover every SupportedLocale. */
   copy: { en: HighlightCopy } & Partial<Record<SupportedLocale, HighlightCopy>>;
   action?: HighlightAction;
   /** Puts the highlight in the What's new deck; highlights without one stay in the panel. */
@@ -44,7 +44,13 @@ export const WHATS_NEW_DECK_SINCE = "0.9.0";
  * hero art: only those reach the corner deck, and an entry without one would
  * reach users only through the Help menu.
  */
-export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
+export type CompleteWhatsNewRelease = Omit<WhatsNewRelease, "highlights"> & {
+  highlights: (Omit<WhatsNewHighlight, "copy"> & {
+    copy: Record<SupportedLocale, HighlightCopy>;
+  })[];
+};
+
+export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
   {
     version: "0.11.0",
     date: "2026-11-18",
@@ -79,6 +85,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Les agents reviennent faire le point dans la discussion",
             body: "Dans une discussion, demandez à un agent de vous prévenir quand une tâche est terminée ou qu'une PR est fusionnée : il revient faire le point dans la même conversation. Il assure aussi le suivi quand il sollicite quelqu'un pour vous, et le bandeau au-dessus de la zone de saisie montre ce qu'il attend.",
           },
+          es: {
+            title: "Los agentes vuelven al chat para informar",
+            body: "Pide a un agente en el chat que te avise cuando una tarea termine o se fusione un PR, y volverá a informar en la misma conversación; también hace seguimiento cuando consulta a otra persona por ti. La barra sobre el cuadro de texto muestra qué está esperando.",
+          },
+          ru: {
+            title: "Агенты возвращаются с отчётом в чат",
+            body: "Попросите агента в чате сообщить, когда задача завершится или PR будет слит, — он отчитается в том же диалоге и напомнит о себе, если ждёт ответа от коллеги. Полоса над полем ввода показывает, чего именно он ждёт.",
+          },
         },
       },
       {
@@ -110,6 +124,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Complétez une réponse en cours",
             body: "Pendant qu'un agent répond dans une discussion, continuez à écrire et envoyez : si la zone de saisie indique Ajouter à l'exécution en cours, votre message rejoint cette réponse sans l'interrompre. Avec une pièce jointe, entre autres, elle indique Démarrer après cette exécution et le message attend le tour suivant.",
+          },
+          es: {
+            title: "Añade indicaciones mientras responde",
+            body: "Mientras un agente responde en el chat, sigue escribiendo y envía: si el cuadro indica Añadir a la ejecución actual, tu mensaje se suma sin detenerla. Con un archivo adjunto, entre otros casos, indica Empezar tras esta ejecución y espera al siguiente turno.",
+          },
+          ru: {
+            title: "Дополняйте ответ прямо во время выполнения",
+            body: "Пока агент отвечает в чате, просто напишите и отправьте сообщение: если поле показывает «Добавить в текущий запуск», оно вольётся в ответ без его остановки. С вложением или в иных случаях оно начнётся в следующем запуске.",
           },
         },
       },
@@ -143,6 +165,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Discutez avec un agent depuis WeChat",
             body: "Ouvrez un agent dont vous êtes propriétaire, choisissez Ajouter un canal de messagerie sous Messagerie, puis WeChat, et scannez le code QR avec votre propre compte WeChat. Écrivez ensuite au bot en privé dans WeChat : les réponses et les fichiers y reviennent.",
           },
+          es: {
+            title: "Chatea con un agente desde WeChat",
+            body: "Abre un agente propio, elige Añadir canal de mensajería en Mensajería, selecciona WeChat y escanea el código QR con tu cuenta. Luego escribe al bot en privado; las respuestas y archivos volverán allí.",
+          },
+          ru: {
+            title: "Общайтесь с агентом через WeChat",
+            body: "Откройте своего агента, выберите «Добавить канал сообщений» в разделе «Сообщения», укажите WeChat и отсканируйте QR-код. После этого пишите боту в личные сообщения — ответы и файлы придут туда же.",
+          },
         },
       },
       {
@@ -174,6 +204,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Rangez vos projets dans des dossiers",
             body: "Dans la barre latérale, cliquez sur + à côté de Projets puis sur Nouveau dossier, et glissez-y des projets ou choisissez Déplacer vers un dossier dans le menu d'un projet. Dans Projets, ouvrez Affichage pour regrouper par dossier.",
+          },
+          es: {
+            title: "Organiza proyectos en carpetas",
+            body: "En la barra lateral, haz clic en + junto a Proyectos y elige Nueva carpeta; luego arrastra proyectos o usa Mover a carpeta desde su menú. En Proyectos, abre Mostrar para agrupar por carpeta.",
+          },
+          ru: {
+            title: "Организуйте проекты в папки",
+            body: "На боковой панели нажмите + рядом с «Проекты» и выберите «Новая папка», затем перетащите туда проекты или выберите «Переместить в папку» в меню проекта. В настройках отображения можно сгруппировать проекты по папкам.",
           },
         },
       },
@@ -213,6 +251,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Reportez une notification à plus tard",
             body: "La boîte de réception est désormais en haut du panneau Travail. Survolez une notification et cliquez sur l'horloge, ou appuyez sur H dans une tâche ouverte, pour choisir quand elle revient ; d'ici là, elle attend dans la vue Reportés.",
           },
+          es: {
+            title: "Pospón notificaciones para más tarde",
+            body: "Tu bandeja de entrada ahora aparece arriba del panel Trabajo. Pasa el cursor por una notificación y haz clic en el reloj, o pulsa H en una tarea abierta, para elegir cuándo volverá.",
+          },
+          ru: {
+            title: "Откладывайте уведомления на потом",
+            body: "Входящие теперь находятся в верхней части панели «Работа». Наведите на уведомление и нажмите на часы — или нажмите H в открытой задаче — чтобы выбрать время возврата; до тех пор оно ждёт в разделе «Отложенные».",
+          },
         },
       },
       {
@@ -243,6 +289,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Dictez au lieu de taper dans l'app de bureau",
             body: "Dans l'app de bureau, activez Paramètres → Saisie vocale, puis cliquez sur le micro d'une discussion, d'un commentaire ou d'une réponse pour dicter, ou maintenez-le pendant que vous parlez. La première fois, choisissez un modèle vocal à télécharger ; l'audio est transcrit sur votre ordinateur.",
+          },
+          es: {
+            title: "Dicta en lugar de escribir en escritorio",
+            body: "En la app de escritorio, activa Ajustes → Entrada de voz y toca el micrófono en el chat o en un comentario para dictar, o mantenlo pulsado mientras hablas. La primera vez elige un modelo de voz; la transcripción ocurre en tu equipo.",
+          },
+          ru: {
+            title: "Диктуйте вместо набора текста в десктопе",
+            body: "В десктопном приложении включите «Настройки → Голосовой ввод» и нажмите на микрофон в чате или комментарии (или удерживайте его во время речи). При первом запуске выберите модель — распознавание выполняется локально.",
           },
         },
       },
@@ -275,6 +329,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Organisez vos projets en tableau et archivez ceux qui sont terminés",
             body: "Dans Projets, ouvrez Affichage pour passer en Tableau ou regrouper par statut, priorité ou responsable, et cherchez depuis l'en-tête. Archivez un projet depuis son menu pour le masquer, et restaurez-le à tout moment depuis Projets archivés.",
           },
+          es: {
+            title: "Planifica proyectos en tablero y archiva los terminados",
+            body: "En Proyectos, abre Mostrar para cambiar a Tablero o agrupar por estado, prioridad o responsable, y busca desde la cabecera. Archiva un proyecto desde su menú para ocultarlo y restáuralo cuando quieras desde Proyectos archivados.",
+          },
+          ru: {
+            title: "Планируйте проекты на доске и архивируйте завершённые",
+            body: "В разделе «Проекты» переключитесь на доску или сгруппируйте по статусу, приоритету или руководителю. Завершённый проект можно скрыть через архив и в любой момент восстановить из архивных проектов.",
+          },
         },
       },
       {
@@ -305,6 +367,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Moins de bruit venant des tâches des autres",
             body: "En haut de la tâche d'une autre personne, cliquez sur Se désabonner et archiver ou appuyez sur Maj+E pour couper ses mises à jour en une fois. Les tâches des autres n'envoient plus que les mises à jour clés ; pour tout recevoir, réglez Tâches des autres sur Toute l'activité dans Paramètres → Notifications.",
+          },
+          es: {
+            title: "Recibe menos ruido de tareas ajenas",
+            body: "En la parte superior de una tarea ajena, haz clic en Darse de baja y archivar o pulsa Shift+E para silenciarla en un paso. Ahora solo envían novedades clave; puedes cambiarlo en Ajustes → Notificaciones.",
+          },
+          ru: {
+            title: "Меньше шума от чужих задач",
+            body: "Вверху чужой задачи нажмите «Отписаться и архивировать» или Shift+E, чтобы отключить уведомления в один клик. По умолчанию приходят только ключевые обновления — режим меняется в «Настройки → Уведомления».",
           },
         },
       },
@@ -337,6 +407,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Modifiez plusieurs tâches à la fois",
             body: "Sélectionnez des tâches dans une liste, puis utilisez la barre du bas pour changer les étiquettes, le projet ou la date d'échéance ; Plus d'actions couvre la date de début, le parent et les propriétés personnalisées. Si certaines sont ignorées, cliquez sur Sélectionner seulement ces tâches pour les reprendre.",
           },
+          es: {
+            title: "Edita varias tareas a la vez",
+            body: "Selecciona tareas en una lista y usa la barra inferior para cambiar etiquetas, proyecto o fecha límite; Más acciones incluye fecha de inicio, tarea padre y propiedades. Si alguna se omite, haz clic en Seleccionar solo estas.",
+          },
+          ru: {
+            title: "Редактируйте сразу несколько задач",
+            body: "Отметьте задачи в списке и измените метки, проект или срок на нижней панели; в меню «Ещё» доступны дата начала, родительская задача и свойства. Пропущенные задачи можно выделить одной кнопкой и повторить.",
+          },
         },
       },
       {
@@ -367,6 +445,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Faites créer votre thème par un agent",
             body: "Dans une discussion ou une tâche, demandez un thème à n'importe quel agent en décrivant les couleurs, le fond ou l'effet verre souhaités. Il crée et vérifie le thème, puis vous le remet ; activez-le ensuite dans Paramètres → Apparence.",
+          },
+          es: {
+            title: "Pide a un agente que cree tu tema",
+            body: "En un chat o tarea, pide a cualquier agente un tema describiendo los colores, fondo o estilo que prefieras. El agente lo crea, lo valida y te lo entrega para activarlo en Ajustes → Apariencia.",
+          },
+          ru: {
+            title: "Попросите агента создать тему оформления",
+            body: "В чате или задаче опишите агенту нужные цвета, фон или стиль интерфейса. Он соберёт и проверит тему, после чего её можно включить в «Настройки → Внешний вид».",
           },
         },
       },
@@ -406,6 +492,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Installez, importez ou créez un thème",
             body: "Dans Paramètres → Apparence, cliquez sur Gérer à côté de Thème pour parcourir et installer des thèmes de la communauté, ou utilisez Importer un thème pour un .zip ou un dossier. Changez de thème à tout moment depuis Thème dans le menu du compte.",
           },
+          es: {
+            title: "Instala, importa o crea un tema",
+            body: "En Ajustes → Apariencia, haz clic en Gestionar junto a Tema para instalar temas de la comunidad, o usa Importar tema para un archivo .zip o carpeta. Cambia de tema en cualquier momento desde el menú de cuenta.",
+          },
+          ru: {
+            title: "Устанавливайте и импортируйте темы",
+            body: "В «Настройки → Внешний вид» нажмите «Управление» рядом с темой, чтобы установить темы сообщества или импортировать .zip / папку. Переключать темы можно в любой момент из меню аккаунта.",
+          },
         },
       },
       {
@@ -436,6 +530,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Pilotez les services d'une tâche depuis sa barre latérale",
             body: "Ouvrez une tâche et choisissez Démarrer un environnement sous Environnements dans sa barre latérale. Le menu de chaque service permet de voir les journaux, de le redémarrer ou de l'arrêter, et Afficher la fenêtre met une app de bureau au premier plan.",
+          },
+          es: {
+            title: "Ejecuta los servicios de una tarea desde su barra lateral",
+            body: "Abre una tarea y usa Iniciar un entorno en Entornos. El menú de cada servicio permite ver registros, reiniciar o detenerlo, y en escritorio puedes traer ventanas al frente con Cambiar a ventana.",
+          },
+          ru: {
+            title: "Управляйте сервисами задачи с боковой панели",
+            body: "Откройте задачу и запустите окружение в разделе «Окружения». Из меню каждого сервиса можно открыть логи, перезапустить или остановить его, а на десктопе — перейти прямо в окно приложения.",
           },
         },
       },
@@ -468,6 +570,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Annotez la réponse d'un agent dans une discussion",
             body: "Dans Discussion, sélectionnez du texte dans la réponse d'un agent et ajoutez une note. Les notes enregistrées restent dans la zone de saisie et partent avec votre prochain message, avec ou sans texte en plus.",
+          },
+          es: {
+            title: "Anota la respuesta de un agente en el chat",
+            body: "En el chat, selecciona texto de una respuesta del agente y añade una nota. Las notas guardadas esperan en el cuadro de texto y se envían con tu siguiente mensaje.",
+          },
+          ru: {
+            title: "Оставляйте пометки к ответам агента",
+            body: "В чате выделите фрагмент ответа агента и добавьте заметку. Сохранённые заметки ждут в поле ввода и отправляются вместе со следующим сообщением.",
           },
         },
       },
@@ -506,6 +616,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Choisissez un thème et des polices dans Apparence",
             body: "Allez dans Paramètres → Apparence pour choisir l'un des cinq thèmes intégrés. Vous pouvez aussi régler les polices et tailles de l'interface et du contenu, ainsi que la densité et le contraste. Vos choix sont enregistrés sur cet appareil.",
           },
+          es: {
+            title: "Elige tema y tipografía en Apariencia",
+            body: "Ve a Ajustes → Apariencia para elegir entre cinco temas integrados, configurar fuentes y tamaños de interfaz y contenido, y ajustar densidad y contraste en este dispositivo.",
+          },
+          ru: {
+            title: "Выбирайте тему и шрифты во «Внешнем виде»",
+            body: "Откройте «Настройки → Внешний вид», чтобы выбрать одну из пяти встроенных тем, настроить шрифты, размеры текста, плотность и контрастность для этого устройства.",
+          },
         },
       },
       {
@@ -537,6 +655,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Réservez un projet à ses membres",
             body: "À la création d'un projet, ou plus tard dans ses propriétés, réglez Accès sur Membres du projet uniquement et ajoutez les personnes concernées. Ses tâches, commentaires et pièces jointes ne sont alors visibles que par elles et par les propriétaires et admins de l'espace de travail.",
           },
+          es: {
+            title: "Limita un proyecto a sus miembros",
+            body: "Al crear un proyecto o en sus propiedades, establece Acceso en Solo miembros del proyecto y añade a las personas necesarias. Sus tareas, comentarios y adjuntos solo serán visibles para ellos y los administradores.",
+          },
+          ru: {
+            title: "Ограничьте доступ к проекту его участниками",
+            body: "При создании проекта или в его свойствах выберите «Только участники проекта» и добавьте нужных людей. Задачи, комментарии и вложения увидят только они, а также владельцы и администраторы рабочего пространства.",
+          },
         },
       },
       {
@@ -566,6 +692,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Voyez les services lancés par une tâche",
             body: "Ouvrez une tâche et consultez Environnements dans sa barre latérale : services lancés par les exécutions de l'agent, avec leur état, leur lien et le temps restant. Sur macOS et Linux, les agents peuvent garder un service actif avec multica env start.",
+          },
+          es: {
+            title: "Consulta los servicios iniciados por una tarea",
+            body: "Abre una tarea y revisa Entornos en su barra lateral para ver los servicios que iniciaron sus agentes, con estado, enlace y tiempo restante. En macOS y Linux los agentes pueden mantener servicios con multica env start.",
+          },
+          ru: {
+            title: "Отслеживайте сервисы, запущенные задачей",
+            body: "Откройте задачу и проверьте раздел «Окружения» на боковой панели — там показаны сервисы, запущенные агентами, их статус, ссылка и оставшееся время работы.",
           },
         },
       },
@@ -604,6 +738,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Restaurez une ancienne version d'un skill",
             body: "Ouvrez un skill et allez dans Historique pour voir le contenu de chaque version enregistrée. Restaurez-en une : elle devient la version la plus récente pour les prochaines exécutions de vos agents.",
           },
+          es: {
+            title: "Restaura una versión anterior de una habilidad",
+            body: "Abre una habilidad y ve a Historial para inspeccionar cada versión guardada. Al restaurar una, pasa a ser la versión más reciente para las próximas ejecuciones.",
+          },
+          ru: {
+            title: "Восстанавливайте прошлые версии навыков",
+            body: "Откройте навык и перейдите в «Историю», чтобы посмотреть сохранённые версии. Восстановленная версия станет актуальной для следующих запусков агентов.",
+          },
         },
       },
       {
@@ -635,6 +777,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "N'affichez que les tâches non lues",
             body: "Dans Vues, ajoutez l'étoile à la vue intégrée Non lu pour l'afficher dans la barre latérale. Vous pouvez aussi filtrer n'importe quelle vue par État de lecture → Non lu.",
           },
+          es: {
+            title: "Muestra solo tareas sin leer",
+            body: "En Vistas, marca con estrella la vista Sin leer para añadirla a la barra lateral. También puedes filtrar cualquier vista por Estado de lectura → Sin leer.",
+          },
+          ru: {
+            title: "Показывайте только непрочитанные задачи",
+            body: "В «Представлениях» добавьте встроенный вид «Непрочитанные» на боковую панель или отфильтруйте любой список по «Статус прочтения → Непрочитанные».",
+          },
         },
       },
       {
@@ -664,6 +814,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Épinglez vos espaces de travail principaux",
             body: "Ouvrez le sélecteur d'espaces de travail et cliquez sur l'épingle à côté d'un espace pour le garder en haut. Les indicateurs de non-lu restent visibles.",
+          },
+          es: {
+            title: "Fija tus espacios de trabajo principales",
+            body: "Abre el selector de espacios de trabajo y haz clic en el pin junto a un espacio para mantenerlo arriba. Los indicadores de no leídos siguen visibles.",
+          },
+          ru: {
+            title: "Закрепляйте основные рабочие пространства",
+            body: "Откройте переключатель рабочих пространств и нажмите значок булавки, чтобы держать нужные сверху. Индикаторы непрочитанных сохраняются.",
           },
         },
       },
@@ -701,6 +859,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Une nouvelle mise en page",
             body: "La barre de gauche bascule entre Travail, Équipe, Chat, Boîte et Auto. Repliez ou redimensionnez le panneau latéral voisin pour gagner de la place.",
           },
+          es: {
+            title: "Nuevo diseño del espacio de trabajo",
+            body: "La barra izquierda alterna entre Trabajo, Equipo, Chat, Bandeja de entrada y Autopilot. Contrae o redimensiona el panel lateral para ganar espacio.",
+          },
+          ru: {
+            title: "Новый макет рабочего пространства",
+            body: "Левая панель переключает разделы «Работа», «Команда», «Чат», «Входящие» и «Автопилот». Боковую панель рядом можно свернуть или изменить её ширину.",
+          },
         },
       },
       {
@@ -732,6 +898,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Des vues repensées",
             body: "Ajoutez des vues en favori, combinez ou excluez des filtres, et filtrez par statut d'agent ou « Moi et mes agents ».",
           },
+          es: {
+            title: "Vistas renovadas",
+            body: "Guarda vistas en favoritos, combina o excluye filtros y filtra por estado del agente o «Yo y mis agentes».",
+          },
+          ru: {
+            title: "Обновлённые представления",
+            body: "Добавляйте представления в избранное, комбинируйте или исключайте фильтры, а также фильтруйте по статусу агента или «Я и мои агенты».",
+          },
         },
       },
       {
@@ -762,6 +936,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Limitez les exécutions simultanées par runtime",
             body: "Ouvrez un runtime et fixez combien d'exécutions il traite à la fois. Les suivantes attendent dans la file.",
+          },
+          es: {
+            title: "Limita ejecuciones simultáneas por entorno de ejecución",
+            body: "Abre un entorno de ejecución y define cuántas ejecuciones procesa a la vez. Las adicionales esperan en la cola.",
+          },
+          ru: {
+            title: "Ограничивайте число одновременных запусков в среде выполнения",
+            body: "Откройте среду выполнения и задайте лимит параллельных запусков. Остальные запуски будут ожидать в очереди.",
           },
         },
       },
@@ -800,6 +982,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Une nouvelle barre de commandes",
             body: "Sélectionnez quelques tâches et ouvrez la barre de commandes pour les modifier en une fois. Elle cherche aussi dans tout l'espace de travail et transforme une phrase en nouvelle tâche pour un agent.",
           },
+          es: {
+            title: "Nueva barra de comandos",
+            body: "Selecciona varias tareas y abre la barra de comandos para editarlas juntas. También busca en el espacio de trabajo y convierte una frase en una tarea para un agente.",
+          },
+          ru: {
+            title: "Новая командная панель",
+            body: "Выделите несколько задач и измените их разом через командную панель. Она также ищет по рабочему пространству и превращает фразу в новую задачу для агента.",
+          },
         },
       },
       {
@@ -829,6 +1019,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Jusqu'à 200 options par propriété",
             body: "Les propriétés à choix unique ou multiple acceptent jusqu'à 200 options, que l'on retrouve par texte ou en pinyin.",
+          },
+          es: {
+            title: "Hasta 200 opciones por propiedad",
+            body: "Las propiedades de selección única y múltiple admiten hasta 200 opciones con búsqueda por texto o pinyin.",
+          },
+          ru: {
+            title: "До 200 вариантов в свойствах",
+            body: "Свойства с одиночным и множественным выбором теперь поддерживают до 200 вариантов с поиском по тексту и пиньиню.",
           },
         },
       },
@@ -867,6 +1065,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Exécutez des tâches sur Devin CLI",
             body: "Les agents peuvent tourner sur votre Devin CLI local, avec reprise de session, skills de projet et MCP.",
           },
+          es: {
+            title: "Ejecuta tareas en Devin CLI",
+            body: "Los agentes pueden ejecutarse en tu Devin CLI local con reanudación de sesión, habilidades del proyecto y MCP.",
+          },
+          ru: {
+            title: "Запускайте задачи через Devin CLI",
+            body: "Агенты могут работать через локальный Devin CLI с продолжением сессии, навыками проекта и MCP.",
+          },
         },
       },
       {
@@ -897,6 +1103,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Multica en chinois traditionnel",
             body: "Changez la langue de l'application dans Paramètres → Préférences.",
+          },
+          es: {
+            title: "Multica en chino tradicional",
+            body: "Cambia el idioma de la aplicación en Ajustes → Preferencias.",
+          },
+          ru: {
+            title: "Multica на традиционном китайском",
+            body: "Переключить язык интерфейса можно в разделе «Настройки» → «Язык».",
           },
         },
       },
@@ -935,6 +1149,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Tous les membres créent des workflows",
             body: "Chaque membre peut créer et dupliquer des workflows. Les créateurs et les admins peuvent les modifier et configurer les transferts.",
           },
+          es: {
+            title: "Cualquier miembro puede crear flujos de trabajo",
+            body: "Todos los miembros pueden crear y duplicar flujos de trabajo. Los creadores y administradores pueden editarlos y configurar traspasos.",
+          },
+          ru: {
+            title: "Рабочие процессы доступны каждому участнику",
+            body: "Любой участник может создавать и дублировать рабочие процессы. Создатели и администраторы могут редактировать их и настраивать передачу задач.",
+          },
         },
       },
       {
@@ -965,6 +1187,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Partagez un runtime avec des membres choisis",
             body: "Choisissez précisément qui peut utiliser un runtime, pas seulement tout le monde ou vous seul. Restreindre l'accès affiche d'abord les agents concernés.",
+          },
+          es: {
+            title: "Comparte un entorno de ejecución con miembros concretos",
+            body: "Elige exactamente quién puede usar un entorno de ejecución, no solo todos o únicamente tú. Al restringir el acceso, primero verás los agentes afectados.",
+          },
+          ru: {
+            title: "Делитесь средой выполнения с выбранными участниками",
+            body: "Указывайте конкретных пользователей с доступом к среде выполнения, а не только «все» или «только я». При сужении доступа сначала показываются затронутые агенты.",
           },
         },
       },

@@ -15,6 +15,7 @@ import { Pressable, View } from "react-native";
 import type { Project } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ProjectIcon } from "@/components/ui/project-icon";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   project: Project;
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export function ProjectHeaderCard({ project, onEdit }: Props) {
+  const { t } = useT("projects");
   return (
     <Pressable
       onPress={onEdit}
@@ -45,7 +47,7 @@ export function ProjectHeaderCard({ project, onEdit }: Props) {
           </Text>
         ) : onEdit ? (
           <Text className="text-sm text-muted-foreground/60 italic">
-            Add a description
+            {t("detail.add_description")}
           </Text>
         ) : null}
         {project.issue_count > 0 ? (
@@ -60,12 +62,13 @@ export function ProjectHeaderCard({ project, onEdit }: Props) {
 }
 
 function ProgressSection({ done, total }: { done: number; total: number }) {
+  const { t } = useT("projects");
   const pct = Math.round((done / total) * 100);
   return (
     <View className="w-full pt-2 gap-1.5">
       <View className="flex-row items-center justify-between">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground">
-          Progress
+          {t("detail.progress")}
         </Text>
         <Text className="text-xs text-muted-foreground">
           {done} / {total} · {pct}%

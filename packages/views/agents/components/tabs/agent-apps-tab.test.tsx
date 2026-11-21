@@ -87,7 +87,7 @@ describe("AgentAppsTab", () => {
     const user = userEvent.setup();
     renderApps();
     await screen.findByText("Gmail");
-    expect(screen.queryByRole("combobox", { name: "Level" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Account scope" })).not.toBeInTheDocument();
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
     await user.click(screen.getByRole("switch", { name: "Enable Notion" }));
     await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", {
@@ -130,7 +130,7 @@ describe("AgentAppsTab", () => {
     const user = userEvent.setup();
     renderApps();
     const sources = await screen.findByRole("radiogroup", { name: "Account for Gmail" });
-    const personal = within(sources).getByRole("radio", { name: "Triggerer's account" });
+    const personal = within(sources).getByRole("radio", { name: "Starter's account" });
     expect(personal).toBeChecked();
     personal.focus();
     await user.keyboard("{ArrowLeft}");
@@ -314,7 +314,7 @@ describe("AgentAppsTab on a plan without team app accounts (MUL-9491)", () => {
     expect(screen.queryByRole("button", { name: "Allow all actions" })).not.toBeInTheDocument();
     const sources = screen.getByRole("radiogroup", { name: "Account for Gmail" });
     expect(within(sources).getByRole("radio", { name: "Team account" })).toBeChecked();
-    await user.click(within(sources).getByRole("radio", { name: "Triggerer's account" }));
+    await user.click(within(sources).getByRole("radio", { name: "Starter's account" }));
     await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", {
       apps: [{ toolkit_slug: "gmail", account_scope: "personal", level: "read" }],
     }));

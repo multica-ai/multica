@@ -458,7 +458,7 @@ describe("InboxSection", () => {
     );
     expect(rows()).toHaveLength(5);
 
-    fireEvent.click(screen.getByRole("button", { name: "Show 2 more…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 more..." }));
     expect(rows()).toHaveLength(7);
   });
 
@@ -778,7 +778,7 @@ describe("InboxSection with every row shown", () => {
   it("keeps a short list fully mounted", () => {
     useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, limit: 5 } });
     renderInPanel(30);
-    fireEvent.click(screen.getByRole("button", { name: "Show 25 more…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show 25 more..." }));
     expect(rows()).toHaveLength(30);
   });
 });

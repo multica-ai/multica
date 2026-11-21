@@ -46,7 +46,7 @@
     "unsubscribe_archive": "Unsubscribe & archive"
   },
   "list": {
-    "loading_selection": "Loading notification…",
+    "loading_selection": "Loading notification...",
     "empty": "No notifications",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
@@ -61,7 +61,7 @@
     "unarchive_tooltip": "Unarchive",
     "actions_aria": "Notification actions",
     "load_more": "Load more",
-    "loading_more": "Loading…",
+    "loading_more": "Loading...",
     "retry": "Retry"
   },
   "detail": {
@@ -69,7 +69,7 @@
     "empty": "Your inbox is empty",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
-    "edit_advanced": "Edit as advanced form",
+    "edit_advanced": "Open full form",
     "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}, or until the workspace upgrades or buys more runs.",
     "project_owner_joined_body": "{{name}} is a workspace owner and added themselves to this private project. They can now see its issues, comments, and attachments.",
     "open_project": "Open project",
@@ -154,7 +154,7 @@
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",
     "source_context_retry_failed": "Could not retry with the original context",
-    "source_context_retry_unavailable": "This context can no longer be retried. Start again from the branch point.",
+    "source_context_retry_unavailable": "This request can no longer be retried. Start again from the original message or issue.",
     "mark_read_failed": "Failed to mark as read",
     "mark_unread_failed": "Failed to mark as unread",
     "archive_failed": "Failed to archive",
@@ -176,7 +176,7 @@
     "description": "This permanently deletes this notification. Related issues and runs are kept.",
     "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
     "cancel": "Cancel",
-    "active_issue_description": "This permanently deletes the active notifications for this issue. Previously archived notifications remain and will be visible again in Archived. The issue and its runs are kept."
+    "active_issue_description": "This permanently deletes active inbox notifications for this issue. Previously archived notifications, the issue, and its runs are kept."
   },
   "unsubscribe": {
     "title": "Unsubscribe and archive. Its updates stop reaching you; an @mention still does.",
@@ -187,7 +187,7 @@
   },
   "snooze": {
     "action": "Snooze",
-    "menu_title": "Snooze until…",
+    "menu_title": "Snooze until...",
     "unsnooze": "Bring back now",
     "change_time": "Change time",
     "hours_1": "1 hour",
@@ -195,14 +195,14 @@
     "days_1": "1 day",
     "days_3": "3 days",
     "weeks_1": "1 week",
-    "pick_time": "Pick a date and time…",
+    "pick_time": "Pick a date and time...",
     "picker_title": "Pick a date and time",
     "picker_back": "Back",
     "picker_time": "Time",
     "picker_hour": "Hour",
     "picker_minute": "Minute",
     "picker_submit": "Snooze until {{time}}",
-    "hint": "Comes back early when you're mentioned by name, assigned, or a run fails.",
+    "hint": "Returns early if you're @mentioned, assigned, or a run fails.",
     "custom_invalid": "Pick a time in the future, within a year.",
     "back_at": "Back {{time}}",
     "returned": "Snooze ended",

@@ -27,10 +27,10 @@
     "run_time_label": "耗时 · {{days}}天",
     "run_time_hint": "共 {{tasks}} 次运行",
     "tasks_label": "运行数 · {{days}}天",
-    "tasks_hint": "失败 {{failed}} 个"
+    "tasks_hint": "失败 {{failed}} 次"
   },
   "dim": {
-    "label": "维度",
+    "label": "时间粒度",
     "daily": "按天",
     "weekly": "按周"
   },
@@ -44,7 +44,7 @@
     "metric_tokens": "Token",
     "metric_time": "耗时",
     "metric_tasks": "运行数",
-    "no_data": "所选时间范围内暂无消耗。",
+    "no_data": "所选时间范围内暂无用量数据。",
     "metric_label": "指标"
   },
   "weekly": {
@@ -61,7 +61,7 @@
     "kpi_rate_label": "失败率 · {{days}}天",
     "kpi_agents_label": "受影响智能体 · {{days}}天",
     "kpi_agents_hint": "最多 {{name}} · {{count}} 次",
-    "tooltip_rate": "错误率",
+    "tooltip_rate": "失败率",
     "class": {
       "auth": "认证",
       "rate_limit": "限流",
@@ -112,8 +112,8 @@
     "no_data": "所选时间范围内暂无智能体活动。"
   },
   "empty": {
-    "title": "暂无消耗数据",
-    "body": "智能体开始运行后，这里会显示 token、费用和失败率。"
+    "title": "暂无用量数据",
+    "body": "智能体开始运行后，这里会显示 token 用量、费用和失败率。"
   },
   "duration": {
     "less_than_minute": "<1分钟"

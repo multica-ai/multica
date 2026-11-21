@@ -69,7 +69,7 @@
     "empty": "Votre boîte de réception est vide",
     "original_input": "Saisie d'origine",
     "retry_with_context": "Réessayer avec le contexte",
-    "edit_advanced": "Modifier en mode avancé",
+    "edit_advanced": "Ouvrir le formulaire complet",
     "autopilot_quota_exceeded_body": "Cet espace de travail a atteint sa limite de {{limit}} exécutions d'autopilot pour la période en cours. Les exécutions suivantes ne démarreront pas avant la réinitialisation de l'allocation {{resetAt}}, ou avant que l'espace de travail change de forfait ou achète des exécutions.",
     "project_owner_joined_body": "{{name}}, propriétaire de l’espace de travail, s’est ajouté à ce projet privé et peut désormais voir ses tâches, commentaires et pièces jointes.",
     "open_project": "Ouvrir le projet",
@@ -154,7 +154,7 @@
   "errors": {
     "archived_lookup_failed": "Échec du chargement de la notification liée",
     "source_context_retry_failed": "Impossible de réessayer avec le contexte d'origine",
-    "source_context_retry_unavailable": "Ce contexte ne peut plus être réutilisé pour une nouvelle tentative. Recommencez depuis le point de branchement.",
+    "source_context_retry_unavailable": "Cette demande ne peut plus être relancée. Recommencez depuis le message ou la tâche d'origine.",
     "mark_read_failed": "Échec du marquage comme lu",
     "mark_unread_failed": "Échec du marquage comme non lu",
     "archive_failed": "Échec de l'archivage",
@@ -176,7 +176,7 @@
     "description": "Cette notification sera supprimée définitivement. Les tâches et exécutions associées seront conservées.",
     "issue_description": "Les notifications de cette tâche dans cette vue seront supprimées définitivement. La tâche et ses exécutions seront conservées.",
     "cancel": "Annuler",
-    "active_issue_description": "Les notifications actives de cette tâche seront supprimées définitivement. Les notifications précédemment archivées seront conservées et réapparaîtront dans les archives. La tâche et ses exécutions seront conservées."
+    "active_issue_description": "Cette action supprime définitivement les notifications actives de la boîte de réception pour cette tâche. Les notifications précédemment archivées, la tâche et ses exécutions sont conservées."
   },
   "unsubscribe": {
     "title": "Se désabonner et archiver. Ses mises à jour ne vous parviendront plus ; les @mentions, si.",
@@ -202,7 +202,7 @@
     "picker_hour": "Heure",
     "picker_minute": "Minute",
     "picker_submit": "Reporter jusqu'à {{time}}",
-    "hint": "Revient plus tôt si vous êtes mentionné nommément, assigné, ou si une exécution échoue.",
+    "hint": "Revient plus tôt si vous êtes @mentionné, assigné, ou si une exécution échoue.",
     "custom_invalid": "Choisissez une heure future, dans moins d'un an.",
     "back_at": "Revient {{time}}",
     "returned": "Report terminé",

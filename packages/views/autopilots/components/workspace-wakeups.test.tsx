@@ -196,7 +196,7 @@ it("confirms batch consequences and retains only failed selections for retry", a
   );
   fireEvent.click(screen.getByRole("button", { name: "Turn off selected" }));
   expect(
-    screen.getByText(/Dispatched runs will continue/),
+    screen.getByText(/Runs already in progress will continue/),
   ).toBeVisible();
   expect(disable).not.toHaveBeenCalled();
   fireEvent.click(
@@ -226,7 +226,7 @@ it("loads more in bounded pages and resets paging and selection on scope changes
     screen.getByRole("checkbox", { name: "Select DEV-a, Agent a" }),
   );
   // The scope is the header's title; its menu carries the counts.
-  await user.click(screen.getByRole("button", { name: "Waiting or executing" }));
+  await user.click(screen.getByRole("button", { name: "Waiting or running" }));
   await user.click(await screen.findByRole("menuitemradio", { name: /All wakeups\s*60/ }));
   await waitFor(() =>
     expect(queries.at(-1)).toMatchObject({
@@ -269,7 +269,7 @@ it("opens the shared prompt editor from a manageable row without loading all pro
   vi.mocked(api.editIssueWakeupInstruction).mockResolvedValue(undefined);
   second.can_manage = false;
   mount();
-  const buttons = await screen.findAllByRole("button", { name: "Edit prompt" });
+  const buttons = await screen.findAllByRole("button", { name: "Edit instructions" });
   expect(buttons[1]).toBeDisabled();
   expect(api.listIssueWakeups).not.toHaveBeenCalled();
   if (!buttons[0]) throw new Error("Missing edit button");

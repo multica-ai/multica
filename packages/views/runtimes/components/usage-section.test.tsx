@@ -205,7 +205,7 @@ describe("UsageSection — period and grain", () => {
   });
 
   const periodGroup = () => screen.getByRole("group", { name: "Period" });
-  const dimGroup = () => screen.queryByRole("group", { name: "Dimension" });
+  const dimGroup = () => screen.queryByRole("group", { name: "Interval" });
 
   it("offers every period up front, so 180d is one click", () => {
     render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });

@@ -179,7 +179,7 @@ describe("ChatWakeupCards", () => {
       />,
     );
     expect(screen.getByText("Waiting to report")).toBeInTheDocument();
-    expect(screen.getByText("Reporting…")).toBeInTheDocument();
+    expect(screen.getByText("Reporting...")).toBeInTheDocument();
     expect(screen.getByText("Reported back")).toBeInTheDocument();
     expect(screen.getByText("Couldn't report")).toBeInTheDocument();
 

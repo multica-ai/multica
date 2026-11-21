@@ -135,7 +135,7 @@
   },
   "delegate": {
     "row": "エージェントに依頼：「{{prompt}}」",
-    "hint": "クイック作成"
+    "hint": "エージェントで作成"
   },
   "best": {
     "assign": "{{subject}} を {{name}} に割り当て",

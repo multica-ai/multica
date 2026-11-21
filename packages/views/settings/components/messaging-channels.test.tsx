@@ -340,7 +340,7 @@ describe("agent messaging channels", () => {
   it("does not display revoked connections or another agent's connection", async () => {
     vi.mocked(api.listTelegramInstallations).mockResolvedValue(
       listing([
-        { ...active, status: "revoked" },
+        { ...active, status: "Revoked" },
         { ...active, id: "i2", agent_id: "agent-2" },
       ]) as never,
     );
@@ -538,7 +538,7 @@ describe("shared connection dialog", () => {
     [
       "dingtalk",
       "registerDingTalkBYO",
-      ["AppKey (client id)", "AppSecret (client secret)"],
+      ["AppKey (Client ID)", "AppSecret (Client Secret)"],
       { client_id: "first", client_secret: "second" },
     ],
     [

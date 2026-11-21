@@ -152,7 +152,7 @@
     "mode_badge_in_place": "직접",
     "ref_label": "시작 브랜치",
     "ref_placeholder": "main",
-    "ref_hint": "작업은 이 브랜치에서 시작하고 풀 리퀘스트도 이 브랜치로 엽니다. 비워 두면 기본 브랜치를 사용합니다.",
+    "ref_hint": "에이전트 실행은 이 브랜치에서 분기하여 이 브랜치를 대상으로 풀 리퀘스트를 엽니다. 비워 두면 기본 브랜치를 사용합니다.",
     "ref_error_too_long": "255자 이내로 입력하세요.",
     "ref_error_characters": "브랜치 이름에는 공백이나 ~ ^ : ? * [ \\ 를 사용할 수 없습니다",
     "ref_error_format": "유효한 브랜치 이름이 아닙니다.",
@@ -164,7 +164,7 @@
     "toast_ref_update_failed": "브랜치를 업데이트하지 못했습니다",
     "ref_error_commit": "이것은 브랜치가 아니라 커밋입니다. 특정 리비전이 필요하면 multica repo checkout --ref를 사용하세요.",
     "ref_default_label": "기본 브랜치",
-    "ref_running_note": "이미 진행 중인 작업에는 영향이 없습니다."
+    "ref_running_note": "이미 진행 중인 실행에는 영향을 주지 않습니다."
   },
   "delete_dialog": {
     "offline_error": "오프라인 상태입니다. 다시 연결한 후 삭제를 재시도하세요.",
@@ -173,7 +173,7 @@
     "confirm": "삭제",
     "cancel": "취소",
     "archive_instead": "대신 보관",
-    "archive_hint": "보관하면 프로젝트가 숨겨지지만 태스크, 기록, 설정은 유지되며 언제든 복원할 수 있습니다."
+    "archive_hint": "보관하면 모든 태스크, 기록, 설정이 그대로 유지됩니다."
   },
   "picker": {
     "no_project": "프로젝트 없음",
@@ -196,7 +196,7 @@
     "slides": {
       "progress": {
         "title": "진행 상황을 한눈에",
-        "description": "상태, 리드, 목표일, 완료율이 카드 한 장에 모여 있어 태스크를 하나씩 열어 볼 필요가 없습니다."
+        "description": "상태, 리드, 마감일, 완료율이 카드 한 장에 모여 있어 모든 태스크를 일일이 열어 볼 필요가 없습니다."
       },
       "context": {
         "title": "실행마다 컨텍스트가 따라갑니다",

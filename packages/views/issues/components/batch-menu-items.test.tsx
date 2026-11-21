@@ -71,7 +71,7 @@ describe("BatchMenuItems custom properties", () => {
   it("still offers the editor next to the clear action", async () => {
     const { onEditor } = renderMenu([issue("a", "alpha"), issue("b", "beta")]);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Notes" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Set value…" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Set value..." }));
     expect(onEditor).toHaveBeenCalledWith({ kind: "property", property: PROPERTIES[0] });
   });
 

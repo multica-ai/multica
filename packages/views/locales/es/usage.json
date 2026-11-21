@@ -12,7 +12,7 @@
   },
   "history_limit": {
     "note": "Tu plan incluye los últimos {{days}} días. Mejora tu plan para ver datos anteriores. No se elimina nada.",
-    "fell_back": "Tu plan incluye los últimos {{days}} días.",
+    "fell_back": "Mostrando los últimos {{days}} días, el límite de tu plan actual.",
     "view_plans": "Ver planes",
     "locked": "No incluido en tu plan",
     "plan": {
@@ -30,7 +30,7 @@
     "tasks_hint": "{{failed}} fallaron"
   },
   "dim": {
-    "label": "Dimensión",
+    "label": "Intervalo",
     "daily": "Diario",
     "weekly": "Semanal"
   },
@@ -60,8 +60,8 @@
     "kpi_failed_hint": "De {{total}} ejecuciones",
     "kpi_rate_label": "Tasa de fallo · {{days}}D",
     "kpi_agents_label": "Agentes afectados · {{days}}D",
-    "kpi_agents_hint": "Peor: {{name}} · {{count}}",
-    "tooltip_rate": "Tasa de error",
+    "kpi_agents_hint": "Mayor cantidad: {{name}} ({{count}} con error)",
+    "tooltip_rate": "Tasa de fallos",
     "class": {
       "auth": "Autenticación",
       "rate_limit": "Límite de peticiones",
@@ -76,8 +76,8 @@
     "mix_title": "Distribución de fallos · {{failed}}",
     "mix_label": "Distribución de fallos",
     "codes_label": "Códigos de error",
-    "by_agent": "Principales responsables",
-    "sort_label": "Ordenar responsables por",
+    "by_agent": "Errores por agente",
+    "sort_label": "Ordenar agentes por",
     "sort_failed": "Fallos",
     "sort_rate": "Tasa",
     "header_agent": "Agente",

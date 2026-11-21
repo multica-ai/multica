@@ -461,10 +461,18 @@ function formatActivity(
       return t(($) => $.activity.duplicate_removed, {
         identifier: details.duplicate_identifier || "?",
       });
-    case "task_completed":
-      return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
-    case "task_failed":
-      return t(($) => $.activity.task_failed, { count: entry.coalesced_count ?? 1 });
+    case "task_completed": {
+      const count = entry.coalesced_count ?? 1;
+      return count === 1
+        ? t(($) => $.activity.task_completed_single)
+        : t(($) => $.activity.task_completed, { count });
+    }
+    case "task_failed": {
+      const count = entry.coalesced_count ?? 1;
+      return count === 1
+        ? t(($) => $.activity.task_failed_single)
+        : t(($) => $.activity.task_failed, { count });
+    }
     case "squad_leader_evaluated": {
       const reason = details.reason?.trim();
       switch (details.outcome) {
