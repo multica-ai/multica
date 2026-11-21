@@ -312,7 +312,7 @@ export function OnboardingFlow({
             {
               title: INSTALL_RUNTIME_ISSUE_TITLE[contentLang],
               description: INSTALL_RUNTIME_ISSUE_BODY[contentLang],
-              status: "in_progress",
+              status: "backlog",
               priority: "high",
               assignee_type: "member",
               assignee_id: user.id,
