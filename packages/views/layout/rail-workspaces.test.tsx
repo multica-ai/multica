@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { renderWithI18n } from "../test/i18n";
 import { RailWorkspaces } from "./rail-workspaces";
 
-type Ws = { id: string; name: string; slug: string; avatar_url: string | null; pinned_at?: string | null };
+type Ws = { id: string; name: string; slug: string; avatar_url: string | null; created_at: string; pinned_at?: string | null; workspace_position?: number | null };
 
 const state = vi.hoisted(() => ({
   workspaces: [] as Ws[],
@@ -75,7 +75,7 @@ vi.mock("@multica/ui/components/common/tooltip-hint", () => ({
   TooltipHint: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-const ws = (n: number): Ws => ({ id: `ws-${n}`, name: n === 1 ? "Active WS" : `WS ${n}`, slug: n === 1 ? "active" : `ws${n}`, avatar_url: null });
+const ws = (n: number): Ws => ({ id: `ws-${n}`, name: n === 1 ? "Active WS" : `WS ${n}`, slug: n === 1 ? "active" : `ws${n}`, avatar_url: null, created_at: "2026-01-01T00:00:00Z" });
 const trigger = () => screen.getByRole("button", { name: "Switch workspace" });
 const triggerHasDot = () => !!trigger().querySelector(".bg-brand");
 const openMenu = async () => {
@@ -104,6 +104,14 @@ describe("RailWorkspaces", () => {
     expect(items.map((el) => el.textContent?.slice(1))).toEqual(["WS 2", "WS 3", "WS 4", "WS 5", "WS 6", "Active WS"]);
     expect(within(menu).getByRole("menuitem", { name: /Active WS$/ })).toHaveAttribute("aria-current", "page");
     expect(within(menu).getByRole("menuitem", { name: /WS 3$/ })).toHaveAttribute("href", "/ws3/issues");
+  });
+
+  it("uses personal positions when the cached list arrives out of order", async () => {
+    state.workspaces = [{ ...ws(1), workspace_position: 2 }, { ...ws(2), workspace_position: 0 }, { ...ws(3), workspace_position: 1 }];
+    renderWithI18n(<RailWorkspaces />);
+    const menu = await openMenu();
+    const items = within(menu).getAllByRole("menuitem").filter((el) => !el.textContent?.includes("Create workspace"));
+    expect(items.map((el) => el.textContent?.slice(1))).toEqual(["WS 2", "WS 3", "Active WS"]);
   });
 
   it("marks pinned workspaces and offers a pin control without navigating", async () => {
