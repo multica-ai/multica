@@ -1800,6 +1800,7 @@ export function MembersTab() {
         onCompleted={() => {
           void qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
           void qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+          void qc.invalidateQueries({ queryKey: workspaceSubscriptionSummaryOptions(wsId).queryKey });
         }}
       />
     </SettingsTab>

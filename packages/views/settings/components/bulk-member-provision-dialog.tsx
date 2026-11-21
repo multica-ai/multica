@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { api } from "@multica/core/api";
-import type { MemberRole, ProvisionMembersResponse } from "@multica/core/types";
+import type { ProvisionMembersResponse } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -23,7 +23,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../../i18n";
 import { parseProvisioningEmails } from "./member-provisioning";
 
-type ProvisionableRole = Exclude<MemberRole, "owner">;
+type ProvisionableRole = "member" | "admin";
 
 interface BulkMemberProvisionDialogProps {
   workspaceId: string;

@@ -13,12 +13,12 @@ export const ProvisionMembersResponseSchema = z.object({
   }).loose(),
   results: z.array(z.object({
     email: z.string(),
-    role: z.enum(["owner", "member", "admin"]).optional(),
+    role: z.enum(["owner", "member", "admin", "guest"]).optional(),
     status: z.enum(["created", "added", "already_member", "duplicate", "invalid", "failed"]),
     user_id: z.string().optional(),
     member_id: z.string().optional(),
     error: z.string().optional(),
-  }).loose().refine((result) => result.role !== "owner" || result.status === "already_member")),
+  }).loose().refine((result) => (result.role !== "owner" && result.role !== "guest") || result.status === "already_member")),
 }).loose();
 
 export const EMPTY_PROVISION_MEMBERS_RESPONSE: ProvisionMembersResponse = {

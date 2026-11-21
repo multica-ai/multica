@@ -12,6 +12,7 @@ describe("member provisioning response boundary", () => {
     expect(ProvisionMembersResponseSchema.parse({ summary: olderSummary, results: [result] }).summary.added).toBe(0);
     expect(ProvisionMembersResponseSchema.parse({ summary: olderSummary, results: [result] }).results[0]?.status).toBe("added");
     expect(ProvisionMembersResponseSchema.parse({ summary: olderSummary, results: [{ ...result, role: "owner", status: "already_member" }] }).results[0]?.role).toBe("owner");
+    expect(ProvisionMembersResponseSchema.parse({ summary: olderSummary, results: [{ ...result, role: "guest", status: "already_member" }] }).results[0]?.role).toBe("guest");
     expect(ProvisionMembersResponseSchema.safeParse({ summary: olderSummary, results: [{ ...result, status: "future" }] }).success).toBe(false);
   });
   const response = {
@@ -29,7 +30,11 @@ describe("member provisioning response boundary", () => {
   });
 
   it("falls back safely for malformed successful responses", async () => {
-    for (const raw of [{ summary: {}, results: "ok" }, { ...response, results: [{ email: "seed@example.test", role: "owner", status: "created" }] }]) {
+    for (const raw of [
+      { summary: {}, results: "ok" },
+      { ...response, results: [{ email: "seed@example.test", role: "owner", status: "created" }] },
+      { ...response, results: [{ email: "seed@example.test", role: "guest", status: "created" }] },
+    ]) {
       expect(ProvisionMembersResponseSchema.safeParse(raw).success).toBe(false);
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(raw))));
       await expect(new ApiClient("https://example.test").provisionMembers("workspace-1", { entries: [] })).resolves.toEqual(EMPTY_PROVISION_MEMBERS_RESPONSE);

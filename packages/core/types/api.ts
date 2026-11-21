@@ -721,10 +721,12 @@ export interface CreateMemberRequest {
   project_ids?: string[];
 }
 
+export type ProvisionableMemberRole = "member" | "admin";
+
 export interface ProvisionMemberEntry {
   email: string;
   name?: string;
-  role: Exclude<MemberRole, "owner">;
+  role: ProvisionableMemberRole;
 }
 
 export interface ProvisionMembersRequest {
