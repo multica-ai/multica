@@ -579,8 +579,6 @@
     "members_group": "Membres",
     "agents_group": "Agents",
     "archive_tooltip": "Archiver",
-    "pin_tooltip": "Épingler à la barre latérale",
-    "unpin_tooltip": "Détacher de la barre latérale",
     "quick_jump_label": "Navigation rapide",
     "description_nav_label": "Description de la tâche",
     "sub_issues_nav_progress": "{{done}}/{{total}} terminées",

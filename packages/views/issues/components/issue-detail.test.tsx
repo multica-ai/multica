@@ -1621,13 +1621,12 @@ describe("IssueDetail (shared)", () => {
       );
     }
 
-    it("names Archive and Pin after their tooltips on an open issue", async () => {
+    it("names Archive after its tooltip on an open issue", async () => {
       renderWithArchive();
 
       expect(
         await screen.findByRole("button", { name: enIssues.detail.archive_tooltip }),
       ).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: enIssues.detail.pin_tooltip })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Mark as done" })).not.toBeInTheDocument();
     });
 
@@ -1640,7 +1639,7 @@ describe("IssueDetail (shared)", () => {
       expect(mockApiObj.updateIssue).not.toHaveBeenCalled();
     });
 
-    it("names the pin toggle Unpin while the issue is pinned", async () => {
+    it("keeps pinning in the more-actions menu rather than the header", async () => {
       mockApiObj.listPins.mockResolvedValue([
         {
           id: "pin-1",
@@ -1654,11 +1653,12 @@ describe("IssueDetail (shared)", () => {
       ]);
       renderIssueDetail();
 
+      fireEvent.click(await screen.findByRole("button", { name: enCommon.more_actions }));
       expect(
-        await screen.findByRole("button", { name: enIssues.detail.unpin_tooltip }),
+        await screen.findByRole("menuitem", { name: enIssues.actions.unpin_from_sidebar }),
       ).toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: enIssues.detail.pin_tooltip }),
+        screen.queryByRole("button", { name: enIssues.actions.unpin_from_sidebar }),
       ).not.toBeInTheDocument();
     });
   });
