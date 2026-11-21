@@ -163,7 +163,7 @@ function KbdGlyph({
 }
 
 const KBD_CASE_STYLE: CSSProperties = {
-  fontFeatureSettings: '"case" 1, "ss01" 1',
+  fontFeatureSettings: '"case" 1',
 };
 
 interface KbdProps extends React.ComponentProps<"kbd"> {

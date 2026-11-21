@@ -7,7 +7,7 @@ describe("Kbd", () => {
     const { container } = render(<Kbd>[</Kbd>);
     const kbd = container.querySelector("[data-slot='kbd']") as HTMLElement;
     expect(kbd).not.toBeNull();
-    expect(kbd.style.fontFeatureSettings).toContain('"case" 1');
+    expect(kbd.style.fontFeatureSettings).toBe('"case" 1');
     expect(kbd.className).toContain("h-[1.85em]");
     expect(kbd.className).toContain("in-data-[slot=tooltip-content]:bg-white/10!");
   });

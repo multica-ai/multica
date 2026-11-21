@@ -175,7 +175,7 @@ function buildOpticalTokens(shortcut: DemoChord, platform: DemoPlatform): Optica
 }
 
 const CASE_STYLE: CSSProperties = {
-  fontFeatureSettings: '"case" 1, "ss01" 1',
+  fontFeatureSettings: '"case" 1',
 };
 
 const TONE_CLASSES: Record<DemoTone, string> = {
