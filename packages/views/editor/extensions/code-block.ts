@@ -1,7 +1,8 @@
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
-import type { Node as PMNode } from "@tiptap/pm/model";
+import { Slice, type Node as PMNode, type ResolvedPos } from "@tiptap/pm/model";
 import type { Editor } from "@tiptap/core";
 import { NodeSelection, Plugin, PluginKey, Selection, TextSelection } from "@tiptap/pm/state";
+import { ReplaceStep, replaceStep } from "@tiptap/pm/transform";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { createLowlight } from "lowlight";
 
@@ -113,6 +114,13 @@ export function isDynamicBlockLanguage(language: unknown): language is "html" | 
  */
 export const OPEN_BLOCK_SOURCE_META = "multica:openBlockSource";
 
+/** Whether `node` at `pos` is a dynamic block currently showing its preview. */
+function isPreviewedBlock(editor: Editor, typeName: string, node: PMNode | null | undefined, pos: number): boolean {
+  if (!node || node.type.name !== typeName || !isDynamicBlockLanguage(node.attrs.language)) return false;
+  const dom = editor.view.nodeDOM(pos);
+  return dom instanceof HTMLElement && !!dom.querySelector('[data-dynamic-block-view="preview"]');
+}
+
 /**
  * Up or Down from the edge of a textblock onto a dynamic block that shows its
  * preview selects that block whole. Left to the browser, the caret would skip
@@ -127,13 +135,61 @@ function selectPreviewedBlock(editor: Editor, typeName: string, dir: 1 | -1): bo
   if (!$side.depth || !view.endOfTextblock(dir < 0 ? "up" : "down")) return false;
   const next = Selection.findFrom(state.doc.resolve(dir > 0 ? $side.after() : $side.before()), dir);
   if (!(next instanceof TextSelection)) return false;
-  const block = next.$head.parent;
-  if (block.type.name !== typeName || !isDynamicBlockLanguage(block.attrs.language)) return false;
   const pos = next.$head.before();
-  const dom = view.nodeDOM(pos);
-  if (!(dom instanceof HTMLElement) || !dom.querySelector('[data-dynamic-block-view="preview"]')) return false;
+  if (!isPreviewedBlock(editor, typeName, next.$head.parent, pos)) return false;
   view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, pos)).scrollIntoView());
   return true;
+}
+
+/**
+ * Backspace at the start of a textblock right after a previewed dynamic
+ * block, or Delete at its end right before one, selects the block, as it
+ * would an image. The default join would append the paragraph to the hidden
+ * source (Backspace) or pour the source into the paragraph (Delete). An empty
+ * textblock is removed on the way, as ProseMirror does next to a leaf block.
+ * Only a sibling textblock is handled: a list item or quote keeps its own
+ * Backspace (lifting it out), which never reaches into the block.
+ */
+function deleteTowardPreviewedBlock(editor: Editor, typeName: string, dir: 1 | -1): boolean {
+  const { state, view } = editor;
+  const { selection } = state;
+  if (!(selection instanceof TextSelection) || !selection.empty) return false;
+  const $cursor = selection.$head;
+  if (dir < 0 ? $cursor.parentOffset > 0 : $cursor.parentOffset < $cursor.parent.content.size) return false;
+  const $cut = dir < 0 ? cutBefore($cursor) : cutAfter($cursor);
+  if (!$cut || $cut.depth !== $cursor.depth - 1) return false;
+  const block = dir < 0 ? $cut.nodeBefore : $cut.nodeAfter;
+  const blockPos = dir < 0 ? $cut.pos - (block?.nodeSize ?? 0) : $cut.pos;
+  if (!isPreviewedBlock(editor, typeName, block, blockPos)) return false;
+
+  const tr = state.tr;
+  if ($cursor.parent.content.size === 0) {
+    const step = replaceStep(state.doc, $cursor.before(), $cursor.after(), Slice.empty);
+    if (step instanceof ReplaceStep && step.slice.size < step.to - step.from) tr.step(step);
+  }
+  view.dispatch(tr.setSelection(NodeSelection.create(tr.doc, tr.mapping.map(blockPos))).scrollIntoView());
+  return true;
+}
+
+// ProseMirror's findCutBefore / findCutAfter (prosemirror-commands), which it
+// does not export: the boundary a join at the cursor would cross.
+function cutBefore($pos: ResolvedPos): ResolvedPos | null {
+  if ($pos.parent.type.spec.isolating) return null;
+  for (let depth = $pos.depth - 1; depth >= 0; depth--) {
+    if ($pos.index(depth) > 0) return $pos.doc.resolve($pos.before(depth + 1));
+    if ($pos.node(depth).type.spec.isolating) break;
+  }
+  return null;
+}
+
+function cutAfter($pos: ResolvedPos): ResolvedPos | null {
+  if ($pos.parent.type.spec.isolating) return null;
+  for (let depth = $pos.depth - 1; depth >= 0; depth--) {
+    const parent = $pos.node(depth);
+    if ($pos.index(depth) + 1 < parent.childCount) return $pos.doc.resolve($pos.after(depth + 1));
+    if (parent.type.spec.isolating) break;
+  }
+  return null;
 }
 
 export const CodeBlockExtension = CodeBlockLowlight.extend({
@@ -145,6 +201,11 @@ export const CodeBlockExtension = CodeBlockLowlight.extend({
         selectPreviewedBlock(props.editor, this.name, -1) || (inherited.ArrowUp?.(props) ?? false),
       ArrowDown: (props) =>
         selectPreviewedBlock(props.editor, this.name, 1) || (inherited.ArrowDown?.(props) ?? false),
+      // The inherited Backspace (clearing an empty code block) goes first.
+      Backspace: (props) =>
+        (inherited.Backspace?.(props) ?? false) || deleteTowardPreviewedBlock(props.editor, this.name, -1),
+      Delete: (props) =>
+        deleteTowardPreviewedBlock(props.editor, this.name, 1) || (inherited.Delete?.(props) ?? false),
       // A previewed dynamic block is selected as a whole (its NodeView keeps
       // the caret out of the hidden source); Enter opens the source with the
       // caret at its start.

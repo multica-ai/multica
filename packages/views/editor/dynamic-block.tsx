@@ -45,6 +45,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { isImeComposing } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { CodeBlockStatic } from "./code-block-static";
@@ -414,7 +415,7 @@ function DynamicBlockTitleInput({
         onChange={(event) => setDraft(event.target.value)}
         onBlur={(event) => commit(event.currentTarget.value)}
         onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) return;
+          if (isImeComposing(event)) return;
           if (event.key === "Enter") {
             event.preventDefault();
             event.currentTarget.blur();

@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { EditorContent, ReactNodeViewRenderer, useEditor, type Editor } from "@tiptap/react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
-import StarterKit from "@tiptap/starter-kit";
-import { createLowlight } from "lowlight";
 import { useEffect } from "react";
 import { mockNativeDialog } from "../test-utils/native-dialog";
 import { HTML_BLOCK_MESSAGE_KEY } from "../utils/html-block-document";
@@ -32,17 +30,12 @@ vi.mock("../mermaid-diagram", async (importOriginal) => ({
   MermaidDiagram: ({ chart }: { chart: string }) => <div data-testid="diagram">{chart}</div>,
 }));
 
-import { CodeBlockExtension } from "./code-block";
-import { CodeBlockView } from "./code-block-view";
+import { createEditorExtensions } from ".";
 
 function TestEditor({ content, onEditor }: { content: JSONContent[]; onEditor: (editor: Editor) => void }) {
+  // The editor's real extension set, so other keymaps get their turn first.
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({ codeBlock: false }),
-      CodeBlockExtension.extend({
-        addNodeView: () => ReactNodeViewRenderer(CodeBlockView),
-      }).configure({ lowlight: createLowlight() }),
-    ],
+    extensions: createEditorExtensions({ disableMentions: true }),
     content: { type: "doc", content },
   });
   useEffect(() => {
@@ -61,9 +54,10 @@ const codeBlock = (language: string, text: string, meta: string | null = null): 
 /** "before" paragraph (8) puts the block at 8; its text starts at 9. */
 const BLOCK_POS = 8;
 
-async function mount(block: JSONContent) {
+async function mount(block: JSONContent, around: { before?: JSONContent[]; after?: JSONContent[] } = {}) {
   let editor: Editor | undefined;
-  render(<TestEditor content={[paragraph("before"), block, paragraph("after")]} onEditor={(e) => (editor = e)} />);
+  const content = [...(around.before ?? [paragraph("before")]), block, ...(around.after ?? [paragraph("after")])];
+  render(<TestEditor content={content} onEditor={(e) => (editor = e)} />);
   await waitFor(() => expect(document.querySelector("[data-dynamic-code-block], pre")).not.toBeNull());
   return editor!;
 }
@@ -87,6 +81,25 @@ function postHeight(height: number) {
       }),
     );
   });
+}
+
+function press(editor: Editor, key: string) {
+  return act(async () => {
+    fireEvent.keyDown(editor.view.dom, { key });
+  });
+}
+
+function select(editor: Editor, pos: number) {
+  return act(async () => {
+    editor.commands.setTextSelection(pos);
+  });
+}
+
+/** Top-level node texts, so a join or a lost paragraph shows. */
+function blocks(editor: Editor): string[] {
+  const out: string[] = [];
+  editor.state.doc.forEach((node) => out.push(`${node.type.name}:${node.textContent}`));
+  return out;
 }
 
 function blockMeta(editor: Editor): string | null {
@@ -225,14 +238,11 @@ describe("CodeBlockView — ```html in the editor", () => {
     const editor = await mount(codeBlock("html", "<p>hi</p>"));
     // jsdom has no layout; every caret here sits on its textblock's edge.
     vi.spyOn(editor.view, "endOfTextblock").mockReturnValue(true);
-    const press = (key: string) => act(async () => {
-      fireEvent.keyDown(editor.view.dom, { key });
-    });
 
     await act(async () => {
       editor.commands.setTextSelection(3);
     });
-    await press("ArrowDown");
+    await press(editor, "ArrowDown");
     expect(editor.state.selection).toBeInstanceOf(NodeSelection);
     expect(editor.state.selection.from).toBe(BLOCK_POS);
 
@@ -240,7 +250,7 @@ describe("CodeBlockView — ```html in the editor", () => {
     await act(async () => {
       editor.commands.setTextSelection(after);
     });
-    await press("ArrowUp");
+    await press(editor, "ArrowUp");
     expect(editor.state.selection).toBeInstanceOf(NodeSelection);
     expect(editor.state.selection.from).toBe(BLOCK_POS);
 
@@ -249,8 +259,50 @@ describe("CodeBlockView — ```html in the editor", () => {
     await act(async () => {
       editor.commands.setTextSelection(3);
     });
-    await press("ArrowDown");
+    await press(editor, "ArrowDown");
     expect(editor.state.selection).toBeInstanceOf(TextSelection);
+  });
+
+  it("selects a previewed block on Backspace or Delete instead of joining its hidden source", async () => {
+    const editor = await mount(codeBlock("html", "<p>hi</p>"));
+    const original = blocks(editor);
+    const afterStart = BLOCK_POS + editor.state.doc.nodeAt(BLOCK_POS)!.nodeSize + 1;
+
+    // Backspace at the start of the next paragraph would append it to the source.
+    await select(editor, afterStart);
+    await press(editor, "Backspace");
+    expect(editor.state.selection).toBeInstanceOf(NodeSelection);
+    expect(editor.state.selection.from).toBe(BLOCK_POS);
+    expect(blocks(editor)).toEqual(original);
+
+    // Delete at the end of the previous paragraph would pull the source into it.
+    await select(editor, BLOCK_POS - 1);
+    await press(editor, "Delete");
+    expect(editor.state.selection).toBeInstanceOf(NodeSelection);
+    expect(editor.state.selection.from).toBe(BLOCK_POS);
+    expect(blocks(editor)).toEqual(original);
+  });
+
+  it("removes an empty paragraph beside a previewed block and selects the block", async () => {
+    const empty: JSONContent = { type: "paragraph" };
+    const editor = await mount(codeBlock("html", "<p>hi</p>"), {
+      before: [paragraph("before"), empty],
+      after: [empty, paragraph("after")],
+    });
+    const blockPos = BLOCK_POS + 2;
+    const blockSize = editor.state.doc.nodeAt(blockPos)!.nodeSize;
+
+    await select(editor, blockPos + blockSize + 1);
+    await press(editor, "Backspace");
+    expect(blocks(editor)).toEqual(["paragraph:before", "paragraph:", "codeBlock:<p>hi</p>", "paragraph:after"]);
+    expect(editor.state.selection).toBeInstanceOf(NodeSelection);
+    expect(editor.state.selection.from).toBe(blockPos);
+
+    await select(editor, BLOCK_POS + 1);
+    await press(editor, "Delete");
+    expect(blocks(editor)).toEqual(["paragraph:before", "codeBlock:<p>hi</p>", "paragraph:after"]);
+    expect(editor.state.selection).toBeInstanceOf(NodeSelection);
+    expect(editor.state.selection.from).toBe(BLOCK_POS);
   });
 
   it("moves the caret out of the source when the preview comes back", async () => {
