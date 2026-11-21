@@ -297,6 +297,8 @@
     "button": "Отображение",
     "grouping_section": "Группировка",
     "ordering_section": "Порядок",
+    "apply_sort_to_all_projects": "По умолчанию для всех проектов",
+    "project_default_sort_saved": "Сортировка по умолчанию для проектов сохранена",
     "card_properties_section": "Свойства карточки",
     "columns_section": "Столбцы",
     "columns_locked_by_filter": "Сбросьте фильтр статусов, чтобы показывать или скрывать столбцы.",

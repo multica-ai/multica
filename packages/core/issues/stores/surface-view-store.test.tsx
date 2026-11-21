@@ -5,6 +5,7 @@ import { setCurrentWorkspace } from "../../platform/workspace-storage";
 import { ViewStoreProvider, useViewStore } from "./view-store-context";
 import {
   ISSUE_SURFACE_VIEW_STORAGE_KEY,
+  setProjectDefaultSort,
   clearIssueSurfaceViewState,
   getIssueSurfaceViewStateRegistrySnapshot,
   getIssueSurfaceViewStore,
@@ -127,6 +128,58 @@ describe("issue surface view store registry", () => {
       getIssueSurfaceViewStore("workspace:compact-card").getState().cardProperties
         .project,
     ).toBe(true);
+  });
+
+  it("starts unconfigured project surfaces from the saved default and keeps configured ones", async () => {
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    const configured = getIssueSurfaceViewStore("project:configured");
+    configured.getState().setViewMode("list");
+    const untouched = getIssueSurfaceViewStore("project:untouched");
+    const workspace = getIssueSurfaceViewStore("workspace:all");
+
+    setProjectDefaultSort({ sortBy: "position", sortDirection: "asc" });
+
+    expect(configured.getState().sortBy).toBe("updated_at");
+    expect(untouched.getState().sortBy).toBe("position");
+    expect(getIssueSurfaceViewStore("project:fresh").getState().sortBy).toBe("position");
+    expect(workspace.getState().sortBy).toBe("updated_at");
+
+    setCurrentWorkspace("other", "ws_b");
+    await flush();
+    expect(getIssueSurfaceViewStore("project:fresh-b").getState().sortBy).toBe("updated_at");
+
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    expect(getIssueSurfaceViewStore("project:fresh-b").getState().sortBy).toBe("position");
+  });
+
+  it("keeps Manual off project surfaces grouped by something other than status", async () => {
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    setProjectDefaultSort({ sortBy: "position", sortDirection: "asc" });
+
+    const store = getIssueSurfaceViewStore("project:by-assignee");
+    store.getState().setGrouping("assignee");
+
+    expect(store.getState().sortBy).toBe("updated_at");
+  });
+
+  it("restores Updated date when the built-in sort is saved as the default", async () => {
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    setProjectDefaultSort({ sortBy: "position", sortDirection: "asc" });
+    const untouched = getIssueSurfaceViewStore("project:untouched");
+    expect(untouched.getState().sortBy).toBe("position");
+
+    setProjectDefaultSort({ sortBy: "updated_at", sortDirection: "desc" });
+
+    expect([untouched.getState().sortBy, untouched.getState().sortDirection]).toEqual([
+      "updated_at",
+      "desc",
+    ]);
+    const raw = JSON.parse(localStorage.getItem(`${ISSUE_SURFACE_VIEW_STORAGE_KEY}:acme`) as string);
+    expect(raw.state.projectDefaultSort).toBeNull();
   });
 
   it("isolates view state by surface key inside one workspace registry", async () => {

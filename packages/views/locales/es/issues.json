@@ -276,6 +276,8 @@
     "button": "Visualización",
     "grouping_section": "Agrupación",
     "ordering_section": "Ordenación",
+    "apply_sort_to_all_projects": "Predeterminar en todos los proyectos",
+    "project_default_sort_saved": "Orden predeterminado de los proyectos guardado",
     "card_properties_section": "Propiedades de la tarjeta",
     "ascending_title": "Ascendente",
     "descending_title": "Descendente",

@@ -9,6 +9,9 @@ import {
   DEFAULT_HIDDEN_STATUSES,
   type IssueViewState,
   mergeViewStatePersisted,
+  normalizeSortForGrouping,
+  type SortDirection,
+  type SortField,
   viewStorePersistOptions,
   viewStoreSlice,
 } from "./view-store";
@@ -24,11 +27,19 @@ interface IssueSurfaceViewEntry {
   updatedAt: string;
 }
 
+export interface ProjectDefaultSort {
+  sortBy: SortField;
+  sortDirection: SortDirection;
+}
+
 interface IssueSurfaceViewRegistryState {
   surfaces: Record<string, IssueSurfaceViewEntry>;
+  /** Sort a project surface starts with before the user configures it. */
+  projectDefaultSort: ProjectDefaultSort | null;
   setSurfaceState: (surfaceKey: string, state: IssueViewState) => void;
   clearSurfaceState: (surfaceKey: string) => void;
   pruneSurfaceStates: (validSurfaceKeys: Iterable<string>) => void;
+  setProjectDefaultSort: (sort: ProjectDefaultSort | null) => void;
 }
 
 const basePersist = viewStorePersistOptions(ISSUE_SURFACE_VIEW_STORAGE_KEY);
@@ -37,16 +48,41 @@ const suppressSurfacePersist = new Set<string>();
 
 const SURFACE_DEFAULTS_VERSION = 1;
 
+const isProjectSurfaceKey = (surfaceKey: string) => surfaceKey.startsWith("project:");
+
+function withSort<T extends Pick<IssueViewState, "grouping" | "sortBy" | "sortDirection" | "sortDirections">>(
+  state: T,
+  sort: ProjectDefaultSort,
+): T {
+  const next = normalizeSortForGrouping(state.grouping, sort.sortBy, sort.sortDirection);
+  return {
+    ...state,
+    ...next,
+    sortDirections: { ...state.sortDirections, [next.sortBy]: next.sortDirection },
+  };
+}
+
 function defaultsForSurface(
   surfaceKey: string,
   set: StoreApi<IssueViewState>["setState"],
 ): IssueViewState {
   const defaults = viewStoreSlice(set);
-  if (!surfaceKey.startsWith("project:")) return defaults;
-  return {
+  if (!isProjectSurfaceKey(surfaceKey)) return defaults;
+  const projectDefaults = {
     ...defaults,
     cardProperties: { ...defaults.cardProperties, project: false },
   };
+  const sort = issueSurfaceViewRegistryStore.getState().projectDefaultSort;
+  return sort ? withSort(projectDefaults, sort) : projectDefaults;
+}
+
+function sanitizeProjectDefaultSort(value: unknown): ProjectDefaultSort | null {
+  if (!value || typeof value !== "object") return null;
+  const { sortBy, sortDirection } = value as Partial<ProjectDefaultSort>;
+  if (typeof sortBy !== "string" || (sortDirection !== "asc" && sortDirection !== "desc")) {
+    return null;
+  }
+  return { sortBy: sortBy as SortField, sortDirection };
 }
 
 function isLegacyCardDefault(cardProperties: unknown): boolean {
@@ -99,6 +135,8 @@ const issueSurfaceViewRegistryStore = createStore<IssueSurfaceViewRegistryState>
   persist(
     (set) => ({
       surfaces: {},
+      projectDefaultSort: null,
+      setProjectDefaultSort: (sort) => set({ projectDefaultSort: sort }),
       setSurfaceState: (surfaceKey, state) =>
         set((current) => ({
           surfaces: {
@@ -147,12 +185,16 @@ const issueSurfaceViewRegistryStore = createStore<IssueSurfaceViewRegistryState>
           ),
         };
       },
-      partialize: (state) => ({ surfaces: state.surfaces }),
+      partialize: (state) => ({
+        surfaces: state.surfaces,
+        projectDefaultSort: state.projectDefaultSort,
+      }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<IssueSurfaceViewRegistryState>;
         return {
           ...current,
           surfaces: p.surfaces ?? {},
+          projectDefaultSort: sanitizeProjectDefaultSort(p.projectDefaultSort),
         };
       },
     },
@@ -236,6 +278,28 @@ export function pruneIssueSurfaceViewStates(validSurfaceKeys: Iterable<string>) 
   for (const [surfaceKey, store] of surfaceStores) {
     if (!valid.has(surfaceKey)) resetStoreFromRegistry(surfaceKey, store);
   }
+}
+
+/**
+ * Make `sort` the starting sort of this workspace's project surfaces that have
+ * no saved state of their own; a project the user already configured keeps
+ * its state. Choosing the built-in default clears the setting.
+ */
+export function setProjectDefaultSort(sort: ProjectDefaultSort) {
+  const builtin = viewStoreSlice(() => {});
+  const isBuiltin =
+    sort.sortBy === builtin.sortBy && sort.sortDirection === builtin.sortDirection;
+  issueSurfaceViewRegistryStore.getState().setProjectDefaultSort(isBuiltin ? null : sort);
+  const { surfaces } = issueSurfaceViewRegistryStore.getState();
+  for (const [surfaceKey, store] of surfaceStores) {
+    if (isProjectSurfaceKey(surfaceKey) && !surfaces[surfaceKey]) {
+      resetStoreFromRegistry(surfaceKey, store);
+    }
+  }
+}
+
+export function getProjectDefaultSort(): ProjectDefaultSort | null {
+  return issueSurfaceViewRegistryStore.getState().projectDefaultSort;
 }
 
 export function getIssueSurfaceViewStateRegistrySnapshot() {
