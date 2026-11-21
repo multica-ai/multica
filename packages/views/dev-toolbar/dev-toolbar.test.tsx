@@ -14,7 +14,10 @@ const mocks = vi.hoisted(() => ({
   listRuntimes: vi.fn(),
   getAgentTaskSnapshot: vi.fn(),
   listAgents: vi.fn(),
+  copyText: vi.fn(),
 }));
+
+vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: mocks.copyText }));
 
 class FakeSocket {
   static last: FakeSocket | null = null;
@@ -93,6 +96,7 @@ describe("DevToolbar", () => {
     mocks.listRuntimes.mockReset().mockResolvedValue([]);
     mocks.getAgentTaskSnapshot.mockReset().mockResolvedValue([]);
     mocks.listAgents.mockReset().mockResolvedValue([]);
+    mocks.copyText.mockReset().mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -243,6 +247,45 @@ describe("DevToolbar", () => {
     settle([]);
     await waitFor(() => expect(counter).toHaveTextContent("↻0"));
     expect(screen.getByTestId("dev-toolbar-cache-fetching")).toBe(counter);
+  });
+
+  it("names what ran in a long task and copies the trace for analysis", async () => {
+    const observers: { types: string[]; callback: (list: { getEntries: () => unknown[] }) => void }[] = [];
+    class FakePerformanceObserver {
+      static supportedEntryTypes = ["longtask", "measure"];
+      types: string[] = [];
+      constructor(callback: (list: { getEntries: () => unknown[] }) => void) {
+        observers.push({ types: this.types, callback });
+      }
+      observe({ type }: { type: string }) {
+        this.types.push(type);
+      }
+      disconnect() {}
+    }
+    const emit = (type: string, entry: object) =>
+      observers.find((o) => o.types.includes(type))!.callback({ getEntries: () => [{ entryType: type, ...entry }] });
+    vi.stubGlobal("PerformanceObserver", FakePerformanceObserver);
+    renderToolbar({ route: "/acme/issues/MUL-1" });
+
+    await waitFor(() => expect(observers.length).toBeGreaterThan(0));
+    emit("measure", {
+      name: "\u200bCommentList",
+      startTime: 1010,
+      duration: 150,
+      detail: { devtools: { track: "Components \u269b", properties: [["Changed Props", ""], ["+\u00a0comments", "Array(40)"]] } },
+    });
+    emit("longtask", { startTime: 1000, duration: 180 });
+
+    fireEvent.click(screen.getByTestId("dev-toolbar-jank"));
+    fireEvent.click(await screen.findByText("<CommentList> 150ms"));
+    expect(screen.getByText("<CommentList> 1×")).toBeInTheDocument();
+    expect(screen.getByText("comments")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy trace" }));
+    await waitFor(() => expect(mocks.copyText).toHaveBeenCalledOnce());
+    const report = mocks.copyText.mock.calls[0]![0] as string;
+    expect(report).toContain("## Long tasks · web · http://localhost:18080");
+    expect(report).toContain("- <CommentList> 150ms self, 1×; changed props: comments");
   });
 
   it("shows runtime health and opens the issue a running agent task works on", async () => {
