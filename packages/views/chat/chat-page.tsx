@@ -31,6 +31,7 @@ import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
 import { NewChatButton } from "./components/new-chat-button";
 import { useChatController } from "./components/use-chat-controller";
+import { useChatFork } from "./components/use-chat-fork";
 import { useChatAnnotations } from "./components/use-chat-annotations";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
@@ -89,6 +90,13 @@ export function ChatPage() {
     agentName: c.activeAgent?.name,
     enabled: !c.isSessionArchived && !c.isAgentArchived && !c.isAgentAccessRevoked && c.isAgentRuntimeBound && !c.noAgent,
   });
+  const chatFork = useChatFork(
+    c.wsId ?? "",
+    c.currentSession ?? null,
+    c.activeAgent ?? null,
+    isCurrentChatRoute && getCurrentSlug() === workspaceSlug,
+    (chatId) => push(`${wsPaths.chat()}?session=${encodeURIComponent(chatId)}`),
+  );
   const urlSession = searchParams.get("session") || null;
   const urlAgent = searchParams.get("agent") || null;
 
@@ -326,6 +334,9 @@ export function ChatPage() {
           session={c.currentSession}
           agent={c.activeAgent}
           onArchive={handleArchive}
+          onFork={chatFork.canFork ? chatFork.start : undefined}
+          forkPending={chatFork.pending}
+          forkDisabled={!!c.pendingTask?.task_id}
         />
       )}
       {c.showSkeleton ? (

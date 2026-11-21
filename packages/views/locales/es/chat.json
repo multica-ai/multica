@@ -271,6 +271,11 @@
     "archive": "Archivar chat",
     "unarchive": "Desarchivar chat",
     "delete": "Eliminar chat",
+    "fork": "Bifurcar el chat",
+    "fork_pending": "Creando rama…",
+    "fork_failed": "No se pudo bifurcar el chat. Comprueba que el chat esté inactivo y que su entorno de Codex esté disponible.",
+    "fork_ready": "La rama del chat está lista",
+    "open_fork": "Abrir rama",
     "agent_settings": "Ajustes del agente"
   },
   "wakeup": {

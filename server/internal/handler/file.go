@@ -372,9 +372,17 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 // and groups them by chat_message_id. Mirrors groupAttachments — used so the
 // chat message list can surface attachment metadata to the UI bubble (file
 // cards, click-through download) without an N+1 query per message.
-func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID string, messageIDs []pgtype.UUID) map[string][]AttachmentResponse {
-	if len(messageIDs) == 0 {
+func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID string, messages []db.ChatMessage) map[string][]AttachmentResponse {
+	if len(messages) == 0 {
 		return nil
+	}
+	messageIDs := make([]pgtype.UUID, len(messages))
+	var forkMessageIDs []pgtype.UUID
+	for i, message := range messages {
+		messageIDs[i] = message.ID
+		if len(message.ForkAttachmentIds) > 0 {
+			forkMessageIDs = append(forkMessageIDs, message.ID)
+		}
 	}
 	attachments, err := h.Queries.ListAttachmentsByChatMessageIDs(ctx, db.ListAttachmentsByChatMessageIDsParams{
 		Column1:     messageIDs,
@@ -388,6 +396,18 @@ func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID s
 	for _, a := range attachments {
 		mid := uuidToString(a.ChatMessageID)
 		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a, attachmentURLModeSigned))
+	}
+	if len(forkMessageIDs) > 0 {
+		references, err := h.Queries.ListChatForkAttachmentReferences(ctx, db.ListChatForkAttachmentReferencesParams{
+			MessageIds: forkMessageIDs, WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			slog.Error("failed to load attachment references for chat forks", "error", err)
+		}
+		for _, reference := range references {
+			mid := uuidToString(reference.MessageID)
+			grouped[mid] = append(grouped[mid], h.attachmentToResponse(reference.Attachment, attachmentURLModeSigned))
+		}
 	}
 	return grouped
 }

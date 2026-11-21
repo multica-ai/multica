@@ -1895,6 +1895,8 @@ var ErrChatQuickActionsBusy = errors.New("chat quick actions: session busy")
 // a race with archiving the session and therefore must not persist a new turn.
 var ErrChatSessionArchived = errors.New("chat task: session archived")
 
+var ErrChatSessionForkPending = errors.New("chat task: session fork is pending")
+
 // PreparedChatTaskEnqueue is an opaque, side-effect-free input snapshot built
 // before a caller opens a task-enqueue transaction.
 type PreparedChatTaskEnqueue struct {
@@ -2074,6 +2076,9 @@ func (s *TaskService) enqueueChatTaskTx(
 	}
 	if currentSession.Status != "active" {
 		return db.AgentTaskQueue{}, ErrChatSessionArchived
+	}
+	if currentSession.ForkSnapshotTaskID.Valid || currentSession.ForkInitializationTaskID.Valid {
+		return db.AgentTaskQueue{}, ErrChatSessionForkPending
 	}
 
 	agent, err := qtx.GetAgentForClaimUpdate(ctx, chatSession.AgentID)
@@ -2465,6 +2470,9 @@ func (s *TaskService) sendDirectChatMessage(
 		if currentSession.Status != "active" {
 			return ErrChatSessionArchived
 		}
+		if currentSession.ForkSnapshotTaskID.Valid || currentSession.ForkInitializationTaskID.Valid {
+			return ErrChatSessionForkPending
+		}
 		carrier, err := qtx.GetAgentForClaimUpdate(ctx, session.AgentID)
 		if err != nil {
 			return fmt.Errorf("reload chat agent: %w", err)
@@ -2694,6 +2702,9 @@ func (s *TaskService) OpenMikaOnboardingChat(ctx context.Context, session db.Cha
 		}
 		if current.Status != "active" {
 			return ErrChatSessionArchived
+		}
+		if current.ForkSnapshotTaskID.Valid || current.ForkInitializationTaskID.Valid {
+			return ErrChatSessionForkPending
 		}
 		hasUserMessage, err := qtx.ChatSessionHasUserMessage(ctx, session.ID)
 		if err != nil {
@@ -3083,6 +3094,9 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 			if err != nil {
 				return fmt.Errorf("cancel queued task: %w", err)
 			}
+			if isNativeChatForkTask(task) {
+				return settleNativeChatFork(ctx, qtx, task, "")
+			}
 			cancelledChatMessage, err = s.settleQueuedChatInput(ctx, qtx, task, opts.QueueAction)
 			return err
 		})
@@ -3128,7 +3142,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 			if err != nil {
 				return err
 			}
-			if !cancelled.ChatSessionID.Valid {
+			if !cancelled.ChatSessionID.Valid || isNativeChatForkTask(cancelled) {
 				return nil
 			}
 			return qtx.AdvanceCancelledChatSessionPointer(ctx, cancelled.ID)
@@ -3151,7 +3165,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCancelled(ctx, task)
 	s.publishRequeuedChatTasks(ctx, queuedChat)
-	if !opts.QueuedOnly {
+	if !opts.QueuedOnly && !isNativeChatForkTask(task) {
 		cancelledChatMessage = s.finalizeCancelledChatMessage(ctx, task, opts)
 	}
 
@@ -4865,6 +4879,9 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			return err
 		}
 		task = t
+		if isNativeChatForkTask(t) {
+			return settleNativeChatFork(ctx, qtx, t, sessionID)
+		}
 		change, err = syncQoderIssue(ctx, qtx, t, true)
 		if err != nil {
 			return err
@@ -5028,7 +5045,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	// cursor (chat_session.last_read_at) vs the assistant messages after it — a
 	// no_response row has role='assistant' and a fresh created_at, so it counts
 	// as unread just like a text reply, no per-reply stamping needed.
-	if task.ChatSessionID.Valid {
+	if task.ChatSessionID.Valid && !isNativeChatForkTask(task) {
 		// The assistant outcome row (message / no_response) and any attachment
 		// binding were written inside the completion transaction above by
 		// writeChatCompletionOutcome. Broadcast chat:done AFTER commit.
@@ -5382,6 +5399,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			return err
 		}
 		task = t
+		if isNativeChatForkTask(t) {
+			return settleNativeChatFork(ctx, qtx, t, "")
+		}
 
 		// Keep resume-unsafe sessions on the task row for observability, but
 		// do not promote them to the chat-level resume pointer.
@@ -5859,6 +5879,9 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // a human may have edited in the meantime, so replaying the failed attempt is
 // never what the workspace wants.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+	if isNativeChatForkTask(t) {
+		return false
+	}
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
@@ -6702,6 +6725,12 @@ func settleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.Age
 	}
 	var queued []db.AgentTaskQueue
 	for _, task := range tasks {
+		if isNativeChatForkTask(task) && (task.Status == "cancelled" || task.Status == "failed") {
+			if err := settleNativeChatFork(ctx, q, task, ""); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if task.ChatSessionID.Valid && (task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled") {
 			next, err := RequeueChatTaskSupplements(ctx, q, task, pgtype.UUID{})
 			if err != nil {

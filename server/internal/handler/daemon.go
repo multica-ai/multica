@@ -3748,6 +3748,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		resp.ChatSessionID = uuidToString(cs.ID)
 		resp.ThreadName = cs.Title
+		if handled, forkFailure := h.applyChatForkClaim(r, task, runtime, cs, &resp); handled || forkFailure != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, forkFailure
+		}
 		// Legacy compatibility: agent creation no longer creates intro chats,
 		// but historical is_agent_intro sessions can still be resumed. Such a
 		// session carries no user message on its opening turn, so flag it for
@@ -3865,7 +3868,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// Input ownership is the claim's fail-closed boundary. Resume-history
 		// reads belong after it: a task that cannot load its input is preserved
 		// for redelivery and must not spend two more queries before returning.
-		if !task.ForceFreshSession {
+		if !task.ForceFreshSession && !resp.RequireNativeResume {
 			contextRevision := pgtype.Int8{}
 			if task.ChannelContextRevision.Valid {
 				contextRevision = task.ChannelContextRevision

@@ -265,7 +265,7 @@ func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request,
 		ID:          sessionUUID,
 		WorkspaceID: workspaceUUID,
 	})
-	if err != nil {
+	if err != nil || session.ForkInitializationTaskID.Valid {
 		writeError(w, http.StatusNotFound, "chat session not found")
 		return db.ChatSession{}, false
 	}
@@ -577,6 +577,16 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	current, err := qtx.LockChatSessionForEnqueue(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
+		return
+	}
+	if current.ForkSnapshotTaskID.Valid || current.ForkInitializationTaskID.Valid {
+		writeError(w, http.StatusConflict, "chat fork is pending")
+		return
+	}
+
 	updated, err := qtx.SetChatSessionArchived(r.Context(), db.SetChatSessionArchivedParams{
 		ID:       session.ID,
 		Archived: req.Archived,
@@ -723,6 +733,16 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
+		return
+	}
+
+	current, err := qtx.GetChatSession(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load locked chat session")
+		return
+	}
+	if current.ForkSnapshotTaskID.Valid || current.ForkInitializationTaskID.Valid {
+		writeError(w, http.StatusConflict, "chat fork is pending")
 		return
 	}
 
@@ -1007,6 +1027,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			h.writeChatSubmissionError(w, err)
 		case submissionID.Valid && errors.Is(err, service.ErrChatSessionNotFound):
 			writeError(w, http.StatusNotFound, "chat session not found")
+		case errors.Is(err, service.ErrChatSessionForkPending):
+			writeError(w, http.StatusConflict, "chat fork is pending")
 		case errors.Is(err, service.ErrChatSessionArchived):
 			writeError(w, http.StatusConflict, "chat session is archived")
 		case errors.Is(err, service.ErrChatTaskAgentArchived):
@@ -1264,11 +1286,7 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	messages = visibleChatMessages(messages)
 
-	messageIDs := make([]pgtype.UUID, len(messages))
-	for i, m := range messages {
-		messageIDs[i] = m.ID
-	}
-	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messageIDs)
+	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messages)
 
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
@@ -1329,11 +1347,7 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 		messages[i], messages[j] = messages[j], messages[i]
 	}
 
-	messageIDs := make([]pgtype.UUID, len(messages))
-	for i, m := range messages {
-		messageIDs[i] = m.ID
-	}
-	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messageIDs)
+	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messages)
 
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {

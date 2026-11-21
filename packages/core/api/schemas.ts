@@ -2625,6 +2625,14 @@ const ChatChannelSourceSchema = z.object({
   route_revision: z.number().default(0),
 }).loose();
 
+export const ChatForkSchema = z.object({
+  task_id: z.string().min(1),
+  status: z.enum(["queued", "dispatched", "running", "completed", "failed", "cancelled", "unknown"]).catch("unknown"),
+  chat_id: z.string().optional(),
+});
+
+export type ChatFork = z.infer<typeof ChatForkSchema>;
+
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),

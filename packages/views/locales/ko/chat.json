@@ -262,6 +262,11 @@
     "wakeup_active": "보고 대기 중"
   },
   "header": {
+    "fork": "채팅 분기",
+    "fork_pending": "분기 생성 중…",
+    "fork_failed": "채팅을 분기할 수 없습니다. 실행 중인 작업이 없고 Codex 런타임을 사용할 수 있는지 확인하세요.",
+    "fork_ready": "채팅 분기가 준비되었습니다",
+    "open_fork": "분기 열기",
     "agent_settings": "에이전트 설정",
     "rename": "이름 변경",
     "delete": "채팅 삭제",

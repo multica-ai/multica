@@ -1039,7 +1039,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			case result.codexStartupRefreshRetrySafe:
 				retryReason = "model_catalog_refresh"
 			}
-			if retryReason == "" || attempt == 2 {
+			if retryReason == "" || attempt == 2 || (attemptOpts.RequireNativeResume && retryReason == "model_catalog_refresh") {
 				flushHeldPins()
 				resCh <- result
 				return
@@ -1077,6 +1077,34 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	return &Session{Supplement: supplement, SupplementReady: supplementReady, Messages: msgCh, Result: resCh}, nil
+}
+
+// ForkCodexThread forks a source rollout already copied into the private
+// staging CODEX_HOME. It launches no model turn.
+func ForkCodexThread(ctx context.Context, cfg Config, cwd, sourceThreadID string) (string, error) {
+	if cfg.Env["CODEX_HOME"] == "" || sourceThreadID == "" {
+		return "", errors.New("Codex fork requires a staging home and source thread ID")
+	}
+	backend, err := New("codex", cfg)
+	if err != nil {
+		return "", err
+	}
+	session, err := backend.(*codexBackend).executeOnce(ctx, "", ExecOptions{
+		Cwd: cwd, Timeout: time.Minute, codexForkSourceThread: sourceThreadID,
+	}, 1)
+	if err != nil {
+		return "", err
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		return "", errors.New("Codex fork closed without a result")
+	}
+	if result.Status != "completed" {
+		return "", fmt.Errorf("Codex fork failed: %s", result.Error)
+	}
+	return result.SessionID, nil
 }
 
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
@@ -1549,6 +1577,19 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		b.cfg.Logger.Info("codex lifecycle", "phase", "initialize_response", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "latency", time.Since(initializeStarted).Round(time.Millisecond).String())
 		c.notify("initialized")
 
+		if opts.codexForkSourceThread != "" {
+			childID, err := c.forkThread(runCtx, opts.codexForkSourceThread)
+			drainAndWait()
+			if err != nil {
+				resCh <- Result{Status: "failed", Error: err.Error()}
+			} else if !cleanupConfirmed {
+				resCh <- Result{Status: "failed", Error: "Codex fork process cleanup was not confirmed"}
+			} else {
+				resCh <- Result{Status: "completed", SessionID: childID}
+			}
+			return
+		}
+
 		// 2. Start a new thread, or resume the prior one for this issue. When
 		// resume fails (thread GCed on the server, schema drift, etc.) we fall
 		// back to a fresh thread so the task still makes progress.
@@ -1998,6 +2039,42 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 	return []map[string]any{{"type": "text", "text": text}}
 }
 
+type codexForkThreadResponse struct {
+	Thread struct {
+		ID            string `json:"id"`
+		ModelProvider string `json:"modelProvider"`
+	} `json:"thread"`
+}
+
+func (c *codexClient) forkThread(ctx context.Context, sourceID string) (string, error) {
+	sourceResult, err := c.request(ctx, "thread/read", map[string]any{
+		"threadId": sourceID, "includeTurns": false,
+	})
+	if err != nil {
+		return "", err
+	}
+	var source codexForkThreadResponse
+	if err := json.Unmarshal(sourceResult, &source); err != nil || source.Thread.ID != sourceID || source.Thread.ModelProvider == "" {
+		return "", errors.New("Codex fork source provider is unavailable")
+	}
+	result, err := c.request(ctx, "thread/fork", map[string]any{
+		"threadId":      sourceID,
+		"excludeTurns":  true,
+		"modelProvider": source.Thread.ModelProvider,
+	})
+	if err != nil {
+		return "", err
+	}
+	var child codexForkThreadResponse
+	if err := json.Unmarshal(result, &child); err != nil || child.Thread.ID == "" || child.Thread.ID == sourceID {
+		return "", errors.New("Codex fork did not return a distinct child thread ID")
+	}
+	if child.Thread.ModelProvider != source.Thread.ModelProvider {
+		return "", errors.New("Codex fork changed the source model provider")
+	}
+	return child.Thread.ID, nil
+}
+
 // startOrResumeThread picks between Codex's thread/resume and thread/start
 // based on opts.ResumeSessionID. When a prior thread ID is provided it first
 // tries thread/resume; recoverable protocol errors (unknown thread, schema
@@ -2007,6 +2084,9 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 // turn/start calls must reference, and resumed indicates whether the prior
 // thread was picked up (only useful for logging).
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
+	if opts.RequireNativeResume && opts.ResumeSessionID == "" {
+		return "", false, fmt.Errorf("codex native resume requires a thread ID")
+	}
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
@@ -2042,6 +2122,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
+				if opts.RequireNativeResume && threadID != priorThreadID {
+					return "", false, fmt.Errorf("codex thread/resume returned a different thread ID")
+				}
 				logger.Info("codex lifecycle",
 					"phase", "thread_resume_response",
 					"task_id", c.cfg.TaskID,
@@ -2055,10 +2138,16 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 				)
 				return threadID, true, nil
 			}
+			if opts.RequireNativeResume {
+				return "", false, fmt.Errorf("codex thread/resume returned no thread ID")
+			}
 			logger.Warn("codex thread/resume returned no thread ID; falling back to thread/start", "prior_thread_id", priorThreadID)
 		} else {
 			if isCodexTransportError(err) {
 				logger.Warn("codex thread/resume failed due to transport error; not falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
+				return "", false, fmt.Errorf("codex thread/resume failed: %w", err)
+			}
+			if opts.RequireNativeResume {
 				return "", false, fmt.Errorf("codex thread/resume failed: %w", err)
 			}
 			logger.Warn("codex thread/resume failed; falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
@@ -2640,7 +2729,7 @@ func (e *codexHandshakeTimeoutError) Unwrap() error {
 
 func isCodexHandshakeRPC(method string) bool {
 	switch method {
-	case "initialize", "thread/start", "thread/resume", "thread/name/set", "turn/start":
+	case "initialize", "thread/start", "thread/resume", "thread/fork", "thread/name/set", "turn/start":
 		return true
 	default:
 		return false

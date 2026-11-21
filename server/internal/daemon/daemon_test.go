@@ -1722,6 +1722,38 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	return d
 }
 
+func TestValidateRequiredCodexResume(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	sessions := filepath.Join(home, "sessions")
+	if err := os.Mkdir(sessions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const childID = "forked-chat"
+	if err := os.WriteFile(filepath.Join(sessions, "rollout-2026-11-20T00-00-00-"+childID+".jsonl"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, provider, chatID, sessionID, home string
+		allowed                                 bool
+	}{
+		{name: "child in prepared home", provider: "codex", chatID: "child", sessionID: childID, home: home, allowed: true},
+		{name: "missing child", provider: "codex", chatID: "child", sessionID: "missing", home: home},
+		{name: "missing home", provider: "codex", chatID: "child", sessionID: childID},
+		{name: "not a chat", provider: "codex", sessionID: childID, home: home},
+		{name: "wrong provider", provider: "claude", chatID: "child", sessionID: childID, home: home},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := Task{ChatSessionID: tc.chatID, PriorSessionID: tc.sessionID}
+			err := validateRequiredCodexResume(task, tc.provider, tc.home)
+			if (err == nil) != tc.allowed {
+				t.Fatalf("allowed=%v, error=%v", tc.allowed, err)
+			}
+		})
+	}
+}
+
 func TestGateCodexResumeToRolloutPresence(t *testing.T) {
 	t.Parallel()
 

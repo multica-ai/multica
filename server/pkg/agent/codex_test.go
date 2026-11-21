@@ -2605,6 +2605,102 @@ func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestCodexForkThreadUsesBoundedResponse(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, []rpcResponse{{
+		method: "thread/read",
+		result: json.RawMessage(`{"thread":{"id":"thr_source","modelProvider":"fixture"}}`),
+	}, {
+		method: "thread/fork",
+		result: json.RawMessage(`{"thread":{"id":"thr_child","modelProvider":"fixture"}}`),
+		assertFn: func(t *testing.T, params map[string]any) {
+			if params["threadId"] != "thr_source" || params["excludeTurns"] != true || params["modelProvider"] != "fixture" {
+				t.Errorf("fork params = %v", params)
+			}
+		},
+	}})
+	defer wait()
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	childID, err := c.forkThread(ctx, "thr_source")
+	if childID != "thr_child" || err != nil || len(fs.Lines()) != 2 {
+		t.Fatalf("childID = %q, error = %v, RPCs = %v", childID, err, fs.Lines())
+	}
+}
+
+func TestCodexRequiredResumeRejectsMissingLineage(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, []rpcResponse{{
+		method:  "thread/resume",
+		errMsg:  "invalid paginated history lineage: missing source rollout",
+		errCode: -32600,
+	}})
+	defer wait()
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	threadID, resumed, err := c.startOrResumeThread(
+		ctx, ExecOptions{ResumeSessionID: "thr_fork", RequireNativeResume: true}, slog.Default(),
+	)
+	if err == nil || !strings.Contains(err.Error(), "missing source rollout") {
+		t.Errorf("error = %v, want the native resume rejection", err)
+	}
+	if resumed || threadID != "" || len(fs.Lines()) != 1 {
+		t.Fatalf("unexpected fallback: threadID=%q resumed=%v RPCs=%v", threadID, resumed, fs.Lines())
+	}
+}
+
+func TestCodexRequiredResumeUsesOnlyTheRequestedThread(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		result    json.RawMessage
+		wantError string
+	}{
+		{name: "same thread", result: json.RawMessage(`{"thread":{"id":"thr_fork"}}`)},
+		{name: "different thread", result: json.RawMessage(`{"thread":{"id":"thr_other"}}`), wantError: "different thread ID"},
+		{name: "missing thread", result: json.RawMessage(`{"thread":{}}`), wantError: "no thread ID"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, fs, _ := newTestCodexClient(t)
+			wait := drainRPCScript(t, c, fs, []rpcResponse{{method: "thread/resume", result: tc.result}})
+			defer wait()
+
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			threadID, resumed, err := c.startOrResumeThread(
+				ctx, ExecOptions{ResumeSessionID: "thr_fork", RequireNativeResume: true}, slog.Default(),
+			)
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) || resumed || threadID != "" {
+					t.Fatalf("got threadID=%q resumed=%v error=%v, want rejection containing %q", threadID, resumed, err, tc.wantError)
+				}
+			} else if err != nil || !resumed || threadID != "thr_fork" {
+				t.Fatalf("got threadID=%q resumed=%v error=%v, want the requested thread", threadID, resumed, err)
+			}
+			if len(fs.Lines()) != 1 {
+				t.Fatalf("expected only thread/resume, got %v", fs.Lines())
+			}
+		})
+	}
+
+	t.Run("no session ID", func(t *testing.T) {
+		c, fs, _ := newTestCodexClient(t)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		threadID, resumed, err := c.startOrResumeThread(ctx, ExecOptions{RequireNativeResume: true}, slog.Default())
+		if err == nil || resumed || threadID != "" || len(fs.Lines()) != 0 {
+			t.Fatalf("got threadID=%q resumed=%v error=%v RPCs=%v, want rejection without RPC", threadID, resumed, err, fs.Lines())
+		}
+	})
+}
+
 func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	t.Parallel()
 

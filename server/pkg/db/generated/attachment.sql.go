@@ -1087,6 +1087,66 @@ func (q *Queries) ListAttachmentsBySourceContext(ctx context.Context, arg ListAt
 	return items, nil
 }
 
+const listChatForkAttachmentReferences = `-- name: ListChatForkAttachmentReferences :many
+SELECT message.id AS message_id, attachment.id, attachment.workspace_id, attachment.issue_id, attachment.comment_id, attachment.uploader_type, attachment.uploader_id, attachment.filename, attachment.url, attachment.content_type, attachment.size_bytes, attachment.created_at, attachment.chat_session_id, attachment.chat_message_id, attachment.task_id, attachment.source_context_id, attachment.width, attachment.height
+FROM chat_message AS message
+JOIN attachment ON attachment.id = ANY(message.fork_attachment_ids)
+WHERE message.id = ANY($1::uuid[])
+  AND attachment.workspace_id = $2
+  AND attachment.issue_id IS NULL AND attachment.comment_id IS NULL
+  AND attachment.source_context_id IS NULL
+ORDER BY attachment.created_at, attachment.id
+`
+
+type ListChatForkAttachmentReferencesParams struct {
+	MessageIds  []pgtype.UUID `json:"message_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+type ListChatForkAttachmentReferencesRow struct {
+	MessageID  pgtype.UUID `json:"message_id"`
+	Attachment Attachment  `json:"attachment"`
+}
+
+func (q *Queries) ListChatForkAttachmentReferences(ctx context.Context, arg ListChatForkAttachmentReferencesParams) ([]ListChatForkAttachmentReferencesRow, error) {
+	rows, err := q.db.Query(ctx, listChatForkAttachmentReferences, arg.MessageIds, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChatForkAttachmentReferencesRow{}
+	for rows.Next() {
+		var i ListChatForkAttachmentReferencesRow
+		if err := rows.Scan(
+			&i.MessageID,
+			&i.Attachment.ID,
+			&i.Attachment.WorkspaceID,
+			&i.Attachment.IssueID,
+			&i.Attachment.CommentID,
+			&i.Attachment.UploaderType,
+			&i.Attachment.UploaderID,
+			&i.Attachment.Filename,
+			&i.Attachment.Url,
+			&i.Attachment.ContentType,
+			&i.Attachment.SizeBytes,
+			&i.Attachment.CreatedAt,
+			&i.Attachment.ChatSessionID,
+			&i.Attachment.ChatMessageID,
+			&i.Attachment.TaskID,
+			&i.Attachment.SourceContextID,
+			&i.Attachment.Width,
+			&i.Attachment.Height,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCommentAttachmentIDsAmong = `-- name: ListCommentAttachmentIDsAmong :many
 SELECT id FROM attachment
 WHERE comment_id = $1
