@@ -115,6 +115,16 @@ export function useExecutionControls({
   // Model, thinking level, and service tier are runtime/model native. Clear
   // them together so the new runtime resolves its own defaults instead of
   // inheriting incompatible tokens.
+  const changeThinking = useCallback(
+    (thinkingLevel: string) => {
+      if (isSmart) {
+        return savePersonalConfig({ thinking_level: thinkingLevel });
+      }
+      return update({ thinking_level: thinkingLevel });
+    },
+    [isSmart, savePersonalConfig, update],
+  );
+
   const changeRuntime = useCallback(
     (runtimeId: string) => {
       if (isSmart) {
@@ -137,6 +147,7 @@ export function useExecutionControls({
     canDiscoverRuntimeModels,
     runtimeOptions,
     changeModel,
+    changeThinking,
     changeRuntime,
   };
 }

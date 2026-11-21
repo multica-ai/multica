@@ -84,6 +84,7 @@ export function AgentPropertiesPanel({
     canDiscoverRuntimeModels,
     runtimeOptions,
     changeModel,
+    changeThinking,
     changeRuntime,
   } = useExecutionControls({
     agent,
@@ -200,7 +201,7 @@ export function AgentPropertiesPanel({
               model={displayModel ?? ""}
               value={displayThinkingLevel ?? ""}
               canEdit={canEdit}
-              onChange={(thinkingLevel) => update({ thinking_level: thinkingLevel })}
+              onChange={changeThinking}
             />
           </>
         )}

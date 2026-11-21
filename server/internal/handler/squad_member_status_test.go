@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 func TestDeriveSquadMemberStatus(t *testing.T) {
@@ -243,6 +244,100 @@ func TestSquadMemberStatusResolvesSmartRuntimeThroughViewerConfig(t *testing.T) 
 	for _, row := range rows2 {
 		if row.MemberID.Valid && uuidToString(row.MemberID) == agentID && row.RuntimeStatus.Valid {
 			t.Errorf("NULL viewer still resolved a runtime status %q; the smart member must not read the template binding", row.RuntimeStatus.String)
+		}
+	}
+}
+
+// The full resolution chain must cover the recommended-match case: a smart
+// agent with a recommended CLI but no persisted personal config still reads
+// idle for a viewer whose own matching runtime is online.
+func TestSquadMemberStatusResolvesRecommendedMatch(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "squad-status-recommended-match", []byte(`{}`))
+	squadID := createCommentTriggerPreviewSquad(t, "Squad Status Recommended Match", agentID)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID)
+		testPool.Exec(ctx, `DELETE FROM squad_member WHERE squad_id = $1`, squadID)
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO squad_member (squad_id, member_type, member_id)
+		VALUES ($1, 'agent', $2)
+	`, squadID, agentID); err != nil {
+		t.Fatalf("insert squad member: %v", err)
+	}
+
+	// Smart with a recommended CLI, and no persisted personal config rows.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent SET share_runtime = false, runtime_id = NULL, recommended_cli = 'codex', model = ''
+		WHERE id = $1
+	`, agentID); err != nil {
+		t.Fatalf("make agent smart: %v", err)
+	}
+
+	// The viewer owns a matching online Codex runtime.
+	viewerID := parseUUID(testUserID)
+	var viewerRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (id, workspace_id, owner_id, provider, name, runtime_mode, status, last_seen_at, created_at, updated_at)
+		VALUES (gen_random_uuid(), $1, $2, 'codex', 'Codex Local', 'local', 'online', now(), now(), now())
+		RETURNING id
+	`, testWorkspaceID, viewerID).Scan(&viewerRuntimeID); err != nil {
+		t.Fatalf("insert viewer runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, viewerRuntimeID)
+	})
+
+	agent, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("GetAgent: %v", err)
+	}
+	userRuntimes, _ := testHandler.Queries.ListAgentRuntimesByOwner(ctx, db.ListAgentRuntimesByOwnerParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		OwnerID:     viewerID,
+	})
+	t.Logf("DBG userRuntimes=%d", len(userRuntimes))
+	effective, err := service.ResolveEffectiveRuntimeConfig(ctx, testHandler.Queries, agent, viewerID)
+	if err != nil {
+		t.Fatalf("ResolveEffectiveRuntimeConfig: %v", err)
+	}
+	if !effective.RuntimeID.Valid {
+		t.Logf("DBG userRuntimes detail:")
+		for _, rt := range userRuntimes {
+			t.Logf("  provider=%s status=%v last=%v mode=%v", rt.Provider, rt.Status, rt.LastSeenAt, rt.RuntimeMode)
+		}
+		t.Fatalf("resolution status = %q (%s); want a runtime id", effective.ResolutionStatus, effective.ResolutionMessage)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.ListSquadMemberStatus(w, squadScopeReq(
+		testUserID,
+		http.MethodGet,
+		"/api/squads/"+squadID+"/members/status",
+		nil,
+		map[string]string{"id": squadID},
+	))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListSquadMemberStatus: got %d: %s", w.Code, w.Body.String())
+	}
+	var wrapped struct {
+		Members []struct {
+			MemberID string `json:"member_id"`
+			Status   string `json:"status"`
+		} `json:"members"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&wrapped); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, row := range wrapped.Members {
+		if row.MemberID == agentID && row.Status != "idle" {
+			t.Fatalf("recommended-match member status = %q, want idle", row.Status)
 		}
 	}
 }
