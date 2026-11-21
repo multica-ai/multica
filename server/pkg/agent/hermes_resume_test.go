@@ -12,6 +12,129 @@ import (
 	"time"
 )
 
+func TestHermesBackendCancelsWaitingToolAndResumesSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	dir := t.TempDir()
+	fakePath, capturePath := filepath.Join(dir, "hermes"), filepath.Join(dir, "requests.jsonl")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+resumed=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$HERMES_TEST_CAPTURE"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_wait"}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      resumed=1
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"_meta":{"hermes":{"sessionProvenance":{"acpSessionId":"ses_wait"}}}}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      if [ "$resumed" = 0 ]; then
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_wait","update":{"sessionUpdate":"tool_call","toolCallId":"wait-1","title":"process_manage: wait","kind":"execute","status":"in_progress","rawInput":{"action":"wait","session_id":"proc_1234"}}}}\n'
+      else
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_wait","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Continuing the queued comment."}}}}\n'
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+        exit 0
+      fi
+      ;;
+  esac
+done
+`))
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default(),
+		Env: map[string]string{"HERMES_TEST_CAPTURE": capturePath}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "Wait for the external job", ExecOptions{Cwd: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, waiting := false, false
+	for !waiting {
+		select {
+		case msg, ok := <-session.Messages:
+			if !ok {
+				t.Fatal("session ended before the wait started")
+			}
+			if msg.Type == MessageStatus && msg.SessionID == "ses_wait" {
+				pinned = true
+			}
+			waiting = msg.Type == MessageToolUse
+		case <-ctx.Done():
+			t.Fatal("waiting tool did not start")
+		}
+	}
+	if !pinned {
+		t.Fatal("the session must be published before cancellation so the next run can resume it")
+	}
+	cancel()
+	for range session.Messages {
+	}
+	select {
+	case result := <-session.Result:
+		if result.Status != "aborted" || result.SessionID != "ses_wait" {
+			t.Fatalf("cancelled result = %+v, want aborted with the resumable session", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancellation did not join the waiting ACP process")
+	}
+
+	resumeCtx, stopResume := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stopResume()
+	next, err := backend.Execute(resumeCtx, "Continue with the queued comment", ExecOptions{
+		Cwd: dir, ResumeSessionID: "ses_wait", ResumeExpected: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range next.Messages {
+	}
+	select {
+	case result := <-next.Result:
+		if result.Status != "completed" || result.SessionID != "ses_wait" || !strings.Contains(result.Output, "queued comment") {
+			t.Fatalf("resumed result = %+v", result)
+		}
+	case <-resumeCtx.Done():
+		t.Fatal("follow-up did not finish")
+	}
+	requests, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newSessions, resumes int
+	for _, line := range strings.Split(strings.TrimSpace(string(requests)), "\n") {
+		var frame struct {
+			Method string `json:"method"`
+			Params struct {
+				SessionID string `json:"sessionId"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatal(err)
+		}
+		if frame.Method == "session/new" {
+			newSessions++
+		}
+		if frame.Method == "session/resume" {
+			resumes++
+			if frame.Params.SessionID != "ses_wait" {
+				t.Fatalf("resumed the wrong session: %s", line)
+			}
+		}
+	}
+	if newSessions != 1 || resumes != 1 {
+		t.Fatalf("session/new=%d session/resume=%d, want one original and one resumed session", newSessions, resumes)
+	}
+}
+
 func TestResolveHermesResumedSessionIDPrefersTopLevelID(t *testing.T) {
 	t.Parallel()
 
