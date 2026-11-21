@@ -69,8 +69,8 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 	); err != nil {
 		t.Fatalf("dispatch task: %v", err)
 	}
-	if _, err := queries.StartAgentTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartAgentTask: %v", err)
+	if _, err := queries.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{TaskID: task.ID}); err != nil {
+		t.Fatalf("StartAgentTaskWithSupplement: %v", err)
 	}
 
 	// No issue with origin_type=quick_create + this task id exists. Completion
@@ -139,8 +139,8 @@ func TestQuickCreateFailure_SurfacesAgentOutput(t *testing.T) {
 	); err != nil {
 		t.Fatalf("dispatch task: %v", err)
 	}
-	if _, err := queries.StartAgentTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartAgentTask: %v", err)
+	if _, err := queries.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{TaskID: task.ID}); err != nil {
+		t.Fatalf("StartAgentTaskWithSupplement: %v", err)
 	}
 
 	// No issue is created; the agent exits with the CLI duplicate error as its
@@ -211,8 +211,8 @@ func TestQuickCreateLookupFault_WritesUnconfirmedInbox(t *testing.T) {
 	); err != nil {
 		t.Fatalf("dispatch task: %v", err)
 	}
-	if _, err := queries.StartAgentTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartAgentTask: %v", err)
+	if _, err := queries.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{TaskID: task.ID}); err != nil {
+		t.Fatalf("StartAgentTaskWithSupplement: %v", err)
 	}
 
 	// Completion runs against a Queries whose origin lookup always faults. The
@@ -292,8 +292,8 @@ func TestQuickCreateFailure_RedactsAgentOutput(t *testing.T) {
 	); err != nil {
 		t.Fatalf("dispatch task: %v", err)
 	}
-	if _, err := queries.StartAgentTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartAgentTask: %v", err)
+	if _, err := queries.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{TaskID: task.ID}); err != nil {
+		t.Fatalf("StartAgentTaskWithSupplement: %v", err)
 	}
 
 	// Fake, non-functional token shaped like a real GitHub PAT.
@@ -361,8 +361,8 @@ func TestQuickCreateLookupCancelled_StillWritesUnconfirmedInbox(t *testing.T) {
 	); err != nil {
 		t.Fatalf("dispatch task: %v", err)
 	}
-	if _, err := queries.StartAgentTask(setupCtx, task.ID); err != nil {
-		t.Fatalf("StartAgentTask: %v", err)
+	if _, err := queries.StartAgentTaskWithSupplement(setupCtx, db.StartAgentTaskWithSupplementParams{TaskID: task.ID}); err != nil {
+		t.Fatalf("StartAgentTaskWithSupplement: %v", err)
 	}
 
 	// The completion transaction runs on a healthy context; the context dies at

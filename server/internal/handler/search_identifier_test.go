@@ -18,6 +18,18 @@ func TestParseQueryNumber(t *testing.T) {
 		{"MUL-123", 123},
 		{"mul-123", 123},
 		{"  123  ", 123},
+		{"2147483647", 2147483647},
+		{"MUL-2147483647", 2147483647},
+		{"2147483648", 0},
+		{"MUL-2147483648", 0},
+		{"35185005423742", 0},
+		{"  35185005423742  ", 0},
+		{"MUL-99999999999", 0},
+		{"V2-99999999999", 0},
+		{"9223372036854775807", 0},
+		{"9223372036854775808", 0},
+		{"MUL-9223372036854775808", 0},
+		{"-2147483649", 0},
 		{"V2-12", 12},
 		{"  v2-12  ", 12},
 		{"A1-7", 7},
@@ -38,6 +50,61 @@ func TestParseQueryNumber(t *testing.T) {
 			if got != tc.want || ok != (tc.want > 0) {
 				t.Fatalf("parseQueryNumber(%q) = (%d, %t), want (%d, %t)", tc.query, got, ok, tc.want, tc.want > 0)
 			}
+		})
+	}
+}
+
+func TestIssueSearch_OutOfRangeNumbers(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Out of range number search", "number-search-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+
+	for _, query := range []string{"35185005423742", "MUL-99999999999"} {
+		t.Run(query, func(t *testing.T) {
+			titleID := dbfx.Issue(t, "Notes about "+query, testutil.Cols{"workspace_id": workspaceID})
+			descriptionID := dbfx.Issue(t, "Description match", testutil.Cols{
+				"workspace_id": workspaceID, "description": "Reference: " + query,
+			})
+			commentID := dbfx.Issue(t, "Comment match", testutil.Cols{"workspace_id": workspaceID})
+			dbfx.Comment(t, commentID, "Reference: "+query, testutil.Cols{"workspace_id": workspaceID})
+			dbfx.Issue(t, "Closed notes about "+query, testutil.Cols{
+				"workspace_id": workspaceID, "status": "cancelled",
+			})
+			dbfx.Issue(t, "Unrelated issue", testutil.Cols{"workspace_id": workspaceID})
+
+			t.Run("global", func(t *testing.T) {
+				req := newRequest(http.MethodGet, "/api/issues/search?q="+url.QueryEscape(query), nil)
+				req.Header.Set("X-Workspace-ID", workspaceID)
+				var response struct {
+					Issues []SearchIssueResponse `json:"issues"`
+				}
+				testutil.Call(t, testHandler.SearchIssues, req).Want(http.StatusOK).JSON(&response)
+				want := map[string]string{titleID: "title", descriptionID: "description", commentID: "comment"}
+				if len(response.Issues) != len(want) {
+					t.Fatalf("global search: got %+v, want title, description and comment matches", response.Issues)
+				}
+				for _, issue := range response.Issues {
+					if source, ok := want[issue.ID]; !ok || issue.MatchSource != source {
+						t.Errorf("global search: unexpected issue %s with match source %q", issue.ID, issue.MatchSource)
+					}
+					delete(want, issue.ID)
+				}
+				if len(want) != 0 {
+					t.Errorf("global search: missing matches %v", want)
+				}
+			})
+
+			t.Run("list", func(t *testing.T) {
+				req := newRequest(http.MethodGet, "/api/issues?q="+url.QueryEscape(query)+"&status=todo&limit=1", nil)
+				req.Header.Set("X-Workspace-ID", workspaceID)
+				var response struct {
+					Issues []IssueResponse `json:"issues"`
+					Total  int64           `json:"total"`
+				}
+				testutil.Call(t, testHandler.ListIssues, req).Want(http.StatusOK).JSON(&response)
+				if response.Total != 1 || len(response.Issues) != 1 || response.Issues[0].ID != titleID {
+					t.Fatalf("list search: got %+v, want only title match %s", response, titleID)
+				}
+			})
 		})
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -40,22 +41,24 @@ import (
 // (AppID, AppSecretEncrypted, TenantKey, BotOpenID, BotUnionID, Region) come
 // from the JSONB config; the rest are flat columns.
 type Installation struct {
-	ID                 pgtype.UUID
-	WorkspaceID        pgtype.UUID
-	AgentID            pgtype.UUID
-	AppID              string
-	AppSecretEncrypted []byte
-	TenantKey          pgtype.Text
-	BotOpenID          string
-	InstallerUserID    pgtype.UUID
-	Status             string
-	WsLeaseToken       pgtype.Text
-	WsLeaseExpiresAt   pgtype.Timestamptz
-	InstalledAt        pgtype.Timestamptz
-	CreatedAt          pgtype.Timestamptz
-	UpdatedAt          pgtype.Timestamptz
-	BotUnionID         pgtype.Text
-	Region             string
+	BindingGeneration      string
+	FirstMessageReceivedAt *time.Time
+	ID                     pgtype.UUID
+	WorkspaceID            pgtype.UUID
+	AgentID                pgtype.UUID
+	AppID                  string
+	AppSecretEncrypted     []byte
+	TenantKey              pgtype.Text
+	BotOpenID              string
+	InstallerUserID        pgtype.UUID
+	Status                 string
+	WsLeaseToken           pgtype.Text
+	WsLeaseExpiresAt       pgtype.Timestamptz
+	InstalledAt            pgtype.Timestamptz
+	CreatedAt              pgtype.Timestamptz
+	UpdatedAt              pgtype.Timestamptz
+	BotUnionID             pgtype.Text
+	Region                 string
 }
 
 // UserBinding is the flat view of a channel_user_binding row. ChannelUserID is
@@ -132,12 +135,14 @@ type OutboundCardMessage struct {
 // rather than as a json []byte field, so MIME-wrapped base64 from the SQL
 // backfill round-trips too. omitempty mirrors the migration's jsonb_strip_nulls.
 type feishuInstallConfig struct {
-	AppID              string `json:"app_id"`
-	AppSecretEncrypted string `json:"app_secret_encrypted,omitempty"`
-	TenantKey          string `json:"tenant_key,omitempty"`
-	BotOpenID          string `json:"bot_open_id,omitempty"`
-	BotUnionID         string `json:"bot_union_id,omitempty"`
-	Region             string `json:"region,omitempty"`
+	BindingGeneration      string     `json:"binding_generation,omitempty"`
+	FirstMessageReceivedAt *time.Time `json:"first_message_received_at,omitempty"`
+	AppID                  string     `json:"app_id"`
+	AppSecretEncrypted     string     `json:"app_secret_encrypted,omitempty"`
+	TenantKey              string     `json:"tenant_key,omitempty"`
+	BotOpenID              string     `json:"bot_open_id,omitempty"`
+	BotUnionID             string     `json:"bot_union_id,omitempty"`
+	Region                 string     `json:"region,omitempty"`
 }
 
 // feishuBindingConfig is the JSON shape of channel_user_binding.config.
@@ -159,22 +164,24 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 		return Installation{}, fmt.Errorf("decode app_secret_encrypted: %w", err)
 	}
 	return Installation{
-		ID:                 row.ID,
-		WorkspaceID:        row.WorkspaceID,
-		AgentID:            row.AgentID,
-		AppID:              cfg.AppID,
-		AppSecretEncrypted: secret,
-		TenantKey:          textOrNull(cfg.TenantKey),
-		BotOpenID:          cfg.BotOpenID,
-		InstallerUserID:    row.InstallerUserID,
-		Status:             row.Status,
-		WsLeaseToken:       row.WsLeaseToken,
-		WsLeaseExpiresAt:   row.WsLeaseExpiresAt,
-		InstalledAt:        row.InstalledAt,
-		CreatedAt:          row.CreatedAt,
-		UpdatedAt:          row.UpdatedAt,
-		BotUnionID:         textOrNull(cfg.BotUnionID),
-		Region:             cfg.Region,
+		BindingGeneration:      cfg.BindingGeneration,
+		FirstMessageReceivedAt: cfg.FirstMessageReceivedAt,
+		ID:                     row.ID,
+		WorkspaceID:            row.WorkspaceID,
+		AgentID:                row.AgentID,
+		AppID:                  cfg.AppID,
+		AppSecretEncrypted:     secret,
+		TenantKey:              textOrNull(cfg.TenantKey),
+		BotOpenID:              cfg.BotOpenID,
+		InstallerUserID:        row.InstallerUserID,
+		Status:                 row.Status,
+		WsLeaseToken:           row.WsLeaseToken,
+		WsLeaseExpiresAt:       row.WsLeaseExpiresAt,
+		InstalledAt:            row.InstalledAt,
+		CreatedAt:              row.CreatedAt,
+		UpdatedAt:              row.UpdatedAt,
+		BotUnionID:             textOrNull(cfg.BotUnionID),
+		Region:                 cfg.Region,
 	}, nil
 }
 
@@ -182,11 +189,13 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 // feishu fields of an Installation. The secret is emitted as unwrapped base64.
 func encodeInstallConfig(inst Installation) ([]byte, error) {
 	cfg := feishuInstallConfig{
-		AppID:      inst.AppID,
-		TenantKey:  inst.TenantKey.String,
-		BotOpenID:  inst.BotOpenID,
-		BotUnionID: inst.BotUnionID.String,
-		Region:     inst.Region,
+		BindingGeneration:      inst.BindingGeneration,
+		FirstMessageReceivedAt: inst.FirstMessageReceivedAt,
+		AppID:                  inst.AppID,
+		TenantKey:              inst.TenantKey.String,
+		BotOpenID:              inst.BotOpenID,
+		BotUnionID:             inst.BotUnionID.String,
+		Region:                 inst.Region,
 	}
 	if len(inst.AppSecretEncrypted) > 0 {
 		cfg.AppSecretEncrypted = base64.StdEncoding.EncodeToString(inst.AppSecretEncrypted)

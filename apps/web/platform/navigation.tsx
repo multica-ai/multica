@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useSyncExternalStore } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { PrefetchKind } from "next/dist/client/components/router-reducer/router-reducer-types";
 import {
   NavigationProvider,
   type NavigationAdapter,
@@ -86,11 +87,18 @@ function NavigationProviderInner({
     hash,
     getShareableUrl: (path: string) =>
       typeof window === "undefined" ? path : window.location.origin + path,
+    openInDesktop: (path: string) => {
+      const url = window.location.origin + path;
+      window.location.href = `multica://open/issue?url=${encodeURIComponent(url)}`;
+    },
     // router.prefetch is a no-op in dev mode by Next.js design; in production
     // it warms the RSC payload + route chunk so the next push() commits with
     // no network round-trip. Safe to call repeatedly — Next dedupes internally.
+    // FULL: workspace routes are dynamic, and the default prefetch stops at
+    // their loading boundary, leaving the click to fetch the rest. Their
+    // payload is a small client-component shell, so take all of it (MUL-9538).
     prefetch: (path: string) => {
-      router.prefetch(path);
+      router.prefetch(path, { kind: PrefetchKind.FULL });
     },
   };
 

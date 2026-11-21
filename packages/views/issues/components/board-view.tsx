@@ -33,6 +33,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardWorkflowContext, type BoardWorkflowContextValue } from "./board-workflow-context";
 import {
+  issueStatusWorkflow,
   resolveProjectWorkflow,
   stepHandsOff,
   useIssueWorkflows,
@@ -58,6 +59,7 @@ import type {
 import { useDragSettle } from "./use-drag-settle";
 import { useIssuePeekActions } from "../surface/peek-context";
 import { useBoardDragPan } from "./use-board-drag-pan";
+import { useRestoredScrollRef } from "../../platform";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -503,8 +505,15 @@ function BoardViewImpl({
     },
     [workflows, workspaceProjects],
   );
+  // Which statuses a card may move to: its project's workflow, or Default
+  // outside a project, where nothing hands off. (MUL-8250)
+  const statusWorkflowOfIssue = useCallback(
+    (issue: Issue | null | undefined) => (issue ? issueStatusWorkflow(workflows, workspaceProjects, issue) : null),
+    [workflows, workspaceProjects],
+  );
   const scopeProject = projectId ? workspaceProjects?.find((p) => p.id === projectId) ?? null : null;
   const activeWorkflow = workflowOfIssue(activeIssue);
+  const activeStatusWorkflow = statusWorkflowOfIssue(activeIssue);
   const activeProject = activeIssue?.project_id
     ? workspaceProjects?.find((p) => p.id === activeIssue.project_id) ?? null
     : null;
@@ -514,8 +523,8 @@ function BoardViewImpl({
       scopeWorkflow: resolveProjectWorkflow(workflows, scopeProject),
       scopeProject,
       dropBlockedReason: (status) =>
-        activeWorkflow && activeIssue?.status !== status && !workflowAllowsStatus(activeWorkflow, status)
-          ? t(($) => $.workflows.not_in_workflow, { name: activeWorkflow.name })
+        activeStatusWorkflow && activeIssue?.status !== status && !workflowAllowsStatus(activeStatusWorkflow, status)
+          ? t(($) => $.workflows.not_in_workflow, { name: activeStatusWorkflow.name })
           : null,
       dropHint: (status) => {
         if (!activeWorkflow || activeIssue?.status === status) return null;
@@ -526,7 +535,7 @@ function BoardViewImpl({
         return { name, actor, run: actor ? actor.type !== "member" : step.handler.type === "creator" };
       },
     }),
-    [activeHandlerLabel, activeIssue?.status, activeProject, activeWorkflow, scopeProject, t, workflows],
+    [activeHandlerLabel, activeIssue?.status, activeProject, activeStatusWorkflow, activeWorkflow, scopeProject, t, workflows],
   );
   // Shared drag/settle primitive: owns the local column mirror, the
   // dragging/settling locks, the post-move animation-frame throttle, and the
@@ -580,6 +589,16 @@ function BoardViewImpl({
   // #6700: drag empty board background with the left button to pan horizontally
   // (Trello/Linear). Card drags start on `[data-board-card]` and are ignored.
   const pan = useBoardDragPan<HTMLDivElement>();
+  // Tab-session scroll restoration (MUL-4741) for the horizontal column
+  // strip; each column's own vertical offset is restored by BoardColumn.
+  const restoreScrollRef = useRestoredScrollRef("board");
+  const attachScroller = useCallback(
+    (el: HTMLDivElement | null) => {
+      pan.ref.current = el;
+      restoreScrollRef(el);
+    },
+    [pan.ref, restoreScrollRef],
+  );
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
@@ -604,7 +623,12 @@ function BoardViewImpl({
         if (!activeCol || !overCol || activeCol === overCol) return prev;
         const targetStatus = groups.find((group) => group.id === overCol)?.status;
         if (targetStatus && catalog.entryOf(targetStatus)?.archived_at) return prev;
-        if (targetStatus && !workflowAllowsStatus(workflowOfIssue(issueMapRef.current.get(activeId)), targetStatus)) {
+        const dragged = issueMapRef.current.get(activeId);
+        if (
+          targetStatus &&
+          dragged?.status !== targetStatus &&
+          !workflowAllowsStatus(statusWorkflowOfIssue(dragged), targetStatus)
+        ) {
           return prev;
         }
 
@@ -619,7 +643,7 @@ function BoardViewImpl({
         return { ...prev, [activeCol]: oldIds, [overCol]: newIds };
       });
     },
-    [groupIds, groups, catalog, sortBy, recentlyMovedRef, setColumns, workflowOfIssue],
+    [groupIds, groups, catalog, sortBy, recentlyMovedRef, setColumns, statusWorkflowOfIssue],
   );
 
   const handleDragEnd = useCallback(
@@ -679,17 +703,18 @@ function BoardViewImpl({
         return;
       }
       const movingWorkflow = workflowOfIssue(map.get(activeId));
+      const movingStatusWorkflow = statusWorkflowOfIssue(map.get(activeId));
       if (
         finalGroup.status &&
-        movingWorkflow &&
+        movingStatusWorkflow &&
         map.get(activeId)?.status !== finalGroup.status &&
-        !workflowAllowsStatus(movingWorkflow, finalGroup.status)
+        !workflowAllowsStatus(movingStatusWorkflow, finalGroup.status)
       ) {
         resetColumns();
         toast.info(
           t(($) => $.workflows.drop_blocked, {
             status: labelOf(finalGroup.status),
-            name: movingWorkflow.name,
+            name: movingStatusWorkflow.name,
           }),
         );
         return;
@@ -798,7 +823,7 @@ function BoardViewImpl({
       );
       applyPropertyGroupValue(finalGroup, activeId);
     },
-    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue, catalog, labelOf, t, workflowOfIssue],
+    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue, catalog, labelOf, t, workflowOfIssue, statusWorkflowOfIssue],
   );
 
   // An aborted drag (pointercancel, window resize, tab hide, Escape) fires
@@ -822,13 +847,14 @@ function BoardViewImpl({
       onDragCancel={handleDragCancel}
     >
       <div
-        ref={pan.ref}
+        ref={attachScroller}
         onPointerDown={pan.onPointerDown}
         onPointerMove={pan.onPointerMove}
         onPointerUp={pan.onPointerUp}
         onPointerCancel={pan.onPointerCancel}
         onLostPointerCapture={pan.onLostPointerCapture}
         data-board-scroller=""
+        data-tab-scroll-root="board"
         className={cn(
           "flex flex-1 min-h-0 gap-4 overflow-x-auto p-2",
           // While a side peek is open, a trailing spacer as wide as the panel

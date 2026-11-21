@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import { pickContentLang } from "./index";
 
@@ -10,12 +12,16 @@ describe("pickContentLang", () => {
   });
 
   it("falls back to English for unsupported or missing languages", () => {
-    expect(pickContentLang("es-ES")).toBe("en");
+    expect(pickContentLang("pt-PT")).toBe("en");
     expect(pickContentLang(null)).toBe("en");
     expect(pickContentLang(undefined)).toBe("en");
   });
 
   it("uses English authored content for the supported French UI locale", () => {
     expect(pickContentLang("fr-FR")).toBe("en");
+  });
+
+  it("uses English authored content for the supported Spanish UI locale", () => {
+    expect(pickContentLang("es-ES")).toBe("en");
   });
 });

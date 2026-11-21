@@ -28,6 +28,8 @@ func TestRunTaskOpenCodeClockSkew(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			redirectTestHome(t, t.TempDir())
+			// The fake CLI speaks `opencode run`; pin that transport.
+			t.Setenv("MULTICA_OPENCODE_TRANSPORT", "run")
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "opencode")
 			argsPath, promptPath := filepath.Join(dir, "args"), filepath.Join(dir, "prompt")
@@ -86,7 +88,7 @@ exit 1
 				t.Fatalf("seed managed workdir: %+v, %v", prepared, err)
 			}
 			task.PriorWorkDir = prepared.WorkDir
-			d.handleTask(context.Background(), task, 0)
+			d.handleTask(context.Background(), task, newTestTaskSlot(0))
 			select {
 			case report := <-reports:
 				if report["retired_session_id"] != "ses-old" {

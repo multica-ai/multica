@@ -5,7 +5,7 @@
  * resource, a container with a selected item, a creation flow, or something
  * unrecognized — is what decides how it should look (icon + title). This module
  * turns a URL into that semantic {@link TabSubject}. It is pure: no React, no
- * Lucide, no query — only URL parsing. The visual/title mapping lives in
+ * icons, no query — only URL parsing. The visual/title mapping lives in
  * `tab-presentation.ts`; the React glue lives in `@multica/views`.
  *
  * Workspace URLs are `/{slug}/{segment}/...`. The slug is index 0, the route
@@ -13,6 +13,7 @@
  * Chat) rides in the query string, so it is parsed too — the URL is the single
  * source of truth for what a tab has open, including which item.
  */
+import { isMyAgentsSearch } from "./paths";
 import { pageForSegment, type WorkspacePageKey } from "./route-icons";
 
 export type TabActorType = "agent" | "member" | "squad";
@@ -20,6 +21,8 @@ export type TabActorType = "agent" | "member" | "squad";
 export type TabSubject =
   /** A collection or tool page with no specific resource. */
   | { kind: "page"; page: WorkspacePageKey }
+  /** My agents' work: the My issues route's `?scope=agents`. */
+  | { kind: "myAgents" }
   /** A single issue detail. */
   | { kind: "issue"; id: string }
   /** A single project detail. */
@@ -30,6 +33,8 @@ export type TabSubject =
   | { kind: "actor"; actorType: TabActorType; id: string }
   /** A single skill detail. */
   | { kind: "skill"; id: string }
+  | { kind: "doc"; id: string }
+  | { kind: "docFolder"; id: string }
   /** A runtime machine detail. */
   | { kind: "machine"; machineId: string }
   /** A runtime nested under a machine. */
@@ -79,7 +84,9 @@ export function parseTabSubject(url: string): TabSubject {
     case "issues":
       return id ? { kind: "issue", id } : { kind: "page", page: "issues" };
     case "my-issues":
-      return { kind: "page", page: "myIssues" };
+      return isMyAgentsSearch(query) ? { kind: "myAgents" } : { kind: "page", page: "myIssues" };
+    case "views":
+      return { kind: "page", page: "views" };
     case "projects":
       return id ? { kind: "project", id } : { kind: "page", page: "projects" };
     case "autopilots":
@@ -113,6 +120,11 @@ export function parseTabSubject(url: string): TabSubject {
         return { kind: "runtime", machineId: id, runtimeId: segments[4] };
       }
       return { kind: "machine", machineId: id };
+    case "docs":
+      if (id === "folders") {
+        return segments[3] ? { kind: "docFolder", id: segments[3] } : { kind: "unknown" };
+      }
+      return id ? { kind: "doc", id } : { kind: "page", page: "docs" };
     case "skills":
       return id ? { kind: "skill", id } : { kind: "page", page: "skills" };
     case "settings":
@@ -141,6 +153,8 @@ export function tabSubjectKey(subject: TabSubject): string {
   switch (subject.kind) {
     case "page":
       return `page:${subject.page}`;
+    case "myAgents":
+      return "my-agents";
     case "issue":
       return `issue:${subject.id}`;
     case "project":
@@ -151,6 +165,10 @@ export function tabSubjectKey(subject: TabSubject): string {
       return `actor:${subject.actorType}:${subject.id}`;
     case "skill":
       return `skill:${subject.id}`;
+    case "doc":
+      return `doc:${subject.id}`;
+    case "docFolder":
+      return `docFolder:${subject.id}`;
     case "machine":
       return `machine:${subject.machineId}`;
     case "runtime":

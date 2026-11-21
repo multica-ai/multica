@@ -1,5 +1,6 @@
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
+import type { DaemonConfigStatus, DaemonSetupTarget } from "../runtimes/commands";
 
 interface ConfigState {
   cdnDomain: string;
@@ -12,6 +13,8 @@ interface ConfigState {
   googleClientId: string;
   daemonServerUrl: string;
   daemonAppUrl: string;
+  daemonConfigStatus: DaemonConfigStatus;
+  daemonSetupTarget: DaemonSetupTarget;
   // Self-host gate (#3433): when true, every "Create workspace" affordance
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
@@ -37,6 +40,7 @@ interface ConfigState {
   // Older handlers accepted the unknown field and returned success while
   // dropping it, so absent must fail closed.
   agentConversationStartersSupported: boolean;
+  webhookPayloadConditionsSupported: boolean;
   // Whether POST /api/issues atomically persists custom-property values.
   // Older servers silently drop the field, so absent must fail closed.
   issueCreatePropertiesSupported: boolean;
@@ -44,6 +48,10 @@ interface ConfigState {
   // deleted the replies too, so absent must fail closed: the client then
   // promises nothing about replies and uses the legacy delete route.
   commentDeleteKeepRepliesSupported: boolean;
+  // Whether the server serves the community theme store. Absent on older
+  // servers and off when the operator turned it off: no Browse entry, no
+  // store requests.
+  themeStoreEnabled: boolean;
   setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAttachmentPublicUrl: (url?: string) => void;
   setAuthConfig: (config: {
@@ -55,13 +63,17 @@ interface ConfigState {
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
     daemonAppUrl?: string;
+    daemonSetupTarget?: DaemonSetupTarget;
   }) => void;
+  setDaemonConfigStatus: (status: DaemonConfigStatus) => void;
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
   setServerVersion: (version?: string) => void;
   setLocalWorktreeSupported: (supported?: boolean) => void;
   setAgentConversationStartersSupported: (supported?: boolean) => void;
+  setWebhookPayloadConditionsSupported: (supported?: boolean) => void;
   setIssueCreatePropertiesSupported: (supported?: boolean) => void;
   setCommentDeleteKeepRepliesSupported: (supported?: boolean) => void;
+  setThemeStoreEnabled: (enabled?: boolean) => void;
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
@@ -72,14 +84,18 @@ export const configStore = createStore<ConfigState>((set) => ({
   googleClientId: "",
   daemonServerUrl: "",
   daemonAppUrl: "",
+  daemonConfigStatus: "loading",
+  daemonSetupTarget: "unknown",
   workspaceCreationDisabled: false,
   vcsIntegrationAvailable: false,
   featureFlags: {},
   serverVersion: "",
   localWorktreeSupported: false,
   agentConversationStartersSupported: false,
+  webhookPayloadConditionsSupported: false,
   issueCreatePropertiesSupported: false,
   commentDeleteKeepRepliesSupported: false,
+  themeStoreEnabled: false,
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
   setAttachmentPublicUrl: (url = "") => set({ attachmentPublicUrl: url }),
   setAuthConfig: ({
@@ -88,18 +104,30 @@ export const configStore = createStore<ConfigState>((set) => ({
     workspaceCreationDisabled = false,
     vcsIntegrationAvailable = false,
   }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable }),
-  setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
-    set({ daemonServerUrl, daemonAppUrl }),
+  setDaemonConfig: ({
+    daemonServerUrl = "",
+    daemonAppUrl = "",
+    daemonSetupTarget = "unknown",
+  }) => set({
+    daemonServerUrl,
+    daemonAppUrl,
+    daemonSetupTarget,
+    daemonConfigStatus: "ready",
+  }),
+  setDaemonConfigStatus: (daemonConfigStatus) => set({ daemonConfigStatus }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
   setServerVersion: (version = "") => set({ serverVersion: version }),
   setLocalWorktreeSupported: (supported = false) =>
     set({ localWorktreeSupported: supported === true }),
   setAgentConversationStartersSupported: (supported = false) =>
     set({ agentConversationStartersSupported: supported === true }),
+  setWebhookPayloadConditionsSupported: (supported = false) =>
+    set({ webhookPayloadConditionsSupported: supported === true }),
   setIssueCreatePropertiesSupported: (supported = false) =>
     set({ issueCreatePropertiesSupported: supported === true }),
   setCommentDeleteKeepRepliesSupported: (supported = false) =>
     set({ commentDeleteKeepRepliesSupported: supported === true }),
+  setThemeStoreEnabled: (enabled = false) => set({ themeStoreEnabled: enabled === true }),
 }));
 
 export function useConfigStore(): ConfigState;

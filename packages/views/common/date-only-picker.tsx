@@ -7,8 +7,8 @@ import {
   formatDateOnly,
   isPastDateOnly,
 } from "@multica/core/issues/date";
-import { Check } from "lucide-react";
-import { Calendar } from "@multica/ui/components/ui/calendar";
+import { Check } from "@multica/ui/icons";
+import { LazyCalendar } from "@multica/ui/components/ui/lazy-calendar";
 import {
   Popover,
   PopoverTrigger,
@@ -67,10 +67,12 @@ interface DateOnlyPickerProps {
  * `DeferredPopup` for why.
  */
 export function DateOnlyPicker(props: DateOnlyPickerProps) {
+  // A one-shot defaultOpen must not replace the mounted calendar with a cold trigger.
+  const [initialDefaultOpen] = useState(props.defaultOpen ?? false);
   const canDefer =
     props.open === undefined &&
     props.onOpenChange === undefined &&
-    !props.defaultOpen;
+    !props.defaultOpen && !initialDefaultOpen;
   if (!canDefer) {
     return <DateOnlyPickerImpl {...props} />;
   }
@@ -174,7 +176,7 @@ function DateOnlyPickerImpl({
           </span>
           <Check className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${date ? "invisible" : ""}`} />
         </button>
-        <Calendar
+        <LazyCalendar
           mode="single"
           selected={date}
           onSelect={(d: Date | undefined) => {

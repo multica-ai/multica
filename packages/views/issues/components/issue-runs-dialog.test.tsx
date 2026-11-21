@@ -3,6 +3,8 @@
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask, TaskUsage } from "@multica/core/types";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { issueKeys } from "@multica/core/issues/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { renderWithI18n } from "../../test/i18n";
 
@@ -61,15 +63,18 @@ function usage(overrides: Partial<TaskUsage> = {}): TaskUsage {
 }
 
 function open(tasks: AgentTask[], locale?: "zh-Hans") {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData([...issueKeys.tasks("issue-1"), "history"], tasks);
   return renderWithI18n(
-    <IssueRunsDialog
-      open
-      onOpenChange={() => {}}
-      issueId="issue-1"
-      identifier="MUL-7680"
-      issueTitle="Issue wakeups v2"
-      tasks={tasks}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <IssueRunsDialog
+        open
+        onOpenChange={() => {}}
+        issueId="issue-1"
+        identifier="MUL-7680"
+        issueTitle="Issue wakeups v2"
+      />
+    </QueryClientProvider>,
     { locale },
   );
 }
@@ -257,6 +262,8 @@ describe("IssueRunsDialog", () => {
     const plot = plotOf();
     layOut(plot);
 
+    expect(screen.getByRole("button", { name: "Cost" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Tokens" })).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByRole("button", { name: "Tokens" }));
     expect(screen.getByText("per run · by token type")).toBeInTheDocument();
     // In the token view the hover splits the run's tokens by type.
@@ -404,7 +411,7 @@ describe("IssueRunsDialog", () => {
       }),
     ]);
 
-    expect(screen.getByTitle("Wakeup · When CI finishes")).toHaveTextContent("Wakeup · When CI finishes");
+    expect(screen.getByText("Wakeup · When CI finishes")).toBeInTheDocument();
     expect(screen.queryByText(/“/)).not.toBeInTheDocument();
   });
 
@@ -412,7 +419,19 @@ describe("IssueRunsDialog", () => {
     const long = "把之前拆出去的三个子任务都合并回这个 PR，conditions / history / runaway protection 一起做完再提交";
     open([makeTask({ trigger_comment_id: "comment-1", trigger_summary: long, usage: [usage()] })]);
 
-    expect(screen.getByText(`“${long}”`)).toHaveAttribute("title", `“${long}”`);
+    // jsdom has no layout: give the line the clipped box a browser would.
+    const line = screen.getByText(`“${long}”`);
+    line.style.overflowX = "hidden";
+    Object.defineProperties(line, {
+      scrollWidth: { configurable: true, value: 600 },
+      clientWidth: { configurable: true, value: 200 },
+    });
+    vi.useFakeTimers();
+    fireEvent.pointerEnter(line, { pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(550);
+    });
+    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent(`“${long}”`);
   });
 
   it("renders in the member's language", () => {

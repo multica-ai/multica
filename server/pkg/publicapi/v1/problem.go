@@ -3,8 +3,10 @@ package publicapiv1
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 )
@@ -107,5 +109,33 @@ func NotFound(w http.ResponseWriter, r *http.Request) {
 }
 
 func MethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	if rctx := chi.RouteContext(r.Context()); rctx != nil && rctx.Routes != nil {
+		// Routes is the root router, so match the full routing path rather than
+		// RoutePath, which has already been trimmed by any mounted subrouters.
+		path := r.URL.RawPath
+		if path == "" {
+			path = r.URL.Path
+		}
+		if path == "" {
+			path = "/"
+		}
+		methods := make(map[string]bool)
+		_ = chi.Walk(rctx.Routes, func(method, _ string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			methods[method] = true
+			return nil
+		})
+		var allowed []string
+		for method := range methods {
+			// Match updates its context; never reuse the live request's context
+			// or execute resource handlers just to discover supported methods.
+			if rctx.Routes.Match(chi.NewRouteContext(), method, path) {
+				allowed = append(allowed, method)
+			}
+		}
+		if len(allowed) > 0 {
+			sort.Strings(allowed)
+			w.Header().Set("Allow", strings.Join(allowed, ", "))
+		}
+	}
 	WriteProblem(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 }

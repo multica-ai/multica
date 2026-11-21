@@ -175,6 +175,8 @@ Current behavior:
   the leader's first assignment turn should move the parent to `in_progress`
   and keep it there while members work; the leader moves the parent to
   `in_review` only when a later re-trigger confirms the overall goal is met.
+  When the run carries a `[Project workflow]` block, the parent stays at its
+  current step instead and the leader runs that block's Step done command.
   Completing a leader task (including the first dispatch) does not itself
   change issue status;
 - that status authority is granted only when the issue's `assignee_type` /
@@ -197,7 +199,9 @@ is leader routing, not member fan-out.
 A worker's reply also wakes the assigned leader without an explicit mention. If
 the leader's current run started before the reply arrived, the reply is
 delivered in a follow-up run after that run completes, so the worker does not
-need to mention the leader again.
+need to mention the leader again. An explicit `@agent` mention of the leader on
+an issue assigned to its squad also runs it as the leader, so
+`multica squad activity` works on that turn too.
 
 Squad mention format:
 
@@ -252,7 +256,8 @@ These actions can trigger agent work or mutate durable state:
 - `role` is roster context, not automatic scheduling.
 - Backlog assignment does not immediately start work.
 - First leader dispatch is not parent completion — parent stays `in_progress`
-  until the leader later confirms the overall goal and moves it to `in_review`.
+  until the leader later confirms the overall goal and moves it to `in_review`
+  (under a `[Project workflow]` block: stays at its step until Step done).
 - The server does not auto-flip parent status when child issues finish; it only
   wakes the leader with an explicit ask (including `in_review` when wrapping up).
 - Getting the leader briefing does NOT imply status authority. A squad

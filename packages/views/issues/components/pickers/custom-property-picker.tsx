@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { CalendarDays, Check, ExternalLink, X } from "lucide-react";
+import { CalendarDays, Check, ExternalLink, X } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { Issue, IssueProperty, IssuePropertyValue } from "@multica/core/types";
-import { hasUnknownActorRef, isListPropertyType } from "@multica/core/types";
+import { hasUnknownActorRef, isListPropertyType, MAX_ISSUE_PROPERTY_SELECT_VALUES } from "@multica/core/types";
 import {
   useSetIssueProperty,
   useUnsetIssueProperty,
@@ -14,7 +14,7 @@ import {
   dateOnlyToLocalDate,
   formatDateOnly,
 } from "@multica/core/issues/date";
-import { Calendar } from "@multica/ui/components/ui/calendar";
+import { LazyCalendar } from "@multica/ui/components/ui/lazy-calendar";
 import {
   Popover,
   PopoverTrigger,
@@ -23,8 +23,10 @@ import {
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { useLocale, useT } from "../../../i18n";
-import { PropertyPicker, PickerItem } from "./property-picker";
+import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
+import { PropertyPicker, PickerItem, PickerEmpty } from "./property-picker";
 import { ActorPropertyPicker, ActorPropertyDisplay } from "./actor-property-picker";
+import { paletteColor } from "@multica/core/appearance";
 
 const EDITABLE_PROPERTY_TYPES = [
   "select",
@@ -156,9 +158,15 @@ export function CustomPropertyValueInput({
 }) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const [optionSearch, setOptionSearch] = useState("");
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const hasValue = value !== undefined;
+  const options = property.config.options ?? [];
+  const optionQuery = optionSearch.trim().toLowerCase();
+  const filteredOptions = options.filter((option) =>
+    option.name.toLowerCase().includes(optionQuery) || matchesPinyin(option.name, optionQuery),
+  );
 
   const commit = (next: IssuePropertyValue) => onChange(next);
   const clear = () => onChange(undefined);
@@ -211,18 +219,18 @@ export function CustomPropertyValueInput({
 
   switch (property.type) {
     case "select": {
-      const options = property.config.options ?? [];
       return (
         <PropertyPicker
           open={open}
           onOpenChange={setOpen}
           align="start"
           searchable={options.length > 7}
+          onSearchChange={setOptionSearch}
           trigger={valueTrigger}
           triggerRender={triggerRender}
         >
           {emptyRow}
-          {options.map((option) => (
+          {filteredOptions.map((option) => (
             <PickerItem
               key={option.id}
               selected={value === option.id}
@@ -231,16 +239,17 @@ export function CustomPropertyValueInput({
                 setOpen(false);
               }}
             >
-              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
+              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: paletteColor(option.color) }} />
               <span className="truncate">{option.name}</span>
             </PickerItem>
           ))}
+          {filteredOptions.length === 0 && <PickerEmpty />}
         </PropertyPicker>
       );
     }
     case "multi_select": {
-      const options = property.config.options ?? [];
       const selected = Array.isArray(value) ? value : [];
+      const atCapacity = selected.length >= MAX_ISSUE_PROPERTY_SELECT_VALUES;
       const toggle = (optionId: string) => {
         const next = selected.includes(optionId)
           ? selected.filter((id) => id !== optionId)
@@ -254,20 +263,23 @@ export function CustomPropertyValueInput({
           onOpenChange={setOpen}
           align="start"
           searchable={options.length > 7}
+          onSearchChange={setOptionSearch}
           trigger={valueTrigger}
           triggerRender={triggerRender}
         >
           {emptyRow}
-          {options.map((option) => (
+          {filteredOptions.map((option) => (
             <PickerItem
               key={option.id}
               selected={selected.includes(option.id)}
+              disabled={atCapacity && !selected.includes(option.id)}
               onClick={() => toggle(option.id)}
             >
-              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
+              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: paletteColor(option.color) }} />
               <span className="truncate">{option.name}</span>
             </PickerItem>
           ))}
+          {filteredOptions.length === 0 && <PickerEmpty />}
         </PropertyPicker>
       );
     }
@@ -324,7 +336,7 @@ export function CustomPropertyValueInput({
               </span>
               <Check className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${date ? "invisible" : ""}`} />
             </button>
-            <Calendar
+            <LazyCalendar
               mode="single"
               selected={date}
               onSelect={(d: Date | undefined) => {
@@ -370,6 +382,7 @@ export function CustomPropertyValueInput({
     default:
       return (
         <TextishPropertyEditor
+          key={property.id}
           property={property}
           value={value}
           open={open}
@@ -407,11 +420,18 @@ function TextishPropertyEditor({
   triggerRender?: React.ReactElement<Record<string, unknown>>;
 }) {
   const { t } = useT("issues");
-  const [draft, setDraft] = useState("");
+  const saved = value === undefined ? "" : String(value);
+  const [session, setSession] = useState({ open, baseline: saved, draft: saved });
 
-  useEffect(() => {
-    if (open) setDraft(value === undefined ? "" : String(value));
-  }, [open, value]);
+  // Adopt live values only while clean. Keep the adopted baseline even if a
+  // remote value happens to match the draft, so later updates cannot erase it.
+  if (
+    session.open !== open ||
+    (open && session.draft === session.baseline && session.baseline !== saved)
+  ) {
+    setSession({ open, baseline: saved, draft: saved });
+  }
+  const draft = session.draft;
 
   const placeholder =
     property.type === "url"
@@ -463,7 +483,10 @@ function TextishPropertyEditor({
             step={property.type === "number" ? "any" : undefined}
             inputMode={property.type === "number" ? "decimal" : undefined}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              const draft = event.target.value;
+              setSession((current) => ({ ...current, draft }));
+            }}
             placeholder={placeholder}
             className="h-8"
           />
@@ -666,7 +689,7 @@ export function CustomPropertyValueDisplay({
       }
       return (
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
+          <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: paletteColor(option.color) }} />
           <span className="truncate">{option.name}</span>
         </span>
       );
@@ -688,7 +711,7 @@ export function CustomPropertyValueDisplay({
               key={option.id}
               className="inline-flex max-w-32 items-center gap-1 rounded-full border border-surface-border px-1.5 py-px text-micro"
             >
-              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
+              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: paletteColor(option.color) }} />
               <span className="truncate">{option.name}</span>
             </span>
           ))}

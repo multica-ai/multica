@@ -5,7 +5,7 @@ import {
   resolveBillingRecovery,
   type BillingRecoveryKind,
 } from "@multica/core/billing/recovery";
-import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
+import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags/keys";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -17,7 +17,8 @@ import {
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useT } from "@/lib/i18n";
 import {
-  getAutopilotQuotaBody,
+  getInboxNoticeBody,
+  isInboxNotice,
   getInboxDisplayTitle,
 } from "@/lib/inbox-display";
 
@@ -42,6 +43,20 @@ function BillingRecovery({
       return (
         <Text className="text-sm leading-5 text-muted-foreground">
           {t("detail.contact_admin")}
+        </Text>
+      );
+    case "autopilot_addon":
+      // Buying runs is a card payment; the app opens web Billing for it.
+      return billingUrl ? (
+        <Button
+          onPress={() => void Linking.openURL(billingUrl)}
+          accessibilityLabel={t("detail.buy_runs")}
+        >
+          <Text>{t("detail.buy_runs")}</Text>
+        </Button>
+      ) : (
+        <Text className="text-sm leading-5 text-muted-foreground">
+          {t("detail.buy_runs_web")}
         </Text>
       );
     case "checkout":
@@ -90,6 +105,7 @@ export default function InboxNoticeDetail() {
   const checkingConfig =
     isQuotaNotice && !configQuery.data && configQuery.isFetching;
   const recovery = resolveBillingRecovery({
+    autopilotAddon: true,
     actions: summaryQuery.data?.availableActions,
     billingEnabled: checkingConfig || billingEnabled,
     loading:
@@ -101,7 +117,7 @@ export default function InboxNoticeDetail() {
   const webUrl = process.env.EXPO_PUBLIC_WEB_URL?.replace(/\/+$/, "");
   const billingUrl =
     webUrl && wsSlug ? `${webUrl}/${wsSlug}/settings?tab=billing` : null;
-  const body = item ? getAutopilotQuotaBody(item) : null;
+  const body = item ? getInboxNoticeBody(item) : null;
 
   return (
     <View className="flex-1 bg-background">
@@ -122,9 +138,7 @@ export default function InboxNoticeDetail() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator />
         </View>
-      ) : !item ||
-        (item.type !== "autopilot_quota_exceeded" &&
-          item.type !== "autopilot_paused") ? (
+      ) : !item || !isInboxNotice(item.type) ? (
         <View className="px-4 py-8">
           <Text className="text-sm text-muted-foreground text-center">
             {t("detail.unavailable")}

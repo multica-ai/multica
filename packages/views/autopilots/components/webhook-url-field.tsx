@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Check, Copy, Eye, EyeOff } from "lucide-react";
+import { Check, Copy, Eye, EyeOff } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { maskAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { IconButton } from "@multica/ui/components/common/icon-button";

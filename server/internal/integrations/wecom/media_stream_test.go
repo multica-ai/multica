@@ -312,6 +312,7 @@ func TestIngestPrefersTheStreamingPathAndUploadsTheRightBytes(t *testing.T) {
 		"file": map[string]any{"url": srv.URL + "/object", "aeskey": keyB64},
 	})
 	out := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 
 	if storage.streamed != 1 {
 		t.Fatalf("UploadStream was called %d times, want the streaming path taken", storage.streamed)
@@ -362,6 +363,7 @@ func TestIngestFallsBackWhenTheBackendCannotStream(t *testing.T) {
 		"file": map[string]any{"url": srv.URL + "/object", "aeskey": keyB64},
 	})
 	out := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 	if len(out.MediaRefs) != 1 {
 		t.Fatalf("MediaRefs = %d, want the buffered path to have carried it", len(out.MediaRefs))
 	}

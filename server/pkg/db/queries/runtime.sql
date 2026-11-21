@@ -59,6 +59,18 @@ SELECT * FROM agent_runtime
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockAgentRuntimeForClaimDelivery :one
+-- The claim delivery gate's lock on the runtime it re-reads owner_id and
+-- visibility from. FOR NO KEY UPDATE still blocks every UPDATE and DELETE of
+-- the row, so a re-registration or visibility flip waits for the gate to
+-- commit. Unlike FOR UPDATE it does not block FOR KEY SHARE, which every task
+-- insert takes on its runtime (lock_task_owner_rows and the foreign key) while
+-- already holding the agent row. The gate takes the agent row after this one,
+-- so FOR UPDATE here deadlocked a chat send racing a delivery (MUL-9501).
+SELECT * FROM agent_runtime
+WHERE id = $1
+FOR NO KEY UPDATE;
+
 -- name: GetAgentRuntimeForWorkspace :one
 SELECT * FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2;
@@ -495,6 +507,10 @@ WHERE runtime_id = @runtime_id
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
+-- runtime_rate_limit has no FK; its row goes with the runtime.
+WITH deleted_rate_limit AS (
+    DELETE FROM runtime_rate_limit WHERE runtime_id = $1
+)
 DELETE FROM agent_runtime WHERE id = $1;
 
 -- name: DeleteSystemAgentsByRuntime :exec
@@ -620,6 +636,12 @@ SELECT id FROM agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
   AND NOT EXISTS (
+    SELECT 1 FROM runtime_profile p
+    WHERE p.id = agent_runtime.profile_id AND p.workspace_id = agent_runtime.workspace_id
+      AND p.daemon_id IS NULL
+      AND p.created_by = agent_runtime.owner_id
+  )
+  AND NOT EXISTS (
     SELECT 1
     FROM agent
     WHERE agent.runtime_id = agent_runtime.id
@@ -645,6 +667,12 @@ SELECT EXISTS (
   WHERE agent_runtime.id = @id
     AND status = 'offline'
     AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+    AND NOT EXISTS (
+      SELECT 1 FROM runtime_profile p
+      WHERE p.id = agent_runtime.profile_id AND p.workspace_id = agent_runtime.workspace_id
+        AND p.daemon_id IS NULL
+        AND p.created_by = agent_runtime.owner_id
+    )
     AND NOT EXISTS (
       SELECT 1
       FROM agent
@@ -686,3 +714,41 @@ SELECT * FROM agent_runtime
 WHERE workspace_id = @workspace_id AND @user_id::uuid = ANY(shared_with)
 ORDER BY id
 FOR NO KEY UPDATE;
+
+-- name: UpdateAgentRuntimeMaxConcurrentTasks :one
+-- Sets or clears (NULL) the runtime-wide concurrency cap (GitHub #9626).
+-- Kept out of the registration upserts so a daemon re-registering never
+-- clobbers it. Gated at the handler to runtime owner / workspace admin.
+-- The handler runs this and then LockRuntimeClaimCapacity in one
+-- transaction, so the new value commits only after every in-flight claim
+-- on the runtime has finished.
+UPDATE agent_runtime
+SET max_concurrent_tasks = sqlc.narg('max_concurrent_tasks'), updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: GetAgentRuntimeMaxConcurrentTasks :one
+-- Claim-path read of the runtime cap. Plain read (no row lock), always made
+-- after LockRuntimeClaimCapacity so it sees the latest committed value.
+SELECT max_concurrent_tasks FROM agent_runtime
+WHERE id = $1;
+
+-- name: LockRuntimeClaimCapacity :exec
+-- Transaction-scoped advisory lock that serializes claims on one runtime
+-- with each other and with cap updates, so two agents claiming concurrently
+-- cannot both see running < cap, and no claim commits against a cap that a
+-- finished update already replaced. An advisory lock (not FOR UPDATE on the
+-- runtime row) because claimTask already holds the agent row lock, while
+-- runtime teardown / access changes lock the runtime row first and then
+-- agent rows; taking the runtime row here would invert that order and risk
+-- a deadlock. Lock order: claims take agent row -> this lock; cap updates
+-- take runtime row (FOR NO KEY UPDATE) -> this lock. A claim never waits on
+-- the runtime row, so the two cannot form a cycle.
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg('runtime_id')::uuid::text || ':runtime_claim_capacity', 0));
+
+-- name: CountActiveTasksByRuntime :one
+-- Capacity-bearing tasks on a runtime across all agents. Same status set as
+-- CountRunningTasks (per agent). Served by the partial index
+-- idx_agent_task_queue_runtime_active (migration 606).
+SELECT count(*) FROM agent_task_queue
+WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');

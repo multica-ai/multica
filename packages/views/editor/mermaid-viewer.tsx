@@ -23,7 +23,7 @@ import {
   Download,
   Image as ImageIcon,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -116,7 +116,7 @@ export function MermaidViewer({
         // panes `vh` includes retracted browser chrome, which would push the
         // toolbar off-screen — the exact "can't find the close button"
         // failure this viewer exists to remove.
-        className="!max-w-[calc(100vw-2rem)] !h-[min(90dvh,calc(100dvh-2rem))] !w-[calc(100vw-2rem)] flex flex-col gap-0 overflow-hidden p-0 xl:!max-w-[80rem]"
+        className="!max-w-[calc(100%-2rem)] !h-[min(90%,calc(100%-2rem))] !w-[calc(100%-2rem)] flex flex-col gap-0 overflow-hidden p-0 xl:!max-w-[80rem]"
         aria-label={t(($) => $.mermaid.viewer_title)}
       >
         {/* Body state (zoom, pan, source toggle) deliberately lives below the

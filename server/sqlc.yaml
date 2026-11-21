@@ -14,3 +14,19 @@ sql:
           - column: "issue_wakeup.condition"
             go_type: "encoding/json.RawMessage"
             nullable: true
+          - column: "chat_wakeup.condition"
+            go_type: "encoding/json.RawMessage"
+            nullable: true
+  # Commercial (ee/) packages generate their own query code so open-source
+  # packages never compile against it.
+  - engine: "postgresql"
+    queries: "ee/projectfolder/queries.sql"
+    schema: "migrations/"
+    gen:
+      go:
+        package: "folderdb"
+        out: "ee/projectfolder/folderdb"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_empty_slices: true
+        omit_unused_structs: true

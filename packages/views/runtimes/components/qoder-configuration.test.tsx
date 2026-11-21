@@ -68,6 +68,16 @@ function mount(onConnected?: () => void) {
   );
   return client;
 }
+it("explains missing server encryption setup without offering credential submission", async () => {
+  mocks.getQoderConnection.mockResolvedValue({ available: false, configured: false });
+  const client = mount();
+  expect(
+    await screen.findByText("Qoder Cloud Agents isn't enabled on this server yet. A server administrator needs to configure credential encryption (MULTICA_VCS_SECRET_KEY)."),
+  ).toBeInTheDocument();
+  expect(screen.queryByPlaceholderText("pt-…")).not.toBeInTheDocument();
+  expect(mocks.saveQoderConnection).not.toHaveBeenCalled();
+  client.clear();
+});
 it("points an existing connection to its runtime page", async () => {
   const client = mount();
   expect(

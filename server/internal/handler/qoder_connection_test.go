@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 )
 
 func TestQoderConnectionSecrets(t *testing.T) {
@@ -284,18 +286,61 @@ func TestQoderStepLeaseReleasesDatabaseConnection(t *testing.T) {
 	testutil.Call(t, testHandler.StopQoderConnection, vcsHandlerRequest("POST", "/qoder/stop", nil, "")).Want(200)
 }
 
-func TestQoderQuickCreateUnsupported(t *testing.T) {
+func TestQoderSquadQuickCreate(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	for _, metadata := range []string{`{}`, `{"cli_version":"99.0.0"}`} {
-		runtimeID := dbfx.Runtime(t, "Qoder issue-only runtime", testutil.Cols{"provider": "qoder_cloud", "runtime_mode": "cloud", "metadata": metadata})
-		status, payload := testHandler.checkQuickCreateDaemonVersion(context.Background(), "issue", parseUUID(runtimeID))
-		if status != http.StatusUnprocessableEntity || payload["code"] != "agent_unavailable" {
-			t.Fatalf("Qoder quick-create should be unavailable, got %d: %v", status, payload)
-		}
-		if !strings.Contains(payload["reason"].(string), "create the issue manually") {
-			t.Fatalf("missing actionable issue-only explanation: %v", payload)
+	runtimeID := dbfx.Runtime(t, "Qoder squad quick-create", testutil.Cols{"provider": "qoder_cloud"})
+	leaderID := dbfx.Agent(t, "Qoder squad leader", runtimeID, testutil.Cols{"runtime_config": `{"qoder_agent_id":"agent_1"}`})
+	squadID := dbfx.Squad(t, "Qoder quick-create squad", leaderID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE agent_id=$1`, leaderID)
+
+	var response QuickCreateIssueResponse
+	testutil.Call(t, testHandler.QuickCreateIssue, newRequest(http.MethodPost, "/api/issues/quick-create", map[string]any{
+		"squad_id": squadID, "prompt": "Add a settings page",
+	})).Want(http.StatusAccepted).JSON(&response)
+
+	var agentID string
+	var raw []byte
+	dbfx.QueryRow(t, `SELECT agent_id::text, context FROM agent_task_queue WHERE id=$1`, response.TaskID).Scan(&agentID, &raw)
+	var qc service.QuickCreateContext
+	if err := json.Unmarshal(raw, &qc); err != nil {
+		t.Fatal(err)
+	}
+	if agentID != leaderID || qc.SquadID != squadID {
+		t.Fatalf("quick-create must route to the Qoder leader and retain the squad: agent=%s context=%+v", agentID, qc)
+	}
+
+	testutil.Call(t, testHandler.QuickCreateIssue, newRequest(http.MethodPost, "/api/issues/quick-create", map[string]any{
+		"squad_id": squadID, "prompt": "Read the screenshot", "attachment_ids": []string{"019ec09d-6222-722b-bdfa-427b105d80be"},
+	})).Want(http.StatusUnprocessableEntity)
+}
+
+func TestQoderQuickCreateLimits(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	qoderID := parseUUID(dbfx.Runtime(t, "Qoder quick-create limits runtime", testutil.Cols{"provider": "qoder_cloud", "runtime_mode": "cloud", "metadata": `{}`}))
+	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", qoderID, true); status != http.StatusUnprocessableEntity || payload["code"] != "agent_unavailable" || !strings.Contains(payload["reason"].(string), "attachments") {
+		t.Fatalf("Qoder quick-create attachments should be rejected, got %d: %v", status, payload)
+	}
+	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", qoderID, false); status != 0 {
+		t.Fatalf("plain Qoder quick-create should be accepted, got %d: %v", status, payload)
+	}
+	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", parseUUID(testRuntimeID), true); status != 0 {
+		t.Fatalf("daemon runtime should be accepted, got %d: %v", status, payload)
+	}
+}
+
+func TestQoderQuickCreateSkipsCLIVersionGate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := dbfx.Runtime(t, "Qoder quick-create runtime", testutil.Cols{"provider": "qoder_cloud", "runtime_mode": "cloud", "metadata": `{}`})
+	for _, minimum := range []string{agentpkg.MinQuickCreateCLIVersion, agentpkg.MinQuickCreateFieldsCLIVersion} {
+		if status, payload := testHandler.checkQuickCreateDaemonVersionAtLeast(context.Background(), "issue", parseUUID(runtimeID), minimum); status != 0 {
+			t.Fatalf("Qoder quick-create should not require a CLI version, got %d: %v", status, payload)
 		}
 	}
 }

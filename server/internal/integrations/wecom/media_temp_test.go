@@ -174,6 +174,7 @@ func TestIngestFallsBackWhenTempFileUnavailable(t *testing.T) {
 	r := newTestResolver(storage, newFakeMediaLedger(nil), nil)
 	msg := mediaMessage(t, "file", map[string]any{"file": map[string]any{"url": srv.URL, "aeskey": keyB64}})
 	out := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 	if len(out.MediaRefs) != 1 || requests.Load() != 2 || len(storage.stored()) != 1 || storage.gotFile != nil {
 		t.Fatalf("temp-file failure did not use buffered fallback: refs=%d requests=%d buffered=%d file=%v", len(out.MediaRefs), requests.Load(), len(storage.stored()), storage.gotFile)
 	}

@@ -22,8 +22,9 @@ export function createIssueStatusListStore(key: string) {
     viewMode: "list", grouping: "status", statusFilters: [key],
     priorityFilters: [], assigneeFilters: [], includeNoAssignee: false,
     creatorFilters: [], projectFilters: [], includeNoProject: false,
-    labelFilters: [], propertyFilters: {}, dateFilter: null,
-    agentRunningFilter: false, showSubIssues: true,
+    labelFilters: [], relationFilters: [], dueDateFilters: [], negatedFilters: [],
+    propertyFilters: {}, advancedFilter: null, dateFilter: null,
+    agentRunningFilter: false, unreadFilter: false, showSubIssues: true,
     hiddenStatuses: [], listCollapsedStatuses: [],
   }));
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -185,7 +185,7 @@ export function NewChatButton({
             <Button
               variant="ghost"
               size="icon-sm"
-              className="rounded-full text-muted-foreground"
+              className="text-muted-foreground"
               aria-label={label}
               onClick={() => {
                 if (only && !isAgentRuntimeBound(only)) {
@@ -215,7 +215,7 @@ export function NewChatButton({
         <IconButton
           variant="ghost"
           size="icon-sm"
-          className="rounded-full text-muted-foreground"
+          className="text-muted-foreground"
           label={label}
           tooltipSide={side === "top" ? "top" : "bottom"}
         />

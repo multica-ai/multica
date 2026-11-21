@@ -33,6 +33,24 @@ func claudeTerminateGrace() time.Duration {
 	return 5 * time.Second
 }
 
+// claudeErrorResultGraceNanos optionally overrides, in nanoseconds, how long
+// claude may keep running after it reported an error result. Set via atomic
+// store in tests; zero keeps the default.
+var claudeErrorResultGraceNanos atomic.Int64
+
+// claudeErrorResultGrace bounds the wait for claude to exit after an error
+// result. With stdin closed the CLI still stays alive while any background
+// task it started is running, then opens a new turn when the task ends. After
+// an error result (a spent session limit, an API failure) that turn cannot
+// change the outcome, so the daemon stops waiting instead of holding the run
+// open for the task's lifetime.
+func claudeErrorResultGrace() time.Duration {
+	if n := claudeErrorResultGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 10 * time.Second
+}
+
 // claudeBackend implements Backend by spawning the Claude Code CLI
 // with --output-format stream-json.
 type claudeBackend struct {
@@ -98,7 +116,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if opts.ResumeSessionID != "" {
 		snapshot, snapshotErr := captureClaudeUsageSnapshot(cmd.Env, cmd.Dir, opts.ResumeSessionID)
 		if snapshotErr != nil {
-			b.cfg.Logger.Warn("claude usage baseline unavailable; falling back to reported totals", "error", snapshotErr)
+			b.cfg.Logger.Warn("claude usage baseline unavailable; ignoring reported session totals, keeping per-run stream usage", "error", snapshotErr)
 		} else {
 			usageSnapshot = snapshot
 		}
@@ -119,11 +137,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if opts.EnableTaskSupplement {
 		supplements = newClaudeSupplementSession(runCtx)
 	}
+	initializer := supplements
+	if initializer == nil && opts.SkillInvocation != nil {
+		initializer = newClaudeSupplementSession(runCtx)
+	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() {
 		closeStdinOnce.Do(func() { _ = stdin.Close() })
-		if supplements != nil {
-			supplements.end()
+		if initializer != nil {
+			initializer.end()
 		}
 	}
 	// Capture stderr into both the daemon log (as before) and a bounded tail
@@ -168,13 +190,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// timeout.
 	writeDone := make(chan error, 1)
 	go func() {
-		if supplements != nil {
-			if initErr := supplements.initialize(inputWriter, opts.HandshakeTimeout); initErr != nil {
-				b.cfg.Logger.Warn("Claude additional messages unavailable; continuing normally", "error", initErr)
-				supplements.end()
+		var commands map[string]bool
+		if initializer != nil {
+			if initErr := initializer.initialize(inputWriter, opts.HandshakeTimeout, opts.EnableTaskSupplement); initErr != nil {
+				b.cfg.Logger.Warn("Claude initialization unavailable; continuing with text input", "error", initErr)
+				initializer.end()
+			} else if !slashCommandsDisabled(b.cfg.LaunchPrefix, opts.ExtraArgs, opts.CustomArgs) {
+				commands = initializer.availableCommands()
 			}
 		}
-		err := writeClaudeInput(inputWriter, prompt)
+		blocks := []string{prompt}
+		if opts.SkillInvocation != nil {
+			blocks = opts.SkillInvocation.claudeTextBlocks(commands)
+		}
+		err := writeClaudeInput(inputWriter, blocks...)
 		if err != nil {
 			closeStdin()
 			if supplements != nil {
@@ -203,6 +232,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
+		rateLimits := newRateLimitTracker(opts.OnRateLimits)
 		eventCount := 0
 		invalidEventCount := 0
 		assistantEventCount := 0
@@ -210,6 +240,36 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		unreadableAssistantCount := 0
 		controlErrors := make(chan error, 1)
 		var controlWrites sync.WaitGroup
+		var controlMu sync.Mutex
+		pendingControls := 0
+		closeRequested := false
+		closeAfterControls := func() {
+			if initializer != nil {
+				initializer.end()
+			}
+			controlMu.Lock()
+			defer controlMu.Unlock()
+			closeRequested = true
+			if pendingControls == 0 {
+				closeStdin()
+			}
+		}
+		var stopAfterErrorResultOnce sync.Once
+		// stopAfterErrorResult terminates a claude that outlives its error
+		// result past the grace period, the same way cancellation does.
+		stopAfterErrorResult := func() {
+			select {
+			case <-procDone:
+				return
+			case <-time.After(claudeErrorResultGrace()):
+			}
+			b.cfg.Logger.Warn("claude still running after an error result; terminating process group", "pid", cmd.Process.Pid)
+			signalProcessGroup(cmd, syscall.SIGTERM)
+			if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
+				signalProcessGroup(cmd, syscall.SIGKILL)
+			}
+			_ = stdout.Close()
+		}
 
 		// On cancellation / timeout, terminate claude (and every MCP server and
 		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
@@ -271,6 +331,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if b.handleUser(msg, msgCh) {
 					sawAsyncLaunch = true
 				}
+			case "rate_limit_event":
+				if update, ok := parseClaudeRateLimitEvent(msg.RateLimitInfo); ok {
+					rateLimits.apply(update)
+				}
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
@@ -282,16 +346,34 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resultIsError = msg.IsError
 				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
+				// A resume whose baseline capture failed cannot trust the
+				// result's modelUsage: newer Claude Code restores the session's
+				// cumulative counters on resume, so the reported total may span
+				// every prior task (GH #9564), and without a baseline there is
+				// no way to verify it is per-run. Keep the stream-derived
+				// per-run usage in that case; the reported totals are recorded
+				// in lastUsageResult only for the resume-rejected recapture
+				// below, where the run is known to have started a fresh session
+				// whose totals are its own.
+				unverifiableBaseline := usageSnapshot == nil && opts.ResumeSessionID != ""
 				var baseline map[string]TokenUsage
 				if usageSnapshot != nil {
 					baseline = usageSnapshot.baseline
 				}
 				if resultUsage, authoritative := claudeResultUsageSince(msg, opts.Model, baseline); authoritative {
-					usage = resultUsage
 					usageMsg := msg
 					lastUsageResult = &usageMsg
+					if !unverifiableBaseline {
+						usage = resultUsage
+					}
 				}
-				closeStdin()
+				// Keep draining stdout while accepted control replies finish writing.
+				// Once those replies drain, stdin closes; requests arriving after that
+				// cannot be answered.
+				closeAfterControls()
+				if resultIsError || terminalReasonError != "" {
+					stopAfterErrorResultOnce.Do(func() { go stopAfterErrorResult() })
+				}
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -305,9 +387,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if supplements != nil {
 					reply, _ = supplements.prepareHook(msg)
 				}
+				controlMu.Lock()
+				pendingControls++
+				controlMu.Unlock()
 				controlWrites.Add(1)
 				go func(msg claudeSDKMessage, reply func(io.Writer) error) {
 					defer controlWrites.Done()
+					defer func() {
+						controlMu.Lock()
+						defer controlMu.Unlock()
+						pendingControls--
+						if closeRequested && pendingControls == 0 {
+							closeStdin()
+						}
+					}()
 					if reply == nil {
 						b.handleControlRequest(msg, inputWriter)
 						return
@@ -321,8 +414,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					}
 				}(msg, reply)
 			case "control_response":
-				if supplements != nil {
-					supplements.handleResponse(msg.Response)
+				if initializer != nil {
+					initializer.handleResponse(msg.Response)
 				}
 			}
 		}
@@ -499,8 +592,8 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 				trySend(ch, Message{Type: MessageText, Content: block.Text})
 			}
 		case "thinking":
-			if block.Text != "" {
-				trySend(ch, Message{Type: MessageThinking, Content: block.Text})
+			if block.Thinking != "" {
+				trySend(ch, Message{Type: MessageThinking, Content: block.Thinking})
 			}
 		case "tool_use":
 			toolUseCount++
@@ -665,6 +758,9 @@ type claudeSDKMessage struct {
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
+
+	// rate_limit_event fields
+	RateLimitInfo json.RawMessage `json:"rate_limit_info,omitempty"`
 
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`
@@ -880,6 +976,12 @@ func (s *claudeUsageSnapshot) appendedCostStateUsage() (map[string]TokenUsage, b
 	return readLastClaudeCostStateUsage(f, s.offset, info.Size())
 }
 
+// ClaudeConfigDir resolves Claude's config directory using the same inherited
+// environment and task overrides as the backend's child process.
+func ClaudeConfigDir(extraEnv map[string]string, cwd string) (string, error) {
+	return claudeConfigDir(buildEnv(extraEnv), cwd)
+}
+
 func claudeConfigDir(env []string, cwd string) (string, error) {
 	if value, ok := lastClaudeEnvValue(env, "CLAUDE_CONFIG_DIR"); ok && value != "" {
 		return resolveClaudeConfigPath(value, cwd)
@@ -1031,6 +1133,7 @@ func claudeUsageHasTokens(input, output, cacheRead, cacheWrite int64) bool {
 type claudeContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
@@ -1135,8 +1238,8 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	return args
 }
 
-func writeClaudeInput(w io.Writer, prompt string) error {
-	data, err := buildClaudeInput(prompt)
+func writeClaudeInput(w io.Writer, prompts ...string) error {
+	data, err := buildClaudeInput(prompts...)
 	if err != nil {
 		return err
 	}
@@ -1146,17 +1249,16 @@ func writeClaudeInput(w io.Writer, prompt string) error {
 	return nil
 }
 
-func buildClaudeInput(prompt string) ([]byte, error) {
+func buildClaudeInput(prompts ...string) ([]byte, error) {
+	content := make([]map[string]string, 0, len(prompts))
+	for _, prompt := range prompts {
+		content = append(content, map[string]string{"type": "text", "text": prompt})
+	}
 	payload := map[string]any{
 		"type": "user",
 		"message": map[string]any{
-			"role": "user",
-			"content": []map[string]string{
-				{
-					"type": "text",
-					"text": prompt,
-				},
-			},
+			"role":    "user",
+			"content": content,
 		},
 	}
 	data, err := json.Marshal(payload)
@@ -1467,9 +1569,30 @@ func cleanupMcpConfigTemp(path string) {
 // tests can shrink it without waiting out the real bound.
 var detectVersionTimeout = 10 * time.Second
 
+// Keep the deadline in the error chain without its network-timeout wording:
+// task failures are also classified from the diagnostic text.
+type versionProbeTimeoutError struct {
+	limit time.Duration
+	cause error
+}
+
+func (e *versionProbeTimeoutError) Error() string {
+	return fmt.Sprintf("version probe timed out (limit %s): %v", e.limit, e.cause)
+}
+
+func (e *versionProbeTimeoutError) Unwrap() []error {
+	return []error{context.DeadlineExceeded, e.cause}
+}
+
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
+	probeCmd, cleanup, err := runtimeCmd.withProbeDirectory()
+	if err != nil {
+		return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
+	}
+	defer cleanup()
+	runtimeCmd = probeCmd
 	if runtime.GOOS == "windows" {
 		if native := resolveCodeArtsNativeFromShim(runtimeCmd.Path, os.Stat); native != "" {
 			runtimeCmd.Path = native
@@ -1499,8 +1622,73 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	// present. See salvageProbeAnswer.
 	//
 	// Built through runtimeCmd.exec so a custom runtime's fixed_args prefix is
-	// still applied (MUL-6260).
-	cmd := runtimeCmd.exec(ctx, "--version")
+	// still applied (MUL-6260). Desktop ZCode ships as a Node .cjs/.mjs bundle;
+	// those and Linux Electron entries use the same headless invocation as
+	// Execute, with a clear error when the required runtime or script is missing.
+	_, zcodeDesktop := zcodeDesktopScript(runtimeCmd.Path)
+	if isNodeScriptPath(runtimeCmd.Path) || zcodeDesktop {
+		if err := requireNodeForZcodeScript(runtimeCmd.Path); err != nil {
+			return "", err
+		}
+	}
+
+	// A provider-specific probe (see Command.ForVersionProbe) runs first. A
+	// build too old to know it rejects the arguments outright, and only that
+	// case falls back to `--version`: a probe that hung or could not start would
+	// fail the same way again, and here it would also spend the remaining
+	// budget on the side effects the provider-specific probe exists to avoid.
+	if len(runtimeCmd.versionArgs) > 0 {
+		version, err := runVersionProbe(ctx, runtimeCmd, runtimeCmd.versionArgs)
+		if err == nil {
+			return version, nil
+		}
+		if !versionProbeRejectedArgs(ctx, err) {
+			return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
+		}
+		if runtimeCmd.logger != nil {
+			runtimeCmd.logger.Debug("agent: CLI rejected its version probe; falling back to --version",
+				"command", runtimeCmd.String(), "probe", strings.Join(runtimeCmd.versionArgs, " "), "err", err)
+		}
+	}
+
+	version, err := runVersionProbe(ctx, runtimeCmd, []string{"--version"})
+	if err != nil {
+		// One provider-agnostic boundary for probes: DetectVersion routes every
+		// provider through here, so an ENOEXEC diagnosis added at this point
+		// reaches the reason the daemon reports for a skipped runtime
+		// (MUL-6164).
+		return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
+	}
+	return version, nil
+}
+
+// versionProbeRejectedArgs reports whether a failed provider-specific version
+// probe is the CLI refusing its arguments: the process ran and exited non-zero
+// on its own, before the deadline. A kill on timeout also surfaces as an
+// *exec.ExitError, with exit code -1, which is why both the code and the
+// context are checked.
+func versionProbeRejectedArgs(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() > 0
+}
+
+// runVersionProbe runs one `<cli> <args>` version probe and returns the
+// recognised version line. detectCLIVersion adds the command and the exec
+// diagnosis to any probe error.
+func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (string, error) {
+	var cmd *exec.Cmd
+	_, zcodeDesktop := zcodeDesktopScript(runtimeCmd.Path)
+	if isNodeScriptPath(runtimeCmd.Path) || zcodeDesktop {
+		cmd, _, _ = runtimeCmd.execVia(ctx, chooseZcodeInvocation, runtimeCmd.Path, args, runtimeCmd.logger)
+		if zcodeDesktop {
+			cmd.Env = zcodeRuntimeEnv(runtimeCmd.Path, os.Environ())
+		}
+	} else {
+		cmd = runtimeCmd.exec(ctx, args...)
+	}
 	hideAgentWindow(cmd)
 	cmd.WaitDelay = probeWaitDelay
 	data, err := outputOwned(cmd, runtimeCmd.logger)
@@ -1521,14 +1709,13 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 		// to empty would be a regression (#2516). It is only unusable as
 		// evidence that a *bounded, incomplete* read already contains the
 		// answer.
-		if salvaged := salvageProbeAnswer(runtimeCmd, "--version", recognised, err); salvaged {
+		if salvageProbeAnswer(runtimeCmd, strings.Join(args, " "), recognised, err) {
 			return version, nil
 		}
-		// One provider-agnostic boundary for probes: DetectVersion routes every
-		// provider through here, so an ENOEXEC diagnosis added at this point
-		// reaches the reason the daemon reports for a skipped runtime
-		// (MUL-6164).
-		return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", &versionProbeTimeoutError{limit: detectVersionTimeout, cause: err}
+		}
+		return "", err
 	}
 	return version, nil
 }

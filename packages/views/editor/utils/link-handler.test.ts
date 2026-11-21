@@ -169,6 +169,15 @@ describe("parseWorkspaceEntityLink", () => {
     ).toEqual({ kind: "issue", id: ISSUE_ID, slug: "acme" });
   });
 
+  it("parses a doc URL, the shape the doc page's Copy link produces", () => {
+    expect(
+      parseWorkspaceEntityLink(`${APP_ORIGIN}/acme/docs/${PROJECT_ID}`, APP_ORIGIN),
+    ).toEqual({ kind: "doc", id: PROJECT_ID, slug: "acme" });
+    // A doc's history page and a folder page are not the doc itself.
+    expect(parseWorkspaceEntityLink(`/acme/docs/${PROJECT_ID}/history`)).toBeNull();
+    expect(parseWorkspaceEntityLink(`/acme/docs/folders/${PROJECT_ID}`)).toBeNull();
+  });
+
   it("parses a site-relative path without needing an app origin", () => {
     expect(parseWorkspaceEntityLink(`/acme/projects/${PROJECT_ID}`)).toEqual({
       kind: "project",

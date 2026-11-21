@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Globe, Info, Lock } from "lucide-react";
+import { AlertTriangle, Globe, Info, Lock } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
@@ -200,8 +200,8 @@ export function DeleteRuntimeDialog({
       <AlertDialogContent
         className={
           cascade
-            ? "w-[calc(100vw-2rem)] !max-w-[640px] gap-0 overflow-hidden p-0"
-            : "w-[calc(100vw-2rem)] !max-w-[440px] gap-0 overflow-hidden p-0"
+            ? "w-[calc(100%-2rem)] !max-w-[640px] gap-0 overflow-hidden p-0"
+            : "w-[calc(100%-2rem)] !max-w-[440px] gap-0 overflow-hidden p-0"
         }
         onClick={(e) => e.stopPropagation()}
       >

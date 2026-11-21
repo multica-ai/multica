@@ -81,15 +81,18 @@ const (
 	codexVersionDiagnosticTimeout      = 2 * time.Second
 	// Keep a raw agent-message tail small enough that a slow daemon does not
 	// make the stdout reader retain token-sized channel entries indefinitely.
-	// At one sixty-fourth of the scanner's maximum completed-snapshot line, any
-	// reconcilable item occupies at most 65 of the 256 message slots (the leading
-	// delta plus 64 aggregates), reserving the rest for status and tool events.
-	// Since this threshold is 512 KiB, a normal message will not reach it: only
-	// its leading delta is usually handed off during generation, while the
-	// remaining deltas stay pending until item/completed reconciles the item.
-	// A single provider event may be larger, in which case that event is flushed
-	// as one chunk rather than split at an arbitrary byte boundary.
+	// At one sixty-fourth of the scanner's maximum completed-snapshot line, a
+	// burst of deltas costs at most one channel slot per 512 KiB, never one per
+	// token. A normal message will not reach this size; its tail is handed off
+	// on codexAgentMessageFlushInterval instead. A single
+	// provider event may be larger, in which case that event is flushed as one
+	// chunk rather than split at an arbitrary byte boundary.
 	codexAgentMessageAggregateBytes = agentStreamMaxLineBytes / 64
+	// codexAgentMessageFlushInterval is how long pending agent text may wait
+	// before the next delta hands it off. It matches the daemon's 500 ms report
+	// batch, so a long answer streams at the rate the server can show it while
+	// a token burst still costs at most one channel slot per interval.
+	codexAgentMessageFlushInterval = 500 * time.Millisecond
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
 	// a context-cancel kill. A clean exit lets codex run its shutdown path and
@@ -1242,12 +1245,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 	var outputMu sync.Mutex
 	// Result.Output is "final user-facing output selected by the backend"
-	// (agent.go), so it holds the deliverable only. finalAnswer is the text the
-	// app-server labelled `phase: "final_answer"`; lastAgentMessage is the
-	// fallback for the legacy `agent_message` protocol, which carries no phase.
+	// (agent.go), so it holds the deliverable only. output tracks the text the
+	// app-server labelled `phase: "final_answer"` and, for the legacy
+	// `agent_message` protocol which carries no phase, the last agent message.
 	// Every agent message still flows to msgCh, so the transcript is unchanged —
 	// only what the daemon forwards to a chat/channel reply narrows (GH #6006).
-	var finalAnswer, lastAgentMessage string
+	var output codexOutputSelection
 	var semanticObserved atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
 	firstItemWait := &codexFirstItemWaitObservation{}
@@ -1282,6 +1285,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		notificationProtocol:     "unknown",
 		acceptNotification:       turnNotificationGate.accept,
 		guardianRateLimitCircuit: &codexGuardianRateLimitCircuit{},
+		rateLimits:               newRateLimitTracker(opts.OnRateLimits),
 		onGuardianRateLimit: func() {
 			guardianRateLimitTripped.Store(true)
 			b.cfg.Logger.Warn("codex Guardian approval rate-limit circuit opened",
@@ -1310,17 +1314,17 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			// preserving the reader's EOF and cancellation liveness.
 			return trySend(msgCh, msg)
 		},
-		onAgentMessage: func(text string) {
+		onAgentMessage: func(text, phase string) {
 			// Delta events make MessageText incremental. Keep Result.Output's
 			// legacy fallback authoritative by updating it from the completed
 			// agent-message snapshot, not whichever delta happened to arrive last.
 			outputMu.Lock()
-			lastAgentMessage = text
+			output.observeAgentMessage(text, phase)
 			outputMu.Unlock()
 		},
 		onFinalAnswer: func(text string) {
 			outputMu.Lock()
-			finalAnswer = text
+			output.observeFinalAnswer(text)
 			outputMu.Unlock()
 		},
 		onSemanticActivity: func(description string) {
@@ -1614,9 +1618,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// Whether that notice asks the agent to tell the USER is the caller's
 		// call, not ours: it depends on whether this surface's conversation is
 		// still readable, which this package cannot see (MUL-5722).
+		turnPrompt := b.skillTurnPrompt(runCtx, c, prompt, opts)
 		turnParams := map[string]any{
 			"threadId": threadID,
-			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
+			"input":    codexTurnInput(turnPrompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
 		}
 		// Per-turn reasoning override. Mirrors the per-thread injection in
 		// startOrResumeThread; keeping both in sync is enforced by the
@@ -1898,7 +1903,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 
 		outputMu.Lock()
-		finalOutput := codexDeliverableOutput(finalAnswer, lastAgentMessage)
+		finalOutput := codexDeliverableOutput(output)
 		outputMu.Unlock()
 
 		// Build usage map from accumulated codex usage.
@@ -2320,17 +2325,50 @@ func trySendString(ch chan<- string, value string) {
 	}
 }
 
+// codexOutputSelection records what a turn produced that could become
+// Result.Output. The zero value is an empty selection.
+type codexOutputSelection struct {
+	// finalAnswer is the last non-blank message labelled `phase: "final_answer"`.
+	finalAnswer string
+	// finalAnswerObserved is set by any final_answer item, including one with
+	// empty or whitespace-only text: the app-server explicitly ended the turn
+	// without a deliverable, which is different from never labelling one.
+	finalAnswerObserved bool
+	lastAgentMessage    string
+	// lastAgentMessagePhase is the phase label of lastAgentMessage; empty for
+	// the legacy protocol and for app-servers that do not label phases.
+	lastAgentMessagePhase string
+}
+
+func (s *codexOutputSelection) observeAgentMessage(text, phase string) {
+	s.lastAgentMessage = text
+	s.lastAgentMessagePhase = phase
+}
+
+func (s *codexOutputSelection) observeFinalAnswer(text string) {
+	s.finalAnswerObserved = true
+	if strings.TrimSpace(text) != "" {
+		s.finalAnswer = text
+	}
+}
+
 // codexDeliverableOutput picks Result.Output from what the turn produced: the
 // message the app-server itself labelled `phase: "final_answer"`, or — for the
 // legacy `agent_message` protocol, which carries no phase — the most recent
 // agent message. Never every message joined: the intermediate ones narrate the
 // work between tool calls, which belongs to the transcript and not to a chat or
-// IM reply (GH #6006).
-func codexDeliverableOutput(finalAnswer, lastAgentMessage string) string {
-	if finalAnswer != "" {
-		return finalAnswer
+// IM reply (GH #6006). A message explicitly labelled with another phase (for
+// example `commentary`) is narration too, so an empty or missing final answer
+// after it yields empty output instead of promoting the narration to the
+// deliverable.
+func codexDeliverableOutput(s codexOutputSelection) string {
+	if s.finalAnswer != "" {
+		return s.finalAnswer
 	}
-	return lastAgentMessage
+	if s.finalAnswerObserved || s.lastAgentMessagePhase != "" {
+		return ""
+	}
+	return s.lastAgentMessage
 }
 
 func logCodexAgentMessage(logger *slog.Logger, msg Message) {
@@ -2394,16 +2432,22 @@ type codexClient struct {
 	// delivered prefix. Unit clients may leave this nil and use onMessage.
 	onAgentMessageChunk func(text string) bool
 	// onAgentMessage receives the authoritative completed text for one agent
-	// message. onAgentMessageChunk may deliver that text incrementally, so
+	// message and its phase label ("" when the protocol carries none).
+	// onAgentMessageChunk may deliver that text incrementally, so
 	// Result.Output fallbacks must use this callback rather than the last chunk.
-	onAgentMessage           func(text string)
+	onAgentMessage           func(text, phase string)
 	onSemanticActivity       func(description string)
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
 	onGuardianRateLimit      func()
+	// rateLimits merges account/rateLimits/updated notifications; nil when
+	// the caller does not collect rate limits.
+	rateLimits *rateLimitTracker
 	// onFinalAnswer fires only for an agent message the app-server itself
 	// labelled `phase: "final_answer"` — the turn's deliverable, as opposed to
 	// the intermediate agent messages that narrate work between tool calls.
+	// It fires for an empty final answer too, so the caller can tell "ended
+	// without a deliverable" from "never labelled one".
 	// Both still reach onMessage: the transcript keeps the whole timeline, only
 	// Result.Output is narrowed to the deliverable (GH #6006).
 	onFinalAnswer func(text string)
@@ -2421,6 +2465,8 @@ type codexClient struct {
 	// advanced only after onAgentMessageChunk confirms daemon handoff.
 	agentMessageStreams map[string]*codexAgentMessageStream
 	agentMessageOrder   []string
+	// now is the clock for agent-text flush pacing; nil means time.Now.
+	now func() time.Time
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnCompleted        bool
@@ -2440,6 +2486,8 @@ type codexClient struct {
 type codexAgentMessageStream struct {
 	delivered strings.Builder
 	pending   strings.Builder
+	// lastFlush is when pending text was last offered to the daemon channel.
+	lastFlush time.Time
 }
 
 // codexTurnNotificationGate keeps resume-time history replay from mutating the
@@ -2571,6 +2619,10 @@ type pendingRPC struct {
 type rpcResult struct {
 	result json.RawMessage
 	err    error
+	// processExited marks the error codexClient.markProcessExited hands to
+	// every pending request. It is not an answer from the server, so a caller
+	// whose context has already ended reports that instead.
+	processExited bool
 }
 
 type codexHandshakeTimeoutError struct {
@@ -2726,11 +2778,16 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 
 	select {
 	case res := <-pr.ch:
+		if res.processExited && requestCtx.Err() != nil {
+			return nil, codexRequestContextError(requestCtx)
+		}
 		return res.result, res.err
 	case <-processDone:
 		select {
 		case res := <-pr.ch:
-			return res.result, res.err
+			if !res.processExited {
+				return res.result, res.err
+			}
 		default:
 		}
 		c.mu.Lock()
@@ -2809,7 +2866,7 @@ func (c *codexClient) markProcessExited(err error) {
 		}
 	}
 	for id, pr := range c.pending {
-		pr.ch <- rpcResult{err: err}
+		pr.ch <- rpcResult{err: err, processExited: true}
 		delete(c.pending, id)
 	}
 }
@@ -2988,6 +3045,14 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	var params map[string]any
 	if p, ok := raw["params"]; ok {
 		_ = json.Unmarshal(p, &params)
+	}
+	// Rate limits belong to the account, not to a thread or turn, so they are
+	// read before the thread filter and the current-turn gate. The
+	// notification then continues down the usual path unchanged.
+	if method == "account/rateLimits/updated" {
+		if update, ok := parseCodexRateLimitsUpdated(params); ok {
+			c.rateLimits.apply(update)
+		}
 	}
 	// Filter multiplexed subagent threads before the current-turn gate. The
 	// gate mutates started/turnID on turn/started; letting another thread reach
@@ -3390,7 +3455,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 			c.onMessage(Message{Type: MessageText, Content: text})
 		}
 		if text != "" && c.onAgentMessage != nil {
-			c.onAgentMessage(text)
+			c.onAgentMessage(text, "")
 		}
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
@@ -3614,9 +3679,11 @@ func (c *codexClient) handleAgentMessageDelta(itemID, delta string) {
 
 	stream := c.agentMessageStream(itemID)
 	// The leading delta is the latency-critical event. Deliver it immediately;
-	// coalesce the rest so a burst of token notifications cannot fill the
-	// daemon channel before its consumer is scheduled.
+	// coalesce the rest into one chunk per flush interval so a burst of token
+	// notifications cannot fill the daemon channel before its consumer is
+	// scheduled, while a long answer still streams as it is generated.
 	if stream.delivered.Len() == 0 && stream.pending.Len() == 0 {
+		stream.lastFlush = c.clock()
 		if c.emitAgentMessageChunk(delta) {
 			stream.delivered.WriteString(delta)
 			return
@@ -3624,9 +3691,18 @@ func (c *codexClient) handleAgentMessageDelta(itemID, delta string) {
 	}
 
 	stream.pending.WriteString(delta)
-	if stream.pending.Len() >= codexAgentMessageAggregateBytes {
+	if stream.pending.Len() >= codexAgentMessageAggregateBytes ||
+		c.clock().Sub(stream.lastFlush) >= codexAgentMessageFlushInterval {
+		stream.lastFlush = c.clock()
 		c.flushAgentMessageStream(stream)
 	}
+}
+
+func (c *codexClient) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 func (c *codexClient) flushAgentMessageStream(stream *codexAgentMessageStream) bool {
@@ -3797,18 +3873,20 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)
+		phase, _ := item["phase"].(string)
 		if text != "" && c.onAgentMessage != nil {
-			c.onAgentMessage(text)
+			c.onAgentMessage(text, phase)
 		}
 		c.completeAgentMessage(itemID, text)
-		phase, _ := item["phase"].(string)
 		if phase == "final_answer" {
 			// The gate exists so a subagent or a replayed history turn cannot
 			// end OUR turn early, and the thread guard at the top of this
 			// function already keeps foreign threads out. A final answer that
 			// arrives before we observed turn/started is still this thread's
-			// deliverable, and dropping it would fall back to narration.
-			if text != "" && c.onFinalAnswer != nil {
+			// deliverable, and dropping it would fall back to narration. An
+			// empty final answer is reported too: it means the turn ended
+			// without a deliverable, not that the last narration is one.
+			if c.onFinalAnswer != nil {
 				c.onFinalAnswer(text)
 			}
 			// Keep the stream open until turn/completed. A final answer is the

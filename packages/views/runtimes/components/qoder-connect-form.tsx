@@ -10,7 +10,7 @@ import {
   Plug,
   Settings2,
   ShieldCheck,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import {
   MAX_CONCURRENCY,
   MAX_RUN_TIMEOUT,

@@ -19,7 +19,7 @@ import {
   type Row,
   type SortingState,
 } from "@tanstack/react-table";
-import { Check, Copy, Search, X } from "lucide-react";
+import { Check, Copy, Search, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { DataTable } from "@multica/ui/components/ui/data-table";
@@ -163,7 +163,7 @@ export function RichTableDialog({ model, open, onOpenChange, getMarkdown }: Rich
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex h-[min(85dvh,56rem)] w-[min(72rem,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+        className="flex h-[min(85%,56rem)] w-[min(72rem,calc(100%-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-border py-2 pr-2 pl-4">
           <DialogTitle className="mr-auto text-body font-medium">

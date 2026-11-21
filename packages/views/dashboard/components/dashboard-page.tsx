@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { BarChart3, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BarChart3, RefreshCw } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -12,6 +12,13 @@ import {
   NumberFlow,
 } from "@multica/ui/components/ui/number-flow";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import {
+  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  DASHBOARD_HISTORY_365D_FLAG,
+} from "@multica/core/feature-flags";
+import { workspaceSubscriptionPricesOptions } from "@multica/core/billing";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { Agent } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -23,13 +30,16 @@ import {
   dashboardRunTimeDailyOptions,
   dashboardFailuresDailyOptions,
   dashboardFailuresByAgentOptions,
+  useDashboardHistoryLimit,
 } from "@multica/core/dashboard";
+import { toast } from "sonner";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
-import { PAGE_GUTTER } from "../../layout/page-header";
-import { CollectionPageHeader } from "../../layout/collection-page";
+import { CollectionPageState } from "../../layout/collection-page";
+import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
 import { useNavigation } from "../../navigation";
+import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import {
   addDaysIso,
   aggregateByWeek,
@@ -67,7 +77,13 @@ import { ProjectFilter, TimeRangeFilter } from "./dashboard-filters";
 import { UsageTrendCard } from "./usage-trend-card";
 import { Leaderboard } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
-import { cn } from "@multica/ui/lib/utils";
+import {
+  earliestReadableDay,
+  effectiveRange,
+  isRangeAllowed,
+  planForRange,
+} from "../history-range";
+import { dashboardTimeRanges } from "./dashboard-shared";
 
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
@@ -137,9 +153,9 @@ function useDataFreshness(
  * where the failure breakdown sat below a leaderboard that could itself run to
  * thirty rows, and the only way to chart failures was to hide spend.
  *
- * Scope is expressed by where a control lives: the toolbar under the header
- * carries the tabs and the two page-scoped filters (time range, project),
- * every card carries its own view switches. All six rollups are fetched for
+ * Scope is expressed by where a control lives: the header carries the tabs and
+ * the two page-scoped filters (time range, project), every card carries its
+ * own view switches. All six rollups are fetched for
  * both tabs — they are small, and prefetching is what makes switching tabs
  * instant — but the loading and empty states are per tab, so Usage does not
  * wait on the failure queries.
@@ -153,8 +169,51 @@ export function DashboardPage() {
   const viewTZ = useViewingTimezone();
   const navigation = useNavigation();
   const locales = i18n.resolvedLanguage ?? i18n.language;
-  const [days, setDays] = useState<TimeRange>(30);
+  // What the reader picked. The page reads `days`, the longest range the plan
+  // covers up to that pick (MUL-9490), derived rather than written back so an
+  // upgrade restores the pick.
+  const [selectedDays, setSelectedDays] = useState<TimeRange>(30);
+  const history = useDashboardHistoryLimit(wsId);
+  const ranges = dashboardTimeRanges(useFeatureEnabled(DASHBOARD_HISTORY_365D_FLAG, false));
+  const days = effectiveRange(selectedDays, history.maxDays, ranges);
+  // Every dashboard query waits for the limit and is keyed on it.
+  const historyLimit = history.ready ? history.maxDays : undefined;
+  const billingEnabled = useFeatureEnabled(BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG, false);
+  const workspacePaths = useWorkspacePaths();
+  const viewPlans = () => navigation.push(`${workspacePaths.settings()}?tab=billing`);
+  // Plan labels on locked ranges come from the limits Cloud enforces; prices
+  // are read only once a range is actually locked.
+  const hasLockedRange = ranges.some((r) => !isRangeAllowed(r.days, history.maxDays));
+  const { data: prices } = useQuery({
+    ...workspaceSubscriptionPricesOptions(wsId),
+    enabled: billingEnabled && hasLockedRange && wsId.length > 0,
+  });
+  const planLimits = prices?.planLimits ?? null;
+
+  // A limit that tightens while the page is open (a trial ending, a
+  // downgrade) moves the page to a shorter range. Say so once, rather than
+  // letting the range change silently.
+  const previousMaxDays = useRef<number | null | undefined>(undefined);
+  useEffect(() => {
+    const previous = previousMaxDays.current;
+    previousMaxDays.current = history.ready ? history.maxDays : undefined;
+    if (!history.ready || previous === undefined || history.maxDays === null) return;
+    const tightened = previous === null || history.maxDays < previous;
+    if (!tightened || isRangeAllowed(selectedDays, history.maxDays)) return;
+    const message = t(($) => $.history_limit.fell_back, { days: history.maxDays });
+    if (billingEnabled) {
+      toast(message, {
+        action: { label: t(($) => $.history_limit.view_plans), onClick: viewPlans },
+      });
+    } else {
+      toast(message);
+    }
+    // Only a change in the limit announces anything.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history.ready, history.maxDays]);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  // One scroller for both tabs: the offset restored is the shown tab's.
+  const restoreScrollRef = useRestoredScrollRef("dashboard");
 
   // The tab lives in the URL because the Errors view is the half of this page
   // people paste at each other ("this agent failed 54 times, see for
@@ -206,7 +265,7 @@ export function DashboardPage() {
   const chartFetchDays = weekCount * 7;
 
   const dailyQuery = useQuery(
-    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, viewTZ, historyLimit),
   );
   // The three per-agent rollups carry no date, so `dailyCutoffIso` below
   // cannot trim them — their window is closed server-side at exactly `days`
@@ -216,19 +275,19 @@ export function DashboardPage() {
   // and the Run time / Tasks KPIs silently widen by one day while the chart
   // and the Cost / Tokens KPIs beside them do not (MUL-5551).
   const byAgentQuery = useQuery(
-    dashboardUsageByAgentOptions(wsId, days, projectId, viewTZ),
+    dashboardUsageByAgentOptions(wsId, days, projectId, viewTZ, historyLimit),
   );
   const runTimeQuery = useQuery(
-    dashboardAgentRunTimeOptions(wsId, days, projectId, viewTZ),
+    dashboardAgentRunTimeOptions(wsId, days, projectId, viewTZ, historyLimit),
   );
   const runTimeDailyQuery = useQuery(
-    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ, historyLimit),
   );
   const failuresDailyQuery = useQuery(
-    dashboardFailuresDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardFailuresDailyOptions(wsId, chartFetchDays, projectId, viewTZ, historyLimit),
   );
   const failuresByAgentQuery = useQuery(
-    dashboardFailuresByAgentOptions(wsId, days, projectId, viewTZ),
+    dashboardFailuresByAgentOptions(wsId, days, projectId, viewTZ, historyLimit),
   );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
@@ -293,12 +352,13 @@ export function DashboardPage() {
   // two failure rollups, and a workspace with spend but no failures is not an
   // empty dashboard.
   const usageLoading =
+    !history.ready ||
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
     runTimeQuery.isLoading ||
     runTimeDailyQuery.isLoading;
   const errorsLoading =
-    failuresDailyQuery.isLoading || failuresByAgentQuery.isLoading;
+    !history.ready || failuresDailyQuery.isLoading || failuresByAgentQuery.isLoading;
 
   const usageHasNoData =
     !usageLoading &&
@@ -385,23 +445,31 @@ export function DashboardPage() {
   // pre-zeroed inside the helpers, so sparse weeks render as empty bars
   // instead of being dropped (MUL-2382 weekly window scoping). Week
   // boundaries follow the viewer's timezone.
+  //
+  // Under a plan limit the leftmost week can start before the first day the
+  // plan covers; the server returns nothing for those days, and the week is
+  // marked partial so the short bar is not read as a dip.
+  const earliestDay = useMemo(
+    () => earliestReadableDay(todayIso(viewTZ), history.maxDays, addDaysIso),
+    [viewTZ, history.maxDays],
+  );
   const weekly = useMemo(
-    () => aggregateByWeek(dailyUsage, viewTZ, weekCount),
-    [dailyUsage, viewTZ, weekCount],
+    () => aggregateByWeek(dailyUsage, viewTZ, weekCount, earliestDay),
+    [dailyUsage, viewTZ, weekCount, earliestDay],
   );
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
   const weeklyTime = useMemo(
-    () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount),
-    [runTimeDailyRows, viewTZ, weekCount],
+    () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount, earliestDay),
+    [runTimeDailyRows, viewTZ, weekCount, earliestDay],
   );
   const weeklyTasks = useMemo(
-    () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount),
-    [runTimeDailyRows, viewTZ, weekCount],
+    () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount, earliestDay),
+    [runTimeDailyRows, viewTZ, weekCount, earliestDay],
   );
   const weeklyErrors = useMemo(
-    () => aggregateWeeklyErrors(failureDailyRows, viewTZ, weekCount),
-    [failureDailyRows, viewTZ, weekCount],
+    () => aggregateWeeklyErrors(failureDailyRows, viewTZ, weekCount, earliestDay),
+    [failureDailyRows, viewTZ, weekCount, earliestDay],
   );
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),
@@ -462,70 +530,71 @@ export function DashboardPage() {
       onValueChange={handleTabChange}
       className="flex h-full min-h-0 flex-col gap-0"
     >
-      <CollectionPageHeader
-        icon={BarChart3}
-        title={t(($) => $.title)}
-        actions={
-          /* Data freshness cluster: the timestamp and the action that advances
-             it stay together. Refresh re-pulls the same scope, so it lives here
-             with the page metadata rather than among the scope controls. */
-          <div className="flex items-center gap-1">
-            {tzLabel ? (
-              <span className="hidden text-caption text-muted-foreground lg:inline">
-                {updatedLabel
-                  ? t(($) => $.header.timezone_and_updated, {
-                      tz: tzLabel,
-                      time: updatedLabel,
-                    })
-                  : tzLabel}
-              </span>
-            ) : null}
-            <IconButton
-              variant="ghost"
-              size="icon-sm"
-              label={t(($) => $.header.refresh)}
-              tooltipSide="bottom"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-            >
-              <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
-            </IconButton>
-          </div>
-        }
-      />
-
-      {/* View toolbar, same grammar as the issues surface header: view
-          switching on the left, page-scoped filters on the right. Both tabs
-          share the range and project filter, which is why the filters live
-          here and not inside a tab. */}
-      <div className={cn("h-12 shrink-0 overflow-x-auto border-b [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
-        <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
-          <TabsList variant="line" className="gap-0 p-0 group-data-horizontal/tabs:h-full">
+      {/* The two tabs are views of the same data, so they sit beside the
+          title; both share the range and project filter, which is why the
+          filters live in the header and not inside a tab. */}
+      <PageHeader>
+        <div className="flex min-w-0 flex-1 items-center gap-2 self-stretch">
+          <h1 className="flex min-w-0 items-center gap-2 px-2 text-body font-medium">
+            <BarChart3 aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{t(($) => $.title)}</span>
+          </h1>
+          <TabsList variant="line" className="shrink-0 gap-0 p-0 group-data-horizontal/tabs:h-full">
             <TabsTrigger
               value="usage"
-              className="h-full rounded-none px-2.5 text-label group-data-horizontal/tabs:after:bottom-0"
+              className="h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0"
             >
               {t(($) => $.tab_usage)}
             </TabsTrigger>
             <TabsTrigger
               value="errors"
-              className="h-full rounded-none px-2.5 text-label group-data-horizontal/tabs:after:bottom-0"
+              className="h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0"
             >
               {t(($) => $.errors.title)}
             </TabsTrigger>
           </TabsList>
-          <div className="flex shrink-0 items-center gap-2">
-            <TimeRangeFilter days={days} onChange={setDays} />
-            <ProjectFilter
-              projects={projects}
-              projectValue={projectValue}
-              onProjectChange={setProjectValue}
-            />
-          </div>
         </div>
-      </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {tzLabel ? (
+            <span className="mr-1 hidden text-caption text-muted-foreground lg:inline">
+              {updatedLabel
+                ? t(($) => $.header.timezone_and_updated, {
+                    tz: tzLabel,
+                    time: updatedLabel,
+                  })
+                : tzLabel}
+            </span>
+          ) : null}
+          <TimeRangeFilter
+            days={days}
+            onChange={setSelectedDays}
+            maxDays={history.maxDays}
+            planForDays={(range) => planForRange(range, planLimits)}
+            onViewPlans={billingEnabled ? viewPlans : null}
+            ranges={ranges}
+          />
+          <ProjectFilter
+            projects={projects}
+            projectValue={projectValue}
+            onProjectChange={setProjectValue}
+          />
+          <IconButton
+            label={t(($) => $.header.refresh)}
+            tooltipSide="bottom"
+            className="text-muted-foreground"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+          >
+            <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
+          </IconButton>
+        </div>
+      </PageHeader>
 
-      <div className="flex-1 overflow-y-auto">
+      <div
+        ref={restoreScrollRef}
+        data-tab-scroll-root="dashboard"
+        className="flex-1 overflow-y-auto"
+      >
         <div className="mx-auto max-w-6xl p-6">
           <TabsContent value="usage" className="space-y-5">
             {usageLoading ? (
@@ -654,12 +723,10 @@ function DashboardSkeleton() {
 function DashboardEmpty() {
   const { t } = useT("usage");
   return (
-    <div className="flex flex-col items-center rounded-lg border border-dashed py-12 text-center">
-      <BarChart3 className="h-6 w-6 text-faint-foreground" />
-      <p className="mt-3 text-body font-medium">{t(($) => $.empty.title)}</p>
-      <p className="mt-1 max-w-md text-caption text-muted-foreground">
-        {t(($) => $.empty.body)}
-      </p>
-    </div>
+    <CollectionPageState
+      icon={BarChart3}
+      title={t(($) => $.empty.title)}
+      description={t(($) => $.empty.body)}
+    />
   );
 }

@@ -27,7 +27,8 @@
 //     runtime_recovery, timeout, iteration_limit, agent_blocked,
 //     api_invalid_request, skill_bundle_unavailable,
 //     runtime_cli_timeout, environment_prepare_failed,
-//     invalid_task_identity, runtime_access_denied
+//     local_directory_missing, invalid_task_identity,
+//     runtime_access_denied
 //
 //   - 14 agent-side values (with `agent_error.` prefix) produced by
 //     Classify(rawError) when the agent process surfaced an error string.
@@ -92,6 +93,12 @@ const (
 	// Written by FailStaleTasks (server) and the daemon's per-task
 	// agent timeout path.
 	ReasonTimeout Reason = "timeout"
+
+	// Process cleanup is a separate, non-retryable failure even when the
+	// provider succeeded or the user cancelled. Blocked successors do not
+	// create a new cleanup obligation of their own.
+	ReasonProcessCleanupUnconfirmed Reason = "cleanup_unconfirmed"
+	ReasonProcessCleanupBlocked     Reason = "cleanup_blocked"
 
 	// ReasonIterationLimit: the agent reached its per-run iteration
 	// cap and emitted a fallback "I reached the iteration limit"
@@ -172,6 +179,23 @@ const (
 	// taskRunFailureReason in daemon/daemon.go; resume-safe, because no
 	// session was touched.
 	ReasonEnvironmentPrepareFailed Reason = "environment_prepare_failed"
+
+	// ReasonLocalDirectoryMissing: the project links a local_directory to
+	// the daemon that claimed the task, and that directory no longer exists
+	// on the machine — the user deleted or moved it after linking it. The
+	// agent process is never launched.
+	//
+	// Split out of the daemon's generic local_directory_error because it is
+	// the one local-directory failure whose fix the user can name from the
+	// label alone: restore the folder, or link a new one (or remove the stale
+	// one) in the project's resources. "Local directory error" hid that, and
+	// retrying reproduces it identically.
+	//
+	// Deliberately NOT retryable: nothing changes until the user acts.
+	// Resume-safe, because no session was touched. Written by
+	// acquireLocalDirectoryLockIfNeeded in daemon/daemon.go; older daemons'
+	// reports are upgraded by NormalizeDaemonReason.
+	ReasonLocalDirectoryMissing Reason = "local_directory_missing"
 
 	// ReasonInvalidTaskIdentity: the daemon refused a claimed task because
 	// the task row's authoritative agent_id was absent or disagreed with the
@@ -271,7 +295,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 27 reasons. Order is
+// allReasons is the canonical ordered list of reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -288,12 +312,15 @@ var allReasons = []Reason{
 	ReasonRuntimeReconnectTimeout,
 	ReasonRuntimeRecovery,
 	ReasonTimeout,
+	ReasonProcessCleanupUnconfirmed,
+	ReasonProcessCleanupBlocked,
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
 	ReasonSkillBundleUnavailable,
 	ReasonRuntimeCLITimeout,
 	ReasonEnvironmentPrepareFailed,
+	ReasonLocalDirectoryMissing,
 	ReasonInvalidTaskIdentity,
 	ReasonRuntimeAccessDenied,
 

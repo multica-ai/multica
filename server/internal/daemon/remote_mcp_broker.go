@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -197,10 +198,10 @@ func remoteMCPServerName(connection remotemcp.Connection) string {
 		}
 		return '-'
 	}, strings.ToLower(connection.ContributionKey))
-	suffix := strings.ReplaceAll(connection.ContributionID, "-", "")
-	if len(suffix) > 8 {
-		suffix = suffix[:8]
-	}
+	// Plugin contribution IDs share a colon-delimited prefix. Hash the complete
+	// identity so the provider name is safe and different installations stay distinct.
+	digest := sha256.Sum256([]byte(connection.ContributionID))
+	suffix := hex.EncodeToString(digest[:8])
 	return "plugin-" + name + "-" + suffix
 }
 

@@ -4,12 +4,13 @@ description: Multica consigne et coordonne le travail ; les ordinateurs connect�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { RunPathDemo } from "@/components/demos/run-path-demo";
 
 Lorsque vous assignez une tâche à un agent, Multica crée une exécution que prend en charge un runtime sur un ordinateur connecté. Le runtime appelle un outil de codage IA local et réécrit l'avancement et les résultats dans la tâche d'origine.
 
 ## Le parcours complet d'une exécution
 
-![Schéma d'une exécution : à gauche, la zone Multica consigne et planifie — une tâche déclenche la création d'une exécution ; à droite, dans la zone « votre ordinateur », le daemon prend en charge l'exécution, lance l'outil de codage IA, puis lit et écrit dans le répertoire de travail ; les messages d'avancement remontent en temps réel vers le journal d'exécution, et le daemon réécrit le résultat final dans la tâche](/images/docs/how-a-run-works.webp)
+<RunPathDemo />
 
 1. **La tâche fournit le contexte.** La tâche contient la description du travail, la discussion et l'assigné. Lorsqu'elle est assignée à un agent, le système utilise les instructions, le modèle, les skills et la configuration de runtime de cet agent.
 2. **Multica crée une exécution.** L'exécution entre dans la file d'attente ; si aucun runtime n'est en ligne, elle y patiente.
@@ -35,7 +36,7 @@ Une exception : tout ce qui est enregistré dans le `custom_env` d'un agent est 
 
 ## Comment les agents sont déclenchés
 
-Les agents ne se mettent jamais au travail d'eux-mêmes — chaque exécution est déclenchée par une action explicite : assigner une tâche, @mentionner l'agent dans un commentaire, discuter directement avec lui, ou une automatisation. Pour savoir comment choisir entre ces quatre méthodes et connaître les règles qu'elles partagent, consultez [Mettre les agents au travail](/triggering-agents).
+Les agents ne se mettent jamais au travail d'eux-mêmes — chaque exécution est déclenchée par une action explicite : assigner une tâche, @mentionner l'agent dans un commentaire, discuter directement avec lui, ou une automatisation. Pour savoir laquelle choisir et connaître les règles communes, consultez [Mettre les agents au travail](/triggering-agents).
 
 ## Fin d'une exécution et fin d'une tâche
 

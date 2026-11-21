@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Cloud, Loader2, Lock, Search } from "lucide-react";
+import { ChevronDown, Cloud, Loader2, Lock, Search } from "@multica/ui/icons";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
@@ -176,7 +176,7 @@ export function RuntimePicker({
           )}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="truncate font-medium">
+              <span className="min-w-0 truncate font-medium">
                 {runtimesLoading
                   ? t(($) => $.create_dialog.runtime_loading)
                   : selectedRuntime
@@ -234,7 +234,7 @@ export function RuntimePicker({
                       grouping stays consistent instead of collapsing to a flat
                       list. */}
                   <div className="flex items-center justify-between gap-2 px-2 pb-0.5 pt-2 text-micro font-medium text-muted-foreground">
-                    <span className="truncate">{machine.title}</span>
+                    <span className="min-w-0 truncate">{machine.title}</span>
                     <span className="shrink-0 tabular-nums">
                       {t(($) => $.create_dialog.runtime_group_online, {
                         online: machine.onlineCount,

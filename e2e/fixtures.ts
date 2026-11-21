@@ -52,7 +52,10 @@ export class TestApiClient {
   private email: string | null = null;
   private createdIssueIds: string[] = [];
   private createdProjectIds: string[] = [];
+  private createdDocIds: string[] = [];
+  private createdDocFolderIds: string[] = [];
   private seededIssueIds: string[] = [];
+  private createdPropertyIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -185,6 +188,28 @@ export class TestApiClient {
     }
   }
 
+  async createDoc(title: string, content: string, folderId?: string) {
+    const res = await this.authedFetch("/api/docs", {method: "POST", body: JSON.stringify({title, content, folder_id: folderId})});
+    if (!res.ok) throw new Error(`create doc: ${res.status} ${await res.text()}`);
+    const doc = await res.json() as {id: string; revision: number; title: string; content: string};
+    this.createdDocIds.push(doc.id); return doc;
+  }
+  async getDoc(id: string) {
+    const res = await this.authedFetch(`/api/docs/${id}`);
+    if (!res.ok) throw new Error(`get doc: ${res.status}`);
+    return await res.json() as {id: string; revision: number; title: string; content: string; folder_id: string | null; version_count: number};
+  }
+  async updateDoc(id: string, base: number, content: string) {
+    const res = await this.authedFetch(`/api/docs/${id}`, {method: "PATCH", body: JSON.stringify({base_revision: base, content})});
+    if (!res.ok) throw new Error(`update doc: ${res.status} ${await res.text()}`);
+    return await res.json() as {revision: number};
+  }
+  async createDocFolder(title: string) {
+    const res = await this.authedFetch("/api/doc-folders", {method: "POST", body: JSON.stringify({title})});
+    if (!res.ok) throw new Error(`create folder: ${res.status}`);
+    const folder = await res.json() as {id: string}; this.createdDocFolderIds.push(folder.id); return folder;
+  }
+
   /** Create a project and register it for cleanup. */
   async createProject(title: string, opts?: Record<string, unknown>) {
     const res = await this.authedFetch("/api/projects", {
@@ -197,6 +222,20 @@ export class TestApiClient {
     const project = await res.json();
     this.createdProjectIds.push(project.id);
     return project as { id: string; title: string; status: string };
+  }
+
+  /** Create a workspace custom property definition; archived on cleanup. */
+  async createProperty(name: string, type = "text", config?: { options: { name: string; color: string }[] }) {
+    const res = await this.authedFetch("/api/properties", {
+      method: "POST",
+      body: JSON.stringify({ name, type, config }),
+    });
+    if (!res.ok) {
+      throw new Error(`create property failed: ${res.status} ${await res.text()}`);
+    }
+    const property = await res.json();
+    this.createdPropertyIds.push(property.id);
+    return property as { id: string; name: string; config: { options?: { id: string; name: string; color: string }[] } };
   }
 
   async updateProject(id: string, updates: Record<string, unknown>) {
@@ -335,15 +374,30 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
-  async createComment(issueId: string, content: string) {
+  async createComment(issueId: string, content: string, parentId?: string) {
     const res = await this.authedFetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, ...(parentId ? { parent_id: parentId } : {}) }),
     });
     if (!res.ok) {
       throw new Error(`create comment failed: ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as { id: string };
+  }
+
+  async seedCommentNotification(issueId: string, commentId: string, title: string) {
+    if (!this.workspaceId || !this.email) throw new Error("Select a workspace before seeding a notification");
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(
+        `INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, actor_type, actor_id, type, issue_id, title, details)
+         SELECT $1, 'member', id, 'member', id, 'new_comment', $2, $3, $4::jsonb FROM "user" WHERE email = $5`,
+        [this.workspaceId, issueId, title, JSON.stringify({ comment_id: commentId }), this.email],
+      );
+    } finally {
+      await client.end();
+    }
   }
 
   /** Seed an owned runtime without launching an actual agent tool. */
@@ -421,6 +475,11 @@ export class TestApiClient {
 
   /** Clean up all issues created during this test. */
   async cleanup() {
+    for (const id of this.createdDocIds) await this.authedFetch(`/api/docs/${id}`, {method: "DELETE"});
+    this.createdDocIds = [];
+    for (const id of this.createdDocFolderIds.reverse()) await this.authedFetch(`/api/doc-folders/${id}`, {method: "DELETE"});
+    this.createdDocFolderIds = [];
+
     if (this.seededIssueIds.length > 0 && this.workspaceId) {
       const client = new pg.Client(DATABASE_URL);
       await client.connect();
@@ -452,6 +511,19 @@ export class TestApiClient {
       }
     }
     this.createdProjectIds = [];
+    // Definitions cannot be deleted, only archived; archiving takes them out
+    // of every picker so later tests see the catalog they expect.
+    for (const id of this.createdPropertyIds) {
+      try {
+        await this.authedFetch(`/api/properties/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ archived: true }),
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    this.createdPropertyIds = [];
   }
 
   getToken() {

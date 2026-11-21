@@ -63,6 +63,44 @@ UPDATE "user" SET
 WHERE id = sqlc.arg('id')
 RETURNING *;
 
+-- name: AdvanceWhatsNewSeenVersion :one
+-- Only moves forward: an older client reporting an older release must not
+-- resurface highlights a newer client already dismissed. Both sides are
+-- validated MAJOR.MINOR.PATCH strings, so the int[] casts cannot fail and
+-- compare numerically (0.7.10 > 0.7.9). No row comes back when the stored
+-- version is already at or past the requested one.
+UPDATE "user" SET
+    whats_new_seen_version = sqlc.arg('version')::text,
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+  AND (
+    whats_new_seen_version IS NULL
+    OR string_to_array(whats_new_seen_version, '.')::int[] < string_to_array(sqlc.arg('version')::text, '.')::int[]
+  )
+RETURNING *;
+
+-- name: ClaimStarPromptShowing :one
+-- Grants one showing of the star prompt, atomically, so two tabs or devices
+-- reacting to the same moment cannot both show it. No row comes back when the
+-- user already starred, used up the showings, is inside the cooldown, or has
+-- an account newer than the cutoff.
+UPDATE "user" SET
+    star_prompt_shown_count = star_prompt_shown_count + 1,
+    star_prompt_last_shown_at = now()
+WHERE id = sqlc.arg('id')
+  AND star_prompt_starred_at IS NULL
+  AND star_prompt_shown_count < sqlc.arg('max_showings')::int
+  AND created_at <= sqlc.arg('created_before')::timestamptz
+  AND (star_prompt_last_shown_at IS NULL OR star_prompt_last_shown_at <= sqlc.arg('shown_before')::timestamptz)
+RETURNING *;
+
+-- name: MarkStarPromptStarred :one
+-- Keeps the first click time; repeating the call is a no-op.
+UPDATE "user" SET
+    star_prompt_starred_at = COALESCE(star_prompt_starred_at, now())
+WHERE id = $1
+RETURNING *;
+
 -- name: JoinCloudWaitlist :one
 -- Records interest in cloud runtimes. Does NOT mark onboarding
 -- complete — the user still has to pick a real path (CLI / Skip)

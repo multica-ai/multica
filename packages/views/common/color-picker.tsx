@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Dices, Pipette } from "lucide-react";
+import { Dices, Pipette } from "@multica/ui/icons";
 import {
   Popover,
   PopoverContent,
@@ -298,6 +298,7 @@ export function ColorPickerPanel({
               onChange(preset);
             }}
             className={cn(
+              // eslint-disable-next-line no-restricted-syntax -- color swatch
               "size-5 rounded-full transition-transform hover:scale-110",
               currentHex === preset &&
                 "ring-2 ring-ring ring-offset-2 ring-offset-surface-raised",

@@ -14,11 +14,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -45,6 +48,15 @@ const (
 	searchIndexCursorMaxBytes = 256 << 10
 	searchIndexCursorVersion  = 1
 	searchIndexStatementLimit = 15 * time.Second
+	// searchIndexAccessRules numbers the rules that decide which projects a
+	// caller may see, and goes up whenever they get stricter. Such a change
+	// writes no search_index_change row, so a copy built before it keeps
+	// content its holder may no longer read; a cursor carries the number it
+	// was issued under so that copy can be told to rebuild.
+	//
+	//	1: a private project is visible to its member list only. Before this,
+	//	   workspace owners and admins saw every private project (MUL-9284).
+	searchIndexAccessRules = 1
 )
 
 // searchIndexBootstrapSlots bounds the manifest and snapshot reads one API
@@ -109,18 +121,22 @@ func validPGSnapshotText(s string) bool {
 // searchIndexCursor is opaque to clients. Since is the snapshot whose changes
 // the client already holds. Target and the After* keyset are set only while a
 // catch-up spans several pages; once it completes, Target becomes the next
-// Since.
+// Since. AccessRules is the searchIndexAccessRules the cursor was issued
+// under; it is an optional field rather than a new Version so that a server
+// from before it existed still accepts the cursor.
 type searchIndexCursor struct {
-	Version   int    `json:"v"`
-	Since     string `json:"s"`
-	Target    string `json:"t,omitempty"`
-	AfterXid  string `json:"x,omitempty"`
-	AfterType string `json:"e,omitempty"`
-	AfterID   string `json:"i,omitempty"`
+	Version     int    `json:"v"`
+	Since       string `json:"s"`
+	Target      string `json:"t,omitempty"`
+	AfterXid    string `json:"x,omitempty"`
+	AfterType   string `json:"e,omitempty"`
+	AfterID     string `json:"i,omitempty"`
+	AccessRules int    `json:"a,omitempty"`
 }
 
 func encodeSearchIndexCursor(c searchIndexCursor) string {
 	c.Version = searchIndexCursorVersion
+	c.AccessRules = searchIndexAccessRules
 	raw, _ := json.Marshal(c)
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
@@ -267,6 +283,9 @@ func (h *Handler) runSearchIndexRead(ctx context.Context, fn func(q *db.Queries)
 }
 
 func (h *Handler) writeSearchIndexError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	if writeQueryCancellation(w, r, err) {
+		return
+	}
 	if isSearchStatementTimeout(err) {
 		writeError(w, http.StatusServiceUnavailable, "search index read timed out; please retry")
 		return
@@ -282,8 +301,15 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
 	release, ok := acquireSearchIndexBootstrapSlot(r.Context())
 	if !ok {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		writeSearchIndexBusy(w)
 		return
 	}
@@ -291,11 +317,17 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	var row db.GetSearchIndexManifestRow
 	err := h.runSearchIndexRead(r.Context(), func(q *db.Queries) error {
 		var err error
-		row, err = q.GetSearchIndexManifest(r.Context(), wsUUID)
+		row, err = q.GetSearchIndexManifest(r.Context(), db.GetSearchIndexManifestParams{
+			WorkspaceID:      wsUUID,
+			HiddenProjectIds: hidden.Param(),
+		})
 		return err
 	})
 	if err != nil {
 		h.writeSearchIndexError(w, r, "manifest", err)
+		return
+	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
 		return
 	}
 	writeJSON(w, http.StatusOK, SearchIndexManifestResponse{
@@ -335,6 +367,9 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 	}
 	release, ok := acquireSearchIndexBootstrapSlot(ctx)
 	if !ok {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		writeSearchIndexBusy(w)
 		return
 	}
@@ -377,19 +412,38 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 		h.writeSearchIndexError(w, r, "snapshot", err)
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
+	// Paging advances over the unfiltered page so a hidden issue cannot end
+	// the snapshot early or stall it.
+	pageLen := len(issues)
+	nextAfterNumber := int32(afterNumber)
+	if pageLen > 0 {
+		nextAfterNumber = issues[pageLen-1].Number
+	}
+	visibleIssues := filterVisibleIssues(hidden, issues)
+	visibleIssueIDs := make(map[pgtype.UUID]bool, len(visibleIssues))
+	for _, is := range visibleIssues {
+		visibleIssueIDs[is.ID] = true
+	}
 
 	resp := SearchIndexSnapshotResponse{
-		Issues:          h.searchIndexIssues(ctx, wsUUID, issues),
+		Issues:          h.searchIndexIssues(ctx, wsUUID, hidden, visibleIssues),
 		Comments:        make([]SearchIndexComment, 0, len(comments)),
-		Projects:        searchIndexProjects(projects),
-		NextAfterNumber: int32(afterNumber),
-		Done:            len(issues) < limit,
+		Projects:        searchIndexProjects(visibleProjects(hidden, projects)),
+		NextAfterNumber: nextAfterNumber,
+		Done:            pageLen < limit,
 	}
 	for _, c := range comments {
+		if !visibleIssueIDs[c.IssueID] {
+			continue
+		}
 		resp.Comments = append(resp.Comments, searchIndexComment(c.ID, c.IssueID, c.Content, c.CreatedAt))
 	}
-	if n := len(issues); n > 0 {
-		resp.NextAfterNumber = issues[n-1].Number
+	if writeQueryCancellation(w, r, r.Context().Err()) {
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -397,7 +451,8 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 // ListSearchIndexChanges returns the entities written after the cursor's
 // snapshot: live rows as upserts, missing rows (and comment tombstones) as
 // deletions. Returns 410 when retention pruning may have dropped a change the
-// cursor has not seen; the client must then rebuild its copy.
+// cursor has not seen, or when the copy predates the current access rules and
+// the caller cannot see every project; the client must then rebuild its copy.
 func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
@@ -409,6 +464,9 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		Limit  int    `json:"limit"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, searchIndexCursorMaxBytes+1024)).Decode(&req); err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -422,18 +480,28 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		limit = min(req.Limit, searchIndexChangesMaxLimit)
 	}
 
+	// Agents and other non-user callers have no per-user marker to check.
+	viewer, _ := util.ParseUUID(requestUserID(r))
 	var (
-		pruned   bool
-		target   = cur.Target
-		changes  []db.ListSearchIndexChangesRow
-		issues   []db.Issue
-		comments []db.ListSearchIndexCommentsByIDsRow
-		projects []db.Project
+		pruned        bool
+		accessChanged bool
+		target        = cur.Target
+		changes       []db.ListSearchIndexChangesRow
+		issues        []db.Issue
+		comments      []db.ListSearchIndexCommentsByIDsRow
+		projects      []db.Project
 	)
 	err = h.runSearchIndexRead(ctx, func(q *db.Queries) error {
 		var err error
 		if pruned, err = q.SearchIndexSinceIsPruned(ctx, cur.Since); err != nil || pruned {
 			return err
+		}
+		if viewer.Valid {
+			if accessChanged, err = q.SearchAccessChangedAfter(ctx, db.SearchAccessChangedAfterParams{
+				WorkspaceID: wsUUID, UserID: viewer, SinceSnapshot: cur.Since,
+			}); err != nil || accessChanged {
+				return err
+			}
 		}
 		if target == "" {
 			if target, err = q.GetSearchIndexCurrentSnapshot(ctx); err != nil {
@@ -503,9 +571,52 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusGone, "search index cursor expired; rebuild the local index")
 		return
 	}
+	if accessChanged {
+		// The caller's access changed after this copy's snapshot (made a
+		// guest or a member, or a guest gained or lost a project). The
+		// content it gained or lost was not rewritten, so no change would
+		// deliver or remove it; only a rebuild does.
+		writeError(w, http.StatusGone, "search index access changed; rebuild the local index")
+		return
+	}
+	// Entities in a project the caller cannot see are reported as deleted, so
+	// a client that synced them before losing access drops its copy.
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
+	if cur.AccessRules != searchIndexAccessRules && !hidden.Empty() {
+		// The copy was built under other access rules and may hold a project
+		// this caller cannot see any more; only a rebuild drops it. A caller
+		// who sees every project has nothing to drop and just gets a current
+		// cursor back.
+		writeError(w, http.StatusGone, "search index access rules changed; rebuild the local index")
+		return
+	}
+	if !hidden.Empty() {
+		issues = filterVisibleIssues(hidden, issues)
+		projects = visibleProjects(hidden, projects)
+		visibleComments := comments[:0:0]
+		issueProjects := map[pgtype.UUID]pgtype.UUID{}
+		for _, c := range comments {
+			projectID, seen := issueProjects[c.IssueID]
+			if !seen {
+				projectID, err = h.Queries.GetIssueProjectID(ctx, c.IssueID)
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					h.writeSearchIndexError(w, r, "changes", err)
+					return
+				}
+				issueProjects[c.IssueID] = projectID
+			}
+			if hidden.CanSeeProject(projectID) {
+				visibleComments = append(visibleComments, c)
+			}
+		}
+		comments = visibleComments
+	}
 
 	resp := SearchIndexChangesResponse{
-		Issues:   h.searchIndexIssues(ctx, wsUUID, issues),
+		Issues:   h.searchIndexIssues(ctx, wsUUID, hidden, issues),
 		Comments: []SearchIndexComment{},
 		Projects: searchIndexProjects(projects),
 		Deleted: SearchIndexDeleted{
@@ -562,10 +673,13 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	} else {
 		resp.Cursor = encodeSearchIndexCursor(searchIndexCursor{Since: target})
 	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, issues []db.Issue) []SearchIndexIssue {
+func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, hidden projectaccess.Hidden, issues []db.Issue) []SearchIndexIssue {
 	out := make([]SearchIndexIssue, 0, len(issues))
 	if len(issues) == 0 {
 		return out
@@ -575,7 +689,7 @@ func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, iss
 	for _, is := range issues {
 		originals = appendDuplicateOriginal(originals, is.Status, is.DuplicateOfIssueID)
 	}
-	fill := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
+	fill := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals...)
 	for _, is := range issues {
 		resp := issueToResponse(is, prefix)
 		fill(&resp)
@@ -605,4 +719,17 @@ func searchIndexComment(id, issueID pgtype.UUID, content string, createdAt pgtyp
 		Content:   content,
 		CreatedAt: createdAt.Time.UTC().Format(time.RFC3339Nano),
 	}
+}
+
+func visibleProjects(hidden projectaccess.Hidden, projects []db.Project) []db.Project {
+	if hidden.Empty() {
+		return projects
+	}
+	out := projects[:0:0]
+	for _, p := range projects {
+		if hidden.CanSeeProject(p.ID) {
+			out = append(out, p)
+		}
+	}
+	return out
 }

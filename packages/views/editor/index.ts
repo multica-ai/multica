@@ -23,6 +23,7 @@ export { useLazyEditor, type LazyEditorHandle, type LazyFocusTarget } from "./us
 export { anchorFromPoint, type TextAnchor } from "./text-anchor";
 export { useDownloadAttachment } from "./use-download-attachment";
 export { AttachmentDownloadProvider } from "./attachment-download-context";
+export { ImageThumbnailsProvider } from "./image-thumbnails-context";
 export {
   AttachmentPreviewModal,
   useAttachmentPreview,
@@ -30,6 +31,7 @@ export {
 } from "./attachment-preview-modal";
 export type {
   AttachmentPreviewHandle,
+  PreviewCopyLinkAction,
   PreviewLocateAction,
   PreviewSequence,
 } from "./attachment-preview-modal";
@@ -39,6 +41,7 @@ export {
   usePreviewSequence,
 } from "./preview-sequence-context";
 export type {
+  OpenAtOptions,
   PreviewItemDetails,
   PreviewSequenceControls,
 } from "./preview-sequence-context";

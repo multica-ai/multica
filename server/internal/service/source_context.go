@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/thumbnail"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -778,6 +779,9 @@ func (s *TaskService) CleanupAbandonedSourceContexts(ctx context.Context, limit 
 			key := s.SourceContextStorage.KeyFromURL(attachment.Url)
 			deleteCtx, cancel := context.WithTimeout(ctx, sourceContextObjectDeleteTimeout)
 			err := s.SourceContextStorage.DeleteObject(deleteCtx, key)
+			if thumbKey, ok := thumbnail.StorageKey(key); ok && err == nil {
+				err = s.SourceContextStorage.DeleteObject(deleteCtx, thumbKey)
+			}
 			cancel()
 			if err != nil {
 				deleteFailed = true

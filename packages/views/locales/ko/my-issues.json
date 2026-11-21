@@ -2,8 +2,8 @@
   "page": {
     "breadcrumb": "내 태스크",
     "workspace_fallback": "워크스페이스",
-    "empty_title": "내게 할당된 태스크가 없습니다",
-    "empty_description": "내가 만들었거나 담당자로 지정된 태스크가 여기에 표시됩니다."
+    "empty_title": "아직 태스크가 없습니다",
+    "empty_description": "나에게 할당되었거나, 내가 만들었거나, 내 에이전트와 스쿼드가 관련된 태스크가 여기에 표시됩니다."
   },
   "header": {
     "scope": {
@@ -14,7 +14,7 @@
       "created_label": "내가 만든 태스크",
       "created_description": "내가 생성한 태스크",
       "agents_label": "내 에이전트와 스쿼드",
-      "agents_description": "내 에이전트에게 할당된 태스크"
+      "agents_description": "내 에이전트와 스쿼드에 배정된 태스크"
     },
     "filter_button": "필터",
     "filter_status": "상태",

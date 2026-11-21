@@ -1,4 +1,8 @@
-export type MemberRole = "owner" | "admin" | "member";
+/**
+ * A guest (MUL-9420) sees only the projects in its `project_ids`, cannot edit
+ * issue properties or run agents, and takes no seat.
+ */
+export type MemberRole = "owner" | "admin" | "member" | "guest";
 
 export interface WorkspaceRepo {
   url: string;
@@ -17,6 +21,7 @@ export interface Workspace {
   avatar_url: string | null;
   created_at: string;
   updated_at: string;
+  pinned_at?: string | null;
 }
 
 /**
@@ -77,6 +82,19 @@ export interface User {
   profile_description: string;
   /** Pinned IANA tz; null means "use browser-detected tz at render time". */
   timezone: string | null;
+  /**
+   * Newest release whose What's new highlights the user has dismissed.
+   * null = never dismissed; undefined = the server predates read tracking,
+   * so the client must not auto-open the card (it would reappear forever).
+   */
+  whats_new_seen_version?: string | null;
+  /**
+   * "Star us on GitHub" prompt bookkeeping. An undefined count means the
+   * server predates it, so the client must never show the prompt.
+   */
+  star_prompt_shown_count?: number;
+  star_prompt_last_shown_at?: string | null;
+  star_prompt_starred_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -90,6 +108,8 @@ export interface MemberWithUser {
   name: string;
   email: string;
   avatar_url: string | null;
+  /** The projects a guest can access. Absent for every other role. */
+  project_ids?: string[];
 }
 
 export interface Invitation {
@@ -106,6 +126,8 @@ export interface Invitation {
   inviter_name?: string;
   inviter_email?: string;
   workspace_name?: string;
+  /** The projects a guest invitation grants. */
+  project_ids?: string[];
 }
 
 export interface ShareLink {

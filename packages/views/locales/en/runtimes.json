@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "Runtimes",
-    "learn_more": "Learn more →",
     "connect_remote": "Add a machine",
-    "search_placeholder": "Search…",
     "scope_mine": "Mine",
     "scope_all": "All",
     "live": "Live",
@@ -22,10 +20,10 @@
       "try_widening": " Try widening the scope or clearing filters."
     },
     "bootstrapping": {
-      "title": "Starting local runtime…",
+      "title": "Starting local runtime...",
       "hint": "Connecting to the workspace..."
     },
-    "add": "Add",
+    "add": "Add runtime",
     "add_menu": {
       "machines": "Machines",
       "this_computer": "This computer",
@@ -39,7 +37,7 @@
     },
     "columns": {
       "name": "Name",
-      "harness": "Harness",
+      "harness": "CLI",
       "agents": "Agents",
       "workload": "Workload",
       "status": "Status"
@@ -67,7 +65,7 @@
       "no_matches": "No machines or cloud services match"
     },
     "filters": {
-      "all": "All",
+      "all": "All runtimes",
       "online": "Online",
       "offline": "Offline"
     }
@@ -81,7 +79,7 @@
     "cancel": "Cancel"
   },
   "machine": {
-    "search_placeholder": "Search machines…",
+    "search_placeholder": "Search machines...",
     "filters": {
       "all": "All",
       "online": "Online",
@@ -90,11 +88,10 @@
     "section_local": "Local",
     "section_remote": "Remote",
     "section_cloud": "Cloud",
-    "this_machine": "This device",
+    "this_machine": "This machine",
     "local_badge": "Local · this machine",
     "pending_custom_runtimes": "Pending custom runtimes",
-    "runtime_count_one": "{{count}} runtime",
-    "runtime_count_other": "{{count}} runtimes",
+    "daemon_title": "Daemon",
     "busy_count_one": "{{count}} busy",
     "busy_count_other": "{{count}} busy",
     "no_matches_title": "No machines",
@@ -118,14 +115,14 @@
       "workload_idle": "All idle",
       "workload_hint": "{{running}} running · {{queued}} queued",
       "cli": "CLI",
-      "cloud_worker": "Cloud worker",
+      "cloud_worker": "Cloud node",
       "local_daemon": "Local daemon"
     },
     "rename": "Rename machine",
     "rename_dialog": {
       "title": "Rename machine",
       "description": "Used for this machine and all its runtimes.",
-      "placeholder": "e.g. Bohan's MacBook",
+      "placeholder": "e.g. Work MacBook",
       "hint": "Leave empty to use the device's default name.",
       "cancel": "Cancel",
       "save": "Save",
@@ -138,7 +135,7 @@
   "health": {
     "online": {
       "label": "Online",
-      "description": "Heartbeat received in the last 45s. Ready to dispatch runs."
+      "description": "Connected and ready to accept runs."
     },
     "recently_lost": {
       "label": "Recently lost",
@@ -146,11 +143,11 @@
     },
     "offline": {
       "label": "Offline",
-      "description": "No heartbeat for 5+ minutes. Restart the daemon or investigate the host."
+      "description": "Disconnected for 5+ minutes. Restart the daemon on this machine or check its network."
     },
     "long_offline": {
       "label": "Long offline",
-      "description": "No heartbeat for 6+ days. If this host will stay offline, rebind its agents to another runtime or delete this runtime."
+      "description": "Disconnected for 6+ days. If this machine won't come back online, rebind its agents to another runtime or delete this runtime."
     }
   },
   "detail": {
@@ -160,18 +157,18 @@
     "last_seen": "last seen {{when}}",
     "never_seen": "never connected",
     "fact_owner": "Owner",
-    "fact_device": "Device",
+    "fact_device": "Machine",
     "fact_runtime": "Runtime",
-    "technical_details": "Technical details",
     "fact_daemon_cli": "Daemon CLI",
     "fact_daemon_id": "Daemon ID",
-    "serving_title": "Serving",
-    "serving_count_one": "{{count}} agent",
-    "serving_count_other": "{{count}} agents",
+    "usage_title": "Usage",
     "no_agents": "No agents are bound to this runtime yet.",
-    "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibility",
+    "concurrency_title": "Concurrency",
+    "concurrency_none": "No limit",
+    "concurrency_hint": "Max runs at once across all agents on this runtime ({{min}}–{{max}}). Leave empty for no limit.",
+    "toast_concurrency_failed": "Failed to update concurrency limit",
     "visibility_label": {
       "private": "Private",
       "public": "Public",
@@ -217,15 +214,15 @@
       "self_heal_notice": "This runtime is managed by a running local daemon. Deleting it will succeed, but the daemon will re-register a fresh runtime within seconds — stop the daemon process first to remove it permanently.",
       "profile_backed_notice": "This runtime was registered from a custom runtime profile. Deleting it removes only the current runtime instance; a running daemon can register it again while the profile remains. Delete the custom runtime profile from Custom runtimes to remove it permanently.",
       "light": {
-        "title": "Delete Runtime?",
+        "title": "Delete this runtime?",
         "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
         "cancel": "Cancel",
         "confirm": "Delete runtime",
         "submitting": "Deleting..."
       },
       "cascade": {
-        "title_one": "Unbind {{count}} agent and delete this Runtime?",
-        "title_other": "Unbind {{count}} agents and delete this Runtime?",
+        "title_one": "Unbind {{count}} agent and delete this runtime?",
+        "title_other": "Unbind {{count}} agents and delete this runtime?",
         "description": "Delete \"{{name}}\". The agents below are kept — their instructions, chats and run history stay intact — but they will be unbound and cannot run until you bind them to another runtime. Their queued or in-progress runs will be cancelled, and then the Runtime will be deleted.",
         "warning": "Queued and in-progress runs will be cancelled, and these agents cannot be assigned new work until they are bound to a runtime.",
         "notice_runtime_has_active_agents": "Active agents were added since you opened this dialog. Review the new plan and confirm.",
@@ -299,7 +296,7 @@
     "title": "Cloud Runtime",
     "description": "Create a cloud runtime.",
     "create_title": "New node",
-    "nodes_title": "Fleet nodes",
+    "nodes_title": "Cloud nodes",
     "refresh": "Refresh",
     "nodes_empty": "No cloud nodes",
     "nodes_failed": "Cloud Runtime unavailable",
@@ -318,11 +315,11 @@
       "name": "Name",
       "instance_type": "Instance type",
       "region": "Region",
-      "disk_size": "Disk size GiB",
-      "image_id": "AMI ID",
+      "disk_size": "Disk size (GiB)",
+      "image_id": "Image ID (AMI)",
       "subnet_id": "Subnet ID",
-      "key_name": "Key pair",
-      "bootstrap_pat": "Bootstrap PAT"
+      "key_name": "SSH key pair",
+      "bootstrap_pat": "Bootstrap token (PAT)"
     },
     "placeholders": {
       "name": "cloud-dev-01",
@@ -346,10 +343,19 @@
     "available": "available",
     "action": "Update",
     "retry": "Retry",
+    "cancel": "Cancel",
+    "cancel_failed": "Couldn't confirm the cancel, so the update may still run. Try again.",
+    "cancel_conflict": "Couldn't cancel: installation has already started.",
     "unknown_error": "Unknown error",
     "initiate_failed": "Failed to initiate update",
+    "scheduled_tasks": "{{running}} running",
+    "note_no_interrupt": "Running tasks won't be interrupted.",
+    "expired_note": "Expired after waiting 24 hours for the machine to go idle.",
+    "busy_note": "The machine was busy, so the update didn't start. Try again when it's idle.",
+    "another_update_note": "Another update is already queued or installing on this machine.",
     "status": {
       "pending": "Waiting for daemon...",
+      "scheduled": "Updates when idle",
       "running": "Updating...",
       "completed": "Update complete. Daemon is restarting...",
       "failed": "Update failed",
@@ -391,35 +397,36 @@
     "pending_health_warning": "Waiting for daemon sync",
     "pending_health_error": "Registration error",
     "pending_health_disabled": "Disabled",
-    "pending_cli_unknown": "waiting"
+    "pending_cli_unknown": "waiting",
+    "col_rate_limits": "Limits"
   },
   "profiles": {
     "cta": "Add runtime",
     "add_custom": "Add custom runtime",
     "this_machine": "this machine",
     "unassigned_title": "Custom runtimes without a machine",
-    "unassigned_description": "These workspace runtimes are not connected to any machine. Connect a machine with the matching commands, or use a row's actions to edit or delete them.",
+    "unassigned_description": "Reconnect the assigned machine, or edit an older runtime to assign its machine.",
     "dialog_title": "Custom runtimes",
-    "dialog_description": "Custom runtime definitions are workspace-wide and sync to every connected machine. A machine registers the runtime when the command is available there.",
-    "create_dialog_description": "Set up a custom command from {{machine}}. The definition syncs workspace-wide and registers only on machines where that command is available.",
+    "dialog_description": "Custom runtimes belong to one machine.",
+    "create_dialog_description": "Only {{machine}} will register this custom command.",
     "learn_more": "View setup guide",
     "close": "Close",
     "add_new": "New custom runtime",
-    "list_title": "Runtime backends",
+    "list_title": "Base runtimes",
     "custom_section_title": "Custom runtimes ({{count}})",
     "custom_section_aria": "Custom runtimes",
-    "builtin_section_title": "Supported base protocols ({{count}})",
-    "builtin_section_hint": "Built-in families are read-only reference options.",
+    "builtin_section_title": "Built-in runtimes ({{count}})",
+    "builtin_section_hint": "Built-in runtimes are read-only reference options.",
     "builtin_section_aria": "Supported built-in protocol families",
     "builtin_reference": "Reference",
     "empty_title": "Create your first custom runtime",
-    "empty_description": "Pick a base protocol family, then point Multica at the command to run.",
+    "empty_description": "Pick a compatible base runtime, then point Multica to the command to run.",
     "badge_builtin": "Built-in",
     "badge_custom": "Custom",
     "badge_disabled": "Disabled",
     "builtin_detail": {
-      "title": "Built-in protocol family",
-      "description": "{{family}} is a built-in protocol family. It can't be edited or removed.",
+      "title": "Built-in runtime",
+      "description": "{{family}} is a built-in runtime. It can't be edited or removed.",
       "read_only": "Read-only"
     },
     "detail": {
@@ -439,14 +446,17 @@
       "step_family_hint": "Select the CLI this command is compatible with.",
       "step_details_label": "Configure the runtime",
       "step_progress": "Step {{current}} of {{total}}",
+      "machine_label": "Machine (optional)",
+      "machine_placeholder": "Keep current machines",
+      "machine_hint": "Selecting a machine removes unused copies on other machines.",
       "family_label": "Base runtime",
       "family_locked_hint": "The base runtime cannot be changed after creation.",
       "display_name_label": "Display name",
-      "display_name_placeholder": "e.g. My custom Claude…",
+      "display_name_placeholder": "e.g. My custom Claude...",
       "command_name_label": "Command",
-      "command_name_placeholder": "e.g. agent --model composer-2.5…",
+      "command_name_placeholder": "e.g. agent --model composer-2.5...",
       "description_label": "Description",
-      "description_placeholder": "What this runtime is for (optional)…",
+      "description_placeholder": "What this runtime is for (optional)...",
       "error_display_name_required": "Display name is required.",
       "error_command_required": "Command is required.",
       "error_command_unclosed_quote": "Close the quote before saving.",
@@ -459,9 +469,9 @@
       "cancel": "Cancel",
       "next": "Next",
       "create": "Create runtime",
-      "creating": "Creating…",
+      "creating": "Creating...",
       "save": "Save changes",
-      "saving": "Saving…",
+      "saving": "Saving...",
       "toast_created": "Custom runtime created",
       "toast_updated": "Custom runtime updated",
       "error_duplicate_name": "A runtime with this display name already exists.",
@@ -472,7 +482,7 @@
       "description": "\"{{name}}\" will be removed from this workspace and every machine where it is registered. This can't be undone.",
       "confirm": "Delete from workspace",
       "cancel": "Cancel",
-      "deleting": "Deleting…",
+      "deleting": "Deleting...",
       "toast_deleted": "Custom runtime deleted from workspace",
       "error_bound": "This custom runtime can't be deleted while agents are still using it — including agents on other machines that registered it.",
       "error_generic": "Failed to delete the runtime."
@@ -480,7 +490,6 @@
   },
   "usage": {
     "period_label": "Period",
-    "dimension_label": "Dimension",
     "kpi_cost_label": "Cost · {{days}}D",
     "kpi_cost_delta": "{{sign}}{{pct}}% vs prev",
     "kpi_cache_label": "Cache savings · {{days}}D",
@@ -488,8 +497,6 @@
     "kpi_tokens_label": "Tokens · {{days}}D",
     "kpi_tokens_hint": "in {{input}} · out {{output}}",
     "when_title": "When this runtime spent",
-    "when_tab_daily": "Daily",
-    "when_tab_weekly": "Weekly",
     "when_tab_heatmap": "Heatmap",
     "daily_metric_cost": "Cost",
     "daily_metric_tokens": "Tokens",
@@ -525,6 +532,7 @@
     "cost_by_title_model": "Cost by model",
     "cost_by_tab_agent": "By agent",
     "cost_by_tab_model": "By model",
+    "cost_by_label": "Group by",
     "cost_by_caption_agent_one": "{{count}} agent on this runtime",
     "cost_by_caption_agent_other": "{{count}} agents on this runtime",
     "cost_by_caption_model_one": "{{count}} model used",
@@ -539,10 +547,10 @@
     "no_data": "No usage data yet"
   },
   "qoder": {
-    "title": "QCA runtime",
+    "title": "Qoder Cloud Agents runtime",
     "description": "Connect Qoder Cloud Agents. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
-    "loading": "Loading…",
-    "unavailable": "Server setup is required: configure MULTICA_VCS_SECRET_KEY.",
+    "loading": "Loading...",
+    "unavailable": "Qoder Cloud Agents isn't enabled on this server yet. A server administrator needs to configure credential encryption (MULTICA_VCS_SECRET_KEY).",
     "online": "Online",
     "error": "Connection error",
     "starting": "Starting",
@@ -559,7 +567,7 @@
     "add_repository": "Add repository",
     "saved": "Saved. The server will start the runtime automatically.",
     "check": "Test connection",
-    "working": "Working…",
+    "working": "Working...",
     "stop": "Pause",
     "stopped": "Paused",
     "offline": "Offline; reconnecting",
@@ -570,20 +578,20 @@
     "select_environment": "Select an environment",
     "no_environments": "No available environments. Create one in Qoder, then refresh.",
     "refresh_catalog": "Refresh list",
-    "agent": "QCA Agent",
-    "select_agent": "Select a QCA Agent",
-    "agent_hint": "Use the PAT saved in the remote runtime to link a QCA Agent. Manage its model, tools and skills in Qoder.",
-    "no_agents": "No available QCA Agents. Create one in Qoder, then refresh.",
-    "agent_unavailable": "The linked QCA Agent is unavailable. Select another agent.",
+    "agent": "Remote agent",
+    "select_agent": "Select an agent from Qoder Cloud Agents",
+    "agent_hint": "Use the saved Qoder PAT to link a remote agent. Manage its model, tools and skills in Qoder Cloud Agents.",
+    "no_agents": "No agents available. Create an agent in Qoder Cloud Agents, then refresh.",
+    "agent_unavailable": "The linked remote agent is unavailable. Select another agent.",
     "save_agent": "Save association",
-    "agent_saved": "QCA Agent association saved",
-    "agent_save_failed": "Could not save QCA Agent association",
+    "agent_saved": "Agent association with Qoder Cloud Agents saved",
+    "agent_save_failed": "Could not save agent association with Qoder Cloud Agents",
     "cloud_title": "Qoder Cloud Agents",
     "managed": "Managed service",
     "cloud_description": "Run agents in Qoder Cloud using a shared connection, without maintaining a local host.",
     "configure_credentials": "Configure credentials",
     "add_agent": "Add agent",
-    "add_agent_description": "Create a Multica agent linked to an existing QCA Agent. It will use the environment and credentials configured for Qoder Cloud.",
+    "add_agent_description": "Create a Multica agent linked to an existing agent in Qoder Cloud Agents. It will use the environment and credentials configured for Qoder Cloud.",
     "agent_name": "Agent name",
     "cancel": "Cancel",
     "shared_credentials_hint": "Credentials are shared within this workspace. PATs are encrypted and never displayed after saving.",
@@ -612,7 +620,7 @@
       "token_rejected": "{{region}} does not accept this token. A token only works on the site that created it.",
       "retry_cn": "Retry on China site",
       "retry_global": "Retry on Global site",
-      "verifying": "Verifying token…",
+      "verifying": "Verifying token...",
       "verified": "Token verified",
       "environment_waiting": "Environments load once the token is verified",
       "repo_count_one": "{{count}} repository",
@@ -671,9 +679,66 @@
       "description_agents_other": "These {{count}} agents will be unbound. They keep their instructions and history and can move to another runtime.",
       "plan_changed": "The agents on Qoder changed. Review the list and confirm again.",
       "confirm": "Disconnect",
-      "working": "Disconnecting…",
+      "working": "Disconnecting...",
       "cancel": "Cancel",
       "done": "Qoder disconnected"
     }
+  },
+  "intro": {
+    "title": "Give your agents a computer to work on",
+    "description": "A runtime is where agents actually run their work: your computer, a server, or a cloud service.",
+    "slides": {
+      "local": {
+        "title": "This computer connects itself",
+        "description": "Download the desktop app and sign in. Claude Code, Codex and the other CLIs on this computer show up on their own."
+      },
+      "remote": {
+        "title": "Another machine, two commands",
+        "description": "Install the CLI on a server or another computer, then run multica setup to connect it."
+      },
+      "cloud": {
+        "title": "Or use a cloud node",
+        "description": "Rather not manage machines? Create a cloud node hosted by Multica."
+      }
+    },
+    "art": {
+      "this_computer": "This computer · Desktop",
+      "detected": "Detected runtimes",
+      "run_there": "Run on that machine",
+      "connected": "{{name}} connected to Multica"
+    }
+  },
+  "rate_limits": {
+    "title": "Limits",
+    "caption": "Reported by the CLI while tasks run",
+    "updated": "Updated {{ago}}",
+    "empty_title": "No limit data yet",
+    "empty_hint": "Recorded the next time this runtime runs a task. API-key accounts have no plan limits.",
+    "window_session": "Session",
+    "window_session_hours": "{{hours}}-hour session",
+    "window_weekly": "Weekly",
+    "window_weekly_opus": "Weekly · Opus",
+    "window_weekly_sonnet": "Weekly · Sonnet",
+    "window_generic": "Other limit",
+    "short_session": "Session",
+    "short_weekly": "Week",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "Other",
+    "used": "{{pct}}% used",
+    "limited": "Limit reached",
+    "resets_in": "Resets in {{duration}}",
+    "resets_at": "Resets {{time}}",
+    "reset_since": "Reset since last report",
+    "verdict_ahead": "{{pct}}% ahead of pace · runs out in about {{duration}}",
+    "verdict_on_pace": "On pace to last until reset",
+    "verdict_limited": "Resumes after the reset",
+    "credits": "Credits",
+    "credits_balance": "{{balance}} left",
+    "credits_unlimited": "Unlimited",
+    "credits_none": "None",
+    "duration_minutes": "{{minutes}}m",
+    "duration_hours": "{{hours}}h {{minutes}}m",
+    "duration_days": "{{days}}d {{hours}}h"
   }
 }

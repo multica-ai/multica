@@ -276,17 +276,17 @@ function ResolvedThreadBar({
         className="flex-row items-center gap-2.5 px-4 py-3 rounded-xl bg-surface-1 active:opacity-70"
         style={continuousCorners}
         accessibilityRole="button"
-        accessibilityLabel={t(
-          total === 1 ? "resolved.a11y_folded_one" : "resolved.a11y_folded_other",
-          { authors: authorsLabel, count: total },
-        )}
+        accessibilityLabel={t("resolved.a11y_folded", {
+          authors: authorsLabel,
+          count: total,
+        })}
       >
         <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
         <Text
           className="flex-1 text-sm text-muted-foreground"
           numberOfLines={1}
         >
-          {t(total === 1 ? "resolved.summary_one" : "resolved.summary_other", {
+          {t("resolved.summary", {
             count: total,
             authors: authorsLabel,
           })}
@@ -436,6 +436,7 @@ function CommentBody({
   // normal server-backed comment OR an in-flight optimistic. Only set when
   // the matching `useCreateComment` mutation errored and the entry was
   // intentionally left in the cache to surface inline retry.
+  const { t } = useT("issues");
   const failed = useFailedCommentsStore((s) => s.failed[entry.id]);
   // Same query as IssueDescription — TanStack dedupes so this fires once
   // per issue regardless of how many comments need to resolve attachments.
@@ -525,7 +526,7 @@ function CommentBody({
     // placeholder in packages/views/issues/components/comment-card.tsx.
     return (
       <Text className="text-sm italic text-muted-foreground">
-        This comment was deleted
+        {t("comments.deleted")}
       </Text>
     );
   }

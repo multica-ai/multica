@@ -3,7 +3,11 @@ title: Put agents to work
 description: Choose how to start work, hand it over, or ask for help.
 ---
 
+import { TriggerChooserDemo } from "@/components/demos/trigger-chooser-demo";
+
 Start with what you want an agent to do. You can give it ownership of an issue, ask for help on one request, or arrange work that repeats.
+
+<TriggerChooserDemo />
 
 | What you need | What to use |
 |---|---|
@@ -13,6 +17,7 @@ Start with what you want an agent to do. You can give it ownership of an issue, 
 | Pass work through a repeatable set of steps | Choose a project [workflow](/workflows) and who takes over at each step. |
 | Ask a question without creating an issue | Start a [chat](/chat) with the agent. |
 | Start recurring work by time or an outside event | Create an [autopilot](/autopilots). |
+| Have an agent come back to an issue later | Add a [wakeup](/issue-wakeups) to the issue with a time or an event to wait for. |
 
 You can only ask agents you have permission to run. For comments, check the trigger preview before sending; use `/note` when you want to leave a message without waking an agent. An issue in `backlog` waits until you are ready to start it.
 

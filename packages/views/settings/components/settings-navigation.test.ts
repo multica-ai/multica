@@ -7,14 +7,28 @@ const resolve = (search: string) =>
 
 describe("settings location", () => {
   it.each([
+    ["tab=issue-statuses", { tab: "workflows", section: null, integration: null }],
     ["tab=issue", { tab: "preferences", section: "issue", integration: null }],
     ["tab=chat", { tab: "preferences", section: "chat", integration: null }],
     ["tab=labs", { tab: "workspace", section: null, integration: null }],
-    ["tab=lark", { tab: "channels", section: null, integration: "lark" }],
+    [
+      "tab=preferences&section=appearance",
+      { tab: "appearance", section: null, integration: null },
+    ],
+    [
+      "tab=preferences&section=theme",
+      { tab: "appearance", section: "mode", integration: null },
+    ],
+    [
+      "tab=preferences&section=style",
+      { tab: "appearance", section: "theme", integration: null },
+    ],
+    ["tab=lark", { tab: "channels", section: null, integration: null }],
     [
       "tab=integrations&integration=slack",
-      { tab: "channels", section: null, integration: "slack" },
+      { tab: "channels", section: null, integration: null },
     ],
+    ["tab=channels&integration=telegram", { tab: "channels", section: null, integration: null }],
     ["tab=integrations", { tab: "channels", section: null, integration: null }],
     [
       "tab=integrations&integration=vcs",
@@ -53,6 +67,15 @@ describe("settings location", () => {
     },
   );
 
+  it("lands a team connect refused by the plan on Connected apps", () => {
+    expect(
+      resolve("tab=apps&error=composio_connect_failed&reason=feature_locked&scope=team"),
+    ).toEqual({ tab: "apps", section: null, integration: null });
+    expect(
+      resolve("tab=integrations&error=composio_connect_failed&reason=feature_locked").tab,
+    ).toBe("apps");
+  });
+
   it("passes current pages and anchors through untouched", () => {
     expect(resolve("tab=code&section=pr-sidebar")).toEqual({
       tab: "code",
@@ -66,7 +89,7 @@ describe("settings location", () => {
     expect(
       settingsHref(
         "/acme/settings",
-        new URLSearchParams("tab=preferences&section=chat&keep=1"),
+        new URLSearchParams("tab=preferences&section=chat&scope=skill&keep=1"),
         "channels",
         { integration: "slack" },
       ),
