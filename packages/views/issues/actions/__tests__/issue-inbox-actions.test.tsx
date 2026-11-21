@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -13,7 +14,7 @@ import { agentListOptions } from "@multica/core/workspace/queries";
 import type { InboxItem, Issue, SnoozedInboxIssue } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
-import { IssueInboxActions } from "../issue-inbox-actions";
+import { IssueInboxBar } from "../issue-inbox-actions";
 
 const state = vi.hoisted(() => ({
   archiveInbox: vi.fn(),
@@ -74,12 +75,14 @@ function setup({
   issueId = "issue-1",
   snoozed = [],
   theirs = false,
+  issueActions,
 }: {
   rows?: InboxItem[];
   issueId?: string;
   snoozed?: SnoozedInboxIssue[];
   /** The viewer follows the issue, and someone else owns it. */
   theirs?: boolean;
+  issueActions?: ReactNode;
 } = {}) {
   const nav: NavigationAdapter = {
     push: vi.fn(),
@@ -99,6 +102,8 @@ function setup({
     getAgentTaskSnapshot: async () => [],
     // The child list refetches on mount; the unsubscribe button acts directly once it is known.
     listChildIssues: async () => ({ issues: [] }),
+    // The bar's reason line shows the actor's avatar.
+    getBaseUrl: () => "",
   } as unknown as ApiClient);
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
@@ -121,7 +126,7 @@ function setup({
   const page = (id: string | null) => (
     <QueryClientProvider client={qc}>
       <NavigationProvider value={nav}>
-        {id ? <IssueInboxActions issueId={id} /> : <span>Next issue</span>}
+        {id ? <IssueInboxBar issueId={id} issueActions={issueActions} /> : <span>Next issue</span>}
       </NavigationProvider>
     </QueryClientProvider>
   );
@@ -158,7 +163,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("IssueInboxActions", () => {
+describe("IssueInboxBar", () => {
   it("keeps the last row on a later side-effect archive after snooze fails", async () => {
     state.snooze.mockRejectedValueOnce(new Error("snooze failed"));
     const nav = setup({ rows: [ROWS[0]!] });
@@ -232,6 +237,21 @@ describe("IssueInboxActions", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
   });
 
+  it("says why the issue is here, then offers the issue's actions before the notification's", () => {
+    setup({ issueActions: <button type="button">Set status</button> });
+    expect(screen.getByText("Commented")).toBeInTheDocument();
+    const issueAction = screen.getByRole("button", { name: "Set status" });
+    const snooze = screen.getByRole("button", { name: "Snooze" });
+    expect(issueAction.compareDocumentPosition(snooze) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("drops the issue's actions once the notification has left the Inbox", async () => {
+    const nav = setup({ issueActions: <button type="button">Set status</button> });
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Set status" })).toBeNull();
+  });
+
   it("offers snooze in place of a read toggle", () => {
     setup();
     expect(screen.queryByRole("button", { name: "Mark as unread" })).toBeNull();
@@ -254,7 +274,7 @@ describe("IssueInboxActions", () => {
       rows: [ROWS[1]!],
       snoozed: [{ issue_id: "issue-1", item_id: "n-1", snoozed_until: until, snoozed_at: SNOOZED_AT, updates: 0 }],
     });
-    expect(screen.getByTitle(/^Back /)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/^Back /);
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
 
     fireEvent.keyDown(document, { key: "h", code: "KeyH" });
@@ -374,7 +394,7 @@ describe("IssueInboxActions", () => {
     await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
   });
 
-  // Snooze, archive and unsubscribe share the header; each key does only its own.
+  // Snooze, archive and unsubscribe share the bar; each key does only its own.
   async function setupTheirs() {
     const nav = setup({ theirs: true });
     await waitFor(() =>
@@ -413,7 +433,7 @@ describe("IssueInboxActions", () => {
   });
 });
 
-describe("IssueInboxActions once an action is undone", () => {
+describe("IssueInboxBar once an action is undone", () => {
   it("keeps the row again after archiving the last row and undoing", async () => {
     const original = ROWS[0]!;
     const rows = [original];

@@ -123,6 +123,7 @@
     "set_due_date_to": "期限: {{date}}",
     "removed_due_date": "期限を削除",
     "reacted_to_comment": "あなたのコメントに {{emoji}} のリアクションをしました",
+    "commented": "コメントしました",
     "created_with_agent": "エージェントで作成: {{identifier}}",
     "failed_with_detail": "失敗: {{detail}}",
     "autopilot_quota_blocked": "上限に達したため実行をブロックしました",

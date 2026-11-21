@@ -37,14 +37,13 @@ import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
-import { useActorName } from "@multica/core/workspace/hooks";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
 import { getInboxDisplayTitle, inboxRowHref, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
 import { ARCHIVED_VIEW_PARAM } from "../../inbox/components/inbox-view";
-import { ActorAvatar } from "../../common/actor-avatar";
-import { InboxDetailLabel, useTypeLabels } from "../../inbox/components/inbox-detail-label";
+import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
+import { InboxActorAvatar, InboxActorLine } from "../../inbox/components/inbox-actor";
 import { InboxFilterMenu } from "../../inbox/components/inbox-filter-menu";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
@@ -874,31 +873,6 @@ function InboxReturnedLine({ updates }: { updates: number }) {
 
 function inboxRowTitle(item: InboxItem, typeLabels: ReturnType<typeof useTypeLabels>) {
   return isAutopilotQuotaNotice(item.type) ? typeLabels[item.type] : getInboxDisplayTitle(item);
-}
-
-function InboxActorAvatar({ item, size }: { item: InboxItem; size: "xs" | "sm" }) {
-  return (
-    <ActorAvatar
-      actorType={item.actor_type ?? item.recipient_type}
-      actorId={item.actor_id ?? item.recipient_id}
-      size={size}
-    />
-  );
-}
-
-/** Who did what: the actor's name, then what the notification says happened. */
-function InboxActorLine({ item, detail }: { item: InboxItem; detail?: ReactNode }) {
-  const { getActorName } = useActorName();
-  const name =
-    item.actor_type && item.actor_type !== "system" && item.actor_id
-      ? getActorName(item.actor_type, item.actor_id)
-      : null;
-  return (
-    <>
-      {name && <span className="font-medium">{name} </span>}
-      {detail ?? <InboxDetailLabel item={item} />}
-    </>
-  );
 }
 
 /** The whole notification, shown while a row is hovered. */

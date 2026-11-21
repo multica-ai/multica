@@ -18,7 +18,6 @@ import { AppLink, useBackOrReplace } from "../../navigation";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   AlertTriangle,
-  Archive,
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -77,12 +76,14 @@ import { MemberProfileCard } from "../../members/member-profile-card";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
+import { InboxArchiveButton, InboxOpenBar } from "../../inbox/components/inbox-bar";
+import { InboxIssueActions } from "./inbox-issue-actions";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
 import { PropRow } from "../../common/prop-row";
 import { useIsGuest } from "@multica/core/permissions";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
-import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { Attachment, InboxItem, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
 import { commentLandingTarget, isDeletedComment } from "@multica/core/issues/comment-deletion";
@@ -101,7 +102,7 @@ import { AssigneePicker } from "./pickers/assignee-picker";
 import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider, IssueInboxActions } from "../actions";
+import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider, IssueInboxBar } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
@@ -1248,13 +1249,18 @@ function SubIssueDisplayPopover({
 interface IssueDetailProps {
   issueId: string;
   onDelete?: () => void;
-  /** The Inbox page's Archive in the header: archives the open notification. */
+  /**
+   * The Inbox page's Archive in its bar: archives the open notification. The
+   * Inbox page owns the bar then; without it, the Work panel's Inbox does.
+   */
   onArchive?: () => void;
   /**
    * The Inbox's "unsubscribe & archive", shown next to Archive on issues that
    * are not the viewer's own. Only read alongside `onArchive`.
    */
   onUnsubscribeArchive?: (scope: InboxUnsubscribeScope) => void;
+  /** The Inbox page's open notification, whose bar says why it is here. Only read alongside `onArchive`. */
+  inboxItem?: InboxItem;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
@@ -1293,7 +1299,7 @@ interface IssueDetailProps {
   variant?: "page" | "peek";
   /** Peek only: host controls at the end of the header (open full page, close). */
   trailingActions?: ReactNode;
-  /** A bar the host shows under the header, above the scrolling body. */
+  /** A bar the host shows under the header in place of the Inbox bar, above the scrolling body. */
   notice?: ReactNode;
   /**
    * Read the viewer's inbox notifications on this issue while it is on screen
@@ -1514,7 +1520,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightRequestPending = false, onHighlightLanded, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive, inboxItem, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightRequestPending = false, onHighlightLanded, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -3807,6 +3813,14 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   // What the header names the issue: the identifier only in a peek, where the
   // title is right below it; identifier and title on the page.
   const headerLeafLabel = isPeek ? issue.identifier : `${issue.identifier} ${issue.title}`;
+  const inboxIssueActions = guest ? undefined : (
+    <InboxIssueActions
+      issue={issue}
+      onUpdate={handleUpdateField}
+      onMarkDuplicate={actions.openMarkDuplicate}
+      isDuplicate={isDuplicateIssue(issue)}
+    />
+  );
 
   const detailContent = (
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
@@ -3857,20 +3871,6 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
                 It self-hides when no agent is active. */}
             {!guest && <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />}
             {!guest && <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />}
-            {!onArchive && !isPeek && <IssueInboxActions issueId={id} />}
-            {onArchive && onUnsubscribeArchive && (
-              <UnsubscribeArchiveButton issueId={id} userId={user?.id} onConfirm={onUnsubscribeArchive} />
-            )}
-            {onArchive && (
-              <IconButton
-                label={t(($) => $.detail.archive_tooltip)}
-                tooltipSide="bottom"
-                className="text-muted-foreground"
-                onClick={onArchive}
-              >
-                <Archive />
-              </IconButton>
-            )}
             {!guest && <IssueDetailActionsDropdown
               issue={issue}
               locateInSidebar={!isPeek}
@@ -3908,7 +3908,19 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             </>
           }
         />
-        {notice}
+        {notice ??
+          (onArchive ? (
+            inboxItem && (
+              <InboxOpenBar item={inboxItem} issueActions={inboxIssueActions}>
+                {onUnsubscribeArchive && (
+                  <UnsubscribeArchiveButton issueId={id} userId={user?.id} onConfirm={onUnsubscribeArchive} />
+                )}
+                <InboxArchiveButton onClick={onArchive} />
+              </InboxOpenBar>
+            )
+          ) : (
+            !isPeek && <IssueInboxBar issueId={id} issueActions={inboxIssueActions} />
+          ))}
 
         {/* scrollbar-gutter both-edges: with classic (space-taking) scrollbars —
             macOS with a mouse or "always show", Windows, Linux — the global

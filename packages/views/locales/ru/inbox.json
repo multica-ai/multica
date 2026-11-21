@@ -129,6 +129,7 @@
     "set_due_date_to": "Установлен срок {{date}}",
     "removed_due_date": "Срок удалён",
     "reacted_to_comment": "Отреагировал(а) {{emoji}} на ваш комментарий",
+    "commented": "Оставил(а) комментарий",
     "created_with_agent": "Создано с помощью агента: {{identifier}}",
     "failed_with_detail": "Ошибка: {{detail}}",
     "autopilot_quota_blocked": "Запуск заблокирован, так как достигнут лимит",

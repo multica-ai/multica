@@ -123,6 +123,7 @@
     "set_due_date_to": "截止日期设为 {{date}}",
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
+    "commented": "评论了",
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
     "autopilot_quota_blocked": "执行已被阻止：额度已用完",

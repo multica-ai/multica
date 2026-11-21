@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Zap } from "@multica/ui/icons";
+import { ChevronDown, Loader2, Zap } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { dispatchReasonCode } from "@multica/core/api";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -18,6 +18,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -81,7 +89,7 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
               key={action.id}
               action={action}
               issueId={issueId}
-              onBlocked={() => setBlocked(action)}
+              onBlocked={setBlocked}
             />
           ))}
           {hiddenCount > 0 && (
@@ -96,23 +104,7 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
         </div>
       ) : null}
 
-      {/* One message for every refusal. The person reading this dialog and the
-          person who can fix the binding are different people — the clicker's
-          next step is the same either way, and the diagnostic detail lives in
-          settings where the owner will act on it. */}
-      <AlertDialog open={blocked !== null} onOpenChange={(v) => !v && setBlocked(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.detail.quick_action_blocked_title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.detail.quick_action_blocked_body, { name: blocked?.name ?? "" })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction>{t(($) => $.detail.quick_action_blocked_ok)}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <QuickActionBlockedDialog action={blocked} onClose={() => setBlocked(null)} />
     </div>
   );
 }
@@ -150,22 +142,16 @@ export function outcomeMessage(
   }
 }
 
-function QuickActionRow({
-  action,
-  issueId,
-  onBlocked,
-}: {
-  action: QuickAction;
-  issueId: string;
-  onBlocked: () => void;
-}) {
+/**
+ * Runs a quick action on the issue and says what came of it. A refusal goes
+ * to `onBlocked`, which explains it.
+ */
+function useQuickActionRun(issueId: string, onBlocked: (action: QuickAction) => void) {
   const { t } = useT("issues");
   const runMutation = useRunQuickAction(issueId);
-  const running = runMutation.isPending;
 
-  const targetName = action.target_name || t(($) => $.detail.quick_action_target_fallback);
-
-  const handleRun = async () => {
+  const run = async (action: QuickAction) => {
+    const targetName = action.target_name || t(($) => $.detail.quick_action_target_fallback);
     try {
       const comment: Comment = await runMutation.mutateAsync({ quickActionId: action.id });
       const { message, kind } = outcomeMessage(comment.trigger_outcomes?.[0], targetName, t);
@@ -177,19 +163,59 @@ function QuickActionRow({
       // a transient failure they should retry — it gets the dialog. Everything
       // else stays a toast.
       if (dispatchReasonCode(error) === "invocation_not_allowed") {
-        onBlocked();
+        onBlocked(action);
         return;
       }
       toast.error(error instanceof Error ? error.message : String(error));
     }
   };
+  return { run, running: runMutation.isPending };
+}
+
+/*
+ * One message for every refusal. The person reading this dialog and the
+ * person who can fix the binding are different people — the clicker's next
+ * step is the same either way, and the diagnostic detail lives in settings
+ * where the owner will act on it.
+ */
+function QuickActionBlockedDialog({ action, onClose }: { action: QuickAction | null; onClose: () => void }) {
+  const { t } = useT("issues");
+  return (
+    <AlertDialog open={action !== null} onOpenChange={(v) => !v && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t(($) => $.detail.quick_action_blocked_title)}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(($) => $.detail.quick_action_blocked_body, { name: action?.name ?? "" })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t(($) => $.detail.quick_action_blocked_ok)}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function QuickActionRow({
+  action,
+  issueId,
+  onBlocked,
+}: {
+  action: QuickAction;
+  issueId: string;
+  onBlocked: (action: QuickAction) => void;
+}) {
+  const { t } = useT("issues");
+  const { run, running } = useQuickActionRun(issueId, onBlocked);
+  const targetName = action.target_name || t(($) => $.detail.quick_action_target_fallback);
 
   const row = (
     <div>
       <button
         type="button"
         disabled={running}
-        onClick={() => void handleRun()}
+        onClick={() => void run(action)}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-caption transition-colors",
           "hover:bg-accent/50 disabled:cursor-default disabled:opacity-60",
@@ -229,5 +255,57 @@ function QuickActionRow({
         </div>
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+/**
+ * The quick actions behind one button, for the Inbox bar. Nothing configured
+ * renders nothing.
+ */
+export function QuickActionsMenu({ issueId }: { issueId: string }) {
+  const { t } = useT("issues");
+  const wsId = useCurrentWorkspace()?.id ?? "";
+  const [blocked, setBlocked] = useState<QuickAction | null>(null);
+  const { run, running } = useQuickActionRun(issueId, setBlocked);
+  const { data = [] } = useQuery({
+    ...quickActionListOptions(wsId),
+    enabled: wsId !== "",
+  });
+  const actions = useMemo(() => data.filter((a) => a.status === "active"), [data]);
+  if (actions.length === 0) return null;
+
+  const label = t(($) => $.detail.section_quick_actions);
+  return (
+    <>
+      <DropdownMenu>
+        <TooltipHint label={label} side="bottom">
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" size="sm" aria-label={label} className="shrink-0" disabled={running} />}
+          >
+            {running ? <Loader2 className="animate-spin text-muted-foreground" /> : <Zap className="text-muted-foreground" />}
+            <span className="@max-[56rem]/inbox-bar:hidden">{label}</span>
+            <ChevronDown className="size-3 text-muted-foreground @max-[30rem]/inbox-bar:hidden" />
+          </DropdownMenuTrigger>
+        </TooltipHint>
+        <DropdownMenuContent align="start" className="w-auto min-w-56 max-w-80">
+          {actions.map((action) => (
+            <DropdownMenuItem key={action.id} onClick={() => void run(action)}>
+              <Zap className="h-4 w-4" />
+              <span className="min-w-0 flex-1 truncate">{action.name}</span>
+              {action.target_name ? (
+                <ActorAvatar
+                  actorType={action.assignee_type === "squad" ? "squad" : "agent"}
+                  actorId={action.assignee_id}
+                  size="xs"
+                  className="ml-4 shrink-0"
+                  showStatusDot={action.assignee_type === "agent"}
+                />
+              ) : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <QuickActionBlockedDialog action={blocked} onClose={() => setBlocked(null)} />
+    </>
   );
 }

@@ -125,6 +125,7 @@
     "set_due_date_to": "Set due date to {{date}}",
     "removed_due_date": "Removed due date",
     "reacted_to_comment": "Reacted {{emoji}} to your comment",
+    "commented": "Commented",
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}",
     "autopilot_quota_blocked": "Run blocked because the limit was reached",

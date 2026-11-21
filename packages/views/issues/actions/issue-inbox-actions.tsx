@@ -2,12 +2,12 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Archive, ChevronDown } from "@multica/ui/icons";
-import { IconButton } from "@multica/ui/components/common/icon-button";
-import { cn } from "@multica/ui/lib/utils";
+import { AlarmClock, ChevronDown } from "@multica/ui/icons";
+import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
+import type { InboxItem } from "@multica/core/types";
 import { findSnoozedInboxIssue, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { nextInboxRow } from "@multica/core/inbox/open-row";
 import {
@@ -17,7 +17,7 @@ import {
   shortcutMatchesEvent,
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
-import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
+import { InboxArchiveButton, InboxBar, InboxBarButton, InboxBarStatus, InboxOpenBar } from "../../inbox/components/inbox-bar";
 import { InboxKeptActions, InboxNextButton, useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
@@ -34,21 +34,20 @@ import {
 import { useLocale, useT } from "../../i18n";
 
 /**
- * The Inbox's actions in the header of an issue opened from the Work panel's
- * Inbox section, while the section still lists it. Snoozing, archiving or
- * unsubscribing opens the next notification the section lists, so the Inbox
- * can be worked through without leaving the page.
+ * The Inbox bar of an issue opened from the Work panel's Inbox section, while
+ * the section still lists it: why it is here, `issueActions` (its status,
+ * assignee and quick actions), then the notification's own. Snoozing,
+ * archiving or unsubscribing opens the next notification the section lists,
+ * so the Inbox can be worked through without leaving the page.
  *
- * These act on the notification only. The issue's status is changed from its
- * own status control; once its notification leaves the Inbox on its own (the
- * issue reached Done, another window archived it), the section keeps the row
- * in place and this says so instead, with an undo and the way on to the next
- * notification.
+ * Once the notification leaves the Inbox on its own (the issue reached Done,
+ * another window archived it), the section keeps the row in place and the bar
+ * says so instead, with an undo and the way on to the next notification.
  *
- * A snoozed issue shows when it comes back instead, wherever it is opened,
- * with the way to bring it back now or change the time.
+ * A snoozed issue's bar says when it comes back instead, wherever it is
+ * opened, with the way to bring it back now or change the time.
  */
-export function IssueInboxActions({ issueId }: { issueId: string }) {
+export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issueActions?: ReactNode }) {
   const { t } = useT("inbox");
   const wsId = useWorkspaceId();
   const { fromInbox } = useSidebarInboxIssue(wsId, issueId);
@@ -122,15 +121,15 @@ export function IssueInboxActions({ issueId }: { issueId: string }) {
   if (!item) {
     if (snoozed) {
       return (
-        <SnoozedChip
+        <SnoozedBar
           until={new Date(snoozed.snoozed_until)}
           open={snoozeOpen}
           onOpenChange={setSnoozeOpen}
           onSnooze={(until) => snooze({ id: snoozed.item_id }, until)}
           onUnsnooze={() => unsnooze(snoozed.item_id, issueId)}
-        >
-          {settled && next && <InboxNextButton next={next} onNext={moveOn} />}
-        </SnoozedChip>
+          next={settled ? next : null}
+          onNext={moveOn}
+        />
       );
     }
     if (!settled) return null;
@@ -140,65 +139,49 @@ export function IssueInboxActions({ issueId }: { issueId: string }) {
         onUndo={() => restore(settled.item.id, { quiet: true })}
         next={next}
         onNext={moveOn}
-        layout="header"
       />
     );
   }
 
   return (
-    <>
+    <InboxOpenBar item={item} issueActions={issueActions}>
       <UnsubscribeArchiveButton issueId={issueId} userId={item.recipient_id} onConfirm={unsubscribeItem} />
       <InboxSnoozeMenu
         open={snoozeOpen}
         onOpenChange={setSnoozeOpen}
         onSnooze={snoozeItem}
-        trigger={
-          <IconButton
-            label={t(($) => $.snooze.action)}
-            shortcut={<ActionShortcutKeycaps action="snoozeInboxItem" />}
-            tooltipSide="bottom"
-            className="text-muted-foreground"
-          >
-            <AlarmClock />
-          </IconButton>
-        }
+        trigger={<InboxBarButton icon={<AlarmClock />} label={t(($) => $.snooze.action)} shortcut="snoozeInboxItem" />}
       />
-      <IconButton
-        label={t(($) => $.context_menu.archive)}
-        shortcut={<ActionShortcutKeycaps action="archiveInboxItem" />}
-        tooltipSide="bottom"
-        className="text-muted-foreground"
-        onClick={archiveItem}
-      >
-        <Archive />
-      </IconButton>
-      <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
-    </>
+      <InboxArchiveButton onClick={archiveItem} />
+    </InboxOpenBar>
   );
 }
 
 /** When a snoozed issue comes back, with the way to bring it back now or later. */
-function SnoozedChip({
+function SnoozedBar({
   until,
   open,
   onOpenChange,
   onSnooze,
   onUnsnooze,
-  children,
+  next,
+  onNext,
 }: {
   until: Date;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSnooze: (until: Date) => void;
   onUnsnooze: () => void;
-  /** After the chip, before the separator. */
-  children?: ReactNode;
+  /** Set while the section keeps the row it snoozed in place. */
+  next: InboxItem | null;
+  onNext: () => void;
 }) {
   const { t } = useT("inbox");
   const locale = useLocale();
   const label = t(($) => $.snooze.back_at, { time: formatSnoozeTime(until, new Date(), locale) });
   return (
-    <>
+    <InboxBar settled>
+      <InboxBarStatus icon={<AlarmClock />} label={label} />
       <InboxSnoozeMenu
         open={open}
         onOpenChange={onOpenChange}
@@ -206,22 +189,13 @@ function SnoozedChip({
         onSnooze={onSnooze}
         onUnsnooze={onUnsnooze}
         trigger={
-          <button
-            type="button"
-            title={label}
-            className={cn(
-              "inline-flex h-7 max-w-72 min-w-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-caption text-foreground",
-              "hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring data-popup-open:bg-accent",
-            )}
-          >
-            <AlarmClock className="size-3.5 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 truncate max-sm:hidden">{label}</span>
-            <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-          </button>
+          <Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground">
+            {t(($) => $.snooze.change_time)}
+            <ChevronDown className="size-3" />
+          </Button>
         }
       />
-      {children}
-      <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
-    </>
+      {next && <InboxNextButton next={next} onNext={onNext} />}
+    </InboxBar>
   );
 }

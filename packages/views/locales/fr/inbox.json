@@ -125,6 +125,7 @@
     "set_due_date_to": "Date d'échéance définie au {{date}}",
     "removed_due_date": "Date d'échéance retirée",
     "reacted_to_comment": "A réagi {{emoji}} à votre commentaire",
+    "commented": "A commenté",
     "created_with_agent": "Créé avec un agent : {{identifier}}",
     "failed_with_detail": "Échec : {{detail}}",
     "autopilot_quota_blocked": "Exécution bloquée car la limite a été atteinte",

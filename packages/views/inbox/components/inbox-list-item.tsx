@@ -1,7 +1,7 @@
 "use client";
 
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { StatusIcon } from "../../issues/components";
+import { StatusIcon } from "../../issues/components/status-icon";
 import {
   IssueAgentActivityIndicator,
 } from "../../issues/components/issue-agent-activity-indicator";

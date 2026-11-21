@@ -123,6 +123,7 @@
     "set_due_date_to": "마감일: {{date}}",
     "removed_due_date": "마감일 제거됨",
     "reacted_to_comment": "내 댓글에 {{emoji}} 반응을 남겼습니다",
+    "commented": "댓글을 남겼습니다",
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}",
     "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨",
