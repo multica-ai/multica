@@ -186,7 +186,15 @@ func fetchDocTree(ctx context.Context, client *cli.APIClient) (docTree, error) {
 
 // resolveDocRef accepts a full id or an unambiguous id prefix from `doc list`.
 func resolveDocRef(ctx context.Context, client *cli.APIClient, ref string, folders bool) (string, error) {
-	if len(ref) == 36 {
+	kind := "doc"
+	if folders {
+		kind = "folder"
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("%s id is required", kind)
+	}
+	if uuidRegexp.MatchString(ref) {
 		return ref, nil
 	}
 	tree, err := fetchDocTree(ctx, client)
@@ -194,10 +202,8 @@ func resolveDocRef(ctx context.Context, client *cli.APIClient, ref string, folde
 		return "", err
 	}
 	items := tree.Docs
-	kind := "doc"
 	if folders {
 		items = tree.Folders
-		kind = "folder"
 	}
 	var matches []string
 	for _, item := range items {

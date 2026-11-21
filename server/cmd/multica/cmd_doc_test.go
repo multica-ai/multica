@@ -154,7 +154,7 @@ func TestRunDocFolderListFormatsTableAndJSON(t *testing.T) {
 	if !strings.Contains(out, "Guides/") || !strings.Contains(out, "Guides/Release/") {
 		t.Fatalf("table output missing folder paths: %q", out)
 	}
-	if strings.Index(out, "Guides/") > strings.Index(out, "Guides/Release/") {
+	if strings.Index(out, rootID) > strings.Index(out, childID) {
 		t.Fatalf("table output should sort parent before child: %q", out)
 	}
 
@@ -349,5 +349,41 @@ func TestRunDocFolderMoveSendsParent(t *testing.T) {
 	_ = docFolderMoveCmd.Flags().Set("parent", "")
 	if err := runDocFolderMove(docFolderMoveCmd, []string{folderID}); err == nil || !strings.Contains(err.Error(), "--parent is required") {
 		t.Fatalf("missing --parent must explain itself: %v", err)
+	}
+}
+
+func TestRunDocFolderUpdateRejectsEmptyAndNonUUIDRefs(t *testing.T) {
+	const folderID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	var writes int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/api/docs" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"folders": []any{map[string]any{"id": folderID, "title": "Guides", "parent_id": nil}},
+				"docs":    []any{},
+			})
+			return
+		}
+		writes++
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": folderID, "title": "X"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Cleanup(func() { _ = docFolderUpdateCmd.Flags().Set("title", "") })
+
+	_ = docFolderUpdateCmd.Flags().Set("title", "X")
+	for _, ref := range []string{"", "   "} {
+		if err := runDocFolderUpdate(docFolderUpdateCmd, []string{ref}); err == nil || !strings.Contains(err.Error(), "folder id is required") {
+			t.Fatalf("ref %q must be rejected: %v", ref, err)
+		}
+	}
+	nonUUID := "aaaaaaaa/../../../docs?x=1#yyyyyyyyyy"[:36]
+	if err := runDocFolderUpdate(docFolderUpdateCmd, []string{nonUUID}); err == nil || !strings.Contains(err.Error(), "no folder matches") {
+		t.Fatalf("36-char non-UUID ref must not be used as an id: %v", err)
+	}
+	if writes != 0 {
+		t.Fatalf("rejected refs must not reach a write endpoint, got %d writes", writes)
 	}
 }
