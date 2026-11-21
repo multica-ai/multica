@@ -16,6 +16,10 @@ Multica enregistre et coordonne le travail ; ce sont les ordinateurs connectés 
 
 Par exemple, si un ordinateur sur lequel sont installés Claude Code et Codex est connecté à deux espaces de travail, le daemon enregistre un runtime Claude Code et un runtime Codex pour chaque espace de travail. Redémarrer le daemon met à jour les enregistrements existants ; il ne crée pas de nouveaux runtimes à chaque fois pour la même combinaison.
 
+## Nettoyage des processus d’exécution
+
+Sous Linux et macOS, les exécutions en streaming utilisant Claude Code, CodeArts, DevEco, le transport `run` d’OpenCode ou DSH arrêtent les processus descendants qui restent dans le groupe du runtime à sa sortie, y compris après une fin normale. Ne comptez pas sur la survie d’un serveur ou d’un navigateur lancé en arrière-plan par ces exécutions. Les processus qui quittent le groupe ne sont pas concernés par ce nettoyage. Les terminaux ACP conservent leur cycle de vie distinct jusqu’à leur libération.
+
 ## Lieu d'exécution et périmètre des données
 
 Les outils de codage IA qu'invoque un runtime local, leurs propres identifiants de connexion et vos répertoires de code locaux restent tous sur l'ordinateur connecté. Le serveur Multica n'exécute pas de commandes à la place des outils locaux et ne téléverse pas automatiquement l'intégralité de votre répertoire de travail.

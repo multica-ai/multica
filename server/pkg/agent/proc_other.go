@@ -46,6 +46,10 @@ func startOwnedProcessTree(cmd *exec.Cmd, _ *slog.Logger) error {
 
 // releaseProcessGroup is a no-op on non-Windows platforms: a process group needs
 // no handle and is gone once its members are.
+//
+// It deliberately does not terminate descendants: ACP managed terminals retain
+// background children until terminal/release. Streaming runtimes instead use
+// ownedRuntimeProcess to finish cleanup before reaping the leader.
 func releaseProcessGroup(cmd *exec.Cmd) {}
 
 func codexInitializeRetrySupported() bool { return true }
@@ -56,6 +60,14 @@ func codexInitializeRetrySupported() bool { return true }
 // the descendants the agent spawned, not just the leader.
 func signalProcessGroup(cmd *exec.Cmd, sig syscall.Signal) {
 	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	// Guard the pid before negating it: Kill(-0, sig) hits the caller's (the
+	// daemon's) own process group, and no caller ever wants to signal a
+	// non-positive pgid. A started process always has a positive pid; this only
+	// fires for a zero-value Process, and never lets a group send escape onto
+	// the daemon itself.
+	if cmd.Process.Pid <= 0 {
 		return
 	}
 	if err := syscall.Kill(-cmd.Process.Pid, sig); err != nil {

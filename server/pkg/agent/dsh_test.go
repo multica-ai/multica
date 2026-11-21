@@ -90,6 +90,32 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed"
 	}
 }
 
+func TestDshCompletedResultDoesNotHideProcessError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+IFS= read -r command
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh"}'
+printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed","output":"done"}'
+exit 7
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-1", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "prompt", ExecOptions{Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "exit status 7") {
+		t.Fatalf("completed frame hid process failure: %+v", result)
+	}
+}
+
 func TestDshBackendCancellationUsesProtocol(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture")
@@ -116,9 +142,16 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-cancel","status":"cance
 		t.Fatalf("bad session message: %#v", message)
 	}
 	cancel()
-	for range session.Messages {
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	var result Result
+	select {
+	case result = <-session.Result:
+	case <-time.After(2 * time.Second):
+		t.Fatal("protocol cancellation waited for escalation after the leader exited")
 	}
-	result := <-session.Result
 	if result.Status != "cancelled" || result.SessionID != "session-cancel" {
 		t.Fatalf("bad cancellation result: %#v", result)
 	}
