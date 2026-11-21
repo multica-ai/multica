@@ -357,19 +357,14 @@ func autoArchivesFor(prefs map[string]string, reason string) bool {
 	return onAction || prefs[autoArchiveCompletedPref] != "muted"
 }
 
-// issueFieldsChangedByActor reports whether an issue:updated payload changed a
-// field that handling the issue means: status, assignee, priority, project or
-// its dates. Title, description and parent edits are not.
-func issueFieldsChangedByActor(payload map[string]any) bool {
-	for _, key := range []string{
-		"status_changed", "assignee_changed", "priority_changed",
-		"project_changed", "start_date_changed", "due_date_changed",
-	} {
-		if changed, _ := payload[key].(bool); changed {
-			return true
-		}
-	}
-	return false
+// issueHandledByActor reports whether an issue:updated payload changed its
+// status or assignee: moves that leave nothing for the actor to come back to.
+// Priority, project, date, title, description and parent edits only tidy the
+// issue, so its notifications still need the actor.
+func issueHandledByActor(payload map[string]any) bool {
+	status, _ := payload["status_changed"].(bool)
+	assignee, _ := payload["assignee_changed"].(bool)
+	return status || assignee
 }
 
 // archiveActorIssueInbox archives the actor's own notifications for an issue
@@ -1194,20 +1189,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
-		if issueFieldsChangedByActor(payload) {
+		if issueHandledByActor(payload) {
 			archiveActorIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID, e.ActorType, e.ActorID, archiveReasonActed)
 		}
-	})
-
-	// issue_labels:changed — labelling an issue is handling it, like the
-	// field changes above.
-	bus.Subscribe(protocol.EventIssueLabelsChanged, func(e events.Event) {
-		payload, ok := e.Payload.(map[string]any)
-		if !ok {
-			return
-		}
-		issueID, _ := payload["issue_id"].(string)
-		archiveActorIssueInbox(ctx, queries, bus, e.WorkspaceID, issueID, e.ActorType, e.ActorID, archiveReasonActed)
 	})
 
 	// comment:created — notify all subscribers except the commenter

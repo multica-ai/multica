@@ -1646,8 +1646,8 @@ func publishIssueFieldsBy(bus *events.Bus, issueID, actorID string, changed ...s
 }
 
 // TestNotification_ActedArchivesIssueInbox verifies that with
-// auto_archive_on_action on, commenting on an issue, changing one of its
-// fields or its labels archives the actor's own notifications on it and
+// auto_archive_on_action on, commenting on an issue, changing its status or
+// reassigning it archives the actor's own notifications on it and
 // reports why, while other recipients keep theirs.
 func TestNotification_ActedArchivesIssueInbox(t *testing.T) {
 	queries := db.New(testPool)
@@ -1662,17 +1662,8 @@ func TestNotification_ActedArchivesIssueInbox(t *testing.T) {
 		act  func(bus *events.Bus, issueID string)
 	}{
 		{"comment", func(bus *events.Bus, issueID string) { publishCommentBy(bus, issueID, "member", actorID) }},
-		{"priority", func(bus *events.Bus, issueID string) { publishIssueFieldsBy(bus, issueID, actorID, "priority_changed") }},
+		{"status", func(bus *events.Bus, issueID string) { publishIssueFieldsBy(bus, issueID, actorID, "status_changed") }},
 		{"assignee", func(bus *events.Bus, issueID string) { publishIssueFieldsBy(bus, issueID, actorID, "assignee_changed") }},
-		{"labels", func(bus *events.Bus, issueID string) {
-			bus.Publish(events.Event{
-				Type:        protocol.EventIssueLabelsChanged,
-				WorkspaceID: testWorkspaceID,
-				ActorType:   "member",
-				ActorID:     actorID,
-				Payload:     map[string]any{"issue_id": issueID},
-			})
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bus := newNotificationBus(t, queries)
@@ -1708,8 +1699,8 @@ func TestNotification_ActedArchivesIssueInbox(t *testing.T) {
 }
 
 // TestNotification_ActedKeepsInboxWhenNotArchivedByActor verifies that acting
-// on an issue leaves the inbox alone by default, for an agent actor, and for a
-// title-only edit.
+// on an issue leaves the inbox alone by default, for an agent actor, and for
+// edits that only tidy it: title, priority, project, dates and labels.
 func TestNotification_ActedKeepsInboxWhenNotArchivedByActor(t *testing.T) {
 	queries := db.New(testPool)
 
@@ -1733,8 +1724,18 @@ func TestNotification_ActedKeepsInboxWhenNotArchivedByActor(t *testing.T) {
 		{"agent actor", onID, func(bus *events.Bus, issueID string) {
 			publishCommentBy(bus, issueID, "agent", "00000000-0000-0000-0000-aaaaaaaaaaaa")
 		}},
-		{"title only", onID, func(bus *events.Bus, issueID string) {
-			publishIssueFieldsBy(bus, issueID, onID, "title_changed")
+		{"tidying edits", onID, func(bus *events.Bus, issueID string) {
+			publishIssueFieldsBy(bus, issueID, onID,
+				"title_changed", "priority_changed", "project_changed", "start_date_changed", "due_date_changed")
+		}},
+		{"labels", onID, func(bus *events.Bus, issueID string) {
+			bus.Publish(events.Event{
+				Type:        protocol.EventIssueLabelsChanged,
+				WorkspaceID: testWorkspaceID,
+				ActorType:   "member",
+				ActorID:     onID,
+				Payload:     map[string]any{"issue_id": issueID},
+			})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

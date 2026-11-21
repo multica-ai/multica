@@ -47,8 +47,8 @@ const INBOX_CATEGORIES = [
 /**
  * Which of your own actions archive an issue's notifications, as one choice
  * over two keys: completing it (`auto_archive_completed`, on by default) and
- * commenting on or editing it (`auto_archive_on_action`), which includes
- * completing.
+ * commenting on it, changing its status or reassigning it
+ * (`auto_archive_on_action`), which includes completing.
  */
 type AutoArchiveLevel = "never" | "completed" | "acted";
 

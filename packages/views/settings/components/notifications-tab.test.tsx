@@ -103,7 +103,7 @@ describe("Inbox notification settings", () => {
     renderTab();
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
     expect(leaving).toHaveTextContent("Reading a notification doesn't take it out of the Inbox.");
-    expect(leaving).toHaveTextContent("issues others reply to or complete stay in your Inbox.");
+    expect(leaving).toHaveTextContent("editing priority, dates or labels doesn't count.");
     expect(within(leaving).getByRole("link", { name: "View archived" })).toHaveAttribute(
       "href",
       "/acme/inbox?view=archived",
@@ -113,8 +113,8 @@ describe("Inbox notification settings", () => {
   it.each<{ preferences: Record<string, string>; shown: string }>([
     { preferences: {}, shown: "When you complete them" },
     { preferences: { auto_archive_completed: "muted" }, shown: "Never" },
-    { preferences: { auto_archive_on_action: "all" }, shown: "When you reply or make changes" },
-    { preferences: { auto_archive_completed: "muted", auto_archive_on_action: "all" }, shown: "When you reply or make changes" },
+    { preferences: { auto_archive_on_action: "all" }, shown: "When you reply or hand off" },
+    { preferences: { auto_archive_completed: "muted", auto_archive_on_action: "all" }, shown: "When you reply or hand off" },
   ])("shows which of your actions archive an issue: %j", ({ preferences, shown }) => {
     renderTab(preferences);
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
@@ -123,7 +123,7 @@ describe("Inbox notification settings", () => {
 
   it.each<{ option: string; sent: Record<string, string> }>([
     { option: "Never", sent: { auto_archive_completed: "muted", auto_archive_on_action: "muted" } },
-    { option: "When you reply or make changes", sent: { auto_archive_completed: "all", auto_archive_on_action: "all" } },
+    { option: "When you reply or hand off", sent: { auto_archive_completed: "all", auto_archive_on_action: "all" } },
   ])("writes both archive keys for one choice: $option", async ({ option, sent }) => {
     const user = userEvent.setup();
     renderTab();
