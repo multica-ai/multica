@@ -67,7 +67,7 @@
     "empty": "收件箱為空",
     "original_input": "原始輸入",
     "retry_with_context": "保留上下文重試",
-    "edit_advanced": "在完整表單中編輯",
+    "edit_advanced": "開啟完整表單",
     "autopilot_quota_exceeded_body": "目前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置、升級方案或加購之前，後續自動化執行將不會啟動。",
     "project_owner_joined_body": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。",
     "open_project": "開啟專案",
@@ -151,7 +151,7 @@
   "errors": {
     "archived_lookup_failed": "無法載入連結指向的通知",
     "source_context_retry_failed": "無法使用原始上下文重試",
-    "source_context_retry_unavailable": "該上下文已無法重試，請從派生起點重新發起。",
+    "source_context_retry_unavailable": "此請求已無法重試。請從原始訊息或任務重新發起。",
     "mark_read_failed": "標為已讀失敗",
     "mark_unread_failed": "標為未讀失敗",
     "archive_failed": "歸檔失敗",
@@ -173,7 +173,7 @@
     "description": "此通知將被永久刪除，相關任務和執行記錄不受影響。",
     "issue_description": "目前檢視中此任務的通知將被永久刪除，任務和執行記錄不受影響。",
     "cancel": "取消",
-    "active_issue_description": "此任務在收件箱中的通知將被永久刪除。先前歸檔的通知會保留，並重新顯示在已歸檔檢視中。任務和執行記錄不受影響。"
+    "active_issue_description": "這將永久刪除此任務在收件匣中的待處理通知。先前歸檔的通知、任務本身及其執行記錄都會保留。"
   },
   "unsubscribe": {
     "title": "取消訂閱並歸檔：不再收到它的訂閱通知，@你時仍會通知",
@@ -198,7 +198,7 @@
     "picker_hour": "時",
     "picker_minute": "分",
     "picker_submit": "延後到 {{time}}",
-    "hint": "被點名 @、被指派或執行失敗時會提前回來。",
+    "hint": "若被 @ 提及、被指派或執行失敗，將提前回到收件匣。",
     "custom_invalid": "請選擇一年內的未來時間。",
     "back_at": "{{time}} 回來",
     "returned": "延後到期",

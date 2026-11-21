@@ -108,7 +108,7 @@
   },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",
-    "detail_link": "자세히 →",
+    "detail_link": "자세히 보기 →",
     "archived": "보관됨",
     "member_count_other": "멤버 {{count}}명",
     "members_section": "멤버",

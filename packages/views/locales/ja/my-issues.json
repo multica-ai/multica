@@ -14,7 +14,7 @@
       "created_label": "作成済み",
       "created_description": "自分が作成したタスク",
       "agents_label": "自分のエージェントとスクワッド",
-      "agents_description": "自分のエージェントに割り当てられたタスク"
+      "agents_description": "自分のエージェントとスクワッドに割り当てられたタスク"
     },
     "filter_button": "フィルター",
     "filter_status": "ステータス",

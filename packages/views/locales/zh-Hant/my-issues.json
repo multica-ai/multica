@@ -14,7 +14,7 @@
       "created_label": "我建立的",
       "created_description": "我建立的任務",
       "agents_label": "我的 AI 代理和小隊",
-      "agents_description": "分配給我的 AI 代理的任務"
+      "agents_description": "指派給我的 AI 代理與小隊的任務"
     },
     "filter_button": "篩選",
     "filter_status": "狀態",

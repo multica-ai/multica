@@ -14,7 +14,7 @@
       "created_label": "Creadas",
       "created_description": "Tareas que he creado",
       "agents_label": "Mis agentes y squads",
-      "agents_description": "Tareas asignadas a mis agentes"
+      "agents_description": "Tareas asignadas a mis agentes y squads"
     },
     "filter_button": "Filtrar",
     "filter_status": "Estado",

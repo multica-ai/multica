@@ -15,9 +15,9 @@
     "copy_link": "複製連結"
   },
   "errors": {
-    "move": "移動失敗",
-    "delete": "刪除失敗",
-    "save": "儲存失敗"
+    "move": "無法移動項目",
+    "delete": "無法刪除項目",
+    "save": "無法儲存變更"
   },
   "move": {
     "title": "移動\"{{title}}\"",
@@ -64,7 +64,7 @@
   "outline": "大綱",
   "link_copied": "連結已複製",
   "unavailable": {
-    "title": "知識庫暫未開放",
+    "title": "此工作區尚未啟用知識庫",
     "description": "目前工作區尚未開啟知識庫。"
   },
   "comments": {
@@ -75,7 +75,7 @@
     "close": "關閉評論",
     "quote_missing": "原文已修改，找不到劃線位置",
     "reply_placeholder": "回覆，或 @ 某人…",
-    "new_placeholder": "寫下評論，@ 提及某人…",
+    "new_placeholder": "新增評論，或 @ 提及某人...",
     "submit": "評論",
     "reply": "回覆",
     "cancel": "取消",
@@ -89,7 +89,7 @@
     "errors": {
       "save": "評論送出失敗",
       "delete": "評論刪除失敗",
-      "resolve": "無法更新討論"
+      "resolve": "無法更新評論"
     }
   }
 }

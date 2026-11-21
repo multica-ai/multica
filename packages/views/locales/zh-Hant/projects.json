@@ -152,7 +152,7 @@
     "mode_badge_in_place": "直接修改",
     "ref_label": "起始分支",
     "ref_placeholder": "main",
-    "ref_hint": "任務從這條分支開始，PR 也提到這裡。留空則使用預設分支。",
+    "ref_hint": "AI 代理執行會從此分支切出，並將 Pull Request 提交至此分支。留空則使用預設分支。",
     "ref_error_too_long": "最多 255 個字元。",
     "ref_error_characters": "分支名稱不能包含空格或 ~ ^ : ? * [ \\",
     "ref_error_format": "不是有效的分支名稱。",
@@ -164,7 +164,7 @@
     "toast_ref_update_failed": "分支更新失敗",
     "ref_error_commit": "這是 commit，不是分支。需要指定某個版本時，請用 multica repo checkout --ref。",
     "ref_default_label": "預設分支",
-    "ref_running_note": "進行中的任務不受影響。"
+    "ref_running_note": "已在進行中的執行不受影響。"
   },
   "delete_dialog": {
     "offline_error": "目前處於離線狀態，請連線後重試刪除。",
@@ -173,7 +173,7 @@
     "confirm": "刪除",
     "cancel": "取消",
     "archive_instead": "改為歸檔",
-    "archive_hint": "歸檔會隱藏專案，但保留它的任務、歷史和設定，隨時可以還原。"
+    "archive_hint": "歸檔會完整保留所有任務、歷史記錄與設定。"
   },
   "picker": {
     "no_project": "無專案",
@@ -196,7 +196,7 @@
     "slides": {
       "progress": {
         "title": "進度一眼看清",
-        "description": "狀態、負責人、截止日期和完成比例都在一張卡上，不用逐一翻任務。"
+        "description": "狀態、負責人、截止日期與完成進度都集中在一張卡片上，不必逐一點開每個任務。"
       },
       "context": {
         "title": "上下文自動帶給 AI 代理",

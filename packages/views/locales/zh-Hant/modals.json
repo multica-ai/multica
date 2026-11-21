@@ -11,7 +11,7 @@
     "description": "工作區是團隊協作處理專案和任務的共享空間。"
   },
   "delete_issue": {
-    "title": "刪除任務",
+    "title": "刪除任務？",
     "description": "將永久刪除該任務及其所有評論。此操作不可撤銷。",
     "cancel": "取消",
     "confirm": "刪除",
@@ -168,7 +168,7 @@
   },
   "create_issue": {
     "sr_manual": "新建任務",
-    "sr_agent": "快速建立任務",
+    "sr_agent": "透過 AI 代理建立任務",
     "manual_breadcrumb": "手動建立",
     "agent_breadcrumb": "透過 AI 代理建立",
     "title_placeholder": "任務標題",
@@ -243,7 +243,7 @@
       "search_placeholder": "搜尋 AI 代理或小隊...",
       "agents_group": "AI 代理",
       "squads_group": "小隊",
-      "version_missing": "該 AI 代理的守護程序沒有報告 CLI 版本。透過 AI 代理建立需要 multica CLI ≥ {{min}}。請升級守護程序並重連，或切換到手動建立。",
+      "version_missing": "此 AI 代理的守護程序未回報 CLI 版本。透過 AI 代理建立需要 multica CLI ≥ {{min}}。請升級守護程序並重新連線，或切換為手動建立。",
       "version_below": "該 AI 代理的守護程序 CLI 是 {{current}}——透過 AI 代理建立需要 ≥ {{min}}。請升級守護程序，或切換到手動建立。",
       "prompt_placeholder": "告訴 AI 代理要做什麼，例如：\"修復 Web 專案裡收件箱載入慢的問題\"",
       "source_context_prompt_placeholder": "告訴 AI 代理要基於這段上下文完成什麼，例如：\"繼續排查並修復這裡提到的問題\"",

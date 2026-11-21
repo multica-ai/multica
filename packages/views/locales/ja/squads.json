@@ -108,7 +108,7 @@
   },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",
-    "detail_link": "詳細 →",
+    "detail_link": "詳細を見る →",
     "archived": "アーカイブ済み",
     "member_count_other": "メンバー {{count}}名",
     "members_section": "メンバー",

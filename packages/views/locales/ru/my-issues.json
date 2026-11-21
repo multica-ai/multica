@@ -14,7 +14,7 @@
       "created_label": "Созданные",
       "created_description": "Задачи, которые я создал(а)",
       "agents_label": "Мои агенты и команды",
-      "agents_description": "Задачи, назначенные моим агентам"
+      "agents_description": "Задачи, назначенные на моих агентов и команды"
     },
     "filter_button": "Фильтр",
     "filter_status": "Статус",

@@ -12,7 +12,7 @@
   },
   "history_limit": {
     "note": "Votre forfait couvre les {{days}} derniers jours. Passez à un forfait supérieur pour voir les données plus anciennes. Rien n'est supprimé.",
-    "fell_back": "Votre forfait couvre les {{days}} derniers jours.",
+    "fell_back": "Affichage des {{days}} derniers jours — la limite de votre forfait actuel.",
     "view_plans": "Voir les forfaits",
     "locked": "Non inclus dans votre forfait",
     "plan": {
@@ -30,7 +30,7 @@
     "tasks_hint": "{{failed}} en échec"
   },
   "dim": {
-    "label": "Dimension",
+    "label": "Intervalle",
     "daily": "Quotidien",
     "weekly": "Hebdomadaire"
   },
@@ -60,8 +60,8 @@
     "kpi_failed_hint": "Sur {{total}} exécutions",
     "kpi_rate_label": "Taux d'échec · {{days}} j",
     "kpi_agents_label": "Agents touchés · {{days}} j",
-    "kpi_agents_hint": "Pire : {{name}} · {{count}}",
-    "tooltip_rate": "Taux d'erreur",
+    "kpi_agents_hint": "Le plus élevé : {{name}} ({{count}} en échec)",
+    "tooltip_rate": "Taux d'échec",
     "class": {
       "auth": "Authentification",
       "rate_limit": "Limite de débit",
@@ -76,8 +76,8 @@
     "mix_title": "Répartition des échecs · {{failed}}",
     "mix_label": "Répartition des échecs",
     "codes_label": "Codes d'erreur",
-    "by_agent": "Principaux fautifs",
-    "sort_label": "Classer les fautifs par",
+    "by_agent": "Erreurs par agent",
+    "sort_label": "Classer les agents par",
     "sort_failed": "Échecs",
     "sort_rate": "Taux",
     "header_agent": "Agent",

@@ -67,8 +67,8 @@
     "done_description": "Your next message to the bot in Feishu / Lark will go straight to the agent. You can close this tab.",
     "error_title": "Couldn't complete the binding",
     "error_admin_hint": "If this keeps happening, ask the workspace admin to re-send the binding link from Lark.",
-    "error_missing_token": "The link is missing its binding token. Ask the Bot to send a new one in Lark.",
-    "error_expired": "This binding link is invalid or expired (links are valid for 15 minutes). Ask the Bot to send a new one.",
+    "error_missing_token": "The link is missing its binding token. Ask the bot to send a new one in Lark.",
+    "error_expired": "This binding link is invalid or expired (links are valid for 15 minutes). Ask the bot to send a new one.",
     "error_already_bound": "This Feishu / Lark account is already linked to another Multica account. Unlink it from that account first before linking it here.",
     "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
     "error_unknown": "Something went wrong. Try again, and if the problem persists, contact the workspace admin."

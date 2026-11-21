@@ -14,7 +14,7 @@
       "created_label": "내가 만든 태스크",
       "created_description": "내가 생성한 태스크",
       "agents_label": "내 에이전트와 스쿼드",
-      "agents_description": "내 에이전트에게 할당된 태스크"
+      "agents_description": "내 에이전트와 스쿼드에 배정된 태스크"
     },
     "filter_button": "필터",
     "filter_status": "상태",

@@ -108,7 +108,7 @@
   },
   "profile_card": {
     "unavailable": "Squad indisponible",
-    "detail_link": "Détail →",
+    "detail_link": "Voir les détails →",
     "archived": "Archivé",
     "member_count_one": "{{count}} membre",
     "member_count_other": "{{count}} membres",
