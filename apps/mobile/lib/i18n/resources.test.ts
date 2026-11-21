@@ -17,17 +17,27 @@ function readLocale(locale: string): [string, unknown][] {
     ]);
 }
 
-function flatten(value: unknown, prefix = ""): Set<string> {
-  const keys = new Set<string>();
+function flattenEntries(
+  value: unknown,
+  prefix = "",
+): Map<string, string> {
+  const entries = new Map<string, string>();
+  if (typeof value === "string") {
+    entries.set(prefix, value);
+    return entries;
+  }
   if (typeof value !== "object" || value === null) {
-    keys.add(prefix);
-    return keys;
+    return entries;
   }
   for (const [key, child] of Object.entries(value)) {
     const nextKey = prefix ? `${prefix}.${key}` : key;
-    for (const childKey of flatten(child, nextKey)) keys.add(childKey);
+    for (const [k, v] of flattenEntries(child, nextKey)) entries.set(k, v);
   }
-  return keys;
+  return entries;
+}
+
+function placeholdersOf(text: string): string[] {
+  return [...new Set([...text.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map((m) => m[1]!))].sort();
 }
 
 describe("mobile i18n resources", () => {
@@ -44,15 +54,17 @@ describe("mobile i18n resources", () => {
       expect(zhNamespaces).toEqual(enNamespaces);
     });
 
-    it("keeps keys aligned with English", () => {
+    it("keeps keys and interpolation placeholders aligned with English", () => {
       const enResources = readLocale("en");
       const zhResources = new Map(readLocale(locale));
 
       for (const [namespace, value] of enResources) {
         const zhValue = zhResources.get(namespace);
         expect(zhValue, `missing ${locale} namespace: ${namespace}`).toBeDefined();
-        const enKeys = flatten(value);
-        const zhKeys = flatten(zhValue);
+        const enEntries = flattenEntries(value);
+        const zhEntries = flattenEntries(zhValue);
+        const enKeys = new Set(enEntries.keys());
+        const zhKeys = new Set(zhEntries.keys());
         // i18next plural rules use `_one` / `_other`; Chinese has only `_other`.
         const missing = [...enKeys].filter((key) => {
           if (zhKeys.has(key)) return false;
@@ -68,6 +80,23 @@ describe("mobile i18n resources", () => {
         expect(
           [...zhKeys].filter((key) => !enKeys.has(key)),
           `extra ${locale} keys in ${namespace}`,
+        ).toEqual([]);
+
+        const placeholderMismatches: string[] = [];
+        for (const [key, zhText] of zhEntries) {
+          const enText = enEntries.get(key);
+          if (enText === undefined) continue;
+          const enPh = placeholdersOf(enText);
+          const zhPh = placeholdersOf(zhText);
+          if (JSON.stringify(zhPh) !== JSON.stringify(enPh)) {
+            placeholderMismatches.push(
+              `${locale}/${namespace}:${key} expected [${enPh.join(", ")}] got [${zhPh.join(", ")}]`,
+            );
+          }
+        }
+        expect(
+          placeholderMismatches,
+          `placeholder mismatches in ${locale}/${namespace}`,
         ).toEqual([]);
       }
     });

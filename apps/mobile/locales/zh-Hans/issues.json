@@ -57,9 +57,9 @@
     "comments": "评论",
     "comment": "评论",
     "reply": "回复",
-    "add_comment": "添加评论…",
+    "add_comment": "添加评论...",
     "description": "描述",
-    "add_description": "添加描述…",
+    "add_description": "添加描述...",
     "runs": "运行",
     "copy_link": "复制链接",
     "open_on_web": "在网页打开",
@@ -71,13 +71,13 @@
     "title": "新建任务",
     "title_placeholder": "任务标题",
     "create": "创建任务",
-    "creating": "创建中…",
-    "description_placeholder": "描述…（输入 @ 提及）"
+    "creating": "创建中...",
+    "description_placeholder": "描述...（输入 @ 提及）"
   },
   "edit": {
     "title": "编辑任务",
     "save": "保存修改",
-    "saving": "保存中…"
+    "saving": "保存中..."
   },
   "activity": {
     "created": "创建了任务",
@@ -150,8 +150,8 @@
     "message": "智能体会在当前步骤结束后停止。",
     "keep_running": "继续运行",
     "cancel_task": "取消运行",
-    "waiting_for_connection": "等待网络连接…",
-    "stopping": "正在停止…",
+    "waiting_for_connection": "等待网络连接...",
+    "stopping": "正在停止...",
     "failed": "无法停止运行，请重试。"
   },
   "form": {
@@ -188,7 +188,7 @@
   },
   "comments": {
     "reply": "回复",
-    "react": "回应…",
+    "react": "回应...",
     "copy": "复制",
     "select_text": "选择文本",
     "copy_link": "复制链接",
@@ -198,10 +198,10 @@
     "delete_title": "删除评论？",
     "delete_keep_replies": "该评论将被永久删除。其回复会保留在讨论中。此操作无法撤销。",
     "delete_with_replies": "该评论将被永久删除，讨论中的回复也会一并移除。此操作无法撤销。",
-    "more_reactions": "更多表情…",
+    "more_reactions": "更多表情...",
     "fallback_actor": "评论",
-    "composer_placeholder": "添加评论…",
-    "composer_pill": "添加评论，输入 @ 提及…"
+    "composer_placeholder": "添加评论...",
+    "composer_pill": "添加评论，输入 @ 提及..."
   },
   "suggestions": {
     "everyone": "所有人",
@@ -230,7 +230,7 @@
     "branch": "起始分支（可选）",
     "label": "标签（可选）",
     "attach": "添加",
-    "attaching": "添加中…",
+    "attaching": "添加中...",
     "branch_hint": "运行会从这个分支开始，并针对它创建 Pull Request。留空则使用仓库默认分支。",
     "commit": "这是提交 ID，不是分支。运行会回传到起始分支。如需一次性修订，请给 multica repo checkout 传入 --ref。",
     "too_long": "最多使用 255 个字符。",
@@ -246,7 +246,7 @@
     "open_transcript": "打开{{summary}}的执行记录",
     "transcript": {
       "title": "执行记录",
-      "loading": "正在加载执行记录…",
+      "loading": "正在加载执行记录...",
       "load_error": "无法加载此执行记录。",
       "retry": "重试",
       "missing": "此运行不可用或已不存在。",

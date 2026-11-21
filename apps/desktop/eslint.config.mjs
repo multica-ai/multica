@@ -90,7 +90,16 @@ export default [
   {
     files: ["src/renderer/src/components/desktop-dev-toolbar.tsx"],
     rules: {
-      "no-restricted-syntax": ["error", NO_ROUND_CONTROLS],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.object.name='router'][callee.property.name='navigate']",
+          message:
+            "Direct router.navigate from application code breaks the Coordinator protocol (MUL-4741). Route it through the navigation adapter in src/platform.",
+        },
+        NO_ROUND_CONTROLS,
+      ],
     },
   },
 ];

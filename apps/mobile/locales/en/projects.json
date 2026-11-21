@@ -2,7 +2,7 @@
   "list": {
     "title": "Projects",
     "empty": "No projects yet",
-    "search_placeholder": "Search projects…"
+    "search_placeholder": "Search projects..."
   },
   "status": {
     "planned": "Planned",
@@ -42,8 +42,8 @@
     "load_failed": "Failed to load project: {{message}}"
   },
   "actions": {
-    "creating": "Creating…",
-    "saving": "Saving…"
+    "creating": "Creating...",
+    "saving": "Saving..."
   },
   "menu": {
     "pin": "Pin",

@@ -80,7 +80,7 @@ describe("Desktop daemon localization with real zh-Hans resources", () => {
     });
 
     expect(
-      await screen.findByText("另有 1 条「poll complete」——点击展开"),
+      await screen.findByText('另有 1 条"poll complete"——点击展开'),
     ).toBeInTheDocument();
   });
 });

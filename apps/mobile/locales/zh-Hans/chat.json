@@ -15,13 +15,13 @@
     "upload_file": "上传文件",
     "send": "发送",
     "queue": "排队发送",
-    "default_placeholder": "输入消息…",
+    "default_placeholder": "输入消息...",
     "unavailable": "聊天不可用",
     "stop_agent": "停止智能体",
     "file_too_large_title": "文件过大",
     "file_too_large_message": "文件必须小于 100 MB。",
-    "working": "智能体正在处理…",
-    "message": "消息…"
+    "working": "智能体正在处理...",
+    "message": "消息..."
   },
   "empty": {
     "greeting": "你好，我是 {{name}}",
@@ -36,7 +36,7 @@
   },
   "picker": {
     "title": "选择智能体",
-    "placeholder": "搜索智能体…",
+    "placeholder": "搜索智能体...",
     "empty": "没有可用智能体。",
     "needs_runtime": "需要运行时"
   },
@@ -152,7 +152,7 @@
     "tool": "工具",
     "tool_result_named": "{{tool}} 结果：",
     "tool_result_unnamed": "结果：",
-    "truncated": "…（已截断）",
+    "truncated": "...（已截断）",
     "error": "错误"
   }
 }

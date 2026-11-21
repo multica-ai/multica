@@ -1,20 +1,56 @@
 import type { SupportedLocale } from "@multica/core/i18n";
 
-export function resolveDesktopEmergencyLocale(): SupportedLocale {
-  const raw =
-    (typeof document !== "undefined" ? document.documentElement.lang : "") ||
-    (typeof navigator !== "undefined" ? navigator.language : "") ||
-    "en";
-  const lower = raw.toLowerCase();
-  if (lower.startsWith("zh")) {
-    return /^zh-(hant|tw|hk|mo)\b/.test(lower) ? "zh-Hant" : "zh-Hans";
+const LOCALE_STORAGE_KEY = "multica-locale";
+
+function matchSupportedLocale(raw: string): SupportedLocale {
+  const parts = raw
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-")
+    .split("-")
+    .filter(Boolean);
+  const lang = parts[0];
+  if (lang === "zh") {
+    const isTraditional = parts
+      .slice(1)
+      .some((sub) => sub === "hant" || sub === "tw" || sub === "hk" || sub === "mo");
+    return isTraditional ? "zh-Hant" : "zh-Hans";
   }
-  if (lower.startsWith("ja")) return "ja";
-  if (lower.startsWith("ko")) return "ko";
-  if (lower.startsWith("fr")) return "fr";
-  if (lower.startsWith("es")) return "es";
-  if (lower.startsWith("ru")) return "ru";
+  if (lang === "ja") return "ja";
+  if (lang === "ko") return "ko";
+  if (lang === "fr") return "fr";
+  if (lang === "es") return "es";
+  if (lang === "ru") return "ru";
   return "en";
+}
+
+function readStoredLocale(): string | null {
+  try {
+    return typeof window !== "undefined"
+      ? window.localStorage.getItem(LOCALE_STORAGE_KEY)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveDesktopEmergencyLocale(
+  preferredLocale?: SupportedLocale,
+): SupportedLocale {
+  if (preferredLocale) return preferredLocale;
+  const stored = readStoredLocale();
+  if (stored) return matchSupportedLocale(stored);
+  const systemLocale =
+    typeof window !== "undefined" ? window.desktopAPI?.systemLocale : "";
+  if (systemLocale) return matchSupportedLocale(systemLocale);
+  const docLang =
+    typeof document !== "undefined" ? document.documentElement.lang : "";
+  if (docLang && docLang.toLowerCase() !== "en") {
+    return matchSupportedLocale(docLang);
+  }
+  const navLang =
+    typeof navigator !== "undefined" ? navigator.language : "";
+  return matchSupportedLocale(navLang || docLang || "en");
 }
 
 export const DESKTOP_EMERGENCY_COPY: Record<

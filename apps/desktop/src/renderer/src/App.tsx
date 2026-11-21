@@ -361,8 +361,14 @@ function AppContent() {
   return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
-function BlockingRuntimeConfigError({ message }: { message: string }) {
-  const copy = DESKTOP_EMERGENCY_COPY[resolveDesktopEmergencyLocale()];
+function BlockingRuntimeConfigError({
+  locale,
+  message,
+}: {
+  locale: SupportedLocale;
+  message: string;
+}) {
+  const copy = DESKTOP_EMERGENCY_COPY[resolveDesktopEmergencyLocale(locale)];
   return (
     <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
       <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
@@ -517,7 +523,10 @@ export default function App() {
             )}
         </CoreProvider>
       ) : (
-        <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
+        <BlockingRuntimeConfigError
+          locale={locale}
+          message={runtimeConfigResult.error.message}
+        />
       )}
       <Toaster />
       {windowContext.kind === "main" && <UpdateNotification />}
