@@ -433,6 +433,10 @@
         "label": "延後通知",
         "description": "延後從收件箱開啟的任務；已延後時讓它現在回來。"
       },
+      "undoInboxAction": {
+        "label": "復原收件箱操作",
+        "description": "提示還在時，復原上一次歸檔、延後或取消訂閱；開啟的通知已歸檔時，把它放回收件箱。"
+      },
       "send": {
         "label": "傳送",
         "description": "也用於提交新任務。"
@@ -855,7 +859,7 @@
       "auto_presets": {
         "never": "從不",
         "completed": "完成任務時",
-        "handled": "回覆、改狀態或轉交後",
+        "handled": "回覆、推進狀態或轉交後",
         "custom": "自訂",
         "custom_item": "自訂..."
       },
@@ -867,7 +871,7 @@
       "auto_actions": {
         "completed": "完成",
         "comment": "回覆",
-        "status": "改狀態",
+        "status": "推進狀態",
         "assignee": "轉交",
         "priority": "改優先級",
         "project": "改專案",

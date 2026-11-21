@@ -433,6 +433,10 @@
         "label": "알림 미루기",
         "description": "인박스에서 연 태스크를 미룹니다. 이미 미뤘다면 지금 되돌립니다."
       },
+      "undoInboxAction": {
+        "label": "인박스 작업 실행 취소",
+        "description": "토스트가 보이는 동안 마지막 보관, 미루기, 구독 해제를 취소합니다. 열린 알림이 보관되었다면 인박스로 되돌립니다."
+      },
       "send": {
         "label": "보내기",
         "description": "새 태스크 생성에도 사용됩니다."
@@ -855,7 +859,7 @@
       "auto_presets": {
         "never": "안 함",
         "completed": "완료했을 때",
-        "handled": "답글, 상태 변경, 담당자 변경 후",
+        "handled": "답글, 상태 진행, 담당자 변경 후",
         "custom": "사용자 지정",
         "custom_item": "사용자 지정..."
       },
@@ -867,7 +871,7 @@
       "auto_actions": {
         "completed": "완료",
         "comment": "답글",
-        "status": "상태 변경",
+        "status": "상태 진행",
         "assignee": "담당자 변경",
         "priority": "우선순위 변경",
         "project": "프로젝트 변경",

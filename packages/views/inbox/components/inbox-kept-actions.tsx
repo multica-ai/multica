@@ -1,12 +1,20 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { Archive, ArrowDown, Undo2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { InboxBarAction } from "@multica/core/inbox/auto-archive";
 import type { KeptInboxRow } from "@multica/core/inbox/open-row";
+import { useModalStore } from "@multica/core/modals";
+import {
+  getShortcut,
+  isEditableShortcutTarget,
+  isPortalLayerShortcutTarget,
+  shortcutMatchesEvent,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxItem } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
@@ -15,6 +23,7 @@ import { useStatusLabel } from "../../issues/utils/status-label";
 import { formatSnoozeTime } from "./inbox-snooze-time";
 import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "./inbox-display";
 import { InboxBar, InboxBarSeparator, InboxBarStatus } from "./inbox-bar";
+import { hasInboxUndo } from "./inbox-undo-toast";
 
 /**
  * How a kept row (`keepOpenInboxRow`) says why it is settled: `line` in its
@@ -70,7 +79,7 @@ export function useKeptInboxRowText(wsId: string) {
  * own (its issue reached Done, another window archived it) and stays on
  * screen until the user moves on: what happened, the issue's own actions
  * when it was archived, so the next change needs no trip to its properties,
- * then the way to undo it and the next notification.
+ * then the way to undo it (Z) and the next notification.
  */
 export function InboxKeptActions({
   label,
@@ -90,6 +99,27 @@ export function InboxKeptActions({
   onNext: () => void;
 }) {
   const { t } = useT("inbox");
+  const undoRef = useRef(onUndo);
+  useEffect(() => {
+    undoRef.current = onUndo;
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // A showing undo toast is the latest action, and the shortcut is its.
+      if (hasInboxUndo()) return;
+      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
+      if (isEditableShortcutTarget(event.target)) return;
+      if (isPortalLayerShortcutTarget(event.target)) return;
+      if (useModalStore.getState().modal) return;
+      if (!shortcutMatchesEvent(getShortcut("undoInboxAction"), event)) return;
+      const undo = undoRef.current;
+      if (!undo) return;
+      event.preventDefault();
+      undo();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
   return (
     <InboxBar settled>
       <InboxBarStatus icon={icon ?? <Archive />} label={label} />
@@ -99,6 +129,9 @@ export function InboxKeptActions({
         <Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground" onClick={onUndo}>
           <Undo2 />
           {t(($) => $.toasts.undo)}
+          <span className="flex @max-[30rem]/inbox-bar:hidden">
+            <ActionShortcutKeycaps action="undoInboxAction" />
+          </span>
         </Button>
       )}
       {next && <InboxNextButton next={next} onNext={onNext} />}

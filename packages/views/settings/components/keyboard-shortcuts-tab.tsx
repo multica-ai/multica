@@ -273,7 +273,7 @@ function ShortcutRow({
   const { t } = useT("settings");
   const label = t(($) => $.shortcuts.actions[action.id].label);
   // Keep descriptions in the search index, but only show non-obvious behavior.
-  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "unsubscribeArchiveInboxItem", "snoozeInboxItem", "send"].includes(action.id)
+  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "unsubscribeArchiveInboxItem", "snoozeInboxItem", "undoInboxAction", "send"].includes(action.id)
     ? t(($) => $.shortcuts.actions[action.id].description)
     : undefined;
   const errorText = error?.kind === "reserved"

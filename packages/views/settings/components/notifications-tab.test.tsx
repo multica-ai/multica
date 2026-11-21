@@ -141,7 +141,7 @@ describe("Inbox notification settings", () => {
     });
 
   it.each<{ preferences: Record<string, string>; shown: string; custom: boolean }>([
-    { preferences: {}, shown: "After you reply, change status or reassign", custom: false },
+    { preferences: {}, shown: "After you reply, move it forward or reassign", custom: false },
     { preferences: { ...ALL_ACTIONS_OFF, auto_archive_completed: "all" }, shown: "When you complete it", custom: false },
     { preferences: ALL_ACTIONS_OFF, shown: "Never", custom: false },
     { preferences: { auto_archive_on_labels: "all" }, shown: "Custom", custom: true },
@@ -159,7 +159,7 @@ describe("Inbox notification settings", () => {
     expect(options.map((option) => [option.textContent, option.getAttribute("aria-selected")])).toEqual([
       ["Never", "false"],
       ["When you complete it", "false"],
-      ["After you reply, change status or reassignRecommended", "true"],
+      ["After you reply, move it forward or reassignRecommended", "true"],
       ["Custom...", "false"],
     ]);
   });
@@ -188,7 +188,7 @@ describe("Inbox notification settings", () => {
     expect(checked).toEqual([
       ["Complete", "true"],
       ["Reply", "true"],
-      ["Change status", "true"],
+      ["Move it forward", "true"],
       ["Reassign", "true"],
       ["Change priority", "false"],
       ["Change project", "false"],

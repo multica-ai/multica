@@ -439,6 +439,10 @@
         "label": "Snooze notification",
         "description": "Snooze the open inbox issue, or bring it back now if it is snoozed."
       },
+      "undoInboxAction": {
+        "label": "Undo inbox action",
+        "description": "Undo the last archive, snooze or unsubscribe while its toast shows, or put the open notification back once it is archived."
+      },
       "send": {
         "label": "Send",
         "description": "Also submits new issues."
@@ -865,7 +869,7 @@
       "auto_presets": {
         "never": "Never",
         "completed": "When you complete it",
-        "handled": "After you reply, change status or reassign",
+        "handled": "After you reply, move it forward or reassign",
         "custom": "Custom",
         "custom_item": "Custom..."
       },
@@ -877,7 +881,7 @@
       "auto_actions": {
         "completed": "Complete",
         "comment": "Reply",
-        "status": "Change status",
+        "status": "Move it forward",
         "assignee": "Reassign",
         "priority": "Change priority",
         "project": "Change project",
