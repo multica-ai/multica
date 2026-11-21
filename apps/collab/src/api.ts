@@ -1,6 +1,9 @@
 import type { Actor } from "./ticket";
 
-/** A stored document as the Go API holds it. */
+/** What a live document holds: a doc, or an issue's description. */
+export type DocumentType = "doc" | "issue";
+
+/** A stored document as the Go API holds it. Issues have no title. */
 export interface StoredDocument {
   workspace_id: string;
   title: string;
@@ -24,10 +27,15 @@ export interface StoreRequest {
   task_id?: string;
   /** Save only the Yjs state for the current revision; the doc is untouched. */
   state_only?: boolean;
+  /** Issues: mentions ("type:id") this session has already stored, which
+   *  must not notify again. */
+  seen_mentions?: string[];
+  /** Issues: a save of what people typed rather than one explicit write. */
+  live?: boolean;
 }
 
 export type StoreResult =
-  | { status: "stored"; revision: number; title: string }
+  | { status: "stored"; revision: number; title: string; mentions: string[] }
   | { status: "conflict"; revision: number; content: string }
   | { status: "gone" };
 
@@ -41,7 +49,7 @@ export class ApiError extends Error {
 }
 
 /** Client for the Go API's internal collaboration endpoints
- *  (server/internal/handler/collab.go). */
+ *  (server/internal/handler/doc_collab.go, issue_description_collab.go). */
 export class CollabApi {
   constructor(
     private readonly baseUrl: string,
@@ -60,15 +68,19 @@ export class CollabApi {
     });
   }
 
-  async loadDoc(id: string): Promise<StoredDocument | null> {
-    const res = await this.request(`/internal/collab/docs/${encodeURIComponent(id)}`);
+  private path(type: DocumentType, id: string) {
+    return `/internal/collab/${type === "issue" ? "issues" : "docs"}/${encodeURIComponent(id)}`;
+  }
+
+  async load(type: DocumentType, id: string): Promise<StoredDocument | null> {
+    const res = await this.request(this.path(type, id));
     if (res.status === 404) return null;
-    if (!res.ok) throw new ApiError(`load doc ${id}: ${res.status} ${await res.text()}`, res.status);
+    if (!res.ok) throw new ApiError(`load ${type} ${id}: ${res.status} ${await res.text()}`, res.status);
     return (await res.json()) as StoredDocument;
   }
 
-  async storeDoc(id: string, body: StoreRequest): Promise<StoreResult> {
-    const res = await this.request(`/internal/collab/docs/${encodeURIComponent(id)}/store`, {
+  async store(type: DocumentType, id: string, body: StoreRequest): Promise<StoreResult> {
+    const res = await this.request(`${this.path(type, id)}/store`, {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -77,8 +89,8 @@ export class CollabApi {
       const data = (await res.json()) as { revision: number; content: string };
       return { status: "conflict", revision: data.revision, content: data.content };
     }
-    if (!res.ok) throw new ApiError(`store doc ${id}: ${res.status} ${await res.text()}`, res.status);
-    const data = (await res.json()) as { revision: number; title: string };
-    return { status: "stored", revision: data.revision, title: data.title };
+    if (!res.ok) throw new ApiError(`store ${type} ${id}: ${res.status} ${await res.text()}`, res.status);
+    const data = (await res.json()) as { revision: number; title?: string; mentions?: string[] };
+    return { status: "stored", revision: data.revision, title: data.title ?? "", mentions: data.mentions ?? [] };
   }
 }

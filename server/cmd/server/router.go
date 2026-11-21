@@ -1629,6 +1629,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/", h.GetCollabDoc)
 			r.Post("/store", h.StoreCollabDoc)
 		})
+		r.Route("/internal/collab/issues/{id}", func(r chi.Router) {
+			r.Use(h.RequireCollabSecret)
+			r.Get("/", h.GetCollabIssue)
+			r.Post("/store", h.StoreCollabIssue)
+		})
 	}
 
 	// Capability-authenticated attachment download (MUL-5292). Public by
@@ -2258,6 +2263,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
+					r.Post("/description/edits", h.EditIssueDescription)
+					r.Post("/collab-ticket", h.CreateIssueCollabTicket)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)

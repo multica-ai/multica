@@ -82,7 +82,7 @@ func TestClientMapsServiceResponses(t *testing.T) {
 	ctx := context.Background()
 
 	content := "new"
-	result, err := client.Write(ctx, "abc", WriteRequest{Actor: Actor{Type: "agent", ID: "a"}, Content: &content})
+	result, err := client.Write(ctx, DocumentName("abc"), WriteRequest{Actor: Actor{Type: "agent", ID: "a"}, Content: &content})
 	if err != nil || result.Status != StatusOK || result.Revision != 7 || !result.Merged {
 		t.Fatalf("write = %+v, %v", result, err)
 	}
@@ -91,34 +91,34 @@ func TestClientMapsServiceResponses(t *testing.T) {
 	}
 
 	status, body = http.StatusConflict, `{"error":"edit_failed","status":"edit_failed","revision":3,"content":"c","failure":{"reason":"ambiguous","index":0,"matches":2}}`
-	result, err = client.Edit(ctx, "abc", EditRequest{Edits: []TextEdit{{OldText: "x", NewText: "y"}}})
+	result, err = client.Edit(ctx, DocumentName("abc"), EditRequest{Edits: []TextEdit{{OldText: "x", NewText: "y"}}})
 	if err != nil || result.Status != StatusEditFailed || result.Failure == nil || result.Failure.Matches != 2 {
 		t.Fatalf("edit = %+v, %v", result, err)
 	}
 
 	status, body = http.StatusNotFound, `{}`
-	if result, err = client.Write(ctx, "abc", WriteRequest{}); err != nil || result.Status != StatusGone {
+	if result, err = client.Write(ctx, DocumentName("abc"), WriteRequest{}); err != nil || result.Status != StatusGone {
 		t.Fatalf("gone = %+v, %v", result, err)
 	}
 
 	status, body = http.StatusRequestEntityTooLarge, `{"error":"content_too_large","status":"too_large","revision":3}`
-	if result, err = client.Edit(ctx, "abc", EditRequest{}); err != nil || result.Status != StatusTooLarge {
+	if result, err = client.Edit(ctx, DocumentName("abc"), EditRequest{}); err != nil || result.Status != StatusTooLarge {
 		t.Fatalf("too large = %+v, %v", result, err)
 	}
 
 	// A refused request must not be written around the running service.
 	status, body = http.StatusBadRequest, `{"error":"bad"}`
-	if _, err = client.Write(ctx, "abc", WriteRequest{}); err == nil || errors.Is(err, ErrUnavailable) {
+	if _, err = client.Write(ctx, DocumentName("abc"), WriteRequest{}); err == nil || errors.Is(err, ErrUnavailable) {
 		t.Fatalf("400 err = %v, want an error other than ErrUnavailable", err)
 	}
 
 	status, body = http.StatusInternalServerError, `{"error":"boom"}`
-	if _, err = client.Write(ctx, "abc", WriteRequest{}); !errors.Is(err, ErrUnavailable) {
+	if _, err = client.Write(ctx, DocumentName("abc"), WriteRequest{}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("500 err = %v, want ErrUnavailable", err)
 	}
 
 	srv.Close()
-	if err = client.Flush(ctx, "abc"); !errors.Is(err, ErrUnavailable) {
+	if err = client.Flush(ctx, DocumentName("abc")); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("unreachable err = %v, want ErrUnavailable", err)
 	}
 }

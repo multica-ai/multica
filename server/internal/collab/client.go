@@ -96,27 +96,29 @@ type Result struct {
 	Failure   *EditFailure    `json:"failure,omitempty"`
 }
 
-func (c *Client) Write(ctx context.Context, docID string, req WriteRequest) (Result, error) {
-	return c.call(ctx, docID, "write", req)
+// Write, Edit and Flush address a live document by its service name:
+// DocumentName for a doc, IssueDocumentName for an issue description.
+func (c *Client) Write(ctx context.Context, document string, req WriteRequest) (Result, error) {
+	return c.call(ctx, document, "write", req)
 }
 
-func (c *Client) Edit(ctx context.Context, docID string, req EditRequest) (Result, error) {
-	return c.call(ctx, docID, "edit", req)
+func (c *Client) Edit(ctx context.Context, document string, req EditRequest) (Result, error) {
+	return c.call(ctx, document, "edit", req)
 }
 
-// Flush persists pending editor changes of a loaded doc, so a read sees what
-// people have typed. Docs nobody has open return immediately.
-func (c *Client) Flush(ctx context.Context, docID string) error {
-	_, err := c.call(ctx, docID, "flush", struct{}{})
+// Flush persists pending editor changes of a loaded document, so a read sees
+// what people have typed. Documents nobody has open return immediately.
+func (c *Client) Flush(ctx context.Context, document string) error {
+	_, err := c.call(ctx, document, "flush", struct{}{})
 	return err
 }
 
-func (c *Client) call(ctx context.Context, docID, op string, body any) (Result, error) {
+func (c *Client) call(ctx context.Context, document, op string, body any) (Result, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return Result{}, err
 	}
-	endpoint := c.baseURL.JoinPath("internal", "documents", DocumentName(docID), op)
+	endpoint := c.baseURL.JoinPath("internal", "documents", document, op)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(raw))
 	if err != nil {
 		return Result{}, err

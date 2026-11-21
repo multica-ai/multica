@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import * as Y from "yjs";
 import type { Document, Hocuspocus } from "@hocuspocus/server";
 import type { DocumentCodec, JSONContent } from "@multica/views/editor/schema/codec";
-import type { CollabApi, StoreRequest } from "./api";
+import type { CollabApi, DocumentType, StoreRequest } from "./api";
 import { applyTextEdits, type EditFailure, type TextEdit } from "./edits";
 import { keepLiveBlocks, mergeDocuments, type MergeConflict } from "./merge";
 import type { Actor } from "./ticket";
@@ -22,9 +22,10 @@ const META_MAP = "meta";
 export const COMPACT_STATE_MIN_BYTES = 1 << 20;
 export const COMPACT_STATE_RATIO = 4;
 
-export function parseDocumentName(name: string): { type: "doc"; id: string } | null {
-  const match = /^doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(name);
-  return match ? { type: "doc", id: match[1]!.toLowerCase() } : null;
+/** `doc:<uuid>` is a doc; `issue:<uuid>` is an issue's description. */
+export function parseDocumentName(name: string): { type: DocumentType; id: string } | null {
+  const match = /^(doc|issue):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(name);
+  return match ? { type: match[1] as DocumentType, id: match[2]!.toLowerCase() } : null;
 }
 
 export function documentEpoch(doc: Y.Doc): string | undefined {
@@ -36,7 +37,11 @@ export function documentEpoch(doc: Y.Doc): string | undefined {
 const serverOrigin = (actor: Actor) => ({ source: "local" as const, skipStoreHooks: true, context: { actor } });
 
 interface DocState {
+  type: DocumentType;
   id: string;
+  /** Issues: mentions stored while this session was loaded. An editor saves
+   *  a mention half typed, or deletes and retypes it; it notifies once. */
+  seenMentions: Set<string>;
   /** Stored revision the live document was last persisted as. */
   revision: number;
   /** Canonical Markdown of that revision. */
@@ -110,8 +115,8 @@ export class DocumentStore {
   async load(name: string): Promise<Uint8Array> {
     const parsed = parseDocumentName(name);
     if (!parsed) throw new Error(`unknown document ${name}`);
-    const stored = await this.api.loadDoc(parsed.id);
-    if (!stored) throw new GoneError(`doc ${parsed.id} not found`);
+    const stored = await this.api.load(parsed.type, parsed.id);
+    if (!stored) throw new GoneError(`${parsed.type} ${parsed.id} not found`);
 
     let ydoc: Y.Doc | null = null;
     let from = "markdown";
@@ -144,18 +149,20 @@ export class DocumentStore {
       // Save the state now: loading again would otherwise redo the catch-up
       // or rebuild with new Yjs items and duplicate text for clients that
       // already hold this one.
-      const saved = await this.api.storeDoc(parsed.id, {
+      const saved = await this.api.store(parsed.type, parsed.id, {
         base_revision: stored.revision,
         content: stored.content,
         ystate: Buffer.from(Y.encodeStateAsUpdate(ydoc)).toString("base64"),
         contributors: [],
         state_only: true,
       });
-      if (saved.status === "gone") throw new GoneError(`doc ${parsed.id} not found`);
-      if (saved.status === "conflict") throw new Error(`doc ${parsed.id} changed while loading`);
+      if (saved.status === "gone") throw new GoneError(`${parsed.type} ${parsed.id} not found`);
+      if (saved.status === "conflict") throw new Error(`${parsed.type} ${parsed.id} changed while loading`);
     }
     this.states.set(name, {
+      type: parsed.type,
       id: parsed.id,
+      seenMentions: new Set(),
       revision: stored.revision,
       persisted: this.codec.ydocToMarkdown(ydoc),
       loadedRaw: stored.content,
@@ -163,7 +170,12 @@ export class DocumentStore {
       dirty: false,
       queue: Promise.resolve(),
     });
-    this.log.info("loaded", { doc: parsed.id, revision: stored.revision, from, state_bytes: state?.byteLength ?? 0 });
+    this.log.info("loaded", {
+      [parsed.type]: parsed.id,
+      revision: stored.revision,
+      from,
+      state_bytes: state?.byteLength ?? 0,
+    });
     return Y.encodeStateAsUpdate(ydoc);
   }
 
@@ -351,10 +363,11 @@ export class DocumentStore {
       ...(req.action ? { action: req.action } : {}),
       ...(req.action_ref ? { action_ref: req.action_ref } : {}),
       ...(req.task_id ? { task_id: req.task_id } : {}),
+      ...(state.type === "issue" ? { seen_mentions: [...state.seenMentions], live: !explicit } : {}),
     };
     let result;
     try {
-      result = await this.api.storeDoc(state.id, body);
+      result = await this.api.store(state.type, state.id, body);
     } catch (error) {
       giveBack();
       state.dirty = true;
@@ -378,9 +391,10 @@ export class DocumentStore {
     state.revision = result.revision;
     state.persisted = content;
     state.loadedRaw = null;
+    for (const mention of result.mentions) state.seenMentions.add(mention);
     this.lastTitle.set(name, result.title);
     this.log.info("stored", {
-      doc: state.id,
+      [state.type]: state.id,
       revision: result.revision,
       contributors: body.contributors.map((c) => `${c.type}:${c.id}`),
     });
