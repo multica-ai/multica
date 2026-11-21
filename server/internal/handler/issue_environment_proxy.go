@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -305,16 +306,34 @@ func (h *Handler) authorizeEnvironmentProxy(w http.ResponseWriter, r *http.Reque
 		return claims, false
 	}
 
-	wsID, userID := uuidToString(row.WorkspaceID), requestUserID(r)
+	wsID := uuidToString(row.WorkspaceID)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return claims, false
+	}
 	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Workspace-ID") != wsID {
 		writeError(w, http.StatusForbidden, "task token is bound to a different workspace")
 		return claims, false
 	}
-	// A hidden object must be indistinguishable from one that does not exist,
-	// so a non-member and a private project both answer like the 404 above.
-	if _, ok := h.requireWorkspaceMember(w, r, wsID, "environment not found"); !ok {
+	// The preview origin relays a browser request whose path belongs to the
+	// developer's own app, so guest policy must not be decided by r.URL.Path:
+	// a guest holding a valid bearer token could name any platform route and
+	// read its guest allowance. Resolve membership here instead, and hide both
+	// a non-member and a guest behind the same 404 as a missing environment.
+	member, err := h.getWorkspaceMember(ctx, userID, wsID)
+	if err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return claims, false
+		}
+		writeError(w, http.StatusNotFound, "environment not found")
 		return claims, false
 	}
+	if projectaccess.IsGuestRole(member.Role) {
+		writeError(w, http.StatusNotFound, "environment not found")
+		return claims, false
+	}
+	// A hidden object must be indistinguishable from one that does not exist,
+	// so a private project answers like the 404 above.
 	if !h.requireIssueIDVisible(w, r, wsID, row.IssueID, http.StatusNotFound, "environment not found") {
 		return claims, false
 	}

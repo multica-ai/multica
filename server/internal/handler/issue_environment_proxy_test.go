@@ -212,6 +212,97 @@ func TestEnvironmentProxyAuthorizationAndState(t *testing.T) {
 	}
 }
 
+// TestEnvironmentProxyGuestAlwaysHidden locks the answer a workspace guest
+// gets from both preview entry points. Guests are members the plan does not
+// give runtimes or environments (MUL-9420), so neither the launch endpoint nor
+// the preview origin's bearer path may reveal whether an environment exists,
+// and a guest must never hand the proxy a platform path to claim that route's
+// guest allowance: the preview origin's path is the developer's app, not ours.
+func TestEnvironmentProxyGuestAlwaysHidden(t *testing.T) {
+	guest := newGuestFixture(t)
+	runtimeID := dbfx.Runtime(t, "guest preview runtime")
+	enableEnvironmentTunnel(t, runtimeID)
+	agentID := dbfx.Agent(t, "guest preview agent", runtimeID)
+	taskID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": guest.sharedIssue, "runtime_id": runtimeID, "status": "running"})
+	environment := func(issueID, key string) string {
+		return dbfx.Insert(t, "issue_environment", testutil.Cols{
+			"workspace_id": testWorkspaceID, "issue_id": issueID, "task_id": taskID,
+			"runtime_id": runtimeID, "local_key": key, "source": "config", "name": key,
+			"state": "running", "started_at": testutil.Raw("now()"), "port": 41000,
+		})
+	}
+	sharedEnv := environment(guest.sharedIssue, "shared")
+	privateEnv := environment(guest.secretIssue, "private")
+	looseEnv := environment(guest.looseIssue, "loose")
+
+	h := proxyTestHandler(t, EnvironmentProxyLimits{})
+	router := proxyRouter(h)
+	guestToken, memberToken := proxyToken(t, guest.guest), proxyToken(t, testUserID)
+
+	launch := func(token, environmentID string) (int, string) {
+		req := httptest.NewRequest(http.MethodGet, testAppOrigin+environmentLaunchURL(environmentID, "/", true).String(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := callPreview(router, req)
+		return rec.Code, rec.Body.String()
+	}
+	missingStatus, missingBody := launch(guestToken, uuid.NewString())
+	if missingStatus != http.StatusNotFound {
+		t.Fatalf("missing environment status = %d %s, want %d", missingStatus, missingBody, http.StatusNotFound)
+	}
+	assertGuestHidden := func(label string, status int, body string) {
+		t.Helper()
+		if status != missingStatus || body != missingBody {
+			t.Fatalf("%s got %d %q, want the missing environment's %d %q", label, status, body, missingStatus, missingBody)
+		}
+	}
+	for _, tc := range []struct{ label, environment string }{
+		{"guest launch of a shared project's environment", sharedEnv},
+		{"guest launch of a private project's environment", privateEnv},
+		{"guest launch of a project-less environment", looseEnv},
+	} {
+		status, body := launch(guestToken, tc.environment)
+		assertGuestHidden(tc.label, status, body)
+	}
+	// The fixture environments are launchable, so the answers above come from
+	// the guest rule rather than from a broken environment.
+	for _, tc := range []struct{ label, environment string }{
+		{"member launch of a shared project's environment", sharedEnv},
+		{"member launch of a project-less environment", looseEnv},
+	} {
+		if status, body := launch(memberToken, tc.environment); status != http.StatusFound {
+			t.Fatalf("%s = %d %s, want %d", tc.label, status, body, http.StatusFound)
+		}
+	}
+
+	// A guest bearer request on the preview origin must not reach the tunnel,
+	// whatever path it names: /api/issues and /api/runtimes are the platform
+	// routes whose guest allowance the proxy path could otherwise smuggle in.
+	tunnel := atomic.Int32{}
+	h.envProxy.notifyTunnel = func(string, string) bool {
+		tunnel.Add(1)
+		return false
+	}
+	preview := func(token, environmentID, path string) (int, string) {
+		req := httptest.NewRequest(http.MethodGet, "http://"+h.envProxy.environmentHost(environmentID)+path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := callPreview(router, req)
+		return rec.Code, rec.Body.String()
+	}
+	originMissing, originMissingBody := preview(guestToken, uuid.NewString(), "/api/issues")
+	if originMissing != http.StatusNotFound {
+		t.Fatalf("missing environment on the preview origin = %d %s, want %d", originMissing, originMissingBody, http.StatusNotFound)
+	}
+	for _, environmentID := range []string{sharedEnv, privateEnv} {
+		for _, path := range []string{"/", "/api/issues", "/api/runtimes"} {
+			status, body := preview(guestToken, environmentID, path)
+			assertGuestHidden("guest preview origin "+environmentID+path, status, body)
+		}
+	}
+	if got := tunnel.Load(); got != 0 {
+		t.Fatalf("guest preview requests opened %d tunnel attempts, want none", got)
+	}
+}
+
 func TestEnvironmentProxyTaskTokenWorkspace(t *testing.T) {
 	id, rt, _ := proxyFixture(t)
 	dbfx.Exec(t, `UPDATE agent_runtime SET status='offline' WHERE id=$1`, rt)
