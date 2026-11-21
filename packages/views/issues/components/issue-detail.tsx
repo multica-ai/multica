@@ -745,6 +745,47 @@ const LANDING_CHROME_HOLD_MAX_MS = 500;
 /** Overscan while a deep link lands, then on each idle step after it, before TIMELINE_OVERSCAN. */
 const LANDING_OVERSCAN_STEPS = [0, 200, 400];
 
+function DescriptionSnapshotDetails({ entry, t }: { entry: TimelineEntry; t: ActivityT }) {
+  if (entry.action !== "description_updated" || !entry.details) return null;
+  const { details } = entry;
+  if (
+    !Object.prototype.hasOwnProperty.call(details, "from") ||
+    !Object.prototype.hasOwnProperty.call(details, "to") ||
+    (details.from !== null && typeof details.from !== "string") ||
+    (details.to !== null && typeof details.to !== "string")
+  ) {
+    return null;
+  }
+
+  const before = typeof details.from === "string" ? details.from : "";
+  const after = typeof details.to === "string" ? details.to : "";
+  return (
+    <details className="ml-6 mt-1">
+      <summary className="w-fit cursor-pointer select-none text-caption text-muted-foreground hover:text-foreground">
+        {t(($) => $.activity.view_description_change)}
+      </summary>
+      <div className="mt-2 grid gap-2 md:grid-cols-2">
+        <div className="min-w-0">
+          <div className="mb-1 text-micro font-medium uppercase text-muted-foreground">
+            {t(($) => $.activity.before_update)}
+          </div>
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xs bg-muted p-2 font-sans text-caption text-foreground">
+            {before}
+          </pre>
+        </div>
+        <div className="min-w-0">
+          <div className="mb-1 text-micro font-medium uppercase text-muted-foreground">
+            {t(($) => $.activity.after_update)}
+          </div>
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xs bg-muted p-2 font-sans text-caption text-foreground">
+            {after}
+          </pre>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
 // priority / assignee churn; the trailing block stays expanded because it
@@ -925,6 +966,7 @@ function ActivityBlock({
               </div>
             </div>
             {handoff && <div className="ml-6"><TimelineHandoff details={details} /></div>}
+            <DescriptionSnapshotDetails entry={entry} t={t} />
           </div>
         );
       })}
