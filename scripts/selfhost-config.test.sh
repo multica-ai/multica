@@ -70,6 +70,52 @@ require_config "$config" 'DATABASE_REPLICA_URL: postgres://reader:secret@replica
 require_config "$config" 'DATABASE_REPLICA_MAX_CONNS: "12"'
 require_config "$config" 'DATABASE_REPLICA_MIN_CONNS: "1"'
 
+# Live doc co-editing is opt-in. Out of the box there is no collab service and
+# the backend has no collab URL, so docs save through the API instead of
+# waiting on a service that is not there. The two commented lines in
+# .env.example are the whole switch: the secret wires the backend, and the
+# profile starts the service.
+if grep -q '^  collab:' <<<"$config"; then
+  echo "The collab service must stay behind its profile by default"
+  exit 1
+fi
+require_config "$config" 'COLLAB_INTERNAL_URL: ""'
+collab_env="$tmp_dir/.env.collab"
+sed 's/^# COLLAB_SECRET=$/COLLAB_SECRET=collab-secret-from-env/;s/^# COMPOSE_PROFILES=collab$/COMPOSE_PROFILES=collab/;s/^# FF_DOCS_V1=true$/FF_DOCS_V1=true/' \
+  "$tmp_env" >"$collab_env"
+# Docs is off by default, and an empty FF_DOCS_V1 would pin it off, so the
+# backend must not receive the variable at all until it is set.
+docs_flag="$(env -u FF_DOCS_V1 docker compose --env-file "$tmp_env" -f docker-compose.selfhost.yml config --format json |
+  node -e '
+let raw = "";
+process.stdin.on("data", (chunk) => (raw += chunk));
+process.stdin.on("end", () => {
+  process.stdout.write(String(JSON.parse(raw).services.backend.environment.FF_DOCS_V1 ?? "unset"));
+});
+')"
+if [ "$docs_flag" != unset ]; then
+  echo "The backend must not receive FF_DOCS_V1 unless it is set, got: $docs_flag"
+  exit 1
+fi
+collab_config="$(env -u COLLAB_SECRET -u COLLAB_INTERNAL_URL -u COMPOSE_PROFILES -u FF_DOCS_V1 \
+  docker compose --env-file "$collab_env" -f docker-compose.selfhost.yml config --format json)"
+node -e '
+  const config = JSON.parse(process.argv[1]);
+  const backend = config.services.backend.environment;
+  const collab = config.services.collab;
+  if (!collab) throw new Error("COMPOSE_PROFILES=collab did not start the collab service");
+  const want = (label, actual, expected) => {
+    if (actual !== expected) throw new Error(`${label} = ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+  };
+  want("backend COLLAB_INTERNAL_URL", backend.COLLAB_INTERNAL_URL, "http://collab:8095");
+  want("backend COLLAB_SECRET", backend.COLLAB_SECRET, "collab-secret-from-env");
+  want("collab COLLAB_SECRET", collab.environment.COLLAB_SECRET, "collab-secret-from-env");
+  want("collab MULTICA_API_URL", collab.environment.MULTICA_API_URL, "http://backend:8080");
+  want("collab image", collab.image, "ghcr.io/multica-ai/multica-collab:latest");
+  want("backend FF_DOCS_V1", backend.FF_DOCS_V1, "true");
+  if (collab.ports && collab.ports.length) throw new Error("collab must not publish a port; editors reach it through the backend");
+' "$collab_config"
+
 # The backend environment is an explicit allowlist, so a variable documented in
 # .env.example but missing here silently never reaches the container: the
 # operator configures it, the server never sees it, and nothing reports the gap.
