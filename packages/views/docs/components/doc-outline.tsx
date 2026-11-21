@@ -46,11 +46,13 @@ function sameOutline(a: OutlineHeading[], b: OutlineHeading[]): boolean {
 
 /**
  * Headings of the editor under `rootRef`, kept current as the user types, and
- * which one the scroll position of `scrollRef` is in.
+ * which one the scroll position of `scrollRef` is in. A new `bodyKey` reads
+ * them again at once, for a host that swaps what the root shows.
  */
 export function useDocOutline(
   rootRef: RefObject<HTMLElement | null>,
   scrollRef: RefObject<HTMLElement | null>,
+  bodyKey?: string | number,
 ) {
   const [headings, setHeadings] = useState<OutlineHeading[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -64,7 +66,7 @@ export function useDocOutline(
       const next = readOutline(root);
       setHeadings((prev) => (sameOutline(prev, next) ? prev : next));
     });
-  }, [rootRef]);
+  }, [rootRef, bodyKey]);
 
   useEffect(() => {
     const scroller = scrollRef.current;

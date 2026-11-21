@@ -9,6 +9,7 @@ import { PageHeader } from "../../layout/page-header";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
 import { DocsGate } from "./docs-gate";
+import { usePrefetchDoc } from "./use-prefetch-doc";
 export function DocsHomePage({
   folderId = null,
 }: {
@@ -26,6 +27,7 @@ function DocsHomePageContent({ folderId }: { folderId: string | null }) {
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const tree = useQuery(docTreeOptions(wsId));
+  const prefetchDoc = usePrefetchDoc();
   const folders =
     tree.data?.folders.filter((f) => f.parentId === folderId) ?? [];
   const docs = tree.data?.docs.filter((d) => d.folderId === folderId) ?? [];
@@ -67,6 +69,7 @@ function DocsHomePageContent({ folderId }: { folderId: string | null }) {
                 <li key={d.id}>
                   <AppLink
                     href={p.docDetail(d.id)}
+                    {...prefetchDoc(d.id)}
                     className="flex items-center gap-3 rounded-md p-3 text-body hover:bg-surface-hover"
                   >
                     <FileText className="size-4" />
