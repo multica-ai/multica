@@ -1,0 +1,14 @@
+{
+  "multica_url": "http://localhost:8080",
+  "multica_token": "",
+  "workspace_id": "",
+  "anthropic_url": "https://api.anthropic.com/v1",
+  "anthropic_token": "",
+  "environment_id": "",
+  "state_dir": "/var/lib/multica-claude-managed",
+  "name": "Claude Managed Agents",
+  "vault_ids": [],
+  "github_token_files": {
+    "https://github.com/OWNER/REPO": "/path/to/private/github-token"
+  }
+}

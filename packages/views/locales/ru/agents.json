@@ -215,7 +215,8 @@
     "rename_required": "Имя обязательно",
     "edit_description_title": "Изменить описание",
     "description_placeholder": "Чем занимается этот агент?",
-    "cancel": "Отмена"
+    "cancel": "Отмена",
+    "claude_execution_note": "Модель, инструменты и навыки задаются в агенте Claude."
   },
   "overview": {
     "attention_title": "Запуски требуют внимания",
@@ -314,7 +315,8 @@
     "discard_dialog_title": "Отменить несохранённые изменения?",
     "discard_dialog_description": "В этой вкладке есть несохранённые изменения. Если вы уйдёте сейчас, они будут потеряны.",
     "discard_keep": "Продолжить редактирование",
-    "discard_confirm": "Отменить изменения"
+    "discard_confirm": "Отменить изменения",
+    "claude_agent": "Агент Claude"
   },
   "creation_studio": {
     "title": "Создание агента",

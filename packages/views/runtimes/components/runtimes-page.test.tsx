@@ -7,6 +7,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
+import { claudeManagedOptions } from "@multica/core/runtimes/claude-managed";
 import { qoderOptions, type QoderConnection } from "@multica/core/runtimes/qoder";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import type { AgentRuntime } from "@multica/core/types";
@@ -121,6 +122,22 @@ function renderPage({
   qc.setQueryData(agentTaskSnapshotOptions(WS).queryKey, []);
   qc.setQueryData(chatSessionsOptions(WS).queryKey, []);
   qc.setQueryData(qoderOptions(WS).queryKey, connection);
+  qc.setQueryData(claudeManagedOptions(WS).queryKey, {
+    available: false,
+    configured: false,
+    name: "",
+    environmentId: "",
+    hasToken: false,
+    repositories: [],
+    vaultIds: [],
+    enabled: false,
+    status: "",
+    lastError: "",
+    maxConcurrency: 3,
+    runTimeoutMinutes: 60,
+    activeRuns: 0,
+    queuedRuns: 0,
+  });
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>

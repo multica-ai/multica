@@ -214,6 +214,7 @@
     "./skills/stores": "./skills/stores/index.ts",
     "./autopilots/stores": "./autopilots/stores/index.ts",
     "./runtimes/qoder": "./runtimes/qoder.ts",
+    "./runtimes/claude-managed": "./runtimes/claude-managed.ts",
     "./docs": "./docs/index.ts"
   },
   "dependencies": {

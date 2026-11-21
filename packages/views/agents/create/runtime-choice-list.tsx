@@ -15,6 +15,7 @@ import {
   TriangleAlert,
 } from "@multica/ui/icons";
 import type { QoderConnection } from "@multica/core/runtimes/qoder";
+import type { ClaudeConnection } from "@multica/core/runtimes/claude-managed";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
@@ -37,8 +38,10 @@ export type QoderChoiceState =
   | "error"
   | "stopped";
 
+type CloudConnection = QoderConnection | ClaudeConnection;
+
 export function qoderChoiceState(
-  connection: QoderConnection,
+  connection: CloudConnection,
   runtimeOnline: boolean,
 ): QoderChoiceState {
   if (!connection.available || !connection.configured) return "not_configured";
@@ -48,10 +51,10 @@ export function qoderChoiceState(
 }
 
 const QODER_NAME = "Qoder Cloud Agents";
+const CLAUDE_NAME = "Claude Managed Agents";
 
 const COMING_SOON = [
   { provider: "cursor", name: "Cursor Cloud Agents", vendor: "Cursor" },
-  { provider: "claude", name: "Claude Managed Agents", vendor: "Anthropic" },
 ];
 
 const ROW = "flex w-full min-w-0 items-center gap-3 px-4 text-left";
@@ -382,7 +385,10 @@ function MachineBlock({
   );
 }
 
-function QoderRow({
+function CloudServiceRow({
+  provider,
+  name,
+  vendor,
   connection,
   state,
   selected,
@@ -392,7 +398,10 @@ function QoderRow({
   onConnect,
   onManage,
 }: {
-  connection: QoderConnection;
+  provider: string;
+  name: string;
+  vendor: string;
+  connection: CloudConnection;
   state: QoderChoiceState;
   selected: boolean;
   canManage: boolean;
@@ -458,11 +467,11 @@ function QoderRow({
     <>
       <Radio checked={selected} disabled={!ready} />
       <Tile dot={<span className={cn("size-2 rounded-full", TILE_DOT, dot)} />}>
-        <ProviderLogo provider="qoder_cloud" className="size-4" />
+        <ProviderLogo provider={provider} className="size-4" />
       </Tile>
       <span className="min-w-0 flex-1">
         <span className={cn("block truncate text-body", selected && "font-medium")}>
-          <Highlight text={QODER_NAME} query={query} />
+          <Highlight text={name} query={query} />
         </span>
         <span
           className={cn(
@@ -471,7 +480,7 @@ function QoderRow({
           )}
         >
           {errorText ||
-            t(($) => $.creation_studio.runtime_step.hosted_by, { vendor: "Qoder" })}
+            t(($) => $.creation_studio.runtime_step.hosted_by, { vendor })}
         </span>
       </span>
     </>
@@ -509,6 +518,9 @@ export interface RuntimeChoiceListProps {
   qoder: QoderConnection | null;
   qoderState: QoderChoiceState | null;
   qoderSelected: boolean;
+  claude: ClaudeConnection | null;
+  claudeState: QoderChoiceState | null;
+  claudeSelected: boolean;
   selectedRuntimeId: string | null;
   query: string;
   currentUserId: string | null;
@@ -518,6 +530,9 @@ export interface RuntimeChoiceListProps {
   onSelectQoder: () => void;
   onConnectQoder: () => void;
   onManageQoder: () => void;
+  onSelectClaude: () => void;
+  onConnectClaude: () => void;
+  onManageClaude: () => void;
   onAddRemote: () => void;
 }
 
@@ -535,6 +550,9 @@ export function RuntimeChoiceList({
   qoder,
   qoderState,
   qoderSelected,
+  claude,
+  claudeState,
+  claudeSelected,
   selectedRuntimeId,
   query,
   currentUserId,
@@ -544,6 +562,9 @@ export function RuntimeChoiceList({
   onSelectQoder,
   onConnectQoder,
   onManageQoder,
+  onSelectClaude,
+  onConnectClaude,
+  onManageClaude,
   onAddRemote,
 }: RuntimeChoiceListProps) {
   const { t } = useT("agents");
@@ -563,11 +584,13 @@ export function RuntimeChoiceList({
   const showWebRow = !localAvailable && !searching;
 
   const showQoder = !!qoder && !!qoderState && (!q || QODER_NAME.toLowerCase().includes(q));
+  const showClaude =
+    !!claude && !!claudeState && (!q || CLAUDE_NAME.toLowerCase().includes(q));
   const matchedCloud = cloud.filter((option) => harnessMatches(option, "", query));
   const soon = COMING_SOON.filter((item) => !q || item.name.toLowerCase().includes(q));
 
   const showMachines = matchedDevices.length > 0 || showWebRow || !searching;
-  const showCloud = showQoder || matchedCloud.length > 0 || soon.length > 0;
+  const showCloud = showQoder || showClaude || matchedCloud.length > 0 || soon.length > 0;
 
   if (!showMachines && !showCloud) {
     return (
@@ -682,10 +705,13 @@ export function RuntimeChoiceList({
           <GroupHeader
             icon={Cloud}
             title={t(($) => $.creation_studio.runtime_step.groups.cloud)}
-            count={(showQoder ? 1 : 0) + matchedCloud.length}
+            count={(showQoder ? 1 : 0) + (showClaude ? 1 : 0) + matchedCloud.length}
           />
           {showQoder && qoder && qoderState ? (
-            <QoderRow
+            <CloudServiceRow
+              provider="qoder_cloud"
+              name={QODER_NAME}
+              vendor="Qoder"
               connection={qoder}
               state={qoderState}
               selected={qoderSelected}
@@ -694,6 +720,21 @@ export function RuntimeChoiceList({
               onSelect={onSelectQoder}
               onConnect={onConnectQoder}
               onManage={onManageQoder}
+            />
+          ) : null}
+          {showClaude && claude && claudeState ? (
+            <CloudServiceRow
+              provider="claude_managed"
+              name={CLAUDE_NAME}
+              vendor="Anthropic"
+              connection={claude}
+              state={claudeState}
+              selected={claudeSelected}
+              canManage={canManage}
+              query={query}
+              onSelect={onSelectClaude}
+              onConnect={onConnectClaude}
+              onManage={onManageClaude}
             />
           ) : null}
           {matchedCloud.map((option) => (

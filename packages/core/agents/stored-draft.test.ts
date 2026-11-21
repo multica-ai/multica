@@ -11,6 +11,7 @@ import {
 
 const draft = (): AgentDraft => ({
   qoderAgentId: "agent_qca",
+  claudeAgentId: "agent_claude",
   name: "Release manager",
   description: "Ships carefully",
   instructions: "# Role\nShip.",

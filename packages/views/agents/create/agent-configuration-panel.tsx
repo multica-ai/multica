@@ -32,6 +32,7 @@ import { ServiceTierSettingField } from "../components/inspector/service-tier-se
 import { ThinkingSettingField } from "../components/inspector/thinking-prop-row";
 import { ModelDropdown } from "../components/model-dropdown";
 import { QoderAgentSelect } from "../components/qoder-agent-select";
+import { ClaudeAgentSelect } from "../components/claude-agent-select";
 import { RuntimePicker } from "../components/runtime-picker";
 import { SkillMultiSelect } from "../components/skill-multi-select";
 import { ConversationStartersEditor } from "../components/conversation-starters-editor";
@@ -104,6 +105,8 @@ export function AgentConfigurationPanel({
   // The Qoder bridge refuses tasks from agents with skills or per-agent
   // config, so the fields that would produce them are not offered.
   const qoderRuntime = selectedRuntime?.provider === "qoder_cloud";
+  const claudeRuntime = selectedRuntime?.provider === "claude_managed";
+  const cloudRuntime = qoderRuntime || claudeRuntime;
   const handleRuntimeSelect = (id: string) => {
     if (id === draft.runtimeId) return;
     if (onRuntimeSelect) {
@@ -172,7 +175,7 @@ export function AgentConfigurationPanel({
               />
             </div>
           </DraftFieldRow>
-          {conversationStartersSupported ? (
+          {conversationStartersSupported && !claudeRuntime ? (
             <DraftFieldRow
               compact={compact}
               align="start"
@@ -211,7 +214,7 @@ export function AgentConfigurationPanel({
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
-          {qoderRuntime ? (
+          {cloudRuntime ? (
             <p className="px-4 py-3 text-caption text-muted-foreground">
               {t(($) => $.creation_studio.cloud_fields_note)}
             </p>
@@ -260,6 +263,12 @@ export function AgentConfigurationPanel({
               <QoderAgentSelect
                 value={draft.qoderAgentId}
                 onChange={(value) => set("qoderAgentId", value)}
+                disabled={runtimeLocked}
+              />
+            ) : claudeRuntime ? (
+              <ClaudeAgentSelect
+                value={draft.claudeAgentId}
+                onChange={(value) => set("claudeAgentId", value)}
                 disabled={runtimeLocked}
               />
             ) : (

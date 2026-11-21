@@ -29,6 +29,7 @@ import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentAppsTab } from "./tabs/agent-apps-tab";
 import { QoderAgentTab } from "./tabs/qoder-agent-tab";
+import { ClaudeAgentTab } from "./tabs/claude-agent-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentAccessSettings } from "./agent-access-settings";
@@ -51,6 +52,7 @@ type SectionLabelKey =
   | "custom_args"
   | "runtime_config"
   | "qoder_agent"
+  | "claude_agent"
   | "skills"
   | "mcp_config"
   | "composio_mcp";
@@ -120,11 +122,14 @@ export function AgentAdvancedSettings({
   );
 
   const qoderRuntime = runtime?.provider === "qoder_cloud";
+  // Claude Managed Agents refuses the same overrides; the Claude agent owns them.
+  const claudeRuntime = runtime?.provider === "claude_managed";
+  const cloudRuntime = qoderRuntime || claudeRuntime;
 
   const settingsSections = useMemo(
     () =>
       SETTINGS_SECTIONS.filter((item) => {
-        if (qoderRuntime) return item.id !== "env" && item.id !== "custom_args";
+        if (cloudRuntime) return item.id !== "env" && item.id !== "custom_args";
         // Env is the only section backed by a secret-bearing endpoint.
         // GET/PUT /api/agents/{id}/env admits the agent owner or a workspace
         // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so
@@ -134,15 +139,20 @@ export function AgentAdvancedSettings({
         if (item.id === "runtime_config") return runtime?.provider === "openclaw";
         return true;
       }).map((item) =>
-        qoderRuntime && item.id === "runtime_config"
-          ? { ...item, labelKey: "qoder_agent" as const }
+        cloudRuntime && item.id === "runtime_config"
+          ? {
+              ...item,
+              labelKey: qoderRuntime
+                ? ("qoder_agent" as const)
+                : ("claude_agent" as const),
+            }
           : item,
       ),
-    [canEdit, qoderRuntime, runtime?.provider],
+    [canEdit, cloudRuntime, qoderRuntime, runtime?.provider],
   );
 
   const capabilitySections = useMemo(() => {
-    if (qoderRuntime) return [];
+    if (cloudRuntime) return [];
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
     const showComposioMcp = composioMCPAppsEnabled && canEdit;
     return CAPABILITY_SECTIONS.filter((item) => {
@@ -153,7 +163,7 @@ export function AgentAdvancedSettings({
   }, [
     canEdit,
     composioMCPAppsEnabled,
-    qoderRuntime,
+    cloudRuntime,
     runtime,
   ]);
 
@@ -290,6 +300,14 @@ export function AgentAdvancedSettings({
                   {active.id === "runtime_config" &&
                     (qoderRuntime ? (
                       <QoderAgentTab
+                        canEdit={canEdit}
+                        key={agent.id}
+                        agent={agent}
+                        onSave={save}
+                        onDirtyChange={setDirty}
+                      />
+                    ) : claudeRuntime ? (
+                      <ClaudeAgentTab
                         canEdit={canEdit}
                         key={agent.id}
                         agent={agent}

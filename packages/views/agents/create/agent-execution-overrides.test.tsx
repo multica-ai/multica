@@ -69,6 +69,7 @@ function listResult(models: RuntimeModel[]): RuntimeModelListRequest {
 
 const baseDraft: AgentDraft = {
   qoderAgentId: "",
+  claudeAgentId: "",
   name: "Fast Codex",
   description: "",
   instructions: "",
