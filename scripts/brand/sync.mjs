@@ -7,7 +7,7 @@
 //   node scripts/brand/sync.mjs --check   exit 1 if any copy drifted (CI)
 //
 // Dependency-free on purpose: CI runs it without installing node_modules.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -108,7 +108,7 @@ export async function sync(root, { check = false } = {}) {
   return drifted;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   const check = args.includes("--check");
   const rootAt = args.indexOf("--root");

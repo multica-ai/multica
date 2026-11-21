@@ -26,6 +26,7 @@ import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { useT } from "../../i18n";
 import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
 import { NO_PROPERTY_VALUE } from "../utils/filter";
+import { paletteColor } from "@multica/core/appearance";
 
 /**
  * Names one property filter value the way chips and advanced conditions show
@@ -385,7 +386,7 @@ export function PropertyFilterOptions({
             {option.color && (
               <span
                 className="size-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: option.color }}
+                style={{ backgroundColor: paletteColor(option.color) }}
               />
             )}
             <span className="truncate">{option.name}</span>

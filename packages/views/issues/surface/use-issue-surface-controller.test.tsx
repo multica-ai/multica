@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import { workspaceWorkingAgentsKeys } from "@multica/core/agents/queries";
+import { agentTaskSnapshotKeys, workspaceWorkingAgentsKeys } from "@multica/core/agents/queries";
 import { issueUnreadKeys } from "@multica/core/issues/unread";
 import {
   getIssueSurfaceViewStore,
@@ -166,6 +166,7 @@ describe("useIssueSurfaceController", () => {
   let listIssueTableFacets: ReturnType<typeof vi.fn>;
   let listSubscribedIssueIds: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
   let listAgents: ReturnType<typeof vi.fn<() => Promise<Agent[]>>>;
+  let listInvolvedSquadIds: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
   // Every row the current fixture holds, kept outside the mocked list endpoint
   // so the working-agents facet stand-in can read it without registering a
   // call that Table-isolation tests assert never happens.
@@ -193,6 +194,7 @@ describe("useIssueSurfaceController", () => {
     listIssueUnread = vi.fn(() => Promise.resolve([]));
     listSubscribedIssueIds = vi.fn(() => never<string[]>());
     listAgents = vi.fn(() => Promise.resolve([] satisfies Agent[]));
+    listInvolvedSquadIds = vi.fn(() => Promise.resolve([]));
     setApiInstance({
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
@@ -209,6 +211,7 @@ describe("useIssueSurfaceController", () => {
       listIssueUnread,
       getChildIssueProgress: vi.fn(() => never()),
       listAgents,
+      listInvolvedSquadIds,
       listSubscribedIssueIds,
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
@@ -1740,6 +1743,66 @@ describe("useIssueSurfaceController", () => {
     }));
   });
 
+  it.each(["list", "board", "table", "swimlane"] as const)("gates %s Idle on the activity snapshot and keeps the working count unfiltered", async (mode) => {
+    mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode(mode);
+    store.getState().toggleAgentIdleFilter();
+    let finish!: (tasks: AgentTask[]) => void;
+    getAgentTaskSnapshot.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: [mode] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.isEmpty).toBe(false);
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+    await waitFor(() => expect(getAgentTaskSnapshot).toHaveBeenCalled());
+    await act(async () => finish([]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.tableQuerySpec.filters).toMatchObject({ idle_only: true });
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toBeUndefined();
+    const chipRequests = listIssueTableFacets.mock.calls.filter(([r]) => r.facets.some((f: { kind: string }) => f.kind === "working_agents"));
+    expect(chipRequests.length).toBeGreaterThan(0);
+    for (const [request] of chipRequests) expect(request.query.filters.idle_only).toBeUndefined();
+  });
+
+  it("retries a failed Idle snapshot instead of claiming everything is idle", async () => {
+    mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+    getIssueSurfaceViewStore("project:p1").getState().toggleAgentIdleFilter();
+    getAgentTaskSnapshot.mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]);
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["list"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    await waitFor(() => expect(result.current.filterDependencyError?.kind).toBe("working"));
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+    expect(result.current.isEmpty).toBe(false);
+    act(() => result.current.filterDependencyError!.retry());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.filterDependencyError).toBeNull();
+    expect(result.current.tableQuerySpec.filters.idle_only).toBe(true);
+  });
+
+  it("filters the Gantt canvas by the same active set as Inbox and updates as work starts or finishes", async () => {
+    const rows = ["running", "queued", "idle"].map((id) => makeIssue({ id, status: "todo", start_date: "2026-01-01" }));
+    listIssues.mockResolvedValue({ issues: rows, total: rows.length });
+    const tasks = [makeRunningTask("t1", "a1", "running"), { ...makeRunningTask("t2", "a2", "queued"), status: "queued" as const }];
+    getAgentTaskSnapshot.mockResolvedValue(tasks);
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("gantt");
+    store.getState().toggleAgentIdleFilter();
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["gantt"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    await waitFor(() => expect(result.current.filteredGanttIssues.map((i) => i.id)).toEqual(["idle"]));
+    act(() => qc.setQueryData(agentTaskSnapshotKeys.list("ws-1"), []));
+    await waitFor(() => expect(result.current.filteredGanttIssues).toHaveLength(3));
+    act(() => qc.setQueryData(agentTaskSnapshotKeys.list("ws-1"), [makeRunningTask("t3", "a3", "idle")]));
+    await waitFor(() => expect(result.current.filteredGanttIssues.map((i) => i.id)).toEqual(["running", "queued"]));
+  });
+
   it("keeps Table loading until working membership resolves, and lets the filter be disabled while pending", async () => {
     getWorkspaceWorkingAgents.mockImplementation(() => never());
     const store = getIssueSurfaceViewStore("project:p1");
@@ -2024,6 +2087,43 @@ describe("useIssueSurfaceController", () => {
       await act(async () => finish([{ id: "agent-1", owner_id: "user-1" } as Agent]));
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["gantt-open"]);
+    });
+
+    it("holds loading while the squads behind \"my agents\" load, then keeps only the viewer's", async () => {
+      const squadRow = (id: string, squad: string) =>
+        makeIssue({
+          id,
+          status: "in_progress",
+          assignee_type: "squad",
+          assignee_id: squad,
+          start_date: "2026-01-01",
+          due_date: "2026-01-05",
+        });
+      let finish!: (ids: string[]) => void;
+      listInvolvedSquadIds.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      mockGanttIssues([squadRow("my-squad-row", "squad-1"), squadRow("their-squad-row", "squad-2")]);
+      const store = getIssueSurfaceViewStore("project:p1");
+      act(() => {
+        store.getState().setViewMode("gantt");
+        store.getState().toggleRelationFilter("my_agents");
+      });
+      const { result } = renderHook(
+        () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["gantt"] }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(2));
+      await waitFor(() => expect(listInvolvedSquadIds).toHaveBeenCalled());
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => finish(["squad-1"]));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["my-squad-row"]);
+
+      act(() => store.getState().setFilterNegated("relation", true));
+      await waitFor(() =>
+        expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["their-squad-row"]),
+      );
     });
 
     it("offers a retry when the agents behind \"my agents\" fail", async () => {

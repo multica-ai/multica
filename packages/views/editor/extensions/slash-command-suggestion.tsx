@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import type { QueryClient } from "@tanstack/react-query";
+import type { Editor } from "@tiptap/core";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
 import { closeHistory } from "@tiptap/pm/history";
@@ -18,7 +19,7 @@ import { getCurrentWsId } from "@multica/core/platform";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { isImeComposing } from "@multica/core/utils";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Agent, MemberWithUser } from "@multica/core/types";
+import type { Agent, AgentSkillSummary, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 import {
   createSuggestionPopupRender,
@@ -138,7 +139,11 @@ export const SlashCommandList = forwardRef<
     // `--suggestion-available-height` from suggestion-popup.tsx's size
     // middleware), falling back to the design max when rendered standalone.
     // Single height authority — mirrors MentionList.
-    <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[min(300px,var(--suggestion-available-height,300px))] overflow-y-auto">
+    <div
+      data-mc="editor-menu"
+      data-kind="slash"
+      className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[min(300px,var(--suggestion-available-height,300px))] overflow-y-auto"
+    >
       {items.map((item, index) => {
         const description = describe(item);
         return (
@@ -217,9 +222,43 @@ function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
     null;
 
   const q = query.toLowerCase();
-  return rankSkillMatches(activeAgent?.skills ?? [], q)
+  return rankSkillMatches(
+    (activeAgent?.skills ?? []).filter((skill) => skill.enabled !== false),
+    q,
+  )
     .slice(0, MAX_ITEMS)
     .map((s) => ({ id: s.id, label: s.name, description: s.description ?? "" }));
+}
+
+function insertSlashSkill(
+  editor: Editor,
+  range: { from: number; to: number },
+  id: string,
+  label: string,
+) {
+  const nodeAfter = editor.view.state.selection.$to.nodeAfter;
+  const overrideSpace = nodeAfter?.text?.startsWith(" ");
+  if (overrideSpace) {
+    range.to += 1;
+  }
+
+  editor
+    .chain()
+    .focus()
+    .insertContentAt(range, [
+      {
+        type: "slashCommand",
+        attrs: {
+          id,
+          label,
+          mentionSuggestionChar: "/",
+        },
+      },
+      { type: "text", text: " " },
+    ])
+    .run();
+
+  window.getSelection()?.collapseToEnd();
 }
 
 export function createSlashCommandSuggestion(qc: QueryClient): Omit<
@@ -236,29 +275,7 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
     items: ({ query }) => buildItems(qc, query),
     command: ({ editor, range, props }) => {
-      const nodeAfter = editor.view.state.selection.$to.nodeAfter;
-      const overrideSpace = nodeAfter?.text?.startsWith(" ");
-      if (overrideSpace) {
-        range.to += 1;
-      }
-
-      editor
-        .chain()
-        .focus()
-        .insertContentAt(range, [
-          {
-            type: "slashCommand",
-            attrs: {
-              id: props.id,
-              label: props.label,
-              mentionSuggestionChar: "/",
-            },
-          },
-          { type: "text", text: " " },
-        ])
-        .run();
-
-      window.getSelection()?.collapseToEnd();
+      insertSlashSkill(editor, range, props.id, props.label);
     },
     render: createSuggestionPopupRender<SlashCommandItem, SlashCommandItem, SlashCommandListRef, SlashCommandListProps>({
       pluginKey,
@@ -286,6 +303,8 @@ export const BUILTIN_COMMANDS: SlashCommandItem[] = [
   { id: "note", label: "note", descriptionKey: "note" },
 ];
 
+const SKILL_ITEM_PREFIX = "skill:";
+
 /** Marks a menu entry as a configured quick action rather than a built-in. */
 export const QUICK_ACTION_ITEM_PREFIX = "quick-action:";
 
@@ -297,24 +316,33 @@ export function quickActionIdFromItem(item: SlashCommandItem): string {
   return item.id.slice(QUICK_ACTION_ITEM_PREFIX.length);
 }
 
-// Match on the command label as a prefix only — the description is for display,
-// not search. With a single command this keeps the menu predictable (typing
-// `/no` surfaces `note`; an unrelated `/deploy` shows nothing).
+// Quick actions and built-ins match on label prefix only. Skills use the
+// shared name/description ranking; unrelated path/date queries stay empty.
 export function buildBuiltinCommandItems(
   query: string,
   quickActions: { id: string; name: string; description?: string }[] = [],
+  skills: AgentSkillSummary[] = [],
 ): SlashCommandItem[] {
   const q = query.toLowerCase();
   // Quick actions lead: on an issue they are the reason a user reaches for
   // `/`, and `/note` is a rarely-used escape hatch.
-  const actionItems: SlashCommandItem[] = quickActions.map((a) => ({
-    id: `${QUICK_ACTION_ITEM_PREFIX}${a.id}`,
-    label: a.name,
-    description: a.description || undefined,
-  }));
-  return [...actionItems, ...BUILTIN_COMMANDS]
-    .filter((c) => c.label.toLowerCase().startsWith(q))
-    .slice(0, MAX_ITEMS);
+  const actionItems: SlashCommandItem[] = quickActions
+    .filter((action) => action.name.toLowerCase().startsWith(q))
+    .map((action) => ({
+      id: `${QUICK_ACTION_ITEM_PREFIX}${action.id}`,
+      label: action.name,
+      description: action.description || undefined,
+    }));
+  const skillItems: SlashCommandItem[] = q ? rankSkillMatches(skills, q).map((skill) => ({
+    id: `${SKILL_ITEM_PREFIX}${skill.id}`,
+    label: skill.name,
+    description: skill.description ?? "",
+  })) : [];
+  const builtinItems = BUILTIN_COMMANDS.filter((command) =>
+    command.label.toLowerCase().startsWith(q),
+  );
+  const cap = Math.max(0, MAX_ITEMS - builtinItems.length);
+  return [...actionItems, ...skillItems].slice(0, cap).concat(builtinItems);
 }
 
 export interface BuiltinCommandSuggestionOptions {
@@ -323,6 +351,8 @@ export interface BuiltinCommandSuggestionOptions {
    * every keystroke and catalog notification without remounting the editor.
    */
   getQuickActions?: () => { id: string; name: string; description?: string }[];
+  /** Reads enabled skills for the draft's current target agents when the query is nonempty. */
+  getSkills?: (editor: Editor) => AgentSkillSummary[];
   subscribeQuickActions?: (refresh: () => void) => () => void;
   /**
    * Builds draft text synchronously from the cached catalog. Returning ""
@@ -342,7 +372,11 @@ export function createBuiltinCommandSuggestion(
     // Only open over a `/` the user actually typed, so a pasted path
     // (`/usr/local/bin`) never opens the command menu (MUL-5429).
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
-    items: ({ query }) => buildBuiltinCommandItems(query, options.getQuickActions?.() ?? []),
+    items: ({ editor, query }) => buildBuiltinCommandItems(
+      query,
+      options.getQuickActions?.() ?? [],
+      query ? (options.getSkills?.(editor) ?? []) : [],
+    ),
     command: ({ editor, range, props }) => {
       if (isQuickActionItem(props)) {
         const content = options.getQuickActionContent?.(quickActionIdFromItem(props));
@@ -359,6 +393,16 @@ export function createBuiltinCommandSuggestion(
           .insertContentAt(range, content, { contentType: "markdown" })
           .run();
         window.getSelection()?.collapseToEnd();
+        return;
+      }
+
+      if (props.id.startsWith(SKILL_ITEM_PREFIX)) {
+        insertSlashSkill(
+          editor,
+          range,
+          props.id.slice(SKILL_ITEM_PREFIX.length),
+          props.label,
+        );
         return;
       }
 
@@ -381,7 +425,11 @@ export function createBuiltinCommandSuggestion(
       getProps: (props) => ({
         // Read the current catalog even when Tiptap finishes an older items
         // request after a catalog notification.
-        items: buildBuiltinCommandItems(props.query, options.getQuickActions?.() ?? []),
+        items: buildBuiltinCommandItems(
+          props.query,
+          options.getQuickActions?.() ?? [],
+          props.query ? (options.getSkills?.(props.editor) ?? []) : [],
+        ),
         query: props.query,
         command: props.command,
         hideOnEmpty: true,

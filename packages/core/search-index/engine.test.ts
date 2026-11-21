@@ -345,6 +345,23 @@ describe("SearchIndexEngine.searchProjects", () => {
     expect(row.matched_snippet).toBe("covers the roadmap");
     expect(row).not.toHaveProperty("search_updated_at");
   });
+
+  it("leaves archived projects out unless asked, then ranks them last", () => {
+    const live = project({ title: "Billing revamp" });
+    const cancelled = project({ title: "Billing v1", status: "cancelled" });
+    const archived = project({ title: "Billing pilot", archived_at: "2026-02-01T00:00:00Z" });
+    const exactArchived = project({ title: "Billing", archived_at: "2026-02-01T00:00:00Z" });
+    const engine = new SearchIndexEngine();
+    [archived, exactArchived, cancelled, live].forEach((p) => engine.upsertProject(p));
+
+    expect(engine.searchProjects({ q: "billing", include_closed: true }).map((h) => h.id)).toEqual([
+      live.id,
+      cancelled.id,
+    ]);
+    expect(
+      engine.searchProjects({ q: "billing", include_closed: true, include_archived: true }).map((h) => h.id),
+    ).toEqual([exactArchived.id, live.id, cancelled.id, archived.id]);
+  });
 });
 
 describe("timestampMicros", () => {

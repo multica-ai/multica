@@ -18,6 +18,7 @@ import {
   openWorkspaceInNewWindow,
   otherWindowWorkspaces,
 } from "./workspace-windows";
+import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 function requireRuntimeAppUrl(scope: string): string {
   const runtimeConfig = window.desktopAPI.runtimeConfig;
@@ -62,7 +63,7 @@ function tryRouteToOverlay(path: string): boolean {
       return true;
     }
     if (id) {
-      overlay.open({ type: "invite", invitationId: id });
+      overlay.open({ type: "invitations", invitationId: id });
       return true;
     }
   }
@@ -130,6 +131,22 @@ export function routeContentLinkPath(
   // Empty seed title — the tab bar derives the real title from the URL and
   // cache; a raw path would flash before that resolves.
   store.openTab(path, "", { activate: disposition === "foreground-tab" });
+}
+
+/** A desktop deep link explicitly targets its URL, including a new comment. */
+export function routeIssueDeepLinkPath(path: string): void {
+  const store = useTabStore.getState();
+  const slug = workspaceSlugForPath(path);
+  if (!slug) return;
+  if (slug !== store.activeWorkspaceSlug) {
+    if (handOffToWorkspaceWindow(slug, path, { navigate: true })) return;
+    store.switchWorkspace(slug, path);
+  } else {
+    store.openTab(path, "", { activate: true });
+  }
+  // Ordinary opens restore a reused tab's view. A deep link must also apply
+  // this address after deduplication, through the session's history flow.
+  useTabStore.getState().navigateActiveSession(path);
 }
 
 /**
@@ -250,6 +267,10 @@ export function DesktopNavigationProvider({
         store.openTab(path, title ?? "", { activate: opts?.activate });
       },
       openWorkspaceInNewWindow,
+      openIssueInNewWindow: (path: string, title: string) => {
+        if (!parseIssueWindowPath(path)) return;
+        void window.desktopAPI.openIssueWindow({ path, title });
+      },
       workspacesInOtherWindows: () => [...otherWindowWorkspaces()],
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),

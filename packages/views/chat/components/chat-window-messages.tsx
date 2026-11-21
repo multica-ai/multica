@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type ComponentProps, type ReactNode } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { motion, useIsPresent } from "motion/react";
 import type { AgentAvailability } from "@multica/core/agents";
@@ -9,6 +9,7 @@ import { chatMessagesPageOptions } from "@multica/core/chat/queries";
 import { hideQueuedChatMessages } from "@multica/core/chat/pending";
 import { useRegenerateChatQuickActions } from "@multica/core/chat/mutations";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
+import { useChatWakeups } from "./chat-wakeups";
 
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
@@ -22,6 +23,7 @@ export function ChatWindowMessages({
   quickActionsDisabled,
   quickActionsPendingMessageId,
   onReady,
+  annotations,
   children,
 }: {
   sessionId: string | null;
@@ -33,9 +35,11 @@ export function ChatWindowMessages({
   quickActionsPendingMessageId: string | null;
   /** This area has something to show — the window can fade in around it. */
   onReady?: () => void;
+  annotations?: ComponentProps<typeof ChatMessageList>["annotations"];
   children: ReactNode;
 }) {
   const isPresent = useIsPresent();
+  const wakeups = useChatWakeups(sessionId);
   const regenerateQuickActions = useRegenerateChatQuickActions();
   const {
     data,
@@ -94,6 +98,8 @@ export function ChatWindowMessages({
             ? regenerateQuickActions.mutateAsync({ sessionId, messageId: message.id })
             : undefined}
           quickActionsPendingMessageId={quickActionsPendingMessageId}
+          annotations={annotations}
+          wakeups={wakeups}
         />
       ) : children}
     </motion.div>

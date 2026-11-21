@@ -100,6 +100,16 @@ describe("modifiedFilterDimensions", () => {
 });
 
 describe("agent running in a saved view", () => {
+  it("round-trips Idle and tracks switching to Running as one changed dimension", () => {
+    const idle = { query: { agentIdleFilter: true }, display: {} };
+    const store = liveStateFor(idle);
+    expect(issueViewDefinitionFromState(store.getState()).query).toMatchObject({ agentIdleFilter: true, agentRunningFilter: false });
+    expect(isIssueViewModified(idle, store.getState()).filters).toBe(false);
+    store.getState().toggleAgentRunningFilter();
+    expect(store.getState().agentIdleFilter).toBe(false);
+    expect([...modifiedFilterDimensions(idle, store.getState())]).toEqual(["agentRunning"]);
+  });
+
   const view = { query: { agentRunningFilter: true }, display: {} };
 
   it("saves the filter and opens with it on, unmodified", () => {

@@ -42,7 +42,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `deferred` | 已安排稍后触发，到达指定时间后进入队列 |
 | `queued` | 正在等待运行时领取 |
 | `dispatched` | 运行时已经领取，正在启动 AI 编程工具 |
-| `waiting_local_directory` | 目标本地目录正被另一条执行占用，等待目录锁释放 |
+| `waiting_local_directory` | 启动前等待目标本地目录或守护进程执行槽位 |
 | `running` | AI 编程工具正在执行 |
 | `completed` | 这次执行已正常结束 |
 | `failed` | 执行出错或中断 |
@@ -105,6 +105,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `queued_expired` | 运行时心跳缺席超过重连宽限期，且该运行也已排队满这么久 | 确认运行时在线后重试 |
 | `runtime_recovery` | 守护进程重启后回收了中断的执行 | 直接重试 |
 | `environment_prepare_failed` | 守护进程没能准备好本次执行的运行环境——工作目录，或写入其中的本地运行时配置 | 先看原始错误定位是哪一步失败，再检查那台机器：磁盘空间、权限、目录是否仍被占用，或 AI 编程工具的本地配置 |
+| `local_directory_missing` | 项目关联的本地文件夹在运行智能体的那台电脑上已不存在——关联之后被删除或移走了 | 把文件夹恢复到原路径后重试。要换到新位置，在 **资源 → 本地文件夹** 里移除旧文件夹，再在那台电脑的 Desktop 中关联新位置（浏览器无法选择文件夹）；参见 [项目资源](/project-resources) |
 | `cancelled` | 被手动停止，或随归档、删除一并取消 | 无需处理 |
 | `timeout` | 超过守护进程配置的执行时长上限 | 缩小任务范围，或调整守护进程的 `agent_timeout` |
 | `iteration_limit` | 达到执行轮次上限 | 缩小任务范围 |
@@ -120,8 +121,8 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | 原因 | 含义 | 处理 |
 | --- | --- | --- |
 | `provider_auth_or_access` | 模型服务认证失败或无访问权限（401/403） | 在该 AI 编程工具中重新登录，或检查 API key |
-| `provider_quota_limit` | 配额或余额用尽（402） | 充值或更换账号 |
-| `provider_capacity_or_rate_limit` | 限流或容量不足（429/529） | 稍后重试 |
+| `provider_quota_limit` | 配额或余额用尽 | 充值或更换账号 |
+| `provider_capacity_or_rate_limit` | 限流或容量不足 | 稍后重试 |
 | `provider_server_error` | 模型服务端错误（5xx） | 稍后重试 |
 | `provider_network` | 到模型服务的网络故障 | 会自动重试；持续出现时检查执行电脑的网络 |
 | `model_not_found_or_unavailable` | 模型不存在或当前不可用 | 在智能体设置中改选可用模型 |
@@ -167,7 +168,7 @@ multica issue rerun-task <run-id>
 | `deferred` | 已安排稍后触发 | 到达预定时间后进入 `queued`，再按下面的规则计时 |
 | `queued` | 等待运行时领取 | 只要运行时还在心跳就一直等待，并且无论如何都会在入队后至少保留一个重连宽限期；两个窗口都过去才会失败，且不会自动重试 |
 | `dispatched` | 运行时已领取，正在启动工具 | 停留超过 **5 分钟**按失败处理 |
-| `waiting_local_directory` | 等待本地目录锁释放 | 没有独立超时；目录释放后回到启动流程 |
+| `waiting_local_directory` | 等待本地目录和执行容量 | 没有独立超时；目录和守护进程执行槽位可用后继续启动 |
 | `running` | AI 编程工具正在执行 | 不设固定时长上限；以运行时心跳判定存活，心跳每 15 秒一次，失去心跳的运行时最迟约 3 分钟被判为离线。其上的运行要等心跳缺席超过重连宽限期（`MULTICA_RUNTIME_RECONNECT_GRACE`，默认 3 小时）才失败；守护进程重启时，会直接回收这些运行 |
 
 自动重试只覆盖以下临时故障，且仅适用于挂在任务或对话上的运行（自动化**仅运行**模式除外）：

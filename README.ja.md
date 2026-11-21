@@ -98,7 +98,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 </p>
 
 - **[実行ログ](https://multica.ai/docs/ja/tasks) →** すべてのツール呼び出し、コマンド、エラーをタイムスタンプ付きで再生できます。
-- **実行中のエージェントに指示を出す →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Grok、Kiro に対応しています。
+- **実行中のエージェントに指示を出す →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Cursor Agent、Grok、Kiro、Pi に対応しています。
 - **利用状況の分析 →** 各実行にかかったコストを、エージェント別・タスク別に確認できます。
 - **[レビューゲート](https://multica.ai/docs/ja/issues) →** 作業は main に直接入らず、まずレビューに回ります。何をリリースするかはあなたが決めます。
 - **[インボックス](https://multica.ai/docs/ja/inbox) →** 細かなステップごとではなく、エージェントが判断を求めてきたときだけ通知が届きます。
@@ -111,9 +111,9 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 - **[すべてをセルフホスト](SELF_HOSTING.md) →** Docker Compose または Helm で、自前のインフラ上に構築できます。
 - **[お使いの Git ホスト](https://multica.ai/docs/ja/vcs-integration) →** GitHub、GitLab、Gitea、Forgejo に対応しています。セルフホスト版も使えます。
 - **[ワークスペース](https://multica.ai/docs/ja/workspaces) →** エージェント、タスク、設定をチームごとに分けられます。
-- **[ロール](https://multica.ai/docs/ja/members-roles)と[アクセススコープ](https://multica.ai/docs/ja/agents#権限と-access) →** `owner`、`admin`、`member`、そして各メンバーがどのエージェントを実行できるかを正確に設定できます。
+- **[ロール](https://multica.ai/docs/ja/members-roles)と[アクセススコープ](https://multica.ai/docs/ja/agents#権限と-access) →** ゲストに特定のプロジェクトを共有し、ワークスペースのロールや各エージェントを実行できる人を設定できます。
 - **[セキュリティモデル](https://multica.ai/docs/ja/security-model) →** エージェントが何にアクセスでき、何にアクセスできないか。
-- **[Slack、Feishu/Lark、DingTalk、WeCom、Telegram](https://multica.ai/docs/ja/channels) →** チームが普段やり取りしている場所から、エージェントに作業を頼み、その進み具合を追えます。Feishu/Lark の新しい接続は、現在は中国本土の Feishu でのみ利用できます。DingTalk、WeCom、Telegram は[コミュニティによるメンテナンス](https://multica.ai/docs/ja/community-maintained)です。
+- **[Slack、Feishu/Lark、DingTalk、WeCom、Telegram、WeChat](https://multica.ai/docs/ja/channels) →** チームが普段やり取りしている場所から、エージェントに作業を頼み、その進み具合を追えます。WeChat は接続用 QR コードをスキャンしたアカウントからの DM のみ受け付けます。Feishu/Lark の新しい接続は、現在は中国本土の Feishu でのみ利用できます。DingTalk、WeCom、Telegram は[コミュニティによるメンテナンス](https://multica.ai/docs/ja/community-maintained)です。
 - **Web、[デスクトップ](https://multica.ai/docs/ja/desktop-app)、[モバイル](https://multica.ai/docs/ja/mobile-app) →** macOS、Windows、Linux、iPhone、iPad で同じワークスペースを使えます。iOS アプリは現在ソースからビルドする形で、まだ App Store では提供していません。
 - **[CLI と API](https://multica.ai/docs/ja/cli) →** すべての機能をスクリプトから操作できます。エージェントも、あなたと同じ CLI で Multica を操作します。
 
@@ -175,7 +175,7 @@ CLI を検出します。Web から接続する場合や別のマシンを追加
 ## ランタイム
 
 Multica はモデルを同梱していません。インストールと認証を済ませたエージェント CLI をそのまま動かします。
-現在 26 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
+現在のソースコードは 31 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
 
 | プロバイダー | CLI | プロバイダー | CLI |
 | --- | --- | --- | --- |
@@ -192,6 +192,8 @@ Multica はモデルを同梱していません。インストールと認証を
 | DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
 | MiniMax Code | `mcode` | Dim | `dim` |
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
+| Muse Code | `muse` | Devin CLI | `devin` |
+| Amp | `amp` | Factory Droid | `droid` |
 | ZCode | `zcode` / ZCode Desktop | | |
 
 インストールと認証の方法：[AI コーディングツールをインストールする](https://multica.ai/docs/ja/install-agent-runtime) ·
@@ -214,7 +216,7 @@ Multica はモデルを同梱していません。インストールと認証を
 | Codex、Claude Code、Cursor から Multica を操作したい | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
 | エージェントが止まっている理由を突き止めたい | [実行](https://multica.ai/docs/ja/tasks) · [トラブルシューティング](https://multica.ai/docs/ja/troubleshooting) |
 
-ドキュメントは [English](https://multica.ai/docs)、[简体中文](https://multica.ai/docs/zh)、
+ドキュメントは [English](https://multica.ai/docs)、[简体中文](https://multica.ai/docs/zh)、[繁體中文](https://multica.ai/docs/zh-Hant)、
 [한국어](https://multica.ai/docs/ko)、[Français](https://multica.ai/docs/fr) でもご覧いただけます。
 
 ---

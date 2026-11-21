@@ -45,7 +45,18 @@ vi.mock("@multica/core/modals", () => ({
   useModalStore: (selector: (s: { open: typeof openModal }) => unknown) => selector({ open: openModal }),
 }));
 
-vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }) }));
+// Render each message as its key path ("batch.delete_count"), so the menu
+// items the tests click are distinguishable.
+vi.mock("../../i18n", () => ({
+  useT: () => ({
+    t: (select: (keys: unknown) => unknown) => {
+      const path: string[] = [];
+      const keys: unknown = new Proxy({}, { get: (_target, key) => (path.push(String(key)), keys) });
+      select(keys);
+      return path.join(".");
+    },
+  }),
+}));
 const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
@@ -78,7 +89,24 @@ vi.mock("./pickers", () => ({
       />
     </div>
   ),
+  AssigneePickerPanel: () => null,
+  DueDatePicker: () => null,
+  StartDatePicker: () => null,
 }));
+vi.mock("./pickers/batch-label-picker", () => ({ BatchLabelPicker: () => null }));
+vi.mock("../../projects/components/project-picker", () => ({ ProjectPicker: () => null }));
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
+  useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
+}));
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({ getShareableUrl: (path: string) => `https://app.example${path}` }),
+}));
+
+async function openDeleteItem() {
+  fireEvent.click(screen.getByRole("button", { name: "batch.more" }));
+  return screen.findByRole("menuitem", { name: "batch.delete_count" });
+}
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -163,20 +191,21 @@ describe("BatchActionToolbar status routing (MUL-4155)", () => {
     });
   });
 
-  it("disables deleting a selection containing an unauthorized issue", () => {
+  it("disables deleting a selection containing an unauthorized issue", async () => {
     deletionPolicy.allowed = false;
     render(<BatchActionToolbar issues={[makeIssue()]} />);
-    const button = screen.getByText("label", { selector: "button.text-destructive" });
-    expect(button).toBeDisabled();
-    fireEvent.click(button);
+    const item = await openDeleteItem();
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(batchDelete).not.toHaveBeenCalled();
   });
 
-  it("opens the dedicated delete confirmation, not the run-confirm modal", () => {
+  it("keeps delete out of the bar and opens the dedicated confirmation from the More menu", async () => {
     render(<BatchActionToolbar issues={[makeIssue({ status: "todo" })]} />);
-    fireEvent.click(screen.getByText("label", { selector: "button.text-destructive" }));
-    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete/ })).not.toBeInTheDocument();
+    fireEvent.click(await openDeleteItem());
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
     expect(openModal).not.toHaveBeenCalled();
     expect(batchDelete).not.toHaveBeenCalled();
   });

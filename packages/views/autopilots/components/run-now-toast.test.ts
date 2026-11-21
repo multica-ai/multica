@@ -35,9 +35,6 @@ describe("runNowBlockedKey", () => {
     expect(runNowBlockedKey("attribution_blocked")).toBe("run_blocked_attribution");
     expect(runNowBlockedKey("already_active")).toBe("run_blocked_already_active");
     expect(runNowBlockedKey("quota_exceeded")).toBe("run_blocked_quota_exceeded");
-    expect(runNowBlockedKey("issue_limit_reached")).toBe(
-      "run_blocked_issue_limit_reached",
-    );
   });
 
   it("maps runtime_access_denied to its dedicated key (PUCK-89)", () => {

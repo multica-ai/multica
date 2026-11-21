@@ -11,9 +11,11 @@ import {
   Monitor,
   Moon,
   Palette,
+  Settings2,
   Sun,
   User,
 } from "@multica/ui/icons";
+import { useAppearanceStore } from "@multica/core/appearance";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { SupportedLocale } from "@multica/core/i18n";
@@ -26,6 +28,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -41,6 +44,7 @@ import { useLanguageSwitch } from "../common/use-language-switch";
 import { useT } from "../i18n";
 import { AppLink } from "../navigation";
 import { isDesktopShell } from "../platform/local-directory";
+import { ThemeSwatch, useAppliedMode, useColorThemes, useThemeLabel } from "../settings/components/theme-swatch";
 import { DISCORD_URL, DiscordIcon } from "./discord";
 import { CHANGELOG_URL, DOCS_URL, DOWNLOAD_URL } from "./help-links";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
@@ -51,11 +55,15 @@ const THEMES = [
   { value: "system", icon: Monitor },
 ] as const;
 
-function SubmenuLabel({ label, value }: { label: string; value?: string }) {
+function SubmenuLabel({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
     <>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {value && <span className="shrink-0 text-caption text-muted-foreground">{value}</span>}
+      <span className="shrink-0">{label}</span>
+      {value && (
+        <span className="ml-auto flex min-w-0 justify-end text-caption text-muted-foreground">
+          {typeof value === "string" ? <span className="truncate">{value}</span> : value}
+        </span>
+      )}
     </>
   );
 }
@@ -76,9 +84,13 @@ export function AccountMenu() {
   const user = useAuthStore((s) => s.user);
   const p = useWorkspacePaths();
   const logout = useLogout();
-  const { theme, setTheme } = useTheme();
+  const { theme: mode, setTheme: setMode } = useTheme();
+  const appliedMode = useAppliedMode();
+  const setAppearance = useAppearanceStore((s) => s.set);
+  const { themes: colorThemes, selected: selectedTheme } = useColorThemes();
+  const themeLabel = useThemeLabel();
   const language = useLanguageSwitch();
-  const themeValue = (theme ?? "system") as (typeof THEMES)[number]["value"];
+  const modeValue = (mode ?? "system") as (typeof THEMES)[number]["value"];
   const name = user?.name ?? "";
   const avatar = (size: "md" | "lg") => (
     <ActorAvatar
@@ -120,18 +132,47 @@ export function AccountMenu() {
               <Palette />
               <SubmenuLabel
                 label={t(($) => $.account.theme)}
-                value={t(($) => $.account.themes[themeValue])}
+                value={
+                  <>
+                    <span className="shrink-0">{t(($) => $.account.themes[modeValue])}</span>
+                    <span aria-hidden="true" className="shrink-0 px-1">·</span>
+                    <span className="truncate">{themeLabel(selectedTheme)}</span>
+                  </>
+                }
               />
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup value={themeValue} onValueChange={setTheme}>
-                {THEMES.map(({ value, icon: Icon }) => (
-                  <DropdownMenuRadioItem key={value} value={value}>
-                    <Icon />
-                    {t(($) => $.account.themes[value])}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
+            <DropdownMenuSubContent className="w-56">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t(($) => $.account.mode)}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={modeValue} onValueChange={(next) => setMode(next as string)}>
+                  {THEMES.map(({ value, icon: Icon }) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      <Icon />
+                      {t(($) => $.account.themes[value])}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t(($) => $.account.theme)}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={selectedTheme.id}
+                  onValueChange={(next) => setAppearance({ theme: next as string })}
+                >
+                  {colorThemes.map((manifest) => (
+                    <DropdownMenuRadioItem key={manifest.id} value={manifest.id} closeOnClick={false}>
+                      <ThemeSwatch theme={manifest} mode={appliedMode} />
+                      <span className="min-w-0 flex-1 truncate">{themeLabel(manifest)}</span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem render={<AppLink href={`${p.settings()}?tab=appearance`} />}>
+                <Settings2 />
+                {t(($) => $.account.appearance_settings)}
+              </DropdownMenuItem>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
           <DropdownMenuSub>

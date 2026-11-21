@@ -1,9 +1,11 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { ArchivedInboxPage } from "../types/inbox";
-import { EMPTY_INBOX_FILTERS, type ArchivedInboxFilters } from "./filter-store";
+import { EMPTY_INBOX_FILTERS, archivedInboxQuery, type ArchivedInboxFilters } from "./filters";
+import { groupInboxItemsByIssue } from "./group";
+import { isInboxItemSnoozed } from "./snooze";
 import { infiniteQueryOptions, keepPreviousData, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import type { InboxItem, InboxWorkspaceUnread } from "../types";
+import type { InboxItem, InboxWorkspaceUnread, SnoozedInboxIssue } from "../types";
 import { focusManager } from "@tanstack/react-query";
 
 export const inboxKeys = {
@@ -13,6 +15,7 @@ export const inboxKeys = {
   pages: (wsId: string) => [...inboxKeys.archived(wsId), "pages"] as const,
   lookup: (wsId: string) => [...inboxKeys.archived(wsId), "lookup"] as const,
   facets: (wsId: string) => [...inboxKeys.all(wsId), "archived-facets"] as const,
+  snoozed: (wsId: string) => [...inboxKeys.all(wsId), "snoozed"] as const,
   // Account-level (not workspace-scoped): a single shared cache entry that
   // holds unread counts for every workspace the user belongs to.
   unreadSummary: () => ["inbox", "unread-summary"] as const,
@@ -21,27 +24,36 @@ export const inboxKeys = {
 export function inboxListOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.list(wsId),
-    queryFn: () => api.listInbox(),
+    queryFn: ({ signal }) => api.listInbox(signal),
   });
 }
 
 /**
- * @deprecated Legacy array endpoint, capped at 200 groups. New archive
- * consumers must use archivedInboxPagesOptions for the complete archive.
- * Retained for compatibility with legacy cache consumers.
+ * The viewer's snoozed issues, soonest back first. Under `inboxKeys.all`, so
+ * every inbox event refreshes it with the lists.
  */
-export function archivedInboxListOptions(wsId: string) {
+export function snoozedInboxOptions(wsId: string) {
   return queryOptions({
-    queryKey: inboxKeys.archived(wsId),
-    queryFn: () => api.listArchivedInbox(),
+    queryKey: inboxKeys.snoozed(wsId),
+    queryFn: ({ signal }) => api.listSnoozedInbox(signal),
   });
 }
 
-// Lists the archived dimensions explicitly, so an `idleOnly` carried in from
-// the active inbox never changes the key or refetches the archive.
-function normalizedInboxFilters(filters: ArchivedInboxFilters): ArchivedInboxFilters {
-  return { statuses: [...filters.statuses].sort(), priorities: [...filters.priorities].sort(),
-    actors: [...filters.actors].sort(), unreadOnly: filters.unreadOnly };
+/** The snoozed entry for one issue, or undefined when it is not snoozed. */
+export function findSnoozedInboxIssue(
+  snoozed: readonly SnoozedInboxIssue[] | undefined,
+  issueId: string | null | undefined,
+  now = Date.now(),
+): SnoozedInboxIssue | undefined {
+  if (!issueId) return undefined;
+  return snoozed?.find((entry) => entry.issue_id === issueId && new Date(entry.snoozed_until).getTime() > now);
+}
+
+// Keyed by the request parameters themselves: an `agent` selection carried in
+// from the active inbox never changes the key, and the relative windows
+// (received, due date) re-key when the day turns.
+function normalizedInboxFilters(filters: ArchivedInboxFilters): Record<string, string> {
+  return archivedInboxQuery(filters);
 }
 
 // A filter change re-keys the archive. Keep the previous result while the new
@@ -65,11 +77,19 @@ export function archivedInboxPagesOptions(wsId: string, filters: ArchivedInboxFi
 }
 
 export function archivedInboxLookupOptions(wsId: string, groupId: string, filters: ArchivedInboxFilters = EMPTY_INBOX_FILTERS) {
+  const prefix = inboxKeys.lookup(wsId);
   return queryOptions({
-    queryKey: [...inboxKeys.lookup(wsId), groupId, normalizedInboxFilters(filters)],
+    queryKey: [...prefix, groupId, normalizedInboxFilters(filters)],
     queryFn: ({ signal }) => api.listArchivedInboxPage(filters, { groupId, signal }),
     enabled: !!groupId,
     retry: false,
+    // A filter change re-asks for the same group. Its last answer stays up
+    // meanwhile, so the open row is judged by the new filters at once instead
+    // of the selection hanging on the request.
+    placeholderData: (previousData, previousQuery) =>
+      isSameWorkspace(previousQuery?.queryKey, wsId) && previousQuery?.queryKey[prefix.length] === groupId
+        ? previousData
+        : undefined,
   });
 }
 
@@ -113,7 +133,7 @@ export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (
 export function inboxUnreadSummaryOptions() {
   return queryOptions({
     queryKey: inboxKeys.unreadSummary(),
-    queryFn: () => api.getInboxUnreadSummary(),
+    queryFn: ({ signal }) => api.getInboxUnreadSummary(signal),
     enabled: () => focusManager.isFocused(),
     refetchOnWindowFocus: true,
   });
@@ -183,10 +203,9 @@ export function unreadCountForWorkspace(
  * its own; deriving it from `listInbox()` instead downloaded the entire
  * unbounded inbox on every app start just to render a number (MUL-6967).
  *
- * `GET /api/inbox/unread-count` is deliberately not the source: it counts raw
- * notification rows, while the inbox renders one row per issue. The summary
- * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
- * applies client-side, so this number matches the list the user sees.
+ * The summary endpoint applies the same newest-per-issue rule
+ * `deduplicateInboxItems` applies client-side, so this number matches the
+ * list the user sees.
  */
 export function useInboxUnreadCount(
   wsId: string | null | undefined,
@@ -207,7 +226,10 @@ export function useInboxUnreadCount(
  * (to avoid new array references on every cache update).
  */
 export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
-  return groupInboxItemsByIssue(items.filter((i) => !i.archived));
+  // The server leaves snoozed issues out; this drops the ones snoozed since the
+  // list loaded, optimistically or by a row that joined a snooze.
+  const now = Date.now();
+  return groupInboxItemsByIssue(items.filter((i) => !i.archived && !isInboxItemSnoozed(i, now)));
 }
 
 /**
@@ -218,41 +240,4 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
  */
 export function deduplicateArchivedInboxItems(items: InboxItem[]): InboxItem[] {
   return groupInboxItemsByIssue(items.filter((i) => i.archived));
-}
-
-function groupInboxItemsByIssue(items: InboxItem[]): InboxItem[] {
-  const groups = new Map<string, InboxItem[]>();
-  for (const item of items) {
-    const key = item.issue_id ?? item.id;
-    const group = groups.get(key) ?? [];
-    group.push(item);
-    groups.set(key, group);
-  }
-  const merged: InboxItem[] = [];
-  for (const group of groups.values()) {
-    group.sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
-    const newest = group[0];
-    if (!newest) continue;
-
-    const commentId =
-      newest.details?.comment_id ??
-      group.find((item) => item.details?.comment_id)?.details?.comment_id;
-
-    if (commentId && newest.details?.comment_id !== commentId) {
-      merged.push({
-        ...newest,
-        details: { ...(newest.details ?? {}), comment_id: commentId },
-      });
-      continue;
-    }
-
-    merged.push(newest);
-  }
-  return merged.sort(
-    (a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
 }

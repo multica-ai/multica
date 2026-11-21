@@ -3,7 +3,7 @@
 -- are one state transition. A missing row is the fail-closed value for old
 -- daemons, old servers, unsupported providers and application rollback.
 WITH candidate AS MATERIALIZED (
-    SELECT t.id, t.issue_id, r.workspace_id, r.provider
+    SELECT t.id, t.issue_id, t.chat_session_id, r.workspace_id, r.provider
     FROM agent_task_queue t
     JOIN agent_runtime r ON r.id = t.runtime_id
     WHERE t.id = @task_id
@@ -14,8 +14,8 @@ WITH candidate AS MATERIALIZED (
     SELECT id, workspace_id, issue_id, 'task-supplement-v1'
     FROM candidate
     WHERE @enable_task_supplement::boolean
-      AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
-      AND issue_id IS NOT NULL
+      AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
+      AND (issue_id IS NOT NULL OR chat_session_id IS NOT NULL)
     ON CONFLICT DO NOTHING
     RETURNING task_id
 )
@@ -24,7 +24,9 @@ SET status = 'running',
     started_at = now(),
     wait_reason = NULL,
     prepare_lease_expires_at = NULL,
-    result = CASE WHEN @enable_process_cleanup::boolean AND candidate.provider IN ('pi', 'omp')
+    result = CASE WHEN @enable_process_cleanup::boolean AND candidate.provider = 'museapp'
+                  THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"museapp-process-cleanup-v1"}'::jsonb
+                  WHEN @enable_process_cleanup::boolean AND candidate.provider IN ('pi', 'omp')
                   THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"pi-process-cleanup-v1"}'::jsonb
                   ELSE t.result END
 FROM candidate
@@ -48,7 +50,7 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = @workspace_id
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
     FOR UPDATE OF t
 ), touched_issue AS (
     UPDATE issue i SET
@@ -122,8 +124,12 @@ WITH locked_task AS MATERIALIZED (
       AND t.agent_id = @agent_id
       AND r.workspace_id = @workspace_id
       AND t.status = 'running'
+      AND (
+          sqlc.narg('required_leader_squad_id')::uuid IS NULL
+          OR (t.is_leader_task AND t.squad_id = sqlc.narg('required_leader_squad_id')::uuid)
+      )
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
       AND (@author_type::text <> 'agent' OR (
           (SELECT count(*) FROM task_supplement s
            JOIN comment c ON c.id = s.comment_id

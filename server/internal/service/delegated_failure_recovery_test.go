@@ -299,7 +299,11 @@ type delegatedFailureFixture struct {
 
 func seedDelegatedFailureFixture(t *testing.T) (*delegatedFailureFixture, *TaskService) {
 	t.Helper()
-	pool := newResolveOriginatorPool(t)
+	return seedDelegatedFailureFixtureIn(t, newResolveOriginatorPool(t))
+}
+
+func seedDelegatedFailureFixtureIn(t *testing.T, pool *pgxpool.Pool) (*delegatedFailureFixture, *TaskService) {
+	t.Helper()
 	ctx := context.Background()
 	workspaceID, userID, coordinatorID, issueID := seedAttributionFixture(t, pool)
 	if _, err := pool.Exec(ctx, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, issueID); err != nil {
@@ -1049,6 +1053,33 @@ func (f *delegatedFailureFixture) insertOrphanedWorkerTask(t *testing.T, attempt
 		t.Fatalf("load orphaned task: %v", err)
 	}
 	return task
+}
+
+func TestHandleFailedTasksUnconfirmedCleanupDoesNotDelegate(t *testing.T) {
+	for _, reason := range []string{"cleanup_unconfirmed", "cleanup_blocked"} {
+		t.Run(reason, func(t *testing.T) {
+			f, svc := seedDelegatedFailureFixture(t)
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			if _, err := f.pool.Exec(t.Context(), `UPDATE agent_task_queue SET failure_reason=$2, error='worker stop unconfirmed', completed_at=now() WHERE id=$1`, failedID, reason); err != nil {
+				t.Fatal(err)
+			}
+			failed, err := svc.Queries.GetAgentTask(t.Context(), failedID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc.HandleFailedTasks(t.Context(), []db.AgentTaskQueue{failed})
+			var recoveryTasks, recoveryComments int
+			if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM agent_task_queue WHERE trigger_evidence_kind='delegated_failure' AND trigger_evidence_ref_id=$1`, failedID).Scan(&recoveryTasks); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM comment WHERE issue_id=$1 AND type='progress_update' AND source_task_id=$2`, f.issueID, failedID).Scan(&recoveryComments); err != nil {
+				t.Fatal(err)
+			}
+			if recoveryTasks != 0 || recoveryComments != 0 {
+				t.Fatalf("cleanup failure dispatched coordinator work: tasks=%d comments=%d", recoveryTasks, recoveryComments)
+			}
+		})
+	}
 }
 
 func TestHandleFailedTasksTerminalFailureCommentsOnTaskIssue(t *testing.T) {

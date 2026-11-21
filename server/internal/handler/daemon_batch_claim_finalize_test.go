@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type batchClaimReceiptResponse struct {
@@ -345,5 +347,39 @@ func TestClaimTasksByRuntime_RepairsStaleCommentPlan(t *testing.T) {
 	}
 	if rebuilt < 1 {
 		t.Fatalf("expected the surviving comment rebuilt into a new trigger task, found %d", rebuilt)
+	}
+}
+
+func TestClaimTasksByRuntime_EmptyPollAcknowledgesNoRechecks(t *testing.T) {
+	rt := createClaimReclaimRuntime(t, context.Background(), "Empty poll")
+	for _, tc := range []struct {
+		name  string
+		ids   []string
+		slots int
+	}{
+		{"no slots", []string{rt}, 0},
+		{"no runtime IDs", nil, 1},
+		{"unknown runtime", []string{"07a50d10-3e8d-4e48-a74b-6a176c34865e"}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := postBatchClaimWithCapabilities(t, testWorkspaceID, tc.ids, tc.slots, protocol.DaemonCapabilityForceRecheckV1)
+			var resp struct {
+				Acknowledged []string `json:"force_rechecked_runtime_ids"`
+			}
+			if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &resp) != nil || resp.Acknowledged == nil || len(resp.Acknowledged) != 0 {
+				t.Fatalf("expected 200 with an explicit empty acknowledgement, got %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestClaimTasksByRuntime_LegacyPollOmitsRecheckAck(t *testing.T) {
+	rt := createClaimReclaimRuntime(t, context.Background(), "Legacy poll")
+	for _, slots := range []int{0, 1} {
+		w := postBatchClaim(t, testWorkspaceID, []string{rt}, slots)
+		var resp map[string]json.RawMessage
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &resp) != nil || resp["tasks"] == nil || resp["force_rechecked_runtime_ids"] != nil {
+			t.Fatalf("unexpected response to legacy poll: %d %s", w.Code, w.Body.String())
+		}
 	}
 }

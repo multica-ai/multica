@@ -1,12 +1,12 @@
 ---
 title: Slack Bot
-description: Create a Slack Bot for an agent and use it in DMs, channels, and the /issue, /new, and /clear commands.
+description: Create a Slack Bot for an agent and use it in DMs, channels, and the @Multica /help, /issue, /new, and /clear commands.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica uses your own Slack app. Once connected, team members can DM the Bot or @-mention it in a channel, and use `/issue` to create issues, `/new` to start a new Multica Chat, and `/clear` to reset the current Chat's agent context.
+Multica uses your own Slack app. Once connected, team members can DM the Bot or @-mention it in a channel, and use `@Multica /help` to list commands, `/issue` to create issues, `/new` to start a new Multica Chat, and `/clear` to reset the current Chat's agent context.
 
 One Slack app maps to one Multica agent. To connect several agents, create a separate app for each.
 
@@ -75,7 +75,7 @@ settings:
   token_rotation_enabled: false
 ```
 
-Before creating, you can replace both occurrences of `Multica` with the agent's name. Do not remove scopes or events from the manifest, or DMs, channel mentions, replies, `/issue`, `/new`, or `/clear` may stop working.
+Before creating, you can replace both occurrences of `Multica` with the agent's name. Do not remove scopes or events from the manifest, or DMs, channel mentions, replies, `@Multica /help`, `/issue`, `/new`, or `/clear` may stop working.
 
 <Callout type="warning">
 Slack slash-command names are workspace-global. If another installed app already owns `/new` or `/clear`, Slack rejects the conflicting command when you create or update the app. Resolve the collision, or send the message form `@Multica /new [message]` or `@Multica /clear [message]` to bypass native slash-command interception.
@@ -111,11 +111,11 @@ The Bot connects out to Slack over Socket Mode, so no public Request URL or OAut
 ### Connect it to an agent [#3-connect-it-to-an-agent]
 
 1. In Multica, open **Agents** and select the agent to connect to Slack.
-2. Go to **Integrations** and click **Connect Slack**.
+2. Go to **Messaging**, click **Add messaging channel**, then choose **Slack**.
 3. Paste the Bot token and the App-level token.
 4. Click **Connect**.
 
-Multica verifies that the two tokens come from the same app. Once connected, the page shows **Connected to Slack**.
+Multica verifies that the two tokens come from the same app. Once connected, the page shows **Connected**.
 
 <Callout type="warning">
 Both tokens are stored encrypted on the Multica server. Tokens are credentials: don't put them in issues, comments, or code repositories. An app already connected to another agent or workspace can't be reused directly; disconnect the original connection first.
@@ -154,6 +154,12 @@ Attach files to a DM, or to a channel message that @-mentions the Bot. They reac
 
 This needs the `files:read` scope; if the app was installed before attachment support existed, see the note in step 1. Each file must be 20 MiB or smaller, and one message carries at most 10. Files that are larger, still uploading, or hosted outside Slack (a Google Drive or Dropbox link, for example) are skipped; the message text still reaches the agent.
 
+### List commands with `@Multica /help`
+
+Send `@Multica /help` in a DM, channel, or thread to list `@Multica /help`, `@Multica /new [message]`, `@Multica /clear [message]`, and `@Multica /issue <title>` (subsequent lines become the description). Multica replies directly without creating a Chat or run or changing the active Chat.
+
+The default manifest registers only `/issue`, `/new`, and `/clear` as native slash commands. `@Multica /help` needs no manifest change or reinstall. Native `/issue <description>` asks the agent to create an issue from your description.
+
 ### Create issues with `/issue`
 
 In a channel or DM, type:
@@ -180,7 +186,7 @@ In a channel or thread, send `@Multica /clear [message]` in the target thread so
 
 ## Manage connections
 
-Open **Settings → Messaging → Slack** to view all connected Slack Bots. Workspace owners and admins can disconnect them.
+Open **Settings → Messaging** to see connected agents grouped by platform. Select an agent to open its **Messaging** section. Workspace owners and admins can disconnect the Bot from its management menu there.
 
 After disconnecting, the Socket Mode connection stops and the Bot no longer receives new messages. Existing conversations and audit records are not deleted.
 
@@ -208,6 +214,7 @@ Account binding links use `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN` w
 - **App can't be verified**: confirm the manifest includes `users:read`, then reinstall the app after updating permissions.
 - **No DM entry point**: confirm `app_home.messages_tab_enabled` is `true`.
 - **No reply in a channel**: confirm the Bot has been invited to the channel and the message @-mentions it.
+- **`/help` does not reach Multica**: send `@Multica /help`; the default manifest does not register native `/help`.
 - **`/issue`, `/new`, or `/clear` doesn't exist**: confirm the manifest includes all three slash commands and the `commands` scope, then reinstall the app. If Slack reports that `/new` or `/clear` is already taken, use the `@Multica` message form or resolve the workspace-level command collision first.
 - **Files don't reach the agent**: confirm the manifest includes `files:read` and that the app was reinstalled after the scope was added, and check the file is 20 MiB or smaller.
 - **The Bot doesn't run**: check whether the agent is archived and whether the [runtime](/daemon-runtimes) it uses is online.

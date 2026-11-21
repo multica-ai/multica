@@ -82,7 +82,8 @@ function WorkspaceScopeBadge({
       <WorkspaceAvatar
         name={name}
         avatarUrl={workspace.avatar_url}
-        className="size-3 rounded-xs border-0"
+        radius="xs"
+        className="size-3 border-0"
       />
     ) : (
       <Building2 aria-hidden="true" className="size-3" />

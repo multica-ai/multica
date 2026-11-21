@@ -94,6 +94,7 @@ var modelPrices = map[string]ModelPrice{
 	// Mixed-modality Live/Image/Omni/Embedding, grounding and hourly cache
 	// storage cannot be inferred from these token totals.
 	"google:gemini-4-argon":                         {Provider: "google", Model: "gemini-4-argon", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2, OutputPerM: 10},
+	"google:gemini-4-carbon":                        {Provider: "google", Model: "gemini-4-carbon", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2, OutputPerM: 10}, // shares Argon's intro rate through 2026-11-30 (checked 2026-11-11)
 	"google:gemini-3.8-flash":                       {Provider: "google", Model: "gemini-3.8-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
 	"google:gemini-3.7-flash":                       {Provider: "google", Model: "gemini-3.7-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
 	"google:gemini-3.6-flash":                       {Provider: "google", Model: "gemini-3.6-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
@@ -155,6 +156,13 @@ var modelPrices = map[string]ModelPrice{
 	// providers/moonshotai/models/kimi-k3.toml). Moonshot bills no separate
 	// cache write, so CacheWritePerM mirrors Input.
 	"moonshotai:kimi-k3": {Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
+	// Kimi K3.1 Pro (platform.kimi.ai/docs/pricing/chat via models.dev
+	// providers/moonshotai/models/kimi-k3.1-pro.toml, 2026-11-11); default 5m
+	// cache write is 1x Input, like kimi-k3.
+	"moonshotai:kimi-k3.1-pro": {Provider: "moonshotai", Model: "kimi-k3.1-pro", InputPerM: 2.0, CacheReadPerM: 0.20, CacheWritePerM: 2.0, OutputPerM: 10.0},
+	// GLM-5.3 / GLM-5.3-Flash (docs.z.ai/guides/overview/pricing, 2026-11-11); the 5.3 Flash tier is paid.
+	"zai:glm-5.3":       {Provider: "zai", Model: "glm-5.3", InputPerM: 1.4, CacheReadPerM: 0.26, CacheWritePerM: 1.4, OutputPerM: 4.4},
+	"zai:glm-5.3-flash": {Provider: "zai", Model: "glm-5.3-flash", InputPerM: 0.15, CacheReadPerM: 0.03, CacheWritePerM: 0.15, OutputPerM: 0.5},
 	// Volcengine Ark (ark.cn-beijing.volces.com). `ark-code-latest` is a
 	// rolling alias whose target can be switched in the Volcengine console
 	// (across model families), so it is not a stable model identity; the
@@ -248,6 +256,7 @@ var modelAliasRules = []struct {
 	// Each Gemini SKU is exact: an image/audio/preview variant must never
 	// inherit the nearest text model rate. Known efforts normalize below.
 	{regexp.MustCompile(`(^|/|:)gemini-4-argon$`), "google:gemini-4-argon"},
+	{regexp.MustCompile(`(^|/|:)gemini-4-carbon$`), "google:gemini-4-carbon"},
 	{regexp.MustCompile(`(^|/|:)gemini-3\.8-flash$`), "google:gemini-3.8-flash"},
 	{regexp.MustCompile(`(^|/|:)gemini-3\.7-flash$`), "google:gemini-3.7-flash"},
 	{regexp.MustCompile(`(^|/|:)gemini-3\.6-flash$`), "google:gemini-3.6-flash"},
@@ -299,6 +308,13 @@ var modelAliasRules = []struct {
 	// unmapped; `kimi-code/k3` (Kimi Code CLI) resolves via the `/k3$` form.
 	{regexp.MustCompile(`(^|/|:)kimi-k3$`), "moonshotai:kimi-k3"},
 	{regexp.MustCompile(`(^|/|:)k3$`), "moonshotai:kimi-k3"},
+	// Kimi K3.1 Pro. Anchored so CodeBuddy's `kimi-k3-1` and the highspeed
+	// SKU stay unmapped; `kimi-code/k3.1-pro` resolves via the `/k3.1-pro$` form.
+	{regexp.MustCompile(`(^|/|:)kimi-k3\.1-pro$`), "moonshotai:kimi-k3.1-pro"},
+	{regexp.MustCompile(`(^|/|:)k3\.1-pro$`), "moonshotai:kimi-k3.1-pro"},
+	// Zhipu GLM-5.3. Anchored so unknown suffixed variants stay unmapped.
+	{regexp.MustCompile(`(^|/|:)glm-5\.3$`), "zai:glm-5.3"},
+	{regexp.MustCompile(`(^|/|:)glm-5\.3-flash$`), "zai:glm-5.3-flash"},
 	// Volcengine Ark `ark-code-latest` is deliberately absent: it is a
 	// console-switchable rolling alias across model families, not a stable
 	// model identity, so it stays unmapped.
@@ -315,8 +331,17 @@ var contextTagRe = regexp.MustCompile(`\[[^\]]+\]$`)
 // Antigravity reports a display label or an effort-suffixed model ID. Effort
 // selects reasoning, not a different SKU. Only strip known effort spellings;
 // unknown variants must remain unpriced instead of borrowing a family's rate.
-var geminiDisplayNameRe = regexp.MustCompile(`(^|/|:)gemini ([0-9]+(?:\.[0-9]+)?) (flash(?:-lite)?|pro|argon)(?: \((?:minimal|low|medium|high)\))?$`)
-var geminiEffortSuffixRe = regexp.MustCompile(`((?:^|/|:)gemini-[0-9]+(?:\.[0-9]+)?-(?:flash(?:-lite)?|pro|argon))-(?:minimal|low|medium|high)$`)
+var geminiDisplayNameRe = regexp.MustCompile(`(^|/|:)gemini ([0-9]+(?:\.[0-9]+)?) (flash(?:-lite)?|pro|argon|carbon)(?: \((?:minimal|low|medium|high)\))?$`)
+var geminiEffortSuffixRe = regexp.MustCompile(`((?:^|/|:)gemini-[0-9]+(?:\.[0-9]+)?-(?:flash(?:-lite)?|pro|argon|carbon))-(?:minimal|low|medium|high)$`)
+
+// Antigravity also labels Claude models with the reasoning effort, as a slug
+// suffix (`claude-opus-5-5-high`) or a display label (`Claude Opus 5.5
+// (High)`); effort selects reasoning, not a different SKU. Scoped to the
+// Antigravity runtime because Cursor ids carry the same suffixes at
+// Cursor-specific rates and a bare `claude-opus-5-5-high` elsewhere stays
+// unmapped. Mirrors pricingCandidates in packages/views/runtimes/utils.ts.
+var antigravityClaudeDisplayRe = regexp.MustCompile(`^(?:[a-z][a-z0-9_-]*[/:])*claude (opus|sonnet|haiku|fable) ([0-9]+(?:[.-][0-9]+)?)(?: \((?:minimal|low|medium|high)\))?$`)
+var antigravityClaudeEffortRe = regexp.MustCompile(`^(?:[a-z][a-z0-9_-]*[/:])*(claude-(?:opus|sonnet|haiku|fable)-[0-9]+(?:[.-][0-9]+)?)-(?:minimal|low|medium|high)$`)
 
 func matchModelAlias(model string) (ModelPrice, bool) {
 	model = geminiDisplayNameRe.ReplaceAllString(model, "${1}gemini-${2}-${3}")
@@ -378,6 +403,23 @@ func PriceForModelAlias(model string) (ModelPrice, bool) {
 			return ModelPrice{}, false
 		}
 		return matchModelAlias(stripped)
+	}
+	return ModelPrice{}, false
+}
+
+// priceForAntigravityModel prices usage reported by the Antigravity runtime:
+// after the general resolver misses, retry the Claude effort/display forms.
+// One trailing context tag is the same SKU; the `$` anchor rejects a second.
+func priceForAntigravityModel(model string) (ModelPrice, bool) {
+	if price, ok := PriceForModelAlias(model); ok {
+		return price, true
+	}
+	s := contextTagRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(model)), "")
+	if m := antigravityClaudeDisplayRe.FindStringSubmatch(s); m != nil {
+		return PriceForModelAlias("claude-" + m[1] + "-" + strings.ReplaceAll(m[2], ".", "-"))
+	}
+	if m := antigravityClaudeEffortRe.FindStringSubmatch(s); m != nil {
+		return PriceForModelAlias(strings.ReplaceAll(m[1], ".", "-"))
 	}
 	return ModelPrice{}, false
 }

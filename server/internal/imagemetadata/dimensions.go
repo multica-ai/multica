@@ -24,13 +24,15 @@ func Dimensions(data []byte) (Size, bool) {
 		return Size{}, false
 	}
 	width, height := int32(cfg.Width), int32(cfg.Height)
-	if format == "jpeg" && jpegOrientation(data) >= 5 {
+	if format == "jpeg" && JPEGOrientation(data) >= 5 {
 		width, height = height, width
 	}
 	return Size{Width: width, Height: height}, true
 }
 
-func jpegOrientation(data []byte) int {
+// JPEGOrientation returns the EXIF orientation (1-8) of a JPEG, or 1 when the
+// data is not a JPEG or carries no valid orientation tag.
+func JPEGOrientation(data []byte) int {
 	if len(data) < 2 || data[0] != 0xff || data[1] != 0xd8 {
 		return 1
 	}
