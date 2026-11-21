@@ -3234,6 +3234,7 @@ JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at > now() - INTERVAL '30 days'
+  AND (sqlc.narg('originator_user_id')::uuid IS NULL OR atq.originator_user_id = sqlc.narg('originator_user_id'))
 GROUP BY atq.agent_id, bucket
 ORDER BY atq.agent_id, bucket;
 

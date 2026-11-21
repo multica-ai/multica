@@ -3475,8 +3475,18 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
+	// Optional caller filter (?originator_user_id=<uuid>): absent spans every
+	// caller, so the Agents-list sparkline reads the same workspace-wide
+	// series as before.
+	originatorUserID, ok := parseOriginatorUserIDParam(w, r)
+	if !ok {
+		return
+	}
 
-	rows, err := h.Queries.GetWorkspaceAgentActivity30d(r.Context(), parseUUID(workspaceID))
+	rows, err := h.Queries.GetWorkspaceAgentActivity30d(r.Context(), db.GetWorkspaceAgentActivity30dParams{
+		WorkspaceID:      parseUUID(workspaceID),
+		OriginatorUserID: originatorUserID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get agent activity")
 		return

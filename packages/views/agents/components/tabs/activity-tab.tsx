@@ -24,12 +24,12 @@ import { cn } from "@multica/ui/lib/utils";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { Agent, AgentTask } from "@multica/core/types";
 import {
+  agentActivity30dOptions,
   agentTaskSnapshotOptions,
   agentTasksOptions,
+  deriveAgentActivity,
   summarizeActivityWindow,
   useWorkspaceActivityMap,
-  type ActivityBucket,
-  type ActivityWindowSummary,
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
@@ -269,25 +269,28 @@ export function AgentPerformanceSummary({
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
-  const activity = activityMap.get(agent.id);
-  // The task history is only fetched for the caller-filtered view; the
-  // default summary reads the server-side activity aggregate so the panel
-  // never depends on how much history was opened.
-  const { data: taskPages } = useInfiniteQuery({
-    ...agentTasksOptions(wsId, agent.id),
-    enabled: !!callerId,
+  // A caller-scoped summary reads the server's activity aggregate filtered
+  // to that caller — the same complete 30-day roll-up the unfiltered panel
+  // shows, not a count over whatever history pages have loaded.
+  const { data: callerBuckets } = useQuery({
+    ...agentActivity30dOptions(wsId, callerId ?? undefined),
+    enabled: !!callerId && !!wsId,
   });
-  const agentTasks = useMemo(
-    () => taskPages?.pages.flatMap((page) => page.tasks) ?? [],
-    [taskPages],
+  const callerActivity = useMemo(
+    () =>
+      callerId && callerBuckets
+        ? // The buckets span the whole workspace; keep this agent's own series.
+          deriveAgentActivity(
+            callerBuckets.filter((b) => b.agent_id === agent.id),
+            agent.created_at,
+            Date.now(),
+          )
+        : null,
+    [callerId, callerBuckets, agent.created_at],
   );
-  const callerSummary = callerId
-    ? summarizeCallerActivityLast30d(agentTasks, Date.now(), callerId)
-    : null;
-  const unfiltered = summarizeActivityWindow(activity, 30);
-  const summary = callerSummary ?? unfiltered;
-  const avgDurationMs =
-    callerSummary?.avgDurationMs ?? activity?.avgDurationMs ?? 0;
+  const activity = callerActivity ?? activityMap.get(agent.id);
+  const summary = summarizeActivityWindow(activity, 30);
+  const avgDurationMs = activity?.avgDurationMs ?? 0;
 
   if (summary.totalRuns === 0) {
     return (
@@ -948,116 +951,12 @@ export function taskCallerUserId(task: AgentTask): string | null {
   return task.attribution?.originator?.id ?? task.originator_user_id ?? null;
 }
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function startOfLocalDay(ts: number): number {
-  const d = new Date(ts);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
-/**
- * Average wall-clock duration of completed/failed tasks whose completion
- * lands in the last 30 days. Pure function so callers can pass a
- * deterministic `now` in tests.
- */
-export function deriveAvgDurationLast30d(
-  tasks: readonly AgentTask[],
-  now: number,
-): number {
-  let sum = 0;
-  let count = 0;
-  for (const t of tasks) {
-    if (!t.completed_at || !t.started_at) continue;
-    const completedAt = new Date(t.completed_at).getTime();
-    if (Number.isNaN(completedAt)) continue;
-    if (now - completedAt > THIRTY_DAYS_MS) continue;
-    const startedAt = new Date(t.started_at).getTime();
-    const dur = completedAt - startedAt;
-    if (Number.isFinite(dur) && dur > 0) {
-      sum += dur;
-      count += 1;
-    }
-  }
-  return count > 0 ? Math.round(sum / count) : 0;
-}
-
 export function matchesCallerFilter(
   task: AgentTask,
   callerId: string | null,
 ): boolean {
   if (!callerId) return true;
   return taskCallerUserId(task) === callerId;
-}
-
-/**
- * Last-30-days roll-up from the same task list Recent work reads, so the
- * panel numbers move with the caller filter instead of staying workspace-
- * wide. Chat tasks stay out — they are not "work" on this surface.
- */
-export function summarizeCallerActivityLast30d(
-  tasks: readonly AgentTask[],
-  now: number,
-  callerId: string | null,
-): ActivityWindowSummary & { avgDurationMs: number } {
-  const buckets: ActivityBucket[] = Array.from({ length: 30 }, () => ({
-    total: 0,
-    failed: 0,
-    completed: 0,
-    cancelled: 0,
-  }));
-  const today = startOfLocalDay(now);
-  const inWindow: AgentTask[] = [];
-  for (const task of tasks) {
-    if (task.chat_session_id) continue;
-    if (!task.completed_at) continue;
-    if (
-      task.status !== "completed" &&
-      task.status !== "failed" &&
-      task.status !== "cancelled"
-    ) {
-      continue;
-    }
-    if (!matchesCallerFilter(task, callerId)) continue;
-    const completedAt = new Date(task.completed_at).getTime();
-    if (Number.isNaN(completedAt) || now - completedAt > THIRTY_DAYS_MS) {
-      continue;
-    }
-    const daysAgo = Math.floor(
-      (today - startOfLocalDay(completedAt)) / DAY_MS,
-    );
-    if (daysAgo < 0 || daysAgo >= 30) continue;
-    buckets[30 - 1 - daysAgo]!.total += 1;
-    if (task.status === "failed") buckets[30 - 1 - daysAgo]!.failed += 1;
-    if (task.status === "completed") buckets[30 - 1 - daysAgo]!.completed += 1;
-    if (task.status === "cancelled")
-      buckets[30 - 1 - daysAgo]!.cancelled += 1;
-    inWindow.push(task);
-  }
-  let totalRuns = 0;
-  let totalFailed = 0;
-  let totalCompleted = 0;
-  let totalCancelled = 0;
-  for (const bucket of buckets) {
-    totalRuns += bucket.total;
-    totalFailed += bucket.failed;
-    totalCompleted += bucket.completed;
-    totalCancelled += bucket.cancelled;
-  }
-  const outcomes = totalCompleted + totalFailed;
-  const successRate =
-    outcomes > 0 ? Math.round((totalCompleted / outcomes) * 100) : null;
-  return {
-    buckets,
-    totalRuns,
-    totalFailed,
-    totalCompleted,
-    totalCancelled,
-    successRate,
-    windowDays: 30,
-    avgDurationMs: deriveAvgDurationLast30d(inWindow, now),
-  };
 }
 
 /** Caller filter for the Recent work section. */

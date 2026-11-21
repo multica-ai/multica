@@ -5341,9 +5341,15 @@ JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at > now() - INTERVAL '30 days'
+  AND ($2::uuid IS NULL OR atq.originator_user_id = $2)
 GROUP BY atq.agent_id, bucket
 ORDER BY atq.agent_id, bucket
 `
+
+type GetWorkspaceAgentActivity30dParams struct {
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	OriginatorUserID pgtype.UUID `json:"originator_user_id"`
+}
 
 type GetWorkspaceAgentActivity30dRow struct {
 	AgentID        pgtype.UUID        `json:"agent_id"`
@@ -5372,8 +5378,8 @@ type GetWorkspaceAgentActivity30dRow struct {
 // not the historical trend.
 // Keep total activity separate from outcomes: cancelled runs belong in the
 // history, but success rate is completed / (completed + failed).
-func (q *Queries) GetWorkspaceAgentActivity30d(ctx context.Context, workspaceID pgtype.UUID) ([]GetWorkspaceAgentActivity30dRow, error) {
-	rows, err := q.db.Query(ctx, getWorkspaceAgentActivity30d, workspaceID)
+func (q *Queries) GetWorkspaceAgentActivity30d(ctx context.Context, arg GetWorkspaceAgentActivity30dParams) ([]GetWorkspaceAgentActivity30dRow, error) {
+	rows, err := q.db.Query(ctx, getWorkspaceAgentActivity30d, arg.WorkspaceID, arg.OriginatorUserID)
 	if err != nil {
 		return nil, err
 	}

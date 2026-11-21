@@ -3607,8 +3607,9 @@ export class ApiClient {
   // completed_at. One workspace-wide fetch backs both the Agents-list
   // sparkline (uses trailing 7 buckets) and the agent detail "Last 30
   // days" panel (uses all 30).
-  async getWorkspaceAgentActivity30d(): Promise<AgentActivityBucket[]> {
-    const raw = await this.fetch<unknown>(`/api/agent-activity-30d`);
+  async getWorkspaceAgentActivity30d(originatorUserId?: string | null): Promise<AgentActivityBucket[]> {
+    const search = originatorUserId ? `?originator_user_id=${encodeURIComponent(originatorUserId)}` : "";
+    const raw = await this.fetch<unknown>(`/api/agent-activity-30d${search}`);
     return parseWithFallback<AgentActivityBucket[]>(raw, AgentActivityBucketListSchema, [], {
       endpoint: "GET /api/agent-activity-30d",
     });

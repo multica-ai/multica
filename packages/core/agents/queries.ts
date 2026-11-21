@@ -129,10 +129,12 @@ export function workspaceWorkingAgentsOptions(
 // the agent detail "Last 30 days" panel. WS task lifecycle events
 // invalidate this query in useRealtimeSync; the staleTime is a
 // tab-focus safety net.
-export function agentActivity30dOptions(wsId: string) {
+export function agentActivity30dOptions(wsId: string, originatorUserId?: string | null) {
   return queryOptions({
-    queryKey: agentActivityKeys.last30d(wsId),
-    queryFn: () => api.getWorkspaceAgentActivity30d(),
+    queryKey: originatorUserId
+      ? [...agentActivityKeys.last30d(wsId), "caller", originatorUserId]
+      : agentActivityKeys.last30d(wsId),
+    queryFn: () => api.getWorkspaceAgentActivity30d(originatorUserId),
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,

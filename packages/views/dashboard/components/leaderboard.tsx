@@ -15,6 +15,7 @@ import {
 import { Segmented } from "./dashboard-shared";
 import "./leaderboard.css";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
+import { SmartRuntimeAgentBadgeById } from "../../agents/components/agent-runtime-hover";
 
 // Which metric ranks the leaderboard. Drives row order, progress bar
 // width, and which column header is emphasised — keeping the three in
@@ -272,10 +273,11 @@ export function Leaderboard({
                             size="md"
                             enableHoverCard
                           />
-                          <span className="min-w-0">
+                          <span className="flex min-w-0 items-center gap-1.5">
                             <span className="block cursor-pointer truncate text-body font-medium">
                               {agent?.name ?? row.agentId}
                             </span>
+                            <SmartRuntimeAgentBadgeById agentId={row.agentId} />
                             {coverageText ? (
                               <TruncatedTooltip content={coverageText}>
                                 <span

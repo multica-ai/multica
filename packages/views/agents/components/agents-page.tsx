@@ -48,6 +48,7 @@ import {
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useNavigation } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { SmartRuntimeAgentBadge } from "./agent-runtime-hover";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   CollectionCreateButton,
@@ -240,6 +241,10 @@ function NameCell({ row }: { row: AgentListRow }) {
       muted={isArchived}
       badges={
         <>
+          <SmartRuntimeAgentBadge
+            shareRuntime={agent.share_runtime}
+            archived={isArchived}
+          />
           {isPrivate && !isArchived && (
             <Tooltip>
               <TooltipTrigger

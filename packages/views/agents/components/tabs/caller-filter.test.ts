@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { AgentTask } from "@multica/core/types";
 import {
-  deriveAvgDurationLast30d,
   matchesCallerFilter,
   resolveAgentCallerId,
-  summarizeCallerActivityLast30d,
   taskCallerUserId,
 } from "./activity-tab";
 
 const NOW = Date.UTC(2026, 5, 15, 12, 0, 0);
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 function task(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -75,80 +72,3 @@ describe("matchesCallerFilter", () => {
   });
 });
 
-describe("deriveAvgDurationLast30d", () => {
-  it("averages wall-clock durations of completions inside the window", () => {
-    const inside = (minutesAgo: number, runMinutes: number) =>
-      task({
-        completed_at: new Date(NOW - minutesAgo * 60 * 1000).toISOString(),
-        started_at: new Date(
-          NOW - (minutesAgo + runMinutes) * 60 * 1000,
-        ).toISOString(),
-      });
-    // 10m and 20m runs → 15m average.
-    expect(
-      deriveAvgDurationLast30d([inside(5, 10), inside(60, 20)], NOW),
-    ).toBe(15 * 60 * 1000);
-  });
-
-  it("ignores completions older than 30 days and broken rows", () => {
-    const old = task({
-      completed_at: new Date(NOW - 31 * DAY_MS).toISOString(),
-      started_at: new Date(NOW - 31 * DAY_MS - 60 * 1000).toISOString(),
-    });
-    const broken = task({ completed_at: "not-a-date" });
-    expect(deriveAvgDurationLast30d([old, broken], NOW)).toBe(0);
-  });
-});
-
-describe("summarizeCallerActivityLast30d", () => {
-  it("rolls up only the caller's terminal non-chat tasks", () => {
-    const mine = (status: "completed" | "failed", daysAgo: number) =>
-      task({
-        status,
-        originator_user_id: "user-1",
-        completed_at: new Date(NOW - daysAgo * DAY_MS).toISOString(),
-      });
-    const theirs = task({
-      status: "completed",
-      originator_user_id: "user-2",
-      completed_at: new Date(NOW - DAY_MS).toISOString(),
-    });
-    const chat = task({
-      status: "completed",
-      originator_user_id: "user-1",
-      chat_session_id: "chat-1",
-      completed_at: new Date(NOW - DAY_MS).toISOString(),
-    });
-    const running = task({
-      status: "running",
-      originator_user_id: "user-1",
-      completed_at: undefined,
-    });
-
-    const summary = summarizeCallerActivityLast30d(
-      [mine("completed", 1), mine("failed", 2), theirs, chat, running],
-      NOW,
-      "user-1",
-    );
-
-    expect(summary.totalRuns).toBe(2);
-    expect(summary.totalCompleted).toBe(1);
-    expect(summary.totalFailed).toBe(1);
-    // One completed and one failed outcome → 50%.
-    expect(summary.successRate).toBe(50);
-    expect(summary.windowDays).toBe(30);
-    // Exactly one bucket carries the day-1 completion.
-    const filled = summary.buckets.filter((b) => b.total > 0);
-    expect(filled).toHaveLength(2);
-  });
-
-  it("returns zero counts for another caller's window", () => {
-    const summary = summarizeCallerActivityLast30d(
-      [task({ originator_user_id: "user-1" })],
-      NOW,
-      "user-2",
-    );
-    expect(summary.totalRuns).toBe(0);
-    expect(summary.successRate).toBeNull();
-  });
-});
