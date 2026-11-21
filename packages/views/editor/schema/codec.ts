@@ -68,6 +68,14 @@ export function createDocumentCodec(opts: { cdnDomain?: string } = {}): Document
   const toNode = (json: JSONContent): PMNode =>
     createDocument(json, schema, undefined, { errorOnInvalidContent: false });
   const serialize = (json: JSONContent): string => manager.serialize(json).trim();
+  // The editor keeps an empty paragraph after a final list, table or code
+  // block, and every connected editor adds its own when it is missing: a
+  // server-side rewrite without one would come back with one per editor,
+  // saved as `&nbsp;` lines. A single one saves as nothing.
+  const withTrailingParagraph = (json: JSONContent): JSONContent =>
+    json.content?.at(-1)?.type === "paragraph"
+      ? json
+      : { ...json, content: [...(json.content ?? []), { type: "paragraph" }] };
   const ydocToJSON = (ydoc: Y.Doc): JSONContent =>
     yXmlFragmentToProseMirrorRootNode(ydoc.getXmlFragment(COLLAB_FIELD), schema).toJSON();
 
@@ -80,7 +88,7 @@ export function createDocumentCodec(opts: { cdnDomain?: string } = {}): Document
       const ydoc = new Y.Doc();
       prosemirrorJSONToYXmlFragment(
         schema,
-        toNode(parse(markdown)).toJSON(),
+        toNode(withTrailingParagraph(parse(markdown))).toJSON(),
         ydoc.getXmlFragment(COLLAB_FIELD),
       );
       return ydoc;
@@ -88,7 +96,7 @@ export function createDocumentCodec(opts: { cdnDomain?: string } = {}): Document
     ydocToJSON,
     ydocToMarkdown: (ydoc) => serialize(ydocToJSON(ydoc)),
     applyJSON(ydoc, json, origin) {
-      const node = toNode(json);
+      const node = toNode(withTrailingParagraph(json));
       ydoc.transact(() => {
         updateYFragment(ydoc, ydoc.getXmlFragment(COLLAB_FIELD), node, {
           mapping: new Map(),

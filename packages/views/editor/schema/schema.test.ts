@@ -91,6 +91,27 @@ describe("document codec", () => {
     expect(codec.ydocToMarkdown(codec.createYDoc(markdown))).toBe(markdown);
   });
 
+  it("keeps the editor's trailing paragraph after a final list, through rewrites", () => {
+    const ydoc = codec.createYDoc("Intro\n\n- a");
+    const last = () => ydoc.getXmlFragment(COLLAB_FIELD).toArray().at(-1) as Y.XmlElement;
+    expect(last().nodeName).toBe("paragraph");
+    expect(codec.ydocToMarkdown(ydoc)).toBe("Intro\n\n- a");
+    codec.applyJSON(ydoc, codec.parse("Intro\n\n- a\n- b"));
+    expect(last().nodeName).toBe("paragraph");
+    expect(ydoc.getXmlFragment(COLLAB_FIELD).length).toBe(3);
+    expect(codec.ydocToMarkdown(ydoc)).toBe("Intro\n\n- a\n- b");
+  });
+
+  it.each([
+    ["ordered", "8. **Keep**:\n   - a\n   - b\n\n   **Drop**:\n   - c\n\n   Closing note."],
+    ["bullet", "- a\n- b:\n  - x\n  - y\n\n  [tag]"],
+  ])("keeps a %s item's paragraph after a nested list stable across saves", (_kind, markdown) => {
+    const saved = codec.serialize(codec.parse(markdown));
+    expect(codec.serialize(codec.parse(saved))).toBe(saved);
+    expect(saved).not.toMatch(/^ {4,}\S/m);
+    expect(JSON.stringify(codec.parse(markdown))).not.toMatch(/"text":" /);
+  });
+
   it("keeps an empty document editable", () => {
     const ydoc = codec.createYDoc("");
     expect(ydoc.getXmlFragment(COLLAB_FIELD).length).toBe(1);

@@ -61,7 +61,7 @@ import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import { CodeBlockView } from "./code-block-view";
 import { TableView } from "./table-view";
 import { RICH_TABLE_CHROME_ATTRIBUTE } from "../../rich-content/rich-table";
-import { PatchedListItem, PatchedTaskItem } from "./list-item";
+import { PatchedListItem, PatchedOrderedList, PatchedTaskItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createBlurShortcutExtension } from "./blur-shortcut";
@@ -172,6 +172,7 @@ export function createEditorExtensions(
       ...(options.collaboration ? { undoRedo: false } : {}),
     }),
     PatchedListItem,
+    PatchedOrderedList,
     // Checkbox task lists: `- [ ]` / `- [x]`. TaskList + TaskItem ship their own
     // markdown tokenizer / renderMarkdown, an input rule (typing `[] ` / `[x] `),
     // and a checkbox NodeView. The taskList tokenizer is consulted before
@@ -274,8 +275,25 @@ export function createEditorExtensions(
                 coalesceAwarenessChanges(options.collaboration.provider.awareness),
             },
             user: options.collaboration.user,
+            render: renderCaret,
           }),
         ]
       : []),
   ];
+}
+
+/** A collaborator's caret, as the extension draws it but hidden from the text
+ *  index: comment anchors read the editor's text, and a caret label sitting
+ *  inside quoted text would otherwise put a name in the middle of it. */
+function renderCaret(user: Record<string, string>): HTMLElement {
+  const caret = document.createElement("span");
+  caret.classList.add("collaboration-carets__caret");
+  caret.setAttribute("aria-hidden", "true");
+  caret.style.borderColor = user.color ?? "";
+  const label = document.createElement("div");
+  label.classList.add("collaboration-carets__label");
+  label.style.backgroundColor = user.color ?? "";
+  label.textContent = user.name ?? "";
+  caret.append(label);
+  return caret;
 }

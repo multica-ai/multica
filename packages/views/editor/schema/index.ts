@@ -19,7 +19,7 @@ import { Markdown } from "@tiptap/markdown";
 import { Marked, type marked } from "marked";
 import type { AnyExtension } from "@tiptap/core";
 import { CodeBlockExtension } from "../extensions/code-block";
-import { PatchedListItem, PatchedTaskItem } from "../extensions/list-item";
+import { PatchedListItem, PatchedOrderedList, PatchedTaskItem } from "../extensions/list-item";
 import { HighlightExtension } from "../extensions/highlight";
 import { FileCardSchema } from "./file-card";
 import { MentionSchema } from "./mention";
@@ -56,6 +56,8 @@ export const STARTER_KIT_OPTIONS: Partial<StarterKitOptions> = {
   // list item (see list-item.ts). PatchedListItem restores the standard
   // split → lift fallback chain.
   listItem: false,
+  // PatchedOrderedList drops indentation the stock parser leaks into items.
+  orderedList: false,
 };
 
 /** The Y.XmlFragment the Collaboration extension binds. */
@@ -84,6 +86,7 @@ export function createMarkdownSchemaExtensions(): AnyExtension[] {
   return [
     StarterKit.configure({ ...STARTER_KIT_OPTIONS, undoRedo: false }),
     PatchedListItem,
+    PatchedOrderedList,
     TaskList,
     PatchedTaskItem,
     CodeBlockExtension,
