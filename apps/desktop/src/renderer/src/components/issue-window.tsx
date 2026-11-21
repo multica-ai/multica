@@ -21,6 +21,7 @@ import type { IssueWindowContext } from "../../../shared/issue-window";
 import { DesktopAuthRecoveryPage } from "../pages/auth-recovery";
 import { IssueDetailPage } from "../pages/issue-detail-page";
 import { IssueWindowNavigationProvider } from "../platform/issue-window-navigation";
+import { DocumentTitleSync } from "./document-title-sync";
 import { TRAFFIC_LIGHT_CLEARANCE } from "./window-toolbar";
 
 export function IssueWindow({ context }: { context: IssueWindowContext }) {
@@ -83,6 +84,7 @@ function IssueWindowRoute() {
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
       <IssueWindowNavigationProvider>
+        <DocumentTitleSync />
         <WorkspacePresencePrefetch />
         <VoiceWorkspaceWords />
         <IssueWindowFrame pageOwnsTitleBar>
