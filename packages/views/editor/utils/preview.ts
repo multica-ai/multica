@@ -31,6 +31,8 @@ export type PreviewKind =
   // JSON / JSON Lines / YAML — a collapsible tree, with the source one toggle
   // away.
   | "structured"
+  // draw.io (.drawio / .dio) — the diagram in the configured draw.io viewer.
+  | "drawio"
   | "text";
 
 /** How a `structured` file's body parses. */
@@ -48,6 +50,8 @@ const EXT_LANGUAGE_MAP: Record<string, string> = {
   html: "xml",
   htm: "xml",
   xml: "xml",
+  drawio: "xml",
+  dio: "xml",
   svg: "xml",
   css: "css",
   scss: "scss",
@@ -198,6 +202,7 @@ export function getPreviewKind(
   if (ct === "text/html" || ext === "html" || ext === "htm") {
     return "html";
   }
+  if (ext === "drawio" || ext === "dio") return "drawio";
   if (TABLE_CONTENT_TYPES.has(ct) || ext === "csv" || ext === "tsv") {
     return "table";
   }

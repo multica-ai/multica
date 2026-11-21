@@ -126,6 +126,8 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | 텍스트 및 HTML 온라인 미리보기 본문의 최대 크기이며 상한은 `16MiB`입니다. 양의 정수 바이트 수 또는 `KB`/`KiB`, `MB`/`MiB`(이진 단위)를 지원합니다. `16MiB`를 초과하는 유효한 값은 `16MiB`로 제한되며 잘못된 값은 기본값을 사용합니다. 상한을 높이면 특히 구문 강조와 Markdown 렌더링 시 브라우저 미리보기가 느려질 수 있습니다. 변경 후 API를 재시작해야 하며 업로드 및 다운로드 제한은 바뀌지 않습니다. |
+| `DRAWIO_VIEWER_URL` | `https://viewer.diagrams.net` | ```` ```drawio ```` 블록과 `.drawio` / `.dio` 첨부 파일을 샌드박스 iframe에서 렌더링하는 draw.io 뷰어입니다. 다이어그램을 내부 네트워크에 두려면 자체 호스팅한 `jgraph/drawio`를 지정할 수 있으며, Multica 앱과 다른 origin에 있어야 합니다. 쿼리와 fragment가 없는 `http`/`https` 절대 URL이어야 하며, 잘못된 값이면 미리보기가 꺼집니다. 리버스 프록시가 Content-Security-Policy를 설정한다면 `frame-src`와 `connect-src`에서 이 origin을 허용해야 합니다. |
+| `DRAWIO_PREVIEW_DISABLED` | `false` | `true`로 설정하면 내장 draw.io 미리보기를 끕니다. 다이어그램은 XML 소스로 표시되고 첨부 파일은 계속 다운로드할 수 있습니다. |
 
 ### S3 또는 호환 저장소
 

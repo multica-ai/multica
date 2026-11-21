@@ -123,6 +123,11 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 沒有設定 `S3_BUCKET` 時，Multica 使用本地磁碟。
 
+| 變數 | 預設值 | 說明 |
+|---|---|---|
+| `DRAWIO_VIEWER_URL` | `https://viewer.diagrams.net` | 渲染 ```` ```drawio ```` 程式碼區塊和 `.drawio` / `.dio` 附件的 draw.io viewer，嵌在沙盒 iframe 中。想讓圖表不出內網，可以指向自建的 `jgraph/drawio`，它必須使用獨立的網域，不能和 Multica 應用同源。必須是不帶查詢參數和片段的 `http`/`https` 絕對位址；位址無效時預覽關閉。如果反向代理設定了 Content-Security-Policy，需要在 `frame-src` 和 `connect-src` 中放行這個位址。 |
+| `DRAWIO_PREVIEW_DISABLED` | `false` | 設為 `true` 關閉內嵌的 draw.io 預覽。關閉後圖表顯示為 XML 原始碼，附件仍可下載。 |
+
 ### S3 或相容儲存
 
 | 變數 | 預設值 | 說明 |

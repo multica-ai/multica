@@ -178,6 +178,11 @@ backend:
     # Text/HTML preview size only; values above 16 MiB are clamped.
     # Larger limits can slow browser previews.
     maxPreviewSize: 2MiB
+    # draw.io viewer for diagram previews; empty uses https://viewer.diagrams.net.
+    # A self-hosted viewer must use its own origin, not the Multica app origin.
+    drawioViewerUrl: ""
+    # "true" turns the embedded draw.io preview off (diagrams show as XML).
+    drawioPreviewDisabled: ""
     localUploadBaseUrl: http://api.multica.dev.lan
   resources:
     requests:
