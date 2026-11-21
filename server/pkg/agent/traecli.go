@@ -11,6 +11,33 @@ import (
 	"time"
 )
 
+const traePublicEdition = "(public edition)"
+
+// traeVersionWithPublicEdition preserves the public installation marker that
+// TraeX prints separately from the version line.
+func traeVersionWithPublicEdition(version, output string) string {
+	if !strings.HasPrefix(version, "traecli ") || strings.HasSuffix(version, traePublicEdition) {
+		return version
+	}
+	for line := range strings.SplitSeq(output, "\n") {
+		if strings.TrimSpace(line) == "installation: public" {
+			return version + traePublicEdition
+		}
+	}
+	return version
+}
+
+// TraeLoadsProjectInstructions reports whether the detected version identifies
+// a public TraeX release with AGENTS.md support. The public 0.209.1 release
+// loads this file from the task's working directory.
+func TraeLoadsProjectInstructions(version string) bool {
+	if !strings.HasPrefix(version, "traecli ") || !strings.HasSuffix(version, traePublicEdition) {
+		return false
+	}
+	detected, err := parseSemver(version)
+	return err == nil && !detected.lessThan(semver{Minor: 209, Patch: 1})
+}
+
 // traecliBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` and `serve` are the
 // protocol subcommand/action; `-y`/`--yolo` is daemon-owned so headless ACP
