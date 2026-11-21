@@ -225,14 +225,15 @@ export function AccessPicker({
 
   if (!canEdit) {
     const summaryLabel = persistedPrivate
-      ? t(($) => $.access.trigger_private)
+      ? t(($) => $.access.scope_labels.owner_only)
       : persistedWorkspace
-        ? t(($) => $.access.trigger_workspace)
+        ? t(($) => $.access.scope_labels.workspace)
         : persistedMembers.length > 0
           ? t(($) => $.access.trigger_members_count, {
               count: persistedMembers.length,
             })
           : t(($) => $.access.trigger_members_empty);
+    const ScopeIcon = persistedPrivate ? Lock : persistedWorkspace ? Globe : Users;
 
     return (
       <div
@@ -241,7 +242,7 @@ export function AccessPicker({
         data-testid="access-readonly"
       >
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <Lock className="size-4" aria-hidden="true" />
+          <ScopeIcon className="size-4" aria-hidden="true" />
         </span>
         <div className="min-w-0">
           <p className="text-body font-medium">{summaryLabel}</p>
