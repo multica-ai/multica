@@ -313,10 +313,22 @@ func RegisterOAuthClient(ctx context.Context, metadata OAuthMetadata, redirectUR
 	if strings.TrimSpace(response.ClientID) == "" {
 		return OAuthClientRegistration{}, errors.New("dynamic client registration returned no client id")
 	}
-	if response.TokenEndpointAuthMethod == "" {
-		response.TokenEndpointAuthMethod = "none"
-	}
+	response.TokenEndpointAuthMethod = registeredAuthMethod(response.TokenEndpointAuthMethod, response.ClientSecret)
 	return OAuthClientRegistration(response), nil
+}
+
+// registeredAuthMethod fills in a method the registration response omitted.
+// RFC 7591 §2 defaults it to client_secret_basic, which only applies when the
+// server actually issued a secret.
+func registeredAuthMethod(method, secret string) string {
+	switch {
+	case method != "":
+		return method
+	case secret != "":
+		return "client_secret_basic"
+	default:
+		return "none"
+	}
 }
 
 func BuildAuthorizationURL(metadata OAuthMetadata, registration OAuthClientRegistration, redirectURI, state, verifier, scope string) (string, error) {

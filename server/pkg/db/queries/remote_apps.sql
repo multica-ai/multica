@@ -38,7 +38,7 @@ INSERT INTO remote_app_connection (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, 'active'
 )
-ON CONFLICT (app_slug, scope, owner_id) DO UPDATE SET
+ON CONFLICT (scope, owner_id, app_slug) DO UPDATE SET
     connected_by    = EXCLUDED.connected_by,
     oauth_client_id = EXCLUDED.oauth_client_id,
     access_token    = EXCLUDED.access_token,

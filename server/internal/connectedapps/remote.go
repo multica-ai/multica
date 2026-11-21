@@ -49,6 +49,8 @@ const (
 	remoteStateTTL     = 10 * time.Minute
 	remoteRefreshSkew  = 2 * time.Minute
 	remoteToolCacheTTL = 10 * time.Minute
+	// Covers the token request (its HTTP client gives up at 30s) and the save.
+	remoteRefreshTimeout = 40 * time.Second
 )
 
 // ErrRemoteState means the callback's state is missing, tampered with, or
@@ -460,10 +462,21 @@ func (s *Service) refreshRemote(ctx context.Context, id pgtype.UUID, stale strin
 	if err != nil {
 		return "", err
 	}
-	tokens, err := s.remote.upstream.Refresh(ctx, client.TokenEndpoint, app.Endpoint, refresh, registration)
+	// Refresh tokens are single-use: once the app has rotated it, the new pair
+	// must be saved even if the caller has gone away.
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), remoteRefreshTimeout)
+	defer cancel()
+	tokens, err := s.remote.upstream.Refresh(saveCtx, client.TokenEndpoint, app.Endpoint, refresh, registration)
 	if err != nil {
 		var oauthErr *remotemcp.OAuthError
 		if errors.As(err, &oauthErr) && oauthErr.Rejected() {
+			if oauthErr.Code == "invalid_client" {
+				// Reconnecting would send the user to an authorize page that
+				// rejects this client and never calls back; register anew.
+				if err := qtx.DeleteRemoteAppOAuthClient(ctx, client.ID); err != nil {
+					return "", err
+				}
+			}
 			return expire("refresh_rejected")
 		}
 		return "", fmt.Errorf("connectedapps: refresh token: %w", err)
@@ -478,12 +491,12 @@ func (s *Service) refreshRemote(ctx context.Context, id pgtype.UUID, stale strin
 			return "", err
 		}
 	}
-	if err := qtx.UpdateRemoteAppConnectionTokens(ctx, db.UpdateRemoteAppConnectionTokensParams{
+	if err := qtx.UpdateRemoteAppConnectionTokens(saveCtx, db.UpdateRemoteAppConnectionTokensParams{
 		ID: row.ID, AccessToken: access, RefreshToken: nextRefresh, ExpiresAt: expiry(s.now(), tokens.ExpiresIn),
 	}); err != nil {
 		return "", err
 	}
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(saveCtx); err != nil {
 		return "", err
 	}
 	return tokens.AccessToken, nil

@@ -30,6 +30,8 @@ type remoteFakeUpstream struct {
 	issued        int
 	refreshErr    error
 	rejectTokenOf string
+	registered    int
+	onRefresh     func()
 }
 
 func (f *remoteFakeUpstream) DiscoverOAuth(context.Context, string) (remotemcp.OAuthMetadata, error) {
@@ -43,6 +45,9 @@ func (f *remoteFakeUpstream) DiscoverOAuth(context.Context, string) (remotemcp.O
 }
 
 func (f *remoteFakeUpstream) Register(context.Context, remotemcp.OAuthMetadata, string) (remotemcp.OAuthClientRegistration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.registered++
 	return remotemcp.OAuthClientRegistration{ClientID: "client-1", TokenEndpointAuthMethod: "none"}, nil
 }
 
@@ -63,6 +68,9 @@ func (f *remoteFakeUpstream) Refresh(_ context.Context, _, _, refreshToken strin
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refreshed = append(f.refreshed, refreshToken)
+	if f.onRefresh != nil {
+		f.onRefresh()
+	}
 	if f.refreshErr != nil {
 		return remotemcp.OAuthTokenResponse{}, f.refreshErr
 	}
@@ -167,8 +175,13 @@ func (f *remoteAppsFixture) callback(t *testing.T, rawQuery string) string {
 // remote sends one JSON-RPC request to the app's gateway server.
 func (f *remoteAppsFixture) remote(t *testing.T, token, method string, params any) (int, json.RawMessage) {
 	t.Helper()
+	return f.remoteCtx(t, context.Background(), token, method, params)
+}
+
+func (f *remoteAppsFixture) remoteCtx(t *testing.T, ctx context.Context, token, method string, params any) (int, json.RawMessage) {
+	t.Helper()
 	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-	req := httptest.NewRequest(http.MethodPost, connectedapps.GatewayPath+"/mobbin", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, connectedapps.GatewayPath+"/mobbin", bytes.NewReader(body))
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -377,6 +390,56 @@ func TestRemoteApps_RefreshExpiryAndReconnect(t *testing.T) {
 		WHERE agent_id = $1 AND issue_id = $2 AND status = 'queued' AND trigger_evidence_kind = 'app_action_request'
 	`, f.agentID, f.issueID).Scan(&note); err != nil || !strings.Contains(note, "now connected") {
 		t.Fatalf("resume run = %q, %v", note, err)
+	}
+}
+
+func TestRemoteApps_RefreshSurvivesCallerAndDeadClient(t *testing.T) {
+	f := newRemoteAppsFixture(t)
+	f.connect(t, testUserID)
+	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "mobbin", "account_scope": "personal", "level": "write"}})
+	token := f.token(t)
+	expireSoon := func() {
+		testPool.Exec(context.Background(), `UPDATE remote_app_connection SET expires_at = now() - interval '1 minute' WHERE owner_id = $1`, testUserID)
+	}
+	search := map[string]any{"name": "search_screens", "arguments": map[string]any{}}
+
+	// A Composio-style guess on multica_apps points at the app's own server.
+	for _, tool := range []string{"apps_get_tool", "apps_run_tool"} {
+		if _, text, _ := f.gateway(t, token, tool, map[string]any{"tool": "MOBBIN_SEARCH_SCREENS"}); !strings.Contains(text, `MCP server "mobbin"`) {
+			t.Fatalf("%s = %s", tool, text)
+		}
+	}
+
+	// The caller goes away after the app has rotated the single-use refresh
+	// token: the new pair is still saved, so the next call needs no refresh.
+	expireSoon()
+	ctx, cancel := context.WithCancel(context.Background())
+	f.up.onRefresh = cancel
+	f.remoteCtx(t, ctx, token, "tools/call", search)
+	f.up.onRefresh = nil
+	if _, res := f.remote(t, token, "tools/call", search); !strings.Contains(string(res), "image") {
+		t.Fatalf("call after a cancelled refresh = %s", res)
+	}
+	if len(f.up.refreshed) != 1 || f.up.tokens[len(f.up.tokens)-1] != "access-2" {
+		t.Fatalf("refreshed = %v tokens = %v; the rotated tokens were lost", f.up.refreshed, f.up.tokens)
+	}
+
+	// The authorization server forgot the client: the account expires and the
+	// client is dropped, so reconnecting registers a new one.
+	f.up.refreshErr = &remotemcp.OAuthError{Status: http.StatusUnauthorized, Code: "invalid_client"}
+	expireSoon()
+	if _, res := f.remote(t, token, "tools/call", search); !strings.Contains(string(res), "apps_request_connection") {
+		t.Fatalf("call with a dead client = %s", res)
+	}
+	var clients int
+	testPool.QueryRow(context.Background(), `SELECT count(*) FROM remote_app_oauth_client WHERE redirect_uri = $1`, remoteTestBase+connectedapps.RemoteCallbackPath).Scan(&clients)
+	if status := f.personalStatus(t); status != "expired" || clients != 0 {
+		t.Fatalf("status = %q, clients = %d; want expired and none", status, clients)
+	}
+	f.up.refreshErr = nil
+	f.connect(t, testUserID)
+	if f.up.registered != 2 || f.personalStatus(t) != "active" {
+		t.Fatalf("registrations = %d, status = %q", f.up.registered, f.personalStatus(t))
 	}
 }
 

@@ -456,6 +456,9 @@ func (s *Service) toolGet(ctx context.Context, rn *run, toolSlug string) map[str
 	if !ok {
 		return textResult("this tool does not belong to an app you can use in this run", true)
 	}
+	if remote, ok := s.RemoteApp(app.ToolkitSlug); ok {
+		return remoteServerHint(remote)
+	}
 	tool, err := s.composio.GetTool(ctx, app.ToolkitSlug, toolSlug)
 	if err != nil {
 		return textResult("tool not found", true)
@@ -480,6 +483,9 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 		return textResult("this tool does not belong to an app you can use in this run", true)
 	}
 	slug := NormalizeSlug(app.ToolkitSlug)
+	if remote, ok := s.RemoteApp(slug); ok {
+		return remoteServerHint(remote)
+	}
 	tool, err := s.composio.GetTool(ctx, slug, toolSlug)
 	if err != nil {
 		return textResult("tool not found", true)

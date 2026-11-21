@@ -105,3 +105,15 @@ func TestOAuthErrorCarriesCode(t *testing.T) {
 		t.Fatal("a 503 must not count as a rejected grant")
 	}
 }
+
+func TestRegisteredAuthMethodDefaultsPerRFC7591(t *testing.T) {
+	for _, tc := range []struct{ method, secret, want string }{
+		{"", "", "none"},
+		{"", "s", "client_secret_basic"},
+		{"client_secret_post", "s", "client_secret_post"},
+	} {
+		if got := registeredAuthMethod(tc.method, tc.secret); got != tc.want {
+			t.Fatalf("registeredAuthMethod(%q, %q) = %q, want %q", tc.method, tc.secret, got, tc.want)
+		}
+	}
+}
