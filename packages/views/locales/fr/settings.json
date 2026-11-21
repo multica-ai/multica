@@ -439,6 +439,10 @@
         "label": "Reporter la notification",
         "description": "Reporte la tâche ouverte depuis la boîte de réception, ou la fait revenir si elle est reportée."
       },
+      "undoInboxAction": {
+        "label": "Annuler l'action de la boîte de réception",
+        "description": "Annule le dernier archivage, report ou désabonnement tant que son message s'affiche, ou restaure la notification ouverte une fois archivée."
+      },
       "send": {
         "label": "Envoyer",
         "description": "Permet aussi de créer des tâches."
@@ -865,7 +869,7 @@
       "auto_presets": {
         "never": "Jamais",
         "completed": "Quand vous la terminez",
-        "handled": "Après une réponse, un changement de statut ou une réattribution",
+        "handled": "Après une réponse, une avancée de statut ou une réattribution",
         "custom": "Personnalisé",
         "custom_item": "Personnalisé..."
       },
@@ -877,7 +881,7 @@
       "auto_actions": {
         "completed": "Terminer",
         "comment": "Répondre",
-        "status": "Changer le statut",
+        "status": "Faire avancer le statut",
         "assignee": "Réassigner",
         "priority": "Changer la priorité",
         "project": "Changer le projet",

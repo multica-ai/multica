@@ -59,7 +59,7 @@ describe("AutoArchivePromptDialog", () => {
     expect(screen.getByRole("dialog", { name: "Archive notifications once you've handled them" })).toBeInTheDocument();
     const choices = screen.getAllByRole("radio").map((radio) => [radio.textContent, radio.getAttribute("aria-checked")]);
     expect(choices).toEqual([
-      ["After you reply, change status or reassignRecommendedIssues you've dealt with leave your Inbox", "true"],
+      ["After you reply, move it forward or reassignRecommendedIssues you've dealt with leave your Inbox", "true"],
       ["When you complete itOnly completing or cancelling an issue archives it", "false"],
       ["NeverYou archive notifications yourself", "false"],
     ]);

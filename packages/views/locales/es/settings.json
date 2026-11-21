@@ -439,6 +439,10 @@
         "label": "Posponer notificación",
         "description": "Pospone el issue abierto de la bandeja, o lo recupera ahora si ya está pospuesto."
       },
+      "undoInboxAction": {
+        "label": "Deshacer acción de la bandeja",
+        "description": "Deshace el último archivado, posposición o baja mientras se ve su aviso, o restaura la notificación abierta una vez archivada."
+      },
       "send": {
         "label": "Enviar",
         "description": "También envía nuevas tareas."
@@ -865,7 +869,7 @@
       "auto_presets": {
         "never": "Nunca",
         "completed": "Cuando la completas",
-        "handled": "Al responder, cambiar el estado o reasignar",
+        "handled": "Al responder, avanzar el estado o reasignar",
         "custom": "Personalizado",
         "custom_item": "Personalizado..."
       },
@@ -877,7 +881,7 @@
       "auto_actions": {
         "completed": "Completar",
         "comment": "Responder",
-        "status": "Cambiar estado",
+        "status": "Avanzar el estado",
         "assignee": "Reasignar",
         "priority": "Cambiar prioridad",
         "project": "Cambiar proyecto",

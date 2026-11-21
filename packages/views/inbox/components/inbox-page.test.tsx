@@ -1240,7 +1240,10 @@ describe("InboxPage", () => {
       renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
       await settle(archiveMutate, "success");
-      expect(toast.success).toHaveBeenCalledWith("Inbox", { action: { label: "Inbox", onClick: expect.any(Function) } });
+      expect(toast.success).toHaveBeenCalledWith(
+        "Inbox",
+        expect.objectContaining({ duration: 10_000, action: { label: "Inbox", onClick: expect.any(Function) } }),
+      );
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });

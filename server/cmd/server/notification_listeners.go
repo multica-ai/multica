@@ -334,8 +334,10 @@ func archiveStaleTaskFailedInbox(
 
 // Preference keys, one per action you take on an issue, that archive your own
 // notifications on it. Completing means moving it to a done or closed status;
-// a status change means any other status. Settling actions are on unless
-// "muted"; edits that only tidy the issue are off unless "all".
+// a status change means moving it to a started status. Moving it to an
+// unstarted status (backlog, todo) is triage, not handling, and archives
+// nothing. Settling actions are on unless "muted"; edits that only tidy the
+// issue are off unless "all".
 const (
 	autoArchiveCompletedPref = "auto_archive_completed"
 	autoArchiveCommentPref   = "auto_archive_on_comment"
@@ -1147,7 +1149,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					"issue_id", issue.ID, "status", issue.Status, "error", categoryErr)
 			case category == issuestatus.CategoryDone, category == issuestatus.CategoryClosed:
 				archiveActions = append(archiveActions, autoArchiveCompletedPref)
-			default:
+			case category == issuestatus.CategoryStarted:
 				archiveActions = append(archiveActions, autoArchiveStatusPref)
 			}
 		}

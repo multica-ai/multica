@@ -2,7 +2,6 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { type InboxBarAction, takeInboxAutoArchive, takeInboxBarAction } from "@multica/core/inbox/auto-archive";
 import type { KeptInboxRow } from "@multica/core/inbox/open-row";
@@ -12,6 +11,7 @@ import { notificationPreferenceOptions } from "@multica/core/notification-prefer
 import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import type { InboxItem, Issue } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { toastInboxUndo } from "./inbox-undo-toast";
 import { useRestoreInbox } from "./use-leave-inbox-row";
 
 /**
@@ -59,13 +59,11 @@ export function useMoveOnAfterAutoArchive({
     setCause(shown ? { key: archivedKey, action } : null);
     if (!own || !moves || !row || !nextRow || !document.hasFocus()) return;
     moveOn();
-    toast.success(t(($) => $.toasts.archived), {
-      action: {
-        label: t(($) => $.toasts.undo),
-        onClick: () => {
-          useInboxSelectionStore.getState().returnRow(wsId, archivedKey);
-          void restore(row.item.id, { quiet: true });
-        },
+    toastInboxUndo(t(($) => $.toasts.archived), {
+      label: t(($) => $.toasts.undo),
+      undo: () => {
+        useInboxSelectionStore.getState().returnRow(wsId, archivedKey);
+        void restore(row.item.id, { quiet: true });
       },
     });
   }, [archivedKey, wsId, qc, restore, t]);

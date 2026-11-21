@@ -15,6 +15,7 @@ import { agentListOptions } from "@multica/core/workspace/queries";
 import type { Agent, InboxItem, Issue, SnoozedInboxIssue } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
+import { takeInboxUndo } from "../../../inbox/components/inbox-undo-toast";
 import { IssueInboxBar } from "../issue-inbox-actions";
 
 const state = vi.hoisted(() => ({
@@ -25,7 +26,7 @@ const state = vi.hoisted(() => ({
   unsnooze: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
@@ -162,7 +163,11 @@ beforeEach(() => {
   });
   useInboxFilterStore.getState().clearFilters("ws");
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // Mocked toasts never close, so the last one's undo would answer Z in the next test.
+  takeInboxUndo();
+});
 
 describe("IssueInboxBar", () => {
   it("keeps the last row on a later side-effect archive after snooze fails", async () => {
@@ -343,6 +348,15 @@ describe("IssueInboxBar", () => {
     expect(toast.success).not.toHaveBeenCalled();
   });
 
+  it("undoes the settled archive with Z", async () => {
+    const nav = setup();
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+
+    await act(async () => fireEvent.keyDown(document, { key: "z", code: "KeyZ" }));
+    expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
+  });
+
   it("names the status that archived it, and opens the next one", async () => {
     const nav = setup({ rows: [{ ...ROWS[0]!, issue_status: "done" }, ROWS[1]!] });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
@@ -391,9 +405,10 @@ describe("IssueInboxBar", () => {
     nav.leave();
     await archive.resolve();
 
-    expect(toast.success).toHaveBeenCalledWith("Notification archived", {
-      action: { label: "Undo", onClick: expect.any(Function) },
-    });
+    expect(toast.success).toHaveBeenCalledWith(
+      "Notification archived",
+      expect.objectContaining({ duration: 10_000, action: { label: "Undo", onClick: expect.any(Function) } }),
+    );
     expect(toast.error).not.toHaveBeenCalled();
     const undo = vi.mocked(toast.success).mock.calls.at(-1)?.[1] as unknown as { action: { onClick: () => void } };
     await act(async () => undo.action.onClick());

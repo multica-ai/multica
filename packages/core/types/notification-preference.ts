@@ -14,7 +14,8 @@ export type NotificationGroupKey =
 /**
  * Each action you take on an issue that can archive your own notifications on
  * it. `auto_archive_completed` is moving it to a done or closed status;
- * `auto_archive_on_status` is any other status change.
+ * `auto_archive_on_status` is moving it to a started status; moving it to an
+ * unstarted one (backlog, todo) archives nothing.
  */
 export type AutoArchiveKey =
   | "auto_archive_completed"

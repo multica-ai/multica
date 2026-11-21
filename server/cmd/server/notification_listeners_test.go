@@ -1738,7 +1738,8 @@ func TestNotification_HandlingArchivesIssueInbox(t *testing.T) {
 // TestNotification_HandlingKeepsInbox verifies that the inbox stays for
 // tidying edits by default, for an action the member turned off, and for an
 // agent actor. Completing stays off when muted even though status changes are
-// on: each action is its own choice.
+// on: each action is its own choice. Moving to an unstarted status is triage,
+// not handling.
 func TestNotification_HandlingKeepsInbox(t *testing.T) {
 	queries := db.New(testPool)
 
@@ -1772,6 +1773,12 @@ func TestNotification_HandlingKeepsInbox(t *testing.T) {
 		}},
 		{"completing turned off", mutedID, func(bus *events.Bus, issueID string) {
 			publishStatusChangeBy(bus, issueID, "done", "in_review", "member", mutedID)
+		}},
+		{"triage from backlog to todo", defaultID, func(bus *events.Bus, issueID string) {
+			publishStatusChangeBy(bus, issueID, "todo", "backlog", "member", defaultID)
+		}},
+		{"reopening to todo", defaultID, func(bus *events.Bus, issueID string) {
+			publishStatusChangeBy(bus, issueID, "todo", "done", "member", defaultID)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
