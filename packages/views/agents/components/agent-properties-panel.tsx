@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Globe, Lock, Settings2, Users } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import type {
   Agent,
   AgentRuntime,
+  AgentRuntimeConfigSummary,
   MemberWithUser,
 } from "@multica/core/types";
 import {
@@ -70,6 +71,12 @@ export function AgentPropertiesPanel({
   onOpenSettings: () => void;
 }) {
   const qc = useQueryClient();
+  // The last saved personal config. The saved response is authoritative
+  // immediately; the agent-list payload the props come from only catches up
+  // after the invalidated query refetches, so consecutive edits must merge
+  // against this override or a cleared field (e.g. thinking) gets written
+  // back from stale values.
+  const [savedSummary, setSavedSummary] = useState<AgentRuntimeConfigSummary | null>(null);
   const { t } = useT("agents");
   const { t: tl } = useT("layout");
   const { t: tr } = useT("runtimes");
@@ -92,9 +99,11 @@ export function AgentPropertiesPanel({
     runtimes,
     currentUserId,
     update,
-    // The agent list payload carries the runtime config summary the panel
-    // reads; a personal-config save must re-read it.
-    onSaved: () => {
+    configOverride: savedSummary,
+    // The saved response updates the override immediately; the invalidated
+    // agent query refreshes the rest of the payload in the background.
+    onSaved: (summary) => {
+      setSavedSummary(summary);
       void qc.invalidateQueries({ queryKey: ["agents"] });
     },
   });
@@ -102,7 +111,7 @@ export function AgentPropertiesPanel({
   // Smart agents carry no template runtime/model: display what the viewer's
   // personal configuration resolves to (the pickers above write to it too).
   const isSmart = agent.share_runtime === false;
-  const currentConfig = agent.runtime_config_summary?.current ?? null;
+  const currentConfig = savedSummary?.current ?? agent.runtime_config_summary?.current ?? null;
   const effectiveRuntimeId =
     (isSmart ? currentConfig?.runtime_id : agent.runtime_id) ?? "";
   const displayModel = isSmart && currentConfig?.model ? currentConfig.model : agent.model;
@@ -156,7 +165,7 @@ export function AgentPropertiesPanel({
             members={members}
             currentUserId={currentUserId}
             canEdit={canEdit && !qoderRuntime}
-            onChange={changeRuntime}
+            onChange={(runtimeId) => void changeRuntime(runtimeId)}
           />
         </ObjectProperty>
 
@@ -191,7 +200,7 @@ export function AgentPropertiesPanel({
                 runtimeOnline={canDiscoverRuntimeModels}
                 value={displayModel ?? ""}
                 canEdit={canEdit}
-                onChange={changeModel}
+                onChange={(next) => void changeModel(next)}
               />
             </ObjectProperty>
             <ThinkingPropRow
@@ -201,7 +210,7 @@ export function AgentPropertiesPanel({
               model={displayModel ?? ""}
               value={displayThinkingLevel ?? ""}
               canEdit={canEdit}
-              onChange={changeThinking}
+              onChange={(next) => void changeThinking(next)}
             />
           </>
         )}

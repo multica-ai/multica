@@ -8,6 +8,7 @@ import {
   runtimeModelsOptions,
 } from "@multica/core/runtimes";
 import { api } from "@multica/core/api";
+import type { AgentRuntimeConfigSummary } from "@multica/core/types";
 import { buildModelChangeUpdate, type ModelCatalog } from "./model-change-cleanup";
 
 /**
@@ -21,14 +22,17 @@ export function useExecutionControls({
   currentUserId,
   update,
   onSaved,
+  /** Latest saved personal config, held by the caller between saves. */
+  configOverride,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
   runtimes: AgentRuntime[];
   currentUserId: string | null;
   update: (data: Record<string, unknown>) => Promise<void>;
-  /** Runs after a personal-config save so the panel re-reads the summary. */
-  onSaved?: () => void;
+  /** Runs after a personal-config save with the fresh summary. */
+  onSaved?: (summary: AgentRuntimeConfigSummary) => void;
+  configOverride?: AgentRuntimeConfigSummary | null;
 }) {
   // Smart agents carry no template runtime: the viewer's personal runtime
   // configuration names the runtime (and model) their runs actually use, so
@@ -36,7 +40,10 @@ export function useExecutionControls({
   // instead of the template PATCH (which the server rejects for smart
   // agents with `smart strategy requires a CLI and no runtime_id`).
   const isSmart = agent.share_runtime === false;
-  const currentConfig = agent.runtime_config_summary?.current ?? null;
+  // Consecutive edits must merge against the freshest config: the saved
+  // response is authoritative immediately, while the agent list payload the
+  // props come from only catches up after the invalidated query refetches.
+  const currentConfig = configOverride?.current ?? agent.runtime_config_summary?.current ?? null;
   const effectiveRuntimeId =
     (isSmart ? currentConfig?.runtime_id : agent.runtime_id) ?? "";
   const runtime = useMemo(
@@ -90,7 +97,10 @@ export function useExecutionControls({
             currentConfig?.max_concurrent_tasks ?? agent.max_concurrent_tasks,
           runtime_config: currentConfig?.runtime_config ?? {},
         })
-        .then(() => onSaved?.()),
+        .then((summary) => {
+          onSaved?.(summary);
+          return summary;
+        }),
     [agent.id, agent.max_concurrent_tasks, currentConfig, onSaved],
   );
 

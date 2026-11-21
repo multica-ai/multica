@@ -333,7 +333,7 @@ export function AgentDetailInspector({
                   members={members}
                   currentUserId={currentUserId}
                   canEdit={canEdit && !qoderRuntime}
-                  onChange={selectingFixedRuntime ? async (runtimeId) => {
+                  onChange={selectingFixedRuntime ? async (runtimeId): Promise<void> => {
                     await update({
                       share_runtime: true,
                       runtime_id: runtimeId,
@@ -342,7 +342,7 @@ export function AgentDetailInspector({
                       service_tier: "",
                     });
                     setSelectingFixedRuntime(false);
-                  } : changeRuntime}
+                  } : (runtimeId) => void changeRuntime(runtimeId)}
                 />
                 )}
               </SettingsRow>
@@ -359,7 +359,7 @@ export function AgentDetailInspector({
                       runtimeOnline={smart ? catalogRuntime?.status === "online" : canDiscoverRuntimeModels}
                       value={agent.model ?? ""}
                       canEdit={canEdit}
-                      onChange={changeModel}
+                      onChange={(next) => void changeModel(next)}
                     />
                   </SettingsRow>
                   <ThinkingSettingField
