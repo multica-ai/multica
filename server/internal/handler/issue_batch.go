@@ -273,7 +273,7 @@ func (h *Handler) writeBatchIssue(ctx context.Context, workspaceID pgtype.UUID, 
 
 	var cancelled []db.AgentTaskQueue
 	if params != nil {
-		out.issue, cancelled, err = updateIssueStoppingWakeups(ctx, q, *params)
+		out.issue, cancelled, err = updateIssueStoppingWakeups(ctx, q, workspaceID, *params)
 		if err != nil {
 			return out, err
 		}

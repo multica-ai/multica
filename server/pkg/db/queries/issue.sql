@@ -362,6 +362,33 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')
 ORDER BY i.id
 FOR UPDATE OF i;
 
+-- name: GetIssueParentID :one
+-- Read without a row lock: a parent change takes LockIssueParentTree before
+-- any issue row, because the parent foreign key makes the write key-share its
+-- new parent's row, which a writer waiting on that lock could hold.
+SELECT parent_issue_id FROM issue
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: LockIssueParentTree :exec
+-- Serializes parent changes within a workspace. Two changes can each pass the
+-- cycle check against the committed tree and still close a loop together
+-- (A -> B racing B -> A), so each takes this lock before its final check.
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg('workspace_id')::uuid::text || ':issue_parent', 0));
+
+-- name: IssueHasAncestor :one
+-- Whether ancestor_id is anywhere above issue_id in the parent chain. UNION
+-- drops ids already visited, so the walk ends even on a chain with a loop.
+WITH RECURSIVE ancestors(id) AS (
+    SELECT i.parent_issue_id FROM issue AS i
+    WHERE i.id = sqlc.arg('issue_id') AND i.workspace_id = sqlc.arg('workspace_id')
+      AND i.parent_issue_id IS NOT NULL
+    UNION
+    SELECT i.parent_issue_id FROM issue AS i
+    JOIN ancestors AS a ON i.id = a.id
+    WHERE i.workspace_id = sqlc.arg('workspace_id') AND i.parent_issue_id IS NOT NULL
+)
+SELECT EXISTS (SELECT 1 FROM ancestors WHERE id = sqlc.arg('ancestor_id')::uuid)::boolean;
+
 -- A mark only counts while the duplicate is cancelled and its original still
 -- exists. Writes keep that true, but a server predating this feature (after a
 -- rollback that kept the column) can reopen a duplicate or delete an original
