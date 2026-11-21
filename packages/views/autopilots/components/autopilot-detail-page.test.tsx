@@ -218,7 +218,7 @@ describe("AutopilotDetailPage", () => {
     const identity = await screen.findByRole("heading", { name: "Daily Sync", level: 1 });
     expect(identity.parentElement?.parentElement).toHaveTextContent("Eve creates an issue each run");
 
-    const prompt = screen.getByRole("heading", { name: "Prompt", level: 2 }).closest("section")!;
+    const prompt = screen.getByRole("heading", { name: "Runbook", level: 2 }).closest("section")!;
     expect(within(prompt).getByText("Summarize what changed yesterday.")).toBeVisible();
     expect(within(prompt).queryByRole("button", { name: "Edit" })).toBeNull();
 

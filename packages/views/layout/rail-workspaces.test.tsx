@@ -10,11 +10,7 @@ const state = vi.hoisted(() => ({
   workspaces: [] as Ws[],
   invitations: [] as { id: string; workspace_id: string; workspace_name?: string; inviter_name?: string }[],
   summary: [] as { workspace_id: string; count: number }[],
-  accept: vi.fn(),
   setPinned: vi.fn(),
-  decline: vi.fn(),
-  invalidateQueries: vi.fn(),
-  mutations: [] as Array<Record<string, unknown>>,
   workspaceCreationDisabled: false,
   openWorkspaceInNewWindow: undefined as undefined | Mock<(slug: string) => void>,
   workspacesInOtherWindows: undefined as undefined | (() => string[]),
@@ -53,8 +49,6 @@ vi.mock("@multica/core/api", async (importOriginal) => {
     api: {
       ...actual.api,
       getBaseUrl: () => "http://127.0.0.1:8080",
-      acceptInvitation: state.accept,
-      declineInvitation: state.decline,
     },
   };
 });
@@ -66,22 +60,16 @@ vi.mock("@multica/core/inbox/queries", () => ({
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
   myInvitationListOptions: () => ({ queryKey: ["invitations"] }),
-  workspaceKeys: { myInvitations: () => ["invitations"] },
   workspaceListOptions: () => ({ queryKey: ["workspaces"] }),
 }));
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
-  useMutation: (options: Record<string, unknown> = {}) => {
-    state.mutations.push(options);
-    return { isPending: false, mutate: vi.fn() };
-  },
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "workspaces") return { data: state.workspaces };
     if (queryKey[0] === "invitations") return { data: state.invitations };
     if (queryKey[0] === "inbox") return { data: state.summary };
     return { data: undefined };
   },
-  useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: state.invalidateQueries }),
 }));
 vi.mock("@multica/ui/components/common/tooltip-hint", () => ({
   TooltipHint: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -99,7 +87,6 @@ beforeEach(() => {
   state.workspaces = [ws(1), ws(2)];
   state.invitations = [];
   state.summary = [];
-  state.mutations.length = 0;
   state.setPinned.mockClear();
   state.workspaceCreationDisabled = false;
   state.openWorkspaceInNewWindow = undefined;
@@ -173,13 +160,24 @@ describe("RailWorkspaces", () => {
     expect(triggerHasDot()).toBe(false);
   });
 
-  it("lists pending invitations in the menu and dots the switcher", async () => {
-    state.invitations = [{ id: "inv-1", workspace_id: "ws-9", workspace_name: "Copilot Hub" }];
+  it("links pending invitations to the invitations page and dots the switcher", async () => {
+    state.invitations = [
+      { id: "inv-1", workspace_id: "ws-8", workspace_name: "Copilot Hub" },
+      { id: "inv-2", workspace_id: "ws-9", workspace_name: "Lumen Labs" },
+    ];
     renderWithI18n(<RailWorkspaces />);
     expect(triggerHasDot()).toBe(true);
     const menu = await openMenu();
-    expect(within(menu).getByText("Pending invitations")).toBeInTheDocument();
-    expect(within(menu).getByRole("menuitem", { name: /Copilot Hub$/ })).toBeInTheDocument();
+    const entry = within(menu).getByRole("menuitem", { name: /Pending invitations/ });
+    expect(entry).toHaveAttribute("href", "/invitations");
+    expect(entry).toHaveTextContent("2");
+    expect(within(menu).queryByText("Copilot Hub")).toBeNull();
+  });
+
+  it("offers no invitations entry when none are pending", async () => {
+    renderWithI18n(<RailWorkspaces />);
+    const menu = await openMenu();
+    expect(within(menu).queryByRole("menuitem", { name: /Pending invitations/ })).toBeNull();
   });
 
   it("offers workspace creation unless the instance disables it", async () => {
@@ -259,35 +257,5 @@ describe("RailWorkspaces", () => {
       const menu = await openMenu();
       expect(within(menu).queryByRole("button", { name: "Open in new window" })).toBeNull();
     });
-  });
-});
-
-describe("pending invitation self-heal", () => {
-  beforeEach(() => {
-    state.accept.mockReset().mockRejectedValue(new Error("invitation is not pending"));
-    state.decline.mockReset().mockRejectedValue(new Error("invitation is not pending"));
-    state.invalidateQueries.mockClear();
-  });
-
-  // "Invitation is not pending": it was concluded on another surface. Both
-  // mutations must refetch the list on failure so the stale tile drops.
-  it("invalidates the pending list when accept or decline fails", async () => {
-    renderWithI18n(<RailWorkspaces />);
-    expect(state.mutations).toHaveLength(2);
-
-    for (const options of state.mutations as Array<{
-      mutationFn: (id: string) => Promise<unknown>;
-      onError?: (...args: unknown[]) => unknown;
-      onSettled?: (...args: unknown[]) => unknown;
-    }>) {
-      const settle = options.onError ?? options.onSettled;
-      expect(settle).toBeTypeOf("function");
-      state.invalidateQueries.mockClear();
-      await expect(options.mutationFn("inv-1")).rejects.toThrow("invitation is not pending");
-      await settle!(new Error("invitation is not pending"), "inv-1", undefined, undefined);
-      expect(state.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["invitations"] });
-    }
-    expect(state.accept).toHaveBeenCalledTimes(1);
-    expect(state.decline).toHaveBeenCalledTimes(1);
   });
 });

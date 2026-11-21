@@ -3,17 +3,17 @@ import { baselineFromQuery } from "../issue-views/baseline";
 import type { BuiltinViewKey } from "../issue-views/sidebar-views";
 import type {
   IssueStatusCategory,
+  IssueTableFacetsRequest,
   IssueTableQuerySpec,
   IssueTableRelation,
   IssueTableScope,
   IssueTableSortField,
-  ListIssuesParams,
   Project,
 } from "../types";
+import { projectLastActivityAt } from "../projects/activity";
 import { assigneeTypesForActorKind } from "./surface/scope";
 import { effectiveNegatedFilters } from "./stores/view-store";
 import { FILTER_DIMENSION_TABLE_FIELD, advancedFilterToTableQuery, advancedFilterUsesField } from "./stores/filter-tree";
-import type { MyIssuesRelation } from "./stores/my-issues-view-store";
 import type { SidebarIssueAssignee, SidebarIssueSettings, SidebarProjectSettings } from "./stores/sidebar-tree-store";
 
 /** Rows an expanded sidebar list shows before "Load more". */
@@ -51,9 +51,9 @@ const ASSIGNEE_RELATIONS: Record<SidebarIssueAssignee, IssueTableRelation[]> = {
   me_and_my_agents: ["assigned", "my_agents"],
 };
 
-/** The request for an expanded project, or `null` when the settings leave nothing to list. */
-export function projectSidebarRequest(
-  projectId: string,
+function projectRowRequest(
+  scope: IssueTableScope,
+  filters: IssueTableQuerySpec["filters"],
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
   userId: string | undefined,
@@ -61,30 +61,77 @@ export function projectSidebarRequest(
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
   if (settings.assignee !== "anyone" && !userId) return null;
-  const statusFilter = shown.length < statuses.length ? { statuses: shown } : {};
-  // The list endpoint cannot OR the user with their agents: `involves_user_id`
-  // never matches issues assigned to the user directly.
-  if (settings.assignee === "me_and_my_agents") {
-    return {
-      table: {
-        scope: { kind: "project", project_id: projectId },
-        filters: {
-          ...statusFilter,
-          relations: ASSIGNEE_RELATIONS.me_and_my_agents,
-          include_sub_issues: settings.showSubIssues,
-        },
-        sort: { field: settings.sortBy, direction: settings.sortDirection },
-      },
-    };
-  }
+  const relations = ASSIGNEE_RELATIONS[settings.assignee] ?? [];
   return {
-    project_id: projectId,
-    ...statusFilter,
-    ...(settings.assignee === "me" ? { assignee_id: userId } : {}),
-    ...(settings.assignee === "my_agents" ? { involves_user_id: userId } : {}),
-    ...(settings.showSubIssues ? {} : { top_level_only: true }),
-    sort_by: settings.sortBy,
-    sort_direction: settings.sortDirection,
+    table: {
+      scope,
+      filters: {
+        ...filters,
+        ...(shown.length < statuses.length ? { statuses: shown } : {}),
+        ...(relations.length > 0 ? { relations } : {}),
+        include_sub_issues: settings.showSubIssues,
+      },
+      sort: { field: settings.sortBy, direction: settings.sortDirection },
+    },
+  };
+}
+
+/** The request for an expanded project, or `null` when the settings leave nothing to list. */
+export function projectSidebarRequest(
+  projectId: string,
+  settings: SidebarIssueSettings,
+  statuses: readonly StatusRef[],
+  userId: string | undefined,
+): SidebarIssuesRequest | null {
+  return projectRowRequest({ kind: "project", project_id: projectId }, {}, settings, statuses, userId);
+}
+
+/** The Projects section's row for issues outside every project. */
+export const NO_PROJECT_SIDEBAR_SOURCE = "project:none";
+
+/** The request for the expanded "No project" row, listed like an expanded project. */
+export function noProjectSidebarRequest(
+  settings: SidebarIssueSettings,
+  statuses: readonly StatusRef[],
+  userId: string | undefined,
+): SidebarIssuesRequest | null {
+  return projectRowRequest({ kind: "workspace" }, { include_no_project: true }, settings, statuses, userId);
+}
+
+/** The facet key the table query gives issues outside every project. */
+export const NO_PROJECT_FACET_KEY = "__none__";
+
+/**
+ * Counts open issues per project, the "No project" row's under
+ * `NO_PROJECT_FACET_KEY`. Open is what a project's count means: any status
+ * outside the done and closed categories, sub-issues included.
+ */
+export function noProjectCountRequest(statuses: readonly StatusRef[]): IssueTableFacetsRequest {
+  return {
+    query: {
+      scope: { kind: "workspace" },
+      filters: {
+        statuses: statuses.filter((s) => !FINISHED.has(s.category)).map((s) => s.key),
+        include_sub_issues: true,
+      },
+      sort: { field: "position", direction: "asc" },
+    },
+    facets: [{ kind: "project" }],
+    include_total: false,
+  };
+}
+
+/**
+ * Counts what an expanded row lists, as the facet total. The server folds the
+ * total into a facet's own scan only while the query does not filter that
+ * facet's dimension, so the facet is one the request leaves unfiltered.
+ */
+export function sidebarCountRequest(request: SidebarIssuesRequest): IssueTableFacetsRequest {
+  const { table } = request;
+  return {
+    query: { ...table, sort: { field: "position", direction: "asc" } },
+    facets: [{ kind: table.filters.priorities?.length ? "creator" : "priority" }],
+    include_total: true,
   };
 }
 
@@ -103,15 +150,10 @@ const VIEW_SORTS = new Set<string>([
 type SidebarViewFields = Pick<IssueView, "query" | "display" | "scope_variant"> &
   Partial<Pick<IssueView, "scope_type" | "scope_id">>;
 
-/** A sidebar list read through the table query, which can express every view filter. */
-export interface SidebarTableRequest {
+/** A sidebar list, read through the table query, which can express every view filter. */
+export interface SidebarIssuesRequest {
   table: IssueTableQuerySpec;
 }
-
-export type SidebarIssuesRequest = ListIssuesParams | SidebarTableRequest;
-
-export const isSidebarTableRequest = (request: SidebarIssuesRequest): request is SidebarTableRequest =>
-  "table" in request;
 
 function viewTableScope(view: SidebarViewFields): IssueTableScope | null {
   const assigneeTypes = assigneeTypesForActorKind(
@@ -157,7 +199,7 @@ export function viewSidebarRequest(
   view: SidebarViewFields,
   today: string,
   unreadIssueIds: readonly string[] = [],
-): SidebarTableRequest | null {
+): SidebarIssuesRequest | null {
   const scope = viewTableScope(view);
   if (!scope) return null;
   const { raw } = baselineFromQuery(view.query);
@@ -193,6 +235,7 @@ export function viewSidebarRequest(
         ...(advanced ? { advanced } : {}),
         ...(Object.keys(fields.propertyFilters).length > 0 ? { properties: fields.propertyFilters } : {}),
         ...(fields.agentRunningFilter ? { working_only: true } : {}),
+        ...(fields.agentIdleFilter ? { idle_only: true } : {}),
         ...(fields.unreadFilter ? { unread_issue_ids: [...unreadIssueIds].sort() } : {}),
         include_sub_issues: display.showSubIssues !== false,
       },
@@ -201,27 +244,37 @@ export function viewSidebarRequest(
   };
 }
 
+/** What each built-in adds to All issues, as the issues page applies it. */
+const BUILTIN_FILTERS: Record<Exclude<BuiltinViewKey, "working" | "snoozed">, IssueTableQuerySpec["filters"]> = {
+  all_issues: {},
+  my_work: { relations: ASSIGNEE_RELATIONS.me_and_my_agents },
+  subscribed: { relations: ["subscribed"] },
+};
+
 /**
- * The request for an expanded built-in view: the page's scope, listed with
- * the same sidebar settings as an expanded project. `null` when the settings
- * leave nothing to list.
+ * The request for an expanded built-in view: its filter, listed with the same
+ * status, sub-issue and ordering settings as an expanded project. The
+ * assignee setting is for projects only: a built-in already says whose
+ * issues it lists. Working and Snoozed list `issueIds`: the issues agents are
+ * running on, as the page does, and the issues the viewer snoozed. `null` when
+ * the settings leave nothing to list.
  */
 export function builtinSidebarRequest(
-  builtin: Exclude<BuiltinViewKey, "unread">,
-  myRelation: MyIssuesRelation,
+  builtin: BuiltinViewKey,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
-): SidebarTableRequest | null {
+  issueIds: readonly string[] = [],
+): SidebarIssuesRequest | null {
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
-  const relation = builtin === "my_agents" ? "involved" : myRelation === "all" ? "any" : myRelation;
-  const relations = ASSIGNEE_RELATIONS[settings.assignee] ?? [];
   return {
     table: {
-      scope: builtin === "all_issues" ? { kind: "workspace" } : { kind: "my", relation },
+      scope: { kind: "workspace" },
       filters: {
+        ...(builtin === "working" || builtin === "snoozed"
+          ? { working_issue_ids: [...issueIds].sort() }
+          : BUILTIN_FILTERS[builtin]),
         ...(shown.length < statuses.length ? { statuses: shown } : {}),
-        ...(relations.length > 0 ? { relations } : {}),
         include_sub_issues: settings.showSubIssues,
       },
       sort: { field: settings.sortBy, direction: settings.sortDirection },
@@ -230,7 +283,9 @@ export function builtinSidebarRequest(
 }
 
 /** The projects the sidebar lists, filtered and ordered by its settings. */
-export function sidebarProjects<P extends Pick<Project, "id" | "title" | "status" | "lead_type" | "lead_id" | "created_at" | "updated_at">>(
+export function sidebarProjects<
+  P extends Pick<Project, "id" | "title" | "status" | "lead_type" | "lead_id" | "created_at" | "updated_at" | "archived_at">,
+>(
   projects: readonly P[],
   settings: SidebarProjectSettings,
   manualOrder: readonly string[],
@@ -239,6 +294,7 @@ export function sidebarProjects<P extends Pick<Project, "id" | "title" | "status
   const statuses = new Set<string>(settings.statuses);
   const shown = projects.filter(
     (p) =>
+      !p.archived_at &&
       statuses.has(p.status) &&
       (!settings.onlyMine || (p.lead_type === "member" && !!userId && p.lead_id === userId)),
   );
@@ -246,7 +302,7 @@ export function sidebarProjects<P extends Pick<Project, "id" | "title" | "status
     case "name":
       return shown.sort((a, b) => a.title.localeCompare(b.title));
     case "updated":
-      return shown.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+      return shown.sort((a, b) => Date.parse(projectLastActivityAt(b)) - Date.parse(projectLastActivityAt(a)));
     case "created":
       return shown.sort((a, b) => b.created_at.localeCompare(a.created_at));
     case "manual": {
@@ -257,4 +313,23 @@ export function sidebarProjects<P extends Pick<Project, "id" | "title" | "status
         .map(({ p }) => p);
     }
   }
+}
+
+/** The "No project" row's id in the manual project order, beside the project ids. */
+export const NO_PROJECT_ORDER_ID = "no_project";
+
+/**
+ * Where the "No project" row sits among the shown projects: first, until it
+ * is dragged elsewhere. A sort by name or date leaves it first, since it is
+ * not a project.
+ */
+export function noProjectRowIndex(
+  shown: readonly Pick<Project, "id">[],
+  settings: Pick<SidebarProjectSettings, "ordering">,
+  manualOrder: readonly string[],
+): number {
+  const at = settings.ordering === "manual" ? manualOrder.indexOf(NO_PROJECT_ORDER_ID) : -1;
+  if (at === -1) return 0;
+  const before = new Set(manualOrder.slice(0, at));
+  return shown.filter((project) => before.has(project.id)).length;
 }

@@ -22,7 +22,7 @@ export function EmbeddedLinkPage({ id }: { id: string }) {
   const wsId = useWorkspaceId();
   const ws = useCurrentWorkspace();
   const navigation = useNavigation();
-  const projectId = navigation.searchParams.get("project") ?? undefined;
+  const projectId = navigation.searchParams.get("project") || undefined;
   const { data: links = [], isLoading, isError } = useQuery(linkListOptions(wsId, projectId));
 
   if (isLoading) return <CollectionPageState icon={Link} title={t(($) => $.links.loading)} />;

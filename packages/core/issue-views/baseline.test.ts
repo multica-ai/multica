@@ -114,6 +114,9 @@ describe("baselineFromQuery agent running", () => {
 
   it("counts as one condition in the view summary", () => {
     expect(issueViewFilterCount({ agentRunningFilter: true, statusFilters: ["todo"] })).toBe(2);
+    expect(issueViewFilterCount({ agentIdleFilter: true, statusFilters: ["todo"] })).toBe(2);
+    expect(baselineFromQuery({ agentIdleFilter: true }).agentIdle).toBe(true);
+    expect(baselineFromQuery({ agentIdleFilter: true, agentRunningFilter: true }).agentIdle).toBe(false);
   });
 });
 

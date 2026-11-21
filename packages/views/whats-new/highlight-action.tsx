@@ -1,12 +1,12 @@
 "use client";
 
 import { ArrowRight, ArrowUpRight } from "@multica/ui/icons";
+import { useSearchStore } from "@multica/core/command-bar";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
-import { useSearchStore } from "../search/search-store";
 import type { HighlightAction } from "./releases";
 
 /**

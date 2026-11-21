@@ -50,6 +50,22 @@ func TestGuestSquadWorkerRouteOnMemberAssignedIssue_GH8301(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A human mention or @all in the worker's reply only notifies people; the
+	// reply still returns to the guest leader.
+	memberMention := "[@Bob](mention://member/" + testUserID + ")"
+	for _, content := range []string{
+		memberMention + " please review",
+		"[@all](mention://all/all) done",
+		memberMention + " [@all](mention://all/all) done",
+	} {
+		triggers, _ := testHandler.computeCommentAgentTriggers(ctx, fx.Issue, content, &parent, "agent", fx.OtherID, commentTriggerComputeOptions{
+			AuthoringTaskID: parseUUID(workerTaskID), OriginatorUserID: testUserID,
+		})
+		if len(triggers) != 1 || triggers[0].Source != commentTriggerSourceThreadParent || triggers[0].Squad == nil ||
+			uuidToString(triggers[0].Agent.ID) != fx.LeaderID || uuidToString(triggers[0].Squad.ID) != fx.SquadID {
+			t.Fatalf("guest worker route for %q = %+v, want one squad leader thread-parent trigger", content, triggers)
+		}
+	}
 	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, fx.Issue, "done", &parent, "agent", fx.OtherID, commentTriggerComputeOptions{
 		AuthoringTaskID: parseUUID(workerTaskID), OriginatorUserID: testUserID,
 	})

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
@@ -9,10 +9,33 @@ import {
 import type { Attachment, TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 
-const { openAtMock, tryOpenMock, downloadMock } = vi.hoisted(() => ({
+const {
+  openAtMock,
+  tryOpenMock,
+  downloadMock,
+  resignedMediaMock,
+  copyImageMock,
+  copyTextMock,
+  originalBlobMock,
+} = vi.hoisted(() => ({
   openAtMock: vi.fn((_key: string) => true),
   tryOpenMock: vi.fn(() => false),
   downloadMock: vi.fn(),
+  resignedMediaMock: vi.fn((_id: string | undefined, url: string) => ({ url, pending: false })),
+  copyImageMock: vi.fn(async (_source: string | (() => Promise<Blob>)) => true),
+  copyTextMock: vi.fn(async (_text: string) => true),
+  originalBlobMock: vi.fn(async (_id: string) => new Blob(["original"], { type: "image/jpeg" })),
+}));
+
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
+  api: { getBaseUrl: () => "", getAttachmentOriginalBlob: originalBlobMock },
+}));
+
+vi.mock("@multica/ui/lib/clipboard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/ui/lib/clipboard")>()),
+  copyImage: copyImageMock,
+  copyText: copyTextMock,
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
@@ -30,7 +53,8 @@ vi.mock("../../../editor", () => ({
 }));
 
 vi.mock("../../../editor/hooks/use-inline-media-url", () => ({
-  useResignedInlineMedia: (_id: string | undefined, url: string) => ({ url, pending: false }),
+  useResignedInlineMedia: resignedMediaMock,
+  useAttachmentThumbnailURL: (_id: string, path: string) => ({ url: path, pending: false, failed: false }),
 }));
 
 vi.mock("@multica/core/workspace/avatar-url", () => ({
@@ -158,6 +182,47 @@ describe("DeliverablesSection", () => {
     expect(downloadMock).toHaveBeenCalledWith("zip");
   });
 
+  it("copies a file's latest-version link from its row, without opening it", () => {
+    const onCopyLink = vi.fn();
+    renderWithI18n(
+      withQuery(
+        <DeliverablesSection files={FILES} onOpenOverview={vi.fn()} onCopyLink={onCopyLink} />,
+      ),
+    );
+    const buttons = screen.getAllByRole("button", { name: "Copy link to latest version" });
+    // One per file row; the image thumbnails above have none.
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]!);
+    expect(onCopyLink).toHaveBeenCalledWith("latency.csv");
+    expect(openAtMock).not.toHaveBeenCalled();
+    // The row itself still opens the file.
+    fireEvent.click(screen.getByRole("button", { name: "report.md, version 2" }));
+    expect(openAtMock).toHaveBeenCalledWith("report-2");
+  });
+
+  it("shows no copy button without a link to copy", () => {
+    renderSection(FILES);
+    expect(screen.queryByRole("button", { name: "Copy link to latest version" })).toBeNull();
+  });
+
+  it("tiles a large image with its thumbnail and falls back to the original if it fails", () => {
+    const render = attachment({
+      id: "render",
+      filename: "render.jpg",
+      content_type: "image/jpeg",
+      size_bytes: 6 * 1024 * 1024,
+      thumbnail_url: "/api/attachments/render/thumbnail",
+    });
+    const { container } = renderSection(collectDeliverableFiles([comment("c-9", [render, SHOT])]));
+    const sources = () =>
+      Array.from(container.querySelectorAll("img"), (img) => img.getAttribute("src")).sort();
+    // A small image without a thumbnail keeps loading its original.
+    expect(sources()).toEqual(["/api/attachments/render/thumbnail", SHOT.download_url].sort());
+
+    fireEvent.error(container.querySelector('img[src="/api/attachments/render/thumbnail"]')!);
+    expect(sources()).toEqual([render.download_url, SHOT.download_url].sort());
+  });
+
   it("opens the overview from view all", () => {
     const onOpenOverview = vi.fn();
     renderSection(FILES, onOpenOverview);
@@ -188,6 +253,25 @@ describe("DeliverablesOverview", () => {
     );
     return { onClose, onLocate };
   }
+
+  it("shows every uploaded image version as a separate selectable thumbnail", () => {
+    const older = { ...SHOT, id: "shot-old", created_at: "2026-09-19T10:00:00Z" };
+    const files = collectDeliverableFiles([comment("older-comment", [older]), ...TIMELINE]);
+    renderOverview({ files });
+    expect(screen.getAllByTitle("settings.png")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: /^Images\s*2$/ }));
+    expect(screen.getAllByTitle("settings.png")).toHaveLength(2);
+    fireEvent.click(screen.getAllByTitle("settings.png")[0]!);
+    expect(openAtMock).toHaveBeenCalledWith("shot-old");
+  });
+
+  it("offers a jump for every known posting comment", () => {
+    const { onLocate } = renderOverview();
+    const buttons = screen.getAllByRole("button", { name: "Show in comments" });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]!);
+    expect(onLocate).toHaveBeenCalledWith({ kind: "comment", commentId: "c-1" });
+  });
 
   it("counts exactly what the sidebar counts", () => {
     renderOverview();
@@ -221,6 +305,19 @@ describe("DeliverablesOverview", () => {
     fireEvent.click(within(secondGroup!).getByRole("button", { name: "Show in comments" }));
     expect(onClose).toHaveBeenCalledTimes(2);
     expect(onLocate).toHaveBeenCalledWith({ kind: "comment", commentId: "c-2" });
+  });
+
+  it("copies a tile's latest-version link without opening it", () => {
+    const onCopyLink = vi.fn();
+    const { onClose } = renderOverview({ onCopyLink });
+    const dialog = screen.getByRole("dialog", { name: "MUL-7588 deliverables" });
+    const buttons = within(dialog).getAllByRole("button", { name: "Copy link to latest version" });
+    expect(buttons).toHaveLength(3);
+    // Groups are in page order: the screenshot comes first.
+    fireEvent.click(buttons[0]!);
+    expect(onCopyLink).toHaveBeenCalledWith("settings.png");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(openAtMock).not.toHaveBeenCalled();
   });
 
   it("goes back to the viewer's file with G, and closes with Escape", () => {
@@ -302,4 +399,185 @@ describe("useDeliverableDetails", () => {
     const located = `locate:${JSON.stringify({ kind: "comment", commentId: "c-2" })}`;
     expect(calls).toEqual(["close", located, "close", located]);
   });
+  it("offers the latest-version link for a deliverable, by file name", () => {
+    const onCopyLink = vi.fn();
+    let copyLink: { label: string; onSelect: () => void } | undefined;
+    function Harness() {
+      const describe = useDeliverableDetails({
+        files: FILES,
+        commentById: new Map(TIMELINE.map((entry) => [entry.id, entry])),
+        onLocate: vi.fn(),
+        onCopyLink,
+      });
+      // An older version: the link still names the file, so it opens the newest.
+      const item = { key: "report-1", url: REPORT_V1.url, filename: REPORT_V1.filename, attachment: REPORT_V1, imageByConstruction: false, blockId: "c-1" };
+      copyLink = describe(item, { items: [item], goTo: () => true, close: vi.fn() }).copyLink;
+      return null;
+    }
+    renderWithI18n(withQuery(<Harness />));
+    expect(copyLink?.label).toBe("Copy link to latest version");
+    copyLink?.onSelect();
+    expect(onCopyLink).toHaveBeenCalledWith("report.md");
+  });
+
+  it("offers no link for a file that is not a deliverable", () => {
+    let copyLink: unknown = "unset";
+    function Harness() {
+      const describe = useDeliverableDetails({
+        files: FILES,
+        commentById: new Map(),
+        onLocate: vi.fn(),
+        onCopyLink: vi.fn(),
+      });
+      const brief = attachment({ id: "brief", filename: "brief.pdf", comment_id: null });
+      const item = { key: "brief", url: brief.url, filename: brief.filename, attachment: brief, imageByConstruction: false, blockId: "description" };
+      copyLink = describe(item, { items: [item], goTo: () => true, close: vi.fn() }).copyLink;
+      return null;
+    }
+    renderWithI18n(withQuery(<Harness />));
+    expect(copyLink).toBeUndefined();
+  });
+});
+
+describe("a thumbnail tile's right-click menu", () => {
+  const RENDER = attachment({
+    id: "render",
+    filename: "render.jpg",
+    content_type: "image/jpeg",
+    size_bytes: 6 * 1024 * 1024,
+    thumbnail_url: "/api/attachments/render/thumbnail",
+  });
+  const SKETCH = attachment({
+    id: "sketch",
+    filename: "sketch.jpg",
+    content_type: "image/jpeg",
+    size_bytes: 5 * 1024 * 1024,
+    thumbnail_url: "/api/attachments/sketch/thumbnail",
+    created_at: "2026-09-20T10:00:02Z",
+  });
+  const IMAGES = [RENDER, SKETCH];
+  const IMAGE_TIMELINE = [comment("c-9", IMAGES)];
+  const IMAGE_FILES = collectDeliverableFiles(IMAGE_TIMELINE);
+
+  function DetailsSiblings() {
+    const describe = useDeliverableDetails({
+      files: IMAGE_FILES,
+      commentById: new Map(IMAGE_TIMELINE.map((entry) => [entry.id, entry])),
+      onLocate: vi.fn(),
+    });
+    const items = IMAGES.map((a) => ({
+      key: a.id,
+      url: a.url,
+      filename: a.filename,
+      attachment: a,
+      imageByConstruction: false,
+      blockId: "c-9",
+    }));
+    return <>{describe(items[1]!, { items, goTo: () => true, close: vi.fn() }).info}</>;
+  }
+
+  const surfaces: [string, () => ReactNode][] = [
+    ["sidebar", () => <DeliverablesSection files={IMAGE_FILES} onOpenOverview={vi.fn()} />],
+    [
+      "overview",
+      () => (
+        <DeliverablesOverview
+          open
+          onClose={vi.fn()}
+          identifier="MUL-9563"
+          files={IMAGE_FILES}
+          commentById={new Map()}
+          onLocate={vi.fn()}
+          returnKey={null}
+        />
+      ),
+    ],
+    ["viewer details", () => <DetailsSiblings />],
+  ];
+
+  function tileOf() {
+    return document.querySelector<HTMLImageElement>('img[src="/api/attachments/render/thumbnail"]')!;
+  }
+
+  async function pick(name: string) {
+    fireEvent.contextMenu(tileOf());
+    fireEvent.click(await screen.findByRole("menuitem", { name }));
+  }
+
+  async function menuItems() {
+    fireEvent.contextMenu(tileOf());
+    const items = (await screen.findAllByRole("menuitem")).map((item) => item.textContent);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    return items;
+  }
+
+  describe("with the async Clipboard API", () => {
+    beforeEach(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { write: vi.fn() },
+      });
+      vi.stubGlobal("ClipboardItem", class {});
+    });
+
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, "clipboard");
+      vi.unstubAllGlobals();
+    });
+
+    it.each(surfaces)(
+      "%s: browsing loads only thumbnails, the menu acts on the original",
+      async (_surface, renderSurface) => {
+        renderWithI18n(withQuery(renderSurface()));
+
+        // Every tile shows its thumbnail; no original is requested.
+        expect(tileOf()).toBeInTheDocument();
+        const sources = Array.from(document.querySelectorAll("img"), (img) => img.getAttribute("src"));
+        expect(sources.every((src) => src?.endsWith("/thumbnail"))).toBe(true);
+        expect(resignedMediaMock).not.toHaveBeenCalled();
+        expect(await menuItems()).toEqual(["View image", "Copy image", "Download", "Copy link"]);
+
+        await pick("Copy image");
+        expect(copyImageMock).toHaveBeenCalledTimes(1);
+        expect(originalBlobMock).not.toHaveBeenCalled();
+        const load = copyImageMock.mock.calls[0]![0] as () => Promise<Blob>;
+        expect(await (await load()).text()).toBe("original");
+        expect(originalBlobMock).toHaveBeenCalledWith("render");
+
+        await pick("Download");
+        expect(downloadMock).toHaveBeenCalledWith("render");
+
+        await pick("Copy link");
+        expect(copyTextMock).toHaveBeenCalledWith(RENDER.markdown_url);
+
+        // Picking an item does not also open the file under it.
+        expect(openAtMock).not.toHaveBeenCalled();
+        expect(tryOpenMock).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  // Plain http:// self-hosting (not localhost) has no async Clipboard API, and
+  // nothing can copy an image there but the browser's own menu.
+  it.each(surfaces)(
+    "%s: without the async Clipboard API, offers the original in the viewer instead of a copy that fails",
+    async (_surface, renderSurface) => {
+      const actual = await vi.importActual<typeof import("@multica/ui/lib/clipboard")>(
+        "@multica/ui/lib/clipboard",
+      );
+      copyImageMock.mockImplementation(actual.copyImage);
+      onTestFinished(() => {
+        copyImageMock.mockReset();
+      });
+      expect(navigator.clipboard?.write).toBeUndefined();
+      renderWithI18n(withQuery(renderSurface()));
+
+      expect(await menuItems()).toEqual(["View image", "Download", "Copy link"]);
+      await pick("View image");
+      expect(openAtMock).toHaveBeenCalledWith("render");
+      expect(copyImageMock).not.toHaveBeenCalled();
+      expect(originalBlobMock).not.toHaveBeenCalled();
+      expect(resignedMediaMock).not.toHaveBeenCalled();
+    },
+  );
 });

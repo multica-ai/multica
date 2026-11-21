@@ -509,7 +509,7 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		// One enumeration, in Instruction Precedence, covering every action
 		// type Agent Identity can forbid. This and workflow step 3 each used to
 		// carry their own list and the two disagreed (MUL-5442).
-		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
+		"The workflow never widens what your Agent Identity allows: when it forbids changing issue status, investigating, implementing, creating issues, updating issues, delegating, or any other action, skip that action.",
 		// MUL-5442 (carried through MUL-6417): the forbids-clause is stated
 		// once on the status-rule header instead of once per status bullet.
 		"skip any status call your Agent Identity forbids",
@@ -527,6 +527,10 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 	}
 
 	for _, banned := range []string{
+		// Read unconditionally, this denied investigating and implementing
+		// even to agents whose identity forbids neither, against step 3's
+		// "complete the task" (MUL-9092).
+		"Never treat this runtime workflow as permission",
 		"4. Run `multica issue status " + issueID + " in_progress`\n",
 		"5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)",
 		"8. When done, run `multica issue status " + issueID + " in_review`\n",
@@ -628,7 +632,7 @@ func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 			for _, banned := range []string{
 				"## Instruction Precedence",
 				"issue workflow below",
-				"Never treat this runtime workflow as permission to change issue status",
+				"The workflow never widens what your Agent Identity allows",
 			} {
 				if strings.Contains(out, banned) {
 					t.Errorf("%s brief must not inherit issue-only precedence text %q\n---\n%s", tc.name, banned, out)
@@ -675,7 +679,8 @@ func TestChatOutputDoesNotRequireIssueComment(t *testing.T) {
 // this rule. Runs both the legacy and slim paths.
 func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 	wantPhrases := []string{
-		"Post exactly ONE comment per run",
+		"Post only your final result, before this turn exits",
+		"one reply per thread when the per-turn message lists several threads",
 		"Do NOT post progress updates",
 	}
 	issueCtxs := map[string]TaskContextForEnv{
@@ -690,6 +695,11 @@ func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 				if !strings.Contains(out, want) {
 					t.Errorf("%s/%s brief missing output rule %q\n---\n%s", label, name, want, out)
 				}
+			}
+			// A multi-thread run is told to post one reply per thread; a
+			// per-run cap of one comment contradicted it (MUL-9092).
+			if strings.Contains(out, "exactly ONE comment per run") {
+				t.Errorf("%s/%s brief still caps a run at one comment\n---\n%s", label, name, out)
 			}
 		}
 		// Chat keeps its own delivery channel; it must not inherit the
@@ -874,6 +884,24 @@ func TestConnectedAppsBlockLivesOutsideBrief(t *testing.T) {
 	})
 	if strings.Contains(out, "## Connected Apps") {
 		t.Errorf("brief must not carry Connected Apps — it is per-run state (MUL-5377)\n---\n%s", out)
+	}
+}
+
+func TestConnectedAppsBlockRunsDirectly(t *testing.T) {
+	t.Parallel()
+	for _, level := range []string{"write", "confirm_writes"} {
+		block := BuildConnectedAppsBlock([]runtimeapps.ConnectedApp{{
+			Provider: "multica", ServerName: "multica_apps", ToolkitSlug: "gmail",
+			AccountScope: "personal", Level: level, AccountStatus: "not_connected",
+		}})
+		for _, want := range []string{"can write", "Allowed calls run immediately", "apps_request_connection", "not connected"} {
+			if !strings.Contains(block, want) {
+				t.Errorf("level %s: missing %q in %s", level, want, block)
+			}
+		}
+		if strings.Contains(block, "confirmation") || strings.Contains(block, "submitted") {
+			t.Errorf("level %s: retired approval instructions in %s", level, block)
+		}
 	}
 }
 
@@ -1088,6 +1116,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}
@@ -1481,6 +1510,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}

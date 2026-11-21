@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -46,6 +47,76 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected message on channel")
+	}
+}
+
+func TestClaudeExecuteThinking(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name    string
+		content string
+		want    []Message
+	}{
+		{
+			name: "thinking stays in order with text and tools",
+			content: `[
+				{"type":"text","text":"Checking the fixture."},
+				{"type":"thinking","thinking":"Compare the fixture with the expected value.","signature":"fixture-signature"},
+				{"type":"tool_use","id":"tool_read","name":"Read","input":{"file_path":"fixture.txt"}},
+				{"type":"text","text":"The fixture matches."}
+			]`,
+			want: []Message{
+				{Type: MessageText, Content: "Checking the fixture."},
+				{Type: MessageThinking, Content: "Compare the fixture with the expected value."},
+				{Type: MessageToolUse, CallID: "tool_read", Tool: "Read", Input: map[string]any{"file_path": "fixture.txt"}},
+				{Type: MessageText, Content: "The fixture matches."},
+			},
+		},
+		{
+			name: "empty and signature-only thinking stay silent",
+			content: `[
+				{"type":"thinking","thinking":"","signature":"fixture-signature"},
+				{"type":"thinking","signature":"fixture-signature"},
+				{"type":"text","text":"The fixture matches."}
+			]`,
+			want: []Message{{Type: MessageText, Content: "The fixture matches."}},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			event := mustMarshal(t, map[string]any{
+				"type": "assistant",
+				"message": map[string]any{
+					"id": "msg_thinking", "role": "assistant", "content": json.RawMessage(tt.content),
+				},
+			})
+			terminal := json.RawMessage(`{"type":"result","subtype":"success","result":"The fixture matches.","modelUsage":{"claude-sonnet-4-6":{"inputTokens":3,"outputTokens":5}}}`)
+			backend := claudeUsageFixtureBackend(t, []json.RawMessage{event}, terminal, false)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "fixture", ExecOptions{Timeout: 5 * time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []Message
+			for message := range session.Messages {
+				switch message.Type {
+				case MessageText, MessageThinking, MessageToolUse:
+					got = append(got, message)
+				}
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("transcript = %#v, want %#v", got, tt.want)
+			}
+			result, ok := <-session.Result
+			if !ok || result.Status != "completed" || result.Output != "The fixture matches." {
+				t.Fatalf("result = %+v (present=%v), want completed with only the final answer", result, ok)
+			}
+			if got := result.Usage["claude-sonnet-4-6"]; got != (TokenUsage{InputTokens: 3, OutputTokens: 5}) {
+				t.Errorf("usage = %+v, want 3 input / 5 output", got)
+			}
+		})
 	}
 }
 
@@ -1319,5 +1390,61 @@ func TestBuildClaudeArgsManagedSkillSettingsWins(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--max-turns 7") {
 		t.Fatalf("unrelated custom arg was dropped: %v", args)
+	}
+}
+
+func TestClaudeExecuteReportsRateLimits(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-rate-limits\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"unifiedWindows\":{\"five_hour\":{\"utilization\":0.25,\"resetsAt\":1795327200},\"seven_day\":{\"utilization\":0.5,\"resetsAt\":1795568400}}},\"session_id\":\"sess-rate-limits\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-rate-limits\",\"result\":\"done\"}'\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	snapshots := make(chan RateLimitSnapshot, 4)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:      5 * time.Second,
+		OnRateLimits: func(s RateLimitSnapshot) { snapshots <- s },
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	select {
+	case snap := <-snapshots:
+		if snap.Status != RateLimitStatusAllowed || len(snap.Windows) != 2 {
+			t.Fatalf("snapshot = %+v", snap)
+		}
+		if snap.Windows[0].Kind != RateLimitWindowSession || *snap.Windows[0].UsedPercent != 25 {
+			t.Fatalf("session window = %+v", snap.Windows[0])
+		}
+	default:
+		t.Fatal("rate_limit_event did not reach OnRateLimits")
 	}
 }

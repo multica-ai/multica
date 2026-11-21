@@ -170,7 +170,7 @@ describe("TeamPanel agent previews", () => {
     await waitFor(() => expect(getIssue).toHaveBeenCalledTimes(5));
     expect(screen.getByRole("link", { name: /^All agents/ })).toBeInTheDocument();
 
-    fireEvent.click(working.getByRole("button", { name: "Show 95 more…" }));
+    fireEvent.click(working.getByRole("button", { name: "Show 95 more..." }));
     expect(working.getAllByRole("link")).toHaveLength(100);
     expect(working.getByRole("button", { name: "Show fewer" })).toHaveAttribute("aria-expanded", "true");
 
@@ -188,7 +188,7 @@ describe("TeamPanel agent previews", () => {
 
     expect(working.getAllByRole("link")).toHaveLength(5);
     expect(attention.getAllByRole("link")).toHaveLength(5);
-    fireEvent.click(attention.getByRole("button", { name: "Show 3 more…" }));
+    fireEvent.click(attention.getByRole("button", { name: "Show 3 more..." }));
     expect(attention.getAllByRole("link")).toHaveLength(8);
     expect(working.getAllByRole("link")).toHaveLength(5);
 
@@ -213,6 +213,19 @@ describe("TeamPanel agent previews", () => {
     expect(screen.queryByRole("region", { name: "Needs attention" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Show/ })).not.toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Working now" })).getAllByRole("link")).toHaveLength(5);
+  });
+});
+
+describe("TeamPanel agent menu", () => {
+  it("opens the agents page's row menu on right-click", async () => {
+    seedAgents(1);
+    renderPanel([runtime()]);
+
+    fireEvent.contextMenu(screen.getByText("running agent 1"), { clientX: 20, clientY: 40 });
+    const menu = await screen.findByRole("menu");
+    expect(
+      Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim()),
+    ).toEqual(["Open in new tab", "Settings", "Duplicate"]);
   });
 });
 

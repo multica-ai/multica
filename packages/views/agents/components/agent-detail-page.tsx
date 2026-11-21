@@ -29,6 +29,7 @@ import {
 import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { refreshFeaturesOnLockedError } from "@multica/core/billing";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -80,6 +81,7 @@ import {
 } from "../../layout/object-page";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { usePaidFeatureErrorMessage } from "../../billing";
 import { availabilityConfig } from "../presence";
 import {
   AgentAdvancedSettings,
@@ -89,6 +91,7 @@ import {
 import { AgentInstructionsSection } from "./agent-instructions-section";
 import { AgentPropertiesPanel } from "./agent-properties-panel";
 import { describeCancelImpact } from "./agent-row-actions";
+import { AgentChannelLinks, AgentChannelsSection } from "./agent-channels-section";
 import { AgentSkillsSection } from "./agent-skills-section";
 import { AgentWorkDialog } from "./agent-work-dialog";
 import { AgentWorkSections } from "./tabs/activity-tab";
@@ -120,6 +123,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const currentUser = useAuthStore((s) => s.user);
 
   const {
@@ -173,7 +177,15 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancelRuns, setConfirmCancelRuns] = useState(false);
 
-  const urlView = viewFromParams(navigation.searchParams);
+  const requestedView = viewFromParams(navigation.searchParams);
+  const urlView = requestedView === "integrations" ? "channels" : requestedView;
+  useEffect(() => {
+    if (requestedView !== "integrations" || !agent) return;
+    const params = new URLSearchParams(navigation.searchParams);
+    params.delete("tab");
+    params.set("view", "channels");
+    navigation.replace(`${navigation.pathname}?${params}`);
+  }, [requestedView, navigation, agent]);
   const [advancedSection, setAdvancedSection] = useState<AdvancedSection | null>(
     () => (isAdvancedSection(urlView) ? urlView : null),
   );
@@ -280,11 +292,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           );
         }
         void qc.invalidateQueries({ queryKey });
-        toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
+        refreshFeaturesOnLockedError(qc, wsId, e);
+        toast.error(paidFeatureError(e, e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast)));
         throw e;
       }
     },
-    [qc, t, wsId],
+    [paidFeatureError, qc, t, wsId],
   );
 
   const handleArchive = async (id: string) => {
@@ -327,6 +340,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   if (!agent && (agentsLoading || detailQuery.isPending)) {
     return (
       <ObjectPage
+        type="agent"
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={<Skeleton className="h-4 w-40" />}
@@ -340,6 +354,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   if (!agent && isForbidden) {
     return (
       <ObjectPage
+        type="agent"
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={
@@ -375,6 +390,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       : t(($) => $.detail.load_failed_title);
     return (
       <ObjectPage
+        type="agent"
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={<span className="truncate text-muted-foreground">{title}</span>}
@@ -628,6 +644,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   return (
     <>
       <ObjectPage
+        type="agent"
         scrollRef={setScrollParent}
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
@@ -673,6 +690,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 ) : null
               }
             />
+            <AgentChannelLinks agent={agent} />
             {notices.length > 0 && <div className="space-y-2">{notices}</div>}
           </div>
 
@@ -682,6 +700,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             scrollParent={scrollParent}
             onViewAll={() => openWork(true)}
           />
+
+          <AgentChannelsSection agent={agent} />
 
           <AgentInstructionsSection
             agent={agent}

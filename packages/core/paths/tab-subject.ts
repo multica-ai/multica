@@ -33,6 +33,10 @@ export type TabSubject =
   | { kind: "actor"; actorType: TabActorType; id: string }
   /** A single skill detail. */
   | { kind: "skill"; id: string }
+  /** An embedded quick link; `projectId` is the `?project=` scope, or null. */
+  | { kind: "link"; id: string; projectId: string | null }
+  | { kind: "doc"; id: string }
+  | { kind: "docFolder"; id: string }
   /** A runtime machine detail. */
   | { kind: "machine"; machineId: string }
   /** A runtime nested under a machine. */
@@ -118,8 +122,17 @@ export function parseTabSubject(url: string): TabSubject {
         return { kind: "runtime", machineId: id, runtimeId: segments[4] };
       }
       return { kind: "machine", machineId: id };
+    case "docs":
+      if (id === "folders") {
+        return segments[3] ? { kind: "docFolder", id: segments[3] } : { kind: "unknown" };
+      }
+      return id ? { kind: "doc", id } : { kind: "page", page: "docs" };
     case "skills":
       return id ? { kind: "skill", id } : { kind: "page", page: "skills" };
+    case "links":
+      return id
+        ? { kind: "link", id, projectId: query.get("project") || null }
+        : { kind: "unknown" };
     case "settings":
       return { kind: "page", page: "settings" };
     case "attachments":
@@ -158,6 +171,12 @@ export function tabSubjectKey(subject: TabSubject): string {
       return `actor:${subject.actorType}:${subject.id}`;
     case "skill":
       return `skill:${subject.id}`;
+    case "link":
+      return `link:${subject.projectId ?? ""}:${subject.id}`;
+    case "doc":
+      return `doc:${subject.id}`;
+    case "docFolder":
+      return `docFolder:${subject.id}`;
     case "machine":
       return `machine:${subject.machineId}`;
     case "runtime":

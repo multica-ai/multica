@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { copyText } from "./clipboard";
+import { canCopyImage, copyImage, copyText, copyTextAndHtml } from "./clipboard";
 
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 
@@ -138,5 +138,123 @@ describe("copyText selection preservation", () => {
     expect(document.activeElement).toBe(document.body);
     expect(focus).not.toHaveBeenCalled();
     expect(document.querySelector("textarea")).toBeNull();
+  });
+});
+
+describe("copyTextAndHtml", () => {
+  class FakeClipboardItem {
+    constructor(readonly data: Record<string, Blob>) {}
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("writes the plain-text and HTML channels in one clipboard item", async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { write },
+      configurable: true,
+    });
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+
+    expect(
+      await copyTextAndHtml(
+        "[TES-1 Example](https://app.example/test/issues/TES-1)",
+        '<a href="https://app.example/test/issues/TES-1">TES-1 Example</a>',
+      ),
+    ).toBe(true);
+
+    expect(write).toHaveBeenCalledTimes(1);
+    const items = (write.mock.calls[0] as [FakeClipboardItem[]])[0]!;
+    expect(items).toHaveLength(1);
+    const item = items[0]!;
+    const plain = item.data["text/plain"]!;
+    const html = item.data["text/html"]!;
+    expect(plain.type).toBe("text/plain");
+    expect(await plain.text()).toBe(
+      "[TES-1 Example](https://app.example/test/issues/TES-1)",
+    );
+    expect(html.type).toBe("text/html");
+    expect(await html.text()).toBe(
+      '<a href="https://app.example/test/issues/TES-1">TES-1 Example</a>',
+    );
+  });
+
+  it("falls back to the plain-text channel when the rich write is rejected", async () => {
+    const write = vi.fn().mockRejectedValue(new Error("synthetic denial"));
+    Object.defineProperty(navigator, "clipboard", {
+      value: { write },
+      configurable: true,
+    });
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+
+    expect(await copyTextAndHtml("plain", "<b>rich</b>")).toBe(true);
+    expect(document.execCommand).toHaveBeenCalledWith("copy");
+  });
+
+  it("falls back to the plain-text channel when ClipboardItem is unavailable", async () => {
+    const write = vi.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { write, writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+    vi.stubGlobal("ClipboardItem", undefined);
+
+    expect(await copyTextAndHtml("plain", "<b>rich</b>")).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("plain");
+  });
+});
+
+describe("copyImage", () => {
+  class FakeClipboardItem {
+    constructor(readonly data: Record<string, Promise<Blob>>) {}
+  }
+
+  // Like the browser, the write settles only once the item's data has.
+  function stubClipboard() {
+    const written: Blob[] = [];
+    const write = vi.fn(async (items: FakeClipboardItem[]) => {
+      written.push(await items[0]!.data["image/png"]!);
+    });
+    Object.defineProperty(navigator, "clipboard", { value: { write }, configurable: true });
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+    return { write, written };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("copies the PNG a loader returns, starting the write before it settles", async () => {
+    const { write, written } = stubClipboard();
+    const png = new Blob(["png"], { type: "image/png" });
+    let resolve!: (blob: Blob) => void;
+    const loader = vi.fn(() => new Promise<Blob>((r) => (resolve = r)));
+
+    const copied = copyImage(loader);
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledTimes(1);
+    resolve(png);
+
+    expect(await copied).toBe(true);
+    expect(written).toEqual([png]);
+  });
+
+  it("is unavailable without the async Clipboard API, as on plain http://", async () => {
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+    const loader = vi.fn(async () => new Blob(["png"], { type: "image/png" }));
+    expect(canCopyImage()).toBe(false);
+    expect(await copyImage(loader)).toBe(false);
+    expect(loader).not.toHaveBeenCalled();
+
+    stubClipboard();
+    expect(canCopyImage()).toBe(true);
+  });
+
+  it("fails when the loader does", async () => {
+    stubClipboard();
+    expect(await copyImage(() => Promise.reject(new Error("synthetic 404")))).toBe(false);
   });
 });

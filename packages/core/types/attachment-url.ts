@@ -91,6 +91,24 @@ const WORKSPACE_STORAGE_PATH_RE = new RegExp(
   `^/workspaces/${UUID_PATTERN}/(${UUID_PATTERN})(?:\\.[A-Za-z0-9]+)?$`,
   "i",
 );
+const LOCAL_UPLOAD_PATH_RE = new RegExp(
+  `^/uploads/workspaces/${UUID_PATTERN}/(${UUID_PATTERN})(?:\\.[A-Za-z0-9]+)?$`,
+  "i",
+);
+
+/** Recover the id in historical local-storage Markdown. This is only an
+ * identity hint: the API still authorizes access before returning any bytes. */
+export function attachmentIdFromLocalUploadURL(rawURL: string): string | undefined {
+  let path = rawURL.split(/[?#]/, 1)[0] ?? "";
+  if (/^https?:\/\//i.test(rawURL)) {
+    try {
+      path = new URL(rawURL).pathname;
+    } catch {
+      return undefined;
+    }
+  }
+  return LOCAL_UPLOAD_PATH_RE.exec(path)?.[1];
+}
 
 /**
  * Extract the attachment id from a raw storage URL on the configured CDN
@@ -159,6 +177,11 @@ export function contentReferencesAttachment(
 ): boolean {
   if (!content) return false;
   if (content.includes(attachmentDownloadPath(attachment.id))) return true;
+  // Bound LocalStorage responses now alias `url` to the authenticated API;
+  // historical bodies still contain the original storage object path.
+  for (const match of content.matchAll(/\/uploads\/workspaces\/[^\s)"'<>]+/g)) {
+    if (attachmentIdFromLocalUploadURL(match[0]) === attachment.id) return true;
+  }
   if (contentReferencesURL(content, attachment.url)) return true;
   if (contentReferencesURL(content, attachment.download_url)) return true;
   if (contentReferencesURL(content, attachment.markdown_url)) return true;

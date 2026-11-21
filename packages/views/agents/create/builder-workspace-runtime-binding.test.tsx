@@ -82,7 +82,7 @@ function mount(runtimes: RuntimeDevice[] = [runtime]) {
     </QueryClientProvider>,
   );
   const trigger = () => {
-    const button = view.container.querySelector<HTMLButtonElement>('[data-slot="popover-trigger"]');
+    const button = view.container.querySelector<HTMLButtonElement>('[data-trigger="popover"]');
     if (!button) throw new Error("runtime picker trigger is missing");
     return button;
   };

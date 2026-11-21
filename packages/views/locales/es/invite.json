@@ -3,52 +3,58 @@
     "back": "Volver",
     "log_out": "Cerrar sesión"
   },
-  "not_found": {
-    "title": "Invitación no encontrada",
-    "description": "Es posible que esta invitación haya caducado, se haya revocado o no pertenezca a tu cuenta.",
-    "go_to_dashboard": "Ir al panel"
-  },
-  "accepted": {
-    "title": "¡Te has unido a {{workspace_name}}!",
-    "redirecting": "Redirigiendo al espacio de trabajo..."
-  },
-  "declined": {
-    "title": "Invitación rechazada",
-    "description": "No se te añadirá a este espacio de trabajo.",
-    "go_to_dashboard": "Ir al panel"
-  },
-  "main": {
-    "join_title": "Únete a {{workspace_name}}",
-    "fallback_workspace_name": "espacio de trabajo",
-    "invited_role_admin": "te invitó a unirte como administrador.",
-    "invited_role_member": "te invitó a unirte como miembro.",
-    "already_handled_accepted": "Esta invitación ya se ha aceptado.",
-    "already_handled_declined": "Esta invitación ya se ha rechazado.",
-    "expired": "Esta invitación ha caducado.",
+  "list": {
+    "title": "Has sido invitado",
+    "subtitle": "Al unirte, entrarás en ese espacio de trabajo. Las demás invitaciones seguirán pendientes.",
+    "workspace_fallback": "Espacio de trabajo",
+    "inviter_fallback": "Alguien",
+    "invited_admin": "{{inviter}} te invitó como administrador",
+    "invited_member": "{{inviter}} te invitó como miembro",
+    "accept": "Unirse",
+    "joining": "Uniéndose...",
     "decline": "Rechazar",
     "declining": "Rechazando...",
-    "accept": "Aceptar y unirse",
-    "joining": "Uniéndose..."
+    "skip": "Omitir y configurar mi propio espacio de trabajo"
+  },
+  "empty": {
+    "title": "Sin invitaciones pendientes",
+    "hint": "Continúa para configurar tu propio espacio de trabajo.",
+    "continue": "Continuar a la configuración",
+    "go_to_dashboard": "Ir al espacio de trabajo"
+  },
+  "linked": {
+    "not_found": "Es posible que esta invitación haya caducado, se haya revocado o no pertenezca a tu cuenta.",
+    "accepted": "Esta invitación ya se ha aceptado.",
+    "declined": "Esta invitación ya se ha rechazado.",
+    "expired": "Esta invitación ha caducado."
   },
   "errors": {
     "accept_failed": "No se ha podido aceptar la invitación",
-    "decline_failed": "No se ha podido rechazar la invitación"
+    "decline_failed": "No se ha podido rechazar la invitación",
+    "member_limit_reached": "{{workspace}} está lleno. Habla con quien te invitó; podrás unirte cuando el espacio de trabajo mejore su plan."
   },
-  "batch": {
-    "log_out": "Cerrar sesión",
-    "empty_title": "Sin invitaciones pendientes",
-    "empty_hint": "Continúa para configurar tu propio espacio de trabajo.",
-    "empty_continue": "Continuar a la configuración",
-    "title": "Has sido invitado",
-    "subtitle": "Elige los espacios de trabajo a los que quieres unirte. Siempre puedes gestionar el resto más tarde desde la barra lateral.",
-    "submit_skip": "Omitir y configurar mi propio espacio de trabajo",
-    "submit_join_one": "Unirse a 1 espacio de trabajo",
-    "submit_join_other": "Unirse a {{count}} espacios de trabajo",
+  "join": {
+    "no_code": "No se encontró ningún código de invitación. Usa un enlace para compartir válido.",
+    "invalid": "Este enlace de invitación no es válido o ha caducado.",
+    "joined_title": "¡Te has unido!",
+    "redirecting": "Redirigiendo a tu espacio de trabajo...",
+    "error_title": "No se pudo abrir la invitación",
+    "go_home": "Ir al inicio",
+    "loading": "Cargando los detalles de la invitación...",
+    "title": "Te han invitado a {{workspace}}",
+    "invited_by": "Invitación de {{name}}",
+    "join_as": "Te unirás a este espacio de trabajo como",
+    "role_admin": "Administrador",
+    "role_member": "Miembro",
+    "login_required": "Tienes que iniciar sesión para unirte a este espacio de trabajo.",
+    "join": "Unirse al espacio de trabajo",
     "joining": "Uniéndose...",
-    "error_generic": "No se han podido procesar las invitaciones. Inténtalo de nuevo.",
-    "row_workspace_fallback": "Espacio de trabajo",
-    "row_inviter_fallback": "Alguien",
-    "row_invited_admin": "{{inviter}} te invitó como administrador",
-    "row_invited_member": "{{inviter}} te invitó como miembro"
+    "log_in_to_join": "Inicia sesión para unirte",
+    "join_failed": "No se pudo unir al espacio de trabajo. Es posible que el enlace haya caducado.",
+    "seats_full": "Todos los puestos de miembro comprados están en uso. Pide a un administrador del espacio de trabajo que añada un puesto antes de volver a intentarlo.",
+    "seats_unavailable": "No se pudo verificar la capacidad de miembros. Inténtalo de nuevo.",
+    "full_title": "{{workspace}} está lleno",
+    "full_description": "Habla con quien te invitó. Este enlace volverá a funcionar cuando el espacio de trabajo mejore su plan.",
+    "retry": "Volver a intentarlo"
   }
 }

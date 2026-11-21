@@ -1,6 +1,6 @@
 /**
- * Notification preferences subscreen. 6 inbox groups + system_notifications
- * toggle, each backed by an optimistic PATCH /api/notification-preferences.
+ * Notification preferences subscreen. Inbox groups and system delivery
+ * settings are backed by an optimistic PATCH /api/notification-preferences.
  *
  * Copy mirrors packages/views/settings/components/notifications-tab.tsx.
  * Group labels describe the same server-side semantics as web; divergent
@@ -12,6 +12,7 @@ import type {
   NotificationGroupKey,
   NotificationPreferences,
 } from "@multica/core/types";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import { Text } from "@/components/ui/text";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
@@ -21,7 +22,7 @@ import { useUpdateNotificationPreferences } from "@/data/mutations/notification-
 import { useT } from "@/lib/i18n";
 
 const INBOX_GROUPS: {
-  key: Exclude<NotificationGroupKey, "system_notifications">;
+  key: Exclude<NotificationGroupKey, "system_notifications" | "chat_replies">;
   labelKey: string;
   descriptionKey?: string;
 }[] = [
@@ -45,9 +46,19 @@ const INBOX_GROUPS: {
     descriptionKey: "groups.mentions_description",
   },
   {
+    key: "reactions",
+    labelKey: "groups.reactions",
+    descriptionKey: "groups.reactions_description",
+  },
+  {
     key: "updates",
     labelKey: "groups.updates",
     descriptionKey: "groups.updates_description",
+  },
+  {
+    key: "new_issues",
+    labelKey: "groups.new_issues",
+    descriptionKey: "groups.new_issues_description",
   },
   {
     key: "agent_activity",
@@ -67,13 +78,10 @@ export default function NotificationsSettingsScreen() {
   const preferences: NotificationPreferences = data?.preferences ?? {};
 
   const onToggle = (key: NotificationGroupKey, enabled: boolean) => {
-    const next: NotificationPreferences = { ...preferences };
-    if (enabled) {
-      // Default is "all" — omitting the key keeps the object clean.
-      delete next[key];
-    } else {
-      next[key] = "muted";
-    }
+    const next: NotificationPreferences = {
+      ...preferences,
+      [key]: enabled ? "all" : "muted",
+    };
     mutation.mutate(next);
   };
 
@@ -106,7 +114,8 @@ export default function NotificationsSettingsScreen() {
         title={t("groups.inbox_notifications")}
       >
         {INBOX_GROUPS.map((group, idx) => {
-          const enabled = preferences[group.key] !== "muted";
+          const enabled =
+            notificationPreferenceValue(preferences, group.key) !== "muted";
           const isLast = idx === INBOX_GROUPS.length - 1;
           return (
             <View key={group.key}>
@@ -132,25 +141,34 @@ export default function NotificationsSettingsScreen() {
         })}
       </Section>
 
-      <Section
-        title={t("groups.system")}
-      >
+      <Section title={t("groups.system")}>
         <View className="flex-row items-center px-4 py-3 gap-3">
           <View className="flex-1">
             <Text className="text-base font-medium text-foreground">
               {t("groups.system_notifications")}
             </Text>
-            <Text className="text-xs text-muted-foreground mt-0.5">
-              {t("groups.system_description")}
-            </Text>
           </View>
           <Switch
             checked={systemEnabled}
-            onCheckedChange={(checked) =>
-              onToggle("system_notifications", checked)
-            }
+            onCheckedChange={(checked) => onToggle("system_notifications", checked)}
           />
         </View>
+        {systemEnabled && (
+          <>
+            <Separator />
+            <View className="flex-row items-center pl-8 pr-4 py-3 gap-3">
+              <View className="flex-1">
+                <Text className="text-base font-medium text-foreground">
+                  {t("groups.chat_replies")}
+                </Text>
+              </View>
+              <Switch
+                checked={preferences.chat_replies !== "muted"}
+                onCheckedChange={(checked) => onToggle("chat_replies", checked)}
+              />
+            </View>
+          </>
+        )}
       </Section>
     </ScrollView>
   );
