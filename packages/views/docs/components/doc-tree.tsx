@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   Dialog,
@@ -371,7 +372,9 @@ export function DocTree() {
                 className={`group flex cursor-pointer items-center gap-1 rounded-md px-1 py-1 text-body hover:bg-surface-hover ${dropTarget === folder.id ? "bg-surface-hover ring-1 ring-ring" : ""}`}
               >
                 <Folder className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate">{folder.title}</span>
+                <TruncatedTooltip content={folder.title} side="right">
+                  <span className="min-w-0 flex-1 truncate">{folder.title}</span>
+                </TruncatedTooltip>
                 <Button
                   variant="ghost"
                   size="icon-xs"
@@ -405,13 +408,15 @@ export function DocTree() {
             className={`flex items-center gap-1 rounded-md px-1 py-1 text-body ${pathname === p.docDetail(doc.id) ? "bg-surface-selected text-surface-selected-foreground" : "hover:bg-surface-hover"}`}
           >
             <FileText className="size-4 shrink-0 text-muted-foreground" />
-            <AppLink
-              href={p.docDetail(doc.id)}
-              {...prefetchDoc(doc.id)}
-              className="min-w-0 flex-1 truncate"
-            >
-              {doc.title || t(($) => $.untitled)}
-            </AppLink>
+            <TruncatedTooltip content={doc.title || t(($) => $.untitled)} side="right">
+              <AppLink
+                href={p.docDetail(doc.id)}
+                {...prefetchDoc(doc.id)}
+                className="min-w-0 flex-1 truncate"
+              >
+                {doc.title || t(($) => $.untitled)}
+              </AppLink>
+            </TruncatedTooltip>
             {menu({ kind: "doc", item: doc })}
           </li>
         ))}
