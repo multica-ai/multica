@@ -1444,6 +1444,46 @@
     "actions_aria": "{{url}} 的操作"
   },
   "desktop": {
+    "island": {
+      "title": "运行灵动岛",
+      "show": "显示运行灵动岛",
+      "description": "使用其他应用时，也能在屏幕顶部查看正在执行或排队的运行。",
+      "soundEnabled": "任务结束提示音",
+      "soundHelp": "岛上可见的任务完成或失败时播放声音。",
+      "sound": "提示音",
+      "previewSound": "试听",
+      "display": "显示位置",
+      "unavailable": "显示器已断开",
+      "profile": "配置外观的屏幕",
+      "preview": "外观预览",
+      "background": "背景",
+      "trailing": "收起时右侧显示",
+      "center": "收起时中央显示",
+      "indicator": "任务状态样式",
+      "group": "任务分组",
+      "sort": "任务排序",
+      "sampleReview": "审阅更改",
+      "sampleTest": "运行测试",
+      "options": {
+        "auto": "跟随工作区窗口",
+        "notch": "MacBook 刘海屏",
+        "floating": "其他显示器",
+        "black": "纯黑",
+        "graphite": "石墨色",
+        "count": "任务数量",
+        "agents": "Agent 名称首字",
+        "hidden": "隐藏",
+        "none": "无",
+        "agent": "Agent",
+        "task": "任务标题",
+        "dot": "呼吸圆点",
+        "bar": "竖条",
+        "glyph": "图标",
+        "tint": "行底色",
+        "status": "状态",
+        "recent": "最近活动"
+      }
+    },
     "tabs": {
       "updates": "更新"
     },

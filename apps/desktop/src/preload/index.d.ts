@@ -39,7 +39,14 @@ import type {
   VoiceTranscribeResult,
 } from "../shared/voice";
 
+import type { RunIslandSnapshot, RunIslandAPI, IslandDevices } from "../shared/run-island";
+
 interface DesktopAPI {
+  onRunIslandDisplaysChanged: (listener: () => void) => () => void;
+  runIslandDevices: () => Promise<IslandDevices>;
+  previewRunIslandSound: (name: string) => void;
+  reportRunIslandFinish: (slug: string, id: string) => void;
+  reportRunIsland: (snapshot: RunIslandSnapshot | null) => void;
   /** App version + normalized OS, captured synchronously at preload time. */
   appInfo: {
     version: string;
@@ -269,6 +276,7 @@ interface UpdaterAPI {
 
 declare global {
   interface Window {
+    runIsland: RunIslandAPI;
     electron: ElectronAPI;
     desktopAPI: DesktopAPI;
     daemonAPI: DaemonAPI;

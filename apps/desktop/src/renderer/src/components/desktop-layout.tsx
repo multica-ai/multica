@@ -27,6 +27,7 @@ import { StarPrompt } from "@multica/views/star-prompt";
 import { WorkspaceTrialNotices } from "@multica/views/billing";
 import { WhatsNewDeck } from "@multica/views/whats-new";
 import { WorkspaceSlugProvider, useCurrentWorkspace } from "@multica/core/paths";
+import { RunIslandBridge } from "../platform/run-island-bridge";
 import { workspaceListOptions } from "@multica/core/workspace";
 import {
   useNavigation,
@@ -226,10 +227,8 @@ export function DesktopShell() {
   // the tab router can mount WorkspaceRouteLayout, which is what populates
   // the singleton in the first place.
   const { data: workspaces = [] } = useQuery(workspaceListOptions());
-  const slug =
-    currentSlug && workspaces.some((w) => w.slug === currentSlug)
-      ? currentSlug
-      : null;
+  const workspace = workspaces.find((item) => item.slug === currentSlug);
+  const slug = workspace?.slug ?? null;
   const renderedPathname = useRenderedRouteStore((s) => s.pathname);
 
   return (
@@ -245,6 +244,9 @@ export function DesktopShell() {
           IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
+        {workspace && window.desktopAPI?.appInfo?.os === "macos" && (
+          <RunIslandBridge workspace={workspace} />
+        )}
         <div className="flex h-screen">
           {/* The wrapper alone paints the frame: a second fill under it would
               double the frame's glass over a theme's backdrop.

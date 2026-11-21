@@ -314,6 +314,8 @@ export interface TaskCancellationActor {
 }
 
 export interface AgentTask {
+  /** Presence-only row for a task whose project the member cannot access. */
+  restricted?: boolean;
   /** Owning issue labels supplied by subtree execution-history reads. */
   issue_identifier?: string;
   issue_title?: string;

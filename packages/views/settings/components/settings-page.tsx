@@ -82,6 +82,7 @@ export interface ExtraSettingsTab {
 interface SettingsPageProps {
   /** Device settings supplied by the desktop platform. */
   extraDeviceTabs?: ExtraSettingsTab[];
+  devicePreferences?: React.ReactNode;
 }
 
 type SettingsEntry = ExtraSettingsTab & {
@@ -125,7 +126,7 @@ const SETTINGS_HEADER_RAIL = cn(
 const FLASH_MS = 1600;
 const ANCHOR_WAIT_MS = 1500;
 
-export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
+export function SettingsPage({ extraDeviceTabs = [], devicePreferences }: SettingsPageProps = {}) {
   const { t } = useT("settings");
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name ?? t(($) => $.page.workspace_fallback);
@@ -164,7 +165,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               "preferences",
               t(($) => $.page.tabs.preferences),
               SlidersHorizontal,
-              <PreferencesTab />,
+              <PreferencesTab>{devicePreferences}</PreferencesTab>,
             ),
             entry(
               "appearance",

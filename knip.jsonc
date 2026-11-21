@@ -43,6 +43,7 @@
       "entry": [
         "eslint.config.mjs",
         "src/main/*.node-test.mjs",
+        "src/renderer/src/{main,run-island}.tsx",
         "scripts/*.node-test.mjs",
         "test/electron-guard.ts"
       ],
