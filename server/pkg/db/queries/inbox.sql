@@ -12,7 +12,8 @@ SELECT i.*,
        iss.due_date AS issue_due_date,
        ARRAY(SELECT il.label_id::text FROM issue_to_label il
              WHERE iss.id IS NOT NULL AND il.issue_id = iss.id
-             ORDER BY il.label_id)::text[] AS issue_label_ids
+             ORDER BY il.label_id)::text[] AS issue_label_ids,
+       iss.title AS issue_title
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
@@ -110,7 +111,8 @@ SELECT i.*,
        iss.due_date AS issue_due_date,
        ARRAY(SELECT il.label_id::text FROM issue_to_label il
              WHERE iss.id IS NOT NULL AND il.issue_id = iss.id
-             ORDER BY il.label_id)::text[] AS issue_label_ids
+             ORDER BY il.label_id)::text[] AS issue_label_ids,
+       iss.title AS issue_title
 FROM inbox_item i
 JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id

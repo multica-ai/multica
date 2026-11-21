@@ -76,6 +76,7 @@ export interface InboxIssueProjectionPatch {
   assignee_id?: string | null;
   due_date?: string | null;
   label_ids?: string[];
+  title?: string;
 }
 
 export function patchInboxIssueProjection(
@@ -116,6 +117,7 @@ export function patchInboxIssueProjection(
         ...(hasIssueFields && patch.label_ids !== undefined
           ? { issue_label_ids: patch.label_ids }
           : {}),
+        ...(patch.title !== undefined ? { issue_title: patch.title } : {}),
       };
     });
     return changed ? next : old;
