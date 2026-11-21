@@ -17,26 +17,33 @@ import (
 // not an inbox event group — it's a delivery-channel toggle controlling
 // whether native OS notification banners fire — but it shares the same
 // preferences map so a single endpoint covers all user notification
-// preferences. `auto_archive_completed` is not an event group either: "muted"
-// stops your notifications from being archived when you complete an issue.
-// `auto_archive_on_action` set to "all" also archives them when you comment on
-// the issue, change its status or reassign it, and `after_auto_archive` is where the client goes when
-// the notification you are reading is archived that way.
+// preferences. The `auto_archive_*` keys are not event groups either: each
+// says whether one action you take on an issue archives your notifications on
+// it. Completing, commenting, other status changes and reassigning archive
+// unless "muted"; priority, project, date and label edits only with "all".
+// `after_auto_archive` is where the client goes when the notification you are
+// reading is archived that way.
 var validNotifGroups = map[string]bool{
-	"assignments":            true,
-	"status_changes":         true,
-	"comments":               true,
-	"chat_replies":           true,
-	"mentions":               true,
-	"reactions":              true,
-	"updates":                true,
-	"agent_activity":         true,
-	"new_issues":             true,
-	"system_notifications":   true,
-	"auto_archive_completed": true,
-	"auto_archive_on_action": true,
-	"after_auto_archive":     true,
-	"others_issues":          true,
+	"assignments":              true,
+	"status_changes":           true,
+	"comments":                 true,
+	"chat_replies":             true,
+	"mentions":                 true,
+	"reactions":                true,
+	"updates":                  true,
+	"agent_activity":           true,
+	"new_issues":               true,
+	"system_notifications":     true,
+	"auto_archive_completed":   true,
+	"auto_archive_on_comment":  true,
+	"auto_archive_on_status":   true,
+	"auto_archive_on_assignee": true,
+	"auto_archive_on_priority": true,
+	"auto_archive_on_project":  true,
+	"auto_archive_on_dates":    true,
+	"auto_archive_on_labels":   true,
+	"after_auto_archive":       true,
+	"others_issues":            true,
 }
 
 // validNotifValues is the set of allowed preference values for a group not

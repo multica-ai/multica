@@ -290,7 +290,8 @@ func TestLegacyPutKeepsOmittedStatusChangesOn(t *testing.T) {
 
 // TestPatchNotificationPreferencesAcceptsAddedGroups covers groups added after
 // the original set: mentions (#6468), reactions (MUL-9328),
-// auto_archive_completed (MUL-9336) and auto_archive_on_action (MUL-9788).
+// auto_archive_completed (MUL-9336) and the per-action auto_archive_on_*
+// keys (MUL-9788).
 // The whitelist rejects unknown keys, so a
 // client shipped ahead of the server would 400 on these keys — the reason the
 // server must deploy first.
@@ -304,7 +305,8 @@ func TestPatchNotificationPreferencesAcceptsAddedGroups(t *testing.T) {
 		{"reactions"},
 		{"auto_archive_completed"},
 		{"reactions", "auto_archive_completed"},
-		{"auto_archive_on_action"},
+		{"auto_archive_on_comment", "auto_archive_on_status", "auto_archive_on_assignee"},
+		{"auto_archive_on_priority", "auto_archive_on_project", "auto_archive_on_dates", "auto_archive_on_labels"},
 	} {
 		t.Run(strings.Join(groups, "+"), func(t *testing.T) {
 			t.Cleanup(func() {
