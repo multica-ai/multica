@@ -159,4 +159,20 @@ describe("Run Island workspace snapshot", () => {
       audible: false,
     });
   });
+  it("counts a redacted retry from the active snapshot without ringing or exposing its issue", () => {
+    const [run] = islandRuns(
+      "studio",
+      [task("retry", "deferred", { restricted: true, issue_id: "" })],
+      agents,
+      labels,
+      chatTitles,
+      cachedIssueTitle,
+    );
+    expect(run).toMatchObject({
+      status: "queued",
+      audible: false,
+      detail: "Agent",
+      path: "/studio/agents/a",
+    });
+  });
 });

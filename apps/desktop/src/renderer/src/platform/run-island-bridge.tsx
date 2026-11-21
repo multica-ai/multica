@@ -31,7 +31,9 @@ function isActiveRun(task: AgentTask) {
     task.status === "queued" ||
     task.status === "dispatched" ||
     task.status === "waiting_local_directory" ||
-    (task.status === "deferred" && !!task.wakeup_id)
+    // The snapshot only selects deferred wakeups. Its restricted rows omit the wakeup ID.
+    (task.status === "deferred" &&
+      (!!task.wakeup_id || task.restricted === true))
   );
 }
 
