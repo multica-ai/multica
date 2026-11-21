@@ -964,6 +964,8 @@
   },
   "workspace": {
     "section_general": "Detalles del espacio de trabajo",
+    "mention_all_label": "Permitir menciones a @todos los miembros",
+    "mention_all_description": "Si se desactiva, @todos los miembros en comentarios y descripciones deja de enviar una notificación a la bandeja de entrada de cada miembro y desaparece del selector de menciones.",
     "logo_label": "Logo del espacio de trabajo",
     "change_logo_aria": "Cambiar logo del espacio de trabajo",
     "click_logo_hint": "Haz clic en el logotipo para subir una imagen o crear un icono de texto",
