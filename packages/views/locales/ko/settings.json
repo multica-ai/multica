@@ -1339,6 +1339,10 @@
       "member": {
         "label": "멤버",
         "description": "태스크 생성 및 작업"
+      },
+      "guest": {
+        "label": "게스트",
+        "description": "공유된 프로젝트만 보고 댓글을 남길 수 있습니다. 에이전트는 실행할 수 없습니다."
       }
     },
     "share_links_create_title": "공유 링크 만들기",
@@ -1388,7 +1392,32 @@
     "toast_invitation_pending": "{{email}}에게 보낸 초대가 이미 대기 중입니다.",
     "toast_invite_check_unavailable": "기존 멤버와 초대를 확인하지 못했습니다. 잠시 후 다시 시도하세요.",
     "member_limit_full_description_billing": "워크스페이스 구독에 조치가 필요합니다. 결제 및 요금제에서 구독을 복구하면 멤버를 추가할 수 있습니다. 먼저 멤버를 제거할 수도 있습니다.",
-    "open_billing": "결제 및 요금제 열기"
+    "open_billing": "결제 및 요금제 열기",
+    "guest_free_tag": "무료 · 좌석 없음",
+    "guest_projects_label": "접근할 수 있는 프로젝트",
+    "guest_projects_add": "프로젝트 추가…",
+    "guest_projects_remove": "{{project}} 제거",
+    "guest_projects_hint": "게스트는 다른 프로젝트, 에이전트, 자동화, 설정을 볼 수 없습니다.",
+    "invite_guest_button": "게스트 초대",
+    "all_label": "전체",
+    "guests_label": "게스트",
+    "guest_count": "게스트 {{count}}명",
+    "list_separator": ", ",
+    "takes_seat": "좌석 1개 사용",
+    "frees_seat": "좌석 반환",
+    "make_member": "멤버로 전환",
+    "make_member_title": "{{name}} 님을 멤버로 전환할까요?",
+    "make_member_description": "{{name}} 님이 워크스페이스 전체를 보고 에이전트를 실행할 수 있습니다. 좌석 1개를 사용합니다.",
+    "make_member_seat_description": "{{name}} 님이 워크스페이스 전체를 보고 에이전트를 실행할 수 있습니다. 구매한 좌석을 모두 사용 중이라 1개를 추가 구매합니다.",
+    "purchase_seat_and_make_member": "좌석 구매 후 멤버로 전환",
+    "making_member": "멤버로 전환 중…",
+    "make_guest_title": "{{name}} 님을 게스트로 전환",
+    "make_guest_description": "{{name}} 님은 아래 프로젝트만 볼 수 있고 좌석이 반환됩니다. 에이전트, 자동화, 런타임 접근은 회수됩니다.",
+    "make_guest_button": "게스트로 전환",
+    "manage_projects": "접근 가능한 프로젝트 관리",
+    "manage_projects_title": "{{name}} 님이 접근할 수 있는 프로젝트",
+    "save_projects": "저장",
+    "toast_projects_updated": "프로젝트를 업데이트했습니다"
   },
   "lark": {
     "section_title": "Lark",

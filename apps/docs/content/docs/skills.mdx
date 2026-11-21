@@ -102,6 +102,12 @@ Runtime-local skills already installed on a connected computer (Claude Code and 
 
 For Oh-My-Pi, the inherited list and runtime copies follow the runtime command's selected profile and effective skill filters. Discovery runs in an empty directory and covers user-level configuration; project settings and explicitly assigned Multica skills are separate. If OMP cannot return its skill roster, refresh reports an error.
 
+### Check skill delivery and tool calls [#skill-execution]
+
+In the issue’s execution log, open the run and select the **Context received** icon. The receipt lists workspace skills for that run. A skill marked **Not verified** with a file path means Multica wrote the complete skill package to that location. Whether the runtime read or executed the skill is still unverified. **Not delivered** means delivery failed.
+
+Tool rows show the calls the runtime reported. If OpenCode runs a skill script directly, the log may show only the shell command. Check the tool output to see what ran.
+
 ## Edit permissions
 
 Any workspace member can create or import a skill. The creator and workspace `owner`s and `admin`s can modify or delete it; other members can view and use it, but cannot overwrite its content.

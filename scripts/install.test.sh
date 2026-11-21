@@ -323,11 +323,49 @@ case "${1:-}" in
     subcommand=""
     for arg in "$@"; do
       case "$arg" in
-        pull | up | port | version | ps | logs | down) subcommand="$arg"; break ;;
+        pull | up | port | config | version | ps | logs | down) subcommand="$arg"; break ;;
       esac
     done
     case "$subcommand" in
+      up) : >.stub-stack-up ;;
+      config)
+        # Opt-in, so the port matrix above never probes real host ports.
+        [ -n "${MULTICA_TEST_COMPOSE_CONFIG:-}" ] || exit 1
+        cat <<JSON
+{
+  "services": {
+    "backend": {
+      "ports": [
+        {
+          "mode": "ingress",
+          "host_ip": "127.0.0.1",
+          "target": 8080,
+          "published": "$(_published_backend_port)",
+          "protocol": "tcp"
+        }
+      ]
+    },
+    "frontend": {
+      "ports": [
+        {
+          "mode": "ingress",
+          "host_ip": "127.0.0.1",
+          "target": 3000,
+          "published": "$(_published_frontend_port)",
+          "protocol": "tcp"
+        }
+      ]
+    }
+  }
+}
+JSON
+        ;;
       port)
+        # Nothing is published until `up`, unless the test models this
+        # installation's own stack already running (an upgrade re-run).
+        if [ ! -f .stub-stack-up ] && [ -z "${MULTICA_TEST_STACK_RUNNING:-}" ]; then
+          exit 1
+        fi
         service=""
         for arg in "$@"; do
           case "$arg" in
@@ -589,12 +627,150 @@ STUB
   fi
 }
 
+# ---------------------------------------------------------------------------
+# --with-server: a host port that is already taken must stop the installer
+# before anything is pulled or started, with a fix the user can act on (#883).
+# The port comes from Compose's own resolution, so an ambient override is
+# checked rather than the .env value.
+# ---------------------------------------------------------------------------
+_HELD_PORT=""
+_HELD_PORT_PID=""
+
+# Starts a real listener on 127.0.0.1 and sets _HELD_PORT / _HELD_PORT_PID.
+_hold_port() {
+  local port_file="$1/held-port"
+  rm -f "$port_file"
+  python3 -c '
+import os, socket, sys, time
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+s.listen(16)
+s.settimeout(0.5)
+with open(sys.argv[1] + ".tmp", "w") as f:
+    f.write(str(s.getsockname()[1]))
+os.rename(sys.argv[1] + ".tmp", sys.argv[1])
+deadline = time.time() + 120
+while time.time() < deadline:
+    try:
+        conn, _ = s.accept()
+        conn.close()
+    except socket.timeout:
+        pass
+' "$port_file" >/dev/null 2>&1 &
+  _HELD_PORT_PID=$!
+  for _ in $(seq 1 50); do
+    [ -s "$port_file" ] && break
+    sleep 0.1
+  done
+  _HELD_PORT="$(cat "$port_file")"
+}
+
+_release_port() {
+  if [ -n "$_HELD_PORT_PID" ]; then
+    kill "$_HELD_PORT_PID" 2>/dev/null || true
+    wait "$_HELD_PORT_PID" 2>/dev/null || true
+    _HELD_PORT_PID=""
+    _HELD_PORT=""
+  fi
+}
+
+# A port nothing listens on: bind an ephemeral one, then let it go.
+_free_port() {
+  python3 -c '
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+'
+}
+
+test_with_server_refuses_ports_already_in_use() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "skipping occupied-port tests: python3 not available" >&2
+    return 0
+  fi
+
+  local tmp held
+  tmp="$(mktemp -d)"
+  trap '_release_port; rm -rf "$tmp"' RETURN
+  _hold_port "$tmp"
+  held="$_HELD_PORT"
+
+  # label | .env mutation (sed) | ambient env | expected setting in the message
+  local cases="env-file PORT|s/^PORT=8080/PORT=$held/||PORT=<free port>
+ambient PORT beats .env||PORT=$held|PORT=<free port>
+env-file BACKEND_PORT|s/^# BACKEND_PORT=8080/BACKEND_PORT=$held/||PORT=<free port>
+env-file FRONTEND_PORT|s/^FRONTEND_PORT=3000/FRONTEND_PORT=$held/||FRONTEND_PORT=<free port>"
+
+  local label mutation ambient setting
+  while IFS='|' read -r label mutation ambient setting; do
+    [ -n "$label" ] || continue
+
+    rm -rf "$tmp/server" "$tmp/stub-bin"
+    _setup_server_sandbox "$tmp"
+    cp "$tmp/server/.env.example" "$tmp/server/.env"
+    if [ -n "$mutation" ]; then
+      sed "$mutation" "$tmp/server/.env" >"$tmp/server/.env.new"
+      mv "$tmp/server/.env.new" "$tmp/server/.env"
+    fi
+
+    local -a extra=(MULTICA_TEST_COMPOSE_CONFIG=1)
+    [ -z "$ambient" ] || extra+=("$ambient")
+    if _run_with_server "$tmp" "${extra[@]}" >/dev/null 2>&1; then
+      echo "[$label] installer must not continue when port $held is already in use" >&2
+      cat "$tmp/install.out" >&2 || true
+      return 1
+    fi
+    if ! grep -q "Port $held is already in use" "$tmp/install.err" ||
+      ! grep -qF "$setting" "$tmp/install.err"; then
+      echo "[$label] expected an actionable occupied-port error naming $held and $setting" >&2
+      cat "$tmp/install.err" >&2 || true
+      return 1
+    fi
+    if [ -f "$tmp/server/.stub-stack-up" ]; then
+      echo "[$label] installer started the stack despite the occupied port" >&2
+      return 1
+    fi
+  done <<<"$cases"
+}
+
+test_with_server_port_preflight_allows_free_and_own_ports() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "skipping occupied-port tests: python3 not available" >&2
+    return 0
+  fi
+
+  local tmp held free
+  tmp="$(mktemp -d)"
+  trap '_release_port; rm -rf "$tmp"' RETURN
+
+  # A free port goes straight through.
+  free="$(_free_port)"
+  _setup_server_sandbox "$tmp"
+  sed "s/^PORT=8080/PORT=$free/" "$tmp/server/.env.example" >"$tmp/server/.env"
+  _run_with_server "$tmp" MULTICA_TEST_COMPOSE_CONFIG=1 || return 1
+  _require_server_ports "$tmp" "free port" "$free" "3000" || return 1
+
+  # Re-running over this installation's own running stack: the port is busy
+  # only because Compose already publishes it for us, which is not a conflict.
+  _hold_port "$tmp"
+  held="$_HELD_PORT"
+  rm -rf "$tmp/server" "$tmp/stub-bin"
+  _setup_server_sandbox "$tmp"
+  sed "s/^PORT=8080/PORT=$held/" "$tmp/server/.env.example" >"$tmp/server/.env"
+  _run_with_server "$tmp" MULTICA_TEST_COMPOSE_CONFIG=1 MULTICA_TEST_STACK_RUNNING=1 || return 1
+  _require_server_ports "$tmp" "own running stack" "$held" "3000" || return 1
+}
+
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint
 test_local_install_does_not_print_token_login_hint
 test_with_server_uses_compose_published_ports
 test_with_server_fails_when_compose_port_is_unavailable
+test_with_server_refuses_ports_already_in_use
+test_with_server_port_preflight_allows_free_and_own_ports
 test_with_server_fails_when_checkout_does_not_land
 test_cli_lookup_failure_does_not_claim_up_to_date
 echo "install.sh tests passed"

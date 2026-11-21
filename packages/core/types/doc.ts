@@ -13,6 +13,34 @@ export interface DocSummary {
   createdAt: string;
   updatedAt: string;
 }
+/**
+ * A comment in a discussion on a doc's text. The discussion's first comment
+ * (parentId null) carries the anchor: the quoted text and up to 64 characters
+ * of context on each side, re-located by text in the rendered doc.
+ */
+export interface DocComment {
+  id: string;
+  docId: string;
+  parentId: string | null;
+  authorType: DocAuthorType;
+  authorId: string;
+  content: string;
+  anchorQuote: string;
+  anchorPrefix: string;
+  anchorSuffix: string;
+  resolvedAt: string | null;
+  resolvedByType: DocAuthorType | null;
+  resolvedById: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface CreateDocCommentRequest {
+  content: string;
+  parentId?: string;
+  anchorQuote?: string;
+  anchorPrefix?: string;
+  anchorSuffix?: string;
+}
 /** A doc search hit: where the query matched, with an excerpt for content hits. */
 export interface SearchDocResult extends DocSummary {
   matchSource: "title" | "content";

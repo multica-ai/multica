@@ -105,6 +105,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `queued_expired` | 运行时心跳缺席超过重连宽限期，且该运行也已排队满这么久 | 确认运行时在线后重试 |
 | `runtime_recovery` | 守护进程重启后回收了中断的执行 | 直接重试 |
 | `environment_prepare_failed` | 守护进程没能准备好本次执行的运行环境——工作目录，或写入其中的本地运行时配置 | 先看原始错误定位是哪一步失败，再检查那台机器：磁盘空间、权限、目录是否仍被占用，或 AI 编程工具的本地配置 |
+| `local_directory_missing` | 项目关联的本地文件夹在运行智能体的那台电脑上已不存在——关联之后被删除或移走了 | 把文件夹恢复到原路径后重试。要换到新位置，在 **资源 → 本地文件夹** 里移除旧文件夹，再在那台电脑的 Desktop 中关联新位置（浏览器无法选择文件夹）；参见 [项目资源](/project-resources) |
 | `cancelled` | 被手动停止，或随归档、删除一并取消 | 无需处理 |
 | `timeout` | 超过守护进程配置的执行时长上限 | 缩小任务范围，或调整守护进程的 `agent_timeout` |
 | `iteration_limit` | 达到执行轮次上限 | 缩小任务范围 |
@@ -120,8 +121,8 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | 原因 | 含义 | 处理 |
 | --- | --- | --- |
 | `provider_auth_or_access` | 模型服务认证失败或无访问权限（401/403） | 在该 AI 编程工具中重新登录，或检查 API key |
-| `provider_quota_limit` | 配额或余额用尽（402） | 充值或更换账号 |
-| `provider_capacity_or_rate_limit` | 限流或容量不足（429/529） | 稍后重试 |
+| `provider_quota_limit` | 配额或余额用尽 | 充值或更换账号 |
+| `provider_capacity_or_rate_limit` | 限流或容量不足 | 稍后重试 |
 | `provider_server_error` | 模型服务端错误（5xx） | 稍后重试 |
 | `provider_network` | 到模型服务的网络故障 | 会自动重试；持续出现时检查执行电脑的网络 |
 | `model_not_found_or_unavailable` | 模型不存在或当前不可用 | 在智能体设置中改选可用模型 |

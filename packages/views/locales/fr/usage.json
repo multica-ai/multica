@@ -10,6 +10,16 @@
     "all_projects": "Tous les projets",
     "period_label": "Période"
   },
+  "history_limit": {
+    "note": "Votre forfait couvre les {{days}} derniers jours. Passez à un forfait supérieur pour voir les données plus anciennes. Rien n'est supprimé.",
+    "fell_back": "Votre forfait couvre les {{days}} derniers jours.",
+    "view_plans": "Voir les forfaits",
+    "locked": "Non inclus dans votre forfait",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
   "kpi": {
     "cost_label": "Coût · {{days}} j",
     "tokens_label": "Tokens · {{days}} j",

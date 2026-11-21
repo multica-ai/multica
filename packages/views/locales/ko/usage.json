@@ -10,6 +10,16 @@
     "all_projects": "모든 프로젝트",
     "period_label": "기간"
   },
+  "history_limit": {
+    "note": "현재 요금제에서는 최근 {{days}}일을 볼 수 있습니다. 업그레이드하면 이전 데이터도 볼 수 있으며, 데이터는 삭제되지 않습니다.",
+    "fell_back": "현재 요금제에서는 최근 {{days}}일만 볼 수 있습니다.",
+    "view_plans": "요금제 보기",
+    "locked": "현재 요금제에 포함되지 않음",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
   "kpi": {
     "cost_label": "비용 · {{days}}일",
     "tokens_label": "토큰 · {{days}}일",

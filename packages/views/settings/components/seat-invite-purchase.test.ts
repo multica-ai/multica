@@ -60,7 +60,9 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       purchaseSeats: true,
       changePlan: false,
       checkPlanChange: false,
+      purchaseAutopilotRuns: false,
     },
+    autopilotAddon: null,
     planChange: null,
     trial: null,
   };

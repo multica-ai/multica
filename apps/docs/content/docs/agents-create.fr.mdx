@@ -101,10 +101,12 @@ L'Accès détermine quels membres peuvent exécuter cet agent (l'assigner, l'@me
 | Accès | Signification |
 |---|---|
 | **Moi uniquement** | Vous seul pouvez l'exécuter. Valeur par défaut. |
-| **Tout l'espace de travail** | Tous les membres de l'espace de travail peuvent l'exécuter. |
+| **Tout l'espace de travail** | Les membres ayant le rôle `owner`, `admin` ou `member`. |
 | **Personnes précises** | Seuls vous et les membres sélectionnés pouvez l'exécuter. |
 
 ![Paramètres d'Accès : Moi uniquement, Tout l'espace de travail, Personnes précises](/images/docs/agent-access-settings.webp)
+
+Sur Multica Cloud, **Personnes précises** est inclus dans Business. Avec Free et Pro, un agent qui a déjà une liste la conserve : on peut toujours en retirer des personnes ou passer à **Moi uniquement** ou **Tout l'espace de travail**, mais on ne peut plus ajouter personne ni donner une liste à un autre agent. Les espaces de travail auto-hébergés disposent de **Personnes précises**.
 
 Seul le propriétaire de l'agent peut modifier l'Accès ; les administrateurs de l'espace de travail ne le peuvent pas. Les `owner` et `admin` de l'espace de travail peuvent gérer le reste de la configuration, mais ne peuvent pas se servir de leur rôle d'administrateur pour exécuter des agents auxquels ils n'ont pas accès.
 

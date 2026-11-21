@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -43,7 +44,23 @@ import (
 // the requester (the admin doing the kick); for LeaveWorkspace it's the leaver
 // themselves.
 func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID) (revocationResult, error) {
+	return h.revokeMember(ctx, workspaceID, userID, memberID, archivedBy, nil, "")
+}
+
+// revokeAndDemoteToGuest is revokeAndRemoveMember for a member who becomes a
+// guest (MUL-9420): the same revocation, since a guest runs no agents, holds
+// no seat and sees only its projects, but the member row stays, with the
+// guest role and exactly guestProjects as its projects. fromRole is the role
+// the demotion was decided on: if the member no longer has it when the
+// transaction locks the row, nothing changes and errMemberRoleChanged is
+// returned.
+func (h *Handler) revokeAndDemoteToGuest(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID, guestProjects []pgtype.UUID, fromRole string) (revocationResult, error) {
+	return h.revokeMember(ctx, workspaceID, userID, memberID, archivedBy, guestProjects, fromRole)
+}
+
+func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID, guestProjects []pgtype.UUID, fromRole string) (revocationResult, error) {
 	var empty revocationResult
+	demote := guestProjects != nil
 
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
@@ -64,6 +81,14 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		UserID:      userID,
 	}); err != nil {
 		return empty, err
+	}
+
+	// A demotion re-checks the role under the row lock: a concurrent role
+	// change that committed first wins, and this one is refused.
+	if demote {
+		if _, err := lockMemberRole(ctx, qtx, memberID, fromRole); err != nil {
+			return empty, err
+		}
 	}
 
 	if _, err := qtx.LockRuntimeShareMemberRemoval(ctx, db.LockRuntimeShareMemberRemovalParams{
@@ -273,8 +298,25 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	}
 
 	// No FK cascade (repo rule): a departing member leaves every private
-	// project in the workspace and stops watching every project.
-	if err := qtx.DeleteProjectMembersByUser(ctx, db.DeleteProjectMembersByUserParams{
+	// project in the workspace and stops watching every project. A new guest
+	// keeps its guest projects and the private projects hidden from the
+	// operator (guestProjectsToKeep).
+	if demote {
+		keep, err := guestProjectsToKeep(ctx, qtx, workspaceID, archivedBy, guestProjects)
+		if err != nil {
+			return empty, err
+		}
+		if _, err := qtx.RemoveUserFromProjectsExcept(ctx, db.RemoveUserFromProjectsExceptParams{
+			WorkspaceID: workspaceID, UserID: userID, KeepProjectIds: keep,
+		}); err != nil {
+			return empty, err
+		}
+		if _, err := qtx.AddUserToProjects(ctx, db.AddUserToProjectsParams{
+			WorkspaceID: workspaceID, UserID: userID, ProjectIds: guestProjects, AddedBy: archivedBy,
+		}); err != nil {
+			return empty, err
+		}
+	} else if err := qtx.DeleteProjectMembersByUser(ctx, db.DeleteProjectMembersByUserParams{
 		WorkspaceID: workspaceID, UserID: userID,
 	}); err != nil {
 		return empty, err
@@ -284,7 +326,16 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	}); err != nil {
 		return empty, err
 	}
-	if err := qtx.DeleteMember(ctx, memberID); err != nil {
+	if demote {
+		if _, err := qtx.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: memberID, Role: projectaccess.RoleGuest}); err != nil {
+			return empty, err
+		}
+		// The new guest no longer sees most of what its local search copy
+		// holds; make that copy rebuild.
+		if err := markSearchAccessChanged(ctx, qtx, workspaceID, userID); err != nil {
+			return empty, err
+		}
+	} else if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
 	}
 

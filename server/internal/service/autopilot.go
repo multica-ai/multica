@@ -134,7 +134,7 @@ func (s *AutopilotService) DispatchAutopilot(
 	// dropped.
 	// webhookDeliveryID is invalid here — durable webhook deliveries admit through
 	// AdmitAutopilotWebhookDelivery instead of this entry point.
-	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, pgtype.UUID{}, pgtype.UUID{}, source+":"+newAutopilotIdempotencyKey())
+	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, pgtype.UUID{}, pgtype.UUID{}, source+":"+newAutopilotIdempotencyKey(), meteredRun)
 	return run, err
 }
 
@@ -159,11 +159,23 @@ func (s *AutopilotService) DispatchAutopilotManual(
 	payload []byte,
 	actorUserID pgtype.UUID,
 ) (*db.AutopilotRun, dispatch.ReasonCode, error) {
-	return s.DispatchAutopilotManualWithKey(ctx, autopilot, triggerID, payload, actorUserID, newAutopilotIdempotencyKey())
+	return s.DispatchAutopilotManualWithKey(ctx, autopilot, triggerID, payload, actorUserID, newAutopilotIdempotencyKey(), ManualRunStartedByMember)
 }
 
+// ManualRunStarter is who pressed "run now". A run a member starts directly is
+// not metered against the workspace's autopilot run quota. A run an agent starts
+// on a member's behalf is metered, because an agent can repeat the call with
+// nobody watching.
+type ManualRunStarter int
+
+const (
+	ManualRunStartedByMember ManualRunStarter = iota
+	ManualRunStartedByAgent
+)
+
 // DispatchAutopilotManualWithKey preserves a caller-supplied request key so
-// retrying the same HTTP request cannot reserve or execute twice.
+// retrying the same HTTP request cannot reserve or execute twice, whether or not
+// the run is metered.
 func (s *AutopilotService) DispatchAutopilotManualWithKey(
 	ctx context.Context,
 	autopilot db.Autopilot,
@@ -171,12 +183,17 @@ func (s *AutopilotService) DispatchAutopilotManualWithKey(
 	payload []byte,
 	actorUserID pgtype.UUID,
 	idempotencyKey string,
+	startedBy ManualRunStarter,
 ) (*db.AutopilotRun, dispatch.ReasonCode, error) {
 	// The manual path is the one surface that shows a per-run outcome to a human,
 	// so it returns the typed reason code decided at the admission source. No
 	// webhook delivery on the manual path.
 	key := "manual:" + util.UUIDToString(autopilot.ID) + ":" + idempotencyKey
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, "manual", payload, pgtype.Timestamptz{}, pgtype.UUID{}, actorUserID, key)
+	metering := meteredRun
+	if startedBy == ManualRunStartedByMember {
+		metering = unmeteredRun
+	}
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, "manual", payload, pgtype.Timestamptz{}, pgtype.UUID{}, actorUserID, key, metering)
 }
 
 // AdmitAutopilotWebhookDelivery creates or reuses the idempotent run for a
@@ -535,7 +552,7 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 	// principal (trigger_owner, MUL-6951), and has no human surface for a per-run reason
 	// code, so it is dropped. No webhook delivery on the scheduled-plan path.
 	key := "schedule:" + util.UUIDToString(triggerID) + ":" + plannedAt.UTC().Format(time.RFC3339Nano)
-	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, pgtype.UUID{}, pgtype.UUID{}, key)
+	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, pgtype.UUID{}, pgtype.UUID{}, key, meteredRun)
 	return run, err
 }
 
@@ -589,6 +606,7 @@ func (s *AutopilotService) dispatchAutopilot(
 	webhookDeliveryID pgtype.UUID,
 	actorUserID pgtype.UUID,
 	idempotencyKey string,
+	metering autopilotRunMetering,
 ) (*db.AutopilotRun, dispatch.ReasonCode, error) {
 	if reason, code, skip := s.shouldSkipDispatch(ctx, autopilot, actorUserID, triggerID); skip {
 		run, err := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, reason)
@@ -601,7 +619,11 @@ func (s *AutopilotService) dispatchAutopilot(
 		initialStatus = "running"
 	}
 
-	run, reused, err := s.createAutopilotRunWithQuota(ctx, autopilot.WorkspaceID, source, idempotencyKey, db.CreateAutopilotRunParams{
+	createRun := s.createAutopilotRunWithQuota
+	if metering == unmeteredRun {
+		createRun = s.createUnmeteredAutopilotRun
+	}
+	run, reused, err := createRun(ctx, autopilot.WorkspaceID, source, idempotencyKey, db.CreateAutopilotRunParams{
 		ID:                dbid.NewV7(),
 		AutopilotID:       autopilot.ID,
 		TriggerID:         triggerID,

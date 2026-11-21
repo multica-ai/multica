@@ -887,6 +887,7 @@
       "codex_resume_oversized": "세션이 너무 커서 재개할 수 없음",
       "idle_watchdog": "에이전트가 장시간 응답하지 않아 중지됨",
       "local_directory_error": "로컬 디렉터리 오류",
+      "local_directory_missing": "프로젝트의 로컬 폴더가 더 이상 없음",
       "cancelled": "시스템에서 취소함",
       "agent_error": "에이전트 실행 오류",
       "codex_semantic_inactivity": "Codex 의미 진행 없음 시간 초과",

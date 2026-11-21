@@ -125,6 +125,7 @@
     "hast-util-to-html": "^9.0.5",
     "katex": "catalog:",
     "lowlight": "^3.3.0",
+    "marked": "^17.0.1",
     "mdast-util-from-markdown": "catalog:",
     "mdast-util-gfm-table": "^2.0.0",
     "mdast-util-math": "^3.0.0",

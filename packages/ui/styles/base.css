@@ -524,3 +524,11 @@ html[data-sidebar-resizing="true"] {
   background-color: var(--find-match-active);
   color: var(--find-match-foreground);
 }
+/* Doc discussions (packages/views/docs): the quoted text of each open
+   discussion, and a stronger tint for the one being read. */
+::highlight(doc-comment) {
+  background-color: color-mix(in oklch, var(--warning) 22%, transparent);
+}
+::highlight(doc-comment-active) {
+  background-color: color-mix(in oklch, var(--warning) 42%, transparent);
+}

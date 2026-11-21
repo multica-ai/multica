@@ -70,12 +70,19 @@
     "original_input": "Saisie d'origine",
     "retry_with_context": "Réessayer avec le contexte",
     "edit_advanced": "Modifier en mode avancé",
-    "autopilot_quota_exceeded_body": "Cet espace de travail a atteint sa limite de {{limit}} exécutions d'automatisation pour la période actuelle. Les prochaines exécutions d'automatisation ne démarreront qu'après la réinitialisation du quota {{resetAt}}.",
+    "autopilot_quota_exceeded_body": "Cet espace de travail a atteint sa limite de {{limit}} exécutions d'autopilot pour la période en cours. Les exécutions suivantes ne démarreront pas avant la réinitialisation de l'allocation {{resetAt}}, ou avant que l'espace de travail change de forfait ou achète des exécutions.",
     "project_owner_joined_body": "{{name}}, propriétaire de l’espace de travail, s’est ajouté à ce projet privé et peut désormais voir ses tâches, commentaires et pièces jointes.",
     "open_project": "Ouvrir le projet",
-    "autopilot_quota_upgrade": "Voir les options de mise à niveau",
+    "autopilot_quota_upgrade": "Voir les options",
     "archive": "Archiver",
-    "unarchive": "Désarchiver"
+    "unarchive": "Désarchiver",
+    "open_doc": "Ouvrir le document",
+    "autopilot_quota_upgrade_action": "Changer de forfait",
+    "autopilot_quota_addon_action": "Acheter des exécutions",
+    "autopilot_quota_portal_action": "Gérer la facturation",
+    "autopilot_quota_contact_upgrade": "Demandez à un propriétaire ou administrateur de l'espace de travail de changer de forfait.",
+    "autopilot_quota_contact_addon": "Demandez à un propriétaire ou administrateur de l'espace de travail d'acheter des exécutions.",
+    "autopilot_quota_contact_addon_or_upgrade": "Demandez à un propriétaire ou administrateur de l'espace de travail d'acheter des exécutions ou de changer de forfait."
   },
   "types": {
     "issue_assigned": "Assigné",
@@ -105,7 +112,9 @@
     "app_action_requested": "Confirmation requise",
     "app_action_reminder": "Confirmation bientôt expirée",
     "app_connect_requested": "Connecter une app",
-    "app_action_result": "Résultat d'action d'app"
+    "app_action_result": "Résultat d'action d'app",
+    "doc_comment": "Nouveau commentaire sur un document",
+    "doc_mentioned": "Mentionné dans un document"
   },
   "labels": {
     "set_status_to": "Statut défini sur",

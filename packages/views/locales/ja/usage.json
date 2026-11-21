@@ -10,6 +10,16 @@
     "all_projects": "すべてのプロジェクト",
     "period_label": "期間"
   },
+  "history_limit": {
+    "note": "現在のプランでは直近 {{days}} 日を表示できます。アップグレードするとそれ以前のデータも表示できます。データは削除されません。",
+    "fell_back": "現在のプランで表示できるのは直近 {{days}} 日です。",
+    "view_plans": "プランを見る",
+    "locked": "現在のプランに含まれていません",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
   "kpi": {
     "cost_label": "コスト · {{days}}日",
     "tokens_label": "トークン · {{days}}日",

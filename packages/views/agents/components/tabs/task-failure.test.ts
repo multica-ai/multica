@@ -193,6 +193,17 @@ describe("failureReasonLabel", () => {
     );
   });
 
+  // MUL-9665: a project's linked folder that was deleted used to read as the
+  // generic "Local directory error", which never said the folder was gone.
+  it("names a deleted project folder instead of a generic local directory error", () => {
+    expect(failureReasonLabel("local_directory_missing", enT)).toBe(
+      "Project's local folder no longer exists",
+    );
+    expect(failureReasonLabel("local_directory_missing", fixedT("zh-Hans"))).toBe(
+      "项目的本地文件夹已不存在",
+    );
+  });
+
   it("localizes the legacy user cancellation value retained by the service", () => {
     expect(failureReasonLabel("user_cancelled", enT)).toBe(
       "Cancelled by user",

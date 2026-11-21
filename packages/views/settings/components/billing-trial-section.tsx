@@ -1,6 +1,6 @@
 "use client";
 
-import { Lock, Sparkles } from "@multica/ui/icons";
+import { Eye, Lock, Sparkles } from "@multica/ui/icons";
 import { resolveWorkspaceTrial } from "@multica/core/billing/trial";
 import type { PaidFeature, WorkspaceSubscriptionSummary } from "@multica/core/types";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
@@ -11,10 +11,14 @@ import type { IconComponent } from "@multica/ui/icons";
 import { useLocale, useT } from "../../i18n";
 import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
-const TRIAL_FEATURE_ICONS: Record<PaidFeature, IconComponent> = {
+// The paid features this section describes; not every paid feature has a
+// trial summary.
+type TrialFeature = Extract<PaidFeature, "private_projects" | "guests">;
+const TRIAL_FEATURE_ICONS: Record<TrialFeature, IconComponent> = {
   private_projects: Lock,
+  guests: Eye,
 };
-const TRIAL_FEATURES = Object.keys(TRIAL_FEATURE_ICONS) as PaidFeature[];
+const TRIAL_FEATURES = Object.keys(TRIAL_FEATURE_ICONS) as TrialFeature[];
 
 function formatDate(value: number, locale: string): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(value));

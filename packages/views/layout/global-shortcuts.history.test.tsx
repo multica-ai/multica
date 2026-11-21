@@ -13,7 +13,9 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
 vi.mock("@multica/core/chat", () => ({
   useChatStore: { getState: () => ({ floatingChatEnabled: false }) },
 }));
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => false }));
 vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "w" }),
   useWorkspacePaths: () => ({
     inbox: () => "/w/inbox",
     chat: () => "/w/chat",

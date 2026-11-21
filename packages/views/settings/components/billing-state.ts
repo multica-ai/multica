@@ -24,7 +24,8 @@ export type AutopilotUsageView =
  * Quota admission counts completed and reserved runs. Keep reserved work
  * visible so the progress bar matches the server's blocking decision for a
  * limited workspace. Limit mode and the reached decision are server facts;
- * this helper only prepares presentation values.
+ * this helper only prepares presentation values. Observe never blocks a run,
+ * so the server sends no reached decision and the limit never reads as hit.
  */
 export function resolveAutopilotUsage(
   entitlements: WorkspaceSubscriptionEntitlements,
@@ -36,7 +37,8 @@ export function resolveAutopilotUsage(
   }
 
   if (!failed && usage !== undefined && usage.action !== "off") {
-    const { used, reserved, total, limit, reached, reset_at: resetAt } = usage;
+    const { used, reserved, total, limit, reset_at: resetAt } = usage;
+    const reached = usage.action === "observe" ? false : usage.reached;
     if (
       used !== null &&
       reserved !== null &&

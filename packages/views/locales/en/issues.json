@@ -610,7 +610,8 @@
     "project_directory_path_copied_with_branch": "Project directory path copied — work is on {{branch}}",
     "workdir_path_copy_failed": "Failed to copy workdir path",
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent",
-    "pull_requests_empty_title": "No linked pull requests."
+    "pull_requests_empty_title": "No linked pull requests.",
+    "guest_readonly_note": "Guests can view and comment, but cannot change issue properties."
   },
   "timeline": {
     "loading": "Loading...",
@@ -789,7 +790,9 @@
     "restart_failed": "Couldn't stop the current run. Your message wasn't sent.",
     "reply_action": "Reply",
     "actions_label": "Comment actions",
-    "create_issue_from_selection": "Create sub-issue from selection"
+    "create_issue_from_selection": "Create sub-issue from selection",
+    "guest_placeholder": "Reply… you can @ members",
+    "guest_hint": "Guests cannot @ agents or assign issues to them"
   },
   "reply": {
     "recipients_changed": "Reply target changed. Review the recipients before sending again.",
@@ -1127,11 +1130,10 @@
     "assignee": {
       "trigger_unassigned": "Unassigned",
       "search_placeholder": "Assign to...",
+      "recent_group": "Recent",
       "members_group": "Members",
       "agents_group": "Agents",
-      "squads_group": "Squads",
-      "agent_runtime_required": "Bind a runtime before assigning work to this agent",
-      "squad_runtime_required": "Bind a runtime to this squad's leader before assigning work"
+      "squads_group": "Squads"
     },
     "start_date": {
       "trigger_label": "Start date",

@@ -494,11 +494,14 @@ func TestNormalizeGOOS(t *testing.T) {
 // every other test green while the CLI silently went back to receiving ~800-char
 // signed URLs on every attachment of every list read.
 //
+// The same holds for workspace-guests-v1: without it, guests drop out of the
+// member lists the CLI resolves names from.
+//
 // The exact string is load-bearing: the server matches the token literally
 // (handler.requestHasClientCapability), so it is asserted verbatim rather than
 // through the constant.
 func TestSetHeaders_AdvertisesStableAttachmentURLs(t *testing.T) {
-	const wantCapability = "stable_attachment_urls"
+	const wantCapability = "stable_attachment_urls,workspace-guests-v1"
 
 	// Every verb goes through setHeaders, and an agent's read path is not only
 	// GET (comment add posts, attachment upload multiparts). Cover the shapes

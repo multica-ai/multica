@@ -99,15 +99,39 @@ describe("resolveAutopilotUsage", () => {
         false,
       ),
     ).toEqual({ kind: "unavailable" });
+  });
+
+  it("shows observed usage without ever reading the limit as reached", () => {
     expect(
       resolveAutopilotUsage(
         freeEntitlements,
         {
           ...quotaUsage,
           action: "observe",
-          total: quotaUsage.limit,
+          used: 9,
+          reserved: 0,
+          total: 9,
           reached: null,
         },
+        false,
+      ),
+    ).toEqual({
+      kind: "metered",
+      used: 9,
+      reserved: 0,
+      total: 9,
+      limit: 7,
+      progress: 100,
+      reached: false,
+      resetAt: "2030-02-01T00:00:00Z",
+    });
+  });
+
+  it("treats an enforced usage without a reached decision as unavailable", () => {
+    expect(
+      resolveAutopilotUsage(
+        freeEntitlements,
+        { ...quotaUsage, reached: null },
         false,
       ),
     ).toEqual({ kind: "unavailable" });
@@ -144,7 +168,9 @@ describe("billing subscription state", () => {
         purchaseSeats: false,
         changePlan: false,
         checkPlanChange: false,
+        purchaseAutopilotRuns: false,
       },
+      autopilotAddon: null,
       planChange: null,
       trial: null,
     } satisfies WorkspaceSubscriptionSummary;
@@ -186,7 +212,9 @@ describe("resolvePlanChangeTarget", () => {
       purchaseSeats: true,
       changePlan,
       checkPlanChange: false,
+      purchaseAutopilotRuns: false,
     },
+    autopilotAddon: null,
     planChange: null,
     trial: null,
   });

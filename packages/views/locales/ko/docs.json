@@ -66,5 +66,30 @@
   "unavailable": {
     "title": "문서를 아직 사용할 수 없습니다",
     "description": "이 워크스페이스에서는 문서가 켜져 있지 않습니다."
+  },
+  "comments": {
+    "title": "댓글",
+    "add": "댓글",
+    "open": "미해결 {{count}}",
+    "resolved": "해결됨 {{count}}",
+    "close": "댓글 닫기",
+    "quote_missing": "댓글을 단 텍스트가 변경되었습니다",
+    "reply_placeholder": "답글 또는 @ 멘션…",
+    "new_placeholder": "댓글 입력, @로 멘션…",
+    "submit": "댓글",
+    "reply": "답글",
+    "cancel": "취소",
+    "resolve": "해결",
+    "reopen": "다시 열기",
+    "delete": "댓글 삭제",
+    "resolved_by": "{{name}} 님이 해결함",
+    "replies_other": "답글 {{count}}개",
+    "empty_open": "미해결 댓글이 없습니다. 텍스트를 선택하고 '댓글'을 눌러 시작하세요.",
+    "empty_resolved": "해결된 댓글이 없습니다.",
+    "errors": {
+      "save": "댓글을 게시하지 못했습니다",
+      "delete": "댓글을 삭제하지 못했습니다",
+      "resolve": "토론을 업데이트하지 못했습니다"
+    }
   }
 }

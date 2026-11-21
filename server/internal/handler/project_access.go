@@ -34,7 +34,7 @@ func (h *Handler) hiddenProjects(r *http.Request, workspaceID string) (projectac
 		return projectaccess.ForPrincipals(ctx, h.Queries, wsUUID)
 	}
 	if m, ok := ctxMember(ctx); ok && m.WorkspaceID == wsUUID && m.UserID == userUUID {
-		return projectaccess.ForMember(ctx, h.Queries, wsUUID, userUUID)
+		return projectaccess.ForMember(ctx, h.Queries, m)
 	}
 	return projectaccess.ForPrincipals(ctx, h.Queries, wsUUID, userUUID)
 }
@@ -86,7 +86,8 @@ func (h *Handler) requestHiddenProjects(w http.ResponseWriter, r *http.Request, 
 // message they already use for a missing object: a hidden object must be
 // indistinguishable from one that does not exist, so this never answers 403.
 func (h *Handler) requireProjectVisible(w http.ResponseWriter, r *http.Request, workspaceID string, projectID pgtype.UUID, status int, notFoundMsg string) bool {
-	if !projectID.Valid {
+	// Only a guest is kept from objects outside any project.
+	if m, ok := ctxMember(r.Context()); !projectID.Valid && ok && !projectaccess.IsGuestRole(m.Role) {
 		return true
 	}
 	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
@@ -291,6 +292,15 @@ func (h *Handler) attachmentInHiddenProject(ctx context.Context, hidden projecta
 // issue) in a project the caller cannot see.
 func (h *Handler) requireAttachmentVisible(w http.ResponseWriter, r *http.Request, workspaceID string, att db.Attachment) bool {
 	if !att.IssueID.Valid && !att.CommentID.Valid {
+		// Outside any issue (docs, chat): a guest (MUL-9420) sees nothing
+		// outside its projects, except what it uploaded itself, such as an
+		// image in a comment it has not posted yet.
+		userID := requestUserID(r)
+		ownUpload := att.UploaderType == "member" && uuidToString(att.UploaderID) == userID
+		if !ownUpload && h.isGuest(r, workspaceID, userID) {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return false
+		}
 		return true
 	}
 	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
@@ -398,10 +408,13 @@ func (h *Handler) chatRunProjectID(ctx context.Context, cs db.ChatSession, task 
 }
 
 // hiddenProjectPredicate is the dynamic-SQL twin of the sqlc
-// hidden_project_ids filter: rows outside any project always pass.
+// hidden_project_ids filter: rows outside any project pass unless the set
+// holds projectaccess.NoProject.
 func hiddenProjectPredicate(column, param string) string {
-	return "(" + column + " IS NULL OR NOT (" + column + " = ANY(" + param + "::uuid[])))"
+	return "(NOT (COALESCE(" + column + ", '" + noProjectSQL + "'::uuid) = ANY(" + param + "::uuid[])))"
 }
+
+const noProjectSQL = "00000000-0000-0000-0000-000000000000"
 
 // filterVisibleIssues drops issues in hidden projects from an unpaginated list.
 func filterVisibleIssues(hidden projectaccess.Hidden, issues []db.Issue) []db.Issue {

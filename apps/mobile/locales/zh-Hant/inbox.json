@@ -39,9 +39,11 @@
     "close": "關閉通知",
     "unavailable": "此通知已不可用。",
     "billing_disabled": "該工作區無法修改帳單設定。請聯絡工作區管理員。",
-    "contact_admin": "請讓工作區所有者或管理員檢視帳單選項。",
+    "contact_admin": "請讓工作區所有者或管理員升級方案或加購執行次數。",
     "review_billing": "檢視帳單選項",
-    "review_billing_web": "在網頁端開啟 Multica 檢視帳單選項。"
+    "review_billing_web": "在網頁端開啟 Multica 檢視帳單選項。",
+    "buy_runs": "加購執行次數",
+    "buy_runs_web": "在網頁端開啟 Multica 加購執行次數。"
   },
   "type": {
     "assigned": "已分配",
@@ -55,6 +57,8 @@
     "due_date_changed": "截止日期已更改",
     "new_comment": "新評論",
     "mentioned": "提到了你",
+    "doc_comment": "文件有新評論",
+    "doc_mentioned": "在文件中提到了你",
     "review_requested": "請求審查",
     "task_completed": "執行完成",
     "task_failed": "執行失敗",
@@ -84,8 +88,8 @@
     "app_action_result": "應用操作結果"
   },
   "body": {
-    "autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置。",
-    "autopilot_limit": "該工作區已達到當前週期 {{limit}} 次自動化執行的上限。此執行未啟動。額度將在 {{resetAt}} 重置。",
+    "autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。",
+    "autopilot_limit": "該工作區已達到當前週期 {{limit}} 次自動化執行的上限。此執行未啟動。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。",
     "project_owner_joined": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。"
   },
   "actions.archive_completed": "歸檔已完成項",
@@ -95,5 +99,5 @@
   "type.task_completed": "執行完成",
   "type.task_failed": "執行失敗",
   "type.run_limit_blocked": "已達到上限，本次執行被阻止",
-  "body.autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置。"
+  "body.autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。"
 }

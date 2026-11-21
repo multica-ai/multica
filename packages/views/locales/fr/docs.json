@@ -66,5 +66,31 @@
   "unavailable": {
     "title": "Documents n'est pas disponible",
     "description": "Documents n'est pas activé dans cet espace de travail."
+  },
+  "comments": {
+    "title": "Commentaires",
+    "add": "Commenter",
+    "open": "Ouverts {{count}}",
+    "resolved": "Résolus {{count}}",
+    "close": "Fermer les commentaires",
+    "quote_missing": "Le texte commenté a été modifié",
+    "reply_placeholder": "Répondre, ou mentionner avec @…",
+    "new_placeholder": "Ajouter un commentaire, @ pour mentionner…",
+    "submit": "Commenter",
+    "reply": "Répondre",
+    "cancel": "Annuler",
+    "resolve": "Résoudre",
+    "reopen": "Rouvrir",
+    "delete": "Supprimer le commentaire",
+    "resolved_by": "Résolu par {{name}}",
+    "replies_one": "{{count}} réponse",
+    "replies_other": "{{count}} réponses",
+    "empty_open": "Aucun commentaire ouvert. Sélectionnez du texte et choisissez Commenter pour en lancer un.",
+    "empty_resolved": "Aucun commentaire résolu.",
+    "errors": {
+      "save": "Impossible de publier le commentaire",
+      "delete": "Impossible de supprimer le commentaire",
+      "resolve": "Impossible de mettre à jour la discussion"
+    }
   }
 }

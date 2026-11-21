@@ -168,7 +168,11 @@
       "pinned_settings": "Отображение закреплённых",
       "views_settings": "Отображение видов",
       "views_builtin": "Встроенные виды",
-      "views_show_count": "Счётчики"
+      "views_show_count": "Счётчики",
+      "guest_badge": "Гость",
+      "guest_badge_hint": "Вы можете просматривать и комментировать проекты, которыми с вами поделились.",
+      "involved": "С моим участием",
+      "shared_projects": "Доступные вам"
     },
     "team": {
       "new_agent": "Новый агент",

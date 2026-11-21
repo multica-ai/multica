@@ -39,6 +39,8 @@ var typeGroups = map[string]string{
 	"status_changed":     GroupStatusChanges,
 	"new_comment":        GroupComments,
 	"mentioned":          GroupMentions,
+	"doc_comment":        GroupComments,
+	"doc_mentioned":      GroupMentions,
 	"reaction_added":     GroupReactions,
 	"priority_changed":   GroupUpdates,
 	"start_date_changed": GroupUpdates,

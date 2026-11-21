@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
@@ -160,7 +161,8 @@ func TestClaimTasksWSFirst_HTTPFallbackAfterUncertainCooldown(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	var logs bytes.Buffer
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	var mu sync.Mutex
 	var item *wsOutbound
@@ -237,6 +239,9 @@ func TestClaimTasksWSFirst_HTTPFallbackAfterUncertainCooldown(t *testing.T) {
 	}
 	if wsClaims.Load() != 0 {
 		t.Fatalf("WS claims after uncertain cooldown = %d, want 0", wsClaims.Load())
+	}
+	if !strings.Contains(logs.String(), "http claim after uncertain ws outcome completed") || !strings.Contains(logs.String(), "task_count=1") {
+		t.Fatal("expected the HTTP recovery result and its task count in the debug log")
 	}
 }
 

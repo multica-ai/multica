@@ -187,15 +187,20 @@
     "autopilot_quota_limit": {
       "title": "Cet espace de travail a atteint sa limite d'exécutions d'automatisation",
       "checking_description": "Vérification des actions de facturation disponibles pour cet espace de travail…",
-      "upgrade_description": "Passez à Pro pour rétablir les exécutions d'automatisation.",
+      "upgrade_description": "Passez à Pro pour augmenter la limite mensuelle et reprendre les exécutions d'autopilot, ou attendez la réinitialisation de l'allocation.",
       "portal_description": "Ouvrez le portail de facturation pour gérer l'abonnement de cet espace de travail et rétablir les exécutions d'automatisation.",
-      "contact_description": "Demandez à un propriétaire ou administrateur de l'espace de travail de passer à Pro.",
+      "contact_description": "Demandez à un propriétaire ou administrateur de l'espace de travail de changer de forfait, ou attendez la réinitialisation de l'allocation.",
       "billing_description": "Ouvrez Facturation pour voir les options de mise à niveau disponibles pour cet espace de travail.",
       "billing_unavailable_description": "Impossible de charger les actions de facturation. Ouvrez Facturation pour réessayer.",
       "billing_disabled_description": "Attendez la réinitialisation du quota actuel ou contactez l'administrateur de votre espace de travail.",
       "upgrade_action": "Passer à Pro",
       "portal_action": "Ouvrir le portail de facturation",
-      "billing_action": "Voir la facturation"
+      "billing_action": "Voir la facturation",
+      "addon_description": "Achetez des exécutions pour reprendre les exécutions d'autopilot ce mois-ci, ou attendez la réinitialisation de l'allocation.",
+      "contact_addon_description": "Demandez à un propriétaire ou administrateur de l'espace de travail d'acheter des exécutions, ou attendez la réinitialisation de l'allocation.",
+      "contact_addon_or_upgrade_description": "Demandez à un propriétaire ou administrateur de l'espace de travail d'acheter des exécutions ou de changer de forfait, ou attendez la réinitialisation de l'allocation.",
+      "addon_action": "Acheter des exécutions",
+      "upgrade_business_action": "Passer à Business"
     },
     "toast_link_subissues_all_failed": "Échec de la liaison des sous-tâches",
     "toast_link_subissues_partial": "Échec de la liaison de {{failed}} sous-tâches sur {{total}}",

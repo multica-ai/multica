@@ -18,7 +18,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
-  propertyListOptions,
+  propertyUsageListOptions,
   useCreateProperty,
   useUpdateProperty,
 } from "@multica/core/properties";
@@ -127,7 +127,7 @@ export function PropertiesTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
 
-  const { data: properties = [], isLoading } = useQuery(propertyListOptions(wsId, true));
+  const { data: properties = [], isLoading } = useQuery(propertyUsageListOptions(wsId));
   const update = useUpdateProperty();
 
   const activeCount = useMemo(

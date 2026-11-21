@@ -105,6 +105,7 @@ Les motifs d'échec affichés dans le journal d'exécution et dans les [Statisti
 | `queued_expired` | Le runtime a cessé d'envoyer des signaux de vie pendant plus longtemps que le délai de grâce de reconnexion, et l'exécution était aussi en file d'attente depuis aussi longtemps | Vérifiez que le runtime est en ligne, puis relancez |
 | `runtime_recovery` | Le daemon a récupéré une exécution interrompue après son redémarrage | Relancez directement |
 | `environment_prepare_failed` | Le daemon n'a pas pu préparer l'environnement d'exécution — son répertoire de travail, ou la configuration locale du runtime qui y est écrite | Lisez l'erreur brute pour savoir quelle étape a échoué, puis vérifiez cette machine : espace disque, permissions, répertoire encore utilisé, ou configuration locale de l'outil de codage IA |
+| `local_directory_missing` | Le dossier local lié au projet n'existe plus sur l'ordinateur qui exécute l'agent — il a été supprimé ou déplacé après avoir été lié | Restaurez le dossier au même chemin, puis réessayez. Pour utiliser un nouvel emplacement, retirez l'ancien dossier dans **Ressources → Dossiers locaux** et liez le nouveau depuis l'application de bureau sur cet ordinateur — les navigateurs ne peuvent pas sélectionner de dossiers ; voir [Ressources du projet](/project-resources) |
 | `cancelled` | Arrêtée manuellement, ou annulée avec un archivage ou une suppression | Rien à faire |
 | `timeout` | Dépassement de la limite de durée d'exécution configurée pour le daemon | Réduisez le périmètre de la tâche, ou ajustez `agent_timeout` du daemon |
 | `iteration_limit` | Plafond d'itérations d'une exécution atteint | Réduisez le périmètre de la tâche |
@@ -120,8 +121,8 @@ Le préfixe `agent_error.` est omis dans ce tableau.
 | Motif | Signification | Que faire |
 | --- | --- | --- |
 | `provider_auth_or_access` | Échec d'authentification ou accès refusé par le fournisseur du modèle (401/403) | Reconnectez-vous dans cet outil de codage IA, ou vérifiez la clé API |
-| `provider_quota_limit` | Quota ou solde épuisé (402) | Rechargez le compte ou changez de compte |
-| `provider_capacity_or_rate_limit` | Limite de débit atteinte ou capacité insuffisante (429/529) | Réessayez plus tard |
+| `provider_quota_limit` | Quota ou solde épuisé | Rechargez le compte ou changez de compte |
+| `provider_capacity_or_rate_limit` | Limite de débit atteinte ou capacité insuffisante | Réessayez plus tard |
 | `provider_server_error` | Erreur serveur du fournisseur du modèle (5xx) | Réessayez plus tard |
 | `provider_network` | Échec réseau lors de la connexion au fournisseur du modèle | Relance automatique ; vérifiez le réseau de la machine d'exécution si le problème persiste |
 | `model_not_found_or_unavailable` | Le modèle n'existe pas ou est actuellement indisponible | Choisissez un modèle disponible dans les paramètres de l'agent |

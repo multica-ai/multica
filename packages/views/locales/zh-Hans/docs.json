@@ -66,5 +66,30 @@
   "unavailable": {
     "title": "知识库暂未开放",
     "description": "当前工作区尚未开启知识库。"
+  },
+  "comments": {
+    "title": "评论",
+    "add": "评论",
+    "open": "未解决 {{count}}",
+    "resolved": "已解决 {{count}}",
+    "close": "关闭评论",
+    "quote_missing": "原文已修改，找不到划线位置",
+    "reply_placeholder": "回复，或 @ 某人…",
+    "new_placeholder": "写下评论，@ 提及某人…",
+    "submit": "评论",
+    "reply": "回复",
+    "cancel": "取消",
+    "resolve": "解决",
+    "reopen": "重新打开",
+    "delete": "删除评论",
+    "resolved_by": "{{name}} 已解决",
+    "replies_other": "{{count}} 条回复",
+    "empty_open": "没有未解决的评论。选中文字后点「评论」即可发起。",
+    "empty_resolved": "没有已解决的评论。",
+    "errors": {
+      "save": "评论发送失败",
+      "delete": "评论删除失败",
+      "resolve": "无法更新讨论"
+    }
   }
 }

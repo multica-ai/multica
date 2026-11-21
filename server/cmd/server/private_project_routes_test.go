@@ -110,6 +110,7 @@ var routeParamsOutsideProjects = map[string]outsideProjectParam{
 	"project-folders/{id}":           {why: "a workspace folder of projects"},
 	"docs/{id}":                      {why: "a workspace doc"},
 	"doc-folders/{id}":               {why: "a workspace folder of docs"},
+	"comments/{docCommentId}":        {why: "a discussion on a workspace doc"},
 	"versions/{number}":              {why: "a version of a workspace doc; the run that wrote it is recorded by id only"},
 	"metadata/{key}":                 {why: "a metadata key", value: func(*privateRouteFixture) string { return "route-probe" }},
 	"system-wakeups/{rule}":          {why: "a system wakeup rule name", value: func(*privateRouteFixture) string { return "child_done" }},

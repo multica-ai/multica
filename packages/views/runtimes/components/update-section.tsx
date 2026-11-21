@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   Loader2,
   CheckCircle2,
@@ -6,10 +6,11 @@ import {
   ArrowUpCircle,
   Check,
   Lock,
+  Clock,
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
-import { api } from "@multica/core/api";
-import type { RuntimeUpdateStatus } from "@multica/core/types";
+import { api, ApiError } from "@multica/core/api";
+import type { RuntimeUpdate, RuntimeUpdateStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
 
 const GITHUB_RELEASES_URL =
@@ -80,16 +81,41 @@ function isNewer(latest: string, current: string): boolean {
   return false;
 }
 
-const statusConfig: Record<
-  RuntimeUpdateStatus,
-  { icon: typeof Loader2; color: string }
-> = {
+type ShownStatus = "pending" | "scheduled" | "running" | "completed" | "failed" | "timeout";
+
+const statusConfig: Record<ShownStatus, { icon: typeof Loader2; color: string }> = {
   pending: { icon: Loader2, color: "text-muted-foreground" },
+  scheduled: { icon: Clock, color: "text-muted-foreground" },
   running: { icon: Loader2, color: "text-info" },
   completed: { icon: CheckCircle2, color: "text-success" },
   failed: { icon: XCircle, color: "text-destructive" },
   timeout: { icon: XCircle, color: "text-warning" },
 };
+
+const UNFINISHED: ReadonlySet<RuntimeUpdateStatus> = new Set(["pending", "scheduled", "running"]);
+
+type Note = "expired" | "busy" | "another_update" | "cancel_failed" | "cancel_conflict" | "initiate_failed";
+
+/**
+ * A failure that is not the machine's fault — it was busy (a daemon that
+ * cannot queue) or already has an update — reads as a neutral note.
+ */
+function neutralFailure(update: RuntimeUpdate): Note | null {
+  if (update.status === "expired") return "expired";
+  if (update.status !== "failed") return null;
+  const error = update.error ?? "";
+  if (error.includes("agent work is starting or still active")) return "busy";
+  if (error.includes("already queued or in progress") || error.includes("already in progress")) {
+    return "another_update";
+  }
+  return null;
+}
+
+function sameReleaseVersion(a: string, b: string): boolean {
+  const pa = parseReleaseVersion(a);
+  const pb = parseReleaseVersion(b);
+  return !!pa && !!pb && pa.every((part, i) => part === pb[i]);
+}
 
 interface UpdateSectionProps {
   /** Null for a read-only viewer who cannot use a runtime as the command channel. */
@@ -114,87 +140,107 @@ export function UpdateSection({
   const { t } = useT("runtimes");
   const isManaged = launchedBy === "desktop";
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
-  const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
-  const [error, setError] = useState("");
-  const [output, setOutput] = useState("");
-  const [updating, setUpdating] = useState(false);
-  const [targetVersion, setTargetVersion] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const cleanup = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => cleanup, [cleanup]);
+  // The machine's update as the server last reported it.
+  const [update, setUpdate] = useState<RuntimeUpdate | null>(null);
+  const [note, setNote] = useState<Note | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   // Fetch latest version on mount.
   useEffect(() => {
     fetchLatestVersion().then(setLatestVersion);
   }, []);
 
-  const markCompleted = useCallback(
-    (message: string) => {
-      setStatus("completed");
-      setOutput(message);
-      setUpdating(false);
-      setTargetVersion(null);
-      cleanup();
-      // Auto-clear status after a few seconds so the UI refreshes to show the
-      // new version from the re-fetched runtime data.
-      setTimeout(() => setStatus(null), 5000);
-    },
-    [cleanup],
-  );
-
+  // A reload, or another runtime of the same daemon, picks up the queue.
+  // Switching machines replaces whatever the previous one showed.
   useEffect(() => {
-    if (!updating || !targetVersion || !currentVersion) return;
-    if (!isNewer(targetVersion, currentVersion)) {
-      markCompleted(`Updated to ${targetVersion}`);
-    }
-  }, [currentVersion, markCompleted, targetVersion, updating]);
+    setUpdate(null);
+    setNote(null);
+    if (!runtimeId) return;
+    let stale = false;
+    api
+      .getActiveUpdate(runtimeId)
+      .then((active) => {
+        // Keep an update this page started while the lookup was in flight.
+        if (!stale) setUpdate((prev) => active ?? prev);
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [runtimeId]);
 
-  const handleUpdate = async () => {
-    if (!latestVersion || !runtimeId) return;
-    cleanup();
-    setUpdating(true);
-    setTargetVersion(latestVersion);
-    setStatus("pending");
-    setError("");
-    setOutput("");
-
-    try {
-      const update = await api.initiateUpdate(runtimeId, latestVersion);
-
-      pollRef.current = setInterval(async () => {
+  const updateId = update?.id ?? null;
+  const polling = !!update && UNFINISHED.has(update.status);
+  const queued = update?.status === "scheduled";
+  useEffect(() => {
+    if (!runtimeId || !updateId || !polling) return;
+    const timer = setInterval(
+      async () => {
         try {
-          const result = await api.getUpdateResult(runtimeId, update.id);
-          setStatus(result.status as RuntimeUpdateStatus);
-
-          if (result.status === "completed") {
-            markCompleted(
-              result.output ?? `Updated to ${targetVersion ?? latestVersion}`,
-            );
-          } else if (
-            result.status === "failed" ||
-            result.status === "timeout"
-          ) {
-            setError(result.error ?? t(($) => $.update.unknown_error));
-            setUpdating(false);
-            setTargetVersion(null);
-            cleanup();
-          }
+          const next = await api.getUpdateResult(runtimeId, updateId);
+          setUpdate((prev) => (prev?.id === next.id ? next : prev));
         } catch {
           // ignore poll errors
         }
-      }, 2000);
-    } catch {
-      setStatus("failed");
-      setError(t(($) => $.update.initiate_failed));
-      setUpdating(false);
-      setTargetVersion(null);
+      },
+      queued ? 10_000 : 2_000,
+    );
+    return () => clearInterval(timer);
+  }, [runtimeId, updateId, polling, queued]);
+
+  // The daemon restarts right after installing, often before its report
+  // lands; the runtime reporting the target version is proof enough. Only an
+  // exact match counts: a CLI request may target an older version.
+  useEffect(() => {
+    if (update?.status !== "running" || !currentVersion) return;
+    if (sameReleaseVersion(update.target_version, currentVersion)) {
+      setUpdate({ ...update, status: "completed", output: `Updated to ${update.target_version}` });
+    }
+  }, [currentVersion, update]);
+
+  // Let the re-fetched runtime show the new version after a moment.
+  useEffect(() => {
+    if (update?.status !== "completed") return;
+    const timer = setTimeout(() => setUpdate(null), 5000);
+    return () => clearTimeout(timer);
+  }, [update?.status]);
+
+  const handleUpdate = async () => {
+    if (!latestVersion || !runtimeId) return;
+    setSubmitting(true);
+    setNote(null);
+    try {
+      setUpdate(await api.initiateUpdate(runtimeId, latestVersion));
+    } catch (err) {
+      // 409: the machine already has an update (e.g. from another tab); show it.
+      const active =
+        err instanceof ApiError && err.status === 409
+          ? await api.getActiveUpdate(runtimeId).catch(() => null)
+          : null;
+      setUpdate(active);
+      if (!active) setNote("initiate_failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!runtimeId || !update) return;
+    setCancelling(true);
+    setNote(null);
+    try {
+      const cancelled = await api.cancelUpdate(runtimeId, update.id);
+      setUpdate(cancelled.status === "cancelled" ? null : cancelled);
+    } catch (err) {
+      const conflict = err instanceof ApiError && err.status === 409;
+      const latest = await api.getUpdateResult(runtimeId, update.id).catch(() => null);
+      if (latest) setUpdate(latest.status === "cancelled" ? null : latest);
+      // A 409 means it started or ended meanwhile; only a start needs saying.
+      if (!conflict) setNote("cancel_failed");
+      else if (latest?.status === "running") setNote("cancel_conflict");
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -210,6 +256,13 @@ export function UpdateSection({
   const isLocalBuild =
     !!currentVersion && parseReleaseVersion(currentVersion) === null;
 
+  // Cancelled, expired, and neutral failures leave the card idle with a note.
+  const neutral = update ? neutralFailure(update) : null;
+  const status: ShownStatus | null =
+    update && !neutral && update.status in statusConfig
+      ? (update.status as ShownStatus)
+      : null;
+  const shownNote = note ?? neutral;
   const config = status ? statusConfig[status] : null;
   const Icon = config?.icon;
   const isActive = status === "pending" || status === "running";
@@ -276,7 +329,7 @@ export function UpdateSection({
                 variant="outline"
                 size="xs"
                 onClick={handleUpdate}
-                disabled={updating}
+                disabled={submitting}
               >
                 <ArrowUpCircle className="h-3 w-3" />
                 {t(($) => $.update.action)}
@@ -291,19 +344,39 @@ export function UpdateSection({
           >
             <Icon className={`h-3 w-3 ${isActive ? "animate-spin" : ""}`} />
             {t(($) => $.update.status[status])}
+            {status === "scheduled" && update?.target_version && (
+              <span className="font-mono">→ {update.target_version}</span>
+            )}
           </span>
+        )}
+
+        {update?.cancellable && UNFINISHED.has(update.status) && runtimeId && (
+          <Button variant="ghost" size="xs" onClick={handleCancel} disabled={cancelling}>
+            {t(($) => $.update.cancel)}
+          </Button>
         )}
       </div>
 
-      {status === "completed" && output && (
+      {status === "scheduled" && (
+        <p className="text-caption text-muted-foreground">
+          {update?.active_tasks
+            ? `${t(($) => $.update.scheduled_tasks, { running: update.active_tasks })} · `
+            : ""}
+          {t(($) => $.update.note_no_interrupt)}
+        </p>
+      )}
+
+      {status === "completed" && update?.output && (
         <div className="rounded-lg border bg-success/5 px-3 py-2">
-          <p className="text-caption text-success">{output}</p>
+          <p className="text-caption text-success">{update.output}</p>
         </div>
       )}
 
-      {(status === "failed" || status === "timeout") && error && (
+      {(status === "failed" || status === "timeout") && (
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
-          <p className="text-caption text-destructive">{error}</p>
+          <p className="text-caption text-destructive">
+            {update?.error || t(($) => $.update.unknown_error)}
+          </p>
           {status === "failed" && (
             <Button
               variant="ghost"
@@ -315,6 +388,23 @@ export function UpdateSection({
             </Button>
           )}
         </div>
+      )}
+
+      {shownNote && (
+        <p
+          className={`text-caption ${shownNote === "initiate_failed" ? "text-destructive" : "text-muted-foreground"}`}
+        >
+          {
+            {
+              expired: t(($) => $.update.expired_note),
+              busy: t(($) => $.update.busy_note),
+              another_update: t(($) => $.update.another_update_note),
+              cancel_failed: t(($) => $.update.cancel_failed),
+              cancel_conflict: t(($) => $.update.cancel_conflict),
+              initiate_failed: t(($) => $.update.initiate_failed),
+            }[shownNote]
+          }
+        </p>
       )}
     </div>
   );
