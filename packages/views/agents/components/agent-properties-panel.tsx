@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Globe, Lock, Settings2, Users } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import type {
   Agent,
   AgentRuntime,
-  AgentRuntimeConfigSummary,
   MemberWithUser,
 } from "@multica/core/types";
 import {
@@ -18,6 +17,7 @@ import {
   useWorkspaceActivityMap,
 } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { providerDisplayName } from "@multica/core/runtimes";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ObjectPanelSection, ObjectProperty } from "../../layout/object-page";
@@ -71,12 +71,6 @@ export function AgentPropertiesPanel({
   onOpenSettings: () => void;
 }) {
   const qc = useQueryClient();
-  // The last saved personal config. The saved response is authoritative
-  // immediately; the agent-list payload the props come from only catches up
-  // after the invalidated query refetches, so consecutive edits must merge
-  // against this override or a cleared field (e.g. thinking) gets written
-  // back from stale values.
-  const [savedSummary, setSavedSummary] = useState<AgentRuntimeConfigSummary | null>(null);
   const { t } = useT("agents");
   const { t: tl } = useT("layout");
   const { t: tr } = useT("runtimes");
@@ -99,11 +93,17 @@ export function AgentPropertiesPanel({
     runtimes,
     currentUserId,
     update,
-    configOverride: savedSummary,
-    // The saved response updates the override immediately; the invalidated
-    // agent query refreshes the rest of the payload in the background.
+    // The saved response is authoritative immediately: patch the shared
+    // agents cache (exactly what the Settings section does) so this panel
+    // and the Settings entry point never merge against stale values.
     onSaved: (summary) => {
-      setSavedSummary(summary);
+      qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (old) =>
+        old?.map((a) =>
+          a.id === agent.id
+            ? ({ ...a, runtime_config_summary: summary } as Agent)
+            : a,
+        ),
+      );
       void qc.invalidateQueries({ queryKey: ["agents"] });
     },
   });
@@ -111,7 +111,7 @@ export function AgentPropertiesPanel({
   // Smart agents carry no template runtime/model: display what the viewer's
   // personal configuration resolves to (the pickers above write to it too).
   const isSmart = agent.share_runtime === false;
-  const currentConfig = savedSummary?.current ?? agent.runtime_config_summary?.current ?? null;
+  const currentConfig = agent.runtime_config_summary?.current ?? null;
   const effectiveRuntimeId =
     (isSmart ? currentConfig?.runtime_id : agent.runtime_id) ?? "";
   const displayModel = isSmart && currentConfig?.model ? currentConfig.model : agent.model;
