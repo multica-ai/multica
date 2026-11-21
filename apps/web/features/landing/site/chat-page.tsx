@@ -20,7 +20,7 @@ export function ChatPage() {
         <Commands />
         <Platforms />
         <Access />
-        <CtaBand title="Bring an agent into your team chat" lead="Bind an agent to a Bot and say hello from Slack, Feishu, DingTalk, WeCom, or Telegram." />
+        <CtaBand title="Bring an agent into your team chat" lead="Connect an agent to a bot and say hello from Slack, Lark, DingTalk, WeCom, Telegram, or WeChat." />
       </div>
     </SitePage>
   );
@@ -40,7 +40,7 @@ function Hero() {
       eyebrow="Chat integrations"
       title="Your agents, in your team chat."
       subtitle="No need to open Multica."
-      lead="Bind an agent to a Bot in Slack, Feishu, DingTalk, WeCom, or Telegram. Message it directly, mention it in a group, or turn a message into an issue."
+      lead="Connect an agent to a bot in Slack, Lark, DingTalk, WeCom, Telegram, or WeChat. Message it directly, mention it in a group, or turn a message into an issue."
       actions={
         <>
           <ActionLink href={ctaHref} size="lg">

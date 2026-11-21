@@ -9,50 +9,49 @@ export function createZhDict(): LandingDict {
     label: "\u5e38\u89c1\u95ee\u9898",
     headline: "\u95ee\u4e0e\u7b54\u3002",
     items: [
-      { question: "可以在微信里与智能体聊天吗？", answer: "可以。工作区管理员在智能体的「集成」页签中用自己的微信扫码连接，扫码账号的私聊消息会按该管理员的工作区权限执行，回复和支持的附件会返回同一会话。暂不支持群聊；自托管服务需先启用微信集成。" },
+      { question: "可以在微信里与智能体聊天吗？", answer: "可以。打开你拥有的智能体，在「消息渠道」中选择「添加消息渠道」→「微信」，用你自己的微信扫码连接。扫码账号的私聊消息会按你的工作区权限执行，回复和支持的附件会返回同一对话。暂不支持群聊；自托管服务需先启用微信集成。" },
       {
-        question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
+        question: "Multica 支持哪些编码智能体？",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 29 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Devin CLI\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Muse Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw、ZCode\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002因为源码公开，你也可以自己添加后端。 自托管部署还可以使用 Qoder PAT 和 Qoder Cloud Agents 中已有的智能体，将 Qoder Cloud Agents 配置为执行任务的托管远端运行时。",
+          "Multica 开箱即用支持 29 款 AI 编程工具：Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw、ZCode。守护进程会自动检测本机已安装的 CLI 并为每款注册一个运行时。因为源码公开，你也可以自己添加后端。自托管部署还可以使用 Qoder PAT 和 Qoder Cloud Agents 中已有的智能体，将 Qoder Cloud Agents 配置为执行任务的托管远程运行时。",
       },
       {
-        question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
+        question: "需要自托管吗，还是有云版本？",
         answer:
-          "\u4e24\u8005\u90fd\u6709\u3002\u4f60\u53ef\u4ee5\u7528 Docker Compose \u6216 Kubernetes \u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u81ea\u6258\u7ba1 Multica\uff0c\u4e5f\u53ef\u4ee5\u4f7f\u7528\u6211\u4eec\u7684\u6258\u7ba1\u4e91\u7248\u672c\u3002你的数据，你选择。",
+          "两者都有。你可以用 Docker Compose 或 Kubernetes 在自己的基础设施上自托管 Multica，也可以使用我们的托管云版本。你的数据，你选择。",
       },
       {
         question: "可以商用吗？",
         answer:
-          "可以。在你自己的组织内部使用 Multica 是免费的，包括为整个团队自托管。只有两种情况需要商业授权：把 Multica 提供给组织外部的人使用（比如作为托管服务或代运维服务），或者把它嵌入你销售或分发的产品中。常见场景见[授权说明](/licensing)。",
+          "可以。在你自己的组织内部使用 Multica 是免费的，包括为整个团队自托管。只有两种情况需要商业授权：把 Multica 提供给组织外部的人使用（比如作为托管服务或代运维服务），或者把它嵌入你销售或分发的产品中。常见场景见[许可协议](/licensing)。",
       },
       {
-        question:
-          "\u8fd9\u548c\u76f4\u63a5\u7528\u7f16\u7801 智能体 \u6709\u4ec0\u4e48\u533a\u522b\uff1f",
+        question: "这和直接用编码智能体有什么区别？",
         answer:
-          "\u7f16\u7801 智能体 \u64c5\u957f\u6267\u884c\u3002Multica \u6dfb\u52a0\u7684\u662f\u7ba1\u7406\u5c42\uff1a\u4efb\u52a1\u961f\u5217\u3001\u56e2\u961f\u534f\u4f5c\u3001\u6280\u80fd\u590d\u7528\u3001\u8fd0\u884c\u65f6\u76d1\u63a7\uff0c\u4ee5\u53ca\u6bcf\u4e2a 智能体 \u5728\u505a\u4ec0\u4e48\u7684\u7edf\u4e00\u89c6\u56fe\u3002\u628a\u5b83\u60f3\u8c61\u6210\u4f60\u7684 智能体 \u7684\u9879\u76ee\u7ecf\u7406\u3002",
+          "编码智能体擅长执行。Multica 添加的是管理层：任务队列、团队协作、技能复用、运行时监控，以及每个智能体在做什么的统一视图。把它想象成你的智能体的项目经理。",
       },
       {
-        question: "智能体 \u80fd\u81ea\u4e3b\u5904\u7406\u957f\u65f6\u95f4\u4efb\u52a1\u5417\uff1f",
+        question: "智能体能自主处理长时间任务吗？",
         answer:
-          "\u53ef\u4ee5\u3002Multica \u7ba1\u7406\u5b8c\u6574\u7684\u4efb\u52a1\u751f\u547d\u5468\u671f\u2014\u2014\u5165\u961f\u3001\u9886\u53d6\u3001\u6267\u884c\u3001\u5b8c\u6210\u6216\u5931\u8d25\u3002智能体 \u4e3b\u52a8\u62a5\u544a\u963b\u585e\u5e76\u5b9e\u65f6\u63a8\u9001\u8fdb\u5ea6\u3002\u4f60\u53ef\u4ee5\u968f\u65f6\u67e5\u770b\uff0c\u4e5f\u53ef\u4ee5\u8ba9\u5b83\u4eec\u8fd0\u884c\u6574\u665a\u3002",
+          "可以。Multica 管理完整的任务生命周期——入队、领取、执行、完成或失败。智能体主动报告阻塞并实时推送进度。你可以随时查看，也可以让它们运行整晚。",
       },
       {
-        question: "\u6211\u7684\u4ee3\u7801\u5b89\u5168\u5417\uff1f智能体 \u5728\u54ea\u91cc\u6267\u884c\uff1f",
+        question: "我的代码安全吗？智能体在哪里执行？",
         answer:
-          "智能体在你的机器（通过本地守护进程）或你连接的运行时上运行，直接在你的代码仓库里工作。工作区里的内容——任务、评论、聊天消息、附件，以及智能体上报的进度——由 Multica 存储；智能体所用的编码工具会把提示词和代码发送给你配置的模型服务商。想让工作区数据留在自己的服务器上，可以自托管 Multica。详见[隐私政策](/privacy)。",
+          "智能体在你的机器（通过本地守护进程）或你连接的运行时上运行，直接在你的代码仓库里工作。工作区里的内容——任务、评论、聊天消息、附件，以及智能体上报的进度——由 Multica 存储；智能体所用的编码工具会把提示词和代码发送给你配置的模型提供方。想让工作区数据留在自己的服务器上，可以自托管 Multica。详见[隐私政策](/privacy)。",
       },
       {
-        question: "\u6211\u53ef\u4ee5\u8fd0\u884c\u591a\u5c11\u4e2a 智能体\uff1f",
+        question: "我可以运行多少个智能体？",
         answer:
-          "\u53d6\u51b3\u4e8e\u4f60\u7684\u786c\u4ef6\u3002\u6bcf\u4e2a 智能体 \u6709\u53ef\u914d\u7f6e\u7684\u5e76\u53d1\u9650\u5236\uff0c\u4f60\u53ef\u4ee5\u8fde\u63a5\u591a\u53f0\u673a\u5668\u4f5c\u4e3a\u8fd0\u884c\u65f6\u3002自托管时没有任何人为限制。",
+          "取决于你的硬件。每个智能体有可配置的并发限制，你可以连接多台机器作为运行时。自托管时没有任何人为限制。",
       },
     ],
   },
 
   about: {
-    title: "\u5173\u4e8e Multica",
+    title: "关于 Multica",
     nameLine: {
-      prefix: "Multica\u2014\u2014",
+      prefix: "Multica——",
       mult: "Mult",
       iplexed: "iplexed ",
       i: "I",
@@ -60,25 +59,25 @@ export function createZhDict(): LandingDict {
       c: "C",
       omputing: "omputing ",
       a: "A",
-      gent: "gent\u3002",
+      gent: "gent。",
     },
     paragraphs: [
-      "\u8fd9\u4e2a\u540d\u5b57\u662f\u5728\u5411 20 \u4e16\u7eaa 60 \u5e74\u4ee3\u5177\u6709\u5f00\u521b\u610f\u4e49\u7684\u64cd\u4f5c\u7cfb\u7edf Multics \u81f4\u610f\u3002Multics \u9996\u521b\u4e86\u5206\u65f6\u7cfb\u7edf\uff0c\u8ba9\u591a\u4e2a\u7528\u6237\u80fd\u591f\u5171\u4eab\u540c\u4e00\u53f0\u673a\u5668\uff0c\u540c\u65f6\u53c8\u50cf\u5404\u81ea\u72ec\u5360\u5b83\u4e00\u6837\u4f7f\u7528\u3002Unix \u5219\u662f\u5728\u6709\u610f\u7b80\u5316 Multics \u7684\u57fa\u7840\u4e0a\u8bde\u751f\u7684\uff0c\u5f3a\u8c03\u4e00\u4e2a\u7528\u6237\u3001\u4e00\u4e2a\u4efb\u52a1\u3001\u4e00\u79cd\u4f18\u96c5\u7684\u54f2\u5b66\u3002",
-      "\u6211\u4eec\u8ba4\u4e3a\uff0c\u7c7b\u4f3c\u7684\u8f6c\u6298\u70b9\u6b63\u5728\u518d\u6b21\u51fa\u73b0\u3002\u51e0\u5341\u5e74\u6765\uff0c\u8f6f\u4ef6\u56e2\u961f\u4e00\u76f4\u5904\u4e8e\u4e00\u79cd\u5355\u7ebf\u7a0b\u7684\u5de5\u4f5c\u6a21\u5f0f\uff0c\u4e00\u4e2a\u5de5\u7a0b\u5e08\u5904\u7406\u4e00\u4e2a\u4efb\u52a1\uff0c\u4e00\u6b21\u53ea\u4e13\u6ce8\u4e8e\u4e00\u4e2a\u4e0a\u4e0b\u6587\u3002AI agents \u6539\u53d8\u4e86\u8fd9\u4e2a\u7b49\u5f0f\u3002Multica \u5c06\u201c\u5206\u65f6\u201d\u91cd\u65b0\u5e26\u56de\u8fd9\u4e2a\u65f6\u4ee3\uff0c\u53ea\u4e0d\u8fc7\u4eca\u5929\u5728\u7cfb\u7edf\u4e2d\u8fdb\u884c\u591a\u8def\u590d\u7528\u7684\u201c\u7528\u6237\u201d\uff0c\u65e2\u5305\u62ec\u4eba\u7c7b\uff0c\u4e5f\u5305\u62ec\u81ea\u4e3b\u4ee3\u7406\u3002",
-      "在 Multica 中，agents 是一级团队成员。它们会被分配任务，汇报进展，提出阻塞，并交付代码，就像人类同事一样。任务分配、活动时间线、task 生命周期，以及运行时基础设施，Multica 从第一天起就是围绕这一理念构建的。",
-      "\u548c\u5f53\u5e74\u7684 Multics \u4e00\u6837\uff0c\u8fd9\u4e00\u5224\u65ad\u5efa\u7acb\u5728\u201c\u591a\u8def\u590d\u7528\u201d\u4e4b\u4e0a\u3002\u4e00\u4e2a\u5c0f\u56e2\u961f\u4e0d\u8be5\u56e0\u4e3a\u4eba\u6570\u5c11\u5c31\u663e\u5f97\u80fd\u529b\u6709\u9650\u3002\u6709\u4e86\u5408\u9002\u7684\u7cfb\u7edf\uff0c\u4e24\u540d\u5de5\u7a0b\u5e08\u52a0\u4e0a\u4e00\u7ec4 agents\uff0c\u5c31\u80fd\u53d1\u6325\u51fa\u4e8c\u5341\u4eba\u56e2\u961f\u7684\u63a8\u8fdb\u901f\u5ea6\u3002",
-      "Multica 的源代码公开，并且可以免费自托管，工作区数据始终保存在你自己的基础设施中。\u4f60\u53ef\u4ee5\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6269\u5c55 API\uff0c\u63a5\u5165\u81ea\u5df1\u7684 LLM providers\uff0c\u4e5f\u53ef\u4ee5\u5411\u793e\u533a\u8d21\u732e\u4ee3\u7801\u3002",
+      "这个名字是在向 20 世纪 60 年代具有开创意义的操作系统 Multics 致敬。Multics 首创了分时系统，让多个用户能够共享同一台机器，同时又像各自独占它一样使用。Unix 则是在有意简化 Multics 的基础上诞生的，强调一个用户、一个任务、一种优雅的哲学。",
+      "我们认为，类似的转折点正在再次出现。几十年来，软件团队一直处于一种单线程的工作模式，一个工程师处理一个任务，一次只专注于一个上下文。AI 智能体改变了这个等式。Multica 将「分时」重新带回这个时代，只不过今天在系统中进行多路复用的「用户」，既包括人类，也包括自主智能体。",
+      "在 Multica 中，智能体是一级团队成员。它们会被指派任务，汇报进展，提出阻塞，并交付代码，就像人类同事一样。任务指派、活动时间线、任务生命周期，以及运行时基础设施，Multica 从第一天起就是围绕这一理念构建的。",
+      "和当年的 Multics 一样，这一判断建立在「多路复用」之上。一个小团队不该因为人数少就显得能力有限。有了合适的系统，两名工程师加上一组智能体，就能发挥出二十人团队的推进速度。",
+      "Multica 的源代码公开，并且可以免费自托管，工作区数据始终保存在你自己的基础设施中。你可以审查每一行代码，扩展 API，接入自己的模型提供方，也可以向社区贡献代码。",
     ],
     cta: "在 GitHub 上查看",
     team: {
       title: "Multica 背后的团队",
       paragraphs: [
         "Multica 由一支从 2021 年起就一起工作的小团队打造。在 Multica 之前，我们做过面向开发者的 AI 搜索引擎 devv.ai。2025 年，我们开始解决自己反复遇到的问题：一个小团队到底该怎样和 AI 智能体一起把事情做完。这就是 Multica。",
-        "Multica 的源代码公开，也可以自托管：在基于它构建之前，你可以读完每一行代码；自托管的部署完全运行在你自己的基础设施上。商业使用的规则，我们在[授权说明](/licensing)里写清楚了。",
+        "Multica 的源代码公开，也可以自托管：在基于它构建之前，你可以读完每一行代码；自托管的部署完全运行在你自己的基础设施上。商业使用的规则，我们在[许可协议](/licensing)里写清楚了。",
       ],
       contacts: [
-        { label: "商业授权与合作", linkLabel: "联系商务", href: "/contact-sales" },
-        { label: "授权规则", linkLabel: "授权说明", href: "/licensing" },
+        { label: "商业授权与合作", linkLabel: "联系销售", href: "/contact-sales" },
+        { label: "授权规则", linkLabel: "许可协议", href: "/licensing" },
         { label: "社区与支持", linkLabel: "Discord", href: discordUrl },
         { label: "源代码与问题反馈", linkLabel: "GitHub", href: githubUrl },
       ],
@@ -86,7 +85,7 @@ export function createZhDict(): LandingDict {
   },
 
   licensing: {
-    title: "授权说明",
+    title: "许可协议",
     intro: [
       "Multica 采用 [Multica License](https://github.com/multica-ai/multica/blob/main/LICENSE) 发布：在 Apache License 2.0 的基础上附加了几项条件。源代码公开，在你自己的组织内部使用 Multica 是免费的，包括为整个团队自托管。",
       "最主要的附加条件针对托管使用：把 Multica 提供给组织外部的人使用，需要商业授权。这一页用大家最常问的问题，说明这条线划在哪里。这是一份通俗说明，不构成法律意见；如与 LICENSE 原文不一致，以 LICENSE 为准。",
@@ -157,7 +156,7 @@ export function createZhDict(): LandingDict {
       {
         heading: "获取商业授权",
         paragraphs: [
-          "通过[联系商务](/contact-sales)告诉我们你的使用场景，我们会在三个工作日内回复。不确定自己的情况是否需要授权？可以在 [Discord](" + discordUrl + ") 上问我们，也可以通过同一个表单咨询。",
+          "通过[联系销售](/contact-sales)告诉我们你的使用场景，我们会在三个工作日内回复。不确定自己的情况是否需要授权？可以在 [Discord](" + discordUrl + ") 上问我们，也可以通过同一个表单咨询。",
         ],
       },
     ],
@@ -177,7 +176,7 @@ export function createZhDict(): LandingDict {
         bullets: [
           "账户信息：你的姓名、邮箱地址和头像。如果你使用 Google 登录，我们会从 Google 获得你的姓名、邮箱地址和头像。你也可以填写语言、时区、个人简介等资料，以及回答上手引导中的问题，例如你的角色、使用场景、从哪里了解到 Multica。",
           "你创建的内容：工作区、任务、评论、聊天消息、附件、智能体指令，以及你或你的智能体放进 Multica Cloud 的其他内容。",
-          "联系商务表单：你的姓名、工作邮箱、公司名称和规模、国家或地区、使用场景、目标，以及你的沟通偏好。为了防止滥用，我们还会记录提交表单时的 IP 地址和浏览器 user agent。",
+          "联系销售表单：你的姓名、工作邮箱、公司名称和规模、国家或地区、使用场景、目标，以及你的沟通偏好。为了防止滥用，我们还会记录提交表单时的 IP 地址和浏览器 user agent。",
           "账单信息：订阅付款由 Stripe 在其托管的页面上处理，我们不会接收或存储你的完整银行卡信息。",
           "使用和设备信息：应用版本、操作系统、客户端类型和一个随机生成的安装 ID；你连接为运行时的每台机器的名称（默认是其主机名）；以及崩溃和错误报告。报告发送前，我们会从错误信息中过滤掉能识别出的邮箱地址和凭据，但报告仍可能包含与出错情况相关的其他细节。",
           "反馈：你提交反馈时，我们会收到反馈内容，以及所在页面、应用版本、操作系统和相关的错误信息。",
@@ -187,7 +186,7 @@ export function createZhDict(): LandingDict {
         heading: "我们如何使用信息",
         bullets: [
           "提供、运营和保护 Multica Cloud，包括登录、同步工作区、发送通知和邀请。",
-          "回复联系商务表单和支持请求。",
+          "回复联系销售表单和支持请求。",
           "发送服务消息，例如登录验证码和工作区邀请。只有在你主动同意后，我们才会发送产品动态或营销信息，你可以随时退订。",
           "了解 Multica 的使用情况、修复问题并改进产品。",
           "防止滥用，并履行法律义务。",
@@ -240,7 +239,7 @@ export function createZhDict(): LandingDict {
       {
         heading: "信息的保留期限",
         paragraphs: [
-          "账户信息和工作区内容会在你的账户或工作区存在期间一直保留。工作区所有者删除工作区后，其中的任务、评论等内容会从 Multica Cloud 中移除，但用于恢复的备份在之后一段时间内仍可能包含副本。如需从我们的文件存储中清除已删除工作区里上传的文件，请发邮件至 [support@multica.ai](mailto:support@multica.ai)。账单记录按会计和税务规定要求的期限保留；产品分析数据、崩溃报告、联系商务表单和反馈，会在为你提供支持和改进 Multica 所需的期间内保留。你可以要求我们删除联系商务表单和反馈。",
+          "账户信息和工作区内容会在你的账户或工作区存在期间一直保留。工作区所有者删除工作区后，其中的任务、评论等内容会从 Multica Cloud 中移除，但用于恢复的备份在之后一段时间内仍可能包含副本。如需从我们的文件存储中清除已删除工作区里上传的文件，请发邮件至 [support@multica.ai](mailto:support@multica.ai)。账单记录按会计和税务规定要求的期限保留；产品分析数据、崩溃报告、联系销售表单和反馈，会在为你提供支持和改进 Multica 所需的期间内保留。你可以要求我们删除联系销售表单和反馈。",
         ],
       },
       {
@@ -4376,10 +4375,10 @@ export function createZhDict(): LandingDict {
     },
   },
   contactSales: {
-    pageTitle: "联系商务",
+    pageTitle: "联系销售",
     pageDescription:
       "了解如何在你的团队中落地 Multica 的人类 + 智能体协作工作流。",
-    eyebrow: "联系商务",
+    eyebrow: "联系销售",
     title: "先了解你的需求",
     fields: {
       firstName: "名",
