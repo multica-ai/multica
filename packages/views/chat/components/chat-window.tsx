@@ -361,6 +361,8 @@ export function ChatWindow() {
               c.noAgent
             }
             quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
+            onEditQueuedTask={handleEditQueuedTask}
+            onRemoveQueuedTask={handleRemoveQueuedTask}
             onReady={markContentReady}
             annotations={annotations}
           >
