@@ -427,6 +427,21 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		defer close(resCh)
 		defer os.Remove(logPath)
 
+		messages := &antigravityMessages{messages: msgCh}
+		send := func(msg Message) bool { return messages.send(runCtx, msg, false) }
+		thinking := &antigravityThinkingProgress{logPath: logPath, send: send}
+		thinkingCtx, stopThinking := context.WithCancel(runCtx)
+		thinkingDone := make(chan struct{})
+		go func() {
+			defer close(thinkingDone)
+			thinking.follow(thinkingCtx)
+		}()
+		finishThinking := func() {
+			stopThinking()
+			<-thinkingDone
+		}
+		defer finishThinking()
+
 		startTime := time.Now()
 		var output strings.Builder
 		var streamModel string
@@ -443,7 +458,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		scanner := newAgentStreamScanner(stdout)
 
-		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+		send(Message{Type: MessageStatus, Status: "running"})
 
 	streamLoop:
 		for scanner.Scan() {
@@ -454,6 +469,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 				case "init":
 					streamSessionID = event.ConversationID
 					streamModel = event.Init.Model
+					thinking.setScope(streamSessionID, turn.start)
 				case "step_update":
 					if event.StepUpdate == nil {
 						turn.invalid = true
@@ -475,19 +491,18 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					if event.StepUpdate.ConversationID != "" {
 						streamSessionID = event.StepUpdate.ConversationID
 					}
+					thinking.setScope(streamSessionID, turn.start)
 					for _, message := range antigravityToolMessages(event.StepUpdate, streamTools) {
 						// Tool lifecycle events also drive the daemon's in-flight
 						// counter. Unlike best-effort text, neither half may be
 						// dropped when a transcript consumer temporarily falls behind.
-						select {
-						case msgCh <- message:
-						case <-runCtx.Done():
+						if !messages.send(runCtx, message, true) {
 							break streamLoop
 						}
 					}
 					if event.StepUpdate.StepType == "agent_response" && event.StepUpdate.TextDelta != "" {
 						output.WriteString(event.StepUpdate.TextDelta)
-						trySend(msgCh, Message{Type: MessageText, Content: event.StepUpdate.TextDelta})
+						send(Message{Type: MessageText, Content: event.StepUpdate.TextDelta})
 					}
 					if strings.EqualFold(event.StepUpdate.State, "done") && event.StepUpdate.StepIndex != nil && event.StepUpdate.Usage != nil && event.StepUpdate.Usage.hasTokens() {
 						// A step may be re-emitted as its state changes. Keying by
@@ -526,7 +541,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			}
 			output.WriteString(line)
 			if chunk != "" {
-				trySend(msgCh, Message{Type: MessageText, Content: chunk})
+				send(Message{Type: MessageText, Content: chunk})
 			}
 		}
 		if err := scanner.Err(); err != nil {
@@ -535,6 +550,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		waitErr := cmd.Wait()
 		releaseProcessGroup(cmd)
+		finishThinking()
 		duration := time.Since(startTime)
 
 		sessionID := streamSessionID
@@ -595,7 +611,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// reconstruct it exactly; if none arrived, emit the response now so
 			// the task transcript and final result both receive the answer.
 			if finalOutput == "" {
-				trySend(msgCh, Message{Type: MessageText, Content: streamResponse})
+				send(Message{Type: MessageText, Content: streamResponse})
 			}
 			finalOutput = streamResponse
 		}
@@ -610,7 +626,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// final comment while the execution transcript remains blank.
 			if recovered := readAntigravityTranscriptOutput(logPath, sessionID); recovered != "" {
 				finalOutput = recovered
-				trySend(msgCh, Message{Type: MessageText, Content: recovered})
+				send(Message{Type: MessageText, Content: recovered})
 				b.cfg.Logger.Info("agy recovered empty stdout from transcript", "bytes", len(recovered))
 			}
 		}

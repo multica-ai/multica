@@ -86,6 +86,11 @@ Multica는 현재 다음 명령을 감지합니다.
 다음 도구는 로그인 외에 추가 설정이 필요합니다.
 
 <Accordions type="multiple">
+<Accordion title="Antigravity" id="antigravity">
+
+CLI가 로컬 실행 기록을 제공하면 실행 로그의 Thinking 영역에 완료된 단계의 사고 내용이 표시됩니다. 모델 단계가 디스크에 기록된 후 갱신되며, 토큰 단위로 표시되지는 않습니다. 현재 턴의 내용만 표시되고 최종 보고서와는 분리됩니다. 로컬 기록을 사용할 수 없어도 도구 이벤트와 응답 텍스트는 기존 스트림으로 전달됩니다.
+
+</Accordion>
 <Accordion title="CodeArts" id="codearts">
 
 TUI만 확인하지 말고 `codearts run --model provider/model "OK만 응답하세요"`로 비대화형 모드도 확인하세요. 현재 CodeArts CLI에서는 사용자 지정 provider가 TUI에서 동작하더라도 `run`, `models`, `serve`에 여전히 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)가 필요할 수 있습니다. Multica는 `~/.codeartsdoer/codearts_cli.json` 또는 `.jsonc`에서 사용자 지정 모델을 찾을 수 있지만, 실행에는 `codearts run`을 사용하므로 해당 인증 요구 사항을 따릅니다.

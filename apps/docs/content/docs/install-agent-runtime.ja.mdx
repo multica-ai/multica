@@ -86,6 +86,11 @@ Multica は現在、次のコマンドを検出します。
 次のツールは、ログインのほかに追加の設定が必要です。
 
 <Accordions type="multiple">
+<Accordion title="Antigravity" id="antigravity">
+
+CLI がローカルの実行記録を提供する場合、実行ログの Thinking に完了したステップの思考内容が表示されます。モデルのステップがディスクに保存された後に更新され、トークン単位の表示ではありません。対象は現在のターンのみで、思考内容は最終レポートには含まれません。ローカルの記録を利用できない場合も、ツールのイベントと応答テキストは通常のストリームで表示されます。
+
+</Accordion>
 <Accordion title="CodeArts" id="codearts">
 
 TUI だけでなく、`codearts run --model provider/model "OK とだけ返してください"` で非対話モードを確認してください。現在の CodeArts CLI では、カスタム provider が TUI で動作しても、`run`、`models`、`serve` には引き続き [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html) が必要な場合があります。Multica は `~/.codeartsdoer/codearts_cli.json` または `.jsonc` からカスタムモデルを検出できますが、実行には `codearts run` を使用するため、その認証要件に従います。
