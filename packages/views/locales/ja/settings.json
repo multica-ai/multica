@@ -418,6 +418,10 @@
         "label": "Multica に質問",
         "description": "フローティングチャットで新しいチャットを始めます。"
       },
+      "toggleChatExpand": {
+        "label": "チャットウィンドウを展開・復元",
+        "description": "フローティングチャットをページいっぱいまで展開するか、元に戻します。閉じているときは開きます。"
+      },
       "findInIssue": {
         "label": "タスク内を検索",
         "description": "開いているタスクの詳細を検索します。"

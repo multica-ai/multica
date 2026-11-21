@@ -418,6 +418,10 @@
         "label": "Multica에 묻기",
         "description": "플로팅 채팅 창에서 새 채팅을 시작합니다."
       },
+      "toggleChatExpand": {
+        "label": "채팅 창 펼치기/복원",
+        "description": "플로팅 채팅 창을 페이지 크기만큼 펼치거나 원래대로 복원합니다. 닫혀 있으면 엽니다."
+      },
       "findInIssue": {
         "label": "태스크에서 찾기",
         "description": "열린 태스크 상세 내용에서 검색합니다."

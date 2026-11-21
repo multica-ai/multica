@@ -424,6 +424,10 @@
         "label": "Demander à Multica",
         "description": "Démarrer une nouvelle discussion dans la fenêtre de discussion flottante."
       },
+      "toggleChatExpand": {
+        "label": "Développer ou restaurer la fenêtre de discussion",
+        "description": "Agrandit la fenêtre de discussion flottante autant que la page le permet, ou la restaure. L'ouvre si elle est fermée."
+      },
       "findInIssue": {
         "label": "Rechercher dans la tâche",
         "description": "Rechercher dans la tâche ouverte."

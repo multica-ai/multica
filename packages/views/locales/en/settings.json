@@ -424,6 +424,10 @@
         "label": "Ask Multica",
         "description": "Start a new chat in the floating chat window."
       },
+      "toggleChatExpand": {
+        "label": "Expand or restore chat window",
+        "description": "Make the floating chat window as large as the page allows, or restore it. Opens the window if it is closed."
+      },
       "findInIssue": {
         "label": "Find in issue",
         "description": "Search within the open issue detail."

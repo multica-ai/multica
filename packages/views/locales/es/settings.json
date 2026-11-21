@@ -424,6 +424,10 @@
         "label": "Pregunta a Multica",
         "description": "Inicia un chat nuevo en la ventana de chat flotante."
       },
+      "toggleChatExpand": {
+        "label": "Expandir o restaurar la ventana de chat",
+        "description": "Agranda la ventana de chat flotante tanto como permite la página, o la restaura. Si está cerrada, la abre."
+      },
       "findInIssue": {
         "label": "Buscar en la tarea",
         "description": "Busca dentro del detalle de la tarea abierta."

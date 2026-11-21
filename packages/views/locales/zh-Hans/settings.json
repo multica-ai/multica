@@ -418,6 +418,10 @@
         "label": "问 Multica",
         "description": "在悬浮聊天窗里开始新对话。"
       },
+      "toggleChatExpand": {
+        "label": "展开或还原聊天窗",
+        "description": "把悬浮聊天窗展开到页面允许的最大尺寸，或还原。聊天窗关闭时会先打开。"
+      },
       "findInIssue": {
         "label": "在任务中查找",
         "description": "搜索当前打开的任务详情。"
