@@ -98,6 +98,14 @@ SMTP takes priority over Resend whenever `SMTP_HOST` is non-empty.
 | `SMTP_TLS_INSECURE` | `false` | Skips certificate verification; trusted internal networks only |
 | `SMTP_EHLO_NAME` | hostname | EHLO/FQDN required by strict relays |
 
+### Notification emails [#email-notifications]
+
+With Resend or SMTP configured, the server also emails members their new inbox notifications (see [Inbox](/inbox#email-notifications)). Links in these emails use `MULTICA_APP_URL`. Sends are paced on each backend replica; in a very large burst some emails are skipped, while the inbox still keeps every notification.
+
+| Variable | Default | Description |
+|---|---|---|
+| `EMAIL_NOTIFICATION_SEND_INTERVAL` | `1s` | Minimum spacing between notification emails on each backend replica, as a Go duration. The default stays under Resend's 2 requests per second, so sign-in codes and invitations on the same key aren't rate-limited. With N replicas sharing a key, use about N × `1s` |
+
 ### Google OAuth
 
 | Variable | Default | Description |

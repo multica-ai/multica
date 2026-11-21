@@ -20,6 +20,7 @@ const PREFERENCE_DEFAULTS: { [K in PreferenceKey]-?: NonNullable<NotificationPre
   agent_activity: "all",
   system_notifications: "all",
   auto_archive_completed: "all",
+  email_notifications: "all",
   others_issues: "key_updates",
 };
 

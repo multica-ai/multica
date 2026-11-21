@@ -9,7 +9,8 @@ export type NotificationGroupKey =
   | "new_issues"
   | "agent_activity"
   | "system_notifications"
-  | "auto_archive_completed";
+  | "auto_archive_completed"
+  | "email_notifications";
 
 export type NotificationGroupValue = "all" | "muted";
 

@@ -27,6 +27,7 @@ import { useT } from "../../i18n";
 import { ARCHIVED_VIEW_PARAM } from "../../inbox/components/inbox-view";
 import { AppLink } from "../../navigation";
 import { BrowserNotificationSetting } from "./browser-notification-setting";
+import { EmailNotificationSetting } from "./email-notification-setting";
 import {
   SettingsCard,
   SettingsRow,
@@ -218,6 +219,7 @@ export function NotificationsTab() {
         {/* Web-only: the browser permission banners require. Renders nothing on
             desktop (OS-native delivery) or where the Notification API is absent. */}
         <BrowserNotificationSetting />
+        <EmailNotificationSetting />
       </SettingsSection>
     </SettingsTab>
   );

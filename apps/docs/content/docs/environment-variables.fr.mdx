@@ -98,6 +98,14 @@ SMTP est prioritaire sur Resend dès que `SMTP_HOST` n'est pas vide.
 | `SMTP_TLS_INSECURE` | `false` | Ignore la vérification des certificats ; réseaux internes de confiance uniquement |
 | `SMTP_EHLO_NAME` | nom d'hôte | Nom EHLO/FQDN exigé par les relais stricts |
 
+### E-mails de notification [#email-notifications]
+
+Avec Resend ou SMTP configuré, le serveur envoie aussi par e-mail aux membres leurs nouvelles notifications de la boîte de réception (voir [Boîte de réception](/inbox#email-notifications)). Les liens de ces e-mails utilisent `MULTICA_APP_URL`. Les envois sont espacés sur chaque réplique du backend ; lors d'un pic très important, certains e-mails sont ignorés, tandis que la boîte de réception conserve toutes les notifications.
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `EMAIL_NOTIFICATION_SEND_INTERVAL` | `1s` | Intervalle minimal entre deux e-mails de notification sur chaque réplique du backend, au format durée Go. La valeur par défaut reste sous les 2 requêtes par seconde de Resend, pour que les codes de connexion et les invitations envoyés avec la même clé ne soient pas limités. Avec N répliques partageant une clé, utilisez environ N × `1s` |
+
 ### Google OAuth
 
 | Variable | Valeur par défaut | Description |
