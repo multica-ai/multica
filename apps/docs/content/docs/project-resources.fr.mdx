@@ -171,6 +171,8 @@ Rien de ce que l'agent laisse non commité n'est supprimé avec le worktree, y c
 
 Exception : une exécution qui commence par terminer une fusion avec vos modifications locales (voir [les conflits](#conflicts-are-resolved-by-the-agent)) commite tout ce qu'elle laisse, car ces modifications non commitées contiennent les vôtres.
 
+Multica extrait les sous-modules Git disponibles localement aux commits enregistrés dans le worktree. Pour inclure vos propres modifications dans un sous-module, commitez-les dans ce sous-module avant l’exécution. Pour un sous-module imbriqué, commitez aussi la référence mise à jour dans chaque sous-module intermédiaire. Lors de la livraison, Multica conserve les commits de l’agent dans les dépôts locaux des sous-modules et enregistre leurs identifiants dans le dépôt parent. Pour partager la branche sur un dépôt distant, publiez d’abord les commits de sous-modules référencés.
+
 Pour voir ce qu'une exécution a enregistré, listez les refs avec `git for-each-ref refs/multica/leftovers` et inspectez-en une avec `git show --stat <ref>`. `git restore --source=<ref> -- <path>` remet un fichier dans votre copie de travail.
 
 Dans le rare cas où ce commit ou cet enregistrement lui-même est impossible, par exemple un dépôt avec `commit.gpgSign` et aucune clé de signature disponible pour le runtime, le worktree est délibérément conservé, l'exécution est signalée comme échouée, et `git worktree list` dans votre dépôt indique le répertoire qui contient le travail.
