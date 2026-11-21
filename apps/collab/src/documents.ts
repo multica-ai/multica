@@ -371,9 +371,9 @@ export class DocumentStore {
       giveBack();
       state.dirty = true;
       if (attempt >= 2) throw new Error(`doc ${state.id}: store kept conflicting`);
-      this.reconcile(name, document, state, result.content);
+      const note = this.reconcile(name, document, state, result.content);
       state.revision = result.revision;
-      return this.persist(name, document, req, attempt + 1);
+      return this.persist(name, document, note && !req.message ? { ...req, message: note } : req, attempt + 1);
     }
     state.revision = result.revision;
     state.persisted = content;
@@ -387,18 +387,25 @@ export class DocumentStore {
     return result.revision;
   }
 
-  private reconcile(name: string, document: Document, state: DocState, storedContent: string) {
+  /** Folds a change stored without this service into the live document.
+   *  Its writer was already told it succeeded, so a block both sides changed
+   *  keeps both copies, live first, and the returned note labels the version
+   *  that saves them. */
+  private reconcile(name: string, document: Document, state: DocState, storedContent: string): string | null {
     const base = this.codec.parse(state.persisted);
     const stored = this.codec.parse(storedContent);
     const live = this.codec.ydocToJSON(document);
     const result = mergeDocuments(this.codec, base, live, stored);
-    if (result.ok) {
-      this.applyParsed(document, result.doc, serverOrigin({ type: "member", id: "", name: "" }));
-    } else {
-      // Keep what people are typing; the next store overwrites the stray write.
-      this.log.warn("stored change conflicts with live edits; keeping live", { doc: state.id, name });
-    }
+    const origin = serverOrigin({ type: "member", id: "", name: "" });
     state.persisted = this.codec.serialize(stored);
+    if (result.ok) {
+      this.applyParsed(document, result.doc, origin);
+      return null;
+    }
+    this.applyParsed(document, result.both, origin);
+    const count = result.conflicts.length;
+    this.log.warn("stored change conflicts with live edits; keeping both", { doc: state.id, name, conflicts: count });
+    return `Kept both sides of ${count} conflicting edit${count === 1 ? "" : "s"}: live text first, then a change saved while live editing was unavailable`;
   }
 
   /** Shows the writing agent in everyone's presence list for a moment. */
