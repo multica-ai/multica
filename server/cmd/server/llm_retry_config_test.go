@@ -97,11 +97,12 @@ func TestParsedLLMMaxRetriesReachesTheClient(t *testing.T) {
 	}
 }
 
-// TestParseLLMDisableThinking pins the MULTICA_LLM_DISABLE_THINKING states.
+// TestParseStrictBool pins the states of the boolean MULTICA_LLM_* switches
+// (MULTICA_LLM_DISABLE_THINKING, MULTICA_LLM_DISABLE_FOLLOW_UP_QUESTIONS).
 // Unset means the knob stays off — the state every existing deployment gets
 // without the variable present — and anything that is not a deliberate
 // true/false must stop the boot rather than be coerced (MUL-6364 contract).
-func TestParseLLMDisableThinking(t *testing.T) {
+func TestParseStrictBool(t *testing.T) {
 	t.Run("accepted", func(t *testing.T) {
 		for _, tc := range []struct {
 			name string
@@ -118,12 +119,12 @@ func TestParseLLMDisableThinking(t *testing.T) {
 			{name: "surrounding whitespace is tolerated", raw: " true ", want: true},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				got, err := parseLLMDisableThinking(tc.raw)
+				got, err := parseStrictBool(tc.raw)
 				if err != nil {
-					t.Fatalf("parseLLMDisableThinking(%q) failed: %v", tc.raw, err)
+					t.Fatalf("parseStrictBool(%q) failed: %v", tc.raw, err)
 				}
 				if got != tc.want {
-					t.Fatalf("parseLLMDisableThinking(%q) = %v, want %v", tc.raw, got, tc.want)
+					t.Fatalf("parseStrictBool(%q) = %v, want %v", tc.raw, got, tc.want)
 				}
 			})
 		}
@@ -141,12 +142,12 @@ func TestParseLLMDisableThinking(t *testing.T) {
 			{name: "trailing garbage", raw: "true " + "x"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				got, err := parseLLMDisableThinking(tc.raw)
+				got, err := parseStrictBool(tc.raw)
 				if err == nil {
-					t.Fatalf("parseLLMDisableThinking(%q) accepted the value (= %v), want a validation error", tc.raw, got)
+					t.Fatalf("parseStrictBool(%q) accepted the value (= %v), want a validation error", tc.raw, got)
 				}
 				if !strings.Contains(err.Error(), strings.TrimSpace(tc.raw)) {
-					t.Fatalf("parseLLMDisableThinking(%q) error = %q, want it to echo the offending value", tc.raw, err)
+					t.Fatalf("parseStrictBool(%q) error = %q, want it to echo the offending value", tc.raw, err)
 				}
 			})
 		}
