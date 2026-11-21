@@ -35,6 +35,7 @@ import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
+import { coalesceAwarenessChanges } from "./coalesced-awareness";
 import {
   COLLAB_FIELD,
   createMarkedInstance,
@@ -267,7 +268,11 @@ export function createEditorExtensions(
             field: COLLAB_FIELD,
           }),
           CollaborationCaret.configure({
-            provider: options.collaboration.provider,
+            provider: {
+              awareness:
+                options.collaboration.provider.awareness &&
+                coalesceAwarenessChanges(options.collaboration.provider.awareness),
+            },
             user: options.collaboration.user,
           }),
         ]

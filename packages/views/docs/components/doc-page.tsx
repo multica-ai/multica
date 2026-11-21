@@ -436,6 +436,26 @@ function LiveStatus({
               <TooltipContent>{c.name}</TooltipContent>
             </Tooltip>
           ))}
+          {collaborators.length > 5 && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    data-collaborators-more
+                    className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1 text-caption ring-2 ring-background"
+                  />
+                }
+              >
+                +{collaborators.length - 5}
+              </TooltipTrigger>
+              <TooltipContent>
+                {collaborators
+                  .slice(5)
+                  .map((c) => c.name)
+                  .join(", ")}
+              </TooltipContent>
+            </Tooltip>
+          )}
         </span>
       )}
       {titleFailed ? (

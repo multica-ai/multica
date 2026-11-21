@@ -105,6 +105,9 @@ export function useDocCollab(docId: string): DocCollabState {
         if (event.reason === "document-reset") setGeneration((g) => g + 1);
       },
     });
+    // Awareness changes on every caret move of every editor; only re-render
+    // when who is here changes.
+    let signature = "";
     const updateCollaborators = () => {
       const seen = new Set<string>();
       const next: DocCollaborator[] = [];
@@ -117,6 +120,9 @@ export function useDocCollab(docId: string): DocCollabState {
         seen.add(dedupe);
         next.push({ key, id: u.id, name: u.name, color: u.color ?? colorFor(u.id), kind: u.kind === "agent" ? "agent" : "member" });
       }
+      const nextSignature = next.map((c) => `${c.key}:${c.kind}:${c.id}:${c.name}:${c.color}`).join("|");
+      if (nextSignature === signature) return;
+      signature = nextSignature;
       setCollaborators(next);
     };
     provider.awareness?.on("change", updateCollaborators);
