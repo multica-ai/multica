@@ -237,10 +237,13 @@ Le répertoire isolé reprend, par liens symboliques, les enregistrements de Gat
 
 Avant de lancer une exécution Hermes, le daemon écrit de façon atomique `.multica_resident_task.json` à la racine de l'environnement de l'exécution, avec le mode `0600`. Ce fichier contient l'exécution, l'agent, l'espace de travail, la session de chat éventuelle et le jeton `mat_` propre à l'exécution ; il est supprimé à la fin de l'exécution. Les outils de la CLI Multica lancés par la Gateway résidente remontent depuis leur répertoire courant jusqu'au fichier de contexte le plus proche, et n'utilisent son jeton et son identité que si leur environnement ne fournit aucune identité d'exécution explicite. Un `MULTICA_TASK_ID` ou un jeton `mat_` explicite reste prioritaire.
 
+Les environnements d'outils propres à chaque exécution nécessitent une version de Hermes prenant en charge `turn_env`. Multica déclare l'identité d'exécution et les noms de `custom_env` autorisés pour l'agent dans `terminal.client_env_turn_passthrough` de la configuration du répertoire isolé. Chaque `hermes acp` transmet leurs valeurs actuelles à chaque prompt via `turn_env` ; Hermes ne conserve ces valeurs qu'en mémoire. La déclaration ne contient que des noms, jamais de valeurs. Les surcharges de `MULTICA_*`, `PATH`, `HOME` et des autres clés bloquées par le daemon restent bloquées ; `HERMES_HOME` reste un réglage du répertoire isolé de l'ACP et non une surcharge pour les outils. Sans le mode résident, la configuration générée et le chemin d'exécution ponctuel ne changent pas.
+
+Lorsqu'une reprise réutilise la racine d'environnement d'une exécution précédente, le fichier de contexte est aussi écrit à la racine stable de l'exécution en cours, afin que la recherche depuis le répertoire de travail comme la recherche par racine stable trouvent le jeton actuel. Les deux fichiers sont supprimés à la fin de l'exécution.
+
 Limites connues :
 
 - La Gateway résidente ne lit pas les skills liés préparés dans le répertoire Hermes propre à l'exécution.
-- Le `custom_env` de chaque exécution n'atteint pas les outils de la Gateway résidente.
 - Les outils d'une même Gateway partagent un seul utilisateur système. Un processus du même UID peut lire le fichier de contexte d'une autre exécution en cours malgré le mode `0600`. N'utilisez ce mode que si tous les agents du runtime se font mutuellement confiance.
 
 ### Mémoire native et sous-agents de Codex [#codex-memory]
