@@ -22,6 +22,10 @@ const (
 	// GateDashboardHistoryDays caps how many calendar days back the workspace
 	// dashboard can read. Limit is a day count with no period.
 	GateDashboardHistoryDays GateName = "dashboard_history_days"
+	// GateEnvironmentProxy caps concurrent remote environment preview leases for
+	// a workspace. A limit of 0 disables remote preview; positive limits cap
+	// concurrent active environment leases without requiring period fields.
+	GateEnvironmentProxy GateName = "environment_proxy"
 )
 
 // MaxDashboardHistoryDays is the largest dashboard_history_days limit Cloud
@@ -30,7 +34,7 @@ const MaxDashboardHistoryDays = 365
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateAutopilotRuns, GateMembers, GateStorageBytes, GateDashboardHistoryDays:
+	case GateAutopilotRuns, GateMembers, GateStorageBytes, GateDashboardHistoryDays, GateEnvironmentProxy:
 		return true
 	default:
 		return false
@@ -107,8 +111,8 @@ type Decision struct {
 	CloudValidUntil     time.Time
 }
 
-// Provider is the only interface the autopilot consumer
-// needs. It deliberately has no error return: every failure is represented by a
+// Provider is the only interface enforcement consumers
+// need. It deliberately has no error return: every failure is represented by a
 // fail-open Decision with ActionOff (or ActionObserve for a bounded stale
 // snapshot that can no longer enforce).
 //

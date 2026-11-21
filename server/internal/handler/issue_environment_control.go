@@ -352,6 +352,9 @@ func (h *Handler) queueEnvironmentCommand(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to queue the command")
 		return
 	}
+	if params.Action == "stop" || params.Action == "restart" {
+		h.revokeEnvironmentSession(uuidToString(params.EnvironmentID))
+	}
 	h.requestDaemonPendingWork(uuidToString(rt.ID), protocol.PendingWorkKindEnvironmentCommand)
 	if params.Action != "logs" {
 		h.publishEnvironmentChanged(uuidToString(issue.WorkspaceID), issue.ID)

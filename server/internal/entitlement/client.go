@@ -410,7 +410,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 		return fetchedPolicy{}, ErrInvalidPolicy
 	}
 	// Unknown gates are ignored for additive compatibility.
-	gates := make(map[GateName]Gate, 4)
+	gates := make(map[GateName]Gate, 5)
 	wireAutopilot, ok := wire.Gates[string(GateAutopilotRuns)]
 	if !ok {
 		return fetchedPolicy{}, ErrInvalidPolicy
@@ -425,7 +425,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 	// Cloud and Multica can deploy in either order and a bad value cannot turn
 	// the autopilot quota off.
 	gateReasons := make(map[GateName]Reason)
-	for _, name := range []GateName{GateMembers, GateStorageBytes, GateDashboardHistoryDays} {
+	for _, name := range []GateName{GateMembers, GateStorageBytes, GateDashboardHistoryDays, GateEnvironmentProxy} {
 		if wire.undecodableGates[string(name)] {
 			gates[name] = Gate{Action: ActionOff}
 			gateReasons[name] = ReasonGateInvalid

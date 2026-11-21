@@ -354,6 +354,24 @@ A declared environment's own servers are not listed a second time as detected on
 
 These commands use the running task's credential, so they work only inside a run. Environments belong to the issue, which means a later run on the same issue can list and stop what an earlier one started. Neither detected nor declared environments are supported on Windows yet.
 
+For direct LAN or VPN access, set `MULTICA_ENV_PUBLIC_HOST` on the daemon to a
+hostname or IP that members can reach. This supplies the host for detected
+server URLs and replaces `localhost` or `$MULTICA_HOST` in declared URLs.
+Implicit readiness probes use `127.0.0.1` with a host override. Explicit
+`ready` addresses use their configured values.
+
+To relay loopback URLs, set `MULTICA_ENV_PROXY_BASE_URL` on a single API
+replica to a dedicated wildcard origin such as `https://*.preview.example.com`.
+For multi-tenant public deployments, give the preview service a registered
+domain separate from the main site (its own eTLD+1, for example
+`https://*.multica-preview.com`), so preview pages cannot set cookies that are
+sent with main-site requests.
+The signed-in browser exchanges a one-time ticket for a host-only preview
+cookie. `COOKIE_DOMAIN` can stay unset. The daemon must support environment
+tunnels. Cloud relay limits leave reported direct URLs available. See
+[environment deployment](apps/docs/content/docs/environments.mdx)
+for ingress and replica configuration.
+
 #### Sidebar controls
 
 - **Declared environments:** use **+** to start an environment reported by the latest run on a machine, using that run's checkout. An environment's menu offers **Stop**, **Restart**, and **View logs**. Restart reads the repository's current declaration, so it needs the checkout and `.multica/environments.toml` to still exist.

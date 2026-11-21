@@ -79,9 +79,10 @@ multica env start web
 |---|---|
 | `MULTICA_PORT` | 埠段的第一個埠，例如 `41000` |
 | `MULTICA_ENVIRONMENT` | 環境名稱 |
+| `MULTICA_HOST` | URL 使用的主機名稱：`MULTICA_ENV_PUBLIC_HOST`，預設為 `localhost` |
 | `PATH` | 執行 `multica env start` 的 AI 代理的 `PATH`，這樣倉庫的工具鏈能被找到。從側欄啟動時，沿用 AI 代理上一次在這條任務上啟動這個環境時的 `PATH`。 |
 
-它們還會繼承守護程序的環境變數，但不包括 `MULTICA_*` 變數（憑據也在其中）：環境不能以這次執行的身分操作。`url` 和 `ready` 裡只會替換 `$MULTICA_PORT`（或 `${MULTICA_PORT}`）。需要第二個埠時，在 shell 裡計算，例如 `API_PORT=$((MULTICA_PORT + 1))`。
+它們還會繼承守護程序的環境變數，但不包括 `MULTICA_*` 變數（憑據也在其中）：環境不能以這次執行的身分操作。`url` 和 `ready` 會替換 `$MULTICA_PORT` 和 `$MULTICA_HOST`（也支援 `${...}` 寫法）。需要第二個埠時，在 shell 裡計算，例如 `API_PORT=$((MULTICA_PORT + 1))`。
 
 ### 讓 `start` 留在前景 [#foreground]
 
@@ -90,6 +91,14 @@ multica env start web
 - 讓主服務留在前景。用 `&` 放到背景的輔助程序沒問題，它們仍在這個程序群組裡。
 - 不要把工作交給程序群組以外的東西，例如 `docker compose up -d`、系統服務或 `setsid`。那樣環境會立刻變成**已退出**，停止時也碰不到那些工作。這類工具要在前景執行，並配一個 `stop` 命令。
 - 執行檢出的程式碼裡還沒有安裝相依套件。在 `start` 裡安裝；守護程序等待就緒的十分鐘包含安裝時間。
+
+### 遠端預覽和直接連線 [#remote-access]
+
+若要透過區域網路或 VPN 直接連線，請在守護程序上將 `MULTICA_ENV_PUBLIC_HOST` 設為工作區成員可存取的主機名稱或 IP。這會取代宣告式和自動偵測服務 URL 中預設的 `localhost`。啟用代理或 Cloud 停用中繼時，兩種服務都會保留直接連結。設定主機覆寫後，隱含的就緒探測會使用 `127.0.0.1`，明確設定的 `ready` 則使用指定的位址。
+
+若要中繼迴路位址，請將伺服器的 `MULTICA_ENV_PROXY_BASE_URL` 設為獨立的萬用字元來源，例如 `https://*.preview.example.com` 或 `https://env-*.preview.example.com`。面向多租戶公網部署時，請為預覽服務使用與主站不同的註冊網域（獨立 eTLD+1，例如 `https://*.multica-preview.com`），防止預覽頁設定會隨主站請求傳送的 Cookie。將萬用字元 DNS 和 TLS 設定至 API 入口，並保留 Host 和 WebSocket Upgrade 標頭。主站來源（`MULTICA_APP_URL`，空白時使用 `MULTICA_PUBLIC_URL`）須將 `/api/*` 轉送至 API。守護程序須支援環境通道，並可向 API 建立 WebSocket 連線。代理須在單一 API 副本上執行（`MULTICA_BACKEND_REPLICAS=1`）。來源無效、與平台來源重疊或副本數大於 1 時，伺服器會記錄錯誤並停用代理。
+
+簽發一次性啟動票證前，預覽連結會檢查登入狀態、工作區成員資格、私人專案存取權及目前的 Cloud 原則。瀏覽器以票證換取僅限目前預覽主機的短期 Cookie。`COOKIE_DOMAIN` 可保持未設定。Cloud 可停用中繼或限制各工作區同時使用的環境數。中繼請求主體上限預設為 32 MiB，可透過 `MULTICA_ENV_PROXY_MAX_BODY_BYTES` 調整。
 
 ## 範例 [#examples]
 
@@ -237,7 +246,7 @@ AI 代理會先弄清專案怎麼啟動，用 `MULTICA_PORT` 寫好埠，啟動�
 ## 已知限制 [#limitations]
 
 - **只支援 macOS 和 Linux。** 在 Windows 上不會識別服務，`multica env start` 會提示暫不支援。
-- **localhost 位址只能在執行它的機器上開啟。** 環境執行在另一台機器上（例如建置機或同事的電腦）時，側欄會註明；請在那台機器上開啟，或者自己轉發埠。
+- **localhost 位址只能在執行它的機器上開啟。** 環境執行在另一台機器上（例如建置機或同事的電腦）時，側欄會註明；請在那台機器上開啟、設定[遠端預覽或直接連線](#remote-access)，或者自己轉發埠。
 - **systemd 下重新啟動守護程序。** 在 Linux 上開啟了[開機自啟](/daemon-runtimes#autostart)時，重新啟動或更新守護程序會同時停止它託管的宣告式環境，之後需要重新啟動。
 - **一個環境只在一台機器上。** 環境執行在啟動它的那次執行所在的機器上，不會隨任務遷移。
 

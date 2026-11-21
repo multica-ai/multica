@@ -37,23 +37,24 @@ type privateRouteResolver func(f *privateRouteFixture, caller string) string
 // caller's own, like a notification. Every route declaring one of these is
 // probed by TestEveryRouteByProjectObjectIDHidesPrivateProjects.
 var projectScopedRouteParams = map[string]privateRouteResolver{
-	"projects/{id}":                    func(f *privateRouteFixture, _ string) string { return f.projectID },
-	"resources/{resourceId}":           func(f *privateRouteFixture, _ string) string { return f.projectResource() },
-	"issue-views/{id}":                 func(f *privateRouteFixture, _ string) string { return f.projectView() },
-	"issues/{id}":                      func(f *privateRouteFixture, _ string) string { return f.issue() },
-	"comments/{commentId}":             func(f *privateRouteFixture, _ string) string { return f.comment() },
-	"supplements/{commentId}":          func(f *privateRouteFixture, _ string) string { return f.supplement() },
-	"attachments/{id}":                 func(f *privateRouteFixture, _ string) string { return f.attachment() },
-	"wakeups/{wakeupID}":               func(f *privateRouteFixture, _ string) string { return f.issueWakeup() },
-	"environments/{environmentId}":     func(f *privateRouteFixture, _ string) string { return f.environment() },
-	"environment-commands/{commandId}": func(f *privateRouteFixture, _ string) string { return f.environmentCommand() },
-	"pull-requests/{prId}":             func(f *privateRouteFixture, _ string) string { return f.pullRequest() },
-	"tasks/{taskId}":                   func(f *privateRouteFixture, _ string) string { return f.issueRun() },
-	"autopilots/{id}":                  func(f *privateRouteFixture, _ string) string { return f.autopilot() },
-	"runs/{runId}":                     func(f *privateRouteFixture, _ string) string { return f.autopilotRun() },
-	"triggers/{triggerId}":             func(f *privateRouteFixture, _ string) string { return f.autopilotTrigger() },
-	"deliveries/{deliveryId}":          func(f *privateRouteFixture, _ string) string { return f.webhookDelivery() },
-	"inbox/{id}":                       func(f *privateRouteFixture, caller string) string { return f.inboxItem(caller) },
+	"projects/{id}":                     func(f *privateRouteFixture, _ string) string { return f.projectID },
+	"resources/{resourceId}":            func(f *privateRouteFixture, _ string) string { return f.projectResource() },
+	"issue-views/{id}":                  func(f *privateRouteFixture, _ string) string { return f.projectView() },
+	"issues/{id}":                       func(f *privateRouteFixture, _ string) string { return f.issue() },
+	"comments/{commentId}":              func(f *privateRouteFixture, _ string) string { return f.comment() },
+	"supplements/{commentId}":           func(f *privateRouteFixture, _ string) string { return f.supplement() },
+	"attachments/{id}":                  func(f *privateRouteFixture, _ string) string { return f.attachment() },
+	"wakeups/{wakeupID}":                func(f *privateRouteFixture, _ string) string { return f.issueWakeup() },
+	"environments/{environmentId}":      func(f *privateRouteFixture, _ string) string { return f.environment() },
+	"environment-proxy/{environmentId}": func(f *privateRouteFixture, _ string) string { return f.environment() },
+	"environment-commands/{commandId}":  func(f *privateRouteFixture, _ string) string { return f.environmentCommand() },
+	"pull-requests/{prId}":              func(f *privateRouteFixture, _ string) string { return f.pullRequest() },
+	"tasks/{taskId}":                    func(f *privateRouteFixture, _ string) string { return f.issueRun() },
+	"autopilots/{id}":                   func(f *privateRouteFixture, _ string) string { return f.autopilot() },
+	"runs/{runId}":                      func(f *privateRouteFixture, _ string) string { return f.autopilotRun() },
+	"triggers/{triggerId}":              func(f *privateRouteFixture, _ string) string { return f.autopilotTrigger() },
+	"deliveries/{deliveryId}":           func(f *privateRouteFixture, _ string) string { return f.webhookDelivery() },
+	"inbox/{id}":                        func(f *privateRouteFixture, caller string) string { return f.inboxItem(caller) },
 	// The inbox is where a member route names an issue as {issueId}; the
 	// caller has a notification about it, so marking it read has an effect.
 	"issues/{issueId}": func(f *privateRouteFixture, caller string) string { f.inboxItem(caller); return f.issue() },
@@ -267,6 +268,9 @@ func (f *privateRouteFixture) environment() string {
 		return f.fx.Insert(f.t, "issue_environment", dbfx.Cols{
 			"workspace_id": f.fx.WorkspaceID, "issue_id": f.issue(), "task_id": f.issueRun(),
 			"local_key": "probe", "source": "config", "name": "probe", "state": "running", "started_at": dbfx.Raw("now()"),
+			// A member's control call must reach the runtime probe, not the
+			// missing-id answer, so the proxy launch needs a port and runtime.
+			"runtime_id": f.shared.runtimeID, "port": 41000,
 		})
 	})
 }
@@ -490,6 +494,11 @@ func TestEveryRouteByProjectObjectIDHidesPrivateProjects(t *testing.T) {
 	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
 	shared.uploadDir = t.TempDir()
 	t.Setenv("LOCAL_UPLOAD_DIR", shared.uploadDir)
+	// The proxy route only exists behind a configured relay origin, so enable
+	// one: the outsider's probe must reach the real handler, not a disabled stub.
+	t.Setenv("MULTICA_APP_URL", "http://app.example.net")
+	t.Setenv("MULTICA_ENV_PROXY_BASE_URL", "http://*.preview.example.com")
+	t.Setenv("MULTICA_BACKEND_REPLICAS", "1")
 	router, _ := NewRouterWithOptions(testPool, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, RouterOptions{})
 	call := func(token, method, path, body string) routeAnswer {
 		var req *http.Request
