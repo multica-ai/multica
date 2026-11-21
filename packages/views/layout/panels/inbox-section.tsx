@@ -364,17 +364,31 @@ function VirtualInboxList({
 }) {
   const scrollRef = usePanelScrollRef()!;
   const [list, setList] = useState<HTMLUListElement | null>(null);
-  // Where the list starts within the scroll container's content.
+  // Where the list starts within the scroll container's content. The sections
+  // above it (Pinned) move it as they collapse, expand, mount or unmount.
   const [scrollMargin, setScrollMargin] = useState(0);
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     if (!list || !scroller) return;
     const measure = () =>
       setScrollMargin(list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(scroller);
-    return () => observer.disconnect();
+    const resize = new ResizeObserver(measure);
+    const observe = () => {
+      resize.disconnect();
+      resize.observe(scroller);
+      for (const child of scroller.children) {
+        if (child.contains(list)) break;
+        resize.observe(child);
+      }
+      measure();
+    };
+    observe();
+    const mutations = new MutationObserver(observe);
+    mutations.observe(scroller, { childList: true });
+    return () => {
+      mutations.disconnect();
+      resize.disconnect();
+    };
   }, [list, scrollRef]);
 
   const virtualizer = useVirtualizer({
