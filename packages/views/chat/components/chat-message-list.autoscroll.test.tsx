@@ -3,6 +3,7 @@ import { act, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
+import { createChatStore, registerChatStore } from "@multica/core/chat";
 import type { TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
@@ -70,6 +71,10 @@ vi.mock("react-virtuoso", () => ({
 
 const TEST_RESOURCES = { en: { chat: enChat } };
 const TASK_ID = "6af44cbe-80ab-4dfe-b07d-bd3cfd588f4d";
+
+registerChatStore(createChatStore({
+  storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+}));
 
 const VIEWPORT = 600;
 

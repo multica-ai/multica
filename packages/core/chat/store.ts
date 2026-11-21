@@ -74,6 +74,8 @@ const OPEN_KEY = "multica:chat:isOpen";
  * be turned off from the Settings → Chat tab.
  */
 const FLOATING_KEY = "multica:chat:floatingChatEnabled";
+/** Device preference, shared by the chat tab and floating chat across workspaces. */
+const COLLAPSED_EXECUTION_DETAILS_KEY = "multica:chat:keepExecutionDetailsCollapsed";
 /**
  * The agent Ask Multica starts a new chat with, per workspace. Missing key =
  * no preference: a new chat goes to the agent last chatted with.
@@ -354,6 +356,7 @@ export interface ChatState {
   isOpen: boolean;
   /** Settings preference: is the floating chat window available at all. */
   floatingChatEnabled: boolean;
+  keepExecutionDetailsCollapsed: boolean;
   activeSessionId: string | null;
   selectedAgentId: string | null;
   /** Project context for the next session. Existing sessions remain bound to
@@ -383,6 +386,7 @@ export interface ChatState {
   setOpen: (open: boolean) => void;
   toggle: () => void;
   setFloatingChatEnabled: (enabled: boolean) => void;
+  setKeepExecutionDetailsCollapsed: (collapsed: boolean) => void;
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
   setSelectedProjectId: (id: string | null) => void;
@@ -458,6 +462,7 @@ export function createChatStore(options: ChatStoreOptions) {
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,
     floatingChatEnabled: initialFloatingEnabled,
+    keepExecutionDetailsCollapsed: storage.getItem(COLLAPSED_EXECUTION_DETAILS_KEY) === "true",
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: initialAgentId,
     selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
@@ -490,6 +495,10 @@ export function createChatStore(options: ChatStoreOptions) {
       // does not linger until the next toggle.
       set(enabled ? { floatingChatEnabled: true } : { floatingChatEnabled: false, isOpen: false });
       if (!enabled) storage.setItem(OPEN_KEY, "false");
+    },
+    setKeepExecutionDetailsCollapsed: (collapsed) => {
+      storage.setItem(COLLAPSED_EXECUTION_DETAILS_KEY, String(collapsed));
+      set({ keepExecutionDetailsCollapsed: collapsed });
     },
     setActiveSession: (id) => {
       logger.info("setActiveSession", { from: get().activeSessionId, to: id });
