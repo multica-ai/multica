@@ -417,9 +417,10 @@ func TestResolveDocRefMatchesSharedPrefixRules(t *testing.T) {
 		{name: "uppercase prefix", ref: "ABCD1", want: docA},
 		{name: "prefix with dash", ref: "abcd5678-0", want: docB},
 		{name: "folder prefix", ref: "FEDC", folders: true, want: folderID},
-		{name: "doc prefix does not match folders", ref: "abcd1", folders: true, wantErr: []string{"no folder found"}},
+		{name: "doc prefix does not match folders", ref: "abcd1", folders: true, wantErr: []string{"no folder found", "`multica doc folder list`"}},
+		{name: "unmatched doc prefix", ref: "0000", wantErr: []string{"no doc found", "`multica doc list`"}},
 		{name: "too short prefix", ref: "abc", wantErr: []string{"resolve doc", "at least 4"}},
-		{name: "ambiguous prefix lists candidates", ref: "abcd", wantErr: []string{"ambiguous doc id prefix", docA, docB}},
+		{name: "ambiguous prefix lists candidates", ref: "abcd", wantErr: []string{"ambiguous doc id prefix", docA, docB, "`multica doc list`"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := resolveDocRef(ctx, client, tc.ref, tc.folders)
@@ -436,6 +437,9 @@ func TestResolveDocRefMatchesSharedPrefixRules(t *testing.T) {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("resolveDocRef(%q) error = %v; want it to contain %q", tc.ref, err, want)
 				}
+			}
+			if strings.Contains(err.Error(), "--full-id") {
+				t.Fatalf("resolveDocRef(%q) error = %v; doc list commands have no --full-id flag", tc.ref, err)
 			}
 		})
 	}

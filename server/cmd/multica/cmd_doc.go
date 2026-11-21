@@ -186,11 +186,11 @@ func fetchDocTree(ctx context.Context, client *cli.APIClient) (docTree, error) {
 
 // resolveDocRef accepts a full id or an unambiguous id prefix from `doc list`.
 func resolveDocRef(ctx context.Context, client *cli.APIClient, ref string, folders bool) (string, error) {
-	kind := "doc"
+	kind, listHint := "doc", "run `multica doc list`"
 	if folders {
-		kind = "folder"
+		kind, listHint = "folder", "run `multica doc folder list`"
 	}
-	resolved, err := resolveIDByPrefix(ctx, client, kind, ref, func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+	resolved, err := resolveIDByPrefixWithListHint(ctx, client, kind, ref, listHint, func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
 		tree, err := fetchDocTree(ctx, client)
 		if err != nil {
 			return nil, err
