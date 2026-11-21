@@ -9,8 +9,14 @@ import type { MetadataRoute } from "next";
  * artwork for launcher cropping; regenerate raster sizes from those source assets.
  */
 
-/** Launch path. Exported so manifest.test.ts can run it through the proxy. */
+/** Launch path. Shortcuts must not reuse it; see platform/pwa-launch.ts. */
 export const PWA_START_URL = "/inbox";
+
+/**
+ * Query flag that sets a shortcut apart from a plain launch when both point at
+ * the same page. The launch URL is the only signal the launch queue delivers.
+ */
+export const PWA_SHORTCUT_PARAM = "launch";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -22,6 +28,9 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: PWA_START_URL,
     scope: "/",
     display: "standalone",
+    // One window per installed app on desktop Chromium; platform/pwa-launch.ts
+    // routes the launch inside it.
+    launch_handler: { client_mode: "focus-existing" },
     // Splash-screen colours. The runtime status bar is driven by the
     // per-scheme `<meta name="theme-color">` pair in app/layout.tsx, which the
     // manifest cannot express — these are the pre-launch fallback only.
@@ -52,7 +61,7 @@ export default function manifest(): MetadataRoute.Manifest {
     // segments, so they resolve to the last workspace the same way start_url
     // does instead of needing a slug the manifest cannot know.
     shortcuts: [
-      { name: "Inbox", url: "/inbox" },
+      { name: "Inbox", url: `/inbox?${PWA_SHORTCUT_PARAM}=shortcut` },
       { name: "My Issues", url: "/my-issues" },
     ],
   };
