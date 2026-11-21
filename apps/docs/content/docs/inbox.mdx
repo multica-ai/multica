@@ -170,3 +170,7 @@ Below them, **Notify me about** turns each kind of notification on or off. These
 - [Comments](/comments) — replies, mentions, and discussion threads.
 - [@-mention agents in comments](/mentioning-agents) — member notifications vs. agent runs.
 - [Autopilots](/autopilots) — configure automatic work creation and default subscribers.
+
+## Continuation monitor pilot
+
+An operator can enable a project-scoped continuation monitor. For explicitly enrolled work, it sends the named owner one private **Continuation needs attention** notification when a receiver ends without a confirmed result or a wait expires. It does not retry the work. This notification ends an inbox snooze. The pilot is off by default; see the [operator guide](https://github.com/multica-ai/multica/blob/main/server/internal/continuation/README.md) for scope and delivery limits.

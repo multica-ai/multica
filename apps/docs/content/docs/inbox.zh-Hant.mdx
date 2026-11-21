@@ -170,3 +170,7 @@ multica inbox snooze <id>... --until tomorrow   # RFC 3339、30m、3h、1d、1w�
 - [評論](/comments) — 瞭解回覆、提及和討論執行緒。
 - [在評論中 @ AI 代理](/mentioning-agents) — 區分成員通知和 AI 代理執行。
 - [自動化](/autopilots) — 配置自動建立工作及預設訂閱者。
+
+## 任務後續處理監控試點
+
+管理員可以按專案啟用後續處理監控。對於明確登記的任務，如果執行結束卻沒有已確認的結果，或等待期限已過，系統會向指定負責人傳送一次私密通知。監控不會重新執行任務。此通知會結束收件匣稍後提醒。試點預設關閉；範圍和交付限制見[操作指南](https://github.com/multica-ai/multica/blob/main/server/internal/continuation/README.md)。

@@ -99,6 +99,7 @@
     "review_requested": "Revisión solicitada",
     "task_completed": "Ejecución completada",
     "task_failed": "Ejecución fallida",
+    "continuation_stalled": "La continuación requiere atención",
     "agent_blocked": "Agente bloqueado",
     "agent_completed": "Agente completado",
     "reaction_added": "Reaccionó",

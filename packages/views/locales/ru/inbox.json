@@ -103,6 +103,7 @@
     "review_requested": "Запрошено ревью",
     "task_completed": "Запуск завершён",
     "task_failed": "Запуск завершился ошибкой",
+    "continuation_stalled": "Продолжение задачи требует внимания",
     "agent_blocked": "Агент заблокирован",
     "agent_completed": "Агент завершил работу",
     "reaction_added": "Реакция",

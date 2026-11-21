@@ -20,6 +20,7 @@ export type InboxItemType =
   | "doc_comment"
   | "doc_mentioned"
   | "task_failed"
+  | "continuation_stalled"
   | "reaction_added"
   // No longer written, but older servers wrote them and those rows remain;
   // keep their labels and filter groups so history still reads and filters.

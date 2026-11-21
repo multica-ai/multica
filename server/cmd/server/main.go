@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/continuation"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/database"
 	"github.com/multica-ai/multica/server/internal/dbreader"
@@ -863,6 +864,17 @@ func main() {
 	// — there is no separate goroutine for scheduled Autopilot anymore.
 	if err := schedulerMgr.Register(scheduler.SearchIndexChangePruneJob(queries)); err != nil {
 		slog.Warn("scheduler: failed to register search index change prune job", "error", err)
+	}
+	continuationMonitor, err := continuation.FromEnv(pool, bus)
+	if err != nil {
+		slog.Error("invalid continuation monitor configuration", "error", err)
+		os.Exit(1)
+	}
+	if continuationMonitor != nil {
+		if err := schedulerMgr.Register(scheduler.IssueContinuationJob(continuationMonitor)); err != nil {
+			slog.Error("register continuation monitor", "error", err)
+			os.Exit(1)
+		}
 	}
 	if err := schedulerMgr.Register(scheduler.IssueWakeupJob(&service.IssueWakeupService{Tasks: taskSvc})); err != nil {
 		slog.Error("scheduler: register issue wakeups", "error", err)

@@ -97,6 +97,7 @@
     "review_requested": "리뷰 요청됨",
     "task_completed": "실행 완료됨",
     "task_failed": "실행 실패함",
+    "continuation_stalled": "작업 계속 진행에 확인이 필요합니다",
     "agent_blocked": "에이전트 막힘",
     "agent_completed": "에이전트 완료됨",
     "reaction_added": "반응 추가됨",

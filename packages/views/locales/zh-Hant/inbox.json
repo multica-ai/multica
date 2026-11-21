@@ -97,6 +97,7 @@
     "review_requested": "請求審查",
     "task_completed": "執行已完成",
     "task_failed": "執行失敗",
+    "continuation_stalled": "任務後續處理需要關注",
     "agent_blocked": "AI 代理被阻塞",
     "agent_completed": "AI 代理已完成",
     "reaction_added": "新增了表情反應",

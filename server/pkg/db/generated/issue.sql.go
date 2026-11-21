@@ -469,7 +469,13 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 
 const deleteIssue = `-- name: DeleteIssue :exec
 WITH target AS (
-    SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
+    SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2 FOR UPDATE
+),
+cleared_continuation_incidents AS (
+ DELETE FROM issue_continuation_incident WHERE workspace_id=$2 AND issue_id IN (SELECT target.id FROM target)
+),
+cleared_continuations AS (
+ DELETE FROM issue_continuation WHERE workspace_id=$2 AND issue_id IN (SELECT target.id FROM target)
 ),
 cleared_wakeup_receipts AS (
  DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target))
