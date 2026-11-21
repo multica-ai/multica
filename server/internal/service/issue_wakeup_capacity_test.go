@@ -59,6 +59,13 @@ func TestIssueWakeupBusyRuleDoesNotBlockOtherWorkspace(t *testing.T) {
 			if ctx.Err() != nil {
 				t.Fatal("busy rule consumed batch deadline")
 			}
+			// The blocker is only needed during TickWorkspaces. Release it before
+			// reading through another connection: a parallel test's DROP TRIGGER
+			// can queue an exclusive table lock behind holder and block that read,
+			// preventing the deferred rollback from ever running.
+			if err := holder.Rollback(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 			if got := other.Count(t, "SELECT count(*) FROM agent_task_queue WHERE context->>'wakeup_id'=$1", util.UUIDToString(second.ID)); got != 1 {
 				t.Fatalf("unrelated rule not dispatched: %d", got)
 			}

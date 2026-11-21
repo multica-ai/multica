@@ -5,28 +5,47 @@
 //   make up C=api,web ARGS="--ephemeral"
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs chat issue --json"
+//   make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --queued --json"
+//   make env-exec ARGS="-- node scripts/dev-fixtures.mjs sidebar"
 //
 // Replies come from the daemon API, driven with the environment profile's user
 // token: the script registers a fixture runtime, then claims, starts and
 // completes each task it caused with canned Markdown, so content appears without
-// running a model through `make up C=daemon`. Every run adds new sessions and
-// issues and then exits; nothing keeps running.
+// running a model through `make up C=daemon`. The `task` fixture claims and
+// starts its task but never completes it. Every run adds new sessions and
+// issues and then exits; nothing keeps running unless `task --hold` was asked
+// to heartbeat.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const KINDS = ["chat", "builder", "issue"];
+const KINDS = ["chat", "builder", "issue", "task", "sidebar"];
+// `sidebar` fills the whole Work panel, so `all` leaves it out.
+const ALL_KINDS = ["chat", "builder", "issue", "task"];
 const FIXTURE_DAEMON_ID = "dev-fixtures";
 const FIXTURE_AGENT_NAME = "Fixture Agent";
+const FIXTURE_WORKER_NAME = "Fixture Worker";
+// Matches the daemon's own heartbeat period.
+const HEARTBEAT_INTERVAL_MS = 15_000;
 
-const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issue>... [--json]
+const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issue | task | sidebar>... [--queued] [--hold] [--json]
 
   chat      a chat session: a user message and an assistant reply with a table, code and a long log line
   builder   an Agent Builder session with the same kind of reply and a filled-in draft
   issue     an issue with a wide description and a comment holding a diff
-  all       all three
-  --json    print the created ids and URLs as JSON instead of text
+  task      an issue assigned to the Fixture Worker agent whose task stays running, with an execution log
+  sidebar   a Work panel in use: 11 issues in 3 projects, read and unread notifications from 3 agents,
+            pinned issues and a pinned project, and 2 saved views
+  all       chat, builder, issue and task
+  --queued  task: also leave a second task queued behind the running one, on the same issue
+  --hold    task: keep the fixture runtime heartbeating until Ctrl-C, so it stays online
+  --json    print the created ids and URLs as JSON instead of text; task adds task_id, auth_token and agent_id
+
+A held task stays running for the server's reconnect grace (MULTICA_RUNTIME_RECONNECT_GRACE,
+3 hours by default), but without --hold the runtime itself shows offline after about 150 seconds.
 
 Run through \`make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"\`.`;
 
@@ -38,17 +57,22 @@ function fail(message) {
 function parseCli(argv) {
   const kinds = new Set();
   let json = false;
+  let queued = false;
+  let hold = false;
   for (const arg of argv) {
     if (arg === "-h" || arg === "--help") {
       console.log(USAGE);
       process.exit(0);
     } else if (arg === "--json") json = true;
-    else if (arg === "all") KINDS.forEach((kind) => kinds.add(kind));
+    else if (arg === "--queued") queued = true;
+    else if (arg === "--hold") hold = true;
+    else if (arg === "all") ALL_KINDS.forEach((kind) => kinds.add(kind));
     else if (KINDS.includes(arg)) kinds.add(arg);
     else fail(`unknown argument ${arg}\n\n${USAGE}`);
   }
   if (kinds.size === 0) fail(`name at least one fixture.\n\n${USAGE}`);
-  return { kinds: KINDS.filter((kind) => kinds.has(kind)), json };
+  if ((queued || hold) && !kinds.has("task")) fail(`--queued and --hold apply to the task fixture.\n\n${USAGE}`);
+  return { kinds: KINDS.filter((kind) => kinds.has(kind)), json, queued, hold };
 }
 
 function loadProfile(env) {
@@ -233,14 +257,175 @@ const ISSUE_COMMENT = `Found it: the prepare lease is extended before the cache 
 | 2 | 51.9 s | 5.8 s | 1 |
 | 3 | 47.0 s | 6.4 s | 1 |`;
 
+const TASK_ISSUE_DESCRIPTION = `Find out why the prepare lease on \`cloud-pool-b\` is extended twice per claim, and propose a fix.
+
+The agent's task on this issue is held in \`running\` by \`scripts/dev-fixtures.mjs\`; it never finishes on its own.`;
+
+const TASK_QUEUED_COMMENT = "When that is done, check whether `cloud-pool-a` shows the same pattern after the next deploy.";
+
+const TASK_MESSAGES = [
+  { type: "text", content: "Looking for where the daemon extends the prepare lease during a claim." },
+  {
+    type: "tool_use",
+    call_id: "fixture-1",
+    tool: "Bash",
+    input: { command: "rg -n ExtendPrepareLease server/internal/daemon" },
+  },
+  {
+    type: "tool_result",
+    call_id: "fixture-1",
+    tool: "Bash",
+    output:
+      "server/internal/daemon/prepare.go:112:\tif err := p.client.ExtendPrepareLease(ctx, task.RuntimeID, task.ID); err != nil {\nserver/internal/daemon/lease.go:41:func (c *Client) ExtendPrepareLease(ctx context.Context, runtimeID, taskID string) error {",
+  },
+  { type: "tool_use", call_id: "fixture-2", tool: "Read", input: { file_path: "server/internal/daemon/prepare.go" } },
+  {
+    type: "tool_result",
+    call_id: "fixture-2",
+    tool: "Read",
+    output:
+      "112\tif err := p.client.ExtendPrepareLease(ctx, task.RuntimeID, task.ID); err != nil {\n113\t\treturn fmt.Errorf(\"extend prepare lease: %w\", err)\n114\t}\n115\tif err := p.cache.CopyInto(ctx, task.WorkDir, cache.Options{Concurrency: 8}); err != nil {",
+  },
+  {
+    type: "text",
+    content: "The lease is extended before the dependency cache copy starts, so a slow copy always needs a second extension. Measuring the copy time on `cloud-pool-b` next.",
+  },
+];
+
+// The sidebar fixture's cast. Each agent picks up one issue assigned to it and,
+// with that task's token, acts on issues the dev user created; every inbox row
+// comes from the server's own notification listeners.
+const SIDEBAR_AGENTS = {
+  atlas: { name: "Atlas", description: "Works through Desktop bugs." },
+  nova: { name: "Nova", description: "Keeps the API reliable." },
+  sage: { name: "Sage", description: "Writes product copy and onboarding research." },
+};
+for (const agent of Object.values(SIDEBAR_AGENTS)) {
+  agent.instructions = "Fixture agent for local UI evidence. Its actions are scripted by scripts/dev-fixtures.mjs.";
+}
+
+// Statuses the sidebar's Projects section shows by default.
+const SIDEBAR_PROJECTS = {
+  desktop: { title: "Desktop 2.0", status: "in_progress", priority: "high" },
+  onboarding: { title: "Onboarding revamp", status: "planned", priority: "medium" },
+  reliability: { title: "API reliability", status: "in_progress", priority: "urgent" },
+};
+
+const SIDEBAR_VIEWS = [
+  { name: "In review", query: { statusFilters: ["in_review"] } },
+  { name: "Urgent and high", query: { priorityFilters: ["urgent", "high"] } },
+];
+
+// ageMinutes backdates the issue's notifications, so the inbox shows a spread
+// of times rather than "just now"; read marks them read afterwards.
+const SIDEBAR_ISSUES = {
+  tabs: { title: "Tabs lose their scroll position after switching workspaces", project: "desktop", status: "todo", priority: "high", pinned: true, ageMinutes: 3 },
+  menus: { title: "Native menu shortcuts ignore the focused window", project: "desktop", status: "todo", priority: "medium", ageMinutes: 26 },
+  updater: { title: "Ship auto-update for the Windows build", project: "desktop", status: "todo", priority: "medium", ageMinutes: 26 * 60, read: true },
+  checklist: { title: "Rewrite the first-run checklist copy", project: "onboarding", status: "todo", priority: "low", ageMinutes: 3 * 60 },
+  invites: { title: "Invite step skips the role picker", project: "onboarding", status: "todo", priority: "medium", ageMinutes: 5 * 60, read: true },
+  dropoff: { title: "Measure drop-off between sign-up and the first issue", project: "onboarding", status: "in_progress", priority: "medium", ageMinutes: 7 * 60, read: true },
+  webhooks: { title: "Retry webhook deliveries with exponential backoff", project: "reliability", status: "todo", priority: "high", pinned: true, ageMinutes: 11 },
+  ratelimit: { title: "Rate-limit the public search endpoint", project: "reliability", status: "todo", priority: "high", ageMinutes: 48 },
+  claims: { title: "Slow claims on cloud-pool-b", project: "reliability", status: "in_progress", priority: "urgent", pinned: true, ageMinutes: 2 * 60 + 10 },
+  flags: { title: "Clean up stale feature flags", status: "todo", priority: "low", ageMinutes: 2 * 24 * 60, read: true },
+  roadmap: {
+    title: "Q4 roadmap review notes",
+    status: "todo",
+    priority: "none",
+    ageMinutes: 4 * 24 * 60,
+    read: true,
+    devComment: "Draft agenda is up. Please flag anything missing before Thursday.",
+  },
+};
+
+const DROPOFF_TABLE = `| Step | Users | Drop-off |
+| --- | ---: | ---: |
+| Signed up | 1,204 | — |
+| Created a workspace | 1,031 | 14% |
+| Invited a teammate | 642 | 38% |
+| Created the first issue | 518 | 19% |`;
+
+const devMention = (dev) => `[@${dev.name}](mention://member/${dev.id})`;
+const daysFromNow = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+// One agent at a time holds a running task on the issue it owns; its actions
+// use that task's token, so they are attributed to the agent. No action
+// touches an issue assigned to another agent, which would wake that agent.
+// Status changes are muted by default (MUL-9449), so they move the board but
+// every issue also gets an action that notifies.
+const SIDEBAR_SCRIPTS = [
+  {
+    agent: "atlas",
+    owns: "tabs",
+    report:
+      "The scroll position is stored per tab but restored before the list has rendered, so it clamps to 0. Restoring it after the first paint fixes it; a PR is up.",
+    actions: [
+      { issue: "tabs", update: { status: "in_progress" } },
+      {
+        issue: "menus",
+        comment: (dev) =>
+          `${devMention(dev)} the accelerators are registered on the first window only. Should Cmd+W close the focused issue window or always the main one?`,
+      },
+      { issue: "claims", update: { status: "in_review" } },
+      {
+        issue: "claims",
+        comment: () => "Moving the lease extension after the cache copy brings p95 back under 7 seconds. Over to review.",
+      },
+    ],
+  },
+  {
+    agent: "nova",
+    owns: "webhooks",
+    report:
+      "Deliveries now retry 5 times with backoff from 30 seconds to 1 hour, and a delivery that keeps failing is marked failed instead of retrying forever. Ready for review.",
+    actions: [
+      { issue: "webhooks", update: { status: "in_review" } },
+      { issue: "ratelimit", update: (dev) => ({ assignee_type: "member", assignee_id: dev.id }) },
+      {
+        issue: "invites",
+        comment: () =>
+          "Reproduced: the role picker is skipped whenever the invite link carries a `role` parameter, even an empty one.",
+      },
+      { issue: "updater", update: () => ({ due_date: daysFromNow(10) }) },
+    ],
+  },
+  {
+    agent: "sage",
+    owns: "checklist",
+    report:
+      "I drafted the new checklist copy, but the step order depends on whether invites move before the first issue. Blocked until that is decided.",
+    actions: [
+      { issue: "checklist", update: { status: "blocked" } },
+      { issue: "flags", update: { priority: "urgent" } },
+      { issue: "dropoff", comment: () => `Last 30 days, by step:\n\n${DROPOFF_TABLE}\n\nThe invite step loses the most people.` },
+      { issue: "roadmap", react: "🎉" },
+    ],
+  },
+];
+
 // -------------------------------------------------------------- fixtures ---
+
+// The version a daemon built from this checkout reports, as the Makefile
+// derives it, so UI that parses the CLI version sees a realistic value.
+function cliVersion() {
+  try {
+    return execFileSync("git", ["describe", "--tags", "--match", "v[0-9]*", "--always", "--dirty"], {
+      cwd: dirname(fileURLToPath(import.meta.url)),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "dev";
+  }
+}
 
 async function ensureRuntime(request, workspaceId) {
   const registered = await request("POST", "/api/daemon/register", {
     workspace_id: workspaceId,
     daemon_id: FIXTURE_DAEMON_ID,
     device_name: "Dev fixtures",
-    cli_version: "dev-fixtures",
+    cli_version: cliVersion(),
     runtimes: [{ name: "Fixture runtime", type: "claude", version: "fixture", status: "online" }],
   });
   const runtime = registered?.runtimes?.[0];
@@ -248,37 +433,68 @@ async function ensureRuntime(request, workspaceId) {
   return runtime;
 }
 
-async function ensureAgent(request, runtime) {
+async function ensureAgent(request, runtime, { name, ...fields }) {
   const agents = (await request("GET", "/api/agents")) ?? [];
   const existing = (Array.isArray(agents) ? agents : agents.agents ?? []).find(
-    (agent) => agent.name === FIXTURE_AGENT_NAME && agent.runtime_id === runtime.id,
+    (agent) => agent.name === name && agent.runtime_id === runtime.id,
   );
   if (existing) return existing;
-  return request("POST", "/api/agents", {
-    name: FIXTURE_AGENT_NAME,
-    description: "Answers with canned Markdown from scripts/dev-fixtures.mjs.",
-    instructions: "Fixture agent for local UI evidence. Its replies are written by scripts/dev-fixtures.mjs.",
-    runtime_id: runtime.id,
-    visibility: "workspace",
-  });
+  return request("POST", "/api/agents", { name, ...fields, runtime_id: runtime.id, visibility: "workspace" });
 }
 
-// A send enqueues the task; the fixture runtime is the only claimer, so the
-// expected task arrives within a few polls. Anything else it holds is left
-// over from an interrupted run and is answered too, so it cannot block ours.
-async function answer(request, runtime, taskId, output) {
+// The Fixture Agent's tasks finish at once, but the Fixture Worker's stay
+// running for hours, so they get separate agents: held tasks must not use up
+// the concurrency the chat fixtures need.
+const FIXTURE_AGENT = {
+  name: FIXTURE_AGENT_NAME,
+  description: "Answers with canned Markdown from scripts/dev-fixtures.mjs.",
+  instructions: "Fixture agent for local UI evidence. Its replies are written by scripts/dev-fixtures.mjs.",
+};
+const FIXTURE_WORKER = {
+  name: FIXTURE_WORKER_NAME,
+  description: "Holds tasks in running or queued for scripts/dev-fixtures.mjs.",
+  instructions: "Fixture agent for local UI evidence. Its tasks are started by scripts/dev-fixtures.mjs and never finish.",
+  max_concurrent_tasks: 50,
+};
+
+// A send or an assignment enqueues the task; the fixture runtime is the only
+// claimer, so the expected task arrives within a few polls. Anything else it
+// can claim is left over from an interrupted run and is answered, so it cannot
+// block ours. Held tasks are never claimable again: they are running already,
+// or queued behind a running task on the same issue.
+async function claimAndStart(request, runtime, taskId, leftoverOutput) {
   const deadline = Date.now() + 30_000;
   for (;;) {
     const claimed = await request("POST", `/api/daemon/runtimes/${runtime.id}/tasks/claim`, {});
     const task = claimed?.task;
     if (task) {
       await request("POST", `/api/daemon/tasks/${task.id}/start`);
-      await request("POST", `/api/daemon/tasks/${task.id}/complete`, { output });
-      if (task.id === taskId) return;
+      if (task.id === taskId) return task;
+      await request("POST", `/api/daemon/tasks/${task.id}/complete`, { output: leftoverOutput });
       continue;
     }
     if (Date.now() > deadline) throw new Error(`task ${taskId} was never offered to the fixture runtime`);
     await sleep(500);
+  }
+}
+
+async function answer(request, runtime, taskId, output) {
+  await claimAndStart(request, runtime, taskId, output);
+  await request("POST", `/api/daemon/tasks/${taskId}/complete`, { output });
+}
+
+// An assignment or a comment enqueues server-side, so the new task is found
+// in the issue's task runs rather than in the response.
+async function waitForQueuedTask(request, issueId, agentId, ignore = new Set()) {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const runs = (await request("GET", `/api/issues/${issueId}/task-runs`)) ?? [];
+    const task = (Array.isArray(runs) ? runs : runs.tasks ?? []).find(
+      (run) => run.agent_id === agentId && run.status === "queued" && !ignore.has(run.id),
+    );
+    if (task) return task;
+    if (Date.now() > deadline) throw new Error(`no queued task for agent ${agentId} appeared on issue ${issueId}`);
+    await sleep(300);
   }
 }
 
@@ -310,33 +526,214 @@ async function seedIssue({ request, appUrl, slug }) {
     description: ISSUE_DESCRIPTION,
     status: "in_progress",
     priority: "high",
+    allow_duplicate: true,
   });
   await request("POST", `/api/issues/${issue.id}/comments`, { content: ISSUE_COMMENT });
   return { issue_id: issue.id, identifier: issue.identifier, url: `${appUrl}/${slug}/issues/${issue.identifier}` };
 }
 
+async function seedTask({ request, profile, runtime, worker, appUrl, slug, queued }) {
+  const issue = await request("POST", "/api/issues", {
+    title: "Fixture: agent task in progress",
+    description: TASK_ISSUE_DESCRIPTION,
+    status: "todo",
+    priority: "medium",
+    assignee_type: "agent",
+    assignee_id: worker.id,
+    allow_duplicate: true,
+  });
+  const pending = await waitForQueuedTask(request, issue.id, worker.id);
+  const task = await claimAndStart(request, runtime, pending.id, ASSISTANT_REPLY);
+  await request("POST", `/api/daemon/tasks/${task.id}/messages`, {
+    messages: TASK_MESSAGES.map((message, index) => ({ seq: index + 1, ...message })),
+  });
+  // A real run moves its issue with its own task token, so the activity is the agent's.
+  const asAgent = client({ ...profile, token: task.auth_token });
+  await asAgent("PUT", `/api/issues/${issue.id}`, { status: "in_progress" });
+
+  const result = {
+    issue_id: issue.id,
+    identifier: issue.identifier,
+    url: `${appUrl}/${slug}/issues/${issue.identifier}`,
+    task_id: task.id,
+    auth_token: task.auth_token,
+    agent_id: worker.id,
+    runtime_id: runtime.id,
+  };
+  if (queued) {
+    await request("POST", `/api/issues/${issue.id}/comments`, { content: TASK_QUEUED_COMMENT });
+    result.queued_task_id = (await waitForQueuedTask(request, issue.id, worker.id, new Set([task.id]))).id;
+  }
+  return result;
+}
+
+const listOf = (response, key) => (Array.isArray(response) ? response : response?.[key] ?? []);
+
+async function ensureProject(request, existing, project) {
+  return existing.find((p) => p.title === project.title && !p.archived_at) ?? request("POST", "/api/projects", project);
+}
+
+async function ensureView(request, existing, view) {
+  return (
+    existing.find((v) => v.name === view.name) ??
+    request("POST", "/api/issue-views", { ...view, scope_type: "workspace", display: {} })
+  );
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The API stamps every notification with the time it was delivered, so the
+// fixture's rows would all read "just now". Shifting them back is the one
+// direct database write; without psql the rows keep their real times.
+function backdateInbox({ workspaceId, recipientId, issues }) {
+  const skip = (reason) => console.error(`[dev-fixtures] sidebar: notifications keep their real times; ${reason}`);
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) return skip("DATABASE_URL is not set.");
+  const ids = [workspaceId, recipientId, ...issues.map((issue) => issue.id)];
+  if (!ids.every((id) => UUID.test(id))) return skip("an id is not a UUID.");
+  const values = issues.map((issue) => `('${issue.id}'::uuid, ${Math.trunc(issue.ageMinutes)})`).join(", ");
+  const sql = `UPDATE inbox_item AS i SET created_at = i.created_at - make_interval(mins => v.minutes)
+    FROM (VALUES ${values}) AS v(issue_id, minutes)
+    WHERE i.issue_id = v.issue_id AND i.workspace_id = '${workspaceId}'
+      AND i.recipient_type = 'member' AND i.recipient_id = '${recipientId}'`;
+  try {
+    execFileSync("psql", [databaseUrl, "-v", "ON_ERROR_STOP=1", "-qAt", "-c", sql], { stdio: ["ignore", "ignore", "pipe"] });
+  } catch (error) {
+    if (error.code === "ENOENT") skip("psql is not installed.");
+    else skip(`psql failed: ${String(error.stderr ?? "").trim().split("\n")[0]}`);
+  }
+}
+
+async function seedSidebar({ request, profile, runtime, appUrl, slug }) {
+  const dev = await request("GET", "/api/me");
+
+  const agents = {};
+  for (const [key, agent] of Object.entries(SIDEBAR_AGENTS)) agents[key] = await ensureAgent(request, runtime, agent);
+
+  const existingProjects = listOf(await request("GET", "/api/projects"), "projects");
+  const projects = {};
+  for (const [key, project] of Object.entries(SIDEBAR_PROJECTS)) {
+    projects[key] = await ensureProject(request, existingProjects, project);
+  }
+
+  const existingViews = listOf(await request("GET", "/api/issue-views?scope_type=all"), "views");
+  const views = [];
+  for (const view of SIDEBAR_VIEWS) views.push(await ensureView(request, existingViews, view));
+
+  const owner = Object.fromEntries(SIDEBAR_SCRIPTS.map((script) => [script.owns, script.agent]));
+  const issues = {};
+  for (const [key, spec] of Object.entries(SIDEBAR_ISSUES)) {
+    if (owner[key]) continue;
+    issues[key] = await createSidebarIssue(request, spec, projects);
+    if (spec.devComment) {
+      issues[key].devComment = await request("POST", `/api/issues/${issues[key].id}/comments`, { content: spec.devComment });
+    }
+  }
+
+  for (const script of SIDEBAR_SCRIPTS) {
+    const agent = agents[script.agent];
+    const own = await createSidebarIssue(request, SIDEBAR_ISSUES[script.owns], projects, agent);
+    issues[script.owns] = own;
+    const pending = await waitForQueuedTask(request, own.id, agent.id);
+    const task = await claimAndStart(request, runtime, pending.id, script.report);
+    const asAgent = client({ ...profile, token: task.auth_token });
+    for (const action of script.actions) {
+      const issue = issues[action.issue];
+      if (action.update) {
+        const body = typeof action.update === "function" ? action.update(dev) : action.update;
+        await asAgent("PUT", `/api/issues/${issue.id}`, body);
+      }
+      if (action.comment) await asAgent("POST", `/api/issues/${issue.id}/comments`, { content: action.comment(dev) });
+      if (action.react) await asAgent("POST", `/api/comments/${issue.devComment.id}/reactions`, { emoji: action.react });
+    }
+    await request("POST", `/api/daemon/tasks/${task.id}/complete`, { output: script.report });
+  }
+
+  for (const [key, spec] of Object.entries(SIDEBAR_ISSUES)) {
+    if (spec.read) await request("POST", `/api/inbox/issues/${issues[key].id}/read`);
+  }
+  backdateInbox({
+    workspaceId: profile.workspaceId,
+    recipientId: dev.id,
+    issues: Object.entries(SIDEBAR_ISSUES).map(([key, spec]) => ({ id: issues[key].id, ageMinutes: spec.ageMinutes })),
+  });
+
+  // Pins persist across runs, so only the issues of this run are added.
+  const pinned = new Set((listOf(await request("GET", "/api/pins"), "pins")).map((pin) => `${pin.item_type}:${pin.item_id}`));
+  const toPin = [
+    ...Object.entries(SIDEBAR_ISSUES)
+      .filter(([, spec]) => spec.pinned)
+      .map(([key]) => ({ item_type: "issue", item_id: issues[key].id })),
+    { item_type: "project", item_id: projects.desktop.id },
+  ];
+  for (const pin of toPin) {
+    if (!pinned.has(`${pin.item_type}:${pin.item_id}`)) await request("POST", "/api/pins", pin);
+  }
+
+  const inbox = listOf(await request("GET", "/api/inbox"), "items");
+  const notified = new Set(inbox.map((item) => item.issue_id));
+  const unread = new Set(inbox.filter((item) => !item.read).map((item) => item.issue_id));
+  return {
+    url: `${appUrl}/${slug}/issues`,
+    inbox_issues: notified.size,
+    inbox_unread_issues: unread.size,
+    issues: Object.fromEntries(Object.entries(issues).map(([key, issue]) => [key, issue.identifier])),
+    project_ids: Object.values(projects).map((project) => project.id),
+    view_ids: views.map((view) => view.id),
+    agent_ids: Object.values(agents).map((agent) => agent.id),
+  };
+}
+
+function createSidebarIssue(request, spec, projects, agent) {
+  return request("POST", "/api/issues", {
+    title: spec.title,
+    status: spec.status,
+    priority: spec.priority,
+    project_id: spec.project ? projects[spec.project].id : undefined,
+    ...(agent ? { assignee_type: "agent", assignee_id: agent.id } : {}),
+    allow_duplicate: true,
+  });
+}
+
+// Keeps the runtime online, and its held tasks with it, the way a daemon does.
+// A failed beat (an API restart) is reported and retried on the next tick.
+async function holdRuntime(request, runtime) {
+  console.error(`[dev-fixtures] holding: ${runtime.name} heartbeats every ${HEARTBEAT_INTERVAL_MS / 1000}s; Ctrl-C to stop.`);
+  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => process.exit(0));
+  for (;;) {
+    await sleep(HEARTBEAT_INTERVAL_MS);
+    try {
+      await request("POST", "/api/daemon/heartbeat", { runtime_id: runtime.id });
+    } catch (error) {
+      console.error(`[dev-fixtures] heartbeat failed, retrying: ${error.message}`);
+    }
+  }
+}
+
 async function main() {
-  const { kinds, json } = parseCli(process.argv.slice(2));
+  const { kinds, json, queued, hold } = parseCli(process.argv.slice(2));
   const profile = loadProfile(process.env);
   const request = client(profile);
 
   const workspaces = (await request("GET", "/api/workspaces")) ?? [];
   const workspace = workspaces.find((ws) => ws.id === profile.workspaceId);
   if (!workspace) fail(`the profile's workspace ${profile.workspaceId} is not visible to its token.`);
-  const context = { request, appUrl: profile.appUrl, slug: workspace.slug };
+  const context = { request, profile, appUrl: profile.appUrl, slug: workspace.slug, queued };
 
-  if (kinds.includes("chat") || kinds.includes("builder")) {
+  if (kinds.some((kind) => kind !== "issue")) {
     context.runtime = await ensureRuntime(request, profile.workspaceId);
   }
-  if (kinds.includes("chat")) context.agent = await ensureAgent(request, context.runtime);
+  if (kinds.includes("chat")) context.agent = await ensureAgent(request, context.runtime, FIXTURE_AGENT);
+  if (kinds.includes("task")) context.worker = await ensureAgent(request, context.runtime, FIXTURE_WORKER);
 
-  const seeders = { chat: seedChat, builder: seedBuilder, issue: seedIssue };
+  const seeders = { chat: seedChat, builder: seedBuilder, issue: seedIssue, task: seedTask, sidebar: seedSidebar };
   const result = {};
   for (const kind of kinds) {
     result[kind] = await seeders[kind](context);
     if (!json) console.log(`[dev-fixtures] ${kind.padEnd(8)}${result[kind].url}`);
   }
   if (json) console.log(JSON.stringify(result, null, 2));
+  if (hold) await holdRuntime(request, context.runtime);
 }
 
 main().catch((error) => fail(error?.stack || String(error)));

@@ -108,7 +108,7 @@
   },
   "profile_card": {
     "unavailable": "Squad indisponible",
-    "detail_link": "Détail →",
+    "detail_link": "Voir les détails →",
     "archived": "Archivé",
     "member_count_one": "{{count}} membre",
     "member_count_other": "{{count}} membres",
@@ -126,7 +126,6 @@
     "mine": "Mes squads",
     "all": "Tous les squads"
   },
-  "toolbar": {},
   "intro": {
     "title": "Réunissez vos agents en squad pour qu'ils travaillent en équipe",
     "description": "Assignez une tâche au squad. Son agent chef la lit, confie chaque étape au membre dont le rôle correspond et suit le travail jusqu'à l'objectif. Vous n'avez qu'un seul interlocuteur.",

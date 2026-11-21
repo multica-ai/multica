@@ -10,12 +10,37 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"github.com/multica-ai/multica/server/pkg/remotemcp/remotemcptest"
 )
+
+func TestRemoteMCPServerNameUsesSafeDistinctContributionIdentities(t *testing.T) {
+	connections := []remotemcp.Connection{
+		{ContributionKey: "example__toolbox", ContributionID: "plugin:12345678-1234-4234-8234-1234567890ab:toolbox"},
+		{ContributionKey: "example__toolbox", ContributionID: "plugin:12345678-1234-4234-8234-1234567890ac:toolbox"},
+		{ContributionKey: "example__toolbox", ContributionID: "plugin:12345678-1234-4234-8234-1234567890ab:other_hook"},
+		{ContributionKey: "Mixed Case/☃", ContributionID: "00000000-0000-0000-0000-000000000001"},
+	}
+	safeName := regexp.MustCompile(`^[a-z0-9_-]+$`)
+	seen := map[string]bool{}
+	for _, connection := range connections {
+		name := remoteMCPServerName(connection)
+		if !safeName.MatchString(name) {
+			t.Errorf("Codex-incompatible server name %q for %q", name, connection.ContributionID)
+		}
+		if seen[name] {
+			t.Errorf("distinct contribution identities alias to %q", name)
+		}
+		seen[name] = true
+		if again := remoteMCPServerName(connection); again != name {
+			t.Fatalf("server identity changed: %q != %q", again, name)
+		}
+	}
+}
 
 func TestRemoteMCPProxyFiltersToolsAndInjectsCredential(t *testing.T) {
 	fixture := remotemcptest.NewServer()
@@ -117,7 +142,9 @@ func TestRemoteMCPProxyPreservesAcceptedNotificationStatus(t *testing.T) {
 }
 
 func TestRemoteMCPProxyRechecksCredentialBeforeUpstreamCall(t *testing.T) {
+	const contributionID = "plugin:12345678-1234-4234-8234-1234567890ab:toolbox"
 	called := false
+	credentialChecked := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 	defer upstream.Close()
 	endpoint, _ := url.Parse(upstream.URL)
@@ -125,18 +152,22 @@ func TestRemoteMCPProxyRechecksCredentialBeforeUpstreamCall(t *testing.T) {
 		endpoint: endpoint, client: upstream.Client(), path: "/capability",
 		semaphore: make(chan struct{}, remoteMCPMaxConcurrency),
 		connection: remotemcp.Connection{
-			ContributionID: "contribution", CredentialHeader: "Authorization",
+			ContributionID: contributionID, CredentialHeader: "Authorization",
 			ApprovedTools: []remotemcp.Tool{{Name: "allowed"}},
 		},
-		resolveCredential: func(context.Context, string) (http.Header, error) {
+		resolveCredential: func(_ context.Context, id string) (http.Header, error) {
+			credentialChecked = true
+			if id != contributionID {
+				t.Errorf("credential lookup identity = %q, want original %q", id, contributionID)
+			}
 			return nil, errors.New("revoked")
 		},
 	}
 	request := httptest.NewRequest(http.MethodPost, "/capability", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"allowed","arguments":{}}}`))
 	response := httptest.NewRecorder()
 	proxy.ServeHTTP(response, request)
-	if called || !strings.Contains(response.Body.String(), "revoked or unavailable") {
-		t.Fatalf("called=%v response=%s", called, response.Body.String())
+	if !credentialChecked || called || !strings.Contains(response.Body.String(), "revoked or unavailable") {
+		t.Fatalf("credentialChecked=%v called=%v response=%s", credentialChecked, called, response.Body.String())
 	}
 }
 

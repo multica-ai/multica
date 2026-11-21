@@ -398,7 +398,7 @@ func TestCreateWorktreeContextCancelsRunningGitProcessTree(t *testing.T) {
 	}
 }
 
-func TestBareDirName(t *testing.T) {
+func TestLegacyBareDirName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		input, want string
@@ -417,8 +417,8 @@ func TestBareDirName(t *testing.T) {
 		{"", "repo.git"},
 	}
 	for _, tt := range tests {
-		if got := bareDirName(tt.input); got != tt.want {
-			t.Errorf("bareDirName(%q) = %q, want %q", tt.input, got, tt.want)
+		if got := legacyBareDirName(tt.input); got != tt.want {
+			t.Errorf("legacyBareDirName(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
@@ -1756,7 +1756,7 @@ func TestEnsureRemoteTrackingLayoutMigratesLegacyCache(t *testing.T) {
 
 // TestCreateWorktreePathCollisionDoesNotLeakBranch verifies the secondary bug
 // fix: when the worktree path already exists as a non-worktree (e.g. a plain
-// directory), createWorktree must fail cleanly without leaking a branch into
+// directory), createWorktreeContext must fail cleanly without leaking a branch into
 // the bare repo. Previously the "already exists" retry logic would
 // misclassify path collisions as branch collisions and create a second
 // timestamp-suffixed branch before hitting the same path error.

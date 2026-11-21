@@ -45,6 +45,8 @@ Multica 當前會檢測以下命令：
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI 快速開始](https://help.aliyun.com/zh/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Amp | `amp` | [Amp CLI](https://ampcode.com/docs/cli) |
+| Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
@@ -72,6 +74,7 @@ Multica 當前會檢測以下命令：
 | Copilot | 1.0.0 |
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
+| Factory Droid | 1.8.0 |
 | MiniMax Code | 0.1.2 |
 | Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
@@ -102,7 +105,11 @@ Multica 當前會檢測以下命令：
 
 **DSH Desktop。** 裝的是 DeepSeek Harness Desktop 而不是 npm 包時，守護程序也會去找這個應用生成的 CLI shim，位置在它自己的使用者級資料目錄下：macOS 是 `~/Library/Application Support/DSH Desktop`，Windows 是 `%APPDATA%\DSH Desktop`。Windows 上這是漫遊應用資料目錄，不是安裝目錄：應用本身裝在 Program Files 或 `%LOCALAPPDATA%\Programs`，它驅動的 CLI 則和其他使用者級狀態放在一起。這些路徑裡的版本層是生成的 id，守護程序會逐個列舉，優先取最新的一份。PATH 上不需要別的東西，生成的 shim 會用絕對路徑呼叫應用自帶的執行時。DSH Desktop 裝在非預設位置時，用 `MULTICA_DSH_PATH` 指向那個 shim。
 
-守護程序只有在 `dsh --profile multica --probe` 成功後才註冊 DeepSeek Harness；失敗時會在 `/health` 報告缺少 profile。
+**升級 DSH 後。** 如果探測指出 profile 中的核心套件不相容，先備份守護程序診斷中列出的設定檔。檢查 `@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-tools` 和 `@deepseek-ai/dsh-llm` 的本機覆寫：盡量使用應用程式內附的核心套件，或讓覆寫版本與已安裝的 DSH 版本一致。保留需要的獨立外掛和鉤子，不要刪除所有相依套件。修復後重新執行 `dsh --profile multica --probe`。Multica 會將這種已確認的相容性拒絕回報為需要手動修復 profile，不會覆寫現有設定。
+
+如果探測指出已安裝的 DSH 不符合 `@multica-ai/dsh-runtime` 的需求而略過載入，請先備份設定檔，再將 Multica 橋接外掛更新至相容的建置版本。更新後重新執行 `dsh --profile multica --probe`。
+
+守護程序只有在 `dsh --profile multica --probe` 成功後才註冊 DeepSeek Harness。`/health` 診斷會區分 profile 缺失、已確認需要手動修復、協定不相容和探測暫時無法使用。啟動失敗時，診斷會包含偵測到的 CLI 版本、設定檔位置，以及可用的已遮蔽敏感資訊輸出。
 
 </Accordion>
 <Accordion title="Devin CLI" id="devin-cli">
@@ -128,6 +135,13 @@ Muse Code 需要 1.4.10 或更高版本。按[官方安裝和登入指南](https
 <Accordion title="Reasonix" id="reasonix">
 
 先執行 `reasonix setup`，配置預設的模型服務和模型，再啟動守護程序。
+
+</Accordion>
+<Accordion title="Qoder CLI / Qoder CN CLI" id="qoder">
+
+如果 Qoder 桌面應用程式可正常使用，但 Multica 本機執行回報驗證錯誤，請在守護程序所在的主機上，以執行守護程序的作業系統帳號透過 Qoder CLI 測試同一個模型。偵測到執行檔只代表守護程序能找到它。CLI 啟動時會使用守護程序的環境和為 AI 代理設定的環境變數。只有 Qoder 桌面應用程式能存取的憑據，CLI 可能無法使用。如果 CLI 也失敗，請先完成 CLI 登入或模型供應商設定，再重試 Multica 執行。
+
+即使終端機測試成功，shell 載入的憑據也可能沒有傳給守護程序。如果模型供應商要從環境變數讀取金鑰或權杖，請在守護程序的啟動環境中設定該變數，再重新啟動守護程序。權限有限的憑據也可以在 AI 代理的 **環境變數** 分頁中設定。Multica 會將這裡設定的值[以明文儲存在伺服器的資料庫中](/agents-create#環境變數與憑據)。
 
 </Accordion>
 </Accordions>
@@ -219,4 +233,4 @@ multica daemon restart
 - [守護程序與執行時](/daemon-runtimes) — 瞭解線上狀態、併發和自定義執行時。
 - [AI 程式設計工具對照](/providers) — 比較各工具在 Multica 中的能力。
 
-ZCode Desktop 的 macOS 應用程式包可被自動發現；請同時安裝 Node.js，並在桌面端啟用可用的 API 連線。模型與思考強度由 ZCode 原生目錄提供。詳見[執行時對照](/providers#zcode)。
+ZCode Desktop 的 macOS 應用程式包可被自動發現，需要同時安裝 Node.js。Linux 下，守護程序透過 PATH 中的 `zcode` 或 `/opt/ZCode/zcode` 自動發現 ZCode Desktop，在背景執行內建 CLI，不開啟桌面視窗，無需額外安裝 Node.js 或手動設定環境變數。請在桌面端啟用可用的 API 連線。模型與思考強度由 ZCode 原生目錄提供。詳見[執行時對照](/providers#zcode)。

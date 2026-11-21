@@ -324,6 +324,35 @@ describe("chat store — Ask Multica agent", () => {
     store.getState().setQuickChatAgentId(null);
     expect(createChatStore({ storage }).getState().quickChatAgentId).toBeNull();
   });
+
+  it("starts a new chat with that agent and no project, and asks for composer focus", () => {
+    const store = createChatStore({ storage: memStorage() });
+    const s = () => store.getState();
+    s().setSelectedAgentId("agent-1");
+    s().setSelectedProjectId("project-1");
+    s().setActiveSession("session-1");
+    s().setQuickChatAgentId("agent-9");
+
+    s().startNewChat();
+
+    expect(s().isOpen).toBe(true);
+    expect(s().activeSessionId).toBeNull();
+    expect(s().selectedProjectId).toBeNull();
+    expect(s().selectedAgentId).toBe("agent-9");
+    expect(s().newChatRequest).toBe(1);
+
+    s().startNewChat();
+    expect(s().newChatRequest).toBe(2);
+  });
+
+  it("starts the new chat with the current agent when none is set", () => {
+    const store = createChatStore({ storage: memStorage() });
+    store.getState().setSelectedAgentId("agent-1");
+
+    store.getState().startNewChat();
+
+    expect(store.getState().selectedAgentId).toBe("agent-1");
+  });
 });
 
 // The ledger is what makes a durable draft restore (#5219) apply at most once.

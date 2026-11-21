@@ -292,8 +292,8 @@ function SingleRecipientChip({
   t: IssuesT;
 }) {
   const label = actionLabel(entry.action, entry.state, t);
-  // The avatar carries "who"; the sentence carries only the outcome, so it
-  // stays fixed-width and never truncates on long agent names.
+  // Name, then outcome. A long name truncates; the outcome never does.
+  const quiet = entry.action !== "steer" && entry.action !== "restart" && entry.action !== "skip";
   return (
     <RecipientActionMenu
       entry={entry}
@@ -309,7 +309,11 @@ function SingleRecipientChip({
           )}
         >
           <TriggerAgentAvatar agent={entry.agent} suppressed={entry.action === "skip"} />
-          <span className="truncate">{label}</span>
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <span className={cn("truncate", quiet && "text-foreground")}>{entry.agent.name}</span>
+            <span aria-hidden className="shrink-0">·</span>
+            <span className="shrink-0">{label}</span>
+          </span>
           <ChevronDown aria-hidden className="size-3 shrink-0 text-faint-foreground" />
         </button>
       }

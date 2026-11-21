@@ -26,6 +26,8 @@ import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import { createDaemonQuitHandler } from "./daemon-quit";
 import { quitConfirmationOptions, quitFailureOptions } from "./daemon-quit-dialogs";
+import { getEffectiveDialogLocale } from "./dialog-locale";
+import { getDaemonErrorCopy } from "./daemon-manager-copy";
 import {
   prepareDaemonForInstall,
   type DaemonInstallPrep,
@@ -111,7 +113,13 @@ let activeProfile: ActiveProfile | null = null;
 let desiredDaemonRunning = false;
 // Non-null while the Windows updater owns daemon shutdown and installation.
 let desiredRunningBeforeUpdateStop: boolean | null = null;
-const UPDATE_IN_PROGRESS = { success: false, error: "An update is being installed. Try again shortly." };
+function currentLanguage(): string {
+  return getEffectiveDialogLocale(() => app.getPreferredSystemLanguages()[0] ?? "en");
+}
+
+function updateInProgressResult(): { success: false; error: string } {
+  return { success: false, error: getDaemonErrorCopy(currentLanguage()).updateInProgress };
+}
 let quitting = false;
 // Renderer recreation must not undo a failed-quit cancellation. Keep this
 // process-local until an explicit start/restart, without changing preferences.
@@ -888,7 +896,7 @@ async function reauthenticate(
     return {
       ok: false,
       reason: "transient",
-      message: restart.error ?? "failed to restart daemon",
+      message: restart.error ?? getDaemonErrorCopy(currentLanguage()).failedToRestartDaemon,
     };
   }
   return { ok: true };
@@ -997,14 +1005,14 @@ function scheduleStatusRefresh(): void {
 async function startDaemon(
   recoveryProfile?: ActiveProfile,
 ): Promise<{ success: boolean; error?: string }> {
-  if (desiredRunningBeforeUpdateStop !== null) return UPDATE_IN_PROGRESS;
-  if (quitting) return { success: false, error: "Application is quitting" };
+  if (desiredRunningBeforeUpdateStop !== null) return updateInProgressResult();
+  if (quitting) return { success: false, error: getDaemonErrorCopy(currentLanguage()).appQuitting };
   const bin = await resolveCliBinary();
-  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  if (!bin) return { success: false, error: getDaemonErrorCopy(currentLanguage()).cliNotInstalled };
 
   const active = await ensureActiveProfile();
   if (!active) {
-    return { success: false, error: "Waiting for the service address" };
+    return { success: false, error: getDaemonErrorCopy(currentLanguage()).waitingServiceAddress };
   }
   if (
     recoveryProfile &&
@@ -1015,7 +1023,7 @@ async function startDaemon(
       current: active,
     })
   ) {
-    return { success: false, error: "Daemon recovery was superseded" };
+    return { success: false, error: getDaemonErrorCopy(currentLanguage()).recoverySuperseded };
   }
   const existing = await fetchProfileHealth(active);
   if (daemonStatusAlive(existing?.status)) {
@@ -1038,11 +1046,11 @@ async function startDaemon(
       current: active,
     })
   ) {
-    return { success: false, error: "Daemon recovery was superseded" };
+    return { success: false, error: getDaemonErrorCopy(currentLanguage()).recoverySuperseded };
   }
 
-  if (desiredRunningBeforeUpdateStop !== null) return UPDATE_IN_PROGRESS;
-  if (quitting) return { success: false, error: "Application is quitting" };
+  if (desiredRunningBeforeUpdateStop !== null) return updateInProgressResult();
+  if (quitting) return { success: false, error: getDaemonErrorCopy(currentLanguage()).appQuitting };
   if (recoveryProfile) recoveryPolicy.recordRecoveryAttempt(Date.now());
   currentState = "starting";
   // Begin a fresh auth-probe window for this attempt.
@@ -1107,7 +1115,7 @@ async function stopDaemon(
   if (await lifecycleBlockedByForeignDaemon()) return { success: true };
 
   const bin = await resolveCliBinary();
-  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  if (!bin) return { success: false, error: getDaemonErrorCopy(currentLanguage()).cliNotInstalled };
 
   const active = await ensureActiveProfile();
   if (!active) return { success: true };
@@ -1136,8 +1144,8 @@ async function stopDaemon(
 }
 
 async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
-  if (desiredRunningBeforeUpdateStop !== null) return UPDATE_IN_PROGRESS;
-  if (quitting) return { success: false, error: "Application is quitting" };
+  if (desiredRunningBeforeUpdateStop !== null) return updateInProgressResult();
+  if (quitting) return { success: false, error: getDaemonErrorCopy(currentLanguage()).appQuitting };
   // Same central, live-preflighted guard as stopDaemon: we can neither stop nor
   // start a daemon we don't manage, so don't try (user-switch, reauth,
   // first-workspace, and any future restart caller all route through here).
@@ -1481,7 +1489,7 @@ export function setupDaemonManager(
     }
   });
   ipcMain.handle("daemon:start", () => {
-    if (desiredRunningBeforeUpdateStop !== null) return UPDATE_IN_PROGRESS;
+    if (desiredRunningBeforeUpdateStop !== null) return updateInProgressResult();
     externalDaemonObserved = false;
     setDesiredDaemonRunning(true, true);
     return lifecycleOperations.runForeground(() => startDaemon());
@@ -1495,7 +1503,7 @@ export function setupDaemonManager(
     return lifecycleOperations.runForeground(() => stopDaemon());
   });
   ipcMain.handle("daemon:restart", () => {
-    if (desiredRunningBeforeUpdateStop !== null) return UPDATE_IN_PROGRESS;
+    if (desiredRunningBeforeUpdateStop !== null) return updateInProgressResult();
     externalDaemonObserved = false;
     setDesiredDaemonRunning(true, true);
     return lifecycleOperations.runForeground(() => restartDaemon());
@@ -1600,7 +1608,7 @@ export function setupDaemonManager(
     const active = await ensureActiveProfile();
     const logPath = active ? profileLogPath(active.name) : null;
     if (!logPath || !existsSync(logPath)) {
-      return { success: false, error: "Log file not found yet" };
+      return { success: false, error: getDaemonErrorCopy(currentLanguage()).logFileNotFound };
     }
     // shell.openPath returns "" on success, error string on failure.
     const error = await shell.openPath(logPath);
@@ -1614,7 +1622,6 @@ export function setupDaemonManager(
   void lifecycleOperations.runBackground(() => bootstrapCli());
 
   let desiredBeforeQuit = false;
-  const language = app.getPreferredSystemLanguages()[0] ?? "en";
   let hiddenQuitWindows: BrowserWindow[] = [];
   const hideQuitWindows = () => {
     hiddenQuitWindows = BrowserWindow.getAllWindows().filter((window) =>
@@ -1664,12 +1671,12 @@ export function setupDaemonManager(
       if (!healthy && !busy) {
         busy = !await daemonProcessIsConfirmedAbsent(active.name);
       }
-      if (busy && (await show(quitConfirmationOptions(language, activeRuns))).response !== 1) return false;
+      if (busy && (await show(quitConfirmationOptions(currentLanguage(), activeRuns))).response !== 1) return false;
       // Reuse the lifecycle queue: an earlier start must finish before stop.
       // Do not queue behind an unresolved CLI installation during quit.
       if (!cachedCliBinary) {
         if (!healthy && await daemonProcessIsConfirmedAbsent(active.name)) return true;
-        throw new Error("Multica CLI is not available");
+        throw new Error(getDaemonErrorCopy(currentLanguage()).cliNotAvailable);
       }
       const window = getMainWindow();
       window?.setProgressBar(2);
@@ -1677,7 +1684,7 @@ export function setupDaemonManager(
       hideQuitWindows();
       try {
         const result = await lifecycleOperations.runForeground(() => stopDaemon({ force: true }));
-        if (!result.success) throw new Error(result.error ?? "Could not stop the daemon");
+        if (!result.success) throw new Error(result.error ?? getDaemonErrorCopy(currentLanguage()).couldNotStopDaemon);
       } finally {
         if (window && !window.isDestroyed()) window.setProgressBar(-1);
       }
@@ -1690,7 +1697,7 @@ export function setupDaemonManager(
       const health = active ? await fetchProfileHealth(active) : null;
       const daemonStopped = Boolean(active && !daemonStatusAlive(health?.status)
         && await daemonProcessIsConfirmedAbsent(active.name));
-      return (await show(quitFailureOptions(language, daemonStopped))).response === 1;
+      return (await show(quitFailureOptions(currentLanguage(), daemonStopped))).response === 1;
     },
     quit: () => { stopLogTail(); app.quit(); },
   });

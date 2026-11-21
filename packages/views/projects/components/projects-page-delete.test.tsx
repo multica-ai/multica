@@ -91,7 +91,7 @@ describe("ProjectsPage deletion lifecycle", () => {
   const listProjects = vi.fn();
 
   beforeEach(() => {
-    useProjectViewStore.setState({ viewMode: "compact" });
+    useProjectViewStore.setState({ layout: "table" });
     qc = new QueryClient({
       defaultOptions: {
         queries: { staleTime: Infinity, retry: false },
@@ -195,7 +195,7 @@ describe("ProjectsPage deletion lifecycle", () => {
   );
 
   it("reports a partial batch failure and retries only the remaining projects", async () => {
-    const other = { ...project, id: "project-2", title: "Another project" };
+    const other = { ...project, id: "project-2", title: "Another project", updated_at: "2026-05-31T00:00:00Z" };
     qc.setQueryData(listKey, { projects: [project, other], total: 2 });
     qc.setQueryData(projectKeys.detail("workspace-1", other.id), other);
     listProjects.mockResolvedValue({ projects: [other], total: 1 });
@@ -241,7 +241,7 @@ describe("ProjectsPage deletion lifecycle", () => {
   );
 
   it("stops a batch if connectivity is lost between projects and retries only after confirmation", async () => {
-    const other = { ...project, id: "project-2", title: "Another project" };
+    const other = { ...project, id: "project-2", title: "Another project", updated_at: "2026-05-31T00:00:00Z" };
     qc.setQueryData(listKey, { projects: [project, other], total: 2 });
     qc.setQueryData(projectKeys.detail("workspace-1", other.id), other);
     listProjects.mockResolvedValue({ projects: [other], total: 1 });
@@ -309,8 +309,8 @@ describe("ProjectsPage deletion lifecycle", () => {
     },
   );
 
-  it.each(["compact", "comfortable"] as const)("retains a %s row after offline rejection and allows an explicit retry", async (mode) => {
-    useProjectViewStore.setState({ viewMode: mode });
+  it.each(["table", "board"] as const)("retains a %s row after offline rejection and allows an explicit retry", async (layout) => {
+    useProjectViewStore.setState({ layout });
     onlineManager.setOnline(false);
     renderPage();
     await confirmDeletion();

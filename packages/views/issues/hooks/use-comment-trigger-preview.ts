@@ -5,6 +5,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import { parseMentions } from "@multica/core/issues/comment-trigger-outcomes";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
 
 const COMMENT_TRIGGER_PREVIEW_DEBOUNCE_MS = 300;
@@ -98,6 +100,9 @@ export function useCommentTriggerPreview({
     [content],
   );
   const debouncedSignature = useDebouncedSignature(signature);
+  // A guest's comment never starts an agent (MUL-9420), so there is nothing
+  // to preview and the server refuses the request.
+  const guest = useIsGuest(useCurrentWorkspace()?.id);
   const contentRef = useRef(content);
   const parentKey = parentId ?? "";
   const editingKey = editingCommentId ?? "";
@@ -109,7 +114,7 @@ export function useCommentTriggerPreview({
   const previewQuery = useQuery({
     queryKey: [...issueKeys.commentTriggerPreview(issueId), parentKey, editingKey, debouncedSignature],
     queryFn: () => api.previewCommentTriggers(issueId, contentRef.current, parentId, editingCommentId),
-    enabled: signature !== "empty" && debouncedSignature !== "empty",
+    enabled: !guest && signature !== "empty" && debouncedSignature !== "empty",
     retry: false,
     // The answer depends on live queue state (pending-task dedup), not just
     // the mention set, so a cached result must revalidate when its signature

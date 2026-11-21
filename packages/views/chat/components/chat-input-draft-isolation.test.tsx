@@ -94,6 +94,10 @@ vi.mock("../../editor/attachment-download-context", () => ({
   AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("../../editor/use-open-attachment-link", () => ({
+  useOpenAttachmentLink: () => ({ resolve: () => undefined, open: () => false, modal: null }),
+}));
+
 vi.mock("@tiptap/react", () => ({
   useEditor: (options: {
     onCreate?: (args: { editor: unknown }) => void;

@@ -4,8 +4,12 @@ import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_ISSUE_VIEW_PREFERENCE } from "@multica/core/api/schemas";
 import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
+import { NO_PROJECT_SIDEBAR_SOURCE } from "@multica/core/issues/sidebar-list";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
-import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
+import {
+  DEFAULT_SIDEBAR_PROJECT_SETTINGS,
+  useSidebarTreeStore,
+} from "@multica/core/issues/stores/sidebar-tree-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
@@ -65,7 +69,7 @@ function render(pathname: string, projectId: string | null) {
 }
 
 beforeEach(() => {
-  useSidebarTreeStore.setState({ locate: null });
+  useSidebarTreeStore.setState({ locate: null, projectSettings: DEFAULT_SIDEBAR_PROJECT_SETTINGS });
   layout.shell = null;
   layout.sidebar = null;
 });
@@ -98,8 +102,14 @@ describe("useShowInSidebar", () => {
     expect(render("/acme/inbox", PROJECT.id).current).toBeNull();
   });
 
-  it("is not offered for an issue without a project, or one the sidebar leaves out", () => {
-    expect(render(`/acme/issues/${ISSUE_ID}`, null).current).toBeNull();
+  it("shows an issue without a project under No project", () => {
+    render(`/acme/issues/${ISSUE_ID}`, null).current?.();
+    expect(useSidebarTreeStore.getState().locate).toEqual({ issueId: ISSUE_ID, source: NO_PROJECT_SIDEBAR_SOURCE });
+  });
+
+  it("is not offered for an issue whose row the sidebar leaves out", () => {
     expect(render(`/acme/issues/${ISSUE_ID}`, DONE_PROJECT.id).current).toBeNull();
+    useSidebarTreeStore.setState({ projectSettings: { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, showNoProject: false } });
+    expect(render(`/acme/issues/${ISSUE_ID}`, null).current).toBeNull();
   });
 });

@@ -7,9 +7,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -244,12 +242,6 @@ func TestNewDispatcherDoesNotTouchTheDatabase(t *testing.T) {
 
 	// And the sweep itself, called directly, must survive the same pool.
 	dispatcher.sweepOnce()
-}
-
-func testFlagService(enabled bool) *featureflag.Service {
-	provider := featureflag.NewStaticProvider()
-	provider.Set(featureflags.PluginsV1, featureflag.Rule{Default: enabled})
-	return featureflag.NewService(provider)
 }
 
 // Nil flags read as disabled. A deployment that never wired the flag service

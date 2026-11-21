@@ -5,7 +5,7 @@
     "add": "Ajouter un état",
     "show_archived": "Afficher les archivés ({{count}})",
     "archived_badge": "Archivé",
-    "archived_hint": "Retiré des nouvelles affectations. Les tâches qui le portent le gardent.",
+    "archived_hint": "Retiré des tableaux et des sélecteurs de statut.",
     "reorder_failed": "Le nouvel ordre n'a pas pu être enregistré.",
     "actions": {
       "move_up": "Monter",
@@ -16,7 +16,6 @@
       "reorder": "Réordonner {{name}}"
     },
     "reorder_hint": "Glissez les statuts au sein d’une catégorie pour réordonner les tableaux, listes et menus.",
-    "built_in_dialog": {},
     "editor": {
       "create_title": "Nouvel état",
       "edit_title": "Modifier l'état",
@@ -48,7 +47,7 @@
     "archive_dialog": {
       "retry": "Réessayer l'archivage",
       "title": "Archiver cet état ?",
-      "description": "Déplacez toutes les tâches hors de « {{name}} » avant de l'archiver. Une fois vide, ce statut disparaîtra des tableaux et des sélecteurs de statut.",
+      "description": "« {{name}} » sera retiré des tableaux et des sélecteurs de statut. Vous pourrez consulter les statuts archivés plus tard.",
       "in_use_title": "Déplacer les tâches avant l'archivage",
       "in_use": "Tâches utilisant encore ce statut : {{count}}. Déplacez-les vers un autre statut, y compris les tâches terminées et annulées, puis réessayez.",
       "view_issues": "Voir les tâches",
@@ -110,7 +109,7 @@
     "field_visibility": "Qui peut l'utiliser",
     "public_target_hint": "Doit être un agent que tout le monde peut déclencher.",
     "target_private": "privé",
-    "target_missing": "Cible indisponible",
+    "target_missing": "Agent indisponible",
     "archive": "Archiver",
     "unarchive": "Restaurer",
     "edit": "Modifier",
@@ -125,7 +124,7 @@
     "field_name": "Nom",
     "field_name_placeholder": "Relecture de code",
     "field_target": "S'exécute en tant que",
-    "no_target": "Aucune cible",
+    "no_target": "Aucun agent (commentaire uniquement)",
     "no_target_hint": "Publie un message sans mentionner personne.",
     "field_prompt": "Invite",
     "field_prompt_placeholder": "Relire le code lié à cette tâche. Se concentrer sur la justesse et les cas limites.",
@@ -157,7 +156,7 @@
       "title": "Fuseau horaire",
       "browser_suffix": " (navigateur)",
       "hint": "Utilisé pour les dates et graphiques dans tous vos espaces de travail.",
-      "sync_failed": "Échec de l'enregistrement de votre préférence de fuseau horaire.",
+      "sync_failed": "Impossible d'enregistrer votre fuseau horaire.",
       "search": "Rechercher un fuseau horaire...",
       "empty": "Aucun fuseau horaire correspondant"
     },
@@ -277,7 +276,7 @@
     },
     "own": {
       "title": "Créer le vôtre",
-      "description": "Importez un thème au format .zip ou depuis un dossier, ou partez d’une copie du thème actuel."
+      "description": "Demandez à n’importe quel agent d’en créer un dans un chat ou une tâche, importez un thème au format .zip ou depuis un dossier, ou partez d’une copie du thème actuel."
     },
     "tools": {
       "duplicate": "Dupliquer « {{name}} » en nouveau thème",
@@ -341,8 +340,8 @@
     },
     "content_size": {
       "title": "Taille du texte",
-      "description": "Seulement le texte du contenu ; l’interface garde sa taille.",
-      "follow": "Comme l’interface ({{size}} px)"
+      "description": "Seulement le texte du contenu. Par défaut, comme l’interface.",
+      "follow": "Suivre la taille de l’interface"
     },
     "content_leading": {
       "title": "Interligne",
@@ -355,7 +354,7 @@
     },
     "density": {
       "title": "Densité",
-      "description": "Hauteur des lignes dans les listes de tickets et la recherche.",
+      "description": "Hauteur des lignes dans les listes de tickets, la recherche et la barre latérale, et espacement du tableau.",
       "compact": "Compacte",
       "default": "Par défaut",
       "comfortable": "Aérée"
@@ -391,8 +390,9 @@
     "no_results": "Aucune action de raccourci correspondante.",
     "conflict_error": "Déjà utilisé par {{action}}.",
     "reserved_error": "Réservé par le navigateur ou la fenêtre de bureau.",
-    "send_error": "Envoyer ne peut utiliser que Entrée ou Mod+Entrée.",
+    "send_error": "L'envoi ne peut utiliser que Entrée ou Cmd/Ctrl+Entrée.",
     "unsafe_error": "Cette touche gênerait la saisie ou la navigation clavier de base.",
+    "unrecognized_error": "Impossible d'enregistrer cette combinaison. Essayez-en une autre.",
     "send_enter_hint": "Maj+Entrée insère un paragraphe, poursuit une liste, ou ajoute un saut de ligne dans un bloc de code.",
     "categories": {
       "general": "Général",
@@ -419,6 +419,10 @@
         "label": "Afficher ou masquer la fenêtre de discussion",
         "description": "Ouvrir ou fermer la fenêtre de discussion flottante. À l'ouverture, le champ de message reçoit le focus."
       },
+      "newChat": {
+        "label": "Demander à Multica",
+        "description": "Démarrer une nouvelle discussion dans la fenêtre de discussion flottante."
+      },
       "findInIssue": {
         "label": "Rechercher dans la tâche",
         "description": "Rechercher dans la tâche ouverte."
@@ -426,6 +430,14 @@
       "archiveInboxItem": {
         "label": "Archiver la notification",
         "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives."
+      },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Se désabonner et archiver",
+        "description": "Se désabonner de la tâche de la notification ouverte et l'archiver. Disponible sur les tâches qui ne sont ni à vous ni à vos agents."
+      },
+      "snoozeInboxItem": {
+        "label": "Reporter la notification",
+        "description": "Reporte la tâche ouverte depuis la boîte de réception, ou la fait revenir si elle est reportée."
       },
       "send": {
         "label": "Envoyer",
@@ -486,6 +498,10 @@
       "goSettings": {
         "label": "Aller aux paramètres",
         "description": "Ouvrir les paramètres de l'espace de travail."
+      },
+      "voiceInput": {
+        "label": "Saisie vocale",
+        "description": "Dictez dans le dernier éditeur utilisé. Maintenez pour parler."
       }
     },
     "fixed": {
@@ -582,7 +598,8 @@
       "code": "Code",
       "channels": "Messagerie",
       "apps": "Applications connectées",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "voice_input": "Saisie vocale"
     },
     "groups": {
       "personal": "Personnel",
@@ -604,7 +621,7 @@
     "loading": "Chargement des plugins",
     "load_failed": "Impossible de charger les plugins",
     "load_failed_description": "Réessayez. Les plugins déjà activés et les exécutions épinglées ne sont pas affectés.",
-    "empty": "Aucun plugin intégré disponible.",
+    "empty": "Aucun plugin installé pour l'instant.",
     "action_failed": "Échec de l'action sur le plugin",
     "enabled": "Portée du plugin activée",
     "disabled": "Plugin désactivé pour les nouvelles tâches",
@@ -712,6 +729,7 @@
     "save_failed": "Impossible d'enregistrer la propriété",
     "limit_hint": "{{count}}/{{max}} propriétés actives",
     "archived_badge": "Archivée",
+    "options_preview": "Voir toutes les options de {{name}}",
     "types": {
       "text": "Texte",
       "number": "Nombre",
@@ -800,10 +818,11 @@
     },
     "delete_dialog": {
       "title": "Supprimer l'étiquette ?",
-      "description": "Supprimer « {{name}} » ? Elle sera retirée de {{count}} ressources. Cette action est irréversible.",
       "cancel": "Annuler",
       "confirm": "Supprimer l'étiquette",
-      "failed": "Impossible de supprimer l'étiquette"
+      "failed": "Impossible de supprimer l'étiquette",
+      "description_one": "Supprimer « {{name}} » ? Elle sera retirée de {{count}} élément. Cette action est irréversible.",
+      "description_other": "Supprimer « {{name}} » ? Elle sera retirée de {{count}} ressources. Cette action est irréversible."
     }
   },
   "account": {
@@ -814,15 +833,39 @@
     "profile_description_label": "À propos de vous",
     "profile_description_hint": "Inclus dans chaque exécution effectuée en votre nom.",
     "profile_description_placeholder": "ex. Ingénieur backend (Go + Postgres). Je préfère des PR concises et des tests livrés avec le changement.",
-    "profile_description_too_long": "Le profil est trop long (maximum {{max}} caractères ; actuellement {{count}}).",
+    "profile_description_too_long": "Le champ « À propos de vous » est trop long (max {{max}} caractères ; actuellement {{count}}).",
     "save": "Mettre à jour le profil",
     "saving": "Mise à jour...",
     "toast_avatar_failed": "Échec de l'envoi de l'avatar",
     "toast_profile_failed": "Échec de la mise à jour du profil"
   },
   "notifications": {
-    "title": "Notifications de la boîte de réception",
-    "description": "Les événements désactivés restent visibles dans la tâche.",
+    "title": "Boîte de réception",
+    "description": "Choisissez les événements qui arrivent dans la boîte de réception de la barre latérale Travail. Un événement désactivé ne crée aucune notification, et le réactiver ne récupère pas celles manquées.",
+    "categories": {
+      "direct": "Vous concernant",
+      "issues": "Tâches que vous suivez",
+      "projects": "Projets que vous suivez",
+      "agents": "Agents"
+    },
+    "others_issues": {
+      "label": "Tâches des autres",
+      "description": "Tâches assignées à quelqu'un d'autre ou à son agent que vous suivez parce que vous les avez créées, commentées ou y avez été mentionné. Les mises à jour clés incluent les @mentions, les réponses dans les fils auxquels vous avez participé et — lorsque Changements de statut est activé — les statuts qui nécessitent votre attention (En relecture, Bloqué, Terminé).",
+      "key_updates": "Mises à jour clés",
+      "all": "Toute l'activité"
+    },
+    "leaving": {
+      "title": "Sortir de la boîte de réception",
+      "description": "Lire une notification ne la retire pas de la boîte de réception.",
+      "manual_label": "Archiver à la main",
+      "manual_description": "Depuis sa ligne dans la barre latérale ou le haut de la notification",
+      "manual_value": "À tout moment",
+      "done_label": "Archiver les tâches que vous terminez",
+      "done_description": "Quand vous passez une tâche à un statut Terminé ou Annulé, ses notifications sont archivées. Celles terminées par d'autres restent dans la boîte de réception.",
+      "archived_label": "Notifications archivées",
+      "archived_description": "Retrouvez-les et désarchivez-les",
+      "archived_action": "Voir les archivées"
+    },
     "toast_failed": "Échec de la mise à jour des réglages de notification",
     "groups": {
       "assignments": {
@@ -841,13 +884,24 @@
         "label": "Mentions",
         "description": "Quand quelqu'un vous @mentionne, y compris via @all et @squad"
       },
+      "reactions": {
+        "label": "Réactions",
+        "description": "Quand quelqu'un réagit à une tâche que vous avez créée ou à un commentaire que vous avez écrit"
+      },
       "updates": {
         "label": "Priorité et date d'échéance",
         "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
       },
+      "new_issues": {
+        "label": "Nouvelles tâches",
+        "description": "Quand une tâche est créée dans un projet auquel vous êtes abonné"
+      },
       "agent_activity": {
         "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent échoue"
+        "description": "Lorsqu'une exécution d'agent échoue, ou qu'une action d'app demandée par un agent est bloquée ou expire"
+      },
+      "chat_replies": {
+        "label": "Inclure les réponses du chat"
       }
     },
     "system": {
@@ -856,7 +910,7 @@
     },
     "browser": {
       "label": "Notifications du navigateur",
-      "hint": "Autoriser ce navigateur à afficher des bannières de notification pour les nouveaux éléments de la boîte de réception.",
+      "hint": "Autorisez ce navigateur à afficher des bannières pour les notifications de la boîte de réception et les réponses du chat.",
       "enable": "Activer",
       "granted": "Ce navigateur peut afficher des bannières de notification.",
       "denied": "Bloqué par votre navigateur. Activez les notifications pour ce site dans ses réglages.",
@@ -889,7 +943,7 @@
     "revoke_aria": "Révoquer {{name}}",
     "revoke_tooltip": "Révoquer",
     "revoke_dialog": {
-      "title": "Révoquer le jeton",
+      "title": "Révoquer le jeton API ?",
       "description": "Ce jeton sera définitivement révoqué et ne pourra plus être utilisé. Cette action est irréversible.",
       "cancel": "Annuler",
       "confirm": "Révoquer"
@@ -912,7 +966,7 @@
     "section_general": "Détails de l'espace de travail",
     "logo_label": "Logo de l'espace de travail",
     "change_logo_aria": "Changer le logo de l'espace de travail",
-    "click_logo_hint": "Cliquez sur le logo pour envoyer une nouvelle image",
+    "click_logo_hint": "Cliquez sur le logo pour importer une image ou créer une icône texte",
     "toast_logo_failed": "Échec de l'envoi du logo de l'espace de travail",
     "name_label": "Nom",
     "description_label": "Description",
@@ -932,7 +986,7 @@
     "leave_default": "Vous retirer de cet espace de travail.",
     "leave_button": "Quitter l'espace de travail",
     "leaving": "Départ...",
-    "leave_confirm_title": "Quitter l'espace de travail",
+    "leave_confirm_title": "Quitter cet espace de travail ?",
     "leave_confirm_description": "Quitter {{name}} ? Vous perdrez l'accès jusqu'à une nouvelle invitation.",
     "toast_leave_failed": "Échec du départ de l'espace de travail",
     "delete_title": "Supprimer l'espace de travail",
@@ -941,7 +995,7 @@
     "deleting": "Suppression...",
     "toast_delete_failed": "Échec de la suppression de l'espace de travail",
     "confirm_cancel": "Annuler",
-    "confirm_action": "Confirmer",
+    "confirm_action": "Quitter l'espace de travail",
     "context_hint": "Transmis à chaque agent de cet espace de travail à chaque exécution.",
     "slug_hint": "Utilisé dans toutes les URL de l'espace de travail. Il ne peut pas être modifié.",
     "copy_slug": "Copier le slug",
@@ -955,7 +1009,7 @@
     "prefix_external_warning": "Les anciens identifiants comme {{oldExample}} dans les titres de PR, noms de branche, documents et discussions ne sont pas mis à jour : ces liens cesseront de fonctionner."
   },
   "delete_workspace_dialog": {
-    "title": "Supprimer l'espace de travail",
+    "title": "Supprimer cet espace de travail ?",
     "description": "Cette action est irréversible. Toutes les tâches, tous les agents, toutes les discussions et tout l'historique des exécutions seront définitivement supprimés.",
     "type_to_confirm_prefix": "Pour confirmer, saisissez",
     "type_to_confirm_suffix": " ci-dessous.",
@@ -965,7 +1019,7 @@
   },
   "labs": {
     "section_placeholder_title": "Aucune expérimentation pour l'instant",
-    "section_placeholder_description": "Les réglages expérimentaux apparaîtront ici au fil des livraisons. Aujourd'hui, cet onglet est volontairement vide.",
+    "section_placeholder_description": "Les fonctionnalités expérimentales apparaîtront ici dès qu'elles seront disponibles.",
     "toast_failed": "Échec de la mise à jour du réglage"
   },
   "github": {
@@ -975,8 +1029,8 @@
     "connect_opening": "Ouverture…",
     "disconnect": "Déconnecter",
     "disconnecting": "Déconnexion…",
-    "disconnect_confirm_title": "Déconnecter la GitHub App",
-    "disconnect_confirm_description": "Multica cessera de recevoir les webhooks de cette installation. Les copies de PR et les liens existants sont conservés ; reconnectez à tout moment pour reprendre les mises à jour.",
+    "disconnect_confirm_title": "Déconnecter le compte GitHub ?",
+    "disconnect_confirm_description": "Déconnecter {{login}} de cet espace de travail ? Les mises à jour de ce compte s’arrêteront. Les PR et liens existants seront conservés ; les autres connexions ne seront pas affectées.",
     "disconnect_confirm_cancel": "Annuler",
     "disconnect_confirm_action": "Déconnecter",
     "not_configured": "L'intégration GitHub n'est pas configurée pour ce déploiement. Les opérateurs doivent définir",
@@ -994,10 +1048,21 @@
     "feature_co_author_description_suffix": "aux commits rédigés par des agents.",
     "feature_auto_link_label": "Lier automatiquement tâches et PR",
     "toast_failed": "Échec de la mise à jour des paramètres GitHub",
-    "feature_auto_link_description": "Lie une PR à la tâche dont l’identifiant, par ex. {{example}}, figure dans son titre ou sa branche, ou suit « Closes » dans sa description.",
+    "feature_auto_link_description": "Associe automatiquement une pull request lorsqu'un ID de tâche apparaît dans le nom de sa branche ou son titre, ou suit « Closes {{example}} » dans sa description.",
     "status_paused": "En pause",
     "pause": "Mettre en pause les fonctionnalités GitHub",
-    "resume": "Reprendre les fonctionnalités GitHub"
+    "resume": "Reprendre les fonctionnalités GitHub",
+    "add_account": "Ajouter un compte ou une organisation",
+    "disconnect_account": "Déconnecter {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub n’a pas renvoyé d’autorisation utilisateur. Reconnectez-vous et terminez l’autorisation. Si cela se répète pour une installation existante, contactez votre opérateur Multica.",
+      "installation_not_authorized": "Pour une installation personnelle, utilisez le compte GitHub propriétaire. Pour une organisation, utilisez un compte administrateur de tous les dépôts autorisés et sélectionnez au moins un dépôt.",
+      "invalid_state": "Cette demande de connexion GitHub a expiré ou est invalide. Recommencez depuis Paramètres → Code.",
+      "incomplete_callback": "GitHub a renvoyé une réponse de connexion incomplète. Recommencez depuis Paramètres → Code.",
+      "bad_workspace": "L’espace de travail de cette connexion est introuvable. Ouvrez l’espace souhaité et réessayez depuis Paramètres → Code.",
+      "verification_failed": "Impossible de vérifier votre accès à l’installation GitHub. Réessayez ; si cela se répète, demandez à votre opérateur Multica de vérifier la configuration de la GitHub App.",
+      "persist_failed": "Impossible d’enregistrer la connexion GitHub. Réessayez depuis Paramètres → Code ; si cela se répète, contactez votre opérateur Multica."
+    }
   },
   "vcs": {
     "section_title": "Git auto-hébergé",
@@ -1051,11 +1116,11 @@
     "not_enabled_self_host_hint": "Auto-hébergement : voir le README du projet pour les détails.",
     "preview_title": "Installation de bot Lark bientôt disponible",
     "preview_description": "Les connexions Lark ne sont pas activées sur ce déploiement. Contactez votre administrateur.",
-    "connected_bots": "Bots",
+    "connected_bots": "Bots connectés",
     "loading": "Chargement…",
     "empty_title": "Aucun bot connecté pour l'instant",
     "empty_description_prefix": "Ouvrez un agent de cet espace de travail et cliquez sur",
-    "empty_description_cta": "Associer à Lark",
+    "empty_description_cta": "Connecter à Feishu / Lark",
     "empty_description_suffix": "pour lui installer un bot.",
     "revoked_badge": "révoqué",
     "region_feishu": "Feishu",
@@ -1068,12 +1133,12 @@
     "disconnect_confirm_cancel": "Annuler",
     "toast_disconnected": "Bot Lark déconnecté",
     "toast_disconnect_failed": "Échec de la déconnexion",
-    "bind_button": "Associer à Lark",
+    "bind_button": "Connecter à Feishu / Lark",
     "bind_button_title": "Associer {{agent}} à un bot Lark",
-    "bind_button_feishu": "Associer à Feishu",
-    "bind_button_lark": "Associer à Lark",
-    "bind_button_feishu_title": "Associer {{agent}} à un bot Feishu (Chine continentale)",
-    "bind_button_lark_title": "Associer {{agent}} à un bot Lark (international)",
+    "bind_button_feishu": "Connecter Feishu",
+    "bind_button_lark": "Connecter Lark",
+    "bind_button_feishu_title": "Connecter {{agent}} à un bot Feishu (Chine)",
+    "bind_button_lark_title": "Connecter {{agent}} à un bot Lark (International)",
     "agent_bot_connected_label": "Connecté à Lark",
     "agent_bot_manage_link": "Gérer dans Lark",
     "agent_bot_manage_tooltip": "Ouvrir la page d'application de ce bot dans Lark — gérer les portées, modifier le nom affiché, demander des permissions supplémentaires.",
@@ -1086,17 +1151,17 @@
     "agent_bot_manage_tooltip_feishu": "Ouvrir la page d'application de ce bot dans Feishu — gérer les portées, modifier le nom affiché, demander des permissions supplémentaires.",
     "agent_bot_manage_tooltip_lark": "Ouvrir la page d'application de ce bot dans Lark — gérer les portées, modifier le nom affiché, demander des permissions supplémentaires.",
     "agent_bot_disconnect_tooltip": "Dissocier ce bot Lark de l'agent. Le bot cessera de recevoir les messages Lark.",
-    "install_dialog_title": "Associer à Lark",
-    "install_dialog_description": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot PersonalAgent.",
-    "install_dialog_description_for_agent": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot pour {{agent}}.",
-    "install_dialog_title_feishu": "Associer à Feishu",
-    "install_dialog_title_lark": "Associer à Lark",
-    "install_dialog_description_feishu": "Ouvrez Feishu sur votre téléphone et scannez le code ci-dessous pour créer un bot PersonalAgent.",
-    "install_dialog_description_lark": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot PersonalAgent.",
-    "install_dialog_description_for_agent_feishu": "Ouvrez Feishu sur votre téléphone et scannez le code ci-dessous pour créer un bot pour {{agent}}.",
-    "install_dialog_description_for_agent_lark": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot pour {{agent}}.",
+    "install_dialog_title": "Connecter à Feishu / Lark",
+    "install_dialog_description": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot Bot.",
+    "install_dialog_description_for_agent": "Scannez le code QR avec Feishu ou Lark pour créer un bot pour {{agent}}.",
+    "install_dialog_title_feishu": "Connecter à Feishu",
+    "install_dialog_title_lark": "Connecter à Lark",
+    "install_dialog_description_feishu": "Ouvrez Feishu sur votre téléphone et scannez le code ci-dessous pour créer un bot Bot.",
+    "install_dialog_description_lark": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot Bot.",
+    "install_dialog_description_for_agent_feishu": "Scannez le code QR avec Feishu pour créer un bot pour {{agent}}.",
+    "install_dialog_description_for_agent_lark": "Scannez le code QR avec Lark pour créer un bot pour {{agent}}.",
     "install_starting": "Préparation du QR code…",
-    "install_scan_hint": "Lark → Scanner → autorisez le nouveau PersonalAgent.",
+    "install_scan_hint": "Lark → Scanner → autorisez le nouveau Bot.",
     "install_open_link_fallback": "Ou touchez ici pour ouvrir dans Lark",
     "install_success": "Bot associé. Envoyez-lui un message dans Feishu/Lark pour vérifier la réception.",
     "install_success_toast": "Bot Lark installé",
@@ -1142,7 +1207,7 @@
     "disconnect": "Déconnecter",
     "disconnecting": "Déconnexion…",
     "disconnect_confirm_title": "Déconnecter ce bot Slack ?",
-    "disconnect_confirm_description": "Le bot cessera de recevoir les messages Slack de cet espace de travail. L'entrée d'installation est conservée pour l'audit ; vous pourrez le réinstaller plus tard depuis le même agent.",
+    "disconnect_confirm_description": "Le bot cessera de recevoir les messages Slack pour cet espace de travail. L'enregistrement d'installation est conservé pour l'audit ; vous pourrez le reconnecter plus tard depuis le même agent.",
     "disconnect_confirm_cancel": "Annuler",
     "toast_disconnected": "Bot Slack déconnecté",
     "toast_disconnect_failed": "Échec de la déconnexion",
@@ -1172,7 +1237,7 @@
     "groups_title": "Groupes récents",
     "groups_description": "Un groupe apparaît lorsqu'un membre de l'espace de travail associe son compte DingTalk et y @mentionne ce bot. Les groupes actifs au cours des 90 derniers jours sont affichés par défaut.",
     "groups_loading": "Chargement des groupes…",
-    "groups_empty": "Aucun message de groupe observé pour l'instant.",
+    "groups_empty": "Aucune activité de groupe pour l'instant.",
     "groups_no_recent": "Aucun groupe actif au cours des 90 derniers jours.",
     "groups_inactive": "Inactifs depuis longtemps ({{count}})",
     "groups_load_more": "Charger plus",
@@ -1186,7 +1251,7 @@
     "group_mentions_other": "{{count}} mentions",
     "group_forget": "Oublier",
     "group_forget_title": "Oublier ce groupe ?",
-    "group_forget_description": "Le groupe sera retiré de l'inventaire de Multica sans supprimer les conversations ni les messages. Il réapparaîtra lorsque quelqu'un @mentionnera de nouveau le bot.",
+    "group_forget_description": "Retire ce groupe de la liste de Multica sans supprimer de messages dans DingTalk.",
     "group_forget_cancel": "Annuler",
     "group_forget_confirm": "Oublier le groupe",
     "group_forget_success": "Groupe retiré de l'inventaire",
@@ -1196,28 +1261,28 @@
     "bot_permission_tooltip_suffix": ", puis @mentionnez de nouveau le bot dans un groupe DingTalk où il a été ajouté.",
     "not_enabled_title": "Intégration DingTalk non activée",
     "not_enabled_description_prefix": "Définissez",
-    "not_enabled_description_suffix": "sur le serveur pour permettre l'installation de robots DingTalk.",
+    "not_enabled_description_suffix": "pour activer les bots DingTalk.",
     "not_enabled_self_host_hint": "Auto-hébergement : voir le README du projet pour les détails.",
-    "connections_title": "Connexions",
+    "connections_title": "Bots connectés",
     "deleted_agent": "Agent supprimé",
     "loading": "Chargement…",
     "empty_title": "Aucun bot connecté pour l'instant",
     "empty_description_prefix": "Ouvrez un agent de cet espace de travail et cliquez sur",
     "empty_description_cta": "Connecter DingTalk",
-    "empty_description_suffix": "pour lui installer un robot.",
+    "empty_description_suffix": "pour lui installer un bot.",
     "revoked_badge": "révoqué",
     "installed_at_label": "Installé {{when}}",
     "identity_label": "Identifiant de personnel associé : {{identity}}",
     "disconnect": "Déconnecter",
     "disconnecting": "Déconnexion…",
     "disconnect_confirm_title": "Déconnecter ce bot DingTalk ?",
-    "disconnect_confirm_description": "Le bot cessera de recevoir les messages DingTalk de cet espace de travail. L'entrée d'installation est conservée pour l'audit ; vous pourrez reconnecter le bot plus tard.",
+    "disconnect_confirm_description": "Le bot cessera de recevoir les messages DingTalk pour cet espace de travail. L'enregistrement d'installation est conservé pour l'audit ; vous pourrez le reconnecter plus tard depuis le même agent.",
     "disconnect_confirm_cancel": "Annuler",
     "toast_disconnected": "Bot DingTalk déconnecté",
     "toast_disconnect_failed": "Échec de la déconnexion",
     "bind_button": "Connecter DingTalk",
     "bind_button_title": "Connecter {{agent}} à un bot DingTalk",
-    "agent_bot_connected_label": "Bot connecté :",
+    "agent_bot_connected_label": "Connecté à DingTalk",
     "agent_bot_disconnect_tooltip": "Dissocier ce bot DingTalk de l'agent. Le bot cessera de recevoir les messages DingTalk.",
     "byo_dialog_title": "Connecter un bot DingTalk",
     "byo_docs_link": "Pas à pas : connecter votre agent Multica à DingTalk",
@@ -1234,7 +1299,7 @@
     "page_description": "Discutez avec les agents dans WeCom ou créez une tâche avec /issue. Aucune URL de rappel publique nécessaire.",
     "not_enabled_title": "Intégration WeCom non activée",
     "not_enabled_description_prefix": "Définissez",
-    "not_enabled_description_suffix": "sur le serveur pour permettre l'installation de bots intelligents WeCom.",
+    "not_enabled_description_suffix": "pour activer les bots intelligents WeCom.",
     "not_enabled_self_host_hint": "Auto-hébergement : voir le README du projet pour les détails.",
     "preview_title": "Installation WeCom bientôt disponible",
     "preview_description": "Les connexions WeCom ne sont pas activées sur ce déploiement. Contactez votre administrateur.",
@@ -1249,7 +1314,7 @@
     "disconnect": "Déconnecter",
     "disconnecting": "Déconnexion…",
     "disconnect_confirm_title": "Déconnecter ce bot WeCom ?",
-    "disconnect_confirm_description": "Le bot cessera de recevoir les messages WeCom de cet espace de travail. L'entrée d'installation est conservée pour l'audit ; vous pourrez le réinstaller plus tard depuis le même agent.",
+    "disconnect_confirm_description": "Le bot cessera de recevoir les messages WeCom pour cet espace de travail. L'enregistrement d'installation est conservé pour l'audit ; vous pourrez le reconnecter plus tard depuis le même agent.",
     "disconnect_confirm_cancel": "Annuler",
     "toast_disconnected": "Bot WeCom déconnecté",
     "toast_disconnect_failed": "Échec de la déconnexion",
@@ -1321,7 +1386,7 @@
     "disconnect": "Déconnecter",
     "disconnecting": "Déconnexion…",
     "disconnect_confirm_title": "Déconnecter ce bot Telegram ?",
-    "disconnect_confirm_description": "Le bot cessera de recevoir les messages Telegram de cet espace de travail. L'historique des conversations dans Multica est conservé ; vous pourrez le reconnecter plus tard depuis le même agent.",
+    "disconnect_confirm_description": "Le bot cessera de recevoir les messages Telegram pour cet espace de travail. L'historique des discussions dans Multica est conservé ; vous pourrez le reconnecter plus tard depuis le même agent.",
     "disconnect_confirm_cancel": "Annuler",
     "toast_disconnected": "Bot Telegram déconnecté",
     "toast_disconnect_failed": "La déconnexion a échoué",
@@ -1366,7 +1431,9 @@
     "github_load_more": "Charger plus",
     "github_selected_count": "{{count}} sélectionnés",
     "github_cancel": "Annuler",
-    "github_import": "Ajouter les dépôts",
+    "github_import": "Ajouter {{count}} dépôts",
+    "github_import_one": "Ajouter {{count}} dépôt",
+    "github_import_other": "Ajouter {{count}} dépôts",
     "save": "Enregistrer",
     "saving": "Enregistrement...",
     "saved_hint": "Toutes les modifications sont enregistrées",
@@ -1399,7 +1466,10 @@
       "close_others": "Fermer les autres onglets",
       "open_window": "Ouvrir dans une nouvelle fenêtre",
       "new": "Nouvel onglet",
-      "pinned_name": "{{title}} (épinglé)"
+      "pinned_name": "{{title}} (épinglé)",
+      "copy_link": "Copier le lien",
+      "link_copied": "Lien copié",
+      "close_right": "Fermer les onglets à droite"
     },
     "updates": {
       "title": "Mises à jour",
@@ -1412,7 +1482,18 @@
       "up_to_date": "Vous avez la dernière version.",
       "downloading": "La v{{version}} se télécharge en arrière-plan — vous serez averti quand elle sera prête à installer.",
       "check_now": "Vérifier maintenant",
-      "checking": "Vérification…"
+      "checking": "Vérification…",
+      "check_unavailable": "Impossible de rechercher les mises à jour pour le moment. Réessayez plus tard.",
+      "check_network": "Impossible de joindre le service de mise à jour. Vérifiez votre connexion et réessayez.",
+      "check_failed": "La recherche de mises à jour a échoué. Réessayez.",
+      "download_failed": "Le téléchargement a échoué. Vous pouvez continuer à utiliser la version actuelle et réessayer.",
+      "download_ready": "La version {{version}} est prête à être installée.",
+      "retry": "Réessayer",
+      "banner_dismiss": "Fermer",
+      "banner_title": "Mise à jour prête",
+      "banner_body": "La version v{{version}} sera appliquée au prochain lancement.",
+      "banner_changelog": "Voir le journal des modifications",
+      "banner_restart": "Redémarrer maintenant"
     },
     "daemon": {
       "title": "Démon",
@@ -1424,7 +1505,7 @@
       "external_description_before": "Le démon de cet appareil s'exécute en dehors de l'application, par exemple dans WSL2. L'application ne peut donc ni le démarrer ni l'arrêter. Démarrez-le ou arrêtez-le depuis cet environnement avec",
       "external_description_after": ".",
       "auto_start_title": "Démarrage automatique à l'ouverture",
-      "auto_start_description": "Démarrer automatiquement à la connexion.",
+      "auto_start_description": "Démarre automatiquement le daemon local au lancement de Multica Desktop",
       "auto_stop_title": "Arrêt automatique à la fermeture",
       "auto_stop_description": "Arrêter le daemon à la fermeture de Desktop.",
       "cli_status": "État du CLI",
@@ -1488,6 +1569,22 @@
       "reconnect_failed": "Impossible de reconnecter le démon",
       "try_again_moment": "Veuillez réessayer dans un instant.",
       "try_again": "Veuillez réessayer."
+    },
+    "errors": {
+      "not_found_title": "Cette page n'existe pas",
+      "not_found_description": "Cette adresse est indisponible. Vérifiez le lien ou revenez en arrière.",
+      "tab_error_title": "Une erreur s'est produite dans cet onglet",
+      "tab_error_description": "Cet onglet n'a pas pu se charger. Rechargez-le ou envoyez un rapport si le problème persiste.",
+      "go_to_issues": "Aller aux tâches",
+      "reload_tab": "Recharger l'onglet",
+      "close_tab": "Fermer l'onglet",
+      "report_error": "Signaler l'erreur",
+      "issue_unavailable_title": "Tâche indisponible",
+      "issue_unavailable_description": "Cet espace de travail n'est plus disponible dans votre compte.",
+      "something_went_wrong": "Une erreur s'est produite",
+      "reload": "Recharger",
+      "close_window": "Fermer la fenêtre",
+      "unknown_route_error": "Erreur de routage inconnue"
     }
   },
   "members": {
@@ -1498,7 +1595,7 @@
     "toast_invitation_sent": "Invitation envoyée",
     "toast_invitation_failed": "Échec de l'envoi de l'invitation",
     "toast_seat_capacity_unavailable": "Impossible de vérifier la capacité de membres. Veuillez réessayer.",
-    "toast_seat_capacity_rate_limited": "La capacité de sièges est en cours de modification. Réessayez dans un instant.",
+    "toast_seat_capacity_rate_limited": "Trop de modifications de sièges en même temps. Réessayez dans un instant.",
     "seat_purchase_title": "Ajouter un siège pour envoyer cette invitation ?",
     "seat_purchase_description": "Aucun siège acheté n'est disponible pour {{email}}. Vérifiez l'estimation de Stripe, puis approuvez ensemble l'achat et l'invitation.",
     "purchase_seat_and_invite": "Acheter 1 siège et inviter",
@@ -1507,7 +1604,7 @@
     "seat_purchase_timeout": "L'achat du siège a été soumis, mais sa confirmation prend plus de temps que prévu. Aucune invitation n'a été envoyée. Réessayez l'invitation lorsque la facturation indique un siège disponible.",
     "seat_purchase_capacity_taken": "Le siège acheté n'est plus disponible, l'invitation n'a donc pas été envoyée. Vérifiez les sièges actuels avant de réessayer.",
     "no_members": "Aucun membre trouvé.",
-    "revoke_invitation_title": "Révoquer l'invitation",
+    "revoke_invitation_title": "Révoquer l'invitation ?",
     "revoke_invitation_description": "Révoquer l'invitation envoyée à {{email}} ? Cette personne ne pourra plus rejoindre cet espace de travail.",
     "toast_invitation_revoked": "Invitation révoquée",
     "toast_invitation_revoke_failed": "Échec de la révocation de l'invitation",
@@ -1515,7 +1612,7 @@
     "toast_role_failed": "Échec de la mise à jour du membre",
     "toast_member_removed": "Membre retiré",
     "toast_member_remove_failed": "Échec du retrait du membre",
-    "remove_member_title": "Retirer {{name}}",
+    "remove_member_title": "Retirer {{name}} ?",
     "remove_member_description": "Retirer {{name}} de {{workspace}} ? Cette personne perdra l'accès à cet espace de travail.",
     "confirm_cancel": "Annuler",
     "confirm_action": "Confirmer",
@@ -1535,6 +1632,10 @@
       "member": {
         "label": "Membre",
         "description": "Créer des tâches et y travailler"
+      },
+      "guest": {
+        "label": "Invité",
+        "description": "Consulte et commente les projets partagés avec lui. Ne peut pas lancer d'agents."
       }
     },
     "share_links_create_title": "Créer un lien de partage",
@@ -1571,7 +1672,47 @@
     "invitation_meta": "Envoyée le {{sent}} · Expire le {{expires}}",
     "revoke_invitation_aria": "Révoquer l'invitation de {{email}}",
     "seats_used": "{{used}} sièges utilisés sur {{purchased}}",
-    "manage_seats": "Gérer les sièges"
+    "manage_seats": "Gérer les sièges",
+    "member_limit_full_title": "Ce forfait autorise jusqu'à {{limit}} membres. L'espace de travail est complet.",
+    "member_limit_full_description": "Passez à Pro pour un nombre illimité de membres. Chaque membre occupe un siège payant, et la mise à niveau en inclut un pour cette invitation. Ou retirez d'abord un membre.",
+    "member_limit_full_description_pending": "Les invitations en attente occupent aussi une place ({{pending}} actuellement). Passez à Pro pour un nombre illimité de membres (chaque membre occupe un siège payant, et la mise à niveau en inclut un pour cette invitation), ou révoquez d'abord une invitation ou retirez un membre.",
+    "member_limit_usage": "{{used}} / {{limit}} membres",
+    "upgrade_and_invite": "Mettre à niveau et inviter",
+    "toast_member_limit_reached": "L'espace de travail est complet. Passez à un forfait supérieur pour inviter d'autres membres.",
+    "member_limit_full_description_no_upgrade": "Révoquez une invitation en attente ou retirez un membre pour libérer une place.",
+    "toast_invalid_email": "Saisissez une adresse e-mail valide.",
+    "toast_already_member": "{{email}} est déjà membre de cet espace de travail.",
+    "toast_invitation_pending": "Une invitation pour {{email}} est déjà en attente.",
+    "toast_invite_check_unavailable": "Impossible de vérifier les membres et invitations existants. Réessayez dans un instant.",
+    "member_limit_full_description_billing": "L'abonnement de l'espace de travail demande votre attention. Rétablissez-le dans Facturation pour ajouter des membres, ou retirez d'abord un membre.",
+    "open_billing": "Ouvrir Facturation",
+    "guest_free_tag": "Gratuit · sans siège",
+    "guest_projects_label": "Projets accessibles",
+    "guest_projects_add": "Ajouter un projet…",
+    "guest_projects_remove": "Retirer {{project}}",
+    "guest_projects_hint": "Les invités ne voient ni les autres projets, ni les agents, automatisations ou réglages.",
+    "invite_guest_button": "Inviter l'invité",
+    "all_label": "Tous",
+    "guests_label": "Invités",
+    "guest_count": "Invités : {{count}}",
+    "list_separator": ", ",
+    "takes_seat": "Occupe 1 siège",
+    "frees_seat": "Libère un siège",
+    "make_member": "Passer en membre",
+    "make_member_title": "Passer {{name}} en membre ?",
+    "make_member_description": "{{name}} verra tout l'espace de travail et pourra lancer des agents. Cela occupe 1 siège.",
+    "make_member_seat_description": "{{name}} verra tout l'espace de travail et pourra lancer des agents. Tous les sièges achetés sont occupés : un siège de plus sera acheté.",
+    "purchase_seat_and_make_member": "Acheter un siège et passer en membre",
+    "making_member": "Passage en membre…",
+    "make_guest_title": "Passer {{name}} en invité ?",
+    "make_guest_description": "{{name}} ne verra que les projets ci-dessous et libère un siège. Ses agents, automatisations et accès aux runtimes sont retirés.",
+    "make_guest_button": "Passer en invité",
+    "manage_projects": "Gérer les projets accessibles",
+    "manage_projects_title": "Projets accessibles à {{name}}",
+    "save_projects": "Enregistrer",
+    "toast_projects_updated": "Projets mis à jour",
+    "revoke_invitation_confirm": "Révoquer l'invitation",
+    "remove_member_confirm": "Retirer le membre"
   },
   "integrations": {
     "status_connected": "Connecté",
@@ -1605,7 +1746,40 @@
     "github_actions": "Actions GitHub"
   },
   "channels": {
-    "breadcrumb": "Fil d'Ariane"
+    "breadcrumb": "Fil d'Ariane",
+    "add": "Ajouter un canal de messagerie",
+    "connect": "Connecter",
+    "disconnect": "Déconnecter",
+    "open": "Ouvrir",
+    "normal": "Connecté",
+    "waiting_message": "En attente du premier message",
+    "disconnected": "Déconnecté",
+    "find_me": "Me trouver sur {{platform}}",
+    "manage": "Gérer {{platform}}",
+    "last_message": "Dernier message : {{time}}",
+    "ask_admin": "Contacter un administrateur",
+    "unavailable": "Connexion indisponible",
+    "permissions_title": "Qui peut connecter",
+    "owner_or_admin": "Propriétaire de l’agent ou administrateur de l’espace",
+    "admin_only": "Administrateurs de l’espace uniquement",
+    "connect_title": "Connecter un canal de messagerie",
+    "choose_description": "Choisissez un agent et une plateforme.",
+    "authorize_description": "Connecter {{agent}} à {{platform}}.",
+    "agent_label": "Agent",
+    "choose_agent": "Choisir un agent",
+    "platform_label": "Plateforme",
+    "region_label": "Région",
+    "method_label": "Méthode de connexion",
+    "feishu": "Feishu (Chine)",
+    "lark": "Lark (international)",
+    "setup_guide": "Guide de configuration",
+    "connection_changed": "Cette connexion n’est plus disponible. Fermez cette fenêtre et réessayez.",
+    "connect_failed": "Impossible de connecter le bot.",
+    "connect_success": "Canal de messagerie connecté.",
+    "disconnect_failed": "Impossible de déconnecter le bot.",
+    "disconnect_title": "Déconnecter le canal de messagerie ?",
+    "disconnect_description": "Cet agent ne recevra plus de messages de {{platform}}.",
+    "agent_unavailable": "Agent indisponible"
   },
   "mcp_usage": {
     "agent_count_one": "Utilisé par {{count}} agent",
@@ -1618,6 +1792,30 @@
     "mcp": "Ajoutés par les administrateurs, partagés dans l'espace de travail puis attribués agent par agent.",
     "apps": "Des comptes d'équipe ou personnels connectés via Multica et ajoutés à chaque agent.",
     "plugins": "Paquets installés pouvant ajouter des outils, des hooks planifiés et du stockage, chacun avec ses propres autorisations."
+  },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "Messages privés avec le compte qui scanne le QR code de connexion.",
+    "loading": "Connexion…",
+    "empty": "Connectez WeChat depuis l’onglet Intégrations d’un agent.",
+    "close": "Fermer",
+    "action_failed": "Cette action n’a pas pu aboutir. Réessayez.",
+    "privacy_hint": "Les messages seront exécutés avec vos droits dans cet espace de travail. Ne partagez pas ce QR code.",
+    "qr_label": "QR code de connexion WeChat",
+    "scan_hint": "Scannez avec WeChat et confirmez sur votre téléphone.",
+    "scanned": "Code scanné. Confirmez la connexion dans WeChat.",
+    "verify_hint": "WeChat demande une vérification. Saisissez le code affiché sur votre téléphone.",
+    "verify_label": "Code de vérification",
+    "verify": "Vérifier",
+    "success": "Connexion établie. Envoyez un nouveau message au bot dans WeChat.",
+    "expired": "Ce QR code a expiré. Générez-en un nouveau.",
+    "blocked": "WeChat a bloqué les tentatives de vérification. Réessayez plus tard.",
+    "already_bound": "Ce bot est déjà lié dans WeChat. Déconnectez l’ancien client, puis réessayez.",
+    "refresh": "Nouveau QR code",
+    "retry": "Réessayer",
+    "already_connected": "Ce compte WeChat est connecté à {{agent}}. Déconnectez-le de cet agent avant de continuer.",
+    "connected_elsewhere": "Ce compte WeChat est connecté ailleurs. Déconnectez la connexion existante avant de continuer.",
+    "authorization_expired": "L’autorisation WeChat a expiré. Scannez à nouveau pour vous reconnecter."
   },
   "connected_apps": {
     "description": "Les comptes que vos agents utilisent pour accéder aux apps externes. Les actions autorisées sont exécutées immédiatement.",
@@ -1642,7 +1840,7 @@
     "disconnect": "Déconnecter",
     "catalog_title": "Apps disponibles",
     "catalog_label": "Apps que les membres peuvent ajouter",
-    "catalog_description": "Les apps sélectionnées ont des règles par défaut vérifiées. « Toutes les apps » ajoute tout ce que Composio peut connecter ; les actions que Multica ne sait pas classer demandent toujours d'abord. Une liste personnalisée n'autorise que les apps choisies.",
+    "catalog_description": "Les apps sélectionnées ont des règles par défaut vérifiées. « Toutes les apps » ajoute tout ce que Multica peut connecter ; les actions que Multica ne sait pas classer demandent toujours d'abord. Une liste personnalisée n'autorise que les apps choisies.",
     "catalog_all": "Toutes les apps",
     "catalog_curated": "Sélection uniquement",
     "catalog_custom": "Liste personnalisée",
@@ -1662,7 +1860,7 @@
       "connected": "Connecté",
       "connect": "Connecter",
       "team_description": "Connectez un compte partagé de l’espace de travail. Autorisez son utilisation sur la page Apps de chaque agent.",
-      "personal_description": "Connectez votre compte personnel. Les apps utilisant le compte de la personne qui déclenche l’exécution l’utilisent lorsque vous lancez une exécution."
+      "personal_description": "Utilisez votre propre compte connecté lorsque vous lancez une exécution."
     },
     "disconnect_team": {
       "title": "Déconnecter le compte {{app}} de l'équipe ?",
@@ -1792,9 +1990,9 @@
       "row_description_other": "{{count}} apps autorisées"
     },
     "saved_access": {
-      "account": "Des restrictions enregistrées bloquent encore certaines actions de ce compte.",
+      "account": "Des restrictions d'actions précédentes limitent encore ce compte.",
       "agent": "Cette app conserve un ancien accès en lecture seule.",
-      "catalog": "Une liste enregistrée masque les autres apps.",
+      "catalog": "Une liste d'applications précédente masque d'autres applications.",
       "allow_actions": "Autoriser toutes les actions",
       "open_catalog": "Afficher toutes les apps",
       "account_confirm": "Les agents utilisant ce compte pourront lire, écrire, envoyer, supprimer et partager. Les restrictions enregistrées seront remplacées.",
@@ -1804,5 +2002,125 @@
       "admin_required": "Un administrateur peut rétablir l’accès.",
       "account_link": "Ce compte conserve des restrictions. Rétablissez l’accès dans les apps connectées."
     }
+  },
+  "voice_input": {
+    "description": "Dictez dans le chat, les commentaires et les réponses. La voix est transcrite sur cet ordinateur et ne le quitte jamais.",
+    "model_title": "Modèle vocal",
+    "model_hint": "Les modèles s’exécutent sur cet ordinateur. Téléchargez-en un, ou passez de l’un à l’autre.",
+    "engine_unavailable": "La transcription sur l’appareil n’est pas disponible sur cet ordinateur.",
+    "enabled": {
+      "title": "Saisie vocale",
+      "hint": "Affiche le micro dans le chat, les commentaires et les réponses, et active le raccourci vocal."
+    },
+    "input_title": "Saisie",
+    "shortcut": {
+      "title": "Raccourci",
+      "hint": "Fonctionne dès qu’un éditeur est à l’écran, même sans le focus.",
+      "change": "Modifier",
+      "unassigned": "Non défini"
+    },
+    "activation": {
+      "title": "Activation",
+      "auto": "Appui ou maintien",
+      "toggle": "Appui",
+      "hold": "Maintien",
+      "hints": {
+        "auto": "Appuyez pour commencer, appuyez à nouveau pour insérer. Maintenez pour parler, relâchez pour insérer.",
+        "toggle": "Appuyez pour commencer, appuyez à nouveau pour insérer.",
+        "hold": "Maintenez pour parler, relâchez pour insérer."
+      }
+    },
+    "recognition_title": "Reconnaissance",
+    "language": {
+      "title": "Langue parlée",
+      "hint": "La détection automatique convient dans la plupart des cas. Choisissez une langue si de courtes phrases sortent dans une autre.",
+      "auto": "Détection automatique"
+    },
+    "fillers": {
+      "title": "Supprimer les hésitations",
+      "hint": "Retire « euh », « hum » et les hésitations similaires."
+    },
+    "vocabulary": {
+      "title": "Vocabulaire",
+      "hint": "Noms et termes à écrire à votre façon, comme des produits ou des collègues. Jusqu’à {{max}}.",
+      "placeholder": "Ajouter un mot",
+      "remove": "Retirer {{word}}"
+    },
+    "microphone_title": "Micro",
+    "device": {
+      "title": "Périphérique d’entrée",
+      "default": "Par défaut du système",
+      "unnamed": "Micro {{index}}",
+      "permission_hint": "Testez le micro une fois pour voir le nom des périphériques."
+    },
+    "test": {
+      "title": "Tester le micro",
+      "hint": "Parlez pour vérifier le niveau. Rien n’est enregistré.",
+      "blocked": "L’accès au micro est bloqué. Autorisez-le dans le navigateur ou les réglages système.",
+      "start": "Tester",
+      "stop": "Arrêter"
+    },
+    "history": {
+      "title": "Historique",
+      "description": "Les enregistrements et leur texte restent sur cet ordinateur et ne sont jamais envoyés. Un enregistrement qui a échoué ou a été interrompu peut être retranscrit à partir de son audio.",
+      "keep": {
+        "title": "Conserver l'historique",
+        "hint": "Durée de conservation des enregistrements sur cet ordinateur.",
+        "options": {
+          "off": "Ne pas conserver",
+          "1d": "1 jour",
+          "7d": "7 jours",
+          "30d": "30 jours",
+          "forever": "Toujours"
+        }
+      },
+      "clear": "Tout effacer",
+      "clear_dialog": {
+        "title": "Effacer l'historique vocal ?",
+        "description": "Tous les enregistrements et transcriptions conservés sur cet ordinateur seront supprimés.",
+        "cancel": "Annuler"
+      },
+      "empty": "Vos dictées apparaîtront ici.",
+      "off": "L'historique est désactivé. Les nouveaux enregistrements ne sont pas conservés.",
+      "today": "Aujourd'hui",
+      "yesterday": "Hier",
+      "status": {
+        "transcribing": "Transcription…",
+        "failed": "Échec de la transcription",
+        "interrupted": "Interrompu avant la transcription"
+      },
+      "actions": {
+        "play": "Lire l'enregistrement",
+        "pause": "Pause",
+        "retranscribe": "Retranscrire",
+        "copy": "Copier le texte",
+        "delete": "Supprimer"
+      },
+      "copied": "Copié",
+      "copy_failed": "Impossible de copier",
+      "retry_failed": "Impossible de transcrire cet enregistrement",
+      "show_more": "Afficher plus"
+    }
+  },
+  "private_projects": {
+    "title": "Projets privés",
+    "description": "Seuls les membres d’un projet privé peuvent l’ouvrir. En tant que propriétaire de l’espace de travail, vous voyez qui fait partie de chacun et pouvez vous y ajouter quand vous devez intervenir.",
+    "empty": "Cet espace de travail n’a aucun projet privé.",
+    "load_failed": "Impossible de charger les projets privés.",
+    "retry": "Réessayer",
+    "no_members": "Aucun membre",
+    "lead_name": "{{name}} (responsable)",
+    "more_members": "+{{count}} autres",
+    "archived": "Archivé",
+    "member": "Vous êtes membre",
+    "open": "Ouvrir",
+    "join": "Rejoindre",
+    "join_title": "Rejoindre « {{title}} » ?",
+    "join_description": "Vous serez ajouté à la liste des membres de ce projet et verrez ses tâches, commentaires et pièces jointes. Ses membres actuels seront prévenus.",
+    "join_description_empty": "Ce projet n’a aucun membre. Vous en serez le seul membre et verrez ses tâches, commentaires et pièces jointes.",
+    "join_confirm": "Rejoindre le projet",
+    "cancel": "Annuler",
+    "toast_joined": "Vous avez rejoint {{title}}",
+    "toast_failed": "Impossible de rejoindre le projet."
   }
 }

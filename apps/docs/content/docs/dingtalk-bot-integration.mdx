@@ -14,7 +14,7 @@ The DingTalk integration is [community-maintained](/community-maintained) and ha
 
 ## Connect the Bot
 
-The agent's creator or a workspace owner/admin can connect the agent to DingTalk. Each agent maps to one DingTalk Bot.
+The agent's owner or a workspace owner/admin can connect the agent to DingTalk. Each agent maps to one DingTalk Bot.
 
 <Steps>
 <Step>
@@ -43,8 +43,8 @@ Open the **Credentials & Basic Information** page and copy the **Client ID (AppK
 
 ### Connect the agent to DingTalk [#4-connect-the-agent-to-dingtalk]
 
-1. Return to Multica and open **Agents → _your agent_ → Capabilities → Integrations**.
-2. Click **Connect DingTalk**.
+1. Return to Multica and open **Agents → _your agent_ → Messaging**.
+2. Click **Add messaging channel**, then choose **DingTalk**.
 3. Enter the **AppKey** and **AppSecret**, then submit.
 
 </Step>
@@ -97,8 +97,8 @@ Send `/clear` to keep the current Multica Chat while applying a fresh agent-visi
 
 ## Manage connections
 
-- On **Agents → _your agent_ → Capabilities → Integrations**, the agent's creator and workspace owners/admins can connect the agent to DingTalk or disconnect it. Once connected, this page shows the Bot's name, DingTalk groups where it has successfully processed messages, and its activity status data in those groups. Any workspace member with read access to the agent can see this information. Groups with no successfully processed messages in the last 90 days are placed under **Long inactive** and loaded when expanded.
-- **Settings → Messaging → DingTalk** lists every DingTalk-connected agent in the current workspace that the viewer can read, along with the Bot's activity status data in DingTalk groups. Workspace owners/admins can also disconnect any listed agent from DingTalk. After disconnection, the Bot stops receiving messages, while the installation record is retained for audit. Workspace owners/admins can also forget a group. This removes the group from the list without deleting conversations or messages. The group reappears if a workspace member with a linked DingTalk account later @mentions the Bot there and Multica accepts the message.
+- On **Agents → _your agent_ → Messaging**, the agent's owner and workspace owners/admins can connect the agent to DingTalk or disconnect it. Once connected, this page shows the Bot's name, DingTalk groups where it has successfully processed messages, and its activity status data in those groups. Any workspace member with read access to the agent can see this information. Groups with no successfully processed messages in the last 90 days are placed under **Long inactive** and loaded when expanded.
+- **Settings → Messaging** lists the connected agents you can read, grouped by platform. Select an agent to open its **Messaging** section, view the Bot's group activity, or manage the connection. After disconnection, the Bot stops receiving messages, while the installation record is retained for audit. Workspace owners/admins can also forget a group. This removes the group from the list without deleting conversations or messages. The group reappears if a workspace member with a linked DingTalk account later @mentions the Bot there and Multica accepts the message.
 
 ## Self-hosting setup
 

@@ -204,18 +204,19 @@ For Agent, use **智能体** in Simplified Chinese (`zh-Hans`) and **AI 代理**
 | Empty / Failed / Success | 空 / 失败 / 成功 |
 | Error / Warning | 错误 / 警告 |
 
-### Roles and status enums (lowercase English, not translated)
+### Roles and status names: localized in UI, lowercase English in schema/CLI
 
-These are schema-level identifiers; render as lowercase English even in Chinese context.
+Translate user-facing UI display labels (status pickers, role selectors, filters, notification descriptions) naturally in each locale:
 
-- Roles: `owner` / `admin` / `member`
+- Role display names (`zh-Hans`): 所有者 / 管理员 / 成员 / 访客
+- Issue status display names (`zh-Hans`): 待规划 / 待办 / 进行中 / 审核中 / 已完成 / 已阻塞 / 已取消
+- Issue status categories (`zh-Hans`): 未开始 / 已开始 / 已完成 / 已关闭
+
+Keep schema-level identifiers in lowercase English only in API payloads, database columns, CLI flags, and code references:
+
+- Roles: `owner` / `admin` / `member` / `guest`
 - Issue status: `backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
 - Issue status category: `unstarted` / `started` / `done` / `closed`
-
-In UI, surface them in English (optionally `code-style` wrapped):
-
-- "你需要 owner 权限"
-- "已切换到 in_progress"
 
 ### Word combination rules
 
@@ -303,6 +304,7 @@ See `auth.json` for the canonical example (the `web` section contains `prefer_de
 - Quotes: straight double quotes `"..."` to match the English source. Do not use `「」` or curly quotes.
 - Ellipsis: three dots `...` not the single character `…`. Match the English source.
 - Mixed Chinese-English: a single space on each side of the English word (see Word combination rules).
+- Bold next to punctuation: a closing `**` that follows punctuation and runs straight into text does not close, so the asterisks show on the page. Chinese, Japanese, and Korean text often runs from bold into the next word with no space. Move the punctuation outside the bold (`**问题（Problem）**和` → `**问题**（Problem）和`), or add a space when the punctuation belongs to a label (`点击 **+**添加` → `点击 **+** 添加`). `apps/docs/lib/unrendered-bold.test.ts` fails on any `**` left unrendered in the docs.
 
 ### Style principles
 

@@ -113,18 +113,25 @@ function hasDesktopDownloadBridge(): boolean {
  */
 export function useDownloadAttachment(
   source: "workspace" | "markdown-link" = "workspace",
-): (attachmentId: string) => Promise<void> {
+): (attachmentId: string, workspaceId?: string) => Promise<void> {
   const { t } = useT("editor");
   const workspaceSlug = useWorkspaceSlug();
+  const fetchMetadata = useCallback(
+    (attachmentId: string, workspaceId: string | undefined) => {
+      if (source === "markdown-link") return api.getAttachmentForDownload(attachmentId);
+      return workspaceId
+        ? api.getAttachment(attachmentId, { workspaceId })
+        : api.getAttachment(attachmentId);
+    },
+    [source],
+  );
   return useCallback(
-    async (attachmentId: string) => {
+    async (attachmentId: string, workspaceId?: string) => {
       const failed = () => toast.error(t(($) => $.attachment.download_failed));
 
       if (hasDesktopDownloadBridge()) {
         try {
-          const fresh = await (source === "markdown-link"
-            ? api.getAttachmentForDownload(attachmentId)
-            : api.getAttachment(attachmentId));
+          const fresh = await fetchMetadata(attachmentId, workspaceId);
           // Prefer the forced-attachment URL (Content-Disposition: attachment in
           // every storage mode) so the native save writes the file rather than
           // opening media inline; fall back to the load-intent `download_url` for
@@ -155,9 +162,7 @@ export function useDownloadAttachment(
         // failures still produce the existing toast instead of a silent failed
         // navigation) and where the server hands back the download URLs it mints
         // for this response.
-        const fresh = await (source === "markdown-link"
-          ? api.getAttachmentForDownload(attachmentId)
-          : api.getAttachment(attachmentId));
+        const fresh = await fetchMetadata(attachmentId, workspaceId);
         if (typeof document === "undefined") {
           failed();
           return;
@@ -196,6 +201,6 @@ export function useDownloadAttachment(
         failed();
       }
     },
-    [t, workspaceSlug, source],
+    [t, workspaceSlug, fetchMetadata],
   );
 }

@@ -101,7 +101,7 @@ L'Accès détermine quels membres peuvent exécuter cet agent (l'assigner, l'@me
 | Accès | Signification |
 |---|---|
 | **Moi uniquement** | Vous seul pouvez l'exécuter. Valeur par défaut. |
-| **Tout l'espace de travail** | Tous les membres de l'espace de travail peuvent l'exécuter. |
+| **Tout l'espace de travail** | Les membres ayant le rôle `owner`, `admin` ou `member`. |
 | **Personnes précises** | Seuls vous et les membres sélectionnés pouvez l'exécuter. |
 
 ![Paramètres d'Accès : Moi uniquement, Tout l'espace de travail, Personnes précises](/images/docs/agent-access-settings.webp)
@@ -118,7 +118,7 @@ Sur la page de détail de l'agent, vous pouvez continuer à ajuster :
 | **Variables d'environnement** | Injectent des variables au démarrage de l'outil de codage IA. |
 | **Arguments personnalisés** | Ajoutés un par un aux arguments CLI de l'outil de codage IA. |
 | **MCP** | Configure les serveurs MCP des outils de codage IA qui les prennent en charge : ajoutez-en un propre à cet agent, ou choisissez parmi les serveurs MCP partagés de l'espace de travail. |
-| **Intégrations** | Connecte les services externes que cet agent peut utiliser. |
+| **Messagerie** | Connecte cet agent à des plateformes de discussion comme Feishu, Slack, DingTalk, WeCom ou Telegram. |
 
 Le daemon qui héberge le runtime a aussi un plafond global de parallélisme (20 par défaut) ; le parallélisme effectif est le plus petit des deux.
 

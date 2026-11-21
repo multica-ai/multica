@@ -1,5 +1,39 @@
 import type { VirtuosoHandle } from "react-virtuoso";
 
+/** About two seconds of frames: content above the list settles well within it. */
+const REVEAL_LIST_MAX_FRAMES = 120;
+
+/**
+ * Frames each list has left. The budget belongs to the list, not to one call:
+ * every commit that re-runs the caller's effect (a realtime comment, a
+ * timeline refresh) restarts the reveal, and must not restart its limit.
+ */
+const revealFramesLeft = new WeakMap<HTMLElement, number>();
+
+/**
+ * Hold the virtualized timeline's top at the top of the viewport until the
+ * caller sees the list report a measured height and cancels.
+ *
+ * A long description can put the whole list below the viewport, where
+ * Virtuoso renders nothing and never measures, and a landing waits on that
+ * measurement. One write is not enough: content above the list can still
+ * change height right after it (an editor filling in, a page mounting twice
+ * while its address is canonicalized), which leaves the list out of range
+ * again and the reader parked in the description.
+ */
+export function revealTimelineList(container: HTMLElement, list: HTMLElement) {
+  let rafId = 0;
+  const reveal = () => {
+    const left = revealFramesLeft.get(list) ?? REVEAL_LIST_MAX_FRAMES;
+    if (left <= 0) return;
+    revealFramesLeft.set(list, left - 1);
+    container.scrollTop += list.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    rafId = requestAnimationFrame(reveal);
+  };
+  reveal();
+  return () => cancelAnimationFrame(rafId);
+}
+
 /** Reveal a nested anchor before aligning it against measured reply content. */
 export function scrollToTimelineComment({
   container, virtualizer, index, commentId, offset, onMounted, onComplete,
@@ -42,8 +76,9 @@ export function scrollToTimelineComment({
     container.scrollTop = target;
     return target;
   };
+  const findAnchor = () => container.querySelector<HTMLElement>(`[id="comment-${commentId}"]`);
   const land = () => {
-    const el = container.querySelector<HTMLElement>(`[id="comment-${commentId}"]`);
+    const el = findAnchor();
     if (!el || el.dataset.virtualThreadMounted === "false") {
       if (el) alignTarget(el, true);
       if (++mountFrames < 60) rafId = requestAnimationFrame(land);
@@ -52,7 +87,18 @@ export function scrollToTimelineComment({
     }
     if (!mounted) { mounted = true; onMounted?.(); }
     const align = () => {
-      const target = alignTarget(el);
+      // Look the anchor up again every frame. A commit between frames can
+      // unmount or replace it (Virtuoso re-ranging rows while a realtime update
+      // lands); a detached node measures as zero, which would scroll the
+      // timeline to the top and pass for a settled landing (MUL-9068).
+      const current = findAnchor();
+      if (!current || current.dataset.virtualThreadMounted === "false") {
+        if (++frames >= 30) { onComplete?.(); return; }
+        if (!current) virtualizer?.scrollIntoView({ index, align: "start", done: queueLanding });
+        queueLanding();
+        return;
+      }
+      const target = alignTarget(current);
       if (Math.abs(target - last) > 1 && ++frames < 30) {
         last = target;
         rafId = requestAnimationFrame(align);

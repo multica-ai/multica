@@ -21,7 +21,6 @@ export const workspaceKeys = {
   squadMemberStatus: (wsId: string, squadId: string) =>
     ["workspaces", wsId, "squads", squadId, "members-status"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
-  assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
 };
 
@@ -222,13 +221,6 @@ export function myInvitationListOptions() {
     // Recover missed realtime events without refetching on every tab switch.
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
-  });
-}
-
-export function assigneeFrequencyOptions(wsId: string) {
-  return queryOptions({
-    queryKey: workspaceKeys.assigneeFrequency(wsId),
-    queryFn: () => api.getAssigneeFrequency(),
   });
 }
 

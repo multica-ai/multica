@@ -23,3 +23,10 @@ stop = "bash scripts/agent-environment.sh stop desktop"
 url = ""
 ready = "http://localhost:$MULTICA_PORT"
 ttl = "24h"
+
+# Design prototypes in apps/storybook. Needs no API or database.
+[environments.storybook]
+label = "Storybook"
+start = "pnpm -C apps/storybook exec storybook dev -p $MULTICA_PORT --host 127.0.0.1 --no-open --ci"
+url = "http://127.0.0.1:$MULTICA_PORT"
+ttl = "24h"

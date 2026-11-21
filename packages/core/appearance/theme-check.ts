@@ -1,7 +1,8 @@
 import type { ArchiveFile } from "./theme-archive";
 import { parseTheme, readThemeFiles, type ThemePackageInput } from "./theme-package";
 import { THEME_VARIABLE_NAMES } from "./theme-variables";
-import { contrastRatio, paintOver, resolveColor, type BasePalette } from "./theme-contrast";
+import { contrastRatio, paintOver, resolveColor, type BasePalette, type Rgba } from "./theme-contrast";
+import { LABEL_TEXT_COLORS, PALETTE_SLOTS } from "./palette";
 import {
   THEME_OPTION_ATTR_PREFIX,
   localizedText,
@@ -19,7 +20,9 @@ import {
  * do: set variables that are not public, name generic families in Latin
  * font stacks, or paint text without enough contrast. Contrast is measured
  * with the options at their defaults, then once per other value of each
- * `select` and `toggle` with the rest at their defaults.
+ * `select` and `toggle` with the rest at their defaults. With a backdrop,
+ * the frame and the page are measured as the glass the app paints over
+ * `--backdrop-color`.
  */
 
 export interface ThemeCheckIssue {
@@ -38,14 +41,22 @@ export interface ContrastVariant {
 
 export interface ContrastCheck {
   mode: "light" | "dark";
-  /** Where the pair is painted: the page, or the frame (rail, toolbar, tabs). */
-  area: "page" | "frame";
+  /**
+   * Where the pair is painted: the page, the frame (rail, toolbar, tabs),
+   * a tooltip, a pressed chip in a display popover, or a label in a colour
+   * slot the theme declares.
+   */
+  area: "page" | "frame" | "tooltip" | "display chip" | "label";
   foreground: string;
   background: string;
   ratio: number;
   required: number;
   /** Set when one option was off its default for this measurement. */
   variant?: ContrastVariant;
+  /** Set when the foreground is the app's default, not a variable the theme set. */
+  defaulted?: boolean;
+  /** Set when the background is glass: its colour at the glass opacity over the backdrop. */
+  glass?: boolean;
 }
 
 export interface ThemeCheckReport {
@@ -93,6 +104,27 @@ const GENERIC_FAMILY =
   /^(?:serif|sans-serif|monospace|cursive|fantasy|system-ui|math|emoji|fangsong|ui-[a-z-]+)$/i;
 const LATIN_STACKS = new Set(["font-ui", "font-content-latin"]);
 const FRAME_ANCHOR = /data-mc="(?:app-rail|window-toolbar|tab-bar|bottom-bar)"/;
+const SLOT = /^\[data-slot=(["']?)([\w-]+)\1\]$/;
+/** Slots portalled to <body> whose own variables the check follows. */
+type Slot = "tooltip-content" | "popover-content";
+const SLOTS: readonly Slot[] = ["tooltip-content", "popover-content"];
+
+/** How to fix a pair the theme reaches only through a default. */
+function contrastHint({ area, foreground, background, defaulted, glass }: ContrastCheck): string {
+  if (glass) {
+    return " With the backdrop, it is measured as glass: the colour at --glass-opacity (--frame-glass-opacity for --app-shell) over --backdrop-color.";
+  }
+  if (area === "tooltip" && foreground === "--foreground") {
+    return " Tooltip text is the app's dark-mode --foreground in both modes; set --tooltip-foreground to choose it.";
+  }
+  if (area === "display chip" && background === "--input") {
+    return " Pressed chips fill with --input, the input border colour; set --display-chip-pressed-background to colour them on their own.";
+  }
+  if (area === "label" && defaulted) {
+    return " Without --label-chip-color, label text is dark or light by the colour as picked, not the slot's, so either can land on any slot; set it to choose.";
+  }
+  return "";
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -173,6 +205,14 @@ function splitSelectors(prelude: string): string[] {
  * follows, then a frame anchor below it. Empty for any other selector.
  */
 function frameModes(selector: string, attributes: ReadonlyMap<string, string>): Mode[] {
+  const i = firstCombinator(selector);
+  if (i < 0 || !FRAME_ANCHOR.test(selector.slice(i))) return [];
+  const head = rootSelector(selector.slice(0, i), attributes);
+  return head && head !== "inactive" ? head.modes : [];
+}
+
+/** Where the first descendant combinator outside brackets and quotes is, or -1. */
+function firstCombinator(selector: string): number {
   let depth = 0;
   let quote = "";
   for (let i = 0; i < selector.length; i += 1) {
@@ -182,13 +222,34 @@ function frameModes(selector: string, attributes: ReadonlyMap<string, string>): 
     } else if (c === '"' || c === "'") quote = c;
     else if (c === "(" || c === "[") depth += 1;
     else if (c === ")" || c === "]") depth = Math.max(0, depth - 1);
-    else if (/\s/.test(c) && depth === 0) {
-      if (!FRAME_ANCHOR.test(selector.slice(i))) return [];
-      const head = rootSelector(selector.slice(0, i), attributes);
-      return head && head !== "inactive" ? head.modes : [];
-    }
+    else if (/\s/.test(c) && depth === 0) return i;
   }
-  return [];
+  return -1;
+}
+
+/**
+ * The slots a rule sets variables on, in which modes, and how specific it
+ * is: `[data-slot="x"]`, alone or in an `:is()` / `:where()` list, either
+ * bare or below a selector on <html> that `rootSelector` follows.
+ * `"inactive"` when that selector does not match; null for any other.
+ */
+function slotSelector(
+  selector: string,
+  attributes: ReadonlyMap<string, string>,
+): { modes: Mode[]; slots: Slot[]; specificity: number } | "inactive" | null {
+  const i = firstCombinator(selector);
+  const head = i < 0 ? null : rootSelector(selector.slice(0, i), attributes);
+  if (i >= 0 && !head) return null;
+  const target = (i < 0 ? selector : selector.slice(i)).trim();
+  const list = /^:(is|where)\(([\s\S]*)\)$/.exec(target);
+  const args = list ? splitSelectors(list[2]!) : [target];
+  const slots = args.map((s) => SLOT.exec(s)?.[2]).filter((s): s is Slot => SLOTS.includes(s as Slot));
+  if (slots.length === 0) return null;
+  if (head === "inactive") return "inactive";
+  // `:is()` counts as its most specific argument and `:where()` as nothing;
+  // the arguments here are attribute selectors, as specific as a class.
+  const own = list?.[1] === "where" ? 0 : Math.max(...args.map((s) => (s.match(/\[|\.|:(?!:)/g)?.length ?? 0) * 10));
+  return { modes: head ? head.modes : ["light", "dark"], slots, specificity: (head ? head.specificity : 0) + own };
 }
 
 /** A palette that records which variables a contrast check read. */
@@ -203,6 +264,110 @@ class ReadTracker extends Map<string, string> {
     return super.get(name);
   }
 }
+
+/**
+ * The variables of an element below <html>, as the browser computes them:
+ * its own declarations, resolved on the element, and everything else
+ * inherited with the value already computed on <html>.
+ */
+class ScopePalette extends ReadTracker {
+  private readonly parent: Map<string, string>;
+  constructor(read: Set<string>, parent: Map<string, string>, own: Iterable<readonly [string, string]>) {
+    super(read, own);
+    this.parent = parent;
+  }
+  override get(name: string) {
+    if (super.has(name)) return super.get(name);
+    if (!this.parent.has(name)) return undefined;
+    const inherited = resolveColor(this.parent, name);
+    if (!("color" in inherited)) return this.parent.get(name);
+    const { r, g, b, a } = inherited.color;
+    return `rgb(${r} ${g} ${b} / ${a})`;
+  }
+  override has(name: string) {
+    return super.has(name) || this.parent.has(name);
+  }
+}
+
+/** A percentage, following var() chains, as 0–1; null when it is not one. */
+function resolveShare(palette: Map<string, string>, name: string, fallback: string): number | null {
+  let value = palette.get(name) ?? fallback;
+  for (let hops = 0; hops < 12; hops += 1) {
+    const reference = /^var\(\s*(--[\w-]+)\s*(?:,\s*(.+))?\)$/s.exec(value.trim());
+    if (!reference) {
+      const share = /^(\d+(?:\.\d+)?|\.\d+)%$/.exec(value.trim());
+      return share ? Math.min(1, Number(share[1]) / 100) : null;
+    }
+    const next = palette.get(reference[1]!) ?? reference[2];
+    if (next === undefined) return null;
+    value = next;
+  }
+  return null;
+}
+
+/** Surfaces the app paints as glass when a theme has a backdrop. */
+const GLASS_SURFACES = ["--app-shell", "--page-canvas", "--background"] as const;
+
+type GlassResult =
+  | { fills: Map<string, Rgba>; solid: boolean }
+  | { error: string }
+  | { unresolved: string }
+  | null;
+
+/**
+ * With a backdrop the frame and the page are glass, the way appearance.css
+ * paints them: the frame is --app-shell at --frame-glass-opacity over
+ * --backdrop-color, and the page's colours sit at --glass-opacity over the
+ * frame. Returns those mixes by surface. They replace the three variables
+ * only inside the frame: a variable on <html> that reads one of them, and
+ * everything in a portal, still sees the opaque value, so the palette keeps
+ * it. Null without a backdrop.
+ */
+function glassFills(palette: Map<string, string>): GlassResult {
+  const backdrop = palette.get("--backdrop")?.trim();
+  if (!backdrop || backdrop === "none") return null;
+  if (!palette.has("--backdrop-color")) {
+    return {
+      error:
+        "--backdrop is set without --backdrop-color. Set it to the colour the backdrop averages to: the glass is measured on it, and it shows while the backdrop loads.",
+    };
+  }
+  const under = resolveColor(palette, "--backdrop-color");
+  if (!("color" in under) || under.color.a < 1) {
+    return { error: "--backdrop-color must be an opaque colour this check can read: hex, rgb(), hsl(), oklab() or oklch()." };
+  }
+  const frameShare = resolveShare(palette, "--frame-glass-opacity", "var(--glass-opacity, 100%)");
+  const pageShare = resolveShare(palette, "--glass-opacity", "100%");
+  if (frameShare === null || pageShare === null) {
+    return { unresolved: `${frameShare === null ? "--frame-glass-opacity" : "--glass-opacity"} is not a percentage this check can read` };
+  }
+  const colors = new Map<string, Rgba>();
+  for (const name of GLASS_SURFACES) {
+    const color = resolveColor(palette, name);
+    if (!("color" in color)) return { unresolved: color.unresolved };
+    colors.set(name, color.color);
+  }
+  const glassOver = (color: Rgba, share: number, bottom: Rgba) => paintOver({ ...color, a: color.a * share }, bottom);
+  const frame = glassOver(colors.get("--app-shell")!, frameShare, under.color);
+  const fills = new Map<string, Rgba>([
+    ["--app-shell", frame],
+    ["--page-canvas", glassOver(colors.get("--page-canvas")!, pageShare, frame)],
+    ["--background", glassOver(colors.get("--background")!, pageShare, frame)],
+  ]);
+  return { fills, solid: frameShare === 1 && pageShare === 1 };
+}
+
+/** Declarations by name, the most specific winning and, at equal specificity, the later one. */
+type Cascade = Map<string, { value: string; specificity: number }>;
+
+function cascadeSet(cascade: Cascade, entries: Iterable<readonly [string, string]>, specificity: number) {
+  for (const [name, value] of entries) {
+    const current = cascade.get(name);
+    if (!current || specificity >= current.specificity) cascade.set(name, { value, specificity });
+  }
+}
+
+const cascadeValues = (cascade: Cascade) => [...cascade].map(([name, { value }]) => [name, value] as const);
 
 /** Rules that hold declarations, top-level or nested, enough to find variables. */
 function rules(css: string): Rule[] {
@@ -335,7 +500,7 @@ function measureContrast(
   chosen: ThemeOptionValues | undefined,
   base: BasePalette,
   variant: ContrastVariant | undefined,
-): { results: ContrastCheck[]; unresolved: Set<string> } {
+): { results: ContrastCheck[]; unresolved: Set<string>; backdrop: Map<string, ThemeCheckIssue["level"]> } {
   // The cascade on <html>, per mode: the base tokens (`:root` and `.dark`),
   // then the theme's root and mode rules by specificity and order.
   const cascade = {
@@ -343,6 +508,18 @@ function measureContrast(
     dark: new Map([...base.dark].map(([name, value]) => [name, { value, specificity: 10 }])),
   };
   const frame = { light: [] as [string, string][], dark: [] as [string, string][] };
+  // What the theme declares on each slot, per mode. The tooltip starts from
+  // `.dark` in tokens.css, which the theme's CSS follows at equal specificity.
+  const slotted = (seed: Iterable<readonly [string, string]>) => {
+    const out = { light: new Map() as Cascade, dark: new Map() as Cascade };
+    cascadeSet(out.light, seed, 10);
+    cascadeSet(out.dark, seed, 10);
+    return out;
+  };
+  const slots: Record<Slot, Record<Mode, Cascade>> = {
+    "tooltip-content": slotted(base.darkScope),
+    "popover-content": slotted([]),
+  };
   const unmodelled = new Map<string, string>();
   const attributes = new Map<string, string>();
   for (const [name, value] of Object.entries(theme ? themeOptionAttributes(theme, chosen) : {})) {
@@ -352,14 +529,13 @@ function measureContrast(
     for (const selector of rule.selectors) {
       const target = rule.nested ? null : rootSelector(selector, attributes);
       if (target === "inactive") continue;
+      const slot = rule.nested || target ? null : slotSelector(selector, attributes);
+      if (slot === "inactive") continue;
       if (target) {
-        for (const m of target.modes) {
-          for (const [name, value] of declarations(rule.body)) {
-            const current = cascade[m].get(name);
-            if (!current || target.specificity >= current.specificity) {
-              cascade[m].set(name, { value, specificity: target.specificity });
-            }
-          }
+        for (const m of target.modes) cascadeSet(cascade[m], declarations(rule.body), target.specificity);
+      } else if (slot) {
+        for (const s of slot.slots) {
+          for (const m of slot.modes) cascadeSet(slots[s][m], declarations(rule.body), slot.specificity);
         }
       } else if (!/[\s>+~]/.test(selector)) {
         // Sets variables on <html> or <body> in a way the check does not follow.
@@ -377,20 +553,43 @@ function measureContrast(
   const options = theme ? themeOptionVariables(theme, chosen) : { light: {}, dark: {} };
   const results: ContrastCheck[] = [];
   const unresolved = new Set<string>();
+  const backdrop = new Map<string, ThemeCheckIssue["level"]>();
   const read = new Set<string>();
 
   for (const m of ["light", "dark"] as const) {
     // Option values are written after the theme as `:root.theme-<mode>`, so they win.
-    const palette = new ReadTracker(read, [
-      ...[...cascade[m]].map(([name, { value }]) => [name, value] as const),
-      ...Object.entries(options[m]),
-    ]);
+    const palette = new ReadTracker(read, [...cascadeValues(cascade[m]), ...Object.entries(options[m])]);
+    const glassed = glassFills(palette);
+    const fills = glassed && "fills" in glassed ? glassed.fills : new Map<string, Rgba>();
+    /** A surface as painted: the glass mix when it is a glass surface in the frame, holding the theme's own colour. */
+    const paint = (surface: Map<string, string>, name: string, inFrame: boolean): ReturnType<typeof resolveColor> => {
+      const fill = inFrame ? fills.get(name) : undefined;
+      return fill && surface.get(name) === palette.get(name) ? { color: fill } : resolveColor(surface, name);
+    };
+    if (glassed && "error" in glassed) backdrop.set(`Backdrop, ${m} mode: ${glassed.error}`, "error");
+    if (glassed && "unresolved" in glassed) unresolved.add(`${m}: the backdrop's glass, because ${glassed.unresolved}`);
+    if (glassed && "solid" in glassed && glassed.solid) {
+      backdrop.set(
+        `Backdrop, ${m} mode: --glass-opacity and --frame-glass-opacity are 100%, so the frame and the page cover the backdrop completely.`,
+        "warning",
+      );
+    }
     const measure = (
       area: ContrastCheck["area"],
       p: Map<string, string>,
       foreground: string,
       backgrounds: readonly string[],
       required: number,
+      /**
+       * Where the backgrounds are resolved, when not where the text is; what a
+       * translucent one sits on; and whether it is outside the frame, in a portal.
+       */
+      {
+        surface = p,
+        under,
+        defaulted,
+        portal = false,
+      }: { surface?: Map<string, string>; under?: string; defaulted?: boolean; portal?: boolean } = {},
     ) => {
       const fg = resolveColor(p, foreground);
       if ("unresolved" in fg) {
@@ -398,16 +597,21 @@ function measureContrast(
         return;
       }
       for (const background of backgrounds) {
-        const bg = resolveColor(p, background);
+        const bg = paint(surface, background, !portal);
         if ("unresolved" in bg) {
           unresolved.add(`${m}: ${bg.unresolved}`);
           continue;
         }
-        if (bg.color.a < 1) {
+        let fill: Rgba = bg.color;
+        if (fill.a < 1 && under) {
+          const floor = paint(surface, under, !portal);
+          if ("color" in floor && floor.color.a === 1) fill = paintOver(fill, floor.color);
+        }
+        if (fill.a < 1) {
           unresolved.add(`${m}: ${background} is translucent, so its contrast depends on what is underneath`);
           continue;
         }
-        const ratio = contrastRatio(fg.color, bg.color);
+        const ratio = contrastRatio(fg.color, fill);
         results.push({
           mode: m,
           area,
@@ -416,8 +620,38 @@ function measureContrast(
           ratio: Math.round(ratio * 100) / 100,
           required,
           ...(variant ? { variant } : {}),
+          ...(defaulted ? { defaulted } : {}),
+          ...(!portal && fills.has(background) && surface.get(background) === palette.get(background) ? { glass: true } : {}),
         });
       }
+    };
+    // Rail items read their own variables, with the fallbacks in theme-variables.css:
+    // the label on the shell at rest, and the active colour on the active and hover fills.
+    const measureRail = (area: ContrastCheck["area"], p: Map<string, string>) => {
+      if (p.has("--rail-item-color")) measure(area, p, "--rail-item-color", ["--app-shell"], TEXT);
+      const railText = p.has("--rail-item-active-color") ? "--rail-item-active-color" : "--sidebar-accent-foreground";
+      const railSurfaces = [p.has("--rail-item-active-background") ? "--rail-item-active-background" : "--sidebar-accent"];
+      if (p.has("--rail-item-hover-background")) railSurfaces.push("--rail-item-hover-background");
+      else {
+        // The default hover is --sidebar-accent at 60% over the shell.
+        const accent = resolveColor(p, "--sidebar-accent");
+        const shell = paint(p, "--app-shell", true);
+        if ("color" in accent && "color" in shell && shell.color.a === 1) {
+          const { r, g, b } = paintOver({ ...accent.color, a: accent.color.a * 0.6 }, shell.color);
+          p.set("--rail-item-hover-background", `rgb(${r} ${g} ${b})`);
+          railSurfaces.push("--rail-item-hover-background");
+        }
+      }
+      // The frame measures --sidebar-accent-foreground on --sidebar-accent for its other controls.
+      measure(
+        area,
+        p,
+        railText,
+        railSurfaces.filter(
+          (surface) => area !== "frame" || railText !== "--sidebar-accent-foreground" || surface !== "--sidebar-accent",
+        ),
+        TEXT,
+      );
     };
     const hasFrame = frame[m].length > 0;
     const backgrounds = hasFrame ? BACKGROUNDS.filter((b) => b !== "--app-shell") : BACKGROUNDS;
@@ -437,38 +671,52 @@ function measureContrast(
       measure("frame", framePalette, "--faint-foreground", FRAME_BACKGROUNDS, NON_TEXT);
       // Toolbar and layout buttons paint --sidebar-accent-foreground on --sidebar-accent on hover.
       measure("frame", framePalette, "--sidebar-accent-foreground", ["--sidebar-accent"], TEXT);
-      // Rail items read their own variables, with the fallbacks in theme-variables.css:
-      // the label on the shell at rest, and the active colour on the active and hover fills.
-      if (framePalette.has("--rail-item-color")) measure("frame", framePalette, "--rail-item-color", ["--app-shell"], TEXT);
-      const railText = framePalette.has("--rail-item-active-color") ? "--rail-item-active-color" : "--sidebar-accent-foreground";
-      const railSurfaces = [
-        framePalette.has("--rail-item-active-background") ? "--rail-item-active-background" : "--sidebar-accent",
-      ];
-      if (framePalette.has("--rail-item-hover-background")) railSurfaces.push("--rail-item-hover-background");
-      else {
-        // The default hover is --sidebar-accent at 60% over the shell.
-        const accent = resolveColor(framePalette, "--sidebar-accent");
-        const shell = resolveColor(framePalette, "--app-shell");
-        if ("color" in accent && "color" in shell && shell.color.a === 1) {
-          const { r, g, b } = paintOver({ ...accent.color, a: accent.color.a * 0.6 }, shell.color);
-          framePalette.set("--rail-item-hover-background", `rgb(${r} ${g} ${b})`);
-          railSurfaces.push("--rail-item-hover-background");
+      measureRail("frame", framePalette);
+    } else {
+      // Without frame rules the rail sits on the page's own colours.
+      measureRail("page", new ReadTracker(read, palette));
+    }
+
+    // The tooltip is a `.dark` scope in both modes: its text takes the app's
+    // dark tokens, and the theme's values only through rules on the tooltip or
+    // --tooltip-foreground. Its fill is resolved outside, in the page's mode.
+    const tooltip = new ScopePalette(read, palette, cascadeValues(slots["tooltip-content"][m]));
+    const tipText = tooltip.has("--tooltip-foreground") ? "--tooltip-foreground" : "--foreground";
+    measure("tooltip", tooltip, tipText, ["--tooltip"], TEXT, { surface: palette, portal: true });
+
+    // Display chips sit in popovers; pressed, they fill with
+    // --display-chip-pressed-background, which defaults to --input (translucent
+    // in dark mode, over the popover's --surface-raised).
+    const popover = new ScopePalette(read, palette, cascadeValues(slots["popover-content"][m]));
+    const chipText = popover.has("--display-chip-pressed-color") ? "--display-chip-pressed-color" : "--foreground";
+    const chipFill = popover.has("--display-chip-pressed-background") ? "--display-chip-pressed-background" : "--input";
+    measure("display chip", popover, chipText, [chipFill], TEXT, { under: "--surface-raised", portal: true });
+
+    // A label paints its slot's colour behind --label-chip-color. When that is
+    // unset the app picks dark or light text by the colour as picked, and every
+    // slot holds both light and dark picks, so either text can land on it: the
+    // worse of the two is what some label shows.
+    const declaredSlots = PALETTE_SLOTS.filter((slot) => palette.has(`--palette-${slot}`));
+    if (palette.has("--label-chip-color")) {
+      const slots = declaredSlots.map((slot) => `--palette-${slot}`);
+      measure("label", palette, "--label-chip-color", slots, TEXT, { under: "--background" });
+    } else {
+      for (const slot of declaredSlots) {
+        const start = results.length;
+        for (const text of LABEL_TEXT_COLORS) {
+          const label = new ReadTracker(read, [...palette, ["--label-chip-color", text]]);
+          measure("label", label, "--label-chip-color", [`--palette-${slot}`], TEXT, { under: "--background", defaulted: true });
         }
+        const measured = results.splice(start);
+        if (measured.length) results.push(measured.reduce((worse, next) => (next.ratio < worse.ratio ? next : worse)));
       }
-      measure(
-        "frame",
-        framePalette,
-        railText,
-        railSurfaces.filter((surface) => railText !== "--sidebar-accent-foreground" || surface !== "--sidebar-accent"),
-        TEXT,
-      );
     }
   }
 
   for (const [name, where] of unmodelled) {
     if (read.has(name)) unresolved.add(`${where}, which the check does not follow`);
   }
-  return { results, unresolved };
+  return { results, unresolved, backdrop };
 }
 
 const pairKey = (c: ContrastCheck) => `${c.mode} ${c.area} ${c.foreground} ${c.background}`;
@@ -485,10 +733,10 @@ function reportFailing(checks: readonly ContrastCheck[], issues: ThemeCheckIssue
     const { mode: m, area, foreground, required, variant } = group[0]!;
     const surfaces = group.map((c) => `${c.background} (${c.ratio.toFixed(2)}:1)`);
     const list = surfaces.length > 1 ? `${surfaces.slice(0, -1).join(", ")} and ${surfaces.at(-1)}` : surfaces[0];
-    const where = [...(area === "frame" ? ["frame"] : []), ...(variant ? [variant.label] : [])];
+    const where = [...(area === "page" ? [] : [area]), ...(variant ? [variant.label] : [])];
     issues.push({
       level: "error",
-      message: `Contrast, ${m} mode${where.length > 0 ? ` (${where.join(", ")})` : ""}: ${foreground} is below ${required}:1 on ${list}.`,
+      message: `Contrast, ${m} mode${where.length > 0 ? ` (${where.join(", ")})` : ""}: ${foreground} is below ${required}:1 on ${list}.${contrastHint({ ...group[0]!, glass: group.some((c) => c.glass) })}`,
     });
   }
 }
@@ -507,6 +755,7 @@ function checkContrast(
   const parsed = rules(clean);
   const defaults = measureContrast(clean, parsed, theme, undefined, base, undefined);
   reportFailing(defaults.results, issues);
+  for (const [message, level] of defaults.backdrop) issues.push({ level, message });
   const failingByDefault = new Set(defaults.results.filter((c) => c.ratio < c.required).map(pairKey));
   const results = [...defaults.results];
   const unresolvedWith = new Map<string, string[]>();
@@ -514,6 +763,9 @@ function checkContrast(
     const run = measureContrast(clean, parsed, theme, chosen, base, variant);
     results.push(...run.results);
     reportFailing(run.results.filter((c) => !failingByDefault.has(pairKey(c))), issues);
+    for (const [message, level] of run.backdrop) {
+      if (!defaults.backdrop.has(message)) issues.push({ level, message: `${message} (${variant.label})` });
+    }
     for (const reason of run.unresolved) {
       if (!defaults.unresolved.has(reason)) unresolvedWith.set(reason, [...(unresolvedWith.get(reason) ?? []), variant.label]);
     }

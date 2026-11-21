@@ -3,11 +3,12 @@
 import { useMemo, useState, type ComponentProps } from "react";
 import { Globe, Lock, Users } from "@multica/ui/icons";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
+import { refreshFeaturesOnLockedError, usePaidFeatureAccess } from "@multica/core/billing";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
@@ -22,6 +23,11 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import {
+  PaidFeatureNotice,
+  PaidFeatureUpgradeBadge,
+  usePaidFeatureErrorMessage,
+} from "../../billing";
 import { useT } from "../../i18n";
 import {
   RevokeRuntimeAccessDialog,
@@ -71,8 +77,17 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const updateRuntime = useUpdateRuntime(wsId);
+  const qc = useQueryClient();
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const current = runtimeAccessScope(runtime);
   const persisted = useMemo(() => runtime.shared_with ?? [], [runtime.shared_with]);
+  // Without the paid feature a runtime keeps the members it is shared with:
+  // they can be removed and the runtime made private or public, but nobody
+  // can be added, and a runtime without a list cannot get one.
+  const memberSharing = usePaidFeatureAccess(wsId, "runtime_member_sharing", {
+    hasExistingConfig: current === "members",
+  });
+  const membersDisabled = !memberSharing.canAdd && current !== "members";
   const [pickerOpen, setPickerOpen] = useState(false);
   const [revokePlan, setRevokePlan] = useState<RuntimeAccessRevocationPlan | null>(null);
   const [revokeOpen, setRevokeOpen] = useState(false);
@@ -106,7 +121,8 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
             setRevokeOpen(true);
             return;
           }
-          toast.error(err instanceof Error && err.message ? err.message : t(($) => $.detail.visibility_toast_failed));
+          refreshFeaturesOnLockedError(qc, wsId, err);
+          toast.error(paidFeatureError(err, err instanceof Error && err.message ? err.message : t(($) => $.detail.visibility_toast_failed)));
         },
       },
     );
@@ -130,14 +146,16 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
             }}
           />
         ))}
-        <Popover open={pickerOpen} onOpenChange={(open) => setPickerOpen(open && !disabled)}>
+        <Popover open={pickerOpen} onOpenChange={(open) => setPickerOpen(open && !disabled && !membersDisabled)}>
           <PopoverTrigger
-            render={<ScopeButton scope="members" active={current === "members"} disabled={disabled} />}
+            render={<ScopeButton scope="members" active={current === "members"} disabled={disabled || membersDisabled} />}
           />
           <PopoverContent align="end" className="w-72 p-0">
             {pickerOpen ? (
               <MemberPicker
-                members={members.filter((member) => member.user_id !== runtime.owner_id)}
+                members={members.filter((member) =>
+                  member.user_id !== runtime.owner_id &&
+                  (memberSharing.canAdd || persisted.includes(member.user_id)))}
                 initial={persisted}
                 saving={updateRuntime.isPending}
                 onCancel={() => setPickerOpen(false)}
@@ -168,6 +186,14 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
             {t(($) => $.detail.visibility_members_edit)}
           </span>
         </button>
+      ) : null}
+      {memberSharing.state === "read_only" || memberSharing.state === "unavailable" ? (
+        // The badge sits with the notice, not in the scope switcher: the
+        // properties column is too narrow for both without truncating labels.
+        <div className="flex items-start justify-between gap-2">
+          <PaidFeatureNotice state={memberSharing.state} />
+          <PaidFeatureUpgradeBadge feature="runtime_member_sharing" className="shrink-0" />
+        </div>
       ) : null}
       <RevokeRuntimeAccessDialog open={revokeOpen} onOpenChange={setRevokeOpen}
         runtime={runtime} wsId={wsId} initialPlan={revokePlan} sharedWith={revokeMembers} />

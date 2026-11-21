@@ -133,6 +133,7 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	}
 
 	var providerRoot string
+	var claudeConfigDir string
 	var additionalProviderRoots []string
 	// Built-in runtime identities (e.g. "omp") declare their user skills dir
 	// in the descriptor; resolve to providerRoot and fall through to the
@@ -143,7 +144,13 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	} else {
 		switch provider {
 		case "claude":
-			providerRoot = filepath.Join(home, ".claude", "skills")
+			claudeConfigDir = filepath.Join(home, ".claude")
+			// Relative overrides depend on the task working directory, which
+			// the runtime-level list and import requests do not have.
+			if configured := os.Getenv("CLAUDE_CONFIG_DIR"); filepath.IsAbs(configured) {
+				claudeConfigDir = configured
+			}
+			providerRoot = filepath.Join(claudeConfigDir, "skills")
 		case "codebuddy":
 			// CodeBuddy Code is a Claude Code fork but ships its own native
 			// config directory; it does NOT read ~/.claude/skills unless the
@@ -221,6 +228,11 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				qwenHome = filepath.Join(home, ".qwen")
 			}
 			providerRoot = filepath.Join(qwenHome, "skills")
+		case "amp":
+			providerRoot = filepath.Join(home, ".config", "amp", "skills")
+			additionalProviderRoots = []string{filepath.Join(home, ".config", "agents", "skills")}
+		case "droid":
+			providerRoot = filepath.Join(home, ".factory", "skills")
 		case "qwenpaw":
 			// QWENPAW_WORKING_DIR (or legacy COPAW_WORKING_DIR) overrides
 			// QwenPaw's global ~/.qwenpaw directory, which owns settings,
@@ -272,7 +284,7 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	}
 	roots = append(roots, localSkillRoot{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal})
 	if provider == "claude" {
-		for _, plugin := range listEnabledClaudePlugins(home) {
+		for _, plugin := range listEnabledClaudePlugins(claudeConfigDir) {
 			manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 			for _, path := range claudePluginComponentPaths(
 				plugin.InstallPath,

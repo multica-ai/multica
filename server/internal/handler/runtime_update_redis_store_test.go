@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 func TestRedisUpdateStore_EnvelopePersistsRunStartedAt(t *testing.T) {
@@ -48,7 +50,7 @@ func TestRedisUpdateStore_CreateGetComplete(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-1", "v1.2.3", "user-1")
+	req, err := store.Create(ctx, "runtime-1", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -75,7 +77,7 @@ func TestRedisUpdateStore_CreateGetComplete(t *testing.T) {
 		t.Fatalf("completed request mismatch: %+v", got)
 	}
 
-	if _, err := store.Create(ctx, "runtime-1", "v1.2.4", "user-1"); err != nil {
+	if _, err := store.Create(ctx, "runtime-1", "", "v1.2.4", "user-1", false); err != nil {
 		t.Fatalf("create after complete should be allowed: %v", err)
 	}
 }
@@ -84,7 +86,7 @@ func TestRedisUpdateStore_CreateWithoutMultiPermission(t *testing.T) {
 	rdb := newRedisTestClientWithoutMulti(t)
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
-	req, err := store.Create(ctx, "runtime-no-multi", "v1.2.3", "user-1")
+	req, err := store.Create(ctx, "runtime-no-multi", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create without MULTI permission: %v", err)
 	}
@@ -115,12 +117,12 @@ func TestRedisUpdateStore_PopPendingAcrossInstances(t *testing.T) {
 	nodeA := NewRedisUpdateStore(rdb)
 	nodeB := NewRedisUpdateStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-cross", "v1.2.3", "user-1")
+	req, err := nodeA.Create(ctx, "runtime-cross", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("node A create: %v", err)
 	}
 
-	popped, err := nodeB.PopPending(ctx, "runtime-cross")
+	popped, err := nodeB.PopPending(ctx, "runtime-cross", false)
 	if err != nil {
 		t.Fatalf("node B pop: %v", err)
 	}
@@ -134,7 +136,7 @@ func TestRedisUpdateStore_PopPendingAcrossInstances(t *testing.T) {
 		t.Fatal("RunStartedAt not set after pop")
 	}
 
-	again, err := nodeB.PopPending(ctx, "runtime-cross")
+	again, err := nodeB.PopPending(ctx, "runtime-cross", false)
 	if err != nil {
 		t.Fatalf("node B second pop: %v", err)
 	}
@@ -152,11 +154,11 @@ func TestRedisUpdateStore_ReportAndPollAcrossInstances(t *testing.T) {
 	nodeC := NewRedisUpdateStore(rdb)
 	nodeD := NewRedisUpdateStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-report", "v1.2.3", "user-1")
+	req, err := nodeA.Create(ctx, "runtime-report", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("node A create: %v", err)
 	}
-	if _, err := nodeB.PopPending(ctx, "runtime-report"); err != nil {
+	if _, err := nodeB.PopPending(ctx, "runtime-report", false); err != nil {
 		t.Fatalf("node B pop: %v", err)
 	}
 	if err := nodeC.Complete(ctx, req.ID, "updated to v1.2.3"); err != nil {
@@ -180,11 +182,11 @@ func TestRedisUpdateStore_FailAcrossInstances(t *testing.T) {
 	nodeB := NewRedisUpdateStore(rdb)
 	nodeC := NewRedisUpdateStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-fail", "v1.2.3", "user-1")
+	req, err := nodeA.Create(ctx, "runtime-fail", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := nodeB.PopPending(ctx, "runtime-fail"); err != nil {
+	if _, err := nodeB.PopPending(ctx, "runtime-fail", false); err != nil {
 		t.Fatalf("pop: %v", err)
 	}
 	if err := nodeC.Fail(ctx, req.ID, "download failed"); err != nil {
@@ -205,17 +207,17 @@ func TestRedisUpdateStore_RejectsConcurrentActive(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-active", "v1.2.3", "user-1")
+	req, err := store.Create(ctx, "runtime-active", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := store.Create(ctx, "runtime-active", "v1.2.4", "user-1"); err != errUpdateInProgress {
+	if _, err := store.Create(ctx, "runtime-active", "", "v1.2.4", "user-1", false); err != errUpdateInProgress {
 		t.Fatalf("second create error = %v, want errUpdateInProgress", err)
 	}
 	if err := store.Complete(ctx, req.ID, "done"); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	if _, err := store.Create(ctx, "runtime-active", "v1.2.4", "user-1"); err != nil {
+	if _, err := store.Create(ctx, "runtime-active", "", "v1.2.4", "user-1", false); err != nil {
 		t.Fatalf("create after terminal should succeed: %v", err)
 	}
 }
@@ -225,11 +227,11 @@ func TestRedisUpdateStore_RunningTimeoutClearsActive(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-timeout", "v1.2.3", "user-1")
+	req, err := store.Create(ctx, "runtime-timeout", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	popped, err := store.PopPending(ctx, "runtime-timeout")
+	popped, err := store.PopPending(ctx, "runtime-timeout", false)
 	if err != nil {
 		t.Fatalf("pop: %v", err)
 	}
@@ -239,9 +241,7 @@ func TestRedisUpdateStore_RunningTimeoutClearsActive(t *testing.T) {
 
 	aged := time.Now().Add(-(updateRunningTimeout + time.Second))
 	popped.RunStartedAt = &aged
-	if err := store.persistRequest(ctx, popped); err != nil {
-		t.Fatalf("persist aged request: %v", err)
-	}
+	persistUpdateForTest(t, rdb, store, popped)
 
 	got, err := store.Get(ctx, req.ID)
 	if err != nil {
@@ -250,7 +250,7 @@ func TestRedisUpdateStore_RunningTimeoutClearsActive(t *testing.T) {
 	if got.Status != UpdateTimeout {
 		t.Fatalf("status = %s, want timeout", got.Status)
 	}
-	if _, err := store.Create(ctx, "runtime-timeout", "v1.2.4", "user-1"); err != nil {
+	if _, err := store.Create(ctx, "runtime-timeout", "", "v1.2.4", "user-1", false); err != nil {
 		t.Fatalf("create after timeout should succeed: %v", err)
 	}
 }
@@ -260,7 +260,7 @@ func TestRedisUpdateStore_PopPendingConcurrent(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-race", "v1.2.3", "user-1")
+	req, err := store.Create(ctx, "runtime-race", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestRedisUpdateStore_PopPendingConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			popped, err := store.PopPending(ctx, "runtime-race")
+			popped, err := store.PopPending(ctx, "runtime-race", false)
 			if err != nil {
 				errs <- err
 				return
@@ -307,3 +307,15 @@ var (
 	_ UpdateStore = (*InMemoryUpdateStore)(nil)
 	_ UpdateStore = (*RedisUpdateStore)(nil)
 )
+
+// persistUpdateForTest overwrites a stored request, e.g. to age it.
+func persistUpdateForTest(t *testing.T, rdb redis.UniversalClient, store *RedisUpdateStore, req *UpdateRequest) {
+	t.Helper()
+	data, err := store.marshalRequest(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := rdb.Set(context.Background(), updateKey(req.ID), data, updateWaitingRetention).Err(); err != nil {
+		t.Fatalf("persist request: %v", err)
+	}
+}

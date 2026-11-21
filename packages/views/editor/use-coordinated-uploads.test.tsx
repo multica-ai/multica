@@ -20,8 +20,12 @@ import {
 // The coordinator (MUL-5181 L2) is what actually performs the request; tests
 // drive an upload's outcome by controlling THAT promise.
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
-vi.mock("@multica/core/api", () => ({ api: { uploadFile: mockApiUploadFile } }));
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("@multica/core/api", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/api")>("@multica/core/api");
+  return { ApiError: actual.ApiError, api: { uploadFile: mockApiUploadFile } };
+});
+const mockToastError = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { error: mockToastError, success: vi.fn() } }));
 
 const TEST_RESOURCES = { en: { common: enCommon, editor: enEditor } };
 
@@ -200,5 +204,82 @@ describe("useCoordinatedUploads paste-as-file recovery", () => {
     // user can never recover.
     expect(state.body).toContain(pastedText);
     expect(state.uploads).toHaveLength(0);
+  });
+});
+
+/**
+ * A file the attachment storage limit refused (MUL-9489) is reported by the
+ * composer's notice, not the generic failure toast, and the next upload that
+ * goes through clears it.
+ */
+describe("useCoordinatedUploads storage limit", () => {
+  function RefusalHost({
+    binding,
+    expose,
+  }: {
+    binding: UploadDraftBinding;
+    expose: (api: ReturnType<typeof useCoordinatedUploads>) => void;
+  }) {
+    const editorRef = useRef<ContentEditorRef | null>(null);
+    const uploads = useCoordinatedUploads(binding, [], {}, inertGate, editorRef);
+    useEffect(() => {
+      expose(uploads);
+    });
+    return null;
+  }
+
+  it("holds the refusal for the notice instead of toasting", async () => {
+    const { ApiError } = await vi.importActual<typeof import("@multica/core/api")>("@multica/core/api");
+    const { binding, state } = makeRecordingBinding("probe:storage");
+    let latest!: ReturnType<typeof useCoordinatedUploads>;
+    mockToastError.mockReset();
+    mockApiUploadFile.mockRejectedValueOnce(
+      new ApiError("full", 403, "Forbidden", {
+        code: "storage_limit_reached",
+        used_bytes: 1_000_000_000,
+        limit_bytes: 1_000_000_000,
+      }),
+    );
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <RefusalHost binding={binding} expose={(u) => { latest = u; }} />
+      </I18nProvider>,
+    );
+    await act(async () => {
+      await latest.handleUpload(new File(["x"], "design-v3.fig"));
+    });
+
+    expect(latest.storageRefusal).toEqual({
+      filename: "design-v3.fig",
+      usedBytes: 1_000_000_000,
+      limitBytes: 1_000_000_000,
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(state.uploads).toHaveLength(0);
+
+    mockApiUploadFile.mockResolvedValueOnce({ id: "att-1", url: "https://cdn/x", filename: "ok.png" } as Attachment);
+    await act(async () => {
+      await latest.handleUpload(new File(["x"], "ok.png"));
+    });
+    expect(latest.storageRefusal).toBeNull();
+  });
+
+  it("still toasts every other failure", async () => {
+    const { binding } = makeRecordingBinding("probe:other");
+    let latest!: ReturnType<typeof useCoordinatedUploads>;
+    mockToastError.mockReset();
+    mockApiUploadFile.mockRejectedValueOnce(new Error("network down"));
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <RefusalHost binding={binding} expose={(u) => { latest = u; }} />
+      </I18nProvider>,
+    );
+    await act(async () => {
+      await latest.handleUpload(new File(["x"], "a.png"));
+    });
+    expect(latest.storageRefusal).toBeNull();
+    expect(mockToastError).toHaveBeenCalledTimes(1);
   });
 });

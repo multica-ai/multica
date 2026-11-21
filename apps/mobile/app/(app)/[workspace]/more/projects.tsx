@@ -41,7 +41,7 @@ export default function ProjectsPage() {
 
   const sorted = useMemo(() => {
     if (!data) return [];
-    return [...data].sort(
+    return data.filter((p) => !p.archived_at).sort(
       (a, b) =>
         new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
     );

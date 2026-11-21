@@ -57,7 +57,7 @@ beforeEach(() => {
     if (["SYN-1", uuid, "OTHER-2"].some((id) => pathname === `/api/issues/${id}`)) {
       return primary(url);
     }
-    const body = /\/(members|agents|squads|assignee-frequency)$/.test(pathname)
+    const body = /\/(members|agents|squads)$/.test(pathname)
       ? []
       : { issues: [], total: 0, members: [], agents: [], comments: [], tasks: [], entries: [], has_more: false };
     return Promise.resolve(response(200, body));

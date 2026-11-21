@@ -152,7 +152,7 @@ describe("PluginsTab", () => {
 
     // The raw scope strings are the trust model, so they must be on screen
     // verbatim alongside their plain-language meaning.
-    await screen.findByText("This Plugin is asking for the following access");
+    await screen.findByText("This plugin requests the following access");
     expect(screen.getByText("issues:read")).toBeInTheDocument();
     expect(screen.getByText("comments:write")).toBeInTheDocument();
     expect(screen.getByText("net:example.com")).toBeInTheDocument();
