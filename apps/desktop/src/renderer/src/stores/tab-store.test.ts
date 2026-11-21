@@ -35,6 +35,11 @@ describe("sanitizeTabPath", () => {
   it("passes through valid workspace-scoped paths", () => {
     expect(sanitizeTabPath("/acme/issues")).toBe("/acme/issues");
     expect(sanitizeTabPath("/my-team/projects/abc")).toBe("/my-team/projects/abc");
+    expect(sanitizeTabPath("/acme/links/id")).toBe("/acme/links/id");
+  });
+
+  it("preserves embedded links restored for a reserved-name workspace", () => {
+    expect(sanitizeTabPath("/links/links/id", "links")).toBe("/links/links/id");
   });
 
   it("rejects paths whose first segment is a reserved slug (missing workspace prefix)", () => {

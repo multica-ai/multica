@@ -40,6 +40,7 @@ var projectScopedRouteParams = map[string]privateRouteResolver{
 	"projects/{id}":                    func(f *privateRouteFixture, _ string) string { return f.projectID },
 	"resources/{resourceId}":           func(f *privateRouteFixture, _ string) string { return f.projectResource() },
 	"issue-views/{id}":                 func(f *privateRouteFixture, _ string) string { return f.projectView() },
+	"links/{id}":                       func(f *privateRouteFixture, _ string) string { return f.projectLink() },
 	"issues/{id}":                      func(f *privateRouteFixture, _ string) string { return f.issue() },
 	"comments/{commentId}":             func(f *privateRouteFixture, _ string) string { return f.comment() },
 	"supplements/{commentId}":          func(f *privateRouteFixture, _ string) string { return f.supplement() },
@@ -333,6 +334,15 @@ func (f *privateRouteFixture) projectResource() string {
 		return f.fx.Insert(f.t, "project_resource", dbfx.Cols{
 			"project_id": f.projectID, "workspace_id": f.fx.WorkspaceID, "resource_type": "github_repo",
 			"resource_ref": dbfx.Raw(`'{"url":"https://github.com/multica-ai/probe"}'::jsonb`),
+		})
+	})
+}
+
+func (f *privateRouteFixture) projectLink() string {
+	return f.once("projectLink", func() string {
+		return f.fx.Insert(f.t, "workspace_link", dbfx.Cols{
+			"workspace_id": f.fx.WorkspaceID, "project_id": f.projectID,
+			"name": "Private route probe link", "url_template": "https://example.com",
 		})
 	})
 }

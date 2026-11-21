@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
 }));
 
+vi.mock("../../links/components/links-section", () => ({ LinksSection: () => null }));
+
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: mocks.copyText,
   copyTextAndHtml: mocks.copyTextAndHtml,

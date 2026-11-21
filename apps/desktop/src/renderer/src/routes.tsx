@@ -5,6 +5,7 @@ import { createMemoryRouter, Outlet, useLocation } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
+import { LinkPage } from "./pages/link-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
@@ -145,6 +146,7 @@ export const appRoutes: RouteObject[] = [
           },
           { path: "projects", element: <ProjectsPage /> },
           { path: "projects/:id", element: <ProjectDetailPage /> },
+          { path: "links/:id", element: <LinkPage /> },
           { path: "autopilots", element: <AutopilotsPage /> },
           { path: "autopilots/:id", element: <AutopilotDetailPage /> },
           {
