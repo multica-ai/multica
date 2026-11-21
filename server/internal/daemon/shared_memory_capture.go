@@ -27,11 +27,101 @@ type sharedMemoryCaptureEvent struct {
 }
 
 var (
-	sharedMemoryCaptureOnce sync.Once
-	sharedMemoryCaptureCh   = make(chan sharedMemoryCaptureEvent, 64)
+	sharedMemoryCaptureQueueSize = 64
 )
 
-func enqueueSharedMemoryCapture(task Task, result TaskResult, logger *slog.Logger) {
+type sharedMemoryCaptureQueue struct {
+	ch       chan sharedMemoryCaptureEvent
+	done     chan struct{}
+	mu       sync.Mutex
+	closed   bool
+	debounce time.Duration
+	flush    func([]sharedMemoryCaptureEvent)
+}
+
+func newSharedMemoryCaptureQueue() *sharedMemoryCaptureQueue {
+	return newSharedMemoryCaptureQueueWith(sharedMemoryDebounce, flushSharedMemoryCapture)
+}
+
+func newSharedMemoryCaptureQueueWith(debounce time.Duration, flush func([]sharedMemoryCaptureEvent)) *sharedMemoryCaptureQueue {
+	queue := &sharedMemoryCaptureQueue{
+		ch:       make(chan sharedMemoryCaptureEvent, sharedMemoryCaptureQueueSize),
+		done:     make(chan struct{}),
+		debounce: debounce,
+		flush:    flush,
+	}
+	go queue.run()
+	return queue
+}
+
+func (q *sharedMemoryCaptureQueue) enqueue(event sharedMemoryCaptureEvent) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return false
+	}
+	select {
+	case q.ch <- event:
+		return true
+	default:
+		return false
+	}
+}
+
+// shutdown closes the producer side and waits for the worker to flush every
+// event accepted before shutdown. Closing the channel also interrupts the
+// debounce wait so the final partial batch is not delayed or discarded.
+func (q *sharedMemoryCaptureQueue) shutdown() {
+	q.mu.Lock()
+	if !q.closed {
+		q.closed = true
+		close(q.ch)
+	}
+	q.mu.Unlock()
+	<-q.done
+}
+
+func (q *sharedMemoryCaptureQueue) run() {
+	defer close(q.done)
+	for first := range q.ch {
+		batch := []sharedMemoryCaptureEvent{first}
+		timer := time.NewTimer(q.debounce)
+	collect:
+		for len(batch) < sharedMemoryCaptureMax {
+			select {
+			case next, ok := <-q.ch:
+				if !ok {
+					stopSharedMemoryCaptureTimer(timer)
+					q.flush(batch)
+					return
+				}
+				batch = append(batch, next)
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(q.debounce)
+			case <-timer.C:
+				break collect
+			}
+		}
+		stopSharedMemoryCaptureTimer(timer)
+		q.flush(batch)
+	}
+}
+
+func stopSharedMemoryCaptureTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+}
+
+func enqueueSharedMemoryCapture(queue *sharedMemoryCaptureQueue, task Task, result TaskResult, logger *slog.Logger) {
 	if !sharedMemoryEnabled() || task.ID == "" {
 		return
 	}
@@ -56,41 +146,8 @@ func enqueueSharedMemoryCapture(task Task, result TaskResult, logger *slog.Logge
 	if event.UserMessage == "" && event.ResultComment == "" {
 		return
 	}
-	sharedMemoryCaptureOnce.Do(func() { go runSharedMemoryCaptureQueue() })
-	select {
-	case sharedMemoryCaptureCh <- event:
-	default:
+	if queue == nil || !queue.enqueue(event) {
 		logger.Warn("shared memory capture queue full; dropping event", "task_id", shortID(task.ID))
-	}
-}
-
-func runSharedMemoryCaptureQueue() {
-	for first := range sharedMemoryCaptureCh {
-		batch := []sharedMemoryCaptureEvent{first}
-		timer := time.NewTimer(sharedMemoryDebounce)
-	collect:
-		for len(batch) < sharedMemoryCaptureMax {
-			select {
-			case next := <-sharedMemoryCaptureCh:
-				batch = append(batch, next)
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
-				timer.Reset(sharedMemoryDebounce)
-			case <-timer.C:
-				break collect
-			}
-		}
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		flushSharedMemoryCapture(batch)
 	}
 }
 

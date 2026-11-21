@@ -218,6 +218,10 @@ type Daemon struct {
 	// waits. See MUL-2663.
 	localPathLocks *LocalPathLocker
 
+	// sharedMemoryCapture is started with the task pollers and drained after
+	// pollLoop stops accepting work and waits for in-flight tasks.
+	sharedMemoryCapture *sharedMemoryCaptureQueue
+
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
 	// them to drain before tearing the daemon down. Without this the bg
@@ -777,6 +781,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
 	defer d.deregisterRuntimes()
+	d.sharedMemoryCapture = newSharedMemoryCaptureQueue()
+	defer d.sharedMemoryCapture.shutdown()
 
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
@@ -3023,7 +3029,7 @@ func (d *Daemon) reportTaskResultForTask(ctx context.Context, task Task, result 
 		err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
 		if err == nil {
 			if captureMemory {
-				enqueueSharedMemoryCapture(task, result, taskLog)
+				enqueueSharedMemoryCapture(d.sharedMemoryCapture, task, result, taskLog)
 			}
 			return
 		}
