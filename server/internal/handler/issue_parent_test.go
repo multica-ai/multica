@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // issueChain inserts n issues where each one is the parent of the next and
@@ -168,6 +169,69 @@ func TestUpdateIssueReverseParentsAtOnceOneWins(t *testing.T) {
 			t.Fatalf("round %d: A -> B = %d %s, B -> A = %d %s; want one 200 and one 400",
 				round, wa.Code, wa.Body.String(), wb.Code, wb.Body.String())
 		}
+	}
+}
+
+func TestUpdateIssueLocksParentTreeBeforeDuplicateRows(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issue := dbfx.Issue(t, "issue to mark and move")
+	original := dbfx.Issue(t, "duplicate target")
+	parent := dbfx.Issue(t, "new parent")
+	req := updateIssueRequest(issue, map[string]any{
+		"duplicate_of_issue_id": original,
+		"parent_issue_id":       parent,
+	})
+	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+	defer cancel()
+
+	holder, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin parent lock holder: %v", err)
+	}
+	defer holder.Rollback(context.Background())
+	if err := db.New(holder).LockIssueParentTree(ctx, parseUUID(testWorkspaceID)); err != nil {
+		t.Fatalf("hold parent tree lock: %v", err)
+	}
+	holderPID := holderBackendPID(t, ctx, holder)
+
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		testHandler.UpdateIssue(w, req.WithContext(ctx))
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitUntilDoneOrBlockedBy(t, holderPID, done)
+	select {
+	case <-done:
+		t.Fatalf("update finished while the parent tree was locked: %d %s", w.Code, w.Body.String())
+	default:
+	}
+
+	// Waiting for the parent tree must leave both rows available to foreign-key checks.
+	for _, id := range []string{issue, original} {
+		if _, err := testPool.Exec(ctx, `SELECT id FROM issue WHERE id = $1 FOR KEY SHARE NOWAIT`, id); err != nil {
+			t.Fatalf("issue %s was already locked while the update waited for the parent tree: %v", id, err)
+		}
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatalf("release parent tree lock: %v", err)
+	}
+	<-done
+	if w.Code != http.StatusOK {
+		t.Fatalf("mark and move issue = %d %s, want 200", w.Code, w.Body.String())
+	}
+	status, duplicateOf, _ := duplicateState(t, issue)
+	if status != "cancelled" || duplicateOf == nil || *duplicateOf != original {
+		t.Fatalf("mark and move stored (status, duplicate_of) = (%q, %v), want (cancelled, %s)", status, duplicateOf, original)
+	}
+	if got := issueParentOf(t, issue); got != parent {
+		t.Fatalf("mark and move stored parent = %s, want %s", got, parent)
 	}
 }
 

@@ -283,11 +283,6 @@ func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pg
 	var issue db.Issue
 	var cancelledWakeups []db.AgentTaskQueue
 	err := h.runWithIssueStatusGuard(ctx, workspaceID, statusKey, func(q *db.Queries) error {
-		if params.DuplicateOfIssueID.Valid {
-			if err := lockAndCheckDuplicateMark(ctx, q, workspaceID, params.ID, params.DuplicateOfIssueID); err != nil {
-				return err
-			}
-		}
 		var innerErr error
 		issue, cancelledWakeups, innerErr = updateIssueStoppingWakeups(ctx, q, workspaceID, params)
 		return innerErr
@@ -304,8 +299,14 @@ func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pg
 // run it inside the status write's transaction and broadcast the returned runs
 // after commit.
 func updateIssueStoppingWakeups(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, params db.UpdateIssueParams) (db.Issue, []db.AgentTaskQueue, error) {
+	// Take the parent tree lock before locking rows for a duplicate mark.
 	if params.ParentIssueID.Valid {
 		if err := lockAndCheckIssueParent(ctx, q, workspaceID, params.ID, params.ParentIssueID); err != nil {
+			return db.Issue{}, nil, err
+		}
+	}
+	if params.DuplicateOfIssueID.Valid {
+		if err := lockAndCheckDuplicateMark(ctx, q, workspaceID, params.ID, params.DuplicateOfIssueID); err != nil {
 			return db.Issue{}, nil, err
 		}
 	}
@@ -4114,7 +4115,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
 		Stage:         prevIssue.Stage,
-		// Checked against the locked rows in updateIssueWithStatusGuard.
+		// Checked against the locked rows before the update.
 		DuplicateOfIssueID: duplicateOfID,
 	}
 	if req.ExpectedRevision != nil {
