@@ -417,13 +417,18 @@ async function fetchHealth(): Promise<DaemonStatus> {
         profile: active.name,
       };
     }
+    // The CLI can return while the daemon is still in preflight. Once the
+    // launch operation has finished, a vanished process must reach the
+    // stopped state so normal recovery can take over.
+    if (
+      currentState === "starting" &&
+      (lifecycleOperations.inProgress ||
+        !(await daemonProcessIsConfirmedAbsent(active.name)))
+    ) {
+      return { state: "starting", profile: active.name };
+    }
     return {
-      state:
-        currentState === "starting"
-          ? "starting"
-          : recoveryPolicy.isPaused
-            ? "recovery_paused"
-            : "stopped",
+      state: recoveryPolicy.isPaused ? "recovery_paused" : "stopped",
       profile: active.name,
     };
   }
