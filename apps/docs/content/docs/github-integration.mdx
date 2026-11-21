@@ -96,6 +96,8 @@ Once linked, PRs appear in the **Pull requests** block of issue detail. Each ent
 
 CI status and mergeability come from snapshots Multica pulls from the GitHub API, and the two are independent; merged or closed PRs no longer show either. When GitHub is temporarily unavailable, the card keeps the last snapshot and marks it stale.
 
+On Multica Cloud, the GitHub App does not currently request the optional read-only **Actions** permission. When the same workflow runs more than once on a commit and an earlier run is cancelled (for example by `concurrency: cancel-in-progress`), that cancelled run still counts as failed even after a newer run passes. Self-hosted deployments can grant read-only **Actions** permission to their GitHub App so CI status ignores superseded cancelled runs; see [Self-hosting setup](#self-hosting-setup).
+
 Under the list, one line says what happens next: for example *Moves to Done when #19 merges*, or which PR closed without merging. There's no line when the workspace leaves status alone or the issue already has the target status.
 
 Click an entry to open the PR on GitHub. Turning off the **PR sidebar** only hides this block; it doesn't disconnect anything.

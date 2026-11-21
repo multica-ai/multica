@@ -96,6 +96,8 @@ Une fois associées, les PR apparaissent dans le bloc **Pull requests** du déta
 
 Le statut CI et la possibilité de fusion proviennent d'instantanés que Multica récupère depuis l'API GitHub, et les deux sont indépendants ; les PR fusionnées ou fermées n'affichent plus ni l'un ni l'autre. Lorsque GitHub est momentanément indisponible, la carte conserve le dernier instantané et le signale comme périmé.
 
+Sur Multica Cloud, la GitHub App ne demande pas actuellement la permission facultative **Actions** en lecture seule. Lorsqu'un même workflow s'exécute plusieurs fois sur un même commit et qu'une exécution antérieure est annulée (par exemple via `concurrency: cancel-in-progress`), cette exécution annulée compte toujours comme un échec même après la réussite d'une exécution plus récente. Les déploiements en auto-hébergement peuvent accorder la permission **Actions** en lecture seule à leur GitHub App afin que le statut CI ignore les exécutions annulées remplacées ; voir [Configuration en auto-hébergement](#configuration-en-auto-hébergement).
+
 Sous la liste, une ligne indique ce qui va se passer : par exemple *Passe à Terminé quand #19 est fusionnée*, ou quelle PR a été fermée sans fusion. Cette ligne n'apparaît pas lorsque l'espace de travail ne change pas le statut ou que la tâche a déjà le statut cible.
 
 Cliquez sur une entrée pour ouvrir la PR sur GitHub. Désactiver la **Barre latérale des pull requests** masque seulement ce bloc ; cela ne déconnecte rien.
