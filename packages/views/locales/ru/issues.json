@@ -43,7 +43,7 @@
     "steer_step_read": "Прочитано",
     "steps_few": "{{count}} шага",
     "steps_many": "{{count}} шагов",
-    "show_earlier_one": "Показать ещё {{count}} предыдущих шагов",
+    "show_earlier_one": "Показать ещё {{count}} предыдущий шаг",
     "show_earlier_few": "Показать ещё {{count}} предыдущих шагов",
     "show_earlier_many": "Показать ещё {{count}} предыдущих шагов",
     "show_earlier_other": "Показать ещё {{count}} предыдущих шагов"
@@ -418,7 +418,7 @@
       "average": "Среднее",
       "count": "Количество"
     },
-    "export_success_one": "Экспортировано задач: {{count}}",
+    "export_success_one": "Экспортирована {{count}} задача",
     "export_success_few": "Экспортировано задач: {{count}}",
     "export_success_many": "Экспортировано задач: {{count}}",
     "export_success_other": "Экспортировано задач: {{count}}"
@@ -1534,8 +1534,8 @@
       "cond_field_hint": "Статус, исполнитель, метка, свойство",
       "cond_children": "Подзадачи завершаются",
       "cond_children_hint": "Все или один этап",
-      "cond_pr": "CI связанного PR завершается",
-      "cond_pr_hint": "Или он смёрджен",
+      "cond_pr": "Обновляется связанный PR",
+      "cond_pr_hint": "Завершается CI, происходит слияние или возникают конфликты",
       "cond_issue": "Статус другой задачи",
       "cond_issue_hint": "например, когда она готова",
       "field_status": "Статус",
@@ -1573,7 +1573,7 @@
       "wait_days_many": "{{count}} дней",
       "max_fires_times_few": "{{count}} раза",
       "max_fires_times_many": "{{count}} раз",
-      "events_selected_one": "Выбрано событий: {{count}}",
+      "events_selected_one": "{{count}} событие",
       "events_selected_few": "Выбрано событий: {{count}}",
       "events_selected_many": "Выбрано событий: {{count}}",
       "events_selected_other": "Выбрано событий: {{count}}"
@@ -1688,7 +1688,7 @@
       "loop": "правило будило другие правила, которые будили его снова",
       "rate": "более 12 запусков за час"
     },
-    "upcoming_one": "{{count}} включённых правил будильника",
+    "upcoming_one": "{{count}} активное правило пробуждения",
     "upcoming_few": "{{count}} включённых правил будильника",
     "upcoming_many": "{{count}} включённых правил будильника",
     "upcoming_other": "{{count}} включённых правил будильника"

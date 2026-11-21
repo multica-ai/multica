@@ -141,7 +141,7 @@
     "bind_runtime": "繫結執行時",
     "restore": "恢復",
     "archive_dialog_title": "歸檔 AI 代理？",
-    "archive_dialog_description": "\"{{name}}\"將被歸檔，無法被分配或提及，但所有歷史會被保留。可以稍後恢復。",
+    "archive_dialog_description": "「{{name}}」將被封存，且無法再被指派或提及。所有進行中的執行都會被取消，但歷史紀錄將保留。你之後可以隨時還原。",
     "archive_dialog_cancel": "取消",
     "archive_dialog_confirm": "歸檔",
     "more_archive": "歸檔 AI 代理",
@@ -847,7 +847,7 @@
     "public_group": "公開訪問",
     "owner_only_readonly": "只有該 AI 代理的所有者可以更改誰能呼叫它。",
     "members_empty": "沒有可選擇的工作區成員",
-    "composio_switch_hint": "提示——該 AI 代理已啟用 應用。共享後，所有獲得訪問權限的人都可以透過該 AI 代理使用這些應用。",
+    "composio_switch_hint": "提示：該 AI 代理已啟用已連接的應用程式。共享後，有權存取此 AI 代理的人都將可以透過它使用這些應用程式。",
     "trigger_members_count_other": "{{count}} 人"
   },
   "profile_card": {

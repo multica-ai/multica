@@ -62,7 +62,7 @@ describe("SkillFilterMenu label filter search", () => {
     await waitFor(() =>
       expect(screen.getByRole("menuitemcheckbox", { name: /docs/ })).toBeInTheDocument(),
     );
-    const input = screen.getByPlaceholderText("Filter…");
+    const input = screen.getByPlaceholderText("Filter...");
     expect(input).toHaveFocus();
 
     await user.keyboard("doc");
@@ -77,6 +77,6 @@ describe("SkillFilterMenu label filter search", () => {
     expect(input).toHaveFocus();
 
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByPlaceholderText("Filter…")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByPlaceholderText("Filter...")).not.toBeInTheDocument());
   });
 });

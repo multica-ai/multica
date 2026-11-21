@@ -2,7 +2,7 @@
   "nav": {
     "inbox": "Inbox",
     "chat": "Chat",
-    "my_issues": "My Issues",
+    "my_issues": "My issues",
     "issues": "Issues",
     "projects": "Projects",
     "autopilots": "Autopilots",
@@ -73,7 +73,7 @@
     "close": "Close"
   },
   "workspace_loader": {
-    "loading_workspace": "Loading workspace…",
+    "loading_workspace": "Loading workspace...",
     "loading_named_prefix": "Loading"
   },
   "window": {
@@ -91,7 +91,7 @@
     "log_out": "Sign out",
     "new_issue": "New issue",
     "pinned_label": "Pinned",
-    "show_more_pins": "Show {{count}} more…",
+    "show_more_pins": "Show {{count}} more...",
     "show_fewer_pins": "Show fewer"
   },
   "spaces": {
@@ -204,7 +204,7 @@
       "stuck_one": "{{count}} run waiting on an offline runtime",
       "stuck_other": "{{count}} runs waiting on an offline runtime",
       "working_now": "Working now",
-      "show_more_agents": "Show {{count}} more…",
+      "show_more_agents": "Show {{count}} more...",
       "show_fewer_agents": "Show fewer",
       "running_tasks_one": "{{count}} run in progress",
       "running_tasks_other": "{{count}} runs in progress",
@@ -260,7 +260,7 @@
     "direction_desc": "Descending",
     "section_columns": "Columns",
     "load_more": "Load more",
-    "loading_more": "Loading…"
+    "loading_more": "Loading..."
   },
   "object_page": {
     "toggle_panel": "Toggle right sidebar",

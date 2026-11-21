@@ -249,7 +249,7 @@ describe("PreferencesTab — Time zone", () => {
   ) {
     await user.click(screen.getByRole("button", { name: "Time zone" }));
     await user.type(
-      await screen.findByPlaceholderText("Search time zones…"),
+      await screen.findByPlaceholderText("Search time zones..."),
       search,
     );
     await user.click(await screen.findByRole("option", { name }));

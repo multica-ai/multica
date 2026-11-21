@@ -41,7 +41,7 @@
     "steer_resend_failed": "Impossible de l'envoyer comme nouvelle exécution.",
     "steer_step": "{{name}} a ajouté",
     "steer_step_read": "Lu",
-    "show_earlier_one": "Afficher {{count}} étapes précédentes",
+    "show_earlier_one": "Afficher {{count}} étape précédente",
     "show_earlier_other": "Afficher {{count}} étapes précédentes"
   },
   "working_filter_error": {
@@ -405,7 +405,7 @@
       "average": "Moyenne",
       "count": "Nombre"
     },
-    "export_success_one": "{{count}} tâches exportées",
+    "export_success_one": "{{count}} tâche exportée",
     "export_success_other": "{{count}} tâches exportées"
   },
   "gantt": {
@@ -1421,8 +1421,8 @@
       "cond_field_hint": "Statut, responsable, libellé, propriété",
       "cond_children": "Les sous-tâches se terminent",
       "cond_children_hint": "Tous, ou une étape",
-      "cond_pr": "La CI d’une PR liée se termine",
-      "cond_pr_hint": "Ou sa fusion",
+      "cond_pr": "Une PR liée est mise à jour",
+      "cond_pr_hint": "La CI se termine, la PR est fusionnée ou présente des conflits",
       "cond_issue": "Le statut d’une autre tâche",
       "cond_issue_hint": "p. ex. quand il est terminé",
       "field_status": "Statut",
@@ -1456,7 +1456,7 @@
       "checked": "Cochée",
       "unchecked": "Décochée",
       "assignee_comment_hint": "{{name}} est le responsable et s’exécute déjà quand un membre commente. Cette règle rejoint cette exécution au lieu d’en lancer une autre ; ajoutez-la seulement pour lui donner une instruction de plus.",
-      "events_selected_one": "{{count}} événements",
+      "events_selected_one": "{{count}} événement",
       "events_selected_other": "{{count}} événements"
     },
     "system": {
@@ -1565,7 +1565,7 @@
       "loop": "il réveillait des règles qui le réveillaient à leur tour",
       "rate": "plus de 12 exécutions en une heure"
     },
-    "upcoming_one": "{{count}} règles de réveil activées",
+    "upcoming_one": "{{count}} règle de réveil active",
     "upcoming_other": "{{count}} règles de réveil activées"
   },
   "duplicates": {

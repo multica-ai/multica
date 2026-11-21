@@ -864,7 +864,7 @@
       },
       "status_changes": {
         "label": "狀態變更",
-        "description": "你訂閱的任務狀態變化時（例如 todo、in_progress、done）"
+        "description": "你訂閱的任務狀態變更時（例如待辦、進行中、已完成）"
       },
       "comments": {
         "label": "評論",
@@ -1493,7 +1493,7 @@
       "external_description_before": "此裝置的守護程序在應用之外執行（例如 WSL2 中），因此應用無法啟動或停止它。請在相應環境中執行",
       "external_description_after": "。",
       "auto_start_title": "啟動應用時自動執行",
-      "auto_start_description": "登入時自動啟動。",
+      "auto_start_description": "開啟 Multica 桌面端時自動啟動本機守護程序",
       "auto_stop_title": "退出應用時自動停止",
       "auto_stop_description": "關閉桌面端時停止守護程序。",
       "cli_status": "CLI 狀態",

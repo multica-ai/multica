@@ -193,7 +193,7 @@ describe("subtree execution log", () => {
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
     expect(list).toHaveBeenCalledWith("issue-1", true);
-    expect(within(dialog).getByRole("status", { name: "Loading runs…" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("status", { name: "Loading runs..." })).toBeInTheDocument();
     expect(within(dialog).queryByRole("img")).not.toBeInTheDocument();
     await act(async () => { rejectRequest(new Error("unavailable")); });
     const retry = await within(dialog).findByRole("button", { name: "Could not load runs. Retry" });
@@ -275,7 +275,7 @@ describe("subtree execution log", () => {
       </QueryClientProvider>,
     );
     fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
-    expect(screen.getByRole("status", { name: "Loading runs…" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading runs..." })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Execution log 1" })).not.toBeInTheDocument();
     expect(list).toHaveBeenCalledWith("issue-1", true, { view: "timeline" });
     await act(async () => { rejectRequest(new Error("unavailable")); });

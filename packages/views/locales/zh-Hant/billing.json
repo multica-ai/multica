@@ -82,7 +82,7 @@
       "title": "當前套餐",
       "plan": "工作區套餐",
       "members": "成員席位",
-      "members_description": "AI 代理和待接受的邀請不計入席位。",
+      "members_description": "活躍成員與待接受的邀請均計入付費席位。訪客不計入席位。",
       "member_count_other": "{{count}} 位成員",
       "billing_interval": "付款週期",
       "period_end": "當前週期結束時間",

@@ -41,7 +41,7 @@
     "steer_resend_failed": "No se ha podido enviar como una ejecución nueva.",
     "steer_step": "{{name}} añadido",
     "steer_step_read": "Leído",
-    "show_earlier_one": "Mostrar {{count}} pasos anteriores",
+    "show_earlier_one": "Mostrar {{count}} paso anterior",
     "show_earlier_other": "Mostrar {{count}} pasos anteriores"
   },
   "status_catalog_error": {
@@ -395,7 +395,7 @@
       "average": "Media",
       "count": "Recuento"
     },
-    "export_success_one": "{{count}} tareas exportadas",
+    "export_success_one": "{{count}} tarea exportada",
     "export_success_other": "{{count}} tareas exportadas"
   },
   "gantt": {
@@ -1335,8 +1335,8 @@
       "cond_field_hint": "Estado, asignado, etiqueta, propiedad",
       "cond_children": "Terminan las subtareas",
       "cond_children_hint": "Todas, o una etapa",
-      "cond_pr": "Termina la CI de un PR enlazado",
-      "cond_pr_hint": "O se fusiona",
+      "cond_pr": "Se actualiza un PR enlazado",
+      "cond_pr_hint": "Termina la CI, se fusiona o tiene conflictos",
       "cond_issue": "El estado de otra tarea",
       "cond_issue_hint": "p. ej. cuando esté hecha",
       "field_status": "Estado",
@@ -1370,7 +1370,7 @@
       "assignee_comment_hint": "{{name}} es el asignado y ya se ejecuta cuando un miembro comenta. Esta regla se une a esa ejecución en lugar de iniciar otra; añádela solo para darle una instrucción extra a esa ejecución.",
       "pr_conflicts": "Tiene conflictos de fusión",
       "other_blocked": "pasa a Bloqueado",
-      "events_selected_one": "{{count}} eventos",
+      "events_selected_one": "{{count}} evento",
       "events_selected_other": "{{count}} eventos"
     },
     "system": {
@@ -1479,7 +1479,7 @@
       "loop": "seguía activando reglas que la volvían a activar",
       "rate": "más de 12 ejecuciones en una hora"
     },
-    "upcoming_one": "{{count}} reglas de activación activadas",
+    "upcoming_one": "{{count}} regla de activación activa",
     "upcoming_other": "{{count}} reglas de activación activadas"
   },
   "duplicates": {

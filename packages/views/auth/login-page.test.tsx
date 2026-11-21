@@ -190,7 +190,7 @@ describe("LoginPage", () => {
     expect(mockSendCode).toHaveBeenCalledWith("test@example.com");
   });
 
-  it("shows 'Sending code…' while submitting", async () => {
+  it("shows 'Sending code...' while submitting", async () => {
     // Never resolve so loading stays true
     mockSendCode.mockReturnValueOnce(new Promise(() => {}));
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);

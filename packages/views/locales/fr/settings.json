@@ -821,7 +821,7 @@
       "cancel": "Annuler",
       "confirm": "Supprimer l'étiquette",
       "failed": "Impossible de supprimer l'étiquette",
-      "description_one": "Supprimer « {{name}} » ? Elle sera retirée de {{count}} ressources. Cette action est irréversible.",
+      "description_one": "Supprimer « {{name}} » ? Elle sera retirée de {{count}} élément. Cette action est irréversible.",
       "description_other": "Supprimer « {{name}} » ? Elle sera retirée de {{count}} ressources. Cette action est irréversible."
     }
   },
@@ -1505,7 +1505,7 @@
       "external_description_before": "Le démon de cet appareil s'exécute en dehors de l'application, par exemple dans WSL2. L'application ne peut donc ni le démarrer ni l'arrêter. Démarrez-le ou arrêtez-le depuis cet environnement avec",
       "external_description_after": ".",
       "auto_start_title": "Démarrage automatique à l'ouverture",
-      "auto_start_description": "Démarrer automatiquement à la connexion.",
+      "auto_start_description": "Démarre automatiquement le daemon local au lancement de Multica Desktop",
       "auto_stop_title": "Arrêt automatique à la fermeture",
       "auto_stop_description": "Arrêter le daemon à la fermeture de Desktop.",
       "cli_status": "État du CLI",

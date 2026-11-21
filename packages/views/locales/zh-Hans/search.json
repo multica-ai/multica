@@ -1,8 +1,8 @@
 {
   "title": "命令栏",
   "description": "搜索、执行命令，或把工作交给智能体",
-  "placeholder": "搜索，或输入要做的事…",
-  "page_placeholder": "筛选…",
+  "placeholder": "搜索，或输入要做的事...",
+  "page_placeholder": "筛选...",
   "breadcrumb_aria": "当前菜单",
   "groups": {
     "pages": "页面",
@@ -15,7 +15,7 @@
     "issues": "任务",
     "autopilots": "自动化",
     "chats": "对话",
-    "skills": "技能",
+    "skills": "Skills",
     "docs": "文档",
     "cancelled": "已取消",
     "recent": "最近",
@@ -40,7 +40,7 @@
     "new_project": "新建项目",
     "new_autopilot": "新建自动化任务",
     "chat_with_agent": "和智能体对话",
-    "change_theme": "切换主题…",
+    "change_theme": "切换主题...",
     "send_feedback": "发送反馈",
     "copy_issue_link": "复制任务链接",
     "copy_identifier": "复制编号（{{identifier}}）",
@@ -48,15 +48,15 @@
     "unfold_all_comments": "展开全部评论"
   },
   "issue": {
-    "change_status": "更改状态…",
-    "assign_to": "指派给…",
-    "set_priority": "设置优先级…",
-    "run_quick_action": "运行快捷操作…",
+    "change_status": "更改状态...",
+    "assign_to": "指派给...",
+    "set_priority": "设置优先级...",
+    "run_quick_action": "运行快捷操作...",
     "quick_actions_available_other": "{{count}} 条可用",
-    "add_label": "添加标签…",
-    "set_due_date": "设置截止日期…",
-    "move_to_project": "移动到项目…",
-    "set_parent": "设置父任务…",
+    "add_label": "添加标签...",
+    "set_due_date": "设置截止日期...",
+    "move_to_project": "移动到项目...",
+    "set_parent": "设置父任务...",
     "cancel_run": "取消当前运行",
     "retry_run": "重试上次运行",
     "create_sub_issue": "新建子任务",
@@ -66,7 +66,7 @@
     "delete_selected_other": "删除 {{count}} 个任务"
   },
   "project": {
-    "change_status": "更改项目状态…",
+    "change_status": "更改项目状态...",
     "new_issue": "在此项目下新建任务",
     "pin": "固定到侧边栏",
     "unpin": "从侧边栏取消固定",
@@ -74,7 +74,7 @@
   },
   "agent": {
     "chat": "和 {{name}} 对话",
-    "assign_issue": "把任务指派给 {{name}}…",
+    "assign_issue": "把任务指派给 {{name}}...",
     "new_issue": "新建任务给 {{name}}",
     "pin_in_chat": "在对话中固定",
     "unpin_in_chat": "从聊天里取消固定",
@@ -92,7 +92,7 @@
     "archive_all_read": "归档收件箱全部已读"
   },
   "chat": {
-    "link_project": "关联到项目…",
+    "link_project": "关联到项目...",
     "pin": "固定对话",
     "unpin": "取消固定对话",
     "archive": "归档对话"
@@ -134,7 +134,7 @@
     "type_to_find_people": "输入关键词查找成员和智能体"
   },
   "delegate": {
-    "row": "交给智能体：「{{prompt}}」",
+    "row": "交给智能体：\"{{prompt}}\"",
     "hint": "通过智能体创建"
   },
   "best": {
@@ -160,7 +160,7 @@
     "prefix_people": "成员与智能体"
   },
   "trigger": {
-    "label": "搜索…"
+    "label": "搜索..."
   },
   "untitled_doc": "未命名"
 }

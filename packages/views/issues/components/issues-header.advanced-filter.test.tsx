@@ -86,7 +86,7 @@ describe("IssueFilterMenu search", () => {
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
     const trigger = await screen.findByRole("menuitem", { name: field });
     fireEvent.click(trigger);
-    const search = await screen.findByPlaceholderText("Filter…");
+    const search = await screen.findByPlaceholderText("Filter...");
     await screen.findByRole("menuitemcheckbox", { name: other });
 
     await user.type(search, query);
@@ -110,14 +110,14 @@ describe("IssueFilterMenu search", () => {
 
     await user.click(search);
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByPlaceholderText("Filter…")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByPlaceholderText("Filter...")).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
   });
 
   it("offers values as conditions and toggles them", async () => {
     const store = renderFilterMenu();
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
-    const search = await screen.findByRole("textbox", { name: "Filter by field or value…" });
+    const search = await screen.findByRole("textbox", { name: "Filter by field or value..." });
     await userEvent.type(search, "lamb");
 
     const row = await screen.findByRole("menuitemcheckbox", { name: /Assignee\s*is\s*Lambda/ });
@@ -130,7 +130,7 @@ describe("IssueFilterMenu search", () => {
   it("matches fields by name and buckets by label", async () => {
     const store = renderFilterMenu();
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
-    const search = await screen.findByRole("textbox", { name: "Filter by field or value…" });
+    const search = await screen.findByRole("textbox", { name: "Filter by field or value..." });
     await userEvent.type(search, "overdue");
     fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Due date\s*is\s*Overdue/ }));
     expect(store.getState().dueDateFilters).toEqual(["overdue"]);

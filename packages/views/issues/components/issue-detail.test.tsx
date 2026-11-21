@@ -1068,7 +1068,7 @@ describe("IssueDetail (shared)", () => {
       await screen.findByText("Historical comment 0");
 
       fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
-      fireEvent.change(await screen.findByRole("textbox", { name: "Find in issue…" }), { target: { value: "needle" } });
+      fireEvent.change(await screen.findByRole("textbox", { name: "Find in issue..." }), { target: { value: "needle" } });
 
       // Counted from the comment's Markdown while it is not mounted.
       await waitFor(() => expect(screen.getByRole("search")).toHaveTextContent("1/1"));
@@ -1706,7 +1706,7 @@ describe("IssueDetail (shared)", () => {
 
     await screen.findByText("Implement authentication");
     fireEvent.click(screen.getByTestId("comment-composer-shell"));
-    const editor = await screen.findByPlaceholderText("Leave a comment…");
+    const editor = await screen.findByPlaceholderText("Leave a comment...");
     fireEvent.change(editor, { target: { value: "A new update" } });
     const composer = editor.closest<HTMLElement>("[aria-busy], .relative.flex.flex-col.rounded-lg")!;
     fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
@@ -2275,7 +2275,7 @@ describe("IssueDetail (shared)", () => {
     );
     await screen.findByText("Implement authentication");
     fireEvent.click(screen.getByTestId("comment-composer-shell"));
-    const editor = await screen.findByPlaceholderText("Leave a comment…");
+    const editor = await screen.findByPlaceholderText("Leave a comment...");
     fireEvent.change(editor, { target: { value: "Unsaved synthetic comment" } });
     mockApiObj.getIssue.mockRejectedValue(new ApiError("unavailable", 503, "Unavailable"));
     await act(async () => {

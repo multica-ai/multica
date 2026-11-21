@@ -141,7 +141,7 @@
     "bind_runtime": "ランタイムを設定",
     "restore": "復元",
     "archive_dialog_title": "エージェントをアーカイブしますか？",
-    "archive_dialog_description": "\"{{name}}\" がアーカイブされます。割り当てやメンションはできなくなりますが、履歴はすべて保持されます。後で復元できます。",
+    "archive_dialog_description": "「{{name}}」はアーカイブされ、割り当てやメンションができなくなります。進行中の実行はキャンセルされますが、履歴は保持されます。あとから復元できます。",
     "archive_dialog_cancel": "キャンセル",
     "archive_dialog_confirm": "アーカイブ",
     "more_archive": "エージェントをアーカイブ",
@@ -706,7 +706,7 @@
     "public_group": "公開アクセス",
     "owner_only_readonly": "このエージェントを実行できる相手は、オーナーのみが変更できます。",
     "members_empty": "選択できるワークスペースメンバーがいません",
-    "composio_switch_hint": "ご注意 — このエージェントは アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。",
+    "composio_switch_hint": "注意: このエージェントでは連携アプリが有効になっています。共有すると、アクセス権を持つメンバーがこのエージェント経由でそれらのアプリを利用できるようになります。",
     "trigger_members_count_other": "{{count}} 人"
   },
   "profile_card": {

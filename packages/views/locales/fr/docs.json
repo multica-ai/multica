@@ -31,7 +31,7 @@
     "description": "« {{title}} » et tout son historique seront supprimés. Action irréversible.",
     "confirm": "Supprimer",
     "folder_title": "Supprimer ce dossier ?",
-    "folder_description": "Seuls les dossiers vides peuvent être supprimés."
+    "folder_description": "Supprimer « {{title}} » ? Les documents et sous-dossiers qu'il contient remonteront d'un niveau. Cette action est irréversible."
   },
   "tree": {
     "more": "Plus d'actions pour {{title}}",

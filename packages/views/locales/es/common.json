@@ -116,7 +116,7 @@
     "collapse": "Mostrar menos"
   },
   "wecom_bind": {
-    "page_title": "Vincula tu cuenta de Multica",
+    "page_title": "Vincular cuenta de WeCom",
     "redeeming": "Vinculando tu cuenta…",
     "needs_auth_description": "Inicia sesión en Multica para completar la vinculación. El token del enlace vincula tu identidad de WeCom a este usuario de Multica, así que primero debes iniciar sesión.",
     "sign_in": "Iniciar sesión",

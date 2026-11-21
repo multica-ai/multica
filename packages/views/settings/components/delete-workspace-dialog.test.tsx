@@ -141,7 +141,7 @@ describe("DeleteWorkspaceDialog", () => {
         onConfirm={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Deleting…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deleting..." })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
   });
 

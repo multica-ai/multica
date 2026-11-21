@@ -128,7 +128,7 @@ describe("QuickActionsSection", () => {
     renderWithI18n(<QuickActionsSection issueId="i-1" />);
     expect(screen.getByRole("button", { name: "Quick actions 1" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "New quick action" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Quick Actions options" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Quick actions options" })).not.toBeInTheDocument();
   });
 
   it("renders nothing before the workspace has any actions", () => {

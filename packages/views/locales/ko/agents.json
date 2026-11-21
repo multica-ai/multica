@@ -141,7 +141,7 @@
     "bind_runtime": "런타임 연결",
     "restore": "복원",
     "archive_dialog_title": "에이전트를 보관할까요?",
-    "archive_dialog_description": "\"{{name}}\"이(가) 보관됩니다. 할당하거나 멘션할 수 없지만 기록은 유지됩니다. 나중에 복원할 수 있습니다.",
+    "archive_dialog_description": "\"{{name}}\"을(를) 보관하면 더 이상 담당자로 지정하거나 멘션할 수 없습니다. 진행 중인 실행은 취소되지만 기록은 유지되며 나중에 복원할 수 있습니다.",
     "archive_dialog_cancel": "취소",
     "archive_dialog_confirm": "보관",
     "more_archive": "에이전트 보관",
@@ -706,7 +706,7 @@
     "public_group": "공개 액세스",
     "owner_only_readonly": "이 에이전트를 실행할 수 있는 대상은 소유자만 변경할 수 있습니다.",
     "members_empty": "선택할 워크스페이스 구성원이 없습니다",
-    "composio_switch_hint": "참고 — 이 에이전트에는 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 모든 사람이 이 에이전트를 통해 해당 앱을 사용할 수 있습니다.",
+    "composio_switch_hint": "참고: 이 에이전트에는 연결된 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 누구나 이 에이전트를 통해 해당 앱을 사용할 수 있습니다.",
     "trigger_members_count_other": "{{count}}명"
   },
   "profile_card": {

@@ -80,7 +80,7 @@ vi.mock("@multica/core/billing", () => ({
 
 vi.mock("../billing/autopilot-addon-dialog", () => ({
   AutopilotAddonDialog: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog" aria-label="Buy more automation runs" /> : null,
+    open ? <div role="dialog" aria-label="Buy more autopilot runs" /> : null,
 }));
 
 import { LimitRecoveryDialog } from "./limit-recovery-dialog";
@@ -206,7 +206,7 @@ describe("LimitRecoveryDialog", () => {
     expect(queryRecoveryDialog()).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Checking the billing actions available for this workspace…",
+        "Checking the billing actions available for this workspace...",
       ),
     ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Close" })).toHaveLength(1);
@@ -446,7 +446,7 @@ describe("LimitRecoveryDialog", () => {
     await user.click(screen.getByRole("button", { name: "Buy more runs" }));
     await waitFor(() => expect(queryRecoveryDialog()).not.toBeInTheDocument());
     expect(
-      screen.getByRole("dialog", { name: "Buy more automation runs" }),
+      screen.getByRole("dialog", { name: "Buy more autopilot runs" }),
     ).toBeInTheDocument();
   });
 

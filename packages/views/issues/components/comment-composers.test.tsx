@@ -618,9 +618,9 @@ describe("comment composers", () => {
 
     // Readonly-first: shell shows the placeholder text; clicking mounts the
     // real editor in place.
-    expect(screen.getByTestId("comment-composer-shell")).toHaveTextContent("Leave a comment…");
+    expect(screen.getByTestId("comment-composer-shell")).toHaveTextContent("Leave a comment...");
     activateComposer("comment-composer-shell");
-    expect(screen.getByPlaceholderText("Leave a comment…")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Leave a comment...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
 
@@ -632,9 +632,9 @@ describe("comment composers", () => {
   it("renders reply composer without a manual expand control", () => {
     const { container } = renderReplyInput();
 
-    expect(screen.getByTestId("reply-composer-shell")).toHaveTextContent("Leave a reply…");
+    expect(screen.getByTestId("reply-composer-shell")).toHaveTextContent("Leave a reply...");
     activateComposer("reply-composer-shell");
-    expect(screen.getByPlaceholderText("Leave a reply…")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(1);
     act(() => screen.getByTestId("editor").focus());
@@ -977,7 +977,7 @@ describe("comment composers", () => {
     });
 
     expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBe("draft A plus more");
-    // …and the post-send caret policy must stand down with it: the guard left
+    // ...and the post-send caret policy must stand down with it: the guard left
     // the editor holding "draft A plus more", so blurring would yank the caret
     // out of the sentence the user is still writing.
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
@@ -1413,11 +1413,11 @@ describe("comment composers — upload submit gate", () => {
     });
 
     // The LIVE EDITOR received the insert (not just the store — an append the
-    // mounted editor never saw would be erased by its next emit)…
+    // mounted editor never saw would be erased by its next emit)...
     expect(insertMarkdownSpy).toHaveBeenCalledWith(
       expect.stringContaining("https://cdn.example/att-live.png"),
     );
-    // …and the draft body converged through the normal onUpdate pipeline.
+    // ...and the draft body converged through the normal onUpdate pipeline.
     await waitFor(() =>
       expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toContain(
         "https://cdn.example/att-live.png",

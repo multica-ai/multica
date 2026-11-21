@@ -121,7 +121,7 @@
     "rename_dialog": {
       "title": "Renombrar máquina",
       "description": "Se usa para esta máquina y todos sus runtimes.",
-      "placeholder": "p. ej., MacBook de Work",
+      "placeholder": "MacBook de trabajo",
       "hint": "Déjalo vacío para usar el nombre predeterminado del dispositivo.",
       "cancel": "Cancelar",
       "save": "Guardar",

@@ -82,7 +82,7 @@
       "title": "Forfait actuel",
       "plan": "Forfait de l'espace de travail",
       "members": "Membres humains",
-      "members_description": "Les agents et les invitations en attente ne comptent pas comme des sièges.",
+      "members_description": "Les membres actifs et les invitations en attente comptent dans vos sièges. Les invités n'utilisent pas de siège.",
       "member_count_one": "{{count}} membre",
       "member_count_other": "{{count}} membres",
       "billing_interval": "Intervalle de facturation",

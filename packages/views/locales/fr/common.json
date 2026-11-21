@@ -123,7 +123,7 @@
     "collapse": "Afficher moins"
   },
   "wecom_bind": {
-    "page_title": "Associer votre compte Multica",
+    "page_title": "Associer un compte WeCom",
     "redeeming": "Association de votre compte…",
     "needs_auth_description": "Connectez-vous à Multica pour terminer l'association. Le jeton contenu dans le lien associe votre identité WeCom à cet utilisateur Multica : vous devez donc être connecté au préalable.",
     "sign_in": "Se connecter",

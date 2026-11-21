@@ -181,7 +181,7 @@ describe("AssigneePicker Recent group", () => {
     renderPicker(onUpdate);
 
     await screen.findByText("Recent");
-    await user.type(screen.getByPlaceholderText("Assign to…"), "grace");
+    await user.type(screen.getByPlaceholderText("Assign to..."), "grace");
     expect(screen.queryByText("Recent")).toBeNull();
 
     await user.keyboard("{Enter}");
@@ -195,7 +195,7 @@ describe("AssigneePicker Recent group", () => {
 
     await screen.findByText("Members");
     // Unassigned, then Ada Lovelace.
-    await user.click(screen.getByPlaceholderText("Assign to…"));
+    await user.click(screen.getByPlaceholderText("Assign to..."));
     await user.keyboard("{ArrowDown}{ArrowDown}");
 
     // A pick from another picker lands and Recent is inserted above Members.

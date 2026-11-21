@@ -31,7 +31,7 @@
     "description": "Se eliminará \"{{title}}\" y todo su historial. Esta acción no se puede deshacer.",
     "confirm": "Eliminar",
     "folder_title": "¿Eliminar esta carpeta?",
-    "folder_description": "Solo se pueden eliminar carpetas vacías."
+    "folder_description": "¿Eliminar \"{{title}}\"? Los documentos y subcarpetas que contiene subirán un nivel. Esta acción no se puede deshacer."
   },
   "tree": {
     "more": "Más acciones para {{title}}",

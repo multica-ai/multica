@@ -8,7 +8,7 @@
     "agent_link_no_access": "You don't have access to chat with this agent."
   },
   "fab": {
-    "running": "Multica is working…",
+    "running": "Multica is working...",
     "unread_one": "{{count}} unread chat",
     "unread_other": "{{count}} unread chats",
     "default": "Ask Multica"
@@ -33,8 +33,8 @@
     "placeholder_archived_agent": "This agent has been archived",
     "placeholder_runtime_required": "Bind a runtime to continue",
     "placeholder_access_revoked": "You no longer have permission to run this agent",
-    "placeholder_named": "Message {{name}}…",
-    "placeholder_default": "Start a message…",
+    "placeholder_named": "Message {{name}}...",
+    "placeholder_default": "Start a message...",
     "send_tooltip": "Send",
     "queue_send_tooltip": "Queue message",
     "stop_tooltip": "Stop",
@@ -104,7 +104,7 @@
     "copy_action": "Copy",
     "copied_toast": "Copied",
     "copy_failed_toast": "Copy failed",
-    "loading_older": "Loading older messages…",
+    "loading_older": "Loading older messages...",
     "quick_actions_heading": "Follow-up questions",
     "quick_actions_aria": "Suggested follow-ups",
     "quick_actions_regenerate": "Regenerate suggestions",
@@ -133,15 +133,15 @@
       "description_default": "This will cancel the current agent run. Partial output will stay in the chat.",
       "cancel": "Keep running",
       "confirm": "Stop run",
-      "confirming": "Stopping…"
+      "confirming": "Stopping..."
     },
     "delete_dialog": {
       "title": "Delete chat",
       "description_with_title": "\"{{title}}\" and its messages will be permanently removed. This action cannot be undone.",
-      "description_default": "This chat and its messages will be permanently deleted.",
+      "description_default": "This chat session and its messages will be permanently deleted. This can't be undone.",
       "cancel": "Cancel",
       "confirm": "Delete",
-      "confirming": "Deleting…"
+      "confirming": "Deleting..."
     },
     "row_actions_aria": "Chat actions"
   },
@@ -161,7 +161,7 @@
     "others": "Others",
     "no_agents": "No agents",
     "history_group": "Chat history",
-    "agent_filter_placeholder": "Search agents…",
+    "agent_filter_placeholder": "Search agents...",
     "agent_needs_runtime": "Needs runtime",
     "agent_needs_runtime_hint": "Bind a runtime before starting a chat with this agent"
   },
@@ -248,7 +248,7 @@
     }
   },
   "list": {
-    "typing": "Typing…",
+    "typing": "Typing...",
     "failed": "Failed to send",
     "you_prefix": "You: ",
     "no_messages": "No messages yet",
@@ -297,7 +297,7 @@
     },
     "report": {
       "waiting": "Waiting to report",
-      "running": "Reporting…",
+      "running": "Reporting...",
       "failed": "Couldn't report"
     },
     "failure": {

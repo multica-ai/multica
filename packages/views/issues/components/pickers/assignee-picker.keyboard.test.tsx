@@ -45,7 +45,7 @@ vi.mock("../../../common/actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
 
-const SEARCH_PLACEHOLDER = "Assign to…";
+const SEARCH_PLACEHOLDER = "Assign to...";
 
 function renderPicker(onUpdate: () => void) {
   return render(

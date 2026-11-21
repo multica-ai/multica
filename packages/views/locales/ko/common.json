@@ -123,7 +123,7 @@
     "collapse": "접기"
   },
   "wecom_bind": {
-    "page_title": "Multica 계정 연결",
+    "page_title": "WeCom 계정 연결",
     "redeeming": "계정을 연결하는 중…",
     "needs_auth_description": "연결을 완료하려면 Multica에 로그인하세요. 토큰은 WeCom 신원을 현재 로그인한 Multica 사용자에게 연결해요.",
     "sign_in": "로그인",

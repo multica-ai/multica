@@ -51,7 +51,7 @@ function renderPicker(props: Partial<React.ComponentProps<typeof ProjectPicker>>
   );
 }
 
-const SEARCH_PLACEHOLDER = "Search projects…";
+const SEARCH_PLACEHOLDER = "Search projects...";
 
 describe("ProjectPicker", () => {
   it("renders the trigger alone — the pill carries no inline clear control", () => {

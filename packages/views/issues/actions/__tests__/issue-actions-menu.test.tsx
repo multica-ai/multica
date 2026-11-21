@@ -275,7 +275,7 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
     // Linking to existing issues stays inside the "Relations" submenu.
-    expect(screen.queryByText("Set parent issue…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
   });
 
@@ -334,7 +334,7 @@ describe("IssueActionsDropdown", () => {
     // The search box and the "Members" group come from the shared assignee
     // picker, so the submenu offers what every other assignee entry point does.
     expect(
-      await screen.findByPlaceholderText("Assign to…"),
+      await screen.findByPlaceholderText("Assign to..."),
     ).toBeInTheDocument();
     expect(await screen.findByText("Members")).toBeInTheDocument();
     fireEvent.click(await screen.findByText("Test User"));
@@ -376,8 +376,8 @@ describe("IssueActionsDropdown", () => {
     fireEvent.click(screen.getByTestId("trigger"));
     fireEvent.click(await screen.findByText("Relations"));
 
-    // The sibling "Set parent issue…" proves the submenu opened.
-    expect(await screen.findByText("Set parent issue…")).toBeInTheDocument();
+    // The sibling "Set parent issue..." proves the submenu opened.
+    expect(await screen.findByText("Set parent issue...")).toBeInTheDocument();
     expect(screen.queryByText("Remove parent issue")).not.toBeInTheDocument();
   });
 
@@ -641,7 +641,7 @@ describe("IssueActionsContextMenu", () => {
 
     fireEvent.contextMenu(screen.getByTestId("row"));
     await user.click(await screen.findByText("Assignee"));
-    const search = await screen.findByPlaceholderText("Assign to…");
+    const search = await screen.findByPlaceholderText("Assign to...");
     await screen.findByText("Test User");
     await waitFor(() => expect(search).toHaveFocus());
 

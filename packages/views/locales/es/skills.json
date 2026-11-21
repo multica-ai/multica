@@ -188,7 +188,7 @@
       "permissions_owner": "Puedes editar y eliminar esta skill. Los cambios surten efecto en la próxima ejecución del agente.",
       "permissions_locked_creator": "Solo el creador ({{name}}) o un administrador del espacio de trabajo pueden editar esta skill.",
       "permissions_locked": "Solo el creador o un administrador del espacio de trabajo pueden editar esta skill.",
-      "character_count_one": "{{count}} caracteres",
+      "character_count_one": "{{count}} carácter",
       "character_count_other": "{{count}} caracteres"
     },
     "files": {
@@ -380,13 +380,13 @@
     "conflict_apply_button": "Aplicar decisiones",
     "conflict_missing_resolution": "Elige cómo resolver este conflicto.",
     "conflict_name_still_exists": "Ese nombre ya existe. Elige otro nombre u omítela.",
-    "bulk_ready_one": "{{count}} skills seleccionadas",
+    "bulk_ready_one": "{{count}} skill seleccionada",
     "bulk_ready_other": "{{count}} skills seleccionadas",
-    "bulk_import_button_one": "Importar {{count}} skills",
+    "bulk_import_button_one": "Importar {{count}} skill",
     "bulk_import_button_other": "Importar {{count}} skills",
-    "conflict_bulk_title_one": "{{count}} skills necesitan una decisión",
+    "conflict_bulk_title_one": "{{count}} skill necesita una decisión",
     "conflict_bulk_title_other": "{{count}} skills necesitan una decisión",
-    "conflict_footer_one": "{{count}} decisiones de conflicto pendientes.",
+    "conflict_footer_one": "{{count}} decisión de conflicto pendiente.",
     "conflict_footer_other": "{{count}} decisiones de conflicto pendientes."
   },
   "file_tree": {

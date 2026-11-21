@@ -20,8 +20,8 @@
       "try_widening": " Try widening the scope or clearing filters."
     },
     "bootstrapping": {
-      "title": "Starting local runtime…",
-      "hint": "Connecting to the workspace…"
+      "title": "Starting local runtime...",
+      "hint": "Connecting to the workspace..."
     },
     "add": "Add runtime",
     "add_menu": {
@@ -79,7 +79,7 @@
     "cancel": "Cancel"
   },
   "machine": {
-    "search_placeholder": "Search machines…",
+    "search_placeholder": "Search machines...",
     "filters": {
       "all": "All",
       "online": "Online",
@@ -126,7 +126,7 @@
       "hint": "Leave empty to use the device's default name.",
       "cancel": "Cancel",
       "save": "Save",
-      "saving": "Saving…",
+      "saving": "Saving...",
       "toast_saved": "Machine renamed",
       "toast_cleared": "Machine name cleared",
       "toast_failed": "Failed to rename machine"
@@ -206,7 +206,7 @@
       "checkbox": "I understand that the listed teammate agents will be unbound, their active runs cancelled, and their active autopilots paused.",
       "cancel": "Cancel",
       "confirm": "Restrict access",
-      "submitting": "Revoking access…",
+      "submitting": "Revoking access...",
       "toast_success": "Runtime access updated",
       "toast_failed": "Failed to revoke runtime access"
     },
@@ -218,7 +218,7 @@
         "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
         "cancel": "Cancel",
         "confirm": "Delete runtime",
-        "submitting": "Deleting…"
+        "submitting": "Deleting..."
       },
       "cascade": {
         "title_one": "Unbind {{count}} agent and delete this runtime?",
@@ -232,7 +232,7 @@
         "cancel": "Cancel",
         "confirm_one": "Unbind {{count}} agent and delete runtime",
         "confirm_other": "Unbind {{count}} agents and delete runtime",
-        "submitting": "Unbinding and deleting…",
+        "submitting": "Unbinding and deleting...",
         "delete_failed_toast": "Failed to delete runtime",
         "table": {
           "header_agent": "Agent",
@@ -303,7 +303,7 @@
     "nodes_failed_hint": "Couldn't load cloud nodes. Try again.",
     "node_fallback_name": "Cloud node",
     "create": "Create node",
-    "creating": "Creating…",
+    "creating": "Creating...",
     "cancel": "Cancel",
     "toast_created": "Cloud Runtime node created",
     "toast_create_failed": "Failed to create Cloud Runtime node",
@@ -354,10 +354,10 @@
     "busy_note": "The machine was busy, so the update didn't start. Try again when it's idle.",
     "another_update_note": "Another update is already queued or installing on this machine.",
     "status": {
-      "pending": "Waiting for daemon…",
+      "pending": "Waiting for daemon...",
       "scheduled": "Updates when idle",
-      "running": "Updating…",
-      "completed": "Update complete. Daemon is restarting…",
+      "running": "Updating...",
+      "completed": "Update complete. Daemon is restarting...",
       "failed": "Update failed",
       "timeout": "Timeout"
     }
@@ -452,11 +452,11 @@
       "family_label": "Base runtime",
       "family_locked_hint": "The base runtime cannot be changed after creation.",
       "display_name_label": "Display name",
-      "display_name_placeholder": "e.g. My custom Claude…",
+      "display_name_placeholder": "e.g. My custom Claude...",
       "command_name_label": "Command",
-      "command_name_placeholder": "e.g. agent --model composer-2.5…",
+      "command_name_placeholder": "e.g. agent --model composer-2.5...",
       "description_label": "Description",
-      "description_placeholder": "What this runtime is for (optional)…",
+      "description_placeholder": "What this runtime is for (optional)...",
       "error_display_name_required": "Display name is required.",
       "error_command_required": "Command is required.",
       "error_command_unclosed_quote": "Close the quote before saving.",
@@ -469,9 +469,9 @@
       "cancel": "Cancel",
       "next": "Next",
       "create": "Create runtime",
-      "creating": "Creating…",
+      "creating": "Creating...",
       "save": "Save changes",
-      "saving": "Saving…",
+      "saving": "Saving...",
       "toast_created": "Custom runtime created",
       "toast_updated": "Custom runtime updated",
       "error_duplicate_name": "A runtime with this display name already exists.",
@@ -482,7 +482,7 @@
       "description": "\"{{name}}\" will be removed from this workspace and every machine where it is registered. This can't be undone.",
       "confirm": "Delete from workspace",
       "cancel": "Cancel",
-      "deleting": "Deleting…",
+      "deleting": "Deleting...",
       "toast_deleted": "Custom runtime deleted from workspace",
       "error_bound": "This custom runtime can't be deleted while agents are still using it — including agents on other machines that registered it.",
       "error_generic": "Failed to delete the runtime."
@@ -549,7 +549,7 @@
   "qoder": {
     "title": "Qoder Cloud Agents runtime",
     "description": "Connect Qoder Cloud Agents. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
-    "loading": "Loading…",
+    "loading": "Loading...",
     "unavailable": "Qoder Cloud Agents isn't enabled on this server yet. A server administrator needs to configure credential encryption (MULTICA_VCS_SECRET_KEY).",
     "online": "Online",
     "error": "Connection error",
@@ -567,11 +567,11 @@
     "add_repository": "Add repository",
     "saved": "Saved. The server will start the runtime automatically.",
     "check": "Test connection",
-    "working": "Working…",
+    "working": "Working...",
     "stop": "Pause",
     "stopped": "Paused",
     "offline": "Offline; reconnecting",
-    "checking": "Testing connection…",
+    "checking": "Testing connection...",
     "check_passed": "Connection successful",
     "check_failed": "Connection failed",
     "environment": "Environment",
@@ -620,7 +620,7 @@
       "token_rejected": "{{region}} does not accept this token. A token only works on the site that created it.",
       "retry_cn": "Retry on China site",
       "retry_global": "Retry on Global site",
-      "verifying": "Verifying token…",
+      "verifying": "Verifying token...",
       "verified": "Token verified",
       "environment_waiting": "Environments load once the token is verified",
       "repo_count_one": "{{count}} repository",
@@ -679,7 +679,7 @@
       "description_agents_other": "These {{count}} agents will be unbound. They keep their instructions and history and can move to another runtime.",
       "plan_changed": "The agents on Qoder changed. Review the list and confirm again.",
       "confirm": "Disconnect",
-      "working": "Disconnecting…",
+      "working": "Disconnecting...",
       "cancel": "Cancel",
       "done": "Qoder disconnected"
     }

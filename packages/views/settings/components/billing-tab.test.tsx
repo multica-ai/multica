@@ -191,7 +191,7 @@ vi.mock("../../platform", () => ({ openExternal: mocks.openExternal }));
 
 vi.mock("../../billing/autopilot-addon-dialog", () => ({
   AutopilotAddonDialog: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog" aria-label="Buy more automation runs" /> : null,
+    open ? <div role="dialog" aria-label="Buy more autopilot runs" /> : null,
 }));
 
 vi.mock("../../billing/autopilot-addon-return-notice", () => ({
@@ -1377,7 +1377,7 @@ describe("BillingTab", () => {
 
     await waitFor(() => expect(mocks.refetchSummary).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Updating estimate…",
+      "Updating estimate...",
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
@@ -1736,7 +1736,7 @@ describe("BillingTab", () => {
       screen.getByRole("button", { name: "Buy · $10.00 / 1,000 runs" }),
     );
     expect(
-      await screen.findByRole("dialog", { name: "Buy more automation runs" }),
+      await screen.findByRole("dialog", { name: "Buy more autopilot runs" }),
     ).toBeInTheDocument();
   });
 
@@ -1808,7 +1808,7 @@ describe("BillingTab", () => {
     expect(screen.queryByText(/0 \/ 7/)).not.toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", { name: "Retry automation usage" }),
+      screen.getByRole("button", { name: "Retry autopilot usage" }),
     );
     expect(mocks.refetchUsage).toHaveBeenCalledOnce();
   });

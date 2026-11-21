@@ -20,10 +20,10 @@
   },
   "archive_dialog": {
     "title": "归档这个小队？",
-    "description": "归档「{{name}}」后，它将无法再被指派或提及，队长不会再分派新任务。所有历史记录都会保留，可随时恢复。",
+    "description": "\"{{name}}\" 将被归档，该小队当前负责的任务会转交给队长。此操作无法撤销，如需恢复路由请新建小队。",
     "cancel": "取消",
     "confirm": "归档",
-    "archiving": "归档中…",
+    "archiving": "归档中...",
     "success": "已归档小队"
   },
   "name_editor": {
@@ -37,14 +37,14 @@
     "label_optional": "（可选）",
     "cancel": "取消",
     "select_target": "选择成员或智能体",
-    "search_placeholder": "搜索成员或智能体…",
+    "search_placeholder": "搜索成员或智能体...",
     "members_section": "成员",
     "agents_section": "智能体",
     "role_placeholder": "例如：审查者、前端负责人",
     "add": "添加"
   },
   "role_editor": {
-    "empty": "添加角色…",
+    "empty": "添加角色...",
     "placeholder": "角色（例如：审查者）"
   },
   "description_editor": {
@@ -148,7 +148,7 @@
       "issue_board_columns": "看板列宽可拖拽调整",
       "issue_inbox_gestures": "移动端收件箱手势",
       "issue_paste_images": "评论支持粘贴图片",
-      "delegating": "按角色挑选成员…",
+      "delegating": "按角色挑选成员...",
       "role_frontend": "前端",
       "role_testing": "测试",
       "role_product": "产品"

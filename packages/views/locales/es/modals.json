@@ -282,7 +282,7 @@
     "description": "Desde {{identifier}}. Sustituye una vez los valores seleccionados; los cambios posteriores no se sincronizan.",
     "no_labels": "Sin etiquetas",
     "manual_only": "Las etiquetas, la fecha de inicio y las propiedades personalizadas solo se aplican a la creación manual.",
-    "apply_one": "Copiar {{count}} campos",
+    "apply_one": "Copiar {{count}} campo",
     "apply_other": "Copiar {{count}} campos"
   }
 }

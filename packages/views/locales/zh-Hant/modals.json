@@ -88,7 +88,7 @@
     "toast_failed": "操作失敗",
     "create_will_start": "建立後 {{name}} 會立即開始工作。",
     "create_will_start_squad": "建立後 {{name}} 的隊長會評估並開始安排任務。",
-    "create_parked": "已指派——在 backlog 中不會開始工作。"
+    "create_parked": "已指派——在待規劃中不會開始工作。"
   },
   "create_squad": {
     "title": "建立小隊",

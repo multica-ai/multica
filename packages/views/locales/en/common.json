@@ -1,6 +1,6 @@
 {
   "daemon_setup": {
-    "loading": "Loading connection settings…",
+    "loading": "Loading connection settings...",
     "error": "Couldn't load connection settings. Check your connection; retrying automatically.",
     "unknown": "This server hasn't confirmed its connection settings. Ask your administrator to update the server.",
     "incomplete": "Connection settings are incomplete. Ask your administrator to configure this server's public URLs."
@@ -13,8 +13,8 @@
     "failed": "Failed to upload avatar",
     "upload_image": "Upload image",
     "emoji_label": "Emoji",
-    "more_emojis": "More emojis…",
-    "emoji_loading": "Loading…",
+    "more_emojis": "More emojis...",
+    "emoji_loading": "Loading...",
     "text_icon": "Text icon"
   },
   "avatar_crop": {
@@ -26,8 +26,8 @@
     "reset": "Reset",
     "cancel": "Cancel",
     "apply": "Save",
-    "uploading": "Uploading…",
-    "loading": "Loading…",
+    "uploading": "Uploading...",
+    "loading": "Loading...",
     "load_failed": "Couldn't load image"
   },
   "text_avatar": {
@@ -51,7 +51,7 @@
   "delete": "Delete",
   "confirm": "Confirm",
   "more_actions": "More actions",
-  "loading": "Loading…",
+  "loading": "Loading...",
   "time": {
     "just_now": "just now",
     "minutes_ago": "{{count}}m ago",
@@ -60,7 +60,7 @@
   },
   "lark_bind": {
     "page_title": "Link your Feishu / Lark account",
-    "redeeming": "Linking your account…",
+    "redeeming": "Linking your account...",
     "needs_auth_description": "Sign in to connect your Feishu / Lark account to your Multica account.",
     "sign_in": "Sign in",
     "done_title": "Account linked",
@@ -75,7 +75,7 @@
   },
   "slack_bind": {
     "page_title": "Link your Slack account",
-    "redeeming": "Linking your account…",
+    "redeeming": "Linking your account...",
     "needs_auth_description": "Sign in to connect your Slack account to your Multica account.",
     "sign_in": "Sign in",
     "done_title": "Account linked",
@@ -90,7 +90,7 @@
   },
   "dingtalk_bind": {
     "page_title": "Link your DingTalk account",
-    "redeeming": "Linking your account…",
+    "redeeming": "Linking your account...",
     "needs_auth_description": "Sign in to connect your DingTalk account to your Multica account.",
     "sign_in": "Sign in",
     "done_title": "Account linked",
@@ -105,7 +105,7 @@
   },
   "telegram_bind": {
     "page_title": "Link your Telegram account",
-    "redeeming": "Linking your account…",
+    "redeeming": "Linking your account...",
     "needs_auth_description": "Sign in to connect your Telegram account to your Multica account.",
     "sign_in": "Sign in",
     "done_title": "Account linked",
@@ -124,7 +124,7 @@
   },
   "wecom_bind": {
     "page_title": "Link your WeCom account",
-    "redeeming": "Linking your account…",
+    "redeeming": "Linking your account...",
     "needs_auth_description": "Sign in to connect your WeCom account to your Multica account.",
     "sign_in": "Sign in",
     "done_title": "Account linked",

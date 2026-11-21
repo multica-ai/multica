@@ -133,7 +133,7 @@
     "archive_dialog_description": "El agente no podrá asignarse ni mencionarse, y sus ejecuciones activas se cancelarán. Todo el historial se conserva y podrás restaurarlo más tarde.",
     "archive_dialog_cancel": "Cancelar",
     "archive_dialog_confirm": "Archivar",
-    "set_access_applies_to_one": "Se aplica a {{count}} agentes.",
+    "set_access_applies_to_one": "Se aplica a {{count}} agente.",
     "set_access_applies_to_other": "Se aplica a {{count}} agentes."
   },
   "detail": {
@@ -150,7 +150,7 @@
     "bind_runtime": "Vincular runtime",
     "restore": "Restaurar",
     "archive_dialog_title": "¿Archivar agente?",
-    "archive_dialog_description": "\"{{name}}\" se archivará. No podrá asignarse ni mencionarse, pero todo el historial se conserva. Podrás restaurarlo más tarde.",
+    "archive_dialog_description": "\"{{name}}\" se archivará y dejará de poder asignarse o mencionarse. Las ejecuciones en curso se cancelarán, pero todo el historial se conserva. Podrás restaurarlo más tarde.",
     "archive_dialog_cancel": "Cancelar",
     "archive_dialog_confirm": "Archivar",
     "more_archive": "Archivar agente",
@@ -348,7 +348,7 @@
       "discard_title": "¿Descartar este borrador?",
       "discard_cancel": "Seguir editando",
       "pick_hint": "Elige uno para continuar.",
-      "banner_one": "Tienes {{count}} borradores sin terminar",
+      "banner_one": "Tienes {{count}} borrador sin terminar",
       "banner_other": "Tienes {{count}} borradores sin terminar"
     },
     "create_agent": "Crear agente",
@@ -851,8 +851,8 @@
     "public_group": "Acceso público",
     "owner_only_readonly": "Solo el propietario del agente puede cambiar quién puede ejecutarlo.",
     "members_empty": "No hay miembros del espacio de trabajo para elegir",
-    "composio_switch_hint": "Ojo: este agente tiene apps de activadas. Compartirlo permite que todos los que tengan acceso usen esas apps a través de este agente.",
-    "trigger_members_count_one": "{{count}} personas",
+    "composio_switch_hint": "Aviso: este agente tiene aplicaciones conectadas activadas. Al compartirlo, cualquiera con acceso podrá usar esas aplicaciones a través de este agente.",
+    "trigger_members_count_one": "{{count}} persona",
     "trigger_members_count_other": "{{count}} personas"
   },
   "profile_card": {

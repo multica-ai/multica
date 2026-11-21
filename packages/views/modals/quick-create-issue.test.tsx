@@ -719,7 +719,7 @@ describe("AgentCreatePanel", () => {
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
     expect(screen.queryByTestId("priority-picker")).not.toBeInTheDocument();
-    await user.click(screen.getByText("Set priority…"));
+    await user.click(screen.getByText("Set priority..."));
     await user.click(screen.getByTestId("priority-picker"));
     await user.click(screen.getByRole("button", { name: /^Create$/i }));
 
@@ -743,7 +743,7 @@ describe("AgentCreatePanel", () => {
       'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     fireEvent.change(editor, { target: { value: "Half-typed request" } });
-    await user.click(screen.getByRole("button", { name: "Customize fields…" }));
+    await user.click(screen.getByRole("button", { name: "Customize fields..." }));
 
     expect(mockSetAgent).toHaveBeenLastCalledWith({ prompt: "Half-typed request" });
     expect(onClose).toHaveBeenCalled();
@@ -1205,7 +1205,7 @@ describe("AgentCreatePanel", () => {
       // Each file is its own queue entry — making users wait for the first to
       // land before picking the second was a restriction with no race behind
       // it, and this issue explicitly removed it.
-      const submit = await screen.findByRole("button", { name: "Uploading…" });
+      const submit = await screen.findByRole("button", { name: "Uploading..." });
       expect(submit).toBeDisabled();
       expect(screen.getByRole("button", { name: "Upload file" })).not.toBeDisabled();
     });

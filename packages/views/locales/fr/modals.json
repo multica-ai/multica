@@ -282,7 +282,7 @@
     "description": "Depuis {{identifier}}. Remplace une fois les valeurs sélectionnées ; les modifications ultérieures ne sont pas synchronisées.",
     "no_labels": "Aucune étiquette",
     "manual_only": "Les étiquettes, la date de début et les propriétés personnalisées ne concernent que la création manuelle.",
-    "apply_one": "Copier {{count}} champs",
+    "apply_one": "Copier {{count}} champ",
     "apply_other": "Copier {{count}} champs"
   }
 }

@@ -123,7 +123,7 @@
     "collapse": "收起"
   },
   "wecom_bind": {
-    "page_title": "關聯 Multica 帳號",
+    "page_title": "綁定企業微信帳號",
     "redeeming": "正在關聯帳號…",
     "needs_auth_description": "需要登入 Multica 才能完成關聯。連結中的 token 會將你在企業微信的身份繫結到當前登入的 Multica 使用者。",
     "sign_in": "登入",

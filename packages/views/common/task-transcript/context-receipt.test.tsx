@@ -224,7 +224,7 @@ describe("ContextReceiptView", () => {
   it("renders in Chinese", () => {
     renderWithI18n(<ContextReceiptView receipt={receipt} />, { locale: "zh-Hans" });
     expect(screen.getByText("已加载上下文")).toBeTruthy();
-    expect(screen.getByText("技能：pr-review")).toBeTruthy();
+    expect(screen.getByText("skill：pr-review")).toBeTruthy();
     expect(screen.getByText("直接输入：3 KB")).toBeTruthy();
     expect(screen.getByText("磁盘文件：38 KB")).toBeTruthy();
     expect(screen.getByText("指令文件：19 KB")).toBeTruthy();

@@ -5,7 +5,7 @@
     "url_label": "Workspace URL",
     "url_placeholder": "my-workspace",
     "submit": "Create workspace",
-    "submitting": "Creating…",
+    "submitting": "Creating...",
     "errors": {
       "slug_format": "Only lowercase letters, numbers, and hyphens",
       "slug_taken": "That workspace URL is already taken.",

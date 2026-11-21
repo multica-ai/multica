@@ -31,7 +31,7 @@
     "description": "\"{{title}}\"とその履歴がすべて削除されます。元に戻せません。",
     "confirm": "削除",
     "folder_title": "フォルダーを削除しますか？",
-    "folder_description": "空のフォルダーのみ削除できます。"
+    "folder_description": "「{{title}}」を削除しますか？このフォルダ内のドキュメントとサブフォルダは1つ上の階層に移動します。この操作は元に戻せません。"
   },
   "tree": {
     "more": "{{title}} のその他の操作",

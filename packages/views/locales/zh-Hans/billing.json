@@ -46,7 +46,7 @@
       "already_subscribed": "这个工作区已经有订阅，当前套餐已刷新。",
       "checkout_failed": "无法打开结账页面，请稍后重试。",
       "portal_response": "服务端响应异常，无法打开账单管理页面，请重试。",
-      "portal_unavailable": "账单管理页面暂不可用，请稍后重试。",
+      "portal_unavailable": "当前工作区无法使用账单管理页面，当前套餐已刷新。",
       "portal_failed": "无法打开账单管理页面，请稍后重试。"
     },
     "return": {
@@ -90,7 +90,7 @@
       "business_adds": "Business 增加私有项目、按成员授权、团队应用账号，以及更高的自动化额度。",
       "plan_change_hold": "套餐变更",
       "plan_change_confirming": "正在切换到 {{plan}}，等待 Stripe 确认。确认之前不能更换套餐或增加席位。",
-      "plan_change_unresolved": "套餐变更状态尚未同步完成，请联系技术支持处理。",
+      "plan_change_unresolved": "切换到 {{plan}} 的结果尚未确认。请联系支持团队处理；处理完成前无法更换套餐或增加席位。",
       "plan_change_state_confirming": "确认中",
       "plan_change_state_unresolved": "需要支持处理"
     },
@@ -138,7 +138,7 @@
       "usage_unavailable": "用量暂时不可用",
       "members": "成员",
       "members_pending": "待接受的邀请：{{pending}}",
-      "metering": "时间表、Webhook 和智能体发起的运行计入额度，成员点击「立即运行」不计入。",
+      "metering": "时间表、Webhook 和智能体发起的运行计入额度，成员点击\"立即运行\"不计入。",
       "storage": "附件存储",
       "storage_description": "任务、评论和聊天中的附件。",
       "storage_label": "附件存储用量",
@@ -182,7 +182,7 @@
       "description": "输入要增加的席位数，确认前会显示最新的 Stripe 估算金额。",
       "additional_label": "增加席位数",
       "additional_hint": "请输入增加数量，而不是新的席位总数。",
-      "preview_loading": "正在更新估算金额…",
+      "preview_loading": "正在更新估算金额...",
       "preview_unreadable": "无法读取估算结果。请修改席位数或重试。",
       "preview_failed": "暂时无法获取估算金额，请稍后重试。",
       "capacity_out_of_sync": "Stripe 席位数与计费记录不一致。再次购买前，请联系支持人员。",
@@ -214,7 +214,7 @@
       "credit": "抵扣下期账单",
       "next_invoice": "下次续费",
       "tax_notice": "税费、抵扣和最终账单明细由 Stripe 确定。",
-      "preview_loading": "正在获取报价…",
+      "preview_loading": "正在获取报价...",
       "preview_failed": "暂时无法获取报价，请稍后重试。",
       "rate_limited": "报价请求过于频繁，请稍等后重试。",
       "in_progress": "有一笔席位购买正在处理中，请等它完成后再试。",
@@ -235,7 +235,7 @@
     "confirm": {
       "title": "前往 Stripe 结账？",
       "description": "套餐：{{plan}}。付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。",
-      "held_invite": "另含 1 个付费席位，用于邀请 {{email}}。付款完成后，可在「账单与套餐」中发送该邀请。"
+      "held_invite": "另含 1 个付费席位，用于邀请 {{email}}。付款完成后，可在\"账单与套餐\"中发送该邀请。"
     },
     "held_invite": {
       "title": "工作区已升级到 {{plan}}",
@@ -247,9 +247,9 @@
     }
   },
   "return_page": {
-    "redirecting": "正在返回工作区账单页…",
+    "redirecting": "正在返回工作区账单页...",
     "load_failed_title": "无法打开工作区账单页",
-    "load_failed_description": "无法确认当前支付状态，请到「工作区设置 → 账单与套餐」查看最新状态。",
+    "load_failed_description": "你已从 Stripe 返回，但无法加载工作区列表以打开对应的账单页。请前往 \"工作区设置 → 账单与套餐\" 查看当前状态。",
     "workspace_missing_title": "找不到该工作区",
     "workspace_missing_description": "你已从 Stripe 返回，但该工作区对你已不可用——可能已被删除，或你的访问权限发生了变化。请到你预期的那个工作区的账单页确认当前状态。",
     "retry": "重试",
@@ -268,11 +268,11 @@
     "upgrade_card": {
       "agent_invocation_members": {
         "title": "允许指定成员运行智能体是 Business 功能",
-        "description": "「仅自己」和「整个工作区」在所有套餐中都可以使用。"
+        "description": "\"仅自己\"和\"整个工作区\"在所有套餐中都可以使用。"
       },
       "runtime_member_sharing": {
         "title": "与指定成员共享运行时是 Business 功能",
-        "description": "「私有」和「公开」在所有套餐中都可以使用。"
+        "description": "\"私有\"和\"公开\"在所有套餐中都可以使用。"
       }
     }
   },
@@ -356,7 +356,7 @@
     "pay": "去支付 {{amount}}",
     "pay_fallback": "去支付",
     "cancel": "取消",
-    "loading": "正在加载加购价格…",
+    "loading": "正在加载加购价格...",
     "unavailable": "该工作区现在无法加购。",
     "conflict": "现在无法加购，或价格已变化。请查看选项后重试。",
     "error": "无法打开付款页面。请重试。",

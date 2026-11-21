@@ -46,7 +46,7 @@
     "unsubscribe_archive": "Unsubscribe & archive"
   },
   "list": {
-    "loading_selection": "Loading notification…",
+    "loading_selection": "Loading notification...",
     "empty": "No notifications",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
@@ -61,7 +61,7 @@
     "unarchive_tooltip": "Unarchive",
     "actions_aria": "Notification actions",
     "load_more": "Load more",
-    "loading_more": "Loading…",
+    "loading_more": "Loading...",
     "retry": "Retry"
   },
   "detail": {
@@ -187,7 +187,7 @@
   },
   "snooze": {
     "action": "Snooze",
-    "menu_title": "Snooze until…",
+    "menu_title": "Snooze until...",
     "unsnooze": "Bring back now",
     "change_time": "Change time",
     "hours_1": "1 hour",
@@ -195,7 +195,7 @@
     "days_1": "1 day",
     "days_3": "3 days",
     "weeks_1": "1 week",
-    "pick_time": "Pick a date and time…",
+    "pick_time": "Pick a date and time...",
     "picker_title": "Pick a date and time",
     "picker_back": "Back",
     "picker_time": "Time",

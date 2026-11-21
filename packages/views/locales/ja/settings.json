@@ -864,7 +864,7 @@
       },
       "status_changes": {
         "label": "ステータス変更",
-        "description": "フォロー中のタスクのステータスが変わったとき（例: todo、in progress、done）"
+        "description": "フォロー中のタスクのステータスが変わったとき（例: 未着手、進行中、完了）"
       },
       "comments": {
         "label": "コメント",
@@ -1493,7 +1493,7 @@
       "external_description_before": "このデバイスのデーモンはアプリの外部（WSL2 など）で実行されているため、アプリから起動や停止はできません。その環境で次を実行してください：",
       "external_description_after": "。",
       "auto_start_title": "起動時に自動開始",
-      "auto_start_description": "ログイン時に自動起動します。",
+      "auto_start_description": "Multica Desktop の起動時にローカルデーモンを自動起動します",
       "auto_stop_title": "終了時に自動停止",
       "auto_stop_description": "デスクトップ版を閉じるとデーモンを停止します。",
       "cli_status": "CLI の状態",
@@ -1559,11 +1559,11 @@
       "not_found_description": "このアドレスは利用できません。リンクを確認するか戻ってください。",
       "tab_error_title": "このタブで問題が発生しました",
       "tab_error_description": "このタブを読み込めませんでした。再読み込みするか、問題が続く場合は報告してください。",
-      "go_to_issues": "課題へ移動",
+      "go_to_issues": "タスク一覧へ",
       "reload_tab": "タブを再読み込み",
       "close_tab": "タブを閉じる",
       "report_error": "エラーを報告",
-      "issue_unavailable_title": "課題を利用できません",
+      "issue_unavailable_title": "タスクを利用できません",
       "issue_unavailable_description": "このワークスペースはあなたのアカウントでは利用できなくなっています。",
       "something_went_wrong": "問題が発生しました",
       "reload": "再読み込み",

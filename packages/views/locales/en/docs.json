@@ -7,7 +7,7 @@
     "new_doc": "New doc",
     "new_folder": "New folder",
     "rename": "Rename",
-    "move": "Move to…",
+    "move": "Move to...",
     "delete": "Delete",
     "cancel": "Cancel",
     "history": "History",
@@ -39,9 +39,9 @@
     "new_doc_in": "New doc in {{title}}"
   },
   "editor": {
-    "placeholder": "Write, or type / for commands…",
+    "placeholder": "Write, or type / for commands...",
     "title_label": "Title",
-    "saving": "Saving…",
+    "saving": "Saving...",
     "saved": "Saved",
     "save_failed": "Not saved · Retry",
     "retry": "Retry",
@@ -54,7 +54,7 @@
     "title": "History",
     "current": "Current",
     "restore": "Restore this version",
-    "loading": "Loading…"
+    "loading": "Loading..."
   },
   "not_found": {
     "title": "Doc not found",
@@ -74,8 +74,8 @@
     "resolved": "Resolved {{count}}",
     "close": "Close comments",
     "quote_missing": "The commented text was changed",
-    "reply_placeholder": "Reply, or @ someone…",
-    "new_placeholder": "Add a comment, or @ someone…",
+    "reply_placeholder": "Reply, or @ someone...",
+    "new_placeholder": "Add a comment, or @ someone...",
     "submit": "Comment",
     "reply": "Reply",
     "cancel": "Cancel",

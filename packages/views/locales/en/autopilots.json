@@ -70,7 +70,7 @@
     "bind_runtime": "Bind runtime",
     "edit": "Edit",
     "run_now": "Run now",
-    "running": "Running…",
+    "running": "Running...",
     "toast_triggered": "Autopilot triggered",
     "toast_trigger_failed": "Failed to trigger autopilot",
     "run_blocked_invocation_not_allowed": "Not triggered — you don't have permission to use this autopilot's agent",
@@ -114,7 +114,7 @@
       "description": "This will permanently delete \"{{title}}\", along with its triggers and run history. This action cannot be undone.",
       "cancel": "Cancel",
       "confirm": "Delete",
-      "deleting": "Deleting…"
+      "deleting": "Deleting..."
     },
     "paused_project_archived": "Paused because its project was archived. Restore the project, then reactivate this autopilot."
   },
@@ -123,7 +123,7 @@
     "description": "Members you add can edit, run, and manage this autopilot's triggers and webhooks.",
     "current_label": "With access",
     "add": "Add member",
-    "search_placeholder": "Search members…",
+    "search_placeholder": "Search members...",
     "no_results": "No members found",
     "remove_tooltip": "Remove access",
     "empty": "No one has been granted access yet.",
@@ -192,7 +192,7 @@
     "rotate_confirm_description": "The current URL will stop working immediately. Any external systems calling it must be updated with the new URL. Continue?",
     "rotate_confirm_cancel": "Cancel",
     "rotate_confirm_action": "Rotate URL",
-    "rotate_in_progress": "Rotating…",
+    "rotate_in_progress": "Rotating...",
     "toast_rotated": "Webhook URL rotated",
     "toast_rotate_failed": "Failed to rotate URL",
     "toast_deleted": "Trigger deleted",
@@ -202,7 +202,7 @@
       "description": "This trigger will be removed and will no longer fire this autopilot. This action cannot be undone.",
       "cancel": "Cancel",
       "confirm": "Delete",
-      "deleting": "Deleting…"
+      "deleting": "Deleting..."
     }
   },
   "deliveries": {
@@ -244,7 +244,7 @@
     },
     "replay": {
       "action": "Replay",
-      "in_progress": "Replaying…",
+      "in_progress": "Replaying...",
       "toast_success": "Delivery replayed",
       "toast_failed": "Replay failed",
       "disabled_invalid_signature": "Can't replay — signature was invalid",
@@ -273,7 +273,7 @@
     "label_placeholder": "e.g. Weekday morning",
     "webhook_help": "Multica will generate a webhook URL after you save. POST any JSON to it to fire this autopilot.",
     "submit": "Add trigger",
-    "submitting": "Adding…",
+    "submitting": "Adding...",
     "toast_added_schedule": "Schedule trigger added",
     "toast_added_webhook": "Webhook trigger added",
     "toast_add_failed": "Failed to add trigger"
@@ -284,7 +284,7 @@
     "label_placeholder": "e.g. Weekday morning",
     "enabled_label": "Enabled",
     "submit": "Save",
-    "submitting": "Saving…",
+    "submitting": "Saving...",
     "toast_updated": "Schedule updated",
     "toast_update_failed": "Failed to update schedule"
   },
@@ -306,13 +306,13 @@
     "title_placeholder": "Autopilot name",
     "runbook_label": "Runbook",
     "runbook_hint": "Read by the agent on every run",
-    "description_placeholder": "# Goal\nWhat should the agent accomplish?\n\n# Context\nWho is this for? Any constraints?\n\n# Steps\n1. …\n2. …",
+    "description_placeholder": "# Goal\nWhat should the agent accomplish?\n\n# Context\nWho is this for? Any constraints?\n\n# Steps\n1. ...\n2. ...",
     "auto_run_hint": "Once saved, runs automatically until paused.",
     "cancel": "Cancel",
     "create": "Create autopilot",
     "save": "Save",
-    "creating": "Creating…",
-    "saving": "Saving…",
+    "creating": "Creating...",
+    "saving": "Saving...",
     "toast_created": "Autopilot created",
     "toast_create_partial": "Autopilot created, but schedule failed to save",
     "toast_create_partial_with_reason": "Autopilot created, but schedule failed to save: {{reason}}",
@@ -333,7 +333,7 @@
     "subscribers_hint": "Auto-subscribed to every issue this autopilot creates",
     "subscribers_empty": "No subscribers — add a teammate to notify them on every run",
     "subscribers_add": "Add subscriber",
-    "subscribers_search_placeholder": "Search members by name…",
+    "subscribers_search_placeholder": "Search members by name...",
     "subscribers_no_results": "No matching members",
     "subscribers_remove_tooltip": "Remove",
     "section_schedule": "Schedule",
@@ -486,7 +486,7 @@
     }
   },
   "agent_picker": {
-    "filter_placeholder": "Filter agents or squads…",
+    "filter_placeholder": "Filter agents or squads...",
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
     "agents_group": "Agents",
@@ -495,7 +495,7 @@
     "squad_runtime_required": "Bind a runtime to this squad's leader before selecting it"
   },
   "timezone_picker": {
-    "search_placeholder": "Search timezone…"
+    "search_placeholder": "Search timezone..."
   },
   "toolbar": {
     "section_assignee": "Assignee",
@@ -515,7 +515,7 @@
       "warning": "This action cannot be undone.",
       "cancel": "Cancel",
       "confirm": "Delete permanently",
-      "deleting": "Deleting…",
+      "deleting": "Deleting...",
       "title_multiple": "Delete {{count}} autopilots?",
       "description_single": "This will permanently delete \"{{name}}\" and its run history."
     }
@@ -537,13 +537,13 @@
     "select_row": "Select {{issue}}, {{agent}}",
     "select_page": "Select all enabled wakeups",
     "load_error": "Could not load wakeups",
-    "loading": "Loading wakeups…",
+    "loading": "Loading wakeups...",
     "disable_selected": "Turn off selected",
     "confirm_title": "Turn off {{count}} wakeups?",
     "confirm_body": "Future wakeups will stop. Queued runs that haven't started yet will be cancelled. Runs already in progress will continue — stop them from the execution log.",
     "cancel": "Cancel",
     "confirm": "Turn off",
-    "disabling": "Turning off…",
+    "disabling": "Turning off...",
     "batch_result": "Turned off: {{succeeded}}. Failed: {{failed}}.",
     "scopes": {
       "active": "Waiting or running",
@@ -611,7 +611,7 @@
       "builtin": "Built-in instruction",
       "instruction_invalid": "Keep the instruction within 4,000 bytes.",
       "save": "Save",
-      "saving": "Saving…",
+      "saving": "Saving...",
       "save_error": "Could not save the default.",
       "customized_one": "{{count}} open issue has its own setting and ignores this default.",
       "customized_other": "{{count}} open issues have their own setting and ignore this default.",

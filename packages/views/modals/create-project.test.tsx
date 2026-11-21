@@ -431,7 +431,7 @@ describe("CreateProjectModal", () => {
 
     renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
 
-    const repoSearchInput = screen.getByRole("textbox", { name: "Search repositories…" });
+    const repoSearchInput = screen.getByRole("textbox", { name: "Search repositories..." });
 
     await user.type(repoSearchInput, "api");
 

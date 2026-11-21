@@ -342,7 +342,7 @@ describe("AgentTranscriptDialog", () => {
     renderDialog([], { task: liveTask, isLive: true });
 
     await screen.findByRole("button", { name: "Run details" });
-    expect(screen.getByText("Waiting for events…")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
   });
 
   it("keeps waiting for live events from other runtimes", async () => {
@@ -353,7 +353,7 @@ describe("AgentTranscriptDialog", () => {
     // Runtime detail now lives in the ⓘ popover; its trigger appearing proves
     // the runtime loaded. The non-antigravity live state still waits.
     await screen.findByRole("button", { name: "Run details" });
-    expect(screen.getByText("Waiting for events…")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
   });
 
   it("shows live Antigravity tool events", async () => {
@@ -365,7 +365,7 @@ describe("AgentTranscriptDialog", () => {
     ], { task: liveTask, isLive: true });
 
     await screen.findByRole("button", { name: "Run details" });
-    expect(screen.queryByText("Waiting for events…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Waiting for events...")).not.toBeInTheDocument();
     expect(screen.getAllByText(/run_command/).length).toBeGreaterThan(0);
   });
 
@@ -591,7 +591,7 @@ describe("AgentTranscriptDialog", () => {
   it("narrows the list to steps matching the search", () => {
     renderDialog();
 
-    fireEvent.change(screen.getByLabelText("Search this run…"), {
+    fireEvent.change(screen.getByLabelText("Search this run..."), {
       target: { value: "pnpm" },
     });
 

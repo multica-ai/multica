@@ -82,7 +82,7 @@
       "title": "現在のプラン",
       "plan": "ワークスペースプラン",
       "members": "ユーザー席",
-      "members_description": "エージェントと保留中の招待は席数に含まれません。",
+      "members_description": "アクティブなメンバーと保留中の招待はシート数に含まれます。ゲストは含まれません。",
       "member_count_other": "{{count}}名",
       "billing_interval": "請求期間",
       "period_end": "現在の期間終了日",

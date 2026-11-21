@@ -1,6 +1,6 @@
 {
   "daemon_setup": {
-    "loading": "正在加载连接配置…",
+    "loading": "正在加载连接配置...",
     "error": "无法加载连接配置。请检查网络，系统会自动重试。",
     "unknown": "服务端尚未确认连接配置。请联系管理员更新服务端。",
     "incomplete": "连接配置不完整。请联系管理员配置此服务的公开访问地址。"
@@ -13,8 +13,8 @@
     "failed": "头像上传失败",
     "upload_image": "上传图片",
     "emoji_label": "表情",
-    "more_emojis": "更多表情…",
-    "emoji_loading": "加载中…",
+    "more_emojis": "更多表情...",
+    "emoji_loading": "加载中...",
     "text_icon": "文字图标"
   },
   "avatar_crop": {
@@ -26,8 +26,8 @@
     "reset": "重置",
     "cancel": "取消",
     "apply": "保存",
-    "uploading": "上传中…",
-    "loading": "加载中…",
+    "uploading": "上传中...",
+    "loading": "加载中...",
     "load_failed": "图片加载失败"
   },
   "text_avatar": {
@@ -51,7 +51,7 @@
   "delete": "删除",
   "confirm": "确认",
   "more_actions": "更多操作",
-  "loading": "加载中…",
+  "loading": "加载中...",
   "time": {
     "just_now": "刚刚",
     "minutes_ago": "{{count}} 分钟前",
@@ -60,7 +60,7 @@
   },
   "lark_bind": {
     "page_title": "关联飞书 / Lark 账号",
-    "redeeming": "正在关联账号…",
+    "redeeming": "正在关联账号...",
     "needs_auth_description": "登录 Multica，将你的飞书 / Lark 账号关联到当前账号。",
     "sign_in": "登录",
     "done_title": "关联成功",
@@ -75,7 +75,7 @@
   },
   "slack_bind": {
     "page_title": "关联 Slack 账号",
-    "redeeming": "正在关联账号…",
+    "redeeming": "正在关联账号...",
     "needs_auth_description": "登录 Multica，将你的 Slack 账号关联到当前账号。",
     "sign_in": "登录",
     "done_title": "关联成功",
@@ -90,7 +90,7 @@
   },
   "dingtalk_bind": {
     "page_title": "关联钉钉账号",
-    "redeeming": "正在关联账号…",
+    "redeeming": "正在关联账号...",
     "needs_auth_description": "登录 Multica，将你的钉钉账号关联到当前账号。",
     "sign_in": "登录",
     "done_title": "关联成功",
@@ -105,7 +105,7 @@
   },
   "telegram_bind": {
     "page_title": "绑定你的 Telegram 账号",
-    "redeeming": "正在关联账号…",
+    "redeeming": "正在关联账号...",
     "needs_auth_description": "登录 Multica，将你的 Telegram 账号关联到当前账号。",
     "sign_in": "登录",
     "done_title": "关联成功",
@@ -124,7 +124,7 @@
   },
   "wecom_bind": {
     "page_title": "关联企业微信账号",
-    "redeeming": "正在关联账号…",
+    "redeeming": "正在关联账号...",
     "needs_auth_description": "登录 Multica，将你的企业微信账号关联到当前账号。",
     "sign_in": "登录",
     "done_title": "关联成功",

@@ -123,7 +123,7 @@
     "collapse": "折りたたむ"
   },
   "wecom_bind": {
-    "page_title": "Multica アカウントをリンク",
+    "page_title": "WeCom アカウントを連携",
     "redeeming": "アカウントをリンク中…",
     "needs_auth_description": "リンクを完了するには Multica にサインインしてください。トークンは WeCom の ID を、サインイン中の Multica ユーザーに紐付けます。",
     "sign_in": "サインイン",

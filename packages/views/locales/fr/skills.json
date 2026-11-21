@@ -190,7 +190,7 @@
       "permissions_owner": "Vous pouvez modifier et supprimer ce skill. Les changements prennent effet à la prochaine exécution d'agent.",
       "permissions_locked_creator": "Seuls le créateur ({{name}}) ou un administrateur de l'espace de travail peuvent modifier ce skill.",
       "permissions_locked": "Seuls le créateur ou un administrateur de l'espace de travail peuvent modifier ce skill.",
-      "character_count_one": "{{count}} caractères",
+      "character_count_one": "{{count}} caractère",
       "character_count_other": "{{count}} caractères"
     },
     "files": {
@@ -380,13 +380,13 @@
     "conflict_apply_button": "Appliquer les décisions",
     "conflict_missing_resolution": "Choisissez comment résoudre ce conflit.",
     "conflict_name_still_exists": "Ce nom existe déjà. Choisissez-en un autre ou ignorez.",
-    "bulk_ready_one": "{{count}} skills sélectionnés",
+    "bulk_ready_one": "{{count}} skill sélectionné",
     "bulk_ready_other": "{{count}} skills sélectionnés",
-    "bulk_import_button_one": "Importer {{count}} skills",
+    "bulk_import_button_one": "Importer {{count}} skill",
     "bulk_import_button_other": "Importer {{count}} skills",
-    "conflict_bulk_title_one": "{{count}} skills demandent une décision",
+    "conflict_bulk_title_one": "{{count}} skill demande une décision",
     "conflict_bulk_title_other": "{{count}} skills demandent une décision",
-    "conflict_footer_one": "{{count}} décisions de conflit en attente.",
+    "conflict_footer_one": "{{count}} décision de conflit en attente.",
     "conflict_footer_other": "{{count}} décisions de conflit en attente."
   },
   "file_tree": {

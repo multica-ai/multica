@@ -55,7 +55,7 @@ describe("NewIssueButton", () => {
 describe("SearchButton", () => {
   it("opens search", () => {
     renderWithI18n(<SearchButton className="" tooltipSide="bottom" />);
-    fireEvent.click(screen.getByRole("button", { name: "Search…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Search..." }));
     expect(setSearchOpen).toHaveBeenCalledWith(true);
   });
 });

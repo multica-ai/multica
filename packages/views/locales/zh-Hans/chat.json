@@ -8,7 +8,7 @@
     "agent_link_no_access": "你没有权限与该智能体聊天。"
   },
   "fab": {
-    "running": "Multica 正在工作…",
+    "running": "Multica 正在工作...",
     "unread_other": "{{count}} 条未读对话",
     "default": "问 Multica"
   },
@@ -31,8 +31,8 @@
     "placeholder_archived_agent": "该智能体已归档",
     "placeholder_runtime_required": "绑定运行时后继续",
     "placeholder_access_revoked": "你已没有运行该智能体的权限",
-    "placeholder_named": "给 {{name}} 发消息…",
-    "placeholder_default": "输入消息…",
+    "placeholder_named": "给 {{name}} 发消息...",
+    "placeholder_default": "输入消息...",
     "send_tooltip": "发送",
     "queue_send_tooltip": "排队发送",
     "stop_tooltip": "停止",
@@ -79,10 +79,10 @@
       "runtime_recovery": "智能体在完成前重启了。请重试。",
       "runtime_access_revoked": "运行时访问已撤销。请先将智能体绑定到可用的运行时，再开始新的运行。",
       "manual": "这次回复已取消。",
-      "skill_bundle_unavailable": "无法下载该智能体所需的技能包，请稍后重试。",
+      "skill_bundle_unavailable": "无法下载该智能体的 skill，本次运行未能启动。通常是网络连接问题，请重试。",
       "runtime_cli_timeout": "本地 OpenClaw CLI 响应超时。请检查本地 OpenClaw CLI 状态，或调大超时配置（MULTICA_OPENCLAW_CLI_TIMEOUT）后再重试。",
-      "environment_prepare_failed": "准备本地运行环境失败，本次运行未能启动。请查看下方报错（常见原因包括磁盘空间不足、目录权限、文件被占用或本地配置无法读取）。",
-      "local_directory_missing": "找不到项目绑定的本地目录，本次运行未能启动。请确认该目录在机器上存在后重试。",
+      "environment_prepare_failed": "运行智能体的机器未能准备好本次运行环境，因此未能启动。下方报错会说明具体失败原因（常见为磁盘空间、权限、目录被占用或本地配置无法读取），与智能体和模型提供商无关。",
+      "local_directory_missing": "该项目关联的本地文件夹在运行智能体的那台机器上已不存在，因此运行未能启动。请恢复该文件夹后再试；如需更换文件夹，请在那台机器的桌面端打开项目的 \"资源 → 本地文件夹\" 重新关联，浏览器无法选择文件夹。",
       "provider_network": "与模型服务的连接中断，回复没能完成。检查网络后重试。",
       "provider_auth_or_access": "智能体的模型账号登录已失效。重新登录后再试。",
       "provider_quota_limit": "智能体的模型账号额度已用尽。充值或更换账号后再试。",
@@ -99,7 +99,7 @@
     "copy_action": "复制",
     "copied_toast": "已复制",
     "copy_failed_toast": "复制失败",
-    "loading_older": "正在加载更早的消息…",
+    "loading_older": "正在加载更早的消息...",
     "quick_actions_heading": "后续提问",
     "quick_actions_aria": "后续提问建议",
     "quick_actions_regenerate": "重新生成建议",
@@ -124,19 +124,19 @@
     },
     "stop_dialog": {
       "title": "停止这次运行？",
-      "description_with_title": "这会取消 「{{title}}」 里的当前智能体运行。已产生的内容会保留在对话里。",
+      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体运行。已产生的内容会保留在对话里。",
       "description_default": "这会取消当前智能体运行。已产生的内容会保留在对话里。",
       "cancel": "继续运行",
       "confirm": "停止运行",
-      "confirming": "停止中…"
+      "confirming": "停止中..."
     },
     "delete_dialog": {
       "title": "删除对话",
-      "description_with_title": "「{{title}}」 及其消息会被永久删除，无法撤销。",
+      "description_with_title": "\"{{title}}\" 及其消息会被永久删除，无法撤销。",
       "description_default": "此对话及其消息会被永久删除，无法撤销。",
       "cancel": "取消",
       "confirm": "删除",
-      "confirming": "删除中…"
+      "confirming": "删除中..."
     },
     "row_actions_aria": "聊天操作"
   },
@@ -156,14 +156,14 @@
     "others": "其他",
     "no_agents": "暂无智能体",
     "history_group": "对话历史",
-    "agent_filter_placeholder": "搜索智能体…",
+    "agent_filter_placeholder": "搜索智能体...",
     "agent_needs_runtime": "需绑定运行时",
     "agent_needs_runtime_hint": "请先绑定运行时，再与该智能体开始对话"
   },
   "empty_state": {
     "first_time_title": "和你的智能体对话",
     "first_time_intro": "✨ 它们了解你的工作区——",
-    "first_time_pillars": "提问、使用技能、直接派活",
+    "first_time_pillars": "任务、项目、skill",
     "first_time_pillars_suffix": "。",
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
@@ -243,7 +243,7 @@
     }
   },
   "list": {
-    "typing": "正在输入…",
+    "typing": "正在输入...",
     "failed": "发送失败",
     "you_prefix": "你：",
     "no_messages": "还没有消息",
@@ -251,8 +251,8 @@
     "quick_agents": "常用智能体",
     "add": "添加",
     "waiting": "等待回复",
-    "pin": "固定",
-    "unpin": "取消固定",
+    "pin": "置顶",
+    "unpin": "取消置顶",
     "pinned": "已置顶",
     "archive": "归档",
     "unarchive": "取消归档",
@@ -292,7 +292,7 @@
     },
     "report": {
       "waiting": "等待汇报",
-      "running": "正在汇报…",
+      "running": "正在汇报...",
       "failed": "汇报失败"
     },
     "failure": {

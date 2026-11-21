@@ -23,7 +23,7 @@
     "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
     "cancel": "Cancel",
     "confirm": "Archive",
-    "archiving": "Archiving…",
+    "archiving": "Archiving...",
     "success": "Squad archived"
   },
   "name_editor": {
@@ -37,14 +37,14 @@
     "label_optional": "(optional)",
     "cancel": "Cancel",
     "select_target": "Select a member or agent",
-    "search_placeholder": "Search members or agents…",
+    "search_placeholder": "Search members or agents...",
     "members_section": "Members",
     "agents_section": "Agents",
     "role_placeholder": "e.g. Reviewer, Frontend Lead",
     "add": "Add"
   },
   "role_editor": {
-    "empty": "Add role…",
+    "empty": "Add role...",
     "placeholder": "Role (e.g. Reviewer)"
   },
   "description_editor": {
@@ -150,7 +150,7 @@
       "issue_board_columns": "Make board columns resizable",
       "issue_inbox_gestures": "Swipe gestures in the mobile inbox",
       "issue_paste_images": "Paste images into comments",
-      "delegating": "Picking a member by role…",
+      "delegating": "Picking a member by role...",
       "role_frontend": "Frontend",
       "role_testing": "Testing",
       "role_product": "Product"

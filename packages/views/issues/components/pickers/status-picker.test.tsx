@@ -289,7 +289,7 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
     renderWithI18n(
       <StatusPicker status="todo" projectId={null} onUpdate={onUpdate} open onOpenChange={() => {}} />,
     );
-    const search = screen.getByPlaceholderText("Search status…");
+    const search = screen.getByPlaceholderText("Search status...");
     fireEvent.change(search, { target: { value: "merg" } });
     expect(rows()).toEqual([]);
     fireEvent.change(search, { target: { value: "rev" } });

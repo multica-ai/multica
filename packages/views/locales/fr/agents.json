@@ -133,7 +133,7 @@
     "archive_dialog_description": "L'agent ne pourra plus être assigné ni mentionné, et ses exécutions actives seront annulées. Tout l'historique sera conservé et vous pourrez le restaurer plus tard.",
     "archive_dialog_cancel": "Annuler",
     "archive_dialog_confirm": "Archiver",
-    "set_access_applies_to_one": "S'applique à {{count}} agents.",
+    "set_access_applies_to_one": "S'applique à {{count}} agent.",
     "set_access_applies_to_other": "S'applique à {{count}} agents."
   },
   "detail": {
@@ -150,7 +150,7 @@
     "bind_runtime": "Associer un runtime",
     "restore": "Restaurer",
     "archive_dialog_title": "Archiver l'agent ?",
-    "archive_dialog_description": "« {{name}} » sera archivé. Il ne pourra plus être assigné ni mentionné, mais tout l'historique est conservé. Vous pourrez le restaurer plus tard.",
+    "archive_dialog_description": "« {{name}} » sera archivé et ne pourra plus être assigné ni mentionné. Les exécutions en cours seront annulées, mais tout l'historique est conservé. Vous pourrez le restaurer plus tard.",
     "archive_dialog_cancel": "Annuler",
     "archive_dialog_confirm": "Archiver",
     "more_archive": "Archiver l'agent",
@@ -367,7 +367,7 @@
       "discard_title": "Abandonner ce brouillon ?",
       "discard_cancel": "Continuer à modifier",
       "pick_hint": "Choisissez-en un pour continuer.",
-      "banner_one": "Vous avez {{count}} brouillon(s) inachevé(s)",
+      "banner_one": "Vous avez {{count}} brouillon non terminé",
       "banner_other": "Vous avez {{count}} brouillon(s) inachevé(s)"
     },
     "close": "Fermer",
@@ -869,8 +869,8 @@
     "public_group": "Accès public",
     "owner_only_readonly": "Seul le propriétaire de l'agent peut modifier qui peut l'exécuter.",
     "members_empty": "Aucun membre de l'espace de travail à choisir",
-    "composio_switch_hint": "Attention — cet agent a des applications activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent.",
-    "trigger_members_count_one": "{{count}} personnes",
+    "composio_switch_hint": "Attention : cet agent dispose d'applications connectées activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent.",
+    "trigger_members_count_one": "{{count}} personne",
     "trigger_members_count_other": "{{count}} personnes"
   },
   "profile_card": {

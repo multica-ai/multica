@@ -87,7 +87,7 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           },
           es: {
             title: "Los agentes vuelven al chat para informar",
-            body: "Pide a un agente en el chat que te avise cuando una incidencia termine o se fusione un PR, y volverá a informar en la misma conversación; también hace seguimiento cuando consulta a otra persona por ti. La barra sobre el cuadro de texto muestra qué está esperando.",
+            body: "Pide a un agente en el chat que te avise cuando una tarea termine o se fusione un PR, y volverá a informar en la misma conversación; también hace seguimiento cuando consulta a otra persona por ti. La barra sobre el cuadro de texto muestra qué está esperando.",
           },
           ru: {
             title: "Агенты возвращаются с отчётом в чат",
@@ -253,7 +253,7 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           },
           es: {
             title: "Pospón notificaciones para más tarde",
-            body: "Tu bandeja de entrada ahora aparece arriba del panel Trabajo. Pasa el cursor por una notificación y haz clic en el reloj, o pulsa H en una incidencia abierta, para elegir cuándo volverá.",
+            body: "Tu bandeja de entrada ahora aparece arriba del panel Trabajo. Pasa el cursor por una notificación y haz clic en el reloj, o pulsa H en una tarea abierta, para elegir cuándo volverá.",
           },
           ru: {
             title: "Откладывайте уведомления на потом",
@@ -369,8 +369,8 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             body: "En haut de la tâche d'une autre personne, cliquez sur Se désabonner et archiver ou appuyez sur Maj+E pour couper ses mises à jour en une fois. Les tâches des autres n'envoient plus que les mises à jour clés ; pour tout recevoir, réglez Tâches des autres sur Toute l'activité dans Paramètres → Notifications.",
           },
           es: {
-            title: "Recibe menos ruido de incidencias ajenas",
-            body: "En la parte superior de una incidencia ajena, haz clic en Dejar de seguir y archivar o pulsa Shift+E para silenciarla en un paso. Ahora solo envían novedades clave; puedes cambiarlo en Ajustes → Notificaciones.",
+            title: "Recibe menos ruido de tareas ajenas",
+            body: "En la parte superior de una tarea ajena, haz clic en Darse de baja y archivar o pulsa Shift+E para silenciarla en un paso. Ahora solo envían novedades clave; puedes cambiarlo en Ajustes → Notificaciones.",
           },
           ru: {
             title: "Меньше шума от чужих задач",
@@ -408,8 +408,8 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             body: "Sélectionnez des tâches dans une liste, puis utilisez la barre du bas pour changer les étiquettes, le projet ou la date d'échéance ; Plus d'actions couvre la date de début, le parent et les propriétés personnalisées. Si certaines sont ignorées, cliquez sur Sélectionner seulement ces tâches pour les reprendre.",
           },
           es: {
-            title: "Edita varias incidencias a la vez",
-            body: "Selecciona incidencias en una lista y usa la barra inferior para cambiar etiquetas, proyecto o fecha límite; Más acciones incluye fecha de inicio, incidencia padre y propiedades. Si alguna se omite, haz clic en Seleccionar solo estas.",
+            title: "Edita varias tareas a la vez",
+            body: "Selecciona tareas en una lista y usa la barra inferior para cambiar etiquetas, proyecto o fecha límite; Más acciones incluye fecha de inicio, tarea padre y propiedades. Si alguna se omite, haz clic en Seleccionar solo estas.",
           },
           ru: {
             title: "Редактируйте сразу несколько задач",
@@ -448,7 +448,7 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           },
           es: {
             title: "Pide a un agente que cree tu tema",
-            body: "En un chat o incidencia, pide a cualquier agente un tema describiendo los colores, fondo o estilo que prefieras. El agente lo crea, lo valida y te lo entrega para activarlo en Ajustes → Apariencia.",
+            body: "En un chat o tarea, pide a cualquier agente un tema describiendo los colores, fondo o estilo que prefieras. El agente lo crea, lo valida y te lo entrega para activarlo en Ajustes → Apariencia.",
           },
           ru: {
             title: "Попросите агента создать тему оформления",
@@ -532,8 +532,8 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             body: "Ouvrez une tâche et choisissez Démarrer un environnement sous Environnements dans sa barre latérale. Le menu de chaque service permet de voir les journaux, de le redémarrer ou de l'arrêter, et Afficher la fenêtre met une app de bureau au premier plan.",
           },
           es: {
-            title: "Ejecuta los servicios de una incidencia desde su barra lateral",
-            body: "Abre una incidencia y usa Iniciar un entorno en Entornos. El menú de cada servicio permite ver registros, reiniciar o detenerlo, y en escritorio puedes traer ventanas al frente con Cambiar a ventana.",
+            title: "Ejecuta los servicios de una tarea desde su barra lateral",
+            body: "Abre una tarea y usa Iniciar un entorno en Entornos. El menú de cada servicio permite ver registros, reiniciar o detenerlo, y en escritorio puedes traer ventanas al frente con Cambiar a ventana.",
           },
           ru: {
             title: "Управляйте сервисами задачи с боковой панели",
@@ -657,7 +657,7 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           },
           es: {
             title: "Limita un proyecto a sus miembros",
-            body: "Al crear un proyecto o en sus propiedades, establece Acceso en Solo miembros del proyecto y añade a las personas necesarias. Sus incidencias, comentarios y adjuntos solo serán visibles para ellos y los administradores.",
+            body: "Al crear un proyecto o en sus propiedades, establece Acceso en Solo miembros del proyecto y añade a las personas necesarias. Sus tareas, comentarios y adjuntos solo serán visibles para ellos y los administradores.",
           },
           ru: {
             title: "Ограничьте доступ к проекту его участниками",
@@ -694,8 +694,8 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             body: "Ouvrez une tâche et consultez Environnements dans sa barre latérale : services lancés par les exécutions de l'agent, avec leur état, leur lien et le temps restant. Sur macOS et Linux, les agents peuvent garder un service actif avec multica env start.",
           },
           es: {
-            title: "Consulta los servicios iniciados por una incidencia",
-            body: "Abre una incidencia y revisa Entornos en su barra lateral para ver los servicios que iniciaron sus agentes, con estado, enlace y tiempo restante. En macOS y Linux los agentes pueden mantener servicios con multica env start.",
+            title: "Consulta los servicios iniciados por una tarea",
+            body: "Abre una tarea y revisa Entornos en su barra lateral para ver los servicios que iniciaron sus agentes, con estado, enlace y tiempo restante. En macOS y Linux los agentes pueden mantener servicios con multica env start.",
           },
           ru: {
             title: "Отслеживайте сервисы, запущенные задачей",
@@ -778,7 +778,7 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             body: "Dans Vues, ajoutez l'étoile à la vue intégrée Non lu pour l'afficher dans la barre latérale. Vous pouvez aussi filtrer n'importe quelle vue par État de lecture → Non lu.",
           },
           es: {
-            title: "Muestra solo incidencias sin leer",
+            title: "Muestra solo tareas sin leer",
             body: "En Vistas, marca con estrella la vista Sin leer para añadirla a la barra lateral. También puedes filtrar cualquier vista por Estado de lectura → Sin leer.",
           },
           ru: {
@@ -942,8 +942,8 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             body: "Abre un entorno de ejecución y define cuántas ejecuciones procesa a la vez. Las adicionales esperan en la cola.",
           },
           ru: {
-            title: "Ограничивайте число одновременных запусков на рантайме",
-            body: "Откройте рантайм и задайте лимит параллельных запусков. Остальные запуски будут ожидать в очереди.",
+            title: "Ограничивайте число одновременных запусков в среде выполнения",
+            body: "Откройте среду выполнения и задайте лимит параллельных запусков. Остальные запуски будут ожидать в очереди.",
           },
         },
       },
@@ -984,7 +984,7 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           },
           es: {
             title: "Nueva barra de comandos",
-            body: "Selecciona varias incidencias y abre la barra de comandos para editarlas juntas. También busca en el espacio de trabajo y convierte una frase en una incidencia para un agente.",
+            body: "Selecciona varias tareas y abre la barra de comandos para editarlas juntas. También busca en el espacio de trabajo y convierte una frase en una tarea para un agente.",
           },
           ru: {
             title: "Новая командная панель",
@@ -1110,7 +1110,7 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           },
           ru: {
             title: "Multica на традиционном китайском",
-            body: "Переключить язык интерфейса можно в «Настройки → Предпочтения».",
+            body: "Переключить язык интерфейса можно в разделе «Настройки» → «Язык».",
           },
         },
       },
@@ -1193,8 +1193,8 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             body: "Elige exactamente quién puede usar un entorno de ejecución, no solo todos o únicamente tú. Al restringir el acceso, primero verás los agentes afectados.",
           },
           ru: {
-            title: "Делитесь рантаймом с выбранными участниками",
-            body: "Указывайте конкретных пользователей с доступом к рантайму, а не только «все» или «только я». При сужении доступа сначала показываются затронутые агенты.",
+            title: "Делитесь средой выполнения с выбранными участниками",
+            body: "Указывайте конкретных пользователей с доступом к среде выполнения, а не только «все» или «только я». При сужении доступа сначала показываются затронутые агенты.",
           },
         },
       },

@@ -232,7 +232,7 @@ describe("UpdateSection queued updates", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
     expect(await screen.findByText("Couldn't cancel: installation has already started.")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("Updating…")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Updating...")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
 
@@ -242,7 +242,7 @@ describe("UpdateSection queued updates", () => {
     renderSection({ runtimeId: "runtime-1", currentVersion: "v0.4.0" });
     fireEvent.click(await screen.findByRole("button", { name: "Update" }));
 
-    expect(await screen.findByText("Waiting for daemon…")).toBeInTheDocument();
+    expect(await screen.findByText("Waiting for daemon...")).toBeInTheDocument();
     expect(api.initiateUpdate).toHaveBeenCalledWith("runtime-1", "v0.5.0");
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
@@ -288,7 +288,7 @@ describe("UpdateSection queued updates", () => {
 
     renderSection({ runtimeId: "runtime-1", currentVersion: "v0.4.1" });
 
-    expect(await screen.findByText("Updating…")).toBeInTheDocument();
+    expect(await screen.findByText("Updating...")).toBeInTheDocument();
     expect(screen.queryByText(/Update complete/)).not.toBeInTheDocument();
   });
 
