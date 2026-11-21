@@ -286,13 +286,13 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 守护进程在后台运行（不连着终端）时，日志写入 `~/.multica/daemon.log`，命名 profile 为 `~/.multica/profiles/<name>/daemon.log`，并按大小轮转，轮转出的文件用 gzip 压缩。
 
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log` 达到多少 MB 时轮转 |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 最多保留几个轮转文件 |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | 轮转文件保留的天数 |
+| 变量 | Profile 配置键 | 默认值 | 说明 |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | `daemon.log` 达到多少 MB 时轮转 |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | 最多保留几个轮转文件 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | 轮转文件保留的天数 |
 
-三个变量都要求正整数；`0`、负数或无法解析的值按默认值处理，不会变成"不限制"。保留数量和天数哪个先到就按哪个删除。崩溃输出写在同目录的 `daemon.err.log`，启动时超过 5 MB 就改名为 `daemon.err.log.1`。
+三个参数都要求正整数。用 `multica --profile dev config set <key> <value>` 保存，`config show` 查看已保存值，传入 `""` 清除对应配置。修改在下次守护进程启动或重启时生效。有效环境变量优先于 profile；未设置、空白、零、负数、格式错误或溢出的环境值回退到有效 profile 值，再回退到表中默认值。大小和天数还必须能安全转换为字节和时长；`config set` 会拒绝无效值。零不能关闭保留限制。保留数量和天数哪个先到就按哪个删除。崩溃输出写在同目录的 `daemon.err.log`，启动时超过 5 MB 就改名为 `daemon.err.log.1`。
 
 ### 各 AI 编程工具的路径、模型与参数
 
