@@ -17,6 +17,14 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: ["@electron-toolkit/preload"] })],
   },
   renderer: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve("src/renderer/index.html"),
+          "run-island": resolve("src/renderer/run-island.html"),
+        },
+      },
+    },
     server: {
       // Allow parallel worktrees to run `pnpm dev:desktop` side-by-side
       // (e.g. Multica Canary alongside a primary checkout) by overriding

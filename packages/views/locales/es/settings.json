@@ -1456,6 +1456,11 @@
     "url_label": "URL del repositorio"
   },
   "desktop": {
+    "island": {
+      "title": "Isla de actividad",
+      "show": "Mostrar la isla de actividad",
+      "description": "Consulta las ejecuciones activas en la parte superior de la pantalla mientras usas otras aplicaciones."
+    },
     "tabs": {
       "updates": "Actualizaciones"
     },

@@ -1187,6 +1187,11 @@
     "actions_aria": "{{url}} 작업"
   },
   "desktop": {
+    "island": {
+      "title": "실행 아일랜드",
+      "show": "실행 아일랜드 표시",
+      "description": "다른 앱을 사용하는 동안에도 화면 상단에서 진행 중이거나 대기 중인 실행을 확인합니다."
+    },
     "tabs": {
       "updates": "업데이트"
     },

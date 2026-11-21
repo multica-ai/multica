@@ -34,6 +34,7 @@ import { SettingsPage } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
 import { Download, Server } from "@multica/ui/icons";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
+import { RunIslandPreference } from "./components/run-island-preference";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { DesktopRouteErrorPage } from "./components/route-error-page";
@@ -52,6 +53,7 @@ function DesktopSettingsRoute() {
   const { t } = useT("settings");
   return (
     <SettingsPage
+      devicePreferences={window.desktopAPI?.appInfo?.os === "macos" ? <RunIslandPreference /> : undefined}
       extraDeviceTabs={[
         {
           value: "daemon",

@@ -90,6 +90,7 @@ import {
   type MainRendererMessageChannel,
 } from "../shared/main-renderer-messages";
 import { AuthSessionCoordinator } from "./auth-session-coordinator";
+import { installRunIsland } from "./run-island";
 import { MainWindowRegistry } from "./main-window-registry";
 import {
   NotificationGate,
@@ -169,6 +170,7 @@ function freezeBreadcrumbPath(): string {
   return join(app.getPath("userData"), "last-client-failure.json");
 }
 
+let runIsland: ReturnType<typeof installRunIsland> | undefined;
 const mainWindows = new MainWindowRegistry<BrowserWindow>();
 const issueWindows = new Set<BrowserWindow>();
 const authSessionCoordinator = new AuthSessionCoordinator<BrowserWindow>(
@@ -494,7 +496,15 @@ function createMainWindow(saved: WindowState = {}): BrowserWindow {
   // Persist bounds on resize/move (debounced) so the next launch restores
   // size/position and max/fullscreen flags. getNormalBounds is used so
   // maximized/fullscreen still saves the restore size.
-  window.on("focus", () => mainWindows.focus(window));
+  window.on("focus", () => {
+    mainWindows.focus(window);
+    runIsland?.refresh();
+  });
+  window.on("moved", () => runIsland?.refresh());
+  window.webContents.on("render-process-gone", () => runIsland?.clear(window));
+  window.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) runIsland?.clear(window);
+  });
   window.on("resize", scheduleWindowSessionSave);
   window.on("move", scheduleWindowSessionSave);
   window.on("close", () => {
@@ -505,6 +515,7 @@ function createMainWindow(saved: WindowState = {}): BrowserWindow {
 
   window.on("closed", () => {
     mainWindows.remove(window);
+    runIsland?.clear(window);
     authSessionCoordinator.unregisterMainWindow(window);
     mainRendererMessages.release(window, mainWindows.mostRecent());
     if (unreadBadgeCounts.delete(window)) applyUnreadBadge();
@@ -917,6 +928,12 @@ if (!gotTheLock) {
       },
     );
 
+    if (process.platform === "darwin") {
+      runIsland = installRunIsland(mainWindows, (owner, path) => {
+        dispatchToMainRenderer(WORKSPACE_OPEN_PATH_CHANNEL, { path, navigate: true }, owner);
+      });
+    }
+
     // Each main window reports the workspace it shows, so routing by
     // workspace and the restored session follow in-window switches.
     ipcMain.on(WINDOW_WORKSPACE_REPORT_CHANNEL, (event, value: unknown) => {
@@ -925,6 +942,7 @@ if (!gotTheLock) {
       const workspaceSlug = value === null ? null : parseWorkspaceSlug(value);
       if (value !== null && !workspaceSlug) return;
       if (mainWindows.setWorkspace(window, workspaceSlug)) {
+        runIsland?.refresh();
         scheduleWindowSessionSave();
       }
     });
@@ -981,6 +999,7 @@ if (!gotTheLock) {
       if (!sourceWindow || userId === undefined) return;
 
       if (mainWindows.has(sourceWindow)) {
+        if (userId === null) runIsland?.clear(sourceWindow);
         const accountInvalidated = authSessionCoordinator.reportMain(
           sourceWindow,
           userId,

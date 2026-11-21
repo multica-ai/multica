@@ -1444,6 +1444,11 @@
     "actions_aria": "{{url}} 的操作"
   },
   "desktop": {
+    "island": {
+      "title": "執行動態島",
+      "show": "顯示執行動態島",
+      "description": "使用其他 App 時，也能在螢幕上方查看執行中或排隊中的工作。"
+    },
     "tabs": {
       "updates": "更新"
     },

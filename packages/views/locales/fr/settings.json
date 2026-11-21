@@ -1456,6 +1456,11 @@
     "actions_aria": "Actions pour {{url}}"
   },
   "desktop": {
+    "island": {
+      "title": "Îlot d’activité",
+      "show": "Afficher l’îlot d’activité",
+      "description": "Consultez les exécutions actives en haut de l’écran quand vous utilisez une autre application."
+    },
     "tabs": {
       "updates": "Mises à jour"
     },

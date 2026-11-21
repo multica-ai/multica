@@ -1456,6 +1456,11 @@
     "actions_aria": "Actions for {{url}}"
   },
   "desktop": {
+    "island": {
+      "title": "Run Island",
+      "show": "Show Run Island",
+      "description": "See active runs at the top of your display while using other apps."
+    },
     "tabs": {
       "updates": "Updates"
     },

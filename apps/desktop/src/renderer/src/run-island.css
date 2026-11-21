@@ -1,0 +1,160 @@
+:root {
+  color-scheme: dark;
+  font-family: var(--font-sans);
+}
+* {
+  box-sizing: border-box;
+}
+html.dark,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+main {
+  height: 100vh;
+  overflow: hidden;
+  color: var(--multica-paper);
+  background: var(--multica-ink);
+  border-radius: 17px;
+}
+main.attached {
+  background: #050505;
+  border-radius: 0 0 17px 17px;
+}
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+.cap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 13px;
+}
+.cap .fill-multica-paper {
+  fill: var(--multica-paper);
+}
+.cap .fill-multica-ink {
+  fill: var(--multica-ink);
+}
+.counter,
+.state {
+  font-size: var(--text-micro);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+i {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+i.active,
+i.running {
+  background: var(--success);
+}
+i.queued {
+  background: var(--warning);
+}
+section {
+  padding: 0 8px 8px;
+  animation: reveal 120ms ease-out;
+}
+header {
+  height: 41px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 9px;
+}
+header strong {
+  flex: none;
+  font-size: var(--text-body-lg);
+  letter-spacing: -0.025em;
+}
+header span,
+small,
+.state,
+p {
+  color: var(--muted-foreground);
+}
+header span {
+  margin-left: auto;
+  font-size: var(--text-micro);
+}
+header span,
+b,
+small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.list {
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.run {
+  display: flex;
+  width: 100%;
+  height: 48px;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 0 9px;
+  text-align: start;
+}
+.run:hover,
+.run:focus-visible {
+  background: var(--surface-hover);
+}
+.description {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+b {
+  font-size: var(--text-label);
+  font-weight: 550;
+}
+small {
+  font-size: var(--text-micro);
+}
+.run svg {
+  color: var(--muted-foreground);
+  flex: none;
+}
+p {
+  margin: 0;
+  padding: 12px 9px;
+}
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+  }
+}

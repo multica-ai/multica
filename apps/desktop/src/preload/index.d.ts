@@ -39,7 +39,10 @@ import type {
   VoiceTranscribeResult,
 } from "../shared/voice";
 
+import type { RunIslandSnapshot, RunIslandAPI } from "../shared/run-island";
+
 interface DesktopAPI {
+  reportRunIsland: (snapshot: RunIslandSnapshot | null) => void;
   /** App version + normalized OS, captured synchronously at preload time. */
   appInfo: {
     version: string;
@@ -269,6 +272,7 @@ interface UpdaterAPI {
 
 declare global {
   interface Window {
+    runIsland: RunIslandAPI;
     electron: ElectronAPI;
     desktopAPI: DesktopAPI;
     daemonAPI: DaemonAPI;

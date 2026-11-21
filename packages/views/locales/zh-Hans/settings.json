@@ -1444,6 +1444,11 @@
     "actions_aria": "{{url}} 的操作"
   },
   "desktop": {
+    "island": {
+      "title": "运行灵动岛",
+      "show": "显示运行灵动岛",
+      "description": "使用其他应用时，也能在屏幕顶部查看正在执行或排队的运行。"
+    },
     "tabs": {
       "updates": "更新"
     },
