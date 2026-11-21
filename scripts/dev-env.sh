@@ -475,6 +475,27 @@ rewrite_env_ports() {
   set_env_value "$file" NEXT_PUBLIC_WS_URL "ws://localhost:${backend}/ws"
 }
 
+# `make` derives LOCAL_UPLOAD_BASE_URL and GOOGLE_REDIRECT_URI before the slot
+# exists, so a first run inherits :8080 and :3000 whether the slot was
+# allocated or adopted from a generated .env.worktree.
+sync_slot_urls() {
+  sync_local_url "$1" LOCAL_UPLOAD_BASE_URL "http://localhost:$2" '/?'
+  sync_local_url "$1" GOOGLE_REDIRECT_URI "http://localhost:$3/auth/callback" '/auth/callback'
+}
+
+# The key follows the slot only while it holds a bare localhost origin; an S3,
+# proxy or other host someone configured is kept. The check runs on the loaded
+# value the services inherit, so a ${...} line that already resolves to the
+# slot is left as written.
+sync_local_url() {
+  local file=$1 key=$2 value=$3 suffix=$4 current="${!2:-}"
+  local pattern="^http://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?${suffix}\$"
+  [ "$current" != "$value" ] || return 0
+  [ -z "$current" ] || [[ "$current" =~ $pattern ]] || return 0
+  set_env_value "$REPO_ROOT/$file" "$key" "$value"
+  export "$key=$value"
+}
+
 # Run after the rewritten file is loaded back. Something outside the keys
 # rewrite_env_ports owns (BACKEND_PORT outranks PORT in local-env.sh) can still
 # win, and registering then would hand destroy the shared backend and database.
@@ -1850,6 +1871,7 @@ cmd_up() {
     load_manifest "$NAME"
     ok "Registered environment $NAME"
   fi
+  sync_slot_urls "$ENV_FILE" "$BACKEND_PORT" "$FRONTEND_PORT"
   bind_paths
   # The CDP port is recorded like any other allocation: later `make up` runs
   # and restarts keep it until --no-cdp clears it.
