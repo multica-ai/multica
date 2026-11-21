@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -771,6 +772,67 @@ func TestPrepareLocalWorktreeFailsOnUntrackedSymlink(t *testing.T) {
 	}
 	if list := gitRun(t, repo, "worktree", "list"); strings.Count(list, "\n") != 0 {
 		t.Errorf("aborted prepare left a worktree registered:\n%s", list)
+	}
+}
+
+func TestRemoveLocalWorktreeDirCleansLeftoversAfterGitSuccess(t *testing.T) {
+	t.Parallel()
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	writeFile(t, filepath.Join(worktree, "node_modules", "leftover"), "generated content")
+
+	requireWorktreeRemovedAfterGitSuccess(t, worktree, nil)
+}
+
+func requireWorktreeRemovedAfterGitSuccess(t *testing.T, worktree string, gitCleanup func()) {
+	t.Helper()
+	repo := t.TempDir()
+	calls := 0
+	git := func(dir string, args ...string) (string, error) {
+		calls++
+		if dir != repo || !slices.Equal(args, []string{"worktree", "remove", "--force", worktree}) {
+			t.Fatalf("unexpected Git invocation in %q: %v", dir, args)
+		}
+		if gitCleanup != nil {
+			gitCleanup()
+		}
+		return "", nil
+	}
+	if err := removeLocalWorktreeDirWithGit(repo, worktree, worktreeTestLogger(), git); err != nil {
+		t.Fatalf("remove worktree after successful Git command: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("Git invocations = %d, want 1", calls)
+	}
+	assertAbsent(t, worktree)
+}
+
+func TestRemoveLocalWorktreeDirPrunesAfterGitFailure(t *testing.T) {
+	t.Parallel()
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	writeFile(t, filepath.Join(worktree, "leftover"), "generated content")
+	repo := t.TempDir()
+	calls := 0
+	git := func(dir string, args ...string) (string, error) {
+		if dir != repo {
+			t.Fatalf("Git ran in %q, want %q", dir, repo)
+		}
+		calls++
+		switch {
+		case calls == 1 && slices.Equal(args, []string{"worktree", "remove", "--force", worktree}):
+			return "", errors.New("worktree removal failed")
+		case calls == 2 && slices.Equal(args, []string{"worktree", "prune"}):
+			assertAbsent(t, worktree)
+			return "", nil
+		default:
+			t.Fatalf("unexpected Git invocation %d: %v", calls, args)
+			return "", nil
+		}
+	}
+	if err := removeLocalWorktreeDirWithGit(repo, worktree, worktreeTestLogger(), git); err != nil {
+		t.Fatalf("remove worktree after failed Git command: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("Git invocations = %d, want 2", calls)
 	}
 }
 
