@@ -273,7 +273,7 @@ If the backend has to reach services whose certificates come from an internal CA
 
 #### Live doc co-editing (optional)
 
-`collab.enabled` is off by default, and the chart then renders exactly what it did before. Turning it on runs one `multica-collab` pod and points the backend at it. Add the shared secret to `multica-secrets` first, then upgrade:
+`collab.enabled` is off by default, and the chart then renders exactly what it did before. Turning it on runs one `multica-collab` pod and points the backend at it. Docs themselves are off until `backend.config.featureFlags.docs_v1=true` (see [Advanced Configuration → Feature Flags](SELF_HOSTING_ADVANCED.md#feature-flags-optional)). Add the shared secret to `multica-secrets` first, then upgrade:
 
 ```bash
 kubectl -n multica patch secret multica-secrets --type=merge \
@@ -281,7 +281,9 @@ kubectl -n multica patch secret multica-secrets --type=merge \
 helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> \
   -n multica \
-  -f my-values.yaml --set collab.enabled=true
+  -f my-values.yaml \
+  --set backend.config.featureFlags.docs_v1=true \
+  --set collab.enabled=true
 ```
 
 The Ingress needs nothing new: editors open `/collab` on the backend host, which the backend forwards to collab, with the same WebSocket settings as `/ws`. Collab always runs as exactly one replica and is replaced with `Recreate`, because each open doc lives in that one process's memory. `collab.config.cdnDomain` is derived from the backend's storage settings; set it only if links to uploaded files stop turning into file cards in live docs.
