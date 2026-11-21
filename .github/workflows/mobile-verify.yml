@@ -13,9 +13,9 @@ name: Mobile Verify
 # - pnpm-workspace.yaml           — catalog versions
 # - turbo.json                    — turbo task pipeline
 #
-# Mobile's vitest suite is intentionally narrow (Node env, pure-function
-# tests under apps/mobile/lib/*.test.ts — see apps/mobile/vitest.config.ts).
-# RN component-level rendering is not exercised here.
+# Mobile's Vitest suite uses Node helpers/data tests and composer lifecycle
+# tests with mocked native hosts — see apps/mobile/vitest.config.ts.
+# Native rendering and keyboard behavior are not exercised here.
 # Repository-wide radius checks run once in CI: frontend-build owns them when
 # selected, otherwise frontend-quality handles docs/mobile-only changes.
 

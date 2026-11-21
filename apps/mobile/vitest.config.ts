@@ -1,23 +1,13 @@
 import { defineConfig } from "vitest/config";
 import path from "node:path";
 
-// Mobile vitest is intentionally minimal — Node environment only, scoped to
-// pure-function helpers in `lib/` and headless data-layer logic in `data/`
-// (query-key + cache-patch functions that take a QueryClient but touch no
-// DOM / RN native modules). We don't ship jsdom or RN test renderers here
-// because the app runs on Hermes / native shims and any DOM-shaped runner
-// would be a lie. Tests that need RN component rendering would need a
-// separate jest+react-native-testing-library track; for now we keep this
-// lane for helpers, serializers, and cache updaters only. Data-layer tests
-// must mock `@/data/api` so the native fetch chain never loads.
-//
-// Co-located test files (foo.ts + foo.test.ts) match how the rest of the
-// monorepo organises vitest suites.
-// The run cancel button, inbox and timeline list have headless
-// callback/prop tests with native modules mocked; these do not verify
-// native rendering.
-// App configuration tests also run here to cover native prebuild options
-// across environment variants without loading React Native.
+// Node helpers and data-layer tests mock native/API boundaries. Composer
+// lifecycle tests use React's test renderer with host/native substitutes:
+// they exercise real hooks and cleanup, not native layout or keyboard behavior.
+// The run cancel button, inbox and timeline list use headless callback/prop
+// tests with native modules mocked; they do not verify native rendering.
+// App configuration tests cover prebuild options without loading React Native.
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -31,6 +21,7 @@ export default defineConfig({
       "app.config.test.ts",
       "lib/**/*.test.ts",
       "data/**/*.test.ts",
+      "components/**/*.test.tsx",
       "components/issue/run-cancel-button.test.ts",
       "components/inbox/inbox-screen.test.ts",
       "components/issue/timeline-list.test.ts",
