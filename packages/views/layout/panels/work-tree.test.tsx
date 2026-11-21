@@ -196,7 +196,7 @@ describe("ProjectsSection", () => {
   });
 
   it("expands a project in place, keeping its count", () => {
-    renderSection();
+    renderSection(PROJECTS, { showCount: true });
     expect(screen.getAllByText("3")).toHaveLength(3);
 
     fireEvent.click(screen.getByRole("button", { name: "Issues in Mobile" }));
@@ -346,8 +346,14 @@ describe("ProjectsSection", () => {
   });
 
   it("counts the open issues outside every project", () => {
-    renderSection();
+    renderSection(PROJECTS, { showCount: true });
     expect(screen.getByRole("button", { name: "No project" }).parentElement).toHaveTextContent("7");
+  });
+
+  it("shows no counts by default", () => {
+    renderSection();
+    expect(screen.queryByText("3")).toBeNull();
+    expect(screen.getByRole("button", { name: "No project" }).parentElement).not.toHaveTextContent("7");
   });
 
   it("creates an issue without a project from the No project row", () => {
