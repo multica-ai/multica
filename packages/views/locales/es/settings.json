@@ -860,8 +860,34 @@
       "manual_label": "Archivar a mano",
       "manual_description": "Desde su fila en la barra lateral o desde la parte superior de la notificación",
       "manual_value": "En cualquier momento",
-      "done_label": "Archivar las tareas que completas",
-      "done_description": "Cuando pasas una tarea a un estado Completado o Cancelado, sus notificaciones se archivan. Las que completan otros se quedan en la bandeja de entrada.",
+      "auto_label": "Archivar las tareas que gestionas",
+      "auto_description": "Solo cuentan tus propias acciones. Una notificación posterior devuelve la tarea.",
+      "auto_presets": {
+        "never": "Nunca",
+        "completed": "Cuando la completas",
+        "handled": "Al responder, cambiar el estado o reasignar",
+        "custom": "Personalizado",
+        "custom_item": "Personalizado..."
+      },
+      "auto_recommended": "Recomendado",
+      "auto_groups": {
+        "settle": "Resolverla",
+        "tidy": "Organizarla"
+      },
+      "auto_actions": {
+        "completed": "Completar",
+        "comment": "Responder",
+        "status": "Cambiar estado",
+        "assignee": "Reasignar",
+        "priority": "Cambiar prioridad",
+        "project": "Cambiar proyecto",
+        "dates": "Cambiar fechas",
+        "labels": "Cambiar etiquetas"
+      },
+      "after_label": "Después de archivar",
+      "after_description": "Cuando la notificación que estás leyendo se archiva así. Archivar a mano (E) sigue abriendo la siguiente.",
+      "after_stay": "Quedarse en la tarea",
+      "after_next": "Abrir la siguiente",
       "archived_label": "Notificaciones archivadas",
       "archived_description": "Encuéntralas de nuevo y desarchívalas",
       "archived_action": "Ver archivadas"

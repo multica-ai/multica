@@ -860,8 +860,34 @@
       "manual_label": "Archive by hand",
       "manual_description": "From its row in the sidebar, or the top of the notification",
       "manual_value": "Anytime",
-      "done_label": "Archive issues you complete",
-      "done_description": "When you move an issue to Done or Cancelled, its notifications are archived. Issues others complete stay in your Inbox.",
+      "auto_label": "Archive issues you handle",
+      "auto_description": "Only your own actions count. A later notification brings an issue back.",
+      "auto_presets": {
+        "never": "Never",
+        "completed": "When you complete it",
+        "handled": "After you reply, change status or reassign",
+        "custom": "Custom",
+        "custom_item": "Custom..."
+      },
+      "auto_recommended": "Recommended",
+      "auto_groups": {
+        "settle": "Handling it",
+        "tidy": "Tidying it"
+      },
+      "auto_actions": {
+        "completed": "Complete",
+        "comment": "Reply",
+        "status": "Change status",
+        "assignee": "Reassign",
+        "priority": "Change priority",
+        "project": "Change project",
+        "dates": "Change dates",
+        "labels": "Change labels"
+      },
+      "after_label": "After archiving",
+      "after_description": "When the notification you're reading is archived this way. Archiving by hand (E) still opens the next one.",
+      "after_stay": "Stay on the issue",
+      "after_next": "Open the next one",
       "archived_label": "Archived notifications",
       "archived_description": "Find them again and unarchive them",
       "archived_action": "View archived"

@@ -217,5 +217,16 @@
     "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back.",
     "col_updates": "While snoozed",
     "col_back": "Back"
+  },
+  "auto_archive_prompt": {
+    "title": "Archive notifications once you've handled them",
+    "description": "The Inbox can now archive an issue's notifications when you act on it. Only your own actions count, and a later notification brings the issue back.",
+    "options": {
+      "handled": "Issues you've dealt with leave your Inbox",
+      "completed": "Only completing or cancelling an issue archives it",
+      "never": "You archive notifications yourself"
+    },
+    "hint": "You can change this in Settings › Notifications",
+    "confirm": "Done"
   }
 }

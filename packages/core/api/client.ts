@@ -3727,6 +3727,25 @@ export class ApiClient {
     );
   }
 
+  /**
+   * Answer the one-time auto-archive question for every workspace where it is
+   * pending. Answers with the active workspace's preferences.
+   */
+  async resolveAutoArchivePrompt(
+    preferences: NotificationPreferences,
+  ): Promise<NotificationPreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/notification-preferences/auto-archive-prompt", {
+      method: "POST",
+      body: JSON.stringify({ preferences }),
+    });
+    return parseWithFallback(
+      raw,
+      NotificationPreferenceResponseSchema,
+      EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
+      { endpoint: "POST /api/notification-preferences/auto-archive-prompt" },
+    );
+  }
+
   // App Config
   async getConfig(): Promise<AppConfigResponse> {
     const raw = await this.fetch<unknown>("/api/config");

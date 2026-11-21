@@ -860,8 +860,34 @@
       "manual_label": "Archiver à la main",
       "manual_description": "Depuis sa ligne dans la barre latérale ou le haut de la notification",
       "manual_value": "À tout moment",
-      "done_label": "Archiver les tâches que vous terminez",
-      "done_description": "Quand vous passez une tâche à un statut Terminé ou Annulé, ses notifications sont archivées. Celles terminées par d'autres restent dans la boîte de réception.",
+      "auto_label": "Archiver les tâches que vous traitez",
+      "auto_description": "Seules vos propres actions comptent. Une nouvelle notification fait revenir la tâche.",
+      "auto_presets": {
+        "never": "Jamais",
+        "completed": "Quand vous la terminez",
+        "handled": "Après une réponse, un changement de statut ou une réattribution",
+        "custom": "Personnalisé",
+        "custom_item": "Personnalisé..."
+      },
+      "auto_recommended": "Recommandé",
+      "auto_groups": {
+        "settle": "La traiter",
+        "tidy": "La ranger"
+      },
+      "auto_actions": {
+        "completed": "Terminer",
+        "comment": "Répondre",
+        "status": "Changer le statut",
+        "assignee": "Réassigner",
+        "priority": "Changer la priorité",
+        "project": "Changer le projet",
+        "dates": "Changer les dates",
+        "labels": "Changer les libellés"
+      },
+      "after_label": "Après l'archivage",
+      "after_description": "Quand la notification que vous lisez est archivée ainsi. Archiver à la main (E) ouvre toujours la suivante.",
+      "after_stay": "Rester sur la tâche",
+      "after_next": "Ouvrir la suivante",
       "archived_label": "Notifications archivées",
       "archived_description": "Retrouvez-les et désarchivez-les",
       "archived_action": "Voir les archivées"
