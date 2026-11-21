@@ -1146,6 +1146,7 @@ func (c *httpAPIClient) BatchGetUsers(ctx context.Context, creds InstallationCre
 // ways the enricher cares about: msg_type (not message_type), and a
 // flat `sender.id` / `mentions[].id` string (not a nested id object).
 type larkRESTMessageItem struct {
+	ChatID         string `json:"chat_id"`
 	MessageID      string `json:"message_id"`
 	RootID         string `json:"root_id"`
 	ParentID       string `json:"parent_id"`
@@ -1171,6 +1172,7 @@ type larkRESTMessageItem struct {
 
 func (it larkRESTMessageItem) normalize() LarkMessage {
 	m := LarkMessage{
+		ChatID:         it.ChatID,
 		MessageID:      it.MessageID,
 		MessageType:    it.MsgType,
 		Content:        it.Body.Content,
