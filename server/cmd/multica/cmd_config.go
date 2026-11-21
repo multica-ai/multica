@@ -39,6 +39,7 @@ var configSetSupportedKeys = []string{
 	"poll_interval",
 	"ws_claim_poll_interval",
 	"heartbeat_interval",
+	"log_level",
 	"agent_timeout",
 	"agent_idle_watchdog",
 	"agent_tool_watchdog",
@@ -57,7 +58,7 @@ var configSetCmd = &cobra.Command{
 		"device_name, runtime_name, workspaces_root, max_concurrent_tasks, poll_interval, ws_claim_poll_interval, " +
 		"heartbeat_interval, agent_timeout, agent_idle_watchdog, agent_tool_watchdog, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
-		"disable_auto_update, auto_update_check_interval, disable_auto_reload.\n\n" +
+		"disable_auto_update, auto_update_check_interval, disable_auto_reload, log_level.\n\n" +
 		"The daemon keys (device_name, runtime_name, workspaces_root, max_concurrent_tasks, " +
 		"poll_interval, ws_claim_poll_interval, heartbeat_interval, agent_timeout, agent_idle_watchdog, agent_tool_watchdog, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
@@ -72,7 +73,8 @@ var configSetCmd = &cobra.Command{
 		"(single-direction: setting one to 'true' turns that behavior off, " +
 		"'false' clears the override so env/default decides). Pass an empty " +
 		"string to clear a persisted " +
-		"value (e.g. `config set poll_interval \"\"`).",
+		"value (e.g. `config set poll_interval \"\"`). " +
+		"log_level controls daemon logs (debug, info, warn, error). LOG_LEVEL overrides it.",
 	Args: exactArgs(2),
 	RunE: runConfigSet,
 }
@@ -107,6 +109,7 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "poll_interval:", valueOrDefault(cfg.PollInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "ws_claim_poll_interval:", valueOrDefault(cfg.WSClaimPollInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "heartbeat_interval:", valueOrDefault(cfg.HeartbeatInterval, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "log_level:", valueOrDefault(cfg.LogLevel, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "agent_timeout:", agentTimeoutDisplay(cfg.AgentTimeout))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "agent_idle_watchdog:", valueOrDefault(cfg.AgentIdleWatchdog, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "agent_tool_watchdog:", valueOrDefault(cfg.AgentToolWatchdog, "(not set)"))
@@ -214,6 +217,13 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 	case "ws_claim_poll_interval":
 		if err := assignPositiveDuration(&cfg.WSClaimPollInterval, key, value); err != nil {
 			return err
+		}
+	case "log_level":
+		switch value {
+		case "", "debug", "info", "warn", "error":
+			cfg.LogLevel = value
+		default:
+			return fmt.Errorf("log_level must be debug, info, warn, or error (got %q)", value)
 		}
 	case "heartbeat_interval":
 		if err := assignPositiveDuration(&cfg.HeartbeatInterval, key, value); err != nil {

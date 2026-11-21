@@ -280,6 +280,8 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 
 ### 守護程序日誌 [#daemon-logs]
 
+`LOG_LEVEL`. 守護程序的預設日誌層級為 `debug`。守護程序日誌層級。使用 `multica config set log_level info` 設定設定檔的預設值。環境變數優先。
+
 守護程序在後臺執行（不連著終端）時，日誌寫入 `~/.multica/daemon.log`，命名 profile 為 `~/.multica/profiles/<name>/daemon.log`，並按大小輪轉，輪轉出的檔案用 gzip 壓縮。
 
 | 變數 | 預設值 | 說明 |

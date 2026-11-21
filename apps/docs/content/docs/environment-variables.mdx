@@ -290,6 +290,8 @@ The daemon periodically cleans up run directories, repository caches, session re
 
 ### Daemon logs [#daemon-logs]
 
+`LOG_LEVEL`. The daemon logs at `debug` by default. Set a profile default with `multica config set log_level info`. The environment variable overrides the profile.
+
 When the daemon runs in the background (not attached to a terminal), it writes logs to `~/.multica/daemon.log`, or `~/.multica/profiles/<name>/daemon.log` for a named profile, rotating by size and compressing rotated files with gzip.
 
 | Variable | Default | Description |

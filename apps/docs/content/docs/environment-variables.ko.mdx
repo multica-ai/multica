@@ -284,6 +284,8 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 ### 데몬 로그 [#daemon-logs]
 
+`LOG_LEVEL`. 데몬의 기본 로그 수준은 `debug`입니다. 데몬 로그 수준입니다. `multica config set log_level info`로 프로필 기본값을 설정합니다. 환경 변수가 우선합니다.
+
 데몬이 백그라운드에서(터미널에 연결되지 않은 채) 실행될 때 로그는 `~/.multica/daemon.log`(이름 있는 프로필은 `~/.multica/profiles/<name>/daemon.log`)에 기록되고 크기에 따라 순환됩니다. 순환된 파일은 gzip으로 압축됩니다.
 
 | 변수 | 기본값 | 설명 |
