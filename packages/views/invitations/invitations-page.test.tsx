@@ -17,6 +17,7 @@ const {
   markOnboardingComplete,
   listMyInvitations,
   listWorkspaces,
+  desktop,
 } = vi.hoisted(() => {
   const auth = { user: null as { onboarded_at: string | null } | null };
   return {
@@ -33,6 +34,7 @@ const {
     markOnboardingComplete: vi.fn(),
     listMyInvitations: vi.fn(),
     listWorkspaces: vi.fn(),
+    desktop: { value: false },
   };
 });
 
@@ -50,6 +52,13 @@ vi.mock("../auth", () => ({
 
 vi.mock("../platform", () => ({
   DragStrip: () => null,
+  isDesktopShell: () => desktop.value,
+}));
+
+vi.mock("../onboarding/join/connect-tools-step", () => ({
+  ConnectToolsStep: ({ workspace }: { workspace: { name: string } }) => (
+    <p>connect tools to {workspace.name}</p>
+  ),
 }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -131,6 +140,7 @@ const row = (name: string) => screen.getByText(name).closest("li")!;
 describe("InvitationsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    desktop.value = false;
     auth.user = { onboarded_at: null };
     refreshMe.mockImplementation(async () => {
       auth.user = ONBOARDED;
@@ -177,6 +187,19 @@ describe("InvitationsPage", () => {
     });
     expect(acceptInvitation).toHaveBeenCalledTimes(1);
     expect(auth.user?.onboarded_at).toBe(ONBOARDED.onboarded_at);
+  });
+
+  it("on desktop, offers to connect this computer's tools before entering", async () => {
+    desktop.value = true;
+    listMyInvitations.mockResolvedValue([mkInvite("inv-1", "ws-1", "Acme")]);
+    listWorkspaces.mockResolvedValue([mkWs("ws-1", "acme")]);
+    renderPage();
+    await waitFor(() => screen.getByText("Acme"));
+
+    fireEvent.click(within(row("Acme")).getByRole("button", { name: "Join" }));
+
+    expect(await screen.findByText("connect tools to acme")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   // The workspace layout sends an un-onboarded local user back to onboarding,

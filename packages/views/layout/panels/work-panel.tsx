@@ -18,6 +18,7 @@ import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-i
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
+import { GettingStartedCard } from "../../onboarding/getting-started/getting-started-card";
 import { PanelBody, PanelHeader, isPathWithin } from "../panel-nav";
 import { INBOX_LIST, InboxSection, useInboxSectionRows } from "./inbox-section";
 import { PinnedSection, usePanelPins } from "./pinned-section";
@@ -278,6 +279,7 @@ export function WorkPanel() {
           )}
         </PanelBody>
       </IssueContextMenuProvider>
+      <GettingStartedCard />
     </>
   );
 }

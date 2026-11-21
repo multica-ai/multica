@@ -32,3 +32,23 @@ export function agentCompletedIssueCountOptions(wsId: string) {
     staleTime: 30_000,
   });
 }
+
+/**
+ * Count of issues ever handed to an AI assignee, any status — the
+ * getting-started checklist's "first task" item. Same `limit: 1` / issue-key
+ * reasoning as above; enabled only while the checklist is on screen.
+ */
+export function agentAssignedIssueCountOptions(wsId: string) {
+  return queryOptions({
+    queryKey: [...issueKeys.all(wsId), "agent-assigned-count"] as const,
+    queryFn: async () => {
+      const res = await api.listIssues({
+        workspace_id: wsId,
+        assignee_types: ["agent", "squad"],
+        limit: 1,
+      });
+      return res.total;
+    },
+    staleTime: 30_000,
+  });
+}

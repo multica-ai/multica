@@ -16,13 +16,11 @@ import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboardin
  * web (matching `WindowOverlay` on desktop); content is the shared
  * `<OnboardingFlow />`. Kept minimal — guard on auth, render, exit.
  *
- * Runtime-connected onboarding opens the Mika session that the final step
- * created and started; skipping the runtime opens the install-runtime guide
- * issue it created. Other exits land on the workspace issues list, or root
- * when no workspace exists.
+ * Onboarding that ends with a first task opens that task. Other exits land
+ * on the workspace issues list, or root when no workspace exists.
  *
  * `CliInstallInstructions` is passed in as the `runtimeInstructions`
- * slot so the flow can render it inside the CLI dialog. The commands it
+ * slot so the connect step can show the terminal path. The commands it
  * shows are hardcoded — nothing environmental to thread through.
  */
 export default function OnboardingPage() {
@@ -52,8 +50,8 @@ export default function OnboardingPage() {
     // Bounce out only when onboarding genuinely doesn't apply: the user is
     // already onboarded. We deliberately don't bounce on `workspaces.length`
     // here — the flow creates a workspace mid-onboarding, and a
-    // hasWorkspaces bounce here would kick the user out before runtime and
-    // Mika setup can run. The new entry-point
+    // hasWorkspaces bounce here would kick the user out before the agent
+    // and first task are set up. The new entry-point
     // judgment in callback / login handles "where should this user go on
     // login" so OnboardingPage no longer needs to second-guess it.
     if (hasOnboarded) {
@@ -72,11 +70,7 @@ export default function OnboardingPage() {
       <OnboardingFlow
         onComplete={(ws, destination) => {
           completingRef.current = true;
-          if (ws && destination?.kind === "chat") {
-            router.push(
-              paths.workspace(ws.slug).chatSession(destination.sessionId),
-            );
-          } else if (ws && destination?.kind === "issue") {
+          if (ws && destination) {
             router.push(
               paths.workspace(ws.slug).issueDetail(destination.issueId),
             );

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { paths, useHasOnboarded } from "@multica/core/paths";
-import type { Invitation } from "@multica/core/types";
+import type { Invitation, Workspace } from "@multica/core/types";
 import {
   workspaceKeys,
   workspaceListOptions,
@@ -12,8 +12,12 @@ import { useNavigation } from "../navigation";
 /**
  * Accept / decline for a pending invitation. The invitations page is the only
  * surface that answers invitations; the workspace switcher links to it.
+ *
+ * `onJoined` replaces the default of landing in the joined workspace.
  */
-export function useInvitationActions() {
+export function useInvitationActions({
+  onJoined,
+}: { onJoined?: (workspace: Workspace) => void } = {}) {
   const queryClient = useQueryClient();
   const { push } = useNavigation();
   const hasOnboarded = useHasOnboarded();
@@ -47,7 +51,9 @@ export function useInvitationActions() {
     // invitation reads as nothing happened (MUL-820).
     onSuccess: (workspaces, invitation) => {
       const joined = workspaces.find((w) => w.id === invitation.workspace_id);
-      if (joined) push(paths.workspace(joined.slug).issues());
+      if (!joined) return;
+      if (onJoined) onJoined(joined);
+      else push(paths.workspace(joined.slug).issues());
     },
     // On failure the invitation was usually concluded on another surface
     // while it was on screen, or the join went through and a later step

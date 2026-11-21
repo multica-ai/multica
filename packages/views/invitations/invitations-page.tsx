@@ -13,10 +13,11 @@ import {
   resolvePostAuthDestination,
   useHasOnboarded,
 } from "@multica/core/paths";
-import type { Invitation } from "@multica/core/types";
-import { AppLink } from "../navigation";
+import type { Invitation, Workspace } from "@multica/core/types";
+import { AppLink, useNavigation } from "../navigation";
 import { useLogout } from "../auth";
-import { DragStrip } from "../platform";
+import { DragStrip, isDesktopShell } from "../platform";
+import { ConnectToolsStep } from "../onboarding/join/connect-tools-step";
 import { useT } from "../i18n";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { useInvitationActions } from "./use-invitation-actions";
@@ -53,7 +54,13 @@ export interface InvitationsPageProps {
 export function InvitationsPage({ invitationId, onBack }: InvitationsPageProps) {
   const { t } = useT("invite");
   const hasOnboarded = useHasOnboarded();
-  const { accept, decline } = useInvitationActions();
+  const { push } = useNavigation();
+  const [connectTools, setConnectTools] = useState<Workspace | null>(null);
+  // Desktop can bring this computer's coding tools along as the member's own
+  // agents before they land; on web there is no local daemon to ask.
+  const { accept, decline } = useInvitationActions({
+    onJoined: isDesktopShell() ? setConnectTools : undefined,
+  });
   const [error, setError] = useState<string | null>(null);
 
   const { data: pending = [], isLoading } = useQuery(myInvitationListOptions());
@@ -67,6 +74,15 @@ export function InvitationsPage({ invitationId, onBack }: InvitationsPageProps) 
     staleTime: 0,
   });
   const { data: workspaces = [] } = useQuery(workspaceListOptions());
+
+  if (connectTools) {
+    return (
+      <ConnectToolsStep
+        workspace={connectTools}
+        onDone={() => push(paths.workspace(connectTools.slug).issues())}
+      />
+    );
+  }
 
   if (isLoading || linked.isLoading) {
     return (

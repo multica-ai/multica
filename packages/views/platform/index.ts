@@ -28,6 +28,7 @@ export {
   type LocalVoiceAPI,
 } from "./local-voice";
 export {
+  restartLocalDaemon,
   useLocalDaemonStatus,
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";

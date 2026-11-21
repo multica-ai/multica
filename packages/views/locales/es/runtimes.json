@@ -70,14 +70,6 @@
       "offline": "Desconectado"
     }
   },
-  "mika_setup": {
-    "title": "Tu runtime está listo. Empieza con Mika.",
-    "description": "Deja que Mika organice el trabajo y coordine a los agentes.",
-    "action": "Empezar con Mika",
-    "failed": "No se ha podido iniciar Mika",
-    "dialog_title": "¿Dónde debe ejecutarse Mika?",
-    "cancel": "Cancelar"
-  },
   "machine": {
     "search_placeholder": "Buscar máquinas…",
     "filters": {
