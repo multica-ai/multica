@@ -66,7 +66,7 @@ export interface SidebarInboxSettings {
 
 export const DEFAULT_SIDEBAR_INBOX_SETTINGS: SidebarInboxSettings = {
   limit: 5,
-  showCount: false,
+  showCount: true,
   railBadge: true,
   compact: false,
 };
