@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Tooltip,
   TooltipContent,
@@ -66,17 +67,79 @@ function DocPageContent({ docId }: { docId: string }) {
   if (isDocNotFound(query.error)) return <DocNotFound docId={docId} />;
   if (!query.data)
     return (
-      <div className="p-6">
+      <DocPageSkeleton docId={docId}>
         {query.isError ? (
           <Button onClick={() => void query.refetch()}>
             {t(($) => $.editor.retry)}
           </Button>
-        ) : (
-          t(($) => $.history.loading)
-        )}
-      </div>
+        ) : null}
+      </DocPageSkeleton>
     );
   return <DocEditor key={`${wsId}:${docId}`} doc={query.data} />;
+}
+
+/**
+ * The editor's frame while the doc loads: the header and reading column sit
+ * where the loaded page puts them, so nothing moves when the content lands.
+ * The tree already knows the title and folder, so those show for real.
+ */
+function DocPageSkeleton({
+  docId,
+  children,
+}: {
+  docId: string;
+  children?: React.ReactNode;
+}) {
+  const { t } = useT("docs");
+  const p = useWorkspacePaths();
+  const wsId = useWorkspaceId();
+  const { data: tree } = useQuery(docTreeOptions(wsId));
+  const summary = tree?.docs.find((d) => d.id === docId);
+  const ancestors = folderAncestry(tree?.folders ?? [], summary?.folderId ?? null);
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <BreadcrumbHeader
+        segments={[
+          { href: p.docs(), label: t(($) => $.kb) },
+          ...ancestors.map((f) => ({ href: p.docFolder(f.id), label: f.title })),
+        ]}
+        leaf={
+          summary ? (
+            <span className="truncate">{summary.title || t(($) => $.untitled)}</span>
+          ) : (
+            <Skeleton className="h-4 w-32" />
+          )
+        }
+      />
+      <div className="@container min-h-0 flex-1 overflow-auto">
+        <div aria-busy className="mx-auto max-w-4xl px-6 py-8 @3xl:px-16">
+          {children ?? (
+            <>
+              {summary ? (
+                <div className="text-display-sm font-semibold">
+                  {summary.title || (
+                    <span className="text-muted-foreground">{t(($) => $.untitled)}</span>
+                  )}
+                </div>
+              ) : (
+                <Skeleton className="h-8 w-2/3" />
+              )}
+              <div className="mt-3 mb-8 flex items-center gap-2">
+                <Skeleton className="size-4 rounded-full" />
+                <Skeleton className="h-3.5 w-40" />
+              </div>
+              <div className="space-y-3">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-11/12" />
+                <Skeleton className="h-4 w-4/5" />
+                <Skeleton className="h-4 w-2/3" />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 function DocEditor({ doc }: { doc: Doc }) {
   const { t } = useT("docs");
