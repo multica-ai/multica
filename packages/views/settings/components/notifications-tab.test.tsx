@@ -103,22 +103,104 @@ describe("Inbox notification settings", () => {
     renderTab();
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
     expect(leaving).toHaveTextContent("Reading a notification doesn't take it out of the Inbox.");
-    expect(leaving).toHaveTextContent("Issues others complete stay in your Inbox.");
+    expect(leaving).toHaveTextContent("Other people's actions never do");
     expect(within(leaving).getByRole("link", { name: "View archived" })).toHaveAttribute(
       "href",
       "/acme/inbox?view=archived",
     );
   });
 
-  it.each<{ preferences: Record<string, string>; checked: boolean }>([
-    { preferences: {}, checked: true },
-    { preferences: { auto_archive_completed: "muted" }, checked: false },
-  ])("toggles archiving issues you complete: %j", ({ preferences, checked }) => {
+  const ALL_ACTIONS_OFF = {
+    auto_archive_completed: "muted",
+    auto_archive_on_comment: "muted",
+    auto_archive_on_status: "muted",
+    auto_archive_on_assignee: "muted",
+  };
+
+  it.each<{ preferences: Record<string, string>; shown: string }>([
+    { preferences: {}, shown: "Complete, Reply, Change status, Reassign" },
+    { preferences: ALL_ACTIONS_OFF, shown: "Never" },
+    { preferences: { ...ALL_ACTIONS_OFF, auto_archive_on_labels: "all" }, shown: "Change labels" },
+    { preferences: { auto_archive_on_comment: "muted", auto_archive_on_dates: "all" }, shown: "Complete, Change status, Reassign, Change dates" },
+  ])("lists which of your actions archive an issue: %j", ({ preferences, shown }) => {
     renderTab(preferences);
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
-    const toggle = within(leaving).getByRole("switch", { name: "Archive issues you complete" });
-    if (checked) expect(toggle).toBeChecked();
-    else expect(toggle).not.toBeChecked();
+    expect(within(leaving).getByRole("combobox", { name: "Archive issues you handle" })).toHaveTextContent(shown);
+  });
+
+  it("groups the actions into handling an issue and tidying it, with the defaults picked", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    await user.click(within(leaving).getByRole("combobox", { name: "Archive issues you handle" }));
+    const handling = await screen.findByRole("group", { name: "Handling it · on by default" });
+    const tidying = screen.getByRole("group", { name: "Tidying it" });
+    const picked = (group: HTMLElement) =>
+      within(group).getAllByRole("option").map((option) => [option.textContent, option.getAttribute("aria-selected")]);
+    expect(picked(handling)).toEqual([
+      ["Complete", "true"],
+      ["Reply", "true"],
+      ["Change status", "true"],
+      ["Reassign", "true"],
+    ]);
+    expect(picked(tidying)).toEqual([
+      ["Change priority", "false"],
+      ["Change project", "false"],
+      ["Change dates", "false"],
+      ["Change labels", "false"],
+    ]);
+  });
+
+  it.each<{ option: string; sent: Record<string, string> }>([
+    { option: "Reply", sent: { auto_archive_on_comment: "muted" } },
+    { option: "Change labels", sent: { auto_archive_on_labels: "all" } },
+  ])("toggles one action at a time: $option", async ({ option, sent }) => {
+    const user = userEvent.setup();
+    renderTab();
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    await user.click(within(leaving).getByRole("combobox", { name: "Archive issues you handle" }));
+    await user.click(await screen.findByRole("option", { name: option }));
+    expect(mutate).toHaveBeenCalledWith(
+      {
+        auto_archive_completed: "all",
+        auto_archive_on_comment: "all",
+        auto_archive_on_status: "all",
+        auto_archive_on_assignee: "all",
+        auto_archive_on_priority: "muted",
+        auto_archive_on_project: "muted",
+        auto_archive_on_dates: "muted",
+        auto_archive_on_labels: "muted",
+        ...sent,
+      },
+      expect.anything(),
+    );
+  });
+
+  it("nests where to go after archiving under the archive choice, hidden while it is off", () => {
+    renderTab(ALL_ACTIONS_OFF);
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    expect(within(leaving).queryByRole("combobox", { name: "After archiving" })).toBeNull();
+  });
+
+  it.each<{ preferences: Record<string, string>; shown: string }>([
+    { preferences: {}, shown: "Stay on the issue" },
+    { preferences: { after_auto_archive: "next" }, shown: "Open the next one" },
+  ])("shows where to go after archiving: %j", ({ preferences, shown }) => {
+    renderTab(preferences);
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    expect(within(leaving).getByRole("combobox", { name: "After archiving" })).toHaveTextContent(shown);
+  });
+
+  it("saves opening the next notification after archiving", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    await user.click(within(leaving).getByRole("combobox", { name: "After archiving" }));
+    await user.click(await screen.findByRole("option", { name: "Open the next one" }));
+    expect(mutate).toHaveBeenCalledWith(
+      { after_auto_archive: "next" },
+      expect.anything(),
+    );
   });
 });
 

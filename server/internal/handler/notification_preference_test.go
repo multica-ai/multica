@@ -289,8 +289,10 @@ func TestLegacyPutKeepsOmittedStatusChangesOn(t *testing.T) {
 }
 
 // TestPatchNotificationPreferencesAcceptsAddedGroups covers groups added after
-// the original set: mentions (#6468), reactions (MUL-9328) and
-// auto_archive_completed (MUL-9336). The whitelist rejects unknown keys, so a
+// the original set: mentions (#6468), reactions (MUL-9328),
+// auto_archive_completed (MUL-9336) and the per-action auto_archive_on_*
+// keys (MUL-9788).
+// The whitelist rejects unknown keys, so a
 // client shipped ahead of the server would 400 on these keys — the reason the
 // server must deploy first.
 func TestPatchNotificationPreferencesAcceptsAddedGroups(t *testing.T) {
@@ -303,6 +305,8 @@ func TestPatchNotificationPreferencesAcceptsAddedGroups(t *testing.T) {
 		{"reactions"},
 		{"auto_archive_completed"},
 		{"reactions", "auto_archive_completed"},
+		{"auto_archive_on_comment", "auto_archive_on_status", "auto_archive_on_assignee"},
+		{"auto_archive_on_priority", "auto_archive_on_project", "auto_archive_on_dates", "auto_archive_on_labels"},
 	} {
 		t.Run(strings.Join(groups, "+"), func(t *testing.T) {
 			t.Cleanup(func() {
@@ -396,5 +400,36 @@ func TestPatchNotificationPreferencesValidatesOthersIssuesValues(t *testing.T) {
 	)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("comments=key_updates: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPatchNotificationPreferencesValidatesAfterAutoArchiveValues(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM notification_preference
+			WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, testUserID)
+	})
+
+	for value, want := range map[string]int{
+		"stay":  http.StatusOK,
+		"next":  http.StatusOK,
+		"all":   http.StatusBadRequest,
+		"muted": http.StatusBadRequest,
+	} {
+		recorder := httptest.NewRecorder()
+		testHandler.PatchNotificationPreferences(
+			recorder,
+			notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+				"after_auto_archive": value,
+			}),
+		)
+		if recorder.Code != want {
+			t.Errorf("after_auto_archive=%q: status=%d want %d body=%s",
+				value, recorder.Code, want, recorder.Body.String())
+		}
 	}
 }
