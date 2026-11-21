@@ -1134,8 +1134,6 @@ To assign a squad instead, use `--squad` (name or ID) or `--squad-id` (canonical
 multica autopilot trigger <id>            # Fires the autopilot once, returns the run
 ```
 
-On Multica Cloud, a member running this command directly uses no automation quota. Runs triggered by an agent on a member's behalf, a schedule, or a webhook count toward the workspace quota. When an agent triggers a run after an enforced limit is reached, the API returns HTTP 429 with `reason_code: quota_exceeded` and a `Retry-After` header.
-
 The command exits non-zero unless the run actually started (`issue_created` or
 `running`). If a run is `skipped` (for example, the runtime is offline
 or a duplicate is already in flight), the CLI prints its

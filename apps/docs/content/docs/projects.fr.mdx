@@ -104,8 +104,6 @@ multica project member add <project-id> carol@example.com
 
 Rendre un projet privé à **Tout l’espace de travail** permet à toute personne ayant le rôle `owner`, `admin` ou `member` de voir le projet, ses tâches, ses commentaires et ses pièces jointes. Les invités ne voient le projet que s’il est partagé avec eux. L'application demande une confirmation avant d'enregistrer ; `multica project update --visibility workspace` applique le changement immédiatement.
 
-Si l’offre de votre espace de travail limite les projets privés, les projets déjà privés le restent et leurs membres y gardent accès. Vous ne pouvez alors ni créer de projet privé, ni rendre un projet privé, ni y ajouter de membre, même en nommant responsable une personne extérieure au projet. Les membres habilités peuvent toujours modifier les détails du projet, retirer des membres, ouvrir l’accès à tout l’espace de travail, et archiver ou supprimer le projet. Le propriétaire de l’espace peut toujours rejoindre le projet (voir [Reprise par le propriétaire de l'espace de travail](#workspace-owner-recovery)).
-
 ### Reprise par le propriétaire de l'espace de travail [#workspace-owner-recovery]
 
 Un projet privé peut n'avoir aucun `owner` ni `admin` sur sa liste, voire plus aucun membre. Le `owner` de l'espace de travail peut intervenir depuis **Paramètres → Général → Projets privés**, une section visible des seuls propriétaires (pas des `admin`). Elle liste chaque projet privé avec son nom et ses membres, et rien d'autre : les tâches, commentaires et pièces jointes restent masqués tant que vous ne l'avez pas rejoint.
