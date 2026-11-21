@@ -41,6 +41,8 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
+import { useTabAttention, useTabAttentionStore } from "@/stores/tab-attention-store";
+import { useTabAttentionSync } from "@/hooks/use-tab-attention-sync";
 import { paths } from "@multica/core/paths";
 import { useT } from "@multica/views/i18n";
 import {
@@ -168,7 +170,17 @@ function SortableTabItem({
     s.tabAttention?.tabId === tab.id ? s.tabAttention.sequence : 0,
   );
   const clearTabAttention = useTabStore((s) => s.clearTabAttention);
+  // Distinct from the store-owned flash above: our persistent attention dot
+  // lives in its own unpersisted store and clears on tab activation.
+  const clearAttentionDot = useTabAttentionStore((s) => s.clearTabAttention);
   const issueWindowPath = parseIssueWindowPath(tab.url);
+  // A dot means "this tab's run finished while you were elsewhere". The
+  // active tab is on screen, so it shows no dot and clears its entry.
+  const hasAttention = useTabAttention(tab.id) && !isActive;
+
+  useEffect(() => {
+    if (isActive) clearAttentionDot(tab.id);
+  }, [isActive, tab.id, clearAttentionDot]);
 
   // The tab's leading visual and title are derived live from its URL and the
   // query cache — a resource's own icon/status/avatar and its real title,
@@ -188,9 +200,11 @@ function SortableTabItem({
   const closeLabel = t(($) => $.desktop.tab_bar.close);
   const closeOthersLabel = t(($) => $.desktop.tab_bar.close_others);
   const openWindowLabel = t(($) => $.desktop.tab_bar.open_window);
+  const attentionLabel = t(($) => $.desktop.tab_bar.attention);
   const tabName = tab.pinned
     ? t(($) => $.desktop.tab_bar.pinned_name, { title })
     : title;
+  const accessibleName = hasAttention ? `${tabName} — ${attentionLabel}` : tabName;
 
   // Persist each tab's resolved title so it survives as the next
   // session's first-frame fallback. The tab strip itself always renders the
@@ -283,7 +297,7 @@ function SortableTabItem({
         e.preventDefault();
         handleClose(e);
       }}
-      aria-label={tabName}
+      aria-label={accessibleName}
       data-tab-active={isActive ? "true" : undefined}
       data-tab-entering={isEntering ? "true" : undefined}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
@@ -297,6 +311,15 @@ function SortableTabItem({
       )}
     >
       <ResourceLeadingVisual visual={visual} />
+      {hasAttention && (
+        <span
+          aria-hidden
+          data-tab-attention="true"
+          // The IM unread red from the chat thread list, so "this conversation
+          // finished" reads the same on a tab as it does in the list.
+          className="size-1.5 shrink-0 rounded-full bg-[oklch(0.62_0.14_18)]"
+        />
+      )}
       <span
         className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left"
         style={{
@@ -546,6 +569,9 @@ function NewTabButton() {
 }
 
 export function TabBar() {
+  // Finished runs in this workspace dot their tabs (chat turn done, issue
+  // agent run done). The sync hook owns marking and clearing.
+  useTabAttentionSync();
   const group = useActiveGroup();
   const moveTab = useTabStore((s) => s.moveTab);
   const activeWorkspaceSlug = useTabStore((s) => s.activeWorkspaceSlug);
