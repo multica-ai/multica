@@ -29,6 +29,8 @@ Sur la page **Skills** de l'espace de travail, choisissez « Nouveau skill ». Q
 | **Importer depuis une URL** | Importez un skill publié depuis GitHub, ClawHub ou Skills.sh. |
 | **Copier depuis un runtime** | Analysez les skills d'un ordinateur connecté et copiez ceux que vous sélectionnez dans l'espace de travail. |
 
+L'importation ignore les fichiers annexes binaires, comme les images PNG et les polices. Si un skill dépend de ces fichiers, il risque de ne pas fonctionner après l'importation.
+
 La copie depuis un runtime prend un instantané des fichiers à ce moment-là. Les modifications ultérieures des fichiers locaux ne mettent pas automatiquement à jour la version de l'espace de travail ; réimportez le skill ou modifiez-le dans Multica.
 
 Le même format d'archive fonctionne depuis le CLI :
@@ -50,7 +52,7 @@ multica skill refresh <skill-id>
 Le skill est retéléchargé depuis sa source et remplacé sur place :
 
 - **Conservé** : l'identité du skill, c'est-à-dire les rattachements aux agents, les étiquettes, le créateur et la date de création. Les agents conservent le skill sans avoir à le rajouter.
-- **Remplacé** : le nom (si la source l'a renommé), la description, `SKILL.md` et tous les fichiers annexes. Les modifications locales du skill sont écrasées.
+- **Remplacé** : le nom (si la source l'a renommé), la description, `SKILL.md` et les fichiers annexes importés. Les modifications locales du skill sont écrasées.
 
 Le créateur du skill ainsi que les `owner` et `admin` de l'espace de travail peuvent mettre à jour depuis la source. Les skills créés manuellement, importés depuis un fichier d'archive ou copiés depuis un runtime n'ont pas de source hébergée et ne peuvent pas être mis à jour de cette façon : réimportez-les.
 
