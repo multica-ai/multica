@@ -402,6 +402,38 @@ describe("collaboration server", () => {
     expect(markdown(again.document)).toBe(expected);
   });
 
+  describe("folds in a write stored while the API could not reach it", () => {
+    /** Ada has the doc open and the service holds it; an agent's write lands
+     *  in the stored doc directly, before Ada's typing is saved. */
+    async function directWriteDuringLiveEdit(stored: string) {
+      resetDoc("One\n\nTwo");
+      const a = await connect(ada);
+      fake.content = stored;
+      fake.revision += 1;
+      typeInto(a.document, 1, 3, " (Ada)");
+      await waitFor(() => fake.stores.length > 0, 2000);
+      return a;
+    }
+
+    it("merging it when it changed other blocks", async () => {
+      const a = await directWriteDuringLiveEdit("One (agent)\n\nTwo");
+      const expected = "One (agent)\n\nTwo (Ada)";
+      expect(fake.content).toBe(expected);
+      expect(fake.stores.at(-1)!.message).toBeUndefined();
+      await waitFor(() => markdown(a.document) === expected);
+    });
+
+    it("keeping both copies of a block both sides changed, in a labeled version", async () => {
+      const a = await directWriteDuringLiveEdit("One\n\nTwo (agent)");
+      const expected = "One\n\nTwo (Ada)\n\nTwo (agent)";
+      expect(fake.content).toBe(expected);
+      const store = fake.stores.at(-1)!;
+      expect(store.contributors).toEqual([ada.id]);
+      expect(store.message).toMatch(/^Kept both sides of 1 conflicting edit:/);
+      await waitFor(() => markdown(a.document) === expected);
+    });
+  });
+
   it("tells a client to start over when no saved state is left to merge with", async () => {
     resetDoc("Original");
     const a = await connect(ada);

@@ -10,7 +10,10 @@ export interface MergeConflict {
 
 export type MergeResult =
   | { ok: true; doc: JSONContent }
-  | { ok: false; conflicts: MergeConflict[] };
+  /** `both` is the merge with each conflict resolved by keeping the current
+   *  blocks followed by the incoming ones, for a write that cannot be sent
+   *  back to its writer. */
+  | { ok: false; conflicts: MergeConflict[]; both: JSONContent };
 
 /**
  * Three-way merge of whole documents at top-level block granularity.
@@ -39,19 +42,32 @@ export function mergeDocuments(
   const regions = diff3Merge(keys(current), keys(base), keys(incoming));
   const merged: JSONContent[] = [];
   const conflicts: MergeConflict[] = [];
-  const toMarkdown = (part: string[]) =>
-    codec.serialize({ type: "doc", content: part.map((key) => blocks.get(key)!) });
+  const toBlocks = (part: string[]) => part.map((key) => blocks.get(key)!);
+  const toMarkdown = (part: string[]) => codec.serialize({ type: "doc", content: toBlocks(part) });
+  const conflict = (a: string[], b: string[]) => {
+    conflicts.push({ current: toMarkdown(a), incoming: toMarkdown(b) });
+    merged.push(...toBlocks(a), ...toBlocks(b));
+  };
   for (const region of regions) {
     if (region.ok) {
-      merged.push(...region.ok.map((key) => blocks.get(key)!));
-    } else {
-      conflicts.push({
-        current: toMarkdown(region.conflict.a),
-        incoming: toMarkdown(region.conflict.b),
-      });
+      merged.push(...toBlocks(region.ok));
+      continue;
+    }
+    const { a, o, b } = region.conflict;
+    // diff3 also reports edits to adjacent blocks as one conflict. When no
+    // block was added or removed, the blocks line up and only those both
+    // sides changed differently conflict.
+    if (a.length !== o.length || b.length !== o.length) {
+      conflict(a, b);
+      continue;
+    }
+    for (let i = 0; i < o.length; i++) {
+      if (a[i] === o[i] || a[i] === b[i]) merged.push(...toBlocks([b[i]!]));
+      else if (b[i] === o[i]) merged.push(...toBlocks([a[i]!]));
+      else conflict([a[i]!], [b[i]!]);
     }
   }
-  if (conflicts.length > 0) return { ok: false, conflicts };
+  if (conflicts.length > 0) return { ok: false, conflicts, both: { type: "doc", content: merged } };
   return { ok: true, doc: { type: "doc", content: merged } };
 }
 
