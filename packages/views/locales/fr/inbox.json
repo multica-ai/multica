@@ -231,5 +231,28 @@
     },
     "hint": "Modifiable dans Paramètres › Notifications",
     "confirm": "Terminé"
+  },
+  "zero": {
+    "cleared_title": "Boîte de réception vide",
+    "just_archived": "{{label}} archivé",
+    "just_snoozed": "{{label}} reporté jusqu’au {{time}}",
+    "just_unsubscribed": "Désabonné et archivé : {{label}}",
+    "just_archived_many_one": "{{count}} notification archivée",
+    "just_archived_many_other": "{{count}} notifications archivées",
+    "snoozed_summary_one": "{{count}} reportée · retour {{time}}",
+    "snoozed_summary_other": "{{count}} reportées · prochain retour {{time}}",
+    "bar_snoozed_one": "{{count}} reportée",
+    "bar_snoozed_other": "{{count}} reportées",
+    "my_work": "Mon travail",
+    "go_to_my_work": "Aller à Mon travail",
+    "agents_working_one": "{{count}} agent en cours",
+    "agents_working_other": "{{count}} agents en cours",
+    "view_archived": "Voir les archives",
+    "quick_jump": "Accès rapide",
+    "filtered_title": "Tout est traité pour ce filtre",
+    "filtered_remaining_one": "{{count}} autre notification dans votre boîte de réception",
+    "filtered_remaining_other": "{{count}} autres notifications dans votre boîte de réception",
+    "clear_and_continue": "Effacer les filtres et continuer",
+    "undo_item": "Annuler {{label}}"
   }
 }

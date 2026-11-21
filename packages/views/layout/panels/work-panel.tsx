@@ -71,8 +71,17 @@ export function KeptRowsRelease() {
   useLayoutEffect(() => {
     if (issueId === undefined) return;
     useSidebarKeptStore.getState().release([issueId, projectId].filter((id) => id !== null));
-    if (wsId) useInboxSelectionStore.getState().releaseRows(wsId, [issueId, inboxKey].filter((id) => id !== null));
-  }, [wsId, issueId, projectId, inboxKey]);
+    if (wsId) {
+      const store = useInboxSelectionStore.getState();
+      store.releaseRows(wsId, [issueId, inboxKey].filter((id) => id !== null));
+      // Keep the Inbox Zero undo context only while on /inbox (or while the
+      // just-cleared issue is still handing off its navigation to /inbox).
+      const lastCleared = store.lastClearedByWorkspace[wsId];
+      if (lastCleared && pathname !== p.inbox() && issueId !== lastCleared.key) {
+        store.clearLastCleared(wsId);
+      }
+    }
+  }, [wsId, issueId, projectId, inboxKey, pathname, p]);
   return null;
 }
 

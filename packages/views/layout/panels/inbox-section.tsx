@@ -2,7 +2,7 @@
 
 import { memo, type ReactNode, type Ref, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlarmClock, Archive, BellOff, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -33,7 +33,7 @@ import { inboxRowTime, inboxSnoozeReturnedAt } from "@multica/core/inbox/snooze"
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { useInboxSelectionStore, type LastInboxCleared } from "@multica/core/inbox/selection-store";
 import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
@@ -53,6 +53,8 @@ import { useInboxIssuePrefetch } from "../../inbox/components/use-inbox-issue-pr
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { useInboxUnsubscribable, useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import {
+  clearedLabelForItem,
+  collectBatchArchiveIds,
   useArchiveInboxBatchWithUndo,
   useArchiveInboxWithUndo,
   useLeaveInboxRow,
@@ -164,9 +166,9 @@ export function InboxSection({
   const openKey = pathname === p.inbox() ? searchParams.get("issue") : null;
   // The open notification, wherever it is open; acting on its row moves on.
   const openRowKey = activeIssueId ?? openKey;
-  const leaveIfOpen = (item: InboxItem) => {
+  const leaveIfOpen = (item: InboxItem, cleared: LastInboxCleared) => {
     const key = inboxRowKey(item);
-    if (key === openRowKey) leave(key, nextInboxRow(all, key));
+    if (key === openRowKey) leave(key, nextInboxRow(all, key), cleared);
   };
   const prefetchRow = useInboxIssuePrefetch(wsId, collapsed ? [] : displayed, (item) => inboxRowHref(p, item));
   // What arrived on each issue while it was snoozed, for the rows back from one.
@@ -187,16 +189,44 @@ export function InboxSection({
   const latest = {
     prefetch: (item: InboxItem) => void prefetchRow(item),
     archive: (item: InboxItem) => {
-      archive(item.id, inboxRowKey(item));
-      leaveIfOpen(item);
+      const key = inboxRowKey(item);
+      archive(item.id, key);
+      leaveIfOpen(item, {
+        kind: "archived",
+        itemId: item.id,
+        key,
+        label: clearedLabelForItem(item),
+        href: inboxRowHref(p, item),
+        clearedAt: Date.now(),
+      });
     },
     unsubscribe: (item: InboxItem) => {
+      const key = inboxRowKey(item);
       unsubscribeArchive({ id: item.id, issueId: item.issue_id! });
-      leaveIfOpen(item);
+      leaveIfOpen(item, {
+        kind: "unsubscribed",
+        itemId: item.id,
+        issueId: item.issue_id!,
+        key,
+        label: clearedLabelForItem(item),
+        href: inboxRowHref(p, item),
+        undoable: true,
+        clearedAt: Date.now(),
+      });
     },
     snooze: (item: InboxItem, until: Date) => {
+      const key = inboxRowKey(item);
       snooze(item, until);
-      leaveIfOpen(item);
+      leaveIfOpen(item, {
+        kind: "snoozed",
+        itemId: item.id,
+        key,
+        label: clearedLabelForItem(item),
+        href: inboxRowHref(p, item),
+        until: until.toISOString(),
+        wasRead: item.read === true,
+        clearedAt: Date.now(),
+      });
     },
   };
   const latestRef = useRef(latest);
@@ -431,6 +461,7 @@ function InboxSectionActions({
 }) {
   const { t } = useT("layout");
   const { t: tInbox } = useT("inbox");
+  const qc = useQueryClient();
   const leave = useLeaveInboxRow();
   const archiveWithUndo = useArchiveInboxBatchWithUndo();
   const { categoryOf } = useIssueStatuses(wsId);
@@ -443,8 +474,23 @@ function InboxSectionActions({
   ) => {
     const open = openRowKey ? rows.find((item) => inboxRowKey(item) === openRowKey) : undefined;
     const takesOpen = !!open && archives(open);
+    const takenIds = takesOpen ? collectBatchArchiveIds(qc, wsId, archives) : [];
     void archiveWithUndo(archive, archives, failed, takesOpen ? openRowKey : null);
-    if (takesOpen) leave(openRowKey!, nextInboxRow(rows, openRowKey!, archives));
+    if (takesOpen) {
+      leave(
+        openRowKey!,
+        nextInboxRow(rows, openRowKey!, archives),
+        takenIds.length > 0
+          ? {
+              kind: "batch_archived",
+              count: takenIds.length,
+              itemIds: takenIds,
+              key: openRowKey,
+              clearedAt: Date.now(),
+            }
+          : undefined,
+      );
+    }
   };
   const isRead = (item: InboxItem) => item.read === true;
   const isFinished = (item: InboxItem) => {
