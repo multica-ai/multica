@@ -125,6 +125,8 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
+If `issue comment add` times out or the response is lost, the comment may already be present. Check `multica issue comment list <issue-id>` before resending. For a reply, add `--thread <parent-id> --full`, using the same ID as `--parent`, to see replies in resolved threads. If the check also fails, keep the comment text and wait for a successful check before resending. Use `--content-file` to send from a saved copy.
+
 Inspect, stop, or retry a single run:
 
 ```bash

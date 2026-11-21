@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -614,6 +616,107 @@ func TestRunIssueCommentAddUploadsAttachmentWithoutIssueID(t *testing.T) {
 	attachmentIDs, ok := commentBody["attachment_ids"].([]any)
 	if !ok || len(attachmentIDs) != 1 || attachmentIDs[0] != "attachment-1" {
 		t.Fatalf("comment attachment_ids = %#v, want [attachment-1]", commentBody["attachment_ids"])
+	}
+}
+
+func TestRunIssueCommentAddChecksDeliveryBeforeRetry(t *testing.T) {
+	const (
+		issueID       = "11111111-1111-4111-8111-111111111111"
+		parentID      = "22222222-2222-4222-8222-222222222222"
+		checkComments = "multica issue comment list " + issueID
+	)
+	for _, tc := range []struct {
+		name     string
+		status   int
+		response string
+		parent   string
+		timeout  bool
+		wantCmd  string
+		wantExit int
+	}{
+		{"lost acknowledgement", http.StatusCreated, "{", "", false, checkComments, cli.ExitNetwork},
+		{"connection closes before response", 0, "", "", false, checkComments, cli.ExitNetwork},
+		{"gateway error", http.StatusBadGateway, "gateway failed", "", false, checkComments, cli.ExitGeneric},
+		{"validation error", http.StatusUnprocessableEntity, "comment rejected", "", false, "", cli.ExitValidation},
+		{
+			name:     "reply times out before response",
+			parent:   parentID,
+			timeout:  true,
+			wantCmd:  checkComments + " --thread " + parentID + " --full",
+			wantExit: cli.ExitNetwork,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var posts atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/api/issues/"+issueID+"/comments" {
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				posts.Add(1)
+				if tc.timeout {
+					var posted map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+						t.Errorf("decode comment body: %v", err)
+						return
+					}
+					if posted["parent_id"] != tc.parent {
+						t.Errorf("comment parent_id = %v, want %q", posted["parent_id"], tc.parent)
+					}
+					<-r.Context().Done()
+					return
+				}
+				if tc.status == 0 {
+					conn, _, err := http.NewResponseController(w).Hijack()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_ = conn.Close()
+					return
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.response)
+			}))
+			defer srv.Close()
+			setCLITestServerEnv(t, srv.URL)
+			if tc.timeout {
+				t.Setenv("MULTICA_HTTP_TIMEOUT", "400ms")
+			}
+			cmd := newIssueCommentAddTestCmd()
+			if err := cmd.Flags().Set("content", "review verdict"); err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Flags().Set("parent", tc.parent); err != nil {
+				t.Fatal(err)
+			}
+			stderr := captureStderr(t)
+			defer stderr.restore()
+			err := runIssueCommentAdd(cmd, []string{issueID})
+			if err == nil || cli.ExitCodeFor(err) != tc.wantExit {
+				t.Fatalf("comment error = %v, want exit code %d", err, tc.wantExit)
+			}
+			if tc.timeout && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("comment error = %v, want a request timeout", err)
+			}
+			if got := posts.Load(); got != 1 {
+				t.Fatalf("POST count = %d, want 1", got)
+			}
+			hint := stderr.read()
+			if tc.wantCmd == "" {
+				if hint != "" {
+					t.Fatalf("stderr = %q, want no delivery hint", hint)
+				}
+				return
+			}
+			if !strings.Contains(hint, "`"+tc.wantCmd+"`") {
+				t.Errorf("stderr = %q, want check command %q", hint, tc.wantCmd)
+			}
+			if !strings.Contains(hint, "keep the comment text and wait for a successful check before resending") {
+				t.Errorf("stderr = %q, want instructions for a failed check", hint)
+			}
+		})
 	}
 }
 
