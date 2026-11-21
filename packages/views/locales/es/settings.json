@@ -1535,6 +1535,7 @@
       "restarting": "Reiniciando el daemon",
       "restarting_description": "Los runtimes volverán a estar en línea en unos segundos.",
       "view_logs": "Ver logs",
+      "start_local": "Iniciar daemon local",
       "managed_externally": "Gestionado fuera de la app",
       "restart": "Reiniciar",
       "stop": "Detener",

@@ -1523,6 +1523,7 @@
       "restarting": "正在重启守护进程",
       "restarting_description": "运行时将在几秒后恢复在线。",
       "view_logs": "查看日志",
+      "start_local": "启动本地守护进程",
       "managed_externally": "由应用外部管理",
       "restart": "重启",
       "stop": "停止",

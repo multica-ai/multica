@@ -1523,6 +1523,7 @@
       "restarting": "デーモンを再起動しています",
       "restarting_description": "ランタイムは数秒後にオンラインへ戻ります。",
       "view_logs": "ログを表示",
+      "start_local": "ローカルデーモンを起動",
       "managed_externally": "アプリ外で管理されています",
       "restart": "再起動",
       "stop": "停止",

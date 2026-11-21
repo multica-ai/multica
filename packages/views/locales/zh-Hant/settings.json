@@ -1523,6 +1523,7 @@
       "restarting": "正在重啟守護程序",
       "restarting_description": "執行時將在幾秒後恢復線上。",
       "view_logs": "檢視日誌",
+      "start_local": "啟動本機守護程序",
       "managed_externally": "由應用外部管理",
       "restart": "重啟",
       "stop": "停止",
