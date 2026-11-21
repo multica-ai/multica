@@ -33,6 +33,7 @@ import { TaskList } from "@tiptap/extension-list";
 import { Markdown } from "@tiptap/markdown";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
+import { CollaborationSelectionSync } from "./collaboration-selection";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import { coalesceAwarenessChanges } from "./coalesced-awareness";
@@ -268,6 +269,7 @@ export function createEditorExtensions(
             document: options.collaboration.document,
             field: COLLAB_FIELD,
           }),
+          CollaborationSelectionSync.configure({ document: options.collaboration.document }),
           CollaborationCaret.configure({
             provider: {
               awareness:
