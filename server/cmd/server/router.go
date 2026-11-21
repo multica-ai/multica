@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
+	"github.com/multica-ai/multica/server/internal/collab"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/entitlement"
@@ -469,6 +470,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.Metrics = opts.BusinessMetrics
 	h.InboxReads.Metrics = opts.InboxReadMetrics
 	h.FeatureFlags = opts.FeatureFlags
+	collabClient, err := collab.NewClient(os.Getenv("COLLAB_INTERNAL_URL"), os.Getenv("COLLAB_SECRET"))
+	if err != nil {
+		slog.Error("live doc editing disabled", "error", err)
+	}
+	h.Collab = collabClient
 	h.ThemeStore = themeStoreFromEnv()
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
@@ -1599,6 +1605,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
 
+	// Live doc editing. Editors authenticate with a ticket from
+	// POST /api/docs/{id}/collab-ticket; the service calls back with the
+	// shared secret.
+	if h.Collab != nil {
+		r.Get("/collab", h.Collab.Proxy().ServeHTTP)
+		r.Route("/internal/collab/docs/{id}", func(r chi.Router) {
+			r.Use(h.RequireCollabSecret)
+			r.Get("/", h.GetCollabDoc)
+			r.Post("/store", h.StoreCollabDoc)
+		})
+	}
+
 	// Capability-authenticated attachment download (MUL-5292). Public by
 	// necessity: a native download (Electron's webContents.downloadURL, a
 	// cross-site webview <img>) carries neither Authorization nor a session
@@ -2361,6 +2379,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetDoc)
 					r.Patch("/", h.UpdateDoc)
+					r.Post("/edits", h.EditDoc)
+					r.Post("/collab-ticket", h.CreateDocCollabTicket)
 					r.With(handler.RequireHumanActor).Delete("/", h.DeleteDoc)
 					r.Post("/move", h.MoveDoc)
 					r.Get("/versions", h.ListDocVersions)

@@ -2,6 +2,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { watchDom } from "./dom-throttle";
 
 export interface OutlineHeading {
   level: number;
@@ -57,23 +58,12 @@ export function useDocOutline(
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    let frame = 0;
-    const refresh = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const next = readOutline(root);
-        setHeadings((prev) => (sameOutline(prev, next) ? prev : next));
-      });
-    };
-    refresh();
     // The editor mounts after first paint and re-renders headings in place, so
     // watch the DOM rather than the Markdown.
-    const observer = new MutationObserver(refresh);
-    observer.observe(root, { childList: true, subtree: true, characterData: true });
-    return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
-    };
+    return watchDom(root, () => {
+      const next = readOutline(root);
+      setHeadings((prev) => (sameOutline(prev, next) ? prev : next));
+    });
   }, [rootRef]);
 
   useEffect(() => {

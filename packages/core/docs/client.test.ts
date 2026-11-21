@@ -101,6 +101,17 @@ describe("knowledge base client", () => {
     ).toBe(false);
   });
 
+  it("treats a stale save that could not be merged as a revision conflict", async () => {
+    respond(
+      { error: "the doc changed in the same place", code: "doc_merge_conflict", actual_revision: 5 },
+      409,
+    );
+    const error = await new ApiClient("https://api.example.test")
+      .updateDoc("d1", { baseRevision: 3, content: "x" })
+      .catch((e: unknown) => e);
+    expect(isDocRevisionConflict(error)).toBe(true);
+  });
+
   it("searches docs and keeps the hits it can read", async () => {
     const { content: _content, ...summary } = validDoc;
     const fetchMock = respond({

@@ -10,6 +10,7 @@ import {
   DocSearchResponseSchema,
   DocCommentSchema,
   DocCommentListSchema,
+  DocCollabTicketSchema,
 } from "../docs/schemas";
 import type {
   Doc,
@@ -20,6 +21,7 @@ import type {
   CreateDocCommentRequest,
   DocTree,
   DocVersion,
+  DocCollabTicket,
   CreateDocRequest,
   UpdateDocRequest,
   CreateDocFolderRequest,
@@ -1093,6 +1095,14 @@ export class ApiClient {
       { versions: [] },
       { endpoint: "GET /api/docs/{id}/versions" },
     ).versions;
+  }
+  async createDocCollabTicket(id: string): Promise<DocCollabTicket> {
+    return parseWithFallback<DocCollabTicket>(
+      await this.fetch<unknown>(`/api/docs/${id}/collab-ticket`, { method: "POST" }),
+      DocCollabTicketSchema,
+      { enabled: false },
+      { endpoint: "POST /api/docs/{id}/collab-ticket" },
+    );
   }
   async getDocVersion(id: string, number: number): Promise<DocVersion | null> {
     return parseWithFallback<DocVersion | null>(

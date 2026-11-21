@@ -67,6 +67,7 @@ vi.mock("../../editor", () => ({
   ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div>,
   useEditorUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
+vi.mock("./use-doc-collab", () => ({ useDocCollab: () => ({ mode: "solo" }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../layout/breadcrumb-header", () => ({
   BreadcrumbHeader: ({ actions }: { actions?: React.ReactNode }) => <header>{actions}</header>,

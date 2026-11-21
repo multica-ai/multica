@@ -31,6 +31,7 @@ import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import type { Mark, Node as PMNode, NodeType } from "@tiptap/pm/model";
 import type { RefObject } from "react";
+import { ySyncPluginKey } from "@tiptap/y-tiptap";
 
 export interface ResolvedIssueRef {
   /** Issue UUID. */
@@ -101,7 +102,8 @@ function collectCandidates(
   rangeTo = Number.POSITIVE_INFINITY,
 ): Candidate[] {
   const out: Candidate[] = [];
-  state.doc.descendants((node, pos, parent) => {
+  const size = state.doc.content.size;
+  state.doc.nodesBetween(Math.max(0, rangeFrom), Math.min(rangeTo, size), (node, pos, parent) => {
     if (!node.isText || !node.text) return;
     if (isSkippedTextNode(node.marks, parent)) return;
     const text = node.text;
@@ -154,8 +156,8 @@ function candidatesFromUserTransaction(
     return collectCandidates(state, range.from, range.to);
   }
 
-  const caret = state.selection.from;
-  const target = collectCandidates(state).find((c) => c.to === caret - 1);
+  const caret = state.selection.$from;
+  const target = collectCandidates(state, caret.start(), caret.end()).find((c) => c.to === caret.pos - 1);
   return target ? [target] : [];
 }
 
@@ -229,9 +231,13 @@ export function createIssueIdentifierAutolinkExtension(
               }
 
               // 3. Capture new candidates from a genuine user edit only (never
-              //    programmatic setContent or our own replacement).
+              //    programmatic setContent, our own replacement, or a
+              //    collaborator's change arriving).
               const isUserEdit =
-                tr.docChanged && !tr.getMeta("preventUpdate") && !remove;
+                tr.docChanged &&
+                !tr.getMeta("preventUpdate") &&
+                !remove &&
+                !tr.getMeta(ySyncPluginKey)?.isChangeOrigin;
               if (isUserEdit) {
                 const fresh = candidatesFromUserTransaction(tr, newState);
                 if (fresh.length > 0) {

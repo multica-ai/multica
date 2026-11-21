@@ -1,5 +1,6 @@
 "use client";
 import { docKeys } from "../docs/queries";
+import { applyDocUpdated } from "../docs/realtime";
 
 import { weixinKeys } from "../weixin/queries";
 
@@ -1423,12 +1424,24 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
     };
 
+    // Only the tree lists docs and folders; an open doc's body and comments
+    // are not touched by these.
     const docUnsubs = ([
-      "doc:created", "doc:updated", "doc:deleted",
-      "doc_folder:created", "doc_folder:updated", "doc_folder:deleted",
+      "doc:created", "doc_folder:created", "doc_folder:updated", "doc_folder:deleted",
     ] as const).map((event) => ws.on(event, () => {
       const wsId = getCurrentWsId();
-      if (wsId) void qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
+      if (wsId) void qc.invalidateQueries({ queryKey: docKeys.tree(wsId) });
+    }));
+    docUnsubs.push(ws.on("doc:updated", (p) => {
+      const wsId = getCurrentWsId();
+      if (wsId) applyDocUpdated(qc, wsId, p);
+    }));
+    docUnsubs.push(ws.on("doc:deleted", (p) => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      void qc.invalidateQueries({ queryKey: docKeys.tree(wsId) });
+      const docId = (p as { doc_id?: string } | undefined)?.doc_id;
+      if (docId) void qc.invalidateQueries({ queryKey: docKeys.detail(wsId, docId) });
     }));
     // A discussion changed on one doc: refetch that doc's comments only.
     docUnsubs.push(ws.on("doc_comment:changed", (p) => {
