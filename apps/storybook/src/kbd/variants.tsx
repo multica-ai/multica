@@ -231,10 +231,11 @@ export function DemoShortcutKeycaps({
     return (
       <span className={cn("inline-flex items-center gap-1", className)}>
         {tokens.map(({ id, label, text, icon: Icon }) => (
-          <Kbd
+          <kbd
             key={id}
             title={label}
             className={cn(
+              "pointer-events-none inline-flex w-fit items-center justify-center gap-1 rounded-sm font-sans font-medium text-muted-foreground select-none",
               CURRENT_TONE_CLASSES[tone],
               size === "md"
                 ? "h-7 min-w-7 rounded-md px-1.5 text-caption [&_svg]:size-3.5"
@@ -242,7 +243,7 @@ export function DemoShortcutKeycaps({
             )}
           >
             {Icon ? <Icon aria-hidden="true" strokeWidth={1.8} /> : (text ?? label)}
-          </Kbd>
+          </kbd>
         ))}
       </span>
     );
@@ -374,30 +375,26 @@ export function DemoLiteralKbd({
 }) {
   if (variant === "current") {
     return (
-      <Kbd
+      <kbd
         className={cn(
-          "border border-border/70 bg-muted/80",
+          "pointer-events-none inline-flex w-fit items-center justify-center gap-1 rounded-sm border border-border/70 bg-muted/80 font-sans font-medium text-muted-foreground select-none",
           size === "md"
             ? "h-7 min-w-7 rounded-md px-1.5 text-caption"
             : "h-5 min-w-5 px-1 text-micro",
         )}
       >
         {children}
-      </Kbd>
+      </kbd>
     );
   }
   return (
-    <kbd
-      style={CASE_STYLE}
-      className={cn(
-        "pointer-events-none inline-flex w-fit items-center justify-center font-sans leading-none font-medium select-none",
-        TONE_CLASSES[tone],
-        size === "md"
-          ? "h-[2.15em] min-w-[2.15em] rounded-md px-[0.52em] text-caption"
-          : "h-[1.85em] min-w-[1.85em] rounded-[5px] px-[0.44em] text-micro",
-      )}
+    <Kbd
+      size={size}
+      tone={tone === "on-primary" ? "on-primary" : "default"}
+      compact
+      className={tone === "tooltip" ? TONE_CLASSES.tooltip : undefined}
     >
       {children}
-    </kbd>
+    </Kbd>
   );
 }
