@@ -70,6 +70,13 @@ default.** Reviewers should request changes or close the PR until one is
 provided. PRs
 missing the problem, goal, or high-level proposal are also not ready for review.
 
+Do not add or translate docs in `apps/docs/content/docs/` or root `README*.md`
+for features gated behind a default-off flag in
+`server/internal/featureflags/keys.go` (permanently enabled compat keys do not
+count); note why docs were skipped in the PR description instead. When a PR
+flips a flag to default-on or removes it for general availability, add the docs
+across all locales in the same PR.
+
 ### Screenshots and Recordings
 
 Store PR evidence as [GitHub attachments](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
