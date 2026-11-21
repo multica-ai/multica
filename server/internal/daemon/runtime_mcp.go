@@ -11,6 +11,9 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"log/slog"
+	"os/user"
 )
 
 // runtimeLocalMcpServerSummary is the intentionally non-secret inventory
@@ -259,52 +262,24 @@ func stripJSONC(raw []byte) ([]byte, error) {
 // for task-local merging. Callers must never send the result to the server or
 // logs; the public capabilities endpoint continues to use the redacted summary
 // type above.
+// osUserHome resolves the home directory from the OS user database. It is a
+// variable so tests can simulate a passwd entry that disagrees with $HOME.
+var osUserHome = func() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	return u.HomeDir, nil
+}
+
 func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
 	}
 
-	var path, key, format string
-	switch provider {
-	case "claude":
-		path, key, format = filepath.Join(home, ".claude.json"), "mcpServers", "json"
-	case "codearts":
-		path, key, format = codeArtsUserConfigPath(home), "mcp", "jsonc"
-	// codebuddy is deliberately absent. CodeBuddy loads its own user, project
-	// and local scopes on every launch (codebuddy.go never passes
-	// --strict-mcp-config), and a managed entry already wins a same-name
-	// collision, so the daemon pre-merging them would only duplicate what the
-	// CLI does natively — while losing the scope precedence and the approval
-	// gate that protects project-scope servers.
-	case "codex":
-		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-		if codexHome == "" {
-			codexHome = filepath.Join(home, ".codex")
-		}
-		path, key, format = filepath.Join(codexHome, "config.toml"), "mcp_servers", "toml"
-	case "cursor":
-		path, key, format = filepath.Join(home, ".cursor", "mcp.json"), "mcpServers", "json"
-	case "opencode":
-		configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
-		if configHome == "" {
-			configHome = filepath.Join(home, ".config")
-		}
-		path, key, format = filepath.Join(configHome, "opencode", "opencode.json"), "mcp", "json"
-	case "openclaw":
-		path = strings.TrimSpace(os.Getenv("CLAWDBOT_CONFIG_PATH"))
-		if path == "" {
-			stateDir := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR"))
-			if stateDir == "" {
-				stateDir = filepath.Join(home, ".openclaw")
-			}
-			path = filepath.Join(stateDir, "openclaw.json")
-		}
-		key, format = "mcp.servers", "json"
-	default:
-		// pi is intentionally absent. The CLI reads ~/.pi/agent/mcp.json on its
-		// own, and a project .pi/mcp.json replaces entries with the same name.
-		// Copying the user file into the task file would start those servers twice.
+	path, key, format, supported := runtimeMcpUserPath(provider, home)
+	if !supported {
 		return map[string]any{}, false, nil
 	}
 
@@ -327,6 +302,8 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
+	} else {
+		notePasswdHomeConfig(provider, path, home)
 	}
 
 	if provider == "claude" {
@@ -339,6 +316,86 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		}
 	}
 	return servers, true, nil
+}
+
+// runtimeMcpUserPath resolves the user-scope config file for provider under
+// the given home. Paths overridden by environment variables (CODEX_HOME,
+// XDG_CONFIG_HOME, CLAWDBOT_CONFIG_PATH, OPENCLAW_STATE_DIR) are the user
+// pointing somewhere explicitly, so they ignore the home argument entirely.
+// The boolean is false for providers whose user config must not be merged
+// into task-local configs.
+func runtimeMcpUserPath(provider, home string) (path, key, format string, supported bool) {
+	switch provider {
+	case "claude":
+		return filepath.Join(home, ".claude.json"), "mcpServers", "json", true
+	case "codearts":
+		return codeArtsUserConfigPath(home), "mcp", "jsonc", true
+	// codebuddy is deliberately absent. CodeBuddy loads its own user, project
+	// and local scopes on every launch (codebuddy.go never passes
+	// --strict-mcp-config), and a managed entry already wins a same-name
+	// collision, so the daemon pre-merging them would only duplicate what the
+	// CLI does natively — while losing the scope precedence and the approval
+	// gate that protects project-scope servers.
+	case "codex":
+		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+		if codexHome == "" {
+			codexHome = filepath.Join(home, ".codex")
+		}
+		return filepath.Join(codexHome, "config.toml"), "mcp_servers", "toml", true
+	case "cursor":
+		return filepath.Join(home, ".cursor", "mcp.json"), "mcpServers", "json", true
+	case "opencode":
+		configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
+		if configHome == "" {
+			configHome = filepath.Join(home, ".config")
+		}
+		return filepath.Join(configHome, "opencode", "opencode.json"), "mcp", "json", true
+	case "openclaw":
+		path = strings.TrimSpace(os.Getenv("CLAWDBOT_CONFIG_PATH"))
+		if path == "" {
+			stateDir := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR"))
+			if stateDir == "" {
+				stateDir = filepath.Join(home, ".openclaw")
+			}
+			path = filepath.Join(stateDir, "openclaw.json")
+		}
+		return path, "mcp.servers", "json", true
+	default:
+		// pi is intentionally absent. The CLI reads ~/.pi/agent/mcp.json on its
+		// own, and a project .pi/mcp.json replaces entries with the same name.
+		// Copying the user file into the task file would start those servers twice.
+		return "", "", "", false
+	}
+}
+
+// notePasswdHomeConfig is the warning-only diagnostic from the #9233 close
+// review: $HOME stays authoritative, but when it has no config for the
+// provider and the passwd entry's home does hold one, say where it lives.
+// A container or service manager can bake a different home into the image
+// than the one the CLIs wrote under (#9230) — without this, that layout
+// reads as an empty inventory with nothing to explain it. Existence-only
+// probe: the passwd home's config is never read or merged.
+func notePasswdHomeConfig(provider, path, home string) {
+	if home == "" {
+		return
+	}
+	passwd, err := osUserHome()
+	if err != nil || passwd == "" || passwd == home {
+		return
+	}
+	altPath, _, _, supported := runtimeMcpUserPath(provider, passwd)
+	if !supported || altPath == path {
+		return
+	}
+	if _, statErr := os.Stat(altPath); statErr != nil {
+		return
+	}
+	slog.Warn("runtime MCP config exists under the passwd home but $HOME is authoritative; not loading it",
+		"provider", provider,
+		"home", home,
+		"passwd_home", passwd,
+		"passwd_config", altPath,
+	)
 }
 
 func normalizeRuntimeMcpEntry(provider string, value any) any {
