@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -2728,6 +2729,12 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	// a reviewer still has to reach its squad leader, or the
 	// leader→worker→leader loop stalls.
 	if actorType == "member" && (util.HasMentionAll(mentions) || hasMemberMention(mentions)) {
+		return nil, nil
+	}
+
+	// Review and completed issues are awaiting a member verdict, not an
+	// implicit continuation request. Explicit agent mentions were routed above.
+	if actorType == "member" && (issue.Status == issuestatus.InReview || issue.Status == issuestatus.Done) {
 		return nil, nil
 	}
 
