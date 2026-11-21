@@ -577,3 +577,19 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 	}
 	return dshProbeResult{verdict: dshProbeUnavailable, detail: detail}
 }
+
+// HasDiscoveredTool reports executable discovery only. It does not start an
+// agent, verify provider credentials, or run a task. An empty ID checks for any
+// coding tool that daemon discovery recognizes.
+func HasDiscoveredTool(id string) bool {
+	tools := probeAgentCLIs()
+	if id != "" {
+		return tools[id].Path != ""
+	}
+	for _, tool := range tools {
+		if tool.Path != "" {
+			return true
+		}
+	}
+	return false
+}

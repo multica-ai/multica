@@ -65,6 +65,7 @@ func init() {
 	chatCmd.GroupID = groupCore
 
 	// Runtime commands
+	doctorCmd.GroupID = groupRuntime
 	daemonCmd.GroupID = groupRuntime
 	runtimeCmd.GroupID = groupRuntime
 
@@ -95,6 +96,7 @@ func init() {
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(chatCmd)
+	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)
