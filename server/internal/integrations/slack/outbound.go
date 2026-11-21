@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,6 +30,7 @@ type outboundQueries interface {
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 	SetChatMessageChannelOutboundProvenanceByTask(ctx context.Context, arg db.SetChatMessageChannelOutboundProvenanceByTaskParams) (int64, error)
 	RecordChannelOutboundMessage(ctx context.Context, arg db.RecordChannelOutboundMessageParams) error
+	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 }
 
 // replySender posts one reply. Satisfied by *slackSender, so the outbound path
@@ -37,27 +39,36 @@ type replySender interface {
 	SendWithMetadata(ctx context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error)
 }
 
+// outboundSender adds the failure card's Block Kit post to replySender.
+type outboundSender interface {
+	replySender
+	SendBlocks(ctx context.Context, out channel.OutboundMessage, blocks []slack.Block, metadata slack.SlackMetadata) (channel.SendResult, error)
+}
+
 // Outbound delivers an agent's chat reply back to Slack — the outbound half of
 // the round trip. It mirrors the Feishu Patcher: on EventChatDone it finds the
 // Slack chat binding for the finished task's session and posts the reply into
 // the originating channel/thread. Sessions with no Slack binding are ignored,
 // so it coexists with the Feishu Patcher on the shared event bus. It is only
-// registered when Slack is configured.
+// registered when Slack is configured. A terminal task failure posts a failure
+// card with Retry and Open-in-Multica buttons (see interaction.go).
 type Outbound struct {
 	q         outboundQueries
 	decrypt   Decrypter
+	appURL    string
 	logger    *slog.Logger
-	newSender func(creds credentials) replySender
+	newSender func(creds credentials) outboundSender
 }
 
 // NewOutbound builds the Slack outbound subscriber over the generated queries
-// and the bot/app-token decrypter.
-func NewOutbound(q outboundQueries, decrypt Decrypter, logger *slog.Logger) *Outbound {
+// and the bot/app-token decrypter. appURL is the web app origin for the failure
+// card's Open-in-Multica button; empty omits the button.
+func NewOutbound(q outboundQueries, decrypt Decrypter, appURL string, logger *slog.Logger) *Outbound {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	o := &Outbound{q: q, decrypt: decrypt, logger: logger}
-	o.newSender = func(c credentials) replySender {
+	o := &Outbound{q: q, decrypt: decrypt, appURL: strings.TrimRight(appURL, "/"), logger: logger}
+	o.newSender = func(c credentials) outboundSender {
 		// Only the bot token is needed to post; inbound Socket Mode uses the
 		// installation's separate app-level token (see slack_channel.go).
 		return newSlackSender(c, slack.New(c.BotToken), logger)
@@ -65,9 +76,10 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, logger *slog.Logger) *Out
 	return o
 }
 
-// Register subscribes to the chat-done event on the bus.
+// Register subscribes to the chat-done and task-failed events on the bus.
 func (o *Outbound) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventChatDone, o.handleEvent)
+	bus.Subscribe(protocol.EventTaskFailed, o.handleEvent)
 }
 
 func (o *Outbound) handleEvent(e events.Event) {
@@ -87,7 +99,13 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		// Issue / autopilot tasks carry no chat_session.
 		return nil
 	}
-	content := chatDoneContent(e.Payload)
+	failure := e.Type == protocol.EventTaskFailed
+	var content string
+	if failure {
+		content = taskFailureText(e.Payload)
+	} else {
+		content = chatDoneContent(e.Payload)
+	}
 	if content == "" {
 		return nil // nothing to say (empty completion)
 	}
@@ -140,6 +158,9 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("decode slack credentials: %w", err)
 	}
 	channelID, threadTS := outboundTarget(binding)
+	if failure {
+		return o.postFailureCard(ctx, creds, inst.WorkspaceID, sessionID, delivery, taskID, channelID, threadTS, content)
+	}
 	result, err := o.newSender(creds).SendWithMetadata(ctx, channel.OutboundMessage{
 		ChatID:   channelID,
 		Text:     content,
@@ -241,4 +262,51 @@ func chatDoneContent(payload any) string {
 		}
 	}
 	return ""
+}
+
+// taskFailureText returns the redacted error of a terminal failure. The error
+// is omitted while an automatic retry is pending, so that attempt stays silent.
+func taskFailureText(payload any) string {
+	p, ok := payload.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if pending, _ := p["retry_pending"].(bool); pending {
+		return ""
+	}
+	s, _ := p["error"].(string)
+	return strings.TrimSpace(s)
+}
+
+func (o *Outbound) postFailureCard(ctx context.Context, creds credentials, workspaceID, sessionID pgtype.UUID, delivery db.ChannelTaskDelivery, taskID pgtype.UUID, channelID, threadTS, errText string) error {
+	chatURL := ""
+	if o.appURL != "" {
+		if ws, err := o.q.GetWorkspace(ctx, workspaceID); err == nil {
+			chatURL = o.appURL + "/" + ws.Slug + "/chat?session=" + util.UUIDToString(sessionID)
+		}
+	}
+	errText = truncateRunes(errText, maxFailureErrorRunes)
+	result, err := o.newSender(creds).SendBlocks(ctx, channel.OutboundMessage{
+		ChatID:   channelID,
+		Text:     failureCardFallback + " " + errText,
+		ThreadID: threadTS,
+	}, failureCardBlocks(taskID, errText, chatURL), outboundMetadata(delivery.BindingID, delivery.RouteRevision, "task_failure"))
+	if err != nil {
+		return fmt.Errorf("post slack failure card: %w", err)
+	}
+	if result.MessageID == "" {
+		return errors.New("post slack failure card: provider returned no message id")
+	}
+	if err := o.q.RecordChannelOutboundMessage(ctx, db.RecordChannelOutboundMessageParams{
+		OutboundInstallationID: delivery.InstallationID,
+		OutboundChannelType:    delivery.ChannelType,
+		OutboundMessageID:      result.MessageID,
+		OutboundBindingID:      delivery.BindingID,
+		OutboundRouteRevision:  delivery.RouteRevision,
+		OutboundTaskID:         taskID,
+		OutboundKind:           "task_failure",
+	}); err != nil {
+		return fmt.Errorf("record slack failure card: %w", err)
+	}
+	return nil
 }

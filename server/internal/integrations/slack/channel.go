@@ -46,7 +46,13 @@ func (c *slackSender) SendWithMetadata(ctx context.Context, out channel.Outbound
 	return c.send(ctx, out, metadata)
 }
 
-func (c *slackSender) send(ctx context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error) {
+// SendBlocks posts a Block Kit message; out.Text is the notification fallback
+// and must fit one message.
+func (c *slackSender) SendBlocks(ctx context.Context, out channel.OutboundMessage, blocks []slack.Block, metadata slack.SlackMetadata) (channel.SendResult, error) {
+	return c.send(ctx, out, metadata, slack.MsgOptionBlocks(blocks...))
+}
+
+func (c *slackSender) send(ctx context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata, extra ...slack.MsgOption) (channel.SendResult, error) {
 	if c.api == nil {
 		return channel.SendResult{}, errors.New("slack: api client not configured")
 	}
@@ -60,6 +66,7 @@ func (c *slackSender) send(ctx context.Context, out channel.OutboundMessage, met
 			slack.MsgOptionText(chunk, false),
 			slack.MsgOptionDisableLinkUnfurl(),
 		}
+		opts = append(opts, extra...)
 		if metadata.EventType != "" {
 			opts = append(opts, slack.MsgOptionMetadata(metadata))
 		}
