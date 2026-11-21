@@ -1,8 +1,24 @@
-import { BrowserWindow, ipcMain, screen, type Display } from "electron";
+import {
+  BrowserWindow,
+  ipcMain,
+  screen,
+  type Display,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+} from "electron";
 import { is } from "@electron-toolkit/utils";
+import { execFile } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { RunIslandSnapshot, RunIslandView } from "../shared/run-island";
+import {
+  defaultIslandProfile,
+  islandPreferences,
+  islandRunGroups,
+  type RunIslandSnapshot,
+  type RunIslandView,
+  type IslandProfile,
+} from "../shared/run-island";
 import { parseWorkspaceWindowPath } from "../shared/workspace-window";
 import type { MainWindowRegistry } from "./main-window-registry";
 import islandPreload from "../preload/run-island.cjs?asset";
@@ -12,6 +28,8 @@ export function islandLayout(
   display: Pick<Display, "internal" | "bounds" | "workArea">,
   expanded: boolean,
   count: number,
+  profile: IslandProfile = defaultIslandProfile,
+  groupCount = 0,
 ) {
   const { bounds, workArea } = display;
   const inset = workArea.y - bounds.y;
@@ -19,8 +37,19 @@ export function islandLayout(
   // Keep the middle of the header clear on built-in displays with a tall bar.
   const attached = display.internal && inset >= 30;
   const headerHeight = attached ? inset + 2 : 30;
-  const width = Math.min(workArea.width, expanded ? 368 : attached ? 272 : 84);
-  const body = expanded ? 41 + Math.max(1, Math.min(count, 5)) * 48 + 8 : 0;
+  const compactWidth = attached
+    ? 272
+    : profile.center !== "none"
+      ? 224
+      : profile.trailing === "agents"
+        ? 108
+        : profile.trailing === "hidden"
+          ? 44
+          : 84;
+  const width = Math.min(workArea.width, expanded ? 368 : compactWidth);
+  const body = expanded
+    ? 41 + Math.min(240, Math.max(1, count) * 48 + groupCount * 24) + 8
+    : 0;
   return {
     attached,
     headerHeight,
@@ -42,6 +71,79 @@ export function installRunIsland(
   let owner: BrowserWindow | null = null;
   let expanded = false;
   let ready = false;
+
+  const played = new Set<string>();
+  const soundsDir = "/System/Library/Sounds";
+  let sounds: string[] = [];
+  try {
+    sounds = readdirSync(soundsDir, { withFileTypes: true })
+      .filter((file) => file.isFile() && file.name.endsWith(".aiff"))
+      .map((file) => file.name.slice(0, -5))
+      .sort();
+  } catch {
+    /* The island remains usable without system audio files. */
+  }
+
+  function mainSender(event: IpcMainEvent | IpcMainInvokeEvent) {
+    const source = BrowserWindow.fromWebContents(event.sender);
+    return source &&
+      windows.has(source) &&
+      event.senderFrame === event.sender.mainFrame
+      ? source
+      : null;
+  }
+
+  let playback: ReturnType<typeof execFile> | undefined;
+  function play(name: unknown, preview = false) {
+    if (typeof name !== "string" || !sounds.includes(name)) return;
+    if (playback && !preview) return;
+    playback?.kill();
+    const child = execFile(
+      "/usr/bin/afplay",
+      [join(soundsDir, name + ".aiff")],
+      { timeout: 5000 },
+      () => {
+        if (playback === child) playback = undefined;
+      },
+    );
+    playback = child;
+  }
+
+  ipcMain.handle("run-island:devices", (event) =>
+    mainSender(event)
+      ? {
+          sounds,
+          displays: screen
+            .getAllDisplays()
+            .map((d) => ({ value: String(d.id), label: d.label })),
+        }
+      : { sounds: [], displays: [] },
+  );
+  ipcMain.on("run-island:preview-sound", (event, name: unknown) => {
+    if (mainSender(event)) play(name, true);
+  });
+  ipcMain.on("run-island:finish", (event, slug: unknown, id: unknown) => {
+    const source = mainSender(event);
+    if (
+      !source ||
+      source !== windows.mostRecent() ||
+      windows.workspaceOf(source) !== slug ||
+      typeof id !== "string"
+    )
+      return;
+    const snapshot = snapshots.get(source);
+    if (
+      !snapshot ||
+      snapshot.slug !== slug ||
+      snapshot.preferences.muted ||
+      played.has(id) ||
+      !snapshot.runs.some((r) => r.id === id && r.audible)
+    )
+      return;
+    played.add(id);
+    if (played.size > 512) played.delete(played.values().next().value!);
+    play(snapshot.preferences.sound);
+  });
 
   function createPanel() {
     const win = new BrowserWindow({
@@ -109,11 +211,22 @@ export function installRunIsland(
       return;
     }
     panel ??= createPanel();
-    const display = screen.getDisplayMatching(next.getBounds());
+    const target = snapshot.preferences.display;
+    const display =
+      screen.getAllDisplays().find((d) => String(d.id) === target) ??
+      screen.getDisplayMatching(next.getBounds());
+    const attachedToNotch =
+      display.internal && display.workArea.y - display.bounds.y >= 30;
+    const profile =
+      snapshot.preferences[attachedToNotch ? "notch" : "floating"];
     const { bounds, attached, headerHeight } = islandLayout(
       display,
       expanded,
       snapshot.runs.length,
+      profile,
+      expanded && profile.group !== "none"
+        ? islandRunGroups(snapshot.runs, profile).length
+        : 0,
     );
     panel.setBounds(bounds);
     if (!ready) return;
@@ -129,15 +242,13 @@ export function installRunIsland(
   ipcMain.on(
     "run-island:snapshot",
     (event, value: RunIslandSnapshot | null) => {
-      const source = BrowserWindow.fromWebContents(event.sender);
-      if (
-        !source ||
-        !windows.has(source) ||
-        event.senderFrame !== event.sender.mainFrame
-      )
-        return;
+      const source = mainSender(event);
+      if (!source) return;
       if (value && typeof value.slug === "string" && Array.isArray(value.runs))
-        snapshots.set(source, value);
+        snapshots.set(source, {
+          ...value,
+          preferences: islandPreferences(value.preferences),
+        });
       else snapshots.delete(source);
       refresh();
     },
@@ -170,6 +281,7 @@ export function installRunIsland(
   });
   screen.on("display-metrics-changed", refresh);
   screen.on("display-removed", refresh);
+  screen.on("display-added", refresh);
   return {
     refresh,
     clear(window: BrowserWindow) {

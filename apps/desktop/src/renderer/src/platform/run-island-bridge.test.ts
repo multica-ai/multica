@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { Agent, AgentTask } from "@multica/core/types";
+import { islandPreferences, islandRunGroups } from "../../../shared/run-island";
 import { islandRuns } from "./run-island-bridge";
 
 const labels = {
@@ -98,5 +99,45 @@ describe("Run Island workspace snapshot", () => {
       ["/studio/issues/11223344-2", "Issue 11223344"],
       ["/studio/issues/cached", "Test the toolbar"],
     ]);
+  });
+  it("validates stored choices and keeps display profiles independent", () => {
+    expect(islandPreferences(null).muted).toBe(true);
+    const prefs = islandPreferences({
+      notch: { background: "graphite", group: "status" },
+      floating: { indicator: "unknown" },
+      muted: false,
+    });
+    expect(prefs.notch.background).toBe("graphite");
+    expect(prefs.floating.background).toBe("black");
+    expect(prefs.floating.indicator).toBe("dot");
+    expect(prefs.muted).toBe(false);
+  });
+
+  it("sorts by recent activity within groups and skips sound for foreign chats", () => {
+    const runs = islandRuns(
+      "studio",
+      [
+        task("old", "running", { created_at: "2026-01-01" }),
+        task("new", "queued", { created_at: "2026-02-01" }),
+        task("private", "running", { chat_session_id: "foreign" }),
+      ],
+      agents,
+      labels,
+      chatTitles,
+      cachedIssueTitle,
+    );
+    expect(runs.find((r) => r.id === "private")?.audible).toBe(false);
+    const profile = islandPreferences({
+      notch: { sort: "recent", group: "agent" },
+    }).notch;
+    expect(
+      islandRunGroups(runs, profile).map((g) => [
+        g.label,
+        g.runs.map((r) => r.id),
+      ]),
+    ).toEqual([["Ada", ["new", "old", "private"]]]);
+    expect(
+      islandRunGroups(runs, { ...profile, group: "status" }).map((g) => g.key),
+    ).toEqual(["queued", "running"]);
   });
 });

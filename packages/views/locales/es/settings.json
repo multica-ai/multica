@@ -1459,7 +1459,42 @@
     "island": {
       "title": "Isla de actividad",
       "show": "Mostrar la isla de actividad",
-      "description": "Consulta las ejecuciones activas en la parte superior de la pantalla mientras usas otras aplicaciones."
+      "description": "Consulta las ejecuciones activas en la parte superior de la pantalla mientras usas otras aplicaciones.",
+      "soundEnabled": "Avisos de ejecución",
+      "soundHelp": "Reproduce un sonido cuando una ejecución visible finaliza o falla.",
+      "sound": "Sonido de aviso",
+      "previewSound": "Escuchar",
+      "display": "Mostrar en pantalla",
+      "unavailable": "Pantalla desconectada",
+      "profile": "Apariencia por pantalla",
+      "preview": "Vista previa",
+      "background": "Fondo",
+      "trailing": "Lado derecho al contraer",
+      "center": "Etiqueta central al contraer",
+      "indicator": "Indicador de estado",
+      "group": "Agrupar por",
+      "sort": "Ordenar por",
+      "sampleReview": "Revisar cambios",
+      "sampleTest": "Ejecutar pruebas",
+      "options": {
+        "auto": "Seguir la ventana del espacio de trabajo",
+        "notch": "Muesca del MacBook",
+        "floating": "Otras pantallas",
+        "black": "Negro puro",
+        "graphite": "Grafito",
+        "count": "Número de ejecuciones",
+        "agents": "Iniciales de agentes",
+        "hidden": "Oculto",
+        "none": "Ninguno",
+        "agent": "Agente",
+        "task": "Título de la tarea",
+        "dot": "Punto pulsante",
+        "bar": "Barra",
+        "glyph": "Icono",
+        "tint": "Fila coloreada",
+        "status": "Estado",
+        "recent": "Más recientes"
+      }
     },
     "tabs": {
       "updates": "Actualizaciones"

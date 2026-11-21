@@ -1,40 +1,20 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api/client";
 import { agentTaskSnapshotOptions } from "@multica/core/agents/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { paths } from "@multica/core/paths";
-import { defaultStorage } from "@multica/core/platform";
+import { useWSEvent } from "@multica/core/realtime";
+import {
+  useIslandPreferences,
+  useRunIslandEnabled,
+} from "./run-island-settings";
 import { useIsGuest } from "@multica/core/permissions";
 import type { Agent, AgentTask, Workspace } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { useT } from "@multica/views/i18n";
 import type { IslandRun } from "../../../shared/run-island";
-
-const key = "multica:desktop:run-island";
-const changed = "multica:run-island-changed";
-
-function subscribe(listener: () => void) {
-  window.addEventListener("storage", listener);
-  window.addEventListener(changed, listener);
-  return () => {
-    window.removeEventListener("storage", listener);
-    window.removeEventListener(changed, listener);
-  };
-}
-
-export function useRunIslandEnabled() {
-  return useSyncExternalStore(
-    subscribe,
-    () => defaultStorage.getItem(key) === "true",
-  );
-}
-
-export function setRunIslandEnabled(enabled: boolean) {
-  defaultStorage.setItem(key, String(enabled));
-  window.dispatchEvent(new Event(changed));
-}
 
 interface IslandLabels {
   running: string;
@@ -95,6 +75,11 @@ export function islandRuns(
     }
     runs.push({
       id: task.id,
+      agentId: task.agent_id,
+      audible: !task.chat_session_id || chatTitles.has(task.chat_session_id),
+      updated:
+        Date.parse(task.started_at || task.dispatched_at || task.created_at) ||
+        0,
       name,
       path,
       detail,
@@ -114,6 +99,7 @@ export function RunIslandBridge({ workspace }: { workspace: Workspace }) {
 
 function WorkspaceIsland({ workspace }: { workspace: Workspace }) {
   const guest = useIsGuest(workspace.id);
+  const preferences = useIslandPreferences();
   const { data: tasks, error: taskError } = useQuery({
     ...agentTaskSnapshotOptions(workspace.id),
     enabled: !guest,
@@ -138,6 +124,34 @@ function WorkspaceIsland({ workspace }: { workspace: Workspace }) {
   const { t: layout } = useT("layout");
   const { t: settings } = useT("settings");
   const { name, slug } = workspace;
+
+  const onTerminal = useCallback(
+    (payload: unknown) => {
+      if (
+        guest ||
+        workspaceDenied ||
+        preferences.muted ||
+        !payload ||
+        typeof payload !== "object"
+      )
+        return;
+      const event = payload as {
+        task_id?: unknown;
+        status?: unknown;
+        retry_pending?: boolean;
+      };
+      if (
+        typeof event.task_id === "string" &&
+        (event.status === "completed" || event.status === "failed") &&
+        !event.retry_pending
+      ) {
+        window.desktopAPI.reportRunIslandFinish(slug, event.task_id);
+      }
+    },
+    [guest, workspaceDenied, preferences.muted, slug],
+  );
+  useWSEvent("task:completed", onTerminal);
+  useWSEvent("task:failed", onTerminal);
 
   useEffect(() => {
     if (guest || workspaceDenied || !tasks || !agents) {
@@ -168,6 +182,7 @@ function WorkspaceIsland({ workspace }: { workspace: Workspace }) {
     window.desktopAPI.reportRunIsland({
       slug,
       workspace: name,
+      preferences,
       heading: settings(($) => $.desktop.island.title),
       summary: runs.length
         ? t(($) => $.agent_activity.hover_header_tasks, { count: runs.length })
@@ -184,6 +199,7 @@ function WorkspaceIsland({ workspace }: { workspace: Workspace }) {
     agents,
     visibleSessions,
     workspaceDenied,
+    preferences,
     client,
     t,
     agentCopy,

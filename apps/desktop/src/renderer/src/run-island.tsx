@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUpRight } from "@multica/ui/icons";
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { IslandCap, IslandRunList } from "./components/run-island-content";
 import type { RunIslandView } from "../../shared/run-island";
 import "./globals.css";
 import "./run-island.css";
@@ -21,13 +20,16 @@ function RunIsland() {
   }, [view]);
   if (!view) return null;
   const { snapshot, expanded } = view;
+  const profile = snapshot.preferences[view.attached ? "notch" : "floating"];
   function expand(value: boolean) {
     clearTimeout(leave.current);
     window.runIsland.expand(value);
   }
   return (
     <main
-      className={view.attached ? "attached" : "floating"}
+      className="island-surface"
+      data-attached={view.attached}
+      data-background={profile.background}
       onMouseEnter={() => expand(true)}
       onMouseLeave={() => {
         leave.current = setTimeout(() => expand(false), 220);
@@ -43,18 +45,11 @@ function RunIsland() {
         style={{ height: view.headerHeight }}
         onClick={() => expand(true)}
       >
-        <MulticaIcon
-          size={19}
-          mode={
-            snapshot.runs.some((r) => r.status === "running")
-              ? "think"
-              : "static"
-          }
+        <IslandCap
+          runs={snapshot.runs}
+          profile={profile}
+          attached={view.attached}
         />
-        <span className="counter">
-          <i className={snapshot.runs.length ? "active" : ""} />
-          {snapshot.runs.length}
-        </span>
       </button>
       {expanded && (
         <section aria-label={snapshot.heading}>
@@ -63,23 +58,11 @@ function RunIsland() {
             <span>{snapshot.workspace}</span>
           </header>
           {snapshot.runs.length ? (
-            <div className="list">
-              {snapshot.runs.map((run) => (
-                <button
-                  className="run"
-                  key={run.id}
-                  onClick={() => window.runIsland.open(run.id)}
-                >
-                  <i className={run.status} />
-                  <span className="description">
-                    <b>{run.name}</b>
-                    <small>{run.detail}</small>
-                  </span>
-                  <span className="state">{run.label}</span>
-                  <ArrowUpRight size={13} />
-                </button>
-              ))}
-            </div>
+            <IslandRunList
+              runs={snapshot.runs}
+              profile={profile}
+              openRun={window.runIsland.open}
+            />
           ) : (
             <p>{snapshot.summary}</p>
           )}
