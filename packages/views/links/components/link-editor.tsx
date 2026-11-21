@@ -104,7 +104,7 @@ export function LinkEditor({
       >
         {compact ? "+" : link ? t(($) => $.links.edit) : t(($) => $.links.add)}
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90%] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{link ? t(($) => $.links.edit) : t(($) => $.links.add)}</DialogTitle>
         </DialogHeader>
