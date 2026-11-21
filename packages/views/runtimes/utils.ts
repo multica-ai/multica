@@ -284,7 +284,8 @@ const MODEL_PRICING: Record<
   //    = 1.25x input (see the header note above). Mirror
   //    server/internal/metrics/pricing.go.
   "gpt-6-astra":        { input: 10,   output: 50,   cacheRead: 1.00,  cacheWrite: 12.50 },
-  // GPT-6.1 Sol and Terra's cached input is 0.05x input; GPT-6 Sol's is 0.1x.
+  // Cache reads for GPT-6.2 Astra and GPT-6.1 Sol/Terra cost 5% of input.
+  "gpt-6.2-astra":      { input: 8,    output: 40,   cacheRead: 0.40,  cacheWrite: 10.00 },
   "gpt-6.1-sol":        { input: 2,    output: 10,   cacheRead: 0.10,  cacheWrite: 2.50 },
   "gpt-6.1-terra":      { input: 1,    output: 5,    cacheRead: 0.05,  cacheWrite: 1.25 },
   "gpt-6-sol":          { input: 2,    output: 10,   cacheRead: 0.20,  cacheWrite: 2.50 },
