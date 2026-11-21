@@ -658,7 +658,9 @@
       "caller_filter_all": "전체",
       "caller_filter_search": "멤버 검색",
       "caller_filter_members": "멤버",
-      "caller_filter_clear_aria": "호출자 필터 지우기"
+      "caller_filter_clear_aria": "호출자 필터 지우기",
+      "summary_load_failed": "이 호출자의 30일 요약을 불러오지 못했습니다.",
+      "retry": "재시도"
     },
     "connected_apps": {
       "loading": "앱을 불러오는 중…",

@@ -800,7 +800,9 @@
       "caller_filter_all": "全部",
       "caller_filter_search": "搜索成员",
       "caller_filter_members": "成员",
-      "caller_filter_clear_aria": "清除调用人筛选"
+      "caller_filter_clear_aria": "清除调用人筛选",
+      "summary_load_failed": "无法加载该调用人近 30 天的摘要。",
+      "retry": "重试"
     },
     "connected_apps": {
       "loading": "正在加载应用...",

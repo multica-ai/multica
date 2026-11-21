@@ -658,7 +658,9 @@
       "caller_filter_all": "すべて",
       "caller_filter_search": "メンバーを検索",
       "caller_filter_members": "メンバー",
-      "caller_filter_clear_aria": "呼び出し元フィルターをクリア"
+      "caller_filter_clear_aria": "呼び出し元フィルターをクリア",
+      "summary_load_failed": "この呼び出し元の 30 日間のサマリーを読み込めませんでした。",
+      "retry": "再試行"
     },
     "connected_apps": {
       "loading": "アプリを読み込み中…",

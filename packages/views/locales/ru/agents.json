@@ -866,7 +866,9 @@
       "caller_filter_all": "Anyone",
       "caller_filter_search": "Search members",
       "caller_filter_members": "Members",
-      "caller_filter_clear_aria": "Clear caller filter"
+      "caller_filter_clear_aria": "Clear caller filter",
+      "summary_load_failed": "Не удалось загрузить сводку этого вызывающего за 30 дней.",
+      "retry": "Повторить"
     },
     "connected_apps": {
       "loading": "Загрузка приложений…",

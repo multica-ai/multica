@@ -58,6 +58,7 @@ import { taskStatusConfig } from "../../config";
 import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
+import { Loader2 } from "@multica/ui/icons";
 
 // Reveal cached rows in small batches and fetch another page only on demand.
 const RECENT_INITIAL = 10;
@@ -267,12 +268,18 @@ export function AgentPerformanceSummary({
   callerId?: string | null;
 }) {
   const { t } = useT("agents");
+  const { t: tCommon } = useT("common");
   const wsId = useWorkspaceId();
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   // A caller-scoped summary reads the server's activity aggregate filtered
   // to that caller — the same complete 30-day roll-up the unfiltered panel
   // shows, not a count over whatever history pages have loaded.
-  const { data: callerBuckets } = useQuery({
+  const {
+    data: callerBuckets,
+    isPending: callerPending,
+    isError: callerError,
+    refetch: refetchCaller,
+  } = useQuery({
     ...agentActivity30dOptions(wsId, callerId ?? undefined),
     enabled: !!callerId && !!wsId,
   });
@@ -286,8 +293,35 @@ export function AgentPerformanceSummary({
             Date.now(),
           )
         : null,
-    [callerId, callerBuckets, agent.created_at],
+    [callerId, callerBuckets, agent.id, agent.created_at],
   );
+  // A caller-scoped panel never falls back to the workspace-wide numbers:
+  // while its query loads or after it fails there is no honest figure to
+  // show, and showing every caller's totals would read as the member's own.
+  if (callerId && callerPending) {
+    return (
+      <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
+        <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+        {tCommon(($) => $.loading)}
+      </p>
+    );
+  }
+  if (callerId && callerError) {
+    return (
+      <div role="alert" className="flex items-center justify-between gap-2 text-caption text-muted-foreground">
+        <span>{t(($) => $.tab_body.activity.summary_load_failed)}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="shrink-0"
+          onClick={() => void refetchCaller()}
+        >
+          {t(($) => $.tab_body.activity.retry)}
+        </Button>
+      </div>
+    );
+  }
   const activity = callerActivity ?? activityMap.get(agent.id);
   const summary = summarizeActivityWindow(activity, 30);
   const avgDurationMs = activity?.avgDurationMs ?? 0;
