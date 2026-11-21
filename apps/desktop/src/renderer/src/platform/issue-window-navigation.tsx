@@ -131,7 +131,7 @@ export function IssueWindowNavigationProvider({
       openInNewTab: (path, title) => {
         void window.desktopAPI.openIssueWindow({
           path,
-          title: title ?? issueWindowTitle,
+          title: title?.trim() || issueWindowTitle,
         });
       },
       getShareableUrl: (path) =>
