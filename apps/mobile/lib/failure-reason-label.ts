@@ -62,6 +62,7 @@ export const REASONS = new Set([
   "codex_resume_oversized",
   "idle_watchdog",
   "local_directory_error",
+  "local_directory_missing",
   "cancelled",
 
   // Coarse values, still present on historical rows.

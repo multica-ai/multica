@@ -18,7 +18,14 @@ import (
 func (h *Handler) noteCommentInvocationDenied(ctx context.Context, issue db.Issue, comment db.Comment, outcomes []CommentTriggerOutcome) {
 	var denied []CommentTriggerOutcome
 	for _, outcome := range outcomes {
-		if outcome.Status == DispatchBlocked && outcome.ReasonCode == ReasonInvocationNotAllowed {
+		// invocation_not_allowed hides private/foreign targets;
+		// target_unavailable covers malformed mention ids and targets that are
+		// gone (archived agent, missing squad). Both leave the mention looking
+		// successful on the saved comment, so both need a receipt. Runtime
+		// refusals are excluded: noteBlockedRuntimeTargets already leaves their
+		// own, more specific notice.
+		if outcome.Status == DispatchBlocked &&
+			(outcome.ReasonCode == ReasonInvocationNotAllowed || outcome.ReasonCode == ReasonTargetUnavailable) {
 			denied = append(denied, outcome)
 		}
 	}

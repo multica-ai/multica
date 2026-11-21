@@ -84,6 +84,22 @@ wide fallback credential is used. This is the standalone bridge's configuration;
 managed connections set repository tokens in the web and desktop apps instead
 (see below).
 
+
+Managed connections fall back to the workspace's GitHub App integration when a
+repository has no hand-entered token: the server mints a 1-hour installation
+token scoped to that single repository (`contents` and `pull_requests` write,
+`metadata` read) and injects it the same way. This needs the GitHub App (and
+each existing installation) to carry those write permissions; an installation
+that never approved them fails the run with a message naming the missing
+permissions instead of a generic missing-credential error. Repositories under a
+connected GitHub account then need no manual token, while anything outside the
+installation (and any workspace without one) still requires an explicit token.
+The rotating token never breaks session reuse — follow-ups fingerprint the
+installation binding (`github_app:<installation_id>`) — and losing coverage
+fails the next run's credential re-check before a session is reused. Runs
+longer than the token's lifetime get a fresh token pushed into the live
+session about 45 minutes after each issuance.
+
 A project may bind one HTTPS GitHub repository and an optional branch ref.
 Without one, the agent's default repository (`runtime_config.repository`) is
 mounted, and failing that the workspace's only repository when a credential is
@@ -173,13 +189,26 @@ GitHub integration links the pull request back to the issue.
 
 ## Current boundaries
 
-This is a PoC for issue runs and chat turns. Squad coordination, local
+This is a PoC for issue runs, chat turns and squad leader turns. A squad leader
+has no Multica CLI in its Qoder session: it ends its turn with an `OUTCOME:` /
+`REASON:` header and the delegation comment, and the bridge posts the comment
+(which triggers the mentioned members) and records the squad evaluation with the
+task credential. A leader cannot change the issue status. Local
 directories, arbitrary Git hosts,
 tag/commit checkout, full comment-history hydration, interactive tool approval, custom client-side tools, terminal access,
 files delivered by issue runs and billing/usage conversion are not implemented. Set up a Qoder
 Agent that can execute autonomously with its configured tools. `requires_action`
 ends the Multica run as failed with the stop reason; approvals are not granted
 implicitly.
+
+Squad quick-create supports Qoder leaders, but quick-create attachments remain
+unsupported. A blocked delegation target fails the leader run and records the
+target ID and admission reason; successfully triggered members keep running.
+Check these results before delegating again. If a comment or evaluation response
+is lost, the bridge fails the run without automatically replaying that write.
+After a restart, delivery that still needs the task credential fails with a
+notice to inspect comments and activity before retrying. Fully delivered turns
+can still finish reporting completion after a restart.
 
 Multica custom skills and execution overrides are rejected; built-in Multica
 CLI skills are omitted because their local tools are unavailable. Qoder sessions

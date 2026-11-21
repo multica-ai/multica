@@ -144,7 +144,7 @@ describe("platform conditions in the form", () => {
   it("groups conditions by what they wait for", async () => {
     await renderForm();
     fireEvent.click(screen.getByRole("button", { name: /选择条件/ }));
-    for (const label of ["字段变为某个值", "子任务完成", "关联 PR 的 CI 结束", "其他任务的状态变化"]) {
+    for (const label of ["字段变为某个值", "子任务完成", "关联 PR 状态变化", "其他任务的状态变化"]) {
       expect(await screen.findByRole("menuitem", { name: new RegExp(label) })).toBeVisible();
     }
     for (const group of ["协作", "运行与子任务", "关联"]) expect(screen.getByText(group)).toBeVisible();
@@ -166,8 +166,8 @@ describe("platform conditions in the form", () => {
 
   it("waits for a linked PR's CI by default and can wait for the merge instead", async () => {
     await renderForm();
-    await chooseCondition("关联 PR 的 CI 结束");
-    fireEvent.click(screen.getByRole("button", { name: /关联 PR 的 CI 结束: CI 结束/ }));
+    await chooseCondition("关联 PR 状态变化");
+    fireEvent.click(screen.getByRole("button", { name: /关联 PR 状态变化: CI 结束/ }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "合并" }));
     fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "发布" } });
     fireEvent.click(screen.getByRole("button", { name: /创建/ }));

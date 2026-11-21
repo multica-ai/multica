@@ -24,6 +24,8 @@ type Backend interface {
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
+	// SkillInvocation is set only for validated member-authored skill selections.
+	SkillInvocation *SkillInvocation
 	// EnableTaskSupplement installs provider hooks only for runs whose daemon/server
 	// capability handshake enabled additional messages.
 	EnableTaskSupplement bool
@@ -97,6 +99,20 @@ type ExecOptions struct {
 	// knows the resume is gone, and the backend covers only the case the daemon
 	// cannot see — a live resume RPC rejected mid-run.
 	ResumeContinuityNotice string
+	// TaskToken is the task-scoped Multica API credential (mat_...) the server
+	// mints at claim time. CLI backends receive it as MULTICA_TOKEN in the
+	// subprocess environment. Backends that delegate remotely (museapp) forward
+	// it in their wire request so the remote worker can call the Multica API
+	// with the same scoped identity. Empty when the server did not provide one.
+	TaskToken string
+	// MulticaServerURL is the Multica API base URL (e.g.
+	// https://multica.example.com). Remote backends forward it so the worker
+	// knows where to call; CLI backends get it as MULTICA_SERVER_URL.
+	MulticaServerURL string
+	// MulticaWorkspaceID is the workspace UUID for this task. Remote backends
+	// forward it so the worker can pass it as a query param; CLI backends get
+	// it as MULTICA_WORKSPACE_ID.
+	MulticaWorkspaceID string
 	// ExtraArgs is honoured only by backends that opt in by reading it; the
 	// rest ignore it. Deliberately not enumerated here — the previous list
 	// went stale as backends were added, which is how MULTICA_QWENPAW_ARGS
@@ -158,6 +174,15 @@ type ExecOptions struct {
 	// can trip its idle watchdog. Take the snapshot and report on your own
 	// goroutine.
 	OnUsage func(map[string]TokenUsage)
+	// OnRateLimits optionally receives the account's subscription rate-limit
+	// snapshot each time the agent CLI reports a change (Claude Code's
+	// rate_limit_event, Codex's account/rateLimits/updated). Every call carries
+	// the full merged view, so the latest call supersedes earlier ones.
+	// Backends whose CLI reports no rate limits never call it.
+	//
+	// Like OnUsage it runs on the backend's protocol reader goroutine and MUST
+	// NOT block.
+	OnRateLimits func(RateLimitSnapshot)
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string
@@ -418,11 +443,14 @@ var SupportedTypes = []string{
 	"grok",
 	"qwen",
 	"qwenpaw",
+	"droid",
+	"amp",
 	"mcode",
 	"muse",
 	"dim",
 	"devin",
 	"zeroclaw",
+	"museapp",
 	"zcode",
 }
 
@@ -456,6 +484,8 @@ var resumeRejectionUndetectable = map[string]bool{
 	"deveco":      true,
 	"opencode":    true,
 	"codearts":    true,
+	"droid":       true,
+	"amp":         true,
 }
 
 // ResumeRejectionUndetectable reports whether agentType is a backend that
@@ -525,6 +555,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qwenBackend{cfg: cfg}, nil
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
+	case "droid":
+		return &droidBackend{cfg: cfg}, nil
+	case "amp":
+		return &ampBackend{cfg: cfg}, nil
 	case "mcode":
 		return &mcodeBackend{cfg: cfg}, nil
 	case "devin":
@@ -533,6 +567,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &museBackend{cfg: cfg}, nil
 	case "zeroclaw":
 		return &zeroclawBackend{cfg: cfg}, nil
+	case "museapp":
+		return &museappBackend{cfg: cfg}, nil
 	case "zcode":
 		return &zcodeBackend{cfg: cfg}, nil
 	default:
@@ -579,11 +615,14 @@ var launchHeaders = map[string]string{
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
+	"droid":       "droid exec (stream-json)",
+	"amp":         "amp --execute (stream-json)",
 	"dim":         "dim acp",
 	"devin":       "devin acp",
 	"mcode":       "mcode acp",
 	"muse":        "muse serve (msp)",
 	"zeroclaw":    "zeroclaw acp",
+	"museapp":     "museapp (remote receptionist)",
 	"zcode":       "zcode app-server",
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useInboxUnreadCount, useMarkIssueInboxRead } from "@multica/core/inbox";
+import { useMarkIssueInboxRead } from "@multica/core/inbox";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { InboxNewPayload } from "@multica/core/types";
 import { useAppForeground } from "../../common/use-app-foreground";
@@ -16,14 +16,13 @@ import { useAppForeground } from "../../common/use-app-foreground";
  * The inbox passes `enabled: false` for the issue it has open. It reads the
  * row it selected itself, and keeps a row the reader marked unread there.
  *
- * Nothing is sent while the workspace has no unread notifications, so opening
- * issues at inbox zero costs no request. Each opening, arrival and reconnect
- * is written at most once: a failed write is not retried here, and the next
- * one of those tries again.
+ * The deduplicated badge can be zero while older notifications are unread,
+ * so each opening, arrival and reconnect is written regardless of the badge.
+ * Each is written at most once: a failed write is not retried here, and the
+ * next one of those tries again.
  */
 export function useMarkIssueInboxReadWhileViewing(wsId: string, issueId: string, enabled = true) {
   const foreground = useAppForeground();
-  const hasUnreadInbox = useInboxUnreadCount(wsId) > 0;
   const { mutate: markRead } = useMarkIssueInboxRead(wsId);
   // Bumped by every reason to read again since the issue opened. The unread
   // summary alone cannot tell which issue a new notification is for.
@@ -39,16 +38,19 @@ export function useMarkIssueInboxReadWhileViewing(wsId: string, issueId: string,
   );
   useWSEvent("inbox:new", onInboxNew);
 
-  // Realtime sync refetches the unread summary on reconnect, so a missed
-  // notification raises it and the write below waits for that.
+  // An inbox:new sent while the socket was down is never replayed.
   const onReconnect = useCallback(() => setGeneration((n) => n + 1), []);
   useWSReconnect(onReconnect);
 
   useEffect(() => {
-    if (!enabled || !issueId || !foreground || !hasUnreadInbox) return;
-    const key = `${issueId}|${generation}`;
+    if (!enabled || !issueId) {
+      written.current = null;
+      return;
+    }
+    if (!foreground) return;
+    const key = `${wsId}|${issueId}|${generation}`;
     if (written.current === key) return;
     written.current = key;
     markRead(issueId);
-  }, [enabled, issueId, foreground, hasUnreadInbox, generation, markRead]);
+  }, [enabled, wsId, issueId, foreground, generation, markRead]);
 }

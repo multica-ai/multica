@@ -38,9 +38,7 @@ func writePlaceholderPackage(t *testing.T, pkgName, postinstall string) (root, e
 	}
 	execPath = filepath.Join(binDir, "claude.exe")
 	stub := "echo \"Error: claude native binary not installed.\" >&2\nexit 1\n"
-	if err := os.WriteFile(execPath, []byte(stub), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
+	writeTestExecutable(t, execPath, []byte(stub))
 	return root, execPath
 }
 

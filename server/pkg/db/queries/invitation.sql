@@ -1,6 +1,6 @@
 -- name: CreateInvitation :one
-INSERT INTO workspace_invitation (id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO workspace_invitation (id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, expires_at, project_ids)
+VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(sqlc.narg('project_ids')::uuid[], '{}'))
 RETURNING *;
 
 -- name: GetInvitation :one

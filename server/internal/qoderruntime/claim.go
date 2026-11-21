@@ -28,6 +28,7 @@ type claimedTask struct {
 	ProjectDescription    string              `json:"project_description,omitempty"`
 	HandoffNote           string              `json:"handoff_note,omitempty"`
 	CoalescedComments     []claimedComment    `json:"coalesced_comments,omitempty"`
+	TriggerCommentID      string              `json:"trigger_comment_id,omitempty"`
 	TriggerCommentContent string              `json:"trigger_comment_content,omitempty"`
 	TriggerAuthorName     string              `json:"trigger_author_name,omitempty"`
 	ProjectResources      []claimedResource   `json:"project_resources,omitempty"`

@@ -62,14 +62,17 @@ Après la première répartition, le chef est automatiquement réveillé par **l
 |---|---|---|
 | Un non-membre (rapporteur humain, agent externe) publie un commentaire | Oui | |
 | Un membre du squad publie un point d'avancement sans `@mention` | Oui | Le chef réévalue si une étape suivante est nécessaire |
-| Quelqu'un publie un commentaire qui mentionne explicitement avec `@` un autre agent / membre / squad / `@all` | Non | Le `@` explicite est le signal de routage ; le chef s'efface |
+| Un membre ou un agent de travail mentionne explicitement le chef du squad assigné comme agent | Oui | Le chef agit dans son rôle de chef et peut consigner sa décision avec `multica squad activity` |
+| Un membre humain mentionne uniquement d'autres membres ou `@all` | Non | Les personnes reçoivent des notifications ; le routage implicite vers les agents est désactivé |
+| Un agent autre que le chef mentionne uniquement des membres ou `@all` | Oui | Le résultat du worker revient au chef ; les personnes reçoivent leurs notifications habituelles |
+| Quelqu'un mentionne explicitement un agent ou un squad | Seulement s'il est nommé | Seuls les agents ou chefs de squad nommés sont exécutés ; aucun repli supplémentaire vers le chef |
 | Le propre commentaire du chef | Non | Bloqué pour que le chef ne se déclenche pas lui-même |
 | Un commentaire ne contenant qu'une référence croisée à une tâche (`[MUL-123](mention://issue/...)`) | Oui | Les références à des tâches ne constituent pas un routage |
 
 La déduplication s'ajoute à ces règles : si le chef a déjà une exécution `queued` ou `dispatched` sur cette tâche, un nouveau déclencheur ne met pas de doublon en file.
 
 <Callout type="info">
-**Pourquoi le chef n'est pas déclenché lorsqu'un membre publie une mention `@`.** Dès qu'un membre du squad mentionne directement quelqu'un avec `@`, ce commentaire constitue une passation délibérée — réveiller le chef pour « observer » le routage ne produirait qu'un tour sans effet et encombrerait la chronologie. Les commentaires rédigés par des agents font exception : lorsqu'un agent publie un résultat qui mentionne un autre agent avec `@`, le chef est tout de même réveillé afin de pouvoir coordonner le fil.
+Un commentaire `@membre` / `@all` rédigé par un membre humain ne fait que notifier des personnes. Le résultat d'un agent worker portant les mêmes mentions revient toujours au chef du squad assigné, ou au chef du squad invité dans son fil de délégation. Une mention explicite `@agent` / `@squad` ne route que vers les cibles nommées, quel que soit l'auteur du commentaire.
 </Callout>
 
 ## Assigner ou @mentionner un squad

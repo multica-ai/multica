@@ -69,6 +69,7 @@ import {
 } from "../../issues/components/wakeup-presentation";
 import { wakeupCountsOptions } from "./wakeups-tab";
 import { WakeupsIntro } from "./wakeups-intro";
+import { SystemWakeupDefaults } from "./system-wakeup-defaults";
 
 const SCOPES = ["active", "paused", "disabled", "ended", "all"] as const;
 
@@ -516,6 +517,8 @@ export function WorkspaceWakeups() {
   } else {
     body = (
       <CollectionList
+        // Shares the autopilots route with that page's own list.
+        scrollKey="wakeups"
         label={t(($) => $.wakeups.scopes[filters.scope])}
         columns={columns}
         rows={rows}
@@ -580,6 +583,12 @@ export function WorkspaceWakeups() {
           <CollectionCreateButton label={t(($) => $.wakeups.create)} onClick={() => setCreateOpen(true)} />
         }
       />
+      <SystemWakeupDefaults
+        onShowCustomized={() => {
+          // Issues that turned the rule off sit under "Turned off", so widen the scope.
+          if (!batch.isPending) change({ scope: "all", kind: "all", source: "system", agent_id: "" });
+        }}
+      />
       {pausedCount > 0 && latestPaused && filters.scope !== "paused" && (
         <div
           role="status"
@@ -587,12 +596,18 @@ export function WorkspaceWakeups() {
         >
           <TriangleAlert className="size-4 shrink-0 text-destructive" aria-hidden="true" />
           <span className="min-w-0 flex-1">
-            {t(($) => $.wakeups.banner, {
-              count: pausedCount,
-              issue: latestPaused.issue_identifier,
-              condition: text.trigger(latestPaused),
-              reason: text.pausedReason(latestPaused) ?? "",
-            })}
+            {pausedCount === 1
+              ? t(($) => $.wakeups.banner_single, {
+                  issue: latestPaused.issue_identifier,
+                  condition: text.trigger(latestPaused),
+                  reason: text.pausedReason(latestPaused) ?? "",
+                })
+              : t(($) => $.wakeups.banner, {
+                  count: pausedCount,
+                  issue: latestPaused.issue_identifier,
+                  condition: text.trigger(latestPaused),
+                  reason: text.pausedReason(latestPaused) ?? "",
+                })}
           </span>
           <Button size="sm" variant="outline" onClick={() => change({ scope: "paused" })}>
             {t(($) => $.wakeups.banner_view)}

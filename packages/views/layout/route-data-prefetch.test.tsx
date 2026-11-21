@@ -83,6 +83,8 @@ describe("RouteDataPrefetch", () => {
     const warmed = keys();
     expect(warmed.length).toBeGreaterThan(0);
     expect(new Set(warmed).size).toBeGreaterThanOrEqual(5);
+    // The assignee picker ranks from local picks; nothing warms server counts.
+    expect(warmed.some((key) => key.includes("assignee-frequency"))).toBe(false);
   });
 
   it("stays idle without a resolved workspace", () => {

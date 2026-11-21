@@ -57,7 +57,11 @@ export function MikaRuntimeChoice({
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    // min-w-0: DialogContent is a CSS grid, and a grid item's automatic
+    // minimum width is its content width. Without this, an overlong runtime
+    // or model name widens the grid column past the dialog and the pickers'
+    // `truncate` never kicks in.
+    <div className="flex min-w-0 flex-col gap-3">
       {layout === "list" ? (
         // Capped at ~4 rows so the install commands above stay reachable when
         // a member has many machines registered.

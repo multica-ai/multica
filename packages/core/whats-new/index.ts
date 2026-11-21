@@ -49,8 +49,8 @@ export function visibleReleases<R extends ReleaseStamp>(
  * Releases the user hasn't seen. Before the first dismissal, only releases
  * after the account's creation day count, so a new user isn't greeted with
  * the whole backlog. Returns [] when the server can't persist the marker
- * (`whats_new_seen_version` undefined): an auto-opening card that can never
- * be dismissed would reappear on every launch.
+ * (`whats_new_seen_version` undefined): a release that can never be marked
+ * seen would stay new forever.
  */
 export function unreadReleases<R extends ReleaseStamp>(
   visible: readonly R[],
@@ -67,8 +67,8 @@ export function unreadReleases<R extends ReleaseStamp>(
 }
 
 /**
- * Persists the dismissal. Applied optimistically so the rail dot clears at
- * once, and rolled back on failure so the dot returns and the next open
+ * Persists the dismissal. Applied optimistically so the release stops
+ * counting as new at once, and rolled back on failure so the next open
  * retries. The server only advances the marker, so the response may carry a
  * newer version than `version`.
  */

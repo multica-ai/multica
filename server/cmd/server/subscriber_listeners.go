@@ -285,6 +285,11 @@ func extractIssueFields(v any) (handler.IssueResponse, bool) {
 // addSubscriber adds a user as an issue subscriber and publishes a
 // subscriber:added event for real-time frontend sync.
 func addSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, userType, userID, reason string) {
+	// Filter before UUID parsing: @all uses the non-UUID sentinel "all".
+	if !isAssignmentRecipientType(userType) {
+		return
+	}
+
 	affected, err := queries.AddIssueSubscriber(context.Background(), db.AddIssueSubscriberParams{
 		IssueID:  parseUUID(issueID),
 		UserType: userType,

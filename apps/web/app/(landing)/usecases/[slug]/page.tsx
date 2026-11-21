@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
-import Link from "next/link";
+import Link from "@/features/landing/components/landing-link";
 import { notFound } from "next/navigation";
 import { cn } from "@multica/ui/lib/utils";
-import { LandingHeader } from "@/features/landing/components/landing-header";
-import { LandingFooter } from "@/features/landing/components/landing-footer";
+import { SiteHeader } from "@/features/landing/site/site-header";
+import { SiteFooter } from "@/features/landing/site/site-footer";
 import { Screenshot } from "@/features/landing/components/mdx/screenshot";
 import { getUseCasePageForLocale } from "@/lib/use-cases-source";
 import {
@@ -13,6 +13,9 @@ import {
   useCaseText,
 } from "@/lib/use-cases-i18n";
 import type { SupportedLocale } from "@multica/core/i18n";
+import { SHARE_IMAGE } from "@/features/landing/share-image";
+import { landingAlternates, localizeHref } from "@/lib/landing-locale-path";
+import { liveMetadata, requireLiveRoute } from "@/features/landing/site/sitemap";
 
 type Params = { slug: string };
 
@@ -26,18 +29,21 @@ export async function generateMetadata(props: {
   const page = getUseCasePageForLocale([slug], locale);
   if (!page) return {};
 
-  return {
+  const path = `/usecases/${slug}`;
+  return liveMetadata("/usecases", {
     title: page.data.title,
     description: page.data.description,
     openGraph: {
+      images: [SHARE_IMAGE],
       title: page.data.title,
       description: page.data.description,
-      url: `/usecases/${slug}`,
+      url: localizeHref(locale, path),
     },
     alternates: {
-      canonical: `/usecases/${slug}`,
+      canonical: localizeHref(locale, path),
+      languages: landingAlternates(path),
     },
-  };
+  });
 }
 
 function nodeToString(node: ReactNode): string {
@@ -205,6 +211,7 @@ function createMdxComponents(locale: SupportedLocale) {
 }
 
 export default async function UseCasePage(props: { params: Promise<Params> }) {
+  requireLiveRoute("/usecases");
   const { slug } = await props.params;
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];
@@ -219,9 +226,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
 
   return (
     <>
-      <div className="sticky top-0 z-40 bg-white">
-        <LandingHeader variant="light" />
-      </div>
+      <SiteHeader />
       <main className="bg-white text-[#0a0d12]">
         <div
           className={cn(
@@ -231,7 +236,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
           )}
         >
           <article>
-            <h1 className="landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
+            <h1 className="font-site-display text-site-heading">
               {page.data.title}
             </h1>
             <div className="mt-10 text-title-sm leading-[1.85] text-[#0a0d12]/72 [&>:first-child]:mt-0 [&>p]:my-5 sm:text-title">
@@ -268,7 +273,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
           ) : null}
         </div>
       </main>
-      <LandingFooter />
+      <SiteFooter />
     </>
   );
 }

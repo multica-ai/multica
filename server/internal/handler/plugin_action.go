@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -147,7 +149,24 @@ func (h *Handler) pluginSessionCaller(w http.ResponseWriter, r *http.Request, sc
 		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "workspace not found")
 		return service.PluginActionCaller{}, pluginActor{}, false
 	}
+	if !refusePluginGuest(w, r, member) {
+		return service.PluginActionCaller{}, pluginActor{}, false
+	}
 	return caller, pluginActor{Type: "member", Member: member}, true
+}
+
+// refusePluginGuest keeps guests (MUL-9420) off the Action API, whichever way
+// the call reached it. A guest is offered no plugin surface or hook, and the
+// API has no notion of its limits: it reads only the projects shared with it
+// and changes no issue field, while plugin endpoints read workspace storage
+// and task transcripts and write issue content. It reports whether the call
+// may proceed.
+func refusePluginGuest(w http.ResponseWriter, r *http.Request, member db.Member) bool {
+	if !projectaccess.IsGuestRole(member.Role) {
+		return true
+	}
+	publicapiv1.WriteProblem(w, r, http.StatusForbidden, "guest_not_allowed", "guests cannot use Plugins")
+	return false
 }
 
 // pluginTokenCaller is the hook path: a plugin's own server calling in.
@@ -206,6 +225,11 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 			publicapiv1.WriteProblem(w, r, http.StatusForbidden, "actor_membership_revoked", "the user this callback acts for is no longer a member")
 			return service.PluginActionCaller{}, pluginActor{}, false
 		}
+		// Checked today, like membership: a member made a guest after the
+		// hook went out loses the callback with the rest of its access.
+		if !refusePluginGuest(w, r, member) {
+			return service.PluginActionCaller{}, pluginActor{}, false
+		}
 		actor = pluginActor{Type: "member", Member: member}
 	}
 	return caller, actor, true
@@ -217,7 +241,7 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 // member of it" is exactly the reach the user already has. An issue outside it
 // is a 404 for the same reason it is on the ordinary endpoint: a plugin must
 // not be able to confirm that an id it cannot read exists.
-func (h *Handler) pluginIssueForUser(w http.ResponseWriter, r *http.Request, caller service.PluginActionCaller, issueID string) (db.Issue, bool) {
+func (h *Handler) pluginIssueForUser(w http.ResponseWriter, r *http.Request, caller service.PluginActionCaller, actor pluginActor, issueID string) (db.Issue, bool) {
 	if issueID == "" {
 		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "issue not found")
 		return db.Issue{}, false
@@ -240,6 +264,20 @@ func (h *Handler) pluginIssueForUser(w http.ResponseWriter, r *http.Request, cal
 		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "issue not found")
 		return db.Issue{}, false
 	}
+	// A call that acts as a person reaches only the projects that person can
+	// see (MUL-8472): an issue in a private project they are not a member of
+	// is as missing here as on the ordinary endpoint.
+	if actor.isMember() {
+		hidden, err := projectaccess.ForMember(r.Context(), h.Queries, actor.Member)
+		if err != nil {
+			publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to resolve project access")
+			return db.Issue{}, false
+		}
+		if !hidden.CanSeeProject(issue.ProjectID) {
+			publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "issue not found")
+			return db.Issue{}, false
+		}
+	}
 	return issue, true
 }
 
@@ -248,7 +286,7 @@ func (h *Handler) pluginIssueForUser(w http.ResponseWriter, r *http.Request, cal
 // pluginCaller, so this is exactly the reach the caller already has.
 func (h *Handler) resolvePluginIssue(r *http.Request, caller service.PluginActionCaller, issueID string) (db.Issue, bool) {
 	workspaceID := uuidToString(caller.WorkspaceID)
-	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+	if issue, ok, _ := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
 		return issue, true
 	}
 	parsed, err := util.ParseUUID(issueID)
@@ -291,7 +329,7 @@ func (h *Handler) GetPluginContext(w http.ResponseWriter, r *http.Request) {
 
 	var issue *db.Issue
 	if issueID := r.URL.Query().Get("issue_id"); issueID != "" {
-		loaded, ok := h.pluginIssueForUser(w, r, caller, issueID)
+		loaded, ok := h.pluginIssueForUser(w, r, caller, actor, issueID)
 		if !ok {
 			return
 		}
@@ -327,11 +365,11 @@ func publicPluginContext(context service.PluginContext) publicapiv1.Context {
 
 // GetPluginIssue — GET /v1/issues/{issue_ref}
 func (h *Handler) GetPluginIssue(w http.ResponseWriter, r *http.Request) {
-	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeIssuesRead)
+	caller, actor, ok := h.pluginCaller(w, r, plugincontract.ScopeIssuesRead)
 	if !ok {
 		return
 	}
-	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
+	issue, ok := h.pluginIssueForUser(w, r, caller, actor, chi.URLParam(r, "issue_ref"))
 	if !ok {
 		return
 	}
@@ -348,11 +386,11 @@ func (h *Handler) GetPluginIssue(w http.ResponseWriter, r *http.Request) {
 // drifting copy of them. Widening this set later is additive; getting the side
 // effects wrong now is not.
 func (h *Handler) PatchPluginIssue(w http.ResponseWriter, r *http.Request) {
-	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeIssuesWrite)
+	caller, actor, ok := h.pluginCaller(w, r, plugincontract.ScopeIssuesWrite)
 	if !ok {
 		return
 	}
-	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
+	issue, ok := h.pluginIssueForUser(w, r, caller, actor, chi.URLParam(r, "issue_ref"))
 	if !ok {
 		return
 	}
@@ -407,6 +445,112 @@ func (h *Handler) PatchPluginIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	setPublicIssueETag(w, updated.Revision)
 	writeJSON(w, http.StatusOK, h.pluginIssuePayload(r, caller, updated))
+}
+
+// ListPluginTaskMessages — GET /v1/tasks/{task_id}/messages
+//
+// The task-event twin of GetPluginIssue: task.completed/task.failed deliver a
+// task id under the tasks:read grant, and this endpoint is what makes that
+// grant worth something — the persisted run transcript (thinking, tool_use,
+// tool_result, text, error) for memory/archive/audit plugins, so they no longer need
+// a human PAT plus the CLI to read what an agent did.
+//
+// ?since=<seq> returns only messages after that sequence (incremental
+// catch-up, same semantics as the daemon endpoint). ?include=thinking=false
+// drops thinking messages for audit-style consumers; memory plugins want
+// reasoning traces as distillation input, so they ship by default.
+func (h *Handler) ListPluginTaskMessages(w http.ResponseWriter, r *http.Request) {
+	caller, actor, ok := h.pluginCaller(w, r, plugincontract.ScopeTasksRead)
+	if !ok {
+		return
+	}
+	taskID := chi.URLParam(r, "task_id")
+	parsed, err := util.ParseUUID(taskID)
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		return
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), parsed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		} else {
+			publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to load task")
+		}
+		return
+	}
+	scope, err := h.TaskService.ResolveTaskScopeChecked(r.Context(), task)
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to resolve task scope")
+		return
+	}
+	if scope.WorkspaceID != uuidToString(caller.WorkspaceID) {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		return
+	}
+	// Private transcripts require the session creator, even for workspace
+	// admins. Plugin actors have no member authorization for private chats.
+	if task.ChatSessionID.Valid && (!actor.isMember() ||
+		scope.ChatSessionOwnerID == "" ||
+		scope.ChatSessionOwnerID != uuidToString(actor.Member.UserID)) {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		return
+	}
+	// An issue-scoped grant reaches only tasks belonging to that issue.
+	if caller.IssueScope.Valid && (!task.IssueID.Valid ||
+		uuidToString(task.IssueID) != uuidToString(caller.IssueScope)) {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		return
+	}
+	// A person reads the transcript of a run only about projects they can
+	// see, as pluginIssueForUser does for issues.
+	if actor.isMember() {
+		hidden, err := projectaccess.ForMember(r.Context(), h.Queries, actor.Member)
+		if err == nil && !hidden.Empty() {
+			var projects []pgtype.UUID
+			if projects, err = projectaccess.TaskProjects(r.Context(), h.Queries, task); err == nil && !hidden.CanSeeProjects(projects) {
+				publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+				return
+			}
+		}
+		if err != nil {
+			publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to resolve project access")
+			return
+		}
+	}
+
+	var messages []db.TaskMessage
+	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
+		sinceSeq, parseErr := strconv.Atoi(sinceStr)
+		if parseErr != nil || sinceSeq < 0 {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "invalid since parameter")
+			return
+		}
+		messages, err = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
+			TaskID: parsed,
+			Seq:    int32(sinceSeq),
+		})
+	} else {
+		messages, err = h.Queries.ListTaskMessages(r.Context(), parsed)
+	}
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to list task messages")
+		return
+	}
+
+	includeThinking := r.URL.Query().Get("include") != "thinking=false"
+	issueID := ""
+	if task.IssueID.Valid {
+		issueID = uuidToString(task.IssueID)
+	}
+	resp := make([]protocol.TaskMessagePayload, 0, len(messages))
+	for _, m := range messages {
+		if !includeThinking && m.Type == "thinking" {
+			continue
+		}
+		resp = append(resp, taskMessageToPayload(m, taskID, issueID))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": resp})
 }
 
 func setPublicIssueETag(w http.ResponseWriter, revision int64) {
@@ -481,11 +625,11 @@ func (h *Handler) pluginIssuePayload(r *http.Request, caller service.PluginActio
 
 // ListPluginComments — GET /v1/issues/{issue_ref}/comments
 func (h *Handler) ListPluginComments(w http.ResponseWriter, r *http.Request) {
-	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeCommentsRead)
+	caller, actor, ok := h.pluginCaller(w, r, plugincontract.ScopeCommentsRead)
 	if !ok {
 		return
 	}
-	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
+	issue, ok := h.pluginIssueForUser(w, r, caller, actor, chi.URLParam(r, "issue_ref"))
 	if !ok {
 		return
 	}
@@ -536,7 +680,7 @@ func (h *Handler) CreatePluginComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
+	issue, ok := h.pluginIssueForUser(w, r, caller, actor, chi.URLParam(r, "issue_ref"))
 	if !ok {
 		return
 	}

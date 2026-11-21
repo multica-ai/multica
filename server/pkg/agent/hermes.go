@@ -143,6 +143,13 @@ func hermesInsideMcpAdd(args []string, index int) bool {
 // cannot reason about a profile selection without it.
 const hermesACPSubcommand = "acp"
 
+// hermesVersionProbeArgs is the version probe Command.ForVersionProbe selects
+// for Hermes: the ACP entry point's own `--version`, which reads the installed
+// version locally, instead of the root `--version`, which also checks GitHub
+// for updates. Supported since Hermes v0.14.0; older builds reject it with an
+// argparse usage error and detectCLIVersion falls back to `--version`.
+var hermesVersionProbeArgs = []string{hermesACPSubcommand, "--version"}
+
 // hermesACPSubcommandFlags are the options Hermes' `acp` subparser declares
 // (hermes_cli/subcommands/acp.py, plus argparse's own -h/--help), all
 // value-less. Argparse accepts them only after the subcommand, so they keep

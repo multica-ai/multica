@@ -268,7 +268,12 @@ describe("applyIssueChange", () => {
   });
 
   it("patches and rolls back loaded sidebar rows", () => {
-    const sidebarKey = issueKeys.sidebar(WS_ID, "project:p1", { project_id: "p1" }, 5);
+    const sidebarKey = issueKeys.sidebar(
+      WS_ID,
+      "project:p1",
+      { table: { scope: { kind: "project", project_id: "p1" }, filters: {}, sort: { field: "updated_at", direction: "desc" } } },
+      5,
+    );
     const snapshot: ListIssuesResponse = { issues: [issue()], total: 1 };
     qc.setQueryData(sidebarKey, snapshot);
 

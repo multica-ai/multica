@@ -1,15 +1,16 @@
 import { cloneElement, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import { issueKeys } from "@multica/core/issues/queries";
+import type { SidebarIssuesRequest } from "@multica/core/issues/sidebar-list";
 import { issueUnreadOptions } from "@multica/core/issues/unread";
-import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
+import type { AgentTask, Issue, IssueUnread } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueContextMenuProvider } from "../../issues/actions";
-import { SidebarIssueList } from "./sidebar-tree";
+import { SidebarIssueList, TreeRow } from "./sidebar-tree";
 
 vi.mock("../../issues/actions/issue-actions-menu-items", () => ({
   contextPrimitives: {},
@@ -70,7 +71,13 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
 });
 
 const SOURCE = "project:p1";
-const PARAMS: ListIssuesParams = { project_id: "p1", sort_by: "updated_at", sort_direction: "desc" };
+const PARAMS: SidebarIssuesRequest = {
+  table: {
+    scope: { kind: "project", project_id: "p1" },
+    filters: {},
+    sort: { field: "updated_at", direction: "desc" },
+  },
+};
 const issues = (count: number): Issue[] =>
   Array.from({ length: count }, (_, i) => ({ id: `issue-${i + 1}`, title: `Issue ${i + 1}`, status: "todo" }) as Issue);
 
@@ -82,7 +89,7 @@ function renderList({
   onCollapse = vi.fn(),
 }: {
   total?: number;
-  params?: ListIssuesParams | null;
+  params?: SidebarIssuesRequest | null;
   tasks?: Partial<AgentTask>[];
   unread?: IssueUnread[];
   onCollapse?: () => void;
@@ -201,5 +208,44 @@ describe("SidebarIssueList", () => {
     fireEvent.click(status);
     fireEvent.click(screen.getByRole("button", { name: "Pick Done" }));
     expect(updateField).toHaveBeenCalledWith({ status: "done" });
+  });
+});
+
+// jsdom does not lay out the sidebar: model clipping at the existing label.
+function clipLabel(el: HTMLElement) {
+  el.style.overflowX = "hidden";
+  Object.defineProperties(el, {
+    scrollWidth: { configurable: true, value: 320 },
+    clientWidth: { configurable: true, value: 100 },
+  });
+}
+
+describe("sidebar title disclosure", () => {
+  it("reveals a clipped project title on keyboard focus without replacing the link", async () => {
+    const label = "A project title longer than the sidebar";
+    renderWithI18n(<TreeRow href="/acme/projects/p1" label={label} icon={<span />} active={false} />);
+    const link = screen.getByRole("link", { name: label });
+    clipLabel(link);
+    await act(async () => link.focus());
+    expect(document.querySelector("[data-slot=tooltip-content]")).toHaveTextContent(label);
+    expect(screen.getByRole("link", { name: label })).toBe(link);
+    expect(link).toHaveAttribute("href", "/acme/projects/p1");
+    await act(async () => link.blur());
+    await waitFor(() => expect(document.querySelector("[data-slot=tooltip-content]")).toBeNull());
+  });
+
+  it("shows no tooltip on a clipped issue title", async () => {
+    renderList();
+    const link = screen.getByRole("link", { name: "Issue 1" });
+    clipLabel(screen.getByText("Issue 1"));
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(link, { pointerType: "mouse" });
+      await act(async () => { vi.advanceTimersByTime(550); });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(document.querySelector("[data-slot=tooltip-content]")).toBeNull();
+    expect(link).toHaveAttribute("href", "/acme/issues/issue-1");
   });
 });

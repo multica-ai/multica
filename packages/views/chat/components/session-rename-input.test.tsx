@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enChat from "../../locales/en/chat.json";
+import { contextMenuOriginRef } from "@multica/ui/lib/context-menu-origin";
 import { SessionRenameInput } from "./session-rename-input";
 
 const TEST_RESOURCES = { en: { chat: enChat } };
@@ -48,6 +49,36 @@ describe("SessionRenameInput", () => {
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith("研究");
+  });
+
+  it("keeps editing while its own context menu is used", () => {
+    const input = renderInput();
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    const cut = menu.appendChild(document.createElement("div"));
+    cut.setAttribute("role", "menuitem");
+    document.body.appendChild(menu);
+    const release = contextMenuOriginRef(input)(menu);
+
+    fireEvent.pointerDown(cut);
+    fireEvent.click(cut);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(input).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    release?.();
+    menu.remove();
+  });
+
+  it("submits on a menu it did not open", () => {
+    renderInput();
+    const menu = document.body.appendChild(document.createElement("div"));
+    menu.setAttribute("role", "menu");
+
+    fireEvent.pointerDown(menu);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    menu.remove();
   });
 
   it.each([
