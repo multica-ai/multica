@@ -322,6 +322,8 @@ func (h *Handler) writeCollabResult(w http.ResponseWriter, r *http.Request, wsUU
 		writeDocEditFailed(w, failure, result.Revision, result.Content)
 	case collab.StatusGone:
 		writeError(w, http.StatusNotFound, "doc not found")
+	case collab.StatusTooLarge:
+		writeError(w, http.StatusRequestEntityTooLarge, "content must be at most 2 MB")
 	default:
 		writeError(w, http.StatusInternalServerError, "failed to update doc")
 	}

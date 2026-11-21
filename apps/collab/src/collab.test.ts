@@ -24,6 +24,8 @@ interface FakeDoc {
   stores: { contributors: string[]; content: string; message?: string }[];
 }
 let fake: FakeDoc;
+/** When set, stores wait for it before answering. */
+let storeGate: { requested: number; release: Promise<void> } | null = null;
 let apiServer: HttpServer;
 let apiUrl = "";
 
@@ -57,6 +59,10 @@ beforeAll(async () => {
     }
     if (req.method === "POST" && req.url === `/internal/collab/docs/${DOC_ID}/store`) {
       const body = JSON.parse(Buffer.concat(chunks).toString());
+      if (storeGate && !body.state_only) {
+        storeGate.requested += 1;
+        await storeGate.release;
+      }
       if (body.base_revision !== fake.revision) {
         return send(409, { revision: fake.revision, content: fake.content });
       }
@@ -103,6 +109,7 @@ afterEach(async () => {
 
 function resetDoc(content: string) {
   fake = { content, revision: 1, ystate: null, ystateRevision: null, stores: [] };
+  storeGate = null;
 }
 
 function ticket(actor: Actor) {
@@ -185,6 +192,39 @@ describe("collaboration server", () => {
     // Editors see the agent in their presence list while it writes.
     const users = () => [...a.provider.awareness!.getStates().values()].map((s) => s.user?.name);
     await waitFor(() => users().includes(agent.name));
+  });
+
+  it("credits whoever typed while a save was in flight in the next save", async () => {
+    resetDoc("Alpha\n\nBeta");
+    let release!: () => void;
+    storeGate = { requested: 0, release: new Promise<void>((resolve) => (release = resolve)) };
+    const gate = storeGate;
+    const a = await connect(ada);
+    const b = await connect(bob);
+    typeInto(a.document, 0, 5, " by Ada");
+    await waitFor(() => gate.requested === 1, 2000);
+    typeInto(b.document, 1, 4, " by Bob");
+    await waitFor(() => markdown(a.document).includes("by Bob"));
+    release();
+    await waitFor(() => fake.stores.some((store) => store.content.includes("by Bob")), 3000);
+    const bobsSave = fake.stores.find((store) => store.content.includes("by Bob"))!;
+    expect(fake.stores[0]!.contributors).toEqual([ada.id]);
+    expect(bobsSave.contributors).toContain(bob.id);
+  });
+
+  it("refuses an edit that would make the doc too large, leaving the live copy alone", async () => {
+    resetDoc("Short");
+    const a = await connect(ada);
+    const result = await internal("edit", {
+      actor: agent,
+      edits: [{ old_text: "Short", new_text: "x".repeat((2 << 20) + 1) }],
+    });
+    expect(result.status).toBe(413);
+    expect(result.body.status).toBe("too_large");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(markdown(a.document)).toBe("Short");
+    expect(fake.content).toBe("Short");
+    expect(fake.stores).toEqual([]);
   });
 
   it("rejects an edit whose quoted text someone else already changed", async () => {

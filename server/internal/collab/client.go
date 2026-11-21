@@ -80,6 +80,9 @@ const (
 	StatusConflict   = "conflict"
 	StatusEditFailed = "edit_failed"
 	StatusGone       = "gone"
+	// StatusTooLarge: the write would make the doc larger than the API stores.
+	// The live document is left as it was.
+	StatusTooLarge = "too_large"
 )
 
 // Result of a write or edit. Content is the live text after the write, or at
@@ -127,7 +130,7 @@ func (c *Client) call(ctx context.Context, docID, op string, body any) (Result, 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	switch resp.StatusCode {
-	case http.StatusOK, http.StatusConflict:
+	case http.StatusOK, http.StatusConflict, http.StatusRequestEntityTooLarge:
 		var result Result
 		if err := json.Unmarshal(data, &result); err != nil {
 			return Result{}, fmt.Errorf("%w: decode %s response: %v", ErrUnavailable, op, err)
@@ -138,9 +141,15 @@ func (c *Client) call(ctx context.Context, docID, op string, body any) (Result, 
 		return result, nil
 	case http.StatusNotFound:
 		return Result{Status: StatusGone}, nil
-	default:
-		return Result{}, fmt.Errorf("%w: %s returned %d: %s", ErrUnavailable, op, resp.StatusCode, strings.TrimSpace(string(data)))
 	}
+	err = fmt.Errorf("%s returned %d: %s", op, resp.StatusCode, strings.TrimSpace(string(data)))
+	// Only a service that cannot answer is worked around by writing to the
+	// database directly. A request it refused would be refused again, and
+	// writing around a running service would leave its live copy behind.
+	if resp.StatusCode >= 500 {
+		return Result{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return Result{}, err
 }
 
 // Proxy forwards editor WebSockets to the service. The ticket in the first

@@ -13,6 +13,8 @@ import type { Actor } from "./ticket";
  *  block. */
 export const RESET_CLOSE_CODE = 4409;
 const EPOCH_KEY = "epoch";
+/** The API refuses to store more Markdown than this (docContentMaxSize). */
+export const MAX_CONTENT_BYTES = 2 << 20;
 const META_MAP = "meta";
 
 export function parseDocumentName(name: string): { type: "doc"; id: string } | null {
@@ -67,6 +69,7 @@ export type WriteResult =
   | { status: "ok"; revision: number; content: string; title: string; merged: boolean }
   | { status: "conflict"; revision: number; content: string; conflicts: MergeConflict[] }
   | { status: "edit_failed"; revision: number; content: string; failure: EditFailure }
+  | { status: "too_large"; revision: number }
   | { status: "gone" };
 
 class GoneError extends Error {}
@@ -160,6 +163,7 @@ export class DocumentStore {
 
   forget(name: string) {
     this.states.delete(name);
+    this.lastTitle.delete(name);
     clearTimeout(this.agentPresence.get(name));
     this.agentPresence.delete(name);
   }
@@ -198,6 +202,7 @@ export class DocumentStore {
             merged = true;
           }
         }
+        if (tooLarge(this.codec.serialize(next))) return { status: "too_large", revision: state.revision };
         this.codec.applyJSON(document, next, serverOrigin(req.actor));
       }
       return this.commit(name, document, state, req, merged);
@@ -219,7 +224,9 @@ export class DocumentStore {
         const { ok: _ok, ...failure } = result;
         return { status: "edit_failed", revision: state.revision, content: current, failure };
       }
-      this.codec.applyJSON(document, this.codec.parse(result.text), serverOrigin(req.actor));
+      const next = this.codec.parse(result.text);
+      if (tooLarge(this.codec.serialize(next))) return { status: "too_large", revision: state.revision };
+      this.codec.applyJSON(document, next, serverOrigin(req.actor));
       return this.commit(name, document, state, req, false);
     });
   }
@@ -299,7 +306,15 @@ export class DocumentStore {
     if (content === state.persisted && req.title === undefined && !req.action && !req.message) {
       return state.revision;
     }
-    const contributors = explicit ? [req.actor!] : [...state.contributors.values()];
+    // Taken now, not cleared after the store: someone typing while it is in
+    // flight must be credited in the next one.
+    const taken = explicit ? null : state.contributors;
+    if (taken) state.contributors = new Map();
+    const giveBack = () => {
+      if (!taken) return;
+      for (const [key, actor] of taken) if (!state.contributors.has(key)) state.contributors.set(key, actor);
+    };
+    const contributors = explicit ? [req.actor!] : [...taken!.values()];
     const body: StoreRequest = {
       base_revision: state.revision,
       content,
@@ -311,7 +326,13 @@ export class DocumentStore {
       ...(req.action_ref ? { action_ref: req.action_ref } : {}),
       ...(req.task_id ? { task_id: req.task_id } : {}),
     };
-    const result = await this.api.storeDoc(state.id, body);
+    let result;
+    try {
+      result = await this.api.storeDoc(state.id, body);
+    } catch (error) {
+      giveBack();
+      throw error;
+    }
     if (result.status === "gone") {
       this.hocuspocus.closeConnections(name);
       throw new GoneError(name);
@@ -320,6 +341,7 @@ export class DocumentStore {
       // The stored doc moved without this service (an older API instance
       // during a deploy, or a write while the service was down). Fold that
       // change into the live document and try again.
+      giveBack();
       if (attempt >= 2) throw new Error(`doc ${state.id}: store kept conflicting`);
       this.reconcile(name, document, state, result.content);
       state.revision = result.revision;
@@ -329,7 +351,6 @@ export class DocumentStore {
     state.persisted = content;
     state.loadedRaw = null;
     this.lastTitle.set(name, result.title);
-    if (!explicit) state.contributors.clear();
     this.log.info("stored", {
       doc: state.id,
       revision: result.revision,
@@ -370,3 +391,5 @@ export class DocumentStore {
     );
   }
 }
+
+const tooLarge = (markdown: string) => Buffer.byteLength(markdown, "utf8") > MAX_CONTENT_BYTES;

@@ -143,6 +143,8 @@ function sendResult(response: ServerResponse, result: WriteResult): boolean {
       return send(response, 409, { error: "merge_conflict", ...result });
     case "edit_failed":
       return send(response, 409, { error: "edit_failed", ...result });
+    case "too_large":
+      return send(response, 413, { error: "content_too_large", ...result });
   }
 }
 

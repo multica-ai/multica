@@ -101,6 +101,17 @@ func TestClientMapsServiceResponses(t *testing.T) {
 		t.Fatalf("gone = %+v, %v", result, err)
 	}
 
+	status, body = http.StatusRequestEntityTooLarge, `{"error":"content_too_large","status":"too_large","revision":3}`
+	if result, err = client.Edit(ctx, "abc", EditRequest{}); err != nil || result.Status != StatusTooLarge {
+		t.Fatalf("too large = %+v, %v", result, err)
+	}
+
+	// A refused request must not be written around the running service.
+	status, body = http.StatusBadRequest, `{"error":"bad"}`
+	if _, err = client.Write(ctx, "abc", WriteRequest{}); err == nil || errors.Is(err, ErrUnavailable) {
+		t.Fatalf("400 err = %v, want an error other than ErrUnavailable", err)
+	}
+
 	status, body = http.StatusInternalServerError, `{"error":"boom"}`
 	if _, err = client.Write(ctx, "abc", WriteRequest{}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("500 err = %v, want ErrUnavailable", err)
