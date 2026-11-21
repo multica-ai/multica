@@ -6,7 +6,7 @@ import type {
 
 export type ConditionOp = WebhookPayloadCondition["op"];
 
-export const CONDITION_OPS: ConditionOp[] = ["equals", "not_equals", "contains", "in", "exists"];
+export const CONDITION_OPS: ConditionOp[] = ["equals", "not_equals", "contains", "not_contains", "not_regex", "in", "exists"];
 
 // Mirror server limits so the editor never builds a row the API rejects.
 export const MAX_CONDITIONS = 20;
@@ -83,7 +83,7 @@ export function buildCondition(draft: ConditionDraft): WebhookPayloadCondition |
     const values = splitConditionValues(draft.value);
     if (values.length === 0 || values.length > MAX_CONDITION_VALUES) return null;
     condition.values = values.map(parseConditionValue);
-  } else if (draft.op === "contains") {
+  } else if (draft.op === "contains" || draft.op === "not_contains" || draft.op === "not_regex") {
     const parsed = parseConditionValue(draft.value);
     condition.value = typeof parsed === "string" ? parsed : draft.value.trim();
   } else {

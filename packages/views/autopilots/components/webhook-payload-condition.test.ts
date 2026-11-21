@@ -62,6 +62,23 @@ describe("buildCondition", () => {
     });
   });
 
+  it("keeps not_contains values as text", () => {
+    expect(buildCondition(draft({ path: "note", op: "not_contains", value: "<!-- bot -->", ignoreCase: true }))).toEqual({
+      path: "note",
+      op: "not_contains",
+      value: "<!-- bot -->",
+      ignore_case: true,
+    });
+  });
+
+  it("keeps not_regex values as text", () => {
+    expect(buildCondition(draft({ path: "sender.login", op: "not_regex", value: "^bot-\\d+$" }))).toEqual({
+      path: "sender.login",
+      op: "not_regex",
+      value: "^bot-\\d+$",
+    });
+  });
+
   it("splits in values on commas", () => {
     expect(buildCondition(draft({ path: "base.ref", op: "in", value: "main, release, " }))).toEqual({
       path: "base.ref",

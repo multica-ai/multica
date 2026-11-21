@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -654,20 +655,23 @@ type WebhookPayloadCondition struct {
 }
 
 const (
-	payloadOpEquals    = "equals"
-	payloadOpNotEquals = "not_equals"
-	payloadOpContains  = "contains"
-	payloadOpIn        = "in"
-	payloadOpExists    = "exists"
+	payloadOpEquals      = "equals"
+	payloadOpNotEquals   = "not_equals"
+	payloadOpContains    = "contains"
+	payloadOpNotContains = "not_contains"
+	payloadOpNotRegex    = "not_regex"
+	payloadOpIn          = "in"
+	payloadOpExists      = "exists"
 )
 
 const webhookPathWildcard = "*"
 
 // Payload condition limits bound rule evaluation before run admission.
 const (
-	maxWebhookPayloadConditions          = 20
-	maxWebhookPayloadConditionPathLength = 256
-	maxWebhookPayloadConditionValues     = 100
+	maxWebhookPayloadConditions            = 20
+	maxWebhookPayloadConditionPathLength   = 256
+	maxWebhookPayloadConditionValues       = 100
+	maxWebhookPayloadConditionRegexLength  = 1024
 )
 
 // validateWebhookEventFilters enforces the contract at the HTTP boundary so
@@ -712,9 +716,20 @@ func validateWebhookPayloadCondition(c WebhookPayloadCondition) error {
 		if !isScalarConditionValue(c.Value) {
 			return errors.New("value must be a string, number or boolean")
 		}
-	case payloadOpContains:
+	case payloadOpContains, payloadOpNotContains:
 		if s, ok := c.Value.(string); !ok || s == "" {
 			return errors.New("value must be a non-empty string")
+		}
+	case payloadOpNotRegex:
+		s, ok := c.Value.(string)
+		if !ok || s == "" {
+			return errors.New("value must be a non-empty string")
+		}
+		if utf8.RuneCountInString(s) > maxWebhookPayloadConditionRegexLength {
+			return fmt.Errorf("regex pattern must not exceed %d characters", maxWebhookPayloadConditionRegexLength)
+		}
+		if _, err := regexp.Compile(s); err != nil {
+			return fmt.Errorf("invalid regex pattern: %w", err)
 		}
 	case payloadOpIn:
 		if len(c.Values) == 0 {
@@ -733,7 +748,7 @@ func validateWebhookPayloadCondition(c WebhookPayloadCondition) error {
 			return errors.New("exists takes no value")
 		}
 	default:
-		return fmt.Errorf("op must be one of %s, %s, %s, %s, %s", payloadOpEquals, payloadOpNotEquals, payloadOpContains, payloadOpIn, payloadOpExists)
+		return fmt.Errorf("op must be one of %s, %s, %s, %s, %s, %s, %s", payloadOpEquals, payloadOpNotEquals, payloadOpContains, payloadOpNotContains, payloadOpNotRegex, payloadOpIn, payloadOpExists)
 	}
 	return nil
 }
@@ -928,17 +943,17 @@ func webhookActionAllowed(allowed, candidates []string) bool {
 
 // webhookPayloadConditionHolds resolves the path to every value it reaches
 // (a "*" segment fans out over array elements). equals, contains, in and
-// exists hold when any value matches; not_equals holds when none does. A
-// missing path never matches. An empty wildcard expansion satisfies
-// not_equals; exists ignores JSON nulls.
+// exists hold when any value matches; not_equals, not_contains and not_regex
+// hold when none does. A missing path never matches. An empty wildcard
+// expansion satisfies the negation operators; exists ignores JSON nulls.
 func webhookPayloadConditionHolds(c WebhookPayloadCondition, payload any) bool {
 	values, found := resolveWebhookPayloadPath(payload, strings.Split(c.Path, "."))
 	if !found {
 		return false
 	}
-	if c.Op == payloadOpNotEquals {
+	if c.Op == payloadOpNotEquals || c.Op == payloadOpNotContains || c.Op == payloadOpNotRegex {
 		for _, got := range values {
-			if webhookConditionValuesEqual(got, c.Value, c.IgnoreCase) {
+			if webhookConditionValueMatches(c, got) {
 				return false
 			}
 		}
@@ -956,9 +971,9 @@ func webhookConditionValueMatches(c WebhookPayloadCondition, got any) bool {
 	switch c.Op {
 	case payloadOpExists:
 		return got != nil
-	case payloadOpEquals:
+	case payloadOpEquals, payloadOpNotEquals:
 		return webhookConditionValuesEqual(got, c.Value, c.IgnoreCase)
-	case payloadOpContains:
+	case payloadOpContains, payloadOpNotContains:
 		s, ok := got.(string)
 		want, wantOK := c.Value.(string)
 		if !ok || !wantOK {
@@ -968,6 +983,21 @@ func webhookConditionValueMatches(c WebhookPayloadCondition, got any) bool {
 			return strings.Contains(strings.ToLower(s), strings.ToLower(want))
 		}
 		return strings.Contains(s, want)
+	case payloadOpNotRegex:
+		s, ok := got.(string)
+		want, wantOK := c.Value.(string)
+		if !ok || !wantOK {
+			return false
+		}
+		pattern := want
+		if c.IgnoreCase {
+			pattern = "(?i)" + pattern
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return false
+		}
+		return re.MatchString(s)
 	case payloadOpIn:
 		for _, v := range c.Values {
 			if webhookConditionValuesEqual(got, v, c.IgnoreCase) {

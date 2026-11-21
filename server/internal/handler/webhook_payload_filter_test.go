@@ -95,6 +95,62 @@ func TestWebhookPayloadFilter_DiagnosticBounds(t *testing.T) {
 	}
 }
 
+func TestWebhookPayloadFilter_NotContainsAndNotRegex(t *testing.T) {
+	for _, tc := range []struct {
+		name, filterJSON, payload string
+		allowed                   bool
+	}{
+		// not_contains basic
+		{"not_contains: no match → allowed",
+			`[{"event":"pull_request","conditions":[{"path":"title","op":"not_contains","value":"wip"}]}]`,
+			`{"title":"Fix login bug"}`, true},
+		{"not_contains: has match → filtered",
+			`[{"event":"pull_request","conditions":[{"path":"title","op":"not_contains","value":"wip"}]}]`,
+			`{"title":"wip: Fix login bug"}`, false},
+		{"not_contains ignore_case",
+			`[{"event":"pull_request","conditions":[{"path":"title","op":"not_contains","value":"WIP","ignore_case":true}]}]`,
+			`{"title":"wip: fix bug"}`, false},
+		// not_contains with wildcard path (universal negation)
+		{"not_contains wildcard: none match → allowed",
+			`[{"event":"pull_request","conditions":[{"path":"labels.*.name","op":"not_contains","value":"block"}]}]`,
+			`{"labels":[{"name":"bug"},{"name":"urgent"}]}`, true},
+		{"not_contains wildcard: one matches → filtered",
+			`[{"event":"pull_request","conditions":[{"path":"labels.*.name","op":"not_contains","value":"block"}]}]`,
+			`{"labels":[{"name":"bug"},{"name":"blocked"}]}`, false},
+		// not_regex basic
+		{"not_regex: no match → allowed",
+			`[{"event":"pull_request","conditions":[{"path":"sender.login","op":"not_regex","value":"^bot-\\d+$"}]}]`,
+			`{"sender":{"login":"alice"}}`, true},
+		{"not_regex: has match → filtered",
+			`[{"event":"pull_request","conditions":[{"path":"sender.login","op":"not_regex","value":"^bot-\\d+$"}]}]`,
+			`{"sender":{"login":"bot-42"}}`, false},
+		{"not_regex ignore_case",
+			`[{"event":"pull_request","conditions":[{"path":"title","op":"not_regex","value":"^BOT","ignore_case":true}]}]`,
+			`{"title":"bot: automated fix"}`, false},
+		// missing path → condition never holds (false)
+		{"not_contains missing path → false",
+			`[{"event":"pull_request","conditions":[{"path":"missing","op":"not_contains","value":"x"}]}]`,
+			`{"title":"hello"}`, false},
+		{"not_regex missing path → false",
+			`[{"event":"pull_request","conditions":[{"path":"missing","op":"not_regex","value":"x"}]}]`,
+			`{"title":"hello"}`, false},
+		// non-string field → no match (negation holds → allowed)
+		{"not_contains non-string → no match → allowed",
+			`[{"event":"pull_request","conditions":[{"path":"draft","op":"not_contains","value":"x"}]}]`,
+			`{"draft":false}`, true},
+		{"not_regex non-string → no match → allowed",
+			`[{"event":"pull_request","conditions":[{"path":"draft","op":"not_regex","value":"x"}]}]`,
+			`{"draft":false}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := evaluateWebhookTriggerScope([]byte(tc.filterJSON), pullRequestEnvelope(tc.payload))
+			if decision.Allowed != tc.allowed {
+				t.Fatalf("decision = %+v, want allowed=%v", decision, tc.allowed)
+			}
+		})
+	}
+}
+
 func TestWebhookPayloadFilter_PersistsIngressAndWorkerDecisions(t *testing.T) {
 	for _, worker := range []bool{false, true} {
 		name := "ingress"
