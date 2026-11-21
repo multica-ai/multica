@@ -1,4 +1,4 @@
-import { diff3Merge } from "node-diff3";
+import { diff3Merge, diffIndices } from "node-diff3";
 import type { DocumentCodec, JSONContent } from "@multica/views/editor/schema/codec";
 
 export interface MergeConflict {
@@ -53,4 +53,36 @@ export function mergeDocuments(
   }
   if (conflicts.length > 0) return { ok: false, conflicts };
   return { ok: true, doc: { type: "doc", content: merged } };
+}
+
+const isPendingUpload = (block: JSONContent) =>
+  (block.type === "image" || block.type === "fileCard") && block.attrs?.uploading === true;
+
+/**
+ * Prepares a document parsed from Markdown to replace the live one.
+ *
+ * Markdown does not carry everything the live document holds: image size,
+ * file size, and placeholders for uploads still in flight. A writer working
+ * from Markdown never saw them, so its write must not remove them. Every
+ * top-level block whose Markdown is unchanged keeps its live copy. A
+ * placeholder serializes like an empty paragraph, so it pairs with the one
+ * its gap parses back into; inside a region the writer changed it is kept,
+ * on the side of the changed blocks it was on.
+ */
+export function keepLiveBlocks(codec: DocumentCodec, live: JSONContent, next: JSONContent): JSONContent {
+  const key = (block: JSONContent) => codec.serialize({ type: "doc", content: [block] });
+  const current = live.content ?? [];
+  const incoming = next.content ?? [];
+  const content: JSONContent[] = [];
+  let i = 0;
+  for (const { buffer1: [start, length], buffer2: [from, count] } of diffIndices(current.map(key), incoming.map(key))) {
+    content.push(...current.slice(i, start));
+    const replaced = current.slice(start, start + length);
+    const firstContent = replaced.findIndex((block) => !isPendingUpload(block));
+    const before = firstContent === -1 ? replaced : replaced.slice(0, firstContent);
+    content.push(...before, ...incoming.slice(from, from + count), ...replaced.slice(before.length).filter(isPendingUpload));
+    i = start + length;
+  }
+  content.push(...current.slice(i));
+  return { ...next, content };
 }
