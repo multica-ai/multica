@@ -492,6 +492,19 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		defer os.Remove(logPath)
 		defer supplements.close()
 
+		thinking := &antigravityThinkingProgress{logPath: logPath, messages: msgCh}
+		thinkingCtx, stopThinking := context.WithCancel(runCtx)
+		thinkingDone := make(chan struct{})
+		go func() {
+			defer close(thinkingDone)
+			thinking.follow(thinkingCtx)
+		}()
+		finishThinking := func() {
+			stopThinking()
+			<-thinkingDone
+		}
+		defer finishThinking()
+
 		startTime := time.Now()
 		var output strings.Builder
 		var streamModel string
@@ -534,6 +547,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					streamModel = event.Init.Model
 					supplements.activate(streamSessionID)
 					announceSession(streamSessionID)
+					thinking.setScope(streamSessionID, turn.start)
 				case "step_update":
 					if event.StepUpdate == nil {
 						turn.invalid = true
@@ -557,6 +571,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 						announceSession(streamSessionID)
 					}
 					turn.confirmInjected(supplements, transcript, streamSessionID)
+					thinking.setScope(streamSessionID, turn.start)
 					for _, message := range antigravityToolMessages(event.StepUpdate, streamTools) {
 						// Tool lifecycle events also drive the daemon's in-flight
 						// counter. Unlike best-effort text, neither half may be
@@ -624,6 +639,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		// Remove the managed hooks before the result is reported, so a
 		// follow-up run never observes them.
 		supplements.close()
+		finishThinking()
 		duration := time.Since(startTime)
 
 		sessionID := streamSessionID
