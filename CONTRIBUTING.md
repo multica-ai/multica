@@ -753,7 +753,7 @@ fixtures:
 
 ```bash
 make up C=api,web ARGS="--ephemeral"
-make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task, --json
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task sidebar, --json
 make destroy ARGS="--yes"
 ```
 
@@ -763,6 +763,17 @@ with a wide description and a comment with a diff. The script registers a
 fixture runtime with the profile token and completes each task with canned
 Markdown through the daemon API, so it also works inside a daemon-managed task.
 It prints the URL of everything it created and exits.
+
+`sidebar` makes the Work panel look used, for sidebar mocks and screenshots. It
+creates 11 issues across three projects, pins three of them and the Desktop 2.0
+project, and adds two saved views. Three agents (Atlas, Nova and Sage) then
+comment, mention, assign, change dates and priorities, and react through their
+own task tokens, so every inbox row comes from the server's notification
+listeners: 11 notified issues, 6 of them unread, enough for "Show 6 more". The
+notifications are then backdated with `psql` to read from minutes to days old;
+without `psql` they keep their real times. `all` leaves `sidebar` out. Running
+it again adds new issues and notifications and reuses the agents, projects and
+views.
 
 `task` is for UI and CLI work that needs an agent mid-run: agent status,
 the issue's execution log, Working / Idle filters, task panels. It assigns a new

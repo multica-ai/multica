@@ -1963,8 +1963,9 @@ desktop (Electron). Anything selected implies api.
 
 Every environment has an onboarded workspace with two issues, signed in
 through its CLI profile; scripts/dev-fixtures.mjs adds chat, Agent Builder,
-wide-markdown issue content and a running agent task. desktop starts signed in. --cdp exposes a Chrome
-DevTools Protocol port (printed by up and status --json) for Playwright's
+wide-markdown issue content, a running agent task and a Work panel with
+notifications, pins and projects. desktop starts signed in. --cdp exposes a
+Chrome DevTools Protocol port (printed by up and status --json) for Playwright's
 connectOverCDP; the port is kept for later runs until --no-cdp.
 
 down keeps the database, the CLI profile and the allocated slot; with
