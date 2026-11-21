@@ -232,6 +232,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
+		// servedModels holds every model id seen on an assistant message, so
+		// a Bedrock application inference profile ARN in the final usage can
+		// be renamed to the model it served (resolveBedrockProfileUsage).
+		servedModels := make(map[string]struct{})
 		rateLimits := newRateLimitTracker(opts.OnRateLimits)
 		eventCount := 0
 		invalidEventCount := 0
@@ -322,6 +326,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "assistant":
 				assistantEventCount++
 				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
+				if turn.model != "" {
+					servedModels[turn.model] = struct{}{}
+				}
 				toolUseCount += turn.toolUses
 				if !turn.understood {
 					unreadableAssistantCount++
@@ -539,7 +546,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			Error:          finalError,
 			DurationMs:     duration.Milliseconds(),
 			SessionID:      reportedSessionID,
-			Usage:          usage,
+			Usage:          resolveBedrockProfileUsage(usage, servedModels),
 			ResumeRejected: resumeRejected,
 		}
 	}()
@@ -559,7 +566,7 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		// fallback rather than let an older turn stand in for this one.
 		return assistantTurn{}
 	}
-	turn := assistantTurn{understood: true}
+	turn := assistantTurn{understood: true, model: content.Model}
 	var assistantText strings.Builder
 	toolUseCount := 0
 
