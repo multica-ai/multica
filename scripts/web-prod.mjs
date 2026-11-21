@@ -92,24 +92,28 @@ function listenerPid(port) {
   return result.stdout.trim().split("\n").filter(Boolean)[0] ?? "";
 }
 
-async function build() {
+async function build(track) {
   const original = readFileSync(nextEnvFile);
   log("building apps/web for production (same-origin API)");
   try {
-    const buildEnv = { ...env, NEXT_PUBLIC_API_URL: "", NEXT_PUBLIC_WS_URL: "", NEXT_TELEMETRY_DISABLED: "1" };
-    // A runtime setting: at build time it breaks prerendering.
-    delete buildEnv.REMOTE_API_URL;
+    // REMOTE_API_URL is a runtime setting: at build time it breaks
+    // prerendering. Empty rather than unset, so next.config.ts's dotenv
+    // does not read it back from the root .env.
+    const buildEnv = { ...env, NEXT_PUBLIC_API_URL: "", NEXT_PUBLIC_WS_URL: "", REMOTE_API_URL: "", NEXT_TELEMETRY_DISABLED: "1" };
+    const builder = spawn("pnpm", ["--filter", "@multica/web", "build"], { cwd: repoRoot, env: buildEnv, stdio: "inherit" });
+    track(builder);
     const code = await new Promise((done) => {
-      const child = spawn("pnpm", ["--filter", "@multica/web", "build"], { cwd: repoRoot, env: buildEnv, stdio: "inherit" });
-      child.on("exit", (exitCode, signal) => done(signal ? 1 : exitCode ?? 1));
+      builder.on("error", () => done(127));
+      builder.on("exit", (exitCode, signal) => done(signal ? 1 : exitCode ?? 1));
     });
-    if (code !== 0) fail("the web build failed");
+    if (code !== 0) throw new Error("the web build failed");
   } finally {
     writeFileSync(nextEnvFile, original);
   }
 }
 
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
+const READY_TIMEOUT_MS = 60_000;
 
 async function main() {
   if (claimedByDaemon()) {
@@ -121,22 +125,23 @@ async function main() {
     fail(`port ${webPort} is held by a process outside this environment; see \`make status\`.`);
   }
   if (before.components?.api?.state !== "running") fail("the API is not running; run `make up` first.");
-  if (!skipBuild) await build();
-  else if (!existsSync(join(webDir, ".next", "BUILD_ID"))) fail("--skip-build: apps/web/.next holds no production build");
+  if (skipBuild && !existsSync(join(webDir, ".next", "BUILD_ID"))) fail("--skip-build: apps/web/.next holds no production build");
 
-  const restoreDev = webState !== "stopped";
+  let stoppedDev = false;
   let server = null;
+  // The build, then the command: whichever runs now gets a signal passed on,
+  // and its exit lets main() reach cleanup().
   let child = null;
   let cleaning = null;
   const cleanup = () => {
     cleaning ??= (async () => {
-      if (server && !exited(server)) {
+      if (server?.pid && !exited(server)) {
         try { process.kill(-server.pid, "SIGTERM"); } catch { /* already gone */ }
         for (let i = 0; i < 40 && !exited(server); i++) await sleep(250);
         if (!exited(server)) try { process.kill(-server.pid, "SIGKILL"); } catch { /* already gone */ }
       }
       for (let i = 0; i < 40 && listenerPid(webPort); i++) await sleep(250);
-      if (restoreDev) {
+      if (stoppedDev) {
         log("starting the dev web server again");
         if (!devEnvRun("up", "--components", "web")) {
           console.error("[web-prod] the dev web server did not come back; run `make up C=web`.");
@@ -147,17 +152,24 @@ async function main() {
     return cleaning;
   };
   let interrupted = 0;
+  let wakeHold = () => {};
   for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
     process.on(signal, () => {
       interrupted = code;
-      // A command still running got the same Ctrl-C; its exit runs the cleanup.
-      if (!child || exited(child)) cleanup().finally(() => process.exit(code));
+      process.exitCode = code;
+      // A terminal's Ctrl-C reaches the child too; a SIGTERM sent to this
+      // process alone does not.
+      if (child && !exited(child)) child.kill(signal);
+      wakeHold();
     });
   }
 
   try {
-    if (restoreDev) {
+    if (!skipBuild) await build((builder) => { child = builder; });
+    if (interrupted) return;
+    if (webState !== "stopped") {
       log("stopping the dev web server");
+      stoppedDev = true;
       if (!devEnvRun("down", "--components", "web")) throw new Error("could not stop the dev web server");
     }
     for (let i = 0; i < 40 && listenerPid(webPort); i++) await sleep(250);
@@ -165,6 +177,7 @@ async function main() {
 
     const serverLog = join(before.logs, "web-prod.log");
     const out = openSync(serverLog, "w");
+    let serverError = null;
     server = spawn(join(webDir, "node_modules", ".bin", "next"), ["start", "--port", String(webPort)], {
       cwd: webDir,
       env: { ...env, PORT: String(webPort), REMOTE_API_URL: apiUrl, NEXT_PUBLIC_API_URL: "", NEXT_PUBLIC_WS_URL: "" },
@@ -172,9 +185,14 @@ async function main() {
       // Its own process group, so Ctrl-C reaches it only through cleanup().
       detached: true,
     });
+    server.on("error", (error) => { serverError = error; });
     closeSync(out);
+    const deadline = Date.now() + READY_TIMEOUT_MS;
     for (let ready = false; !ready; ) {
+      if (serverError) throw new Error(`could not start next: ${serverError.message}`);
       if (exited(server)) throw new Error(`next start exited (${server.exitCode ?? server.signalCode}); see ${serverLog}`);
+      if (interrupted) return;
+      if (Date.now() > deadline) throw new Error(`next start did not answer on ${webUrl} within ${READY_TIMEOUT_MS / 1000}s; see ${serverLog}`);
       try {
         ready = (await fetch(`${webUrl}/`, { redirect: "manual" })).status > 0;
       } catch {
@@ -185,7 +203,10 @@ async function main() {
 
     if (command.length === 0) {
       log("Ctrl-C stops it and starts the dev web server again");
-      await new Promise((done) => server.on("exit", done));
+      await new Promise((done) => {
+        wakeHold = done;
+        server.on("exit", done);
+      });
       if (!interrupted) throw new Error(`next start exited (${server.exitCode ?? server.signalCode}); see ${serverLog}`);
       return;
     }
@@ -199,12 +220,13 @@ async function main() {
     });
     process.exitCode = interrupted || code;
   } catch (error) {
-    console.error(`[web-prod] ${error.message}`);
-    process.exitCode = 1;
+    if (!interrupted) {
+      console.error(`[web-prod] ${error.message}`);
+      process.exitCode = 1;
+    }
   } finally {
     await cleanup();
   }
-  if (interrupted) process.exit(interrupted);
 }
 
 main();

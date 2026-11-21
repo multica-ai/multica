@@ -96,7 +96,8 @@ const slug = JSON.parse(execFileSync("bash", [join(repoRoot, "scripts", "dev-env
 
 const browser = await chromium.launch();
 async function newContext() {
-  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  // The selectors below match English labels ("Live", "Connecting").
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, locale: "en-US" });
   await context.addInitScript((token) => localStorage.setItem("multica_token", token), profile.token);
   return context;
 }
@@ -140,15 +141,16 @@ async function seedDoc() {
   return { from: `/${slug}/docs`, link: title, live: Boolean(ticket.enabled) };
 }
 
-const scenario = custom.from ? { ...custom, kind: "custom" } : { ...(await seedDoc()), kind: "doc" };
+let scenario;
 
-// Runs in the page. States are sampled every frame and recorded on change.
+// Runs in the page. States are sampled every frame and recorded on change,
+// until __nav.stop() or the safety cap.
 function installRecorder({ kind, until, marker }) {
   const w = window;
   const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
   w.__nav = { frames: [], click: null };
   document.addEventListener("click", (event) => { w.__nav.click ??= event.timeStamp; }, { capture: true });
-  w.__nav.start = (seconds) => {
+  w.__nav.start = (capSeconds) => {
     const t0 = performance.now();
     let last = "";
     const sample = () => {
@@ -172,9 +174,10 @@ function installRecorder({ kind, until, marker }) {
         w.__nav.frames.push({ at: performance.now(), state: key });
         last = key;
       }
-      if (performance.now() - t0 < seconds * 1000) requestAnimationFrame(sample);
+      if (!w.__nav.stopped && performance.now() - t0 < capSeconds * 1000) requestAnimationFrame(sample);
     };
     w.__nav.from = location.pathname;
+    w.__nav.stop = () => { w.__nav.stopped = true; };
     // The start page's own matches are not the destination's content.
     const before = new Set(until ? document.querySelectorAll(until) : []);
     sample();
@@ -205,7 +208,7 @@ async function sample(index, keep) {
   const hoverAt = Date.now();
   await link.hover();
   await page.waitForTimeout(hoverMs);
-  await page.evaluate(() => window.__nav.start(8));
+  await page.evaluate(() => window.__nav.start(60));
   await link.click();
   const until = Date.now() + 15_000;
   while (!(await page.evaluate(() => window.__nav.frames.some((f) => f.state.split("+").includes("content"))))) {
@@ -213,7 +216,11 @@ async function sample(index, keep) {
     await page.waitForTimeout(100);
   }
   await page.waitForTimeout(2000);
-  const nav = await page.evaluate(() => ({ ...window.__nav, origin: performance.timeOrigin }));
+  const nav = await page.evaluate(() => {
+    window.__nav.stop();
+    const { frames, click } = window.__nav;
+    return { frames, click, origin: performance.timeOrigin };
+  });
   if (keep && screenshot) await page.screenshot({ path: resolve(screenshot), animations: "disabled" });
   await context.close();
 
@@ -250,6 +257,7 @@ async function sample(index, keep) {
 const samples = [];
 let failure = null;
 try {
+  scenario = custom.from ? { ...custom, kind: "custom" } : { ...(await seedDoc()), kind: "doc" };
   for (let i = 0; i < warmup + repeats; i++) {
     const result = await sample(i, i === warmup + repeats - 1);
     if (i >= warmup) samples.push(result);
