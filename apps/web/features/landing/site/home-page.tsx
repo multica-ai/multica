@@ -115,9 +115,6 @@ const HERO_AGENTS = [
   "Antigravity",
   "Qwen Code",
   "Kimi CLI",
-  "MiniMax Code",
-  "CodeBuddy",
-  "Trae",
   "Pi",
 ] as const;
 const HERO_AGENT_HOLDS = HERO_AGENTS.map(() => 3600);
