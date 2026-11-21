@@ -224,6 +224,13 @@ func setWorkspaceIssuePrefixForTest(t *testing.T, prefix string) {
 	})
 }
 
+// Refresh the fixture just before claiming. The suite-wide runtime's initial
+// heartbeat can expire before tests reach the claim path.
+func refreshClaimFixtureHeartbeat(t *testing.T, runtimeID string) {
+	t.Helper()
+	dbfx.Exec(t, `UPDATE agent_runtime SET last_seen_at = now() WHERE id = $1`, runtimeID)
+}
+
 func handlerTestRuntimeID(t *testing.T) string {
 	t.Helper()
 

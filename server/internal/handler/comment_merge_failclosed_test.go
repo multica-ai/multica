@@ -2,10 +2,10 @@ package handler
 
 import (
 	"context"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot is Elon's must-fix
@@ -18,6 +18,10 @@ import (
 func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.T) {
 	ctx := context.Background()
 	agentID := createWebhookTestAgent(t, "MergeFailClosed Agent")
+	// The attribution control needs an invocation grant independently of its
+	// missing human lineage; private invocation remains deny-by-default.
+	dbfx.Exec(t, `UPDATE agent SET permission_mode='public_to' WHERE id=$1`, agentID)
+	dbfx.Insert(t, "agent_invocation_target", testutil.Cols{"agent_id": agentID, "target_type": "workspace", "target_id": testWorkspaceID})
 
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
@@ -66,7 +70,10 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 	if err != nil {
 		t.Fatalf("get agent: %v", err)
 	}
-	issue := db.Issue{ID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID)}
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceIssueAssignee}
 
 	readSnapshot := func() (triggerComment, originator, accountable, source string) {
@@ -96,8 +103,9 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 		return n
 	}
 	before := countTasks()
+	accepted := commentDeliveryRecordForTest(t, parseUUID(cidB), trigger.Agent.ID)
 
-	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB), pgtype.Text{}); result != commentMergeAttributionBlocked {
+	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, accepted, pgtype.Text{}); result != commentMergeAttributionBlocked {
 		t.Fatalf("fail-closed merge result = %d, want commentMergeAttributionBlocked (refused, non-success)", result)
 	}
 	if after := countTasks(); after != before {
@@ -123,7 +131,7 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 	if _, err := testPool.Exec(ctx, `UPDATE workspace SET attribution_fail_closed = false WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("clear fail-closed: %v", err)
 	}
-	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB), pgtype.Text{}); result != commentMergeSucceeded {
+	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, accepted, pgtype.Text{}); result != commentMergeSucceeded {
 		t.Fatalf("fail-open merge result = %d, want commentMergeSucceeded", result)
 	}
 	tc2, orig2, _, src2 := readSnapshot()

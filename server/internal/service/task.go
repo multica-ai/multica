@@ -298,13 +298,26 @@ func (s *TaskService) ResolveOriginatorFromTriggerComment(ctx context.Context, w
 // precisely and the workspace forbids the owner_fallback degrade. The caller must then
 // REFUSE the merge and keep the original (precisely-attributed) task snapshot rather
 // than re-stamp a queued run to a degraded owner_fallback (Elon must-fix).
-func (s *TaskService) AttributionForMergedComment(ctx context.Context, workspaceID, commentID pgtype.UUID, isMention bool, agent db.Agent) (attribution.Result, error) {
+func (s *TaskService) AttributionForMergedComment(ctx context.Context, issue db.Issue, accepted db.CommentDeliveryObligation, isMention bool, agent db.Agent) (attribution.Result, error) {
+	if accepted.WorkspaceID != issue.WorkspaceID || accepted.IssueID != issue.ID || accepted.AgentID != agent.ID {
+		return attribution.Result{}, ErrAttributionFailClosed
+	}
 	agentAuthoredSource := attribution.SourceCommentSource
 	if isMention {
 		agentAuthoredSource = attribution.SourceDelegation
 	}
-	attr := s.attributionFromTriggerComment(ctx, workspaceID, commentID, agentAuthoredSource)
-	return s.applyAttributionFallback(ctx, attr, agent)
+	attr, err := s.attributionForAcceptedComment(ctx, accepted, agentAuthoredSource)
+	if err != nil {
+		return attribution.Result{}, err
+	}
+	attr, err = s.applyAttributionFallback(ctx, attr, agent)
+	if err != nil {
+		return attribution.Result{}, err
+	}
+	if err := s.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
+		return attribution.Result{}, err
+	}
+	return attr, nil
 }
 
 // BuildCommentTriggerSummary is the exported wrapper used by the comment-merge
@@ -717,6 +730,11 @@ func ResolveAutopilotTriggerPrincipal(ctx context.Context, q *db.Queries, trigge
 // run never starts.
 var ErrAttributionFailClosed = errors.New("attribution: no precise accountable human and enqueue refused (fail-closed policy, policy read failed, or no agent owner)")
 
+// ErrAttributionPolicyRead distinguishes unavailable policy from a confirmed
+// refusal. Such errors also match ErrAttributionFailClosed: do not run, but a
+// durable accepted input can retry once policy reads recover.
+var ErrAttributionPolicyRead = errors.New("attribution: workspace policy read failed")
+
 // ErrDuplicatePendingTask means a fresh enqueue lost the race to a concurrent
 // one: a queued/dispatched task for the same (issue, agent) already exists, so
 // the pending-task unique index rejected the insert (#5914). This is a benign
@@ -791,7 +809,7 @@ func (s *TaskService) applyAttributionFallback(ctx context.Context, attr attribu
 	if err != nil {
 		// Cannot confirm the workspace allows fallback → fail closed rather than
 		// silently run an unattributable task.
-		return attr, fmt.Errorf("%w: policy read failed: %v", ErrAttributionFailClosed, err)
+		return attr, fmt.Errorf("%w: %w: %w", ErrAttributionFailClosed, ErrAttributionPolicyRead, err)
 	}
 	if failClosed {
 		return attr, ErrAttributionFailClosed
@@ -1275,10 +1293,10 @@ func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pg
 }
 
 func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin, false)
+	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin, false, nil)
 }
 
-func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, freshRerun bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, freshRerun bool, acceptedComment *db.CommentDeliveryObligation) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1306,7 +1324,15 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	// comment or direct member assignment is direct_human. attr.UserID is the
 	// same value the pre-MUL-4302 resolver produced, so overlay/authorization
 	// are unchanged; the extra fields are audit provenance.
-	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, actorUserID)
+	var attr attribution.Result
+	if acceptedComment == nil {
+		attr = s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, actorUserID)
+	} else {
+		attr, err = s.attributionForAcceptedComment(ctx, *acceptedComment, attribution.SourceCommentSource)
+		if err != nil {
+			return db.AgentTaskQueue{}, err
+		}
+	}
 	// No precise human resolved → owner_fallback (accountable = agent owner), or
 	// refuse the enqueue if the workspace is fail-closed (MUL-4302 §3.5).
 	attr, err = s.applyAttributionFallback(ctx, attr, agent)
@@ -1316,6 +1342,15 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	}
 	if err := s.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
 		return db.AgentTaskQueue{}, err
+	}
+	var headSha pgtype.Text
+	if acceptedComment != nil {
+		headSha, err = commentDeliveryReviewHead(ctx, s.Queries, issue.ID)
+		if err != nil {
+			return db.AgentTaskQueue{}, err
+		}
+	} else {
+		headSha = s.ResolveIssueReviewSHAParam(ctx, issue.ID)
 	}
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
@@ -1344,10 +1379,17 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		TriggerEvidenceRefID: attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
-		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+		HeadSha: headSha,
 	}
 	var task db.AgentTaskQueue
-	if fireAt.Valid {
+	if acceptedComment != nil {
+		err = s.WithAcceptedCommentWrite(ctx, issue, agent, *acceptedComment, attr.UserID, attr.AccountableUserID, func(q *db.Queries, head pgtype.Text) error {
+			createParams.HeadSha = head
+			var writeErr error
+			task, writeErr = q.CreateAgentTask(ctx, createParams)
+			return writeErr
+		})
+	} else if fireAt.Valid {
 		task, err = s.Queries.CreateDeferredChannelIssueTask(ctx, db.CreateDeferredChannelIssueTaskParams{
 			ID:                   dbid.NewV7(),
 			AgentID:              createParams.AgentID,
@@ -1457,10 +1499,10 @@ func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, 
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, false, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, false, false, nil)
 }
 
-func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, freshRerun, workflowHandoff bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, freshRerun, workflowHandoff bool, acceptedComment *db.CommentDeliveryObligation) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1482,7 +1524,15 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	// agent-authored comment is a delegation (the parent task's human is
 	// copied); a member mention is direct_human. attr.UserID matches the
 	// pre-MUL-4302 value, so authorization is unchanged.
-	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceDelegation, actorUserID)
+	var attr attribution.Result
+	if acceptedComment == nil {
+		attr = s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceDelegation, actorUserID)
+	} else {
+		attr, err = s.attributionForAcceptedComment(ctx, *acceptedComment, attribution.SourceDelegation)
+		if err != nil {
+			return db.AgentTaskQueue{}, err
+		}
+	}
 	// No precise human resolved → owner_fallback (accountable = agent owner), or
 	// refuse the enqueue if the workspace is fail-closed (MUL-4302 §3.5).
 	attr, err = s.applyAttributionFallback(ctx, attr, agent)
@@ -1492,6 +1542,15 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	}
 	if err := s.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
 		return db.AgentTaskQueue{}, err
+	}
+	var headSha pgtype.Text
+	if acceptedComment != nil {
+		headSha, err = commentDeliveryReviewHead(ctx, s.Queries, issue.ID)
+		if err != nil {
+			return db.AgentTaskQueue{}, err
+		}
+	} else {
+		headSha = s.ResolveIssueReviewSHAParam(ctx, issue.ID)
 	}
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
@@ -1522,10 +1581,17 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		TriggerEvidenceRefID: attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
-		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+		HeadSha: headSha,
 	}
 	var task db.AgentTaskQueue
-	if workflowHandoff {
+	if acceptedComment != nil {
+		err = s.WithAcceptedCommentWrite(ctx, issue, agent, *acceptedComment, attr.UserID, attr.AccountableUserID, func(q *db.Queries, head pgtype.Text) error {
+			params.HeadSha = head
+			var writeErr error
+			task, writeErr = q.CreateAgentTask(ctx, params)
+			return writeErr
+		})
+	} else if workflowHandoff {
 		task, err = s.createWorkflowSquadHandoffTask(ctx, issue, params)
 	} else {
 		task, err = s.Queries.CreateAgentTask(ctx, params)
@@ -2766,6 +2832,9 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 	// the receipt. It would neither replay nor settle — it would sit in the
 	// partial index forever.
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if err := qtx.DeleteCommentDeliveryObligationsForIssue(ctx, issueID); err != nil {
+			return err
+		}
 		var err error
 		cancelled, err = qtx.CancelAgentTasksByIssue(ctx, issueID)
 		if err != nil {
@@ -2817,6 +2886,9 @@ func distinctAgentIDs(cancelled []db.AgentTaskQueue) []pgtype.UUID {
 func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
 	var cancelled []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if err := qtx.DeleteCommentDeliveryObligationsForAgent(ctx, agentID); err != nil {
+			return err
+		}
 		var err error
 		cancelled, err = qtx.CancelAgentTasksByAgent(ctx, agentID)
 		if err != nil {
@@ -2837,36 +2909,6 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 	// working→available based on remaining task counts, no need to call
 	// per row (the rows we just cancelled all belong to the same agent).
 	s.ReconcileAgentStatus(ctx, agentID)
-	s.notifyTasksFinished(cancelled)
-	return cancelled, nil
-}
-
-// CancelTasksByTriggerComment cancels active tasks whose planned comment batch
-// contains the given edited/deleted comment. The historical method name is
-// retained for call-site stability. It must run before deletion clears the
-// trigger FK; the returned rows let the handler re-route every surviving input.
-func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
-	var cancelled []db.AgentTaskQueue
-	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		var err error
-		cancelled, err = qtx.CancelAgentTasksByTriggerComment(ctx, commentID)
-		if err != nil {
-			return err
-		}
-		return SettleTerminalTaskState(ctx, qtx, cancelled...)
-	}); err != nil {
-		return nil, err
-	}
-	for _, t := range cancelled {
-		s.captureTaskCancelled(ctx, t)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
-	}
-	// Reconcile once per distinct agent instead of once per cancelled row: an
-	// edited/deleted trigger comment can cancel several tasks owned by the same
-	// agent, and each reconcile is a DB write plus a status broadcast (D#3319).
-	for _, agentID := range distinctAgentIDs(cancelled) {
-		s.ReconcileAgentStatus(ctx, agentID)
-	}
 	s.notifyTasksFinished(cancelled)
 	return cancelled, nil
 }
@@ -4077,10 +4119,16 @@ func (e *ClaimDeliveryAuthzError) Error() string {
 	return "claim delivery authorization failed: " + e.Reason + ": " + e.Detail
 }
 
+// CommentDeliveryReceipt identifies the exact comment versions in one claim payload.
+type CommentDeliveryReceipt struct {
+	IDs       []pgtype.UUID
+	Revisions map[string]int64
+}
+
 // FinalizeTaskClaim atomically persists the task-scoped agent token, an
 // optional short-lived daemon token used by the Remote MCP broker, the
 // comparable issue state this payload was built from, and, for a comment-backed
-// task, the exact comment ids embedded in the response. The handler must call
+// task, the exact comment ids and revisions embedded in the response. The handler must call
 // this only after the full payload has been built and before writing any
 // response bytes. A failure rolls every write back so the claim can be safely
 // returned to the queue.
@@ -4107,7 +4155,7 @@ func (s *TaskService) FinalizeTaskClaim(
 	ctx context.Context,
 	task db.AgentTaskQueue,
 	token db.CreateTaskTokenParams,
-	deliveredCommentIDs []pgtype.UUID,
+	commentReceipt CommentDeliveryReceipt,
 	recordCommentReceipt bool,
 	authorize func(qtx *db.Queries, token *db.CreateTaskTokenParams) error,
 	issueSnapshot []byte,
@@ -4163,12 +4211,17 @@ func (s *TaskService) FinalizeTaskClaim(
 		if !recordCommentReceipt {
 			return nil
 		}
+		revisions, err := json.Marshal(commentReceipt.Revisions)
+		if err != nil {
+			return fmt.Errorf("encode delivered comment revisions: %w", err)
+		}
 		persisted, err := qtx.SetTaskDeliveredCommentIDs(ctx, db.SetTaskDeliveredCommentIDsParams{
-			DeliveredCommentIds:      deliveredCommentIDs,
-			TaskID:                   task.ID,
-			RuntimeID:                task.RuntimeID,
-			DispatchedAt:             task.DispatchedAt,
-			ExpectedTriggerCommentID: task.TriggerCommentID,
+			DeliveredCommentIds:       commentReceipt.IDs,
+			DeliveredCommentRevisions: revisions,
+			TaskID:                    task.ID,
+			RuntimeID:                 task.RuntimeID,
+			DispatchedAt:              task.DispatchedAt,
+			ExpectedTriggerCommentID:  task.TriggerCommentID,
 		})
 		if err != nil {
 			return fmt.Errorf("set delivered comment ids: %w", err)
@@ -6416,9 +6469,9 @@ func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []p
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, fresh bool) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, origin, fresh)
+		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, origin, fresh, nil)
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, origin, fresh, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, origin, fresh, false, nil)
 }
 
 // The bulk terminal writes below are the sweeper, archive and daemon-recovery

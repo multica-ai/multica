@@ -2614,7 +2614,11 @@ func (h *Handler) finalizeClaimDelivery(
 		return nil
 	}
 
-	receipt, err = h.TaskService.FinalizeTaskClaim(ctx, *task, token, deliveredCommentIDs, recordCommentReceipt, authorize, issueSnapshot, daemonTokens...)
+	commentReceipt := service.CommentDeliveryReceipt{IDs: deliveredCommentIDs}
+	if response != nil {
+		commentReceipt.Revisions = response.deliveredCommentRevisions
+	}
+	receipt, err = h.TaskService.FinalizeTaskClaim(ctx, *task, token, commentReceipt, recordCommentReceipt, authorize, issueSnapshot, daemonTokens...)
 	if err == nil {
 		return receipt, nil, nil
 	}
@@ -3440,6 +3444,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// coverage for this claim. The trigger snapshot CAS below also rejects a
 		// concurrent edit/delete that changes the FK after this read.
 		deliveredCommentIDs = commentDataIDs(deliveredComments)
+		resp.deliveredCommentRevisions = make(map[string]int64, len(deliveredComments))
+		for _, comment := range deliveredComments {
+			resp.deliveredCommentRevisions[comment.ID] = comment.source.Revision
+		}
 		// taskToResponse exposes the enqueue plan to UI task-list callers. A
 		// daemon claim must instead advertise only the structured ids actually
 		// present in this payload, especially when the delivery budget truncates.
@@ -3481,6 +3489,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				WorkspaceID: runtime.WorkspaceID,
 			}); err == nil && !comment.DeletedAt.Valid {
 				loadedTrigger = &comment
+				if _, delivered := resp.deliveredCommentRevisions[uuidToString(comment.ID)]; delivered {
+					resp.deliveredCommentRevisions[uuidToString(comment.ID)] = comment.Revision
+				}
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
@@ -5327,33 +5338,15 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		if len(scoped) == 0 {
 			continue
 		}
-		// The first qualifying comment enqueues the follow-up task; later ones
-		// find it AlreadyPending and merge in, so all undelivered comments end
-		// up covered by a single bounded run.
-		//
-		// A BLOCKED replay must not be discarded (#5914, Elon round 8): the slot
-		// can be held by a task that will never see this comment (it predates that
-		// task and is not in its planned ids), so dropping the failure here is
-		// exactly how a promised follow-up is lost. Hand the obligation to that
-		// blocker instead, keeping it alive until some run provably covers it.
-		res := h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)[agentID]
+		// Same-head queued input can coalesce into one follow-up. A blocker at
+		// another head cannot accept it, so retain an independent obligation
+		// until a later run delivers it or the input is withdrawn.
+		res := h.enqueueCommentAgentTriggers(ctx, issue, commentDeliverySource{Comment: c, ActorType: actorType, ActorID: actorID, OriginatorUserID: originatorUserID}, scoped)[agentID]
 		handled := res.status != DispatchBlocked
-		if res.status == DispatchBlocked {
-			headSha := h.TaskService.ResolveIssueReviewSHAParam(ctx, task.IssueID)
-			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID, headSha) {
-				handled = true
-				slog.Info("reconcile comments on completion: replay blocked, obligation handed to the active task",
-					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID))
-			} else {
-				// The slot is held by a DIFFERENT-head queued task: it can neither
-				// cover this comment nor accept it (merging would let an old-head
-				// run consume a new-head request — TEN-356). Today's schema has no
-				// safe place to park the obligation, so surface it loudly rather
-				// than let it disappear quietly.
-				slog.Error("reconcile comments on completion: replay blocked and obligation could not be handed off; comment needs a durable obligation record",
-					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID),
-					"reason", res.reason)
-			}
+		if !handled {
+			slog.Error("reconcile comments on completion: could not retain input",
+				"issue_id", uuidToString(task.IssueID), "agent_id", agentID,
+				"comment_id", uuidToString(c.ID), "reason", res.reason)
 		}
 		// The replayed agent steer is now an ordinary input of the follow-up;
 		// its failed receipt would otherwise invite a member to resend it.

@@ -173,6 +173,21 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 	})
 }
 
+type commentDeliveryDrainer interface {
+	DrainCommentDeliveryObligations(context.Context, int32) error
+}
+
+func runCommentDeliveryObligationSweeper(ctx context.Context, drainer commentDeliveryDrainer) {
+	sweep := func() {
+		if err := drainer.DrainCommentDeliveryObligations(ctx, 50); err != nil && ctx.Err() == nil {
+			slog.Warn("comment delivery obligation replay failed", "error", err)
+		}
+	}
+	// Recover durable input at startup, before waiting for the first tick.
+	sweep()
+	runPeriodicSweep(ctx, 5*time.Second, sweep)
+}
+
 func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.TaskService) {
 	runPeriodicSweep(ctx, delegatedFailureRecoverySweepInterval, func() {
 		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)

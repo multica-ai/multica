@@ -883,7 +883,9 @@ RETURNING *;
 -- keeps a stale handler from writing after execution starts, and the subset
 -- guard prevents acknowledging an id outside the task's enqueue-time plan.
 UPDATE agent_task_queue
-SET delivered_comment_ids = @delivered_comment_ids::uuid[]
+SET delivered_comment_ids = @delivered_comment_ids::uuid[],
+    context = COALESCE(context, '{}'::jsonb) ||
+        jsonb_build_object('delivered_comment_revisions', @delivered_comment_revisions::jsonb)
 WHERE id = @task_id
   AND runtime_id = @runtime_id
   AND status = 'dispatched'
@@ -1524,11 +1526,22 @@ SET status = 'cancelled',
     cancelled_by_type = sqlc.arg('cancelled_by_type'),
     cancelled_by_id = sqlc.narg('cancelled_by_id'),
     cancelled_by_name = sqlc.narg('cancelled_by_name'),
+    context = CASE
+      WHEN task.trigger_comment_id IS NULL
+       AND COALESCE(cardinality(task.coalesced_comment_ids), 0) = 0 THEN task.context
+      ELSE COALESCE(task.context, '{}'::jsonb) || jsonb_build_object(
+        'cancelled_comment_revisions', COALESCE((
+          SELECT jsonb_object_agg(c.id::text, c.revision)
+          FROM comment c
+          JOIN issue i ON i.id = c.issue_id AND i.workspace_id = c.workspace_id
+          WHERE i.id = task.issue_id
+            AND (c.id = task.trigger_comment_id OR c.id = ANY(task.coalesced_comment_ids))
+        ), '{}'::jsonb))
+    END,
     delivered_comment_ids = CASE
       -- Chat and ordinary issue tasks almost never carry a delegated-failure
-      -- recovery signal. Keep their high-frequency user-cancel path to a
-      -- no-join update; only validate task lineage after the cheap comment
-      -- shape probe finds a possible recovery signal.
+      -- recovery signal. Only validate recovery lineage after the cheap
+      -- comment shape probe finds a possible recovery signal.
       WHEN task.trigger_comment_id IS NULL
        AND COALESCE(cardinality(task.coalesced_comment_ids), 0) = 0
         THEN task.delivered_comment_ids

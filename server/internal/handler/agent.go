@@ -399,6 +399,8 @@ type TaskCancellationActor struct {
 }
 
 type AgentTaskResponse struct {
+	// Internal receipt data from the same comment rows used to build the payload.
+	deliveredCommentRevisions map[string]int64
 	// Restricted marks a run on an issue in a private project the caller
 	// cannot see (MUL-8472): only identity, status, timing and usage remain.
 	Restricted bool `json:"restricted,omitempty"`

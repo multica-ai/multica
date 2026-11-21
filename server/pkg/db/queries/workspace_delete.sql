@@ -365,6 +365,9 @@ deleted_agent_builder_drafts AS (
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
 ),
+deleted_comment_delivery_obligations AS (
+    DELETE FROM comment_delivery_obligation WHERE workspace_id = $1
+),
 deleted_issue_reactions AS (
     DELETE FROM issue_reaction WHERE workspace_id = $1
 ),
