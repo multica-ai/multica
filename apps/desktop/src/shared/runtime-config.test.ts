@@ -74,6 +74,17 @@ describe("runtime config", () => {
     ).toThrow(/apiUrl must use http or https/);
   });
 
+  it("rejects server URLs containing credentials", () => {
+    expect(() =>
+      parseRuntimeConfig(
+        JSON.stringify({
+          schemaVersion: 1,
+          apiUrl: "https://user:password@example.com",
+        }),
+      ),
+    ).toThrow(/must not include credentials/);
+  });
+
   it("rejects non-ws websocket schemes", () => {
     expect(() =>
       parseRuntimeConfig(

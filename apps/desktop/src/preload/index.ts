@@ -176,6 +176,12 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /** Save a new API endpoint and restart the app to connect to it. */
+  setRuntimeConfig: (apiUrl: string) =>
+    ipcRenderer.invoke("runtime-config:set", apiUrl) as Promise<{
+      ok: boolean;
+      error?: string;
+    }>,
   /** Identifies whether this renderer owns the main tabbed window or a
    *  dedicated issue window, parsed from validated launch arguments. */
   windowContext,
