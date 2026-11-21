@@ -171,6 +171,9 @@ func (h *Handler) linkProject(w http.ResponseWriter, r *http.Request, ws pgtype.
 		writeLinkDBError(w, err)
 		return id, false
 	}
+	if !h.requireProjectVisible(w, r, uuidToString(ws), id, http.StatusNotFound, "link or project not found") {
+		return id, false
+	}
 	return id, true
 }
 
@@ -327,6 +330,9 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		writeLinkDBError(w, err)
 		return
 	}
+	if l.ProjectID.Valid && !h.requireProjectVisible(w, r, uuidToString(ws), l.ProjectID, http.StatusNotFound, "link or project not found") {
+		return
+	}
 	var req struct {
 		Name            *string `json:"name"`
 		Icon            *string `json:"icon"`
@@ -397,8 +403,29 @@ func (h *Handler) DeleteWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_, err := h.Queries.DeleteWorkspaceLink(r.Context(), db.DeleteWorkspaceLinkParams{ID: id, WorkspaceID: ws})
+	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
+		writeLinkDBError(w, err)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	l, err := qtx.GetWorkspaceLinkForUpdate(r.Context(), db.GetWorkspaceLinkForUpdateParams{
+		ID:          id,
+		WorkspaceID: ws,
+	})
+	if err != nil {
+		writeLinkDBError(w, err)
+		return
+	}
+	if l.ProjectID.Valid && !h.requireProjectVisible(w, r, uuidToString(ws), l.ProjectID, http.StatusNotFound, "link or project not found") {
+		return
+	}
+	if _, err := qtx.DeleteWorkspaceLink(r.Context(), db.DeleteWorkspaceLinkParams{ID: id, WorkspaceID: ws}); err != nil {
+		writeLinkDBError(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeLinkDBError(w, err)
 		return
 	}
