@@ -80,6 +80,40 @@ func (q *Queries) RecordFeishuInboundReceipt(ctx context.Context, arg RecordFeis
 	return err
 }
 
+const recordFeishuSendObservation = `-- name: RecordFeishuSendObservation :exec
+UPDATE channel_installation
+SET config = jsonb_set(config, '{last_send_observation}', $1::jsonb)
+WHERE id = $2
+  AND workspace_id = $3
+  AND channel_type = 'feishu'
+  AND status = 'active'
+  AND config->>'app_id' = $4::text
+  AND COALESCE(config->>'binding_generation', '') = $5::text
+  AND (config->'last_send_observation'->>'observed_at' IS NULL
+       OR config->'last_send_observation'->>'observed_at' < $1::jsonb->>'observed_at')
+`
+
+type RecordFeishuSendObservationParams struct {
+	Observation       []byte      `json:"observation"`
+	ID                pgtype.UUID `json:"id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	AppID             string      `json:"app_id"`
+	BindingGeneration string      `json:"binding_generation"`
+}
+
+// Fixed-width UTC nanosecond strings sort by completion time. Merge only this
+// field, preserving concurrent receipt/identity writes and installation time.
+func (q *Queries) RecordFeishuSendObservation(ctx context.Context, arg RecordFeishuSendObservationParams) error {
+	_, err := q.db.Exec(ctx, recordFeishuSendObservation,
+		arg.Observation,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.AppID,
+		arg.BindingGeneration,
+	)
+	return err
+}
+
 const setFeishuInstallationBotUnionID = `-- name: SetFeishuInstallationBotUnionID :exec
 UPDATE channel_installation
 SET config = jsonb_set(config, '{bot_union_id}', to_jsonb($1::text)),
