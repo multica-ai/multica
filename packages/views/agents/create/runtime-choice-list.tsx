@@ -499,11 +499,10 @@ function QoderRow({
 }
 
 export interface RuntimeChoiceListProps {
-  local: DeviceOption | null;
+  devices: DeviceOption[];
   /** False on web, where no harness can run on the device in use. */
   localAvailable: boolean;
   localStarting: boolean;
-  remotes: DeviceOption[];
   hiddenRemoteCount: number;
   cloud: HarnessOption[];
   qoder: QoderConnection | null;
@@ -522,14 +521,13 @@ export interface RuntimeChoiceListProps {
 }
 
 /**
- * Every place an agent can run, as one list: machines (this one first, open)
+ * Every place an agent can run, as one list: machines (local ones first, open)
  * and cloud services. A machine folds to a single row until opened.
  */
 export function RuntimeChoiceList({
-  local,
+  devices,
   localAvailable,
   localStarting,
-  remotes,
   hiddenRemoteCount,
   cloud,
   qoder,
@@ -554,7 +552,6 @@ export function RuntimeChoiceList({
   const searching = query.trim().length > 0;
   const q = query.trim().toLowerCase();
 
-  const devices = [...(local ? [local] : []), ...remotes];
   const matchedDevices = searching
     ? devices
         .map((device) => filterDevice(device, query))
