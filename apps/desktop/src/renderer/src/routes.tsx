@@ -5,6 +5,7 @@ import { createMemoryRouter, Outlet, useLocation } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
+import { LinkPage } from "./pages/link-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
@@ -39,6 +40,7 @@ import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { DesktopRouteErrorPage } from "./components/route-error-page";
 import { IssueViewUrlSync } from "./platform/issue-view-tabs";
 import { useRenderedRouteStore } from "./stores/rendered-route-store";
+import { DesktopWorkspaceEntry } from "./platform/workspace-entry";
 
 const WORKSPACE_VIEW_SCOPE = { scope_type: "workspace" } as const;
 const MY_VIEW_SCOPE = { scope_type: "my" } as const;
@@ -123,12 +125,9 @@ export const appRoutes: RouteObject[] = [
         path: ":workspaceSlug",
         element: <WorkspaceRouteLayout />,
         children: [
-          // A bare `/{slug}` URL is normalized to `/{slug}/issues` by
-          // sanitizeTabPath before it ever becomes a session, so the index
-          // route is unreachable in practice; null keeps it a harmless
-          // safety net instead of an in-router <Navigate> (MUL-4741
-          // invariant 1: the router never self-navigates).
-          { index: true, element: null },
+          // The entry resolver replaces the tab session, not the router.
+          // Only the coordinator navigates the router (MUL-4741).
+          { path: "start", element: <DesktopWorkspaceEntry /> },
           {
             path: "issues",
             element: (
@@ -145,6 +144,7 @@ export const appRoutes: RouteObject[] = [
           },
           { path: "projects", element: <ProjectsPage /> },
           { path: "projects/:id", element: <ProjectDetailPage /> },
+          { path: "links/:id", element: <LinkPage /> },
           { path: "autopilots", element: <AutopilotsPage /> },
           { path: "autopilots/:id", element: <AutopilotDetailPage /> },
           {

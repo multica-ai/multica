@@ -39,6 +39,7 @@ function workspaceScoped(slug: string) {
   const ws = `/${encode(slug)}`;
   return {
     root: () => `${ws}/issues`,
+    start: () => `${ws}/start`,
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
@@ -48,6 +49,7 @@ function workspaceScoped(slug: string) {
     issueDeliverable: (id: string, filename: string) =>
       `${ws}/issues/${encode(id)}/deliverables/${encode(filename)}`,
     projects: () => `${ws}/projects`,
+    link: (id: string) => `${ws}/links/${encode(id)}`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,

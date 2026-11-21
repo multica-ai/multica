@@ -47,7 +47,7 @@ export function useInvitationActions() {
     // invitation reads as nothing happened (MUL-820).
     onSuccess: (workspaces, invitation) => {
       const joined = workspaces.find((w) => w.id === invitation.workspace_id);
-      if (joined) push(paths.workspace(joined.slug).issues());
+      if (joined) push(paths.workspace(joined.slug).start());
     },
     // On failure the invitation was usually concluded on another surface
     // while it was on screen, or the join went through and a later step

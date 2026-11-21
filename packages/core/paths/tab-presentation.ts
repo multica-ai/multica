@@ -49,6 +49,7 @@ export type TabLabelKey =
   | "doc"
   | "docFolder"
   | "skill"
+  | "link"
   | "machine"
   | "runtime"
   | "attachment"
@@ -87,6 +88,7 @@ export interface TabEntityData {
   /** Resolved display name for an actor subject. */
   actorName?: string;
   skill?: { name: string };
+  link?: { name: string };
   doc?: {title: string};
   docFolder?: {title: string};
   machine?: { name: string };
@@ -199,6 +201,11 @@ export function resolveTabPresentation(
       return {
         visual: { kind: "icon", icon: "BookOpenText" },
         title: textOr(data.skill?.name, "skill"),
+      };
+    case "link":
+      return {
+        visual: { kind: "icon", icon: "Globe" },
+        title: textOr(data.link?.name, "link"),
       };
     case "machine":
       return {

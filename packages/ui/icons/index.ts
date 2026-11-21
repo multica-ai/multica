@@ -153,6 +153,7 @@ export const Heart = /* @__PURE__ */ createIcon("Heart", glyph.Heart);
 export const HelpCircle = /* @__PURE__ */ createIcon("HelpCircle", glyph.CircleHelp);
 export const Highlighter = /* @__PURE__ */ createIcon("Highlighter", glyph.Highlighter);
 export const History = /* @__PURE__ */ createIcon("History", glyph.History);
+export const Home = /* @__PURE__ */ createIcon("Home", glyph.Home);
 export const Hourglass = /* @__PURE__ */ createIcon("Hourglass", glyph.Hourglass);
 export const Image = /* @__PURE__ */ createIcon("Image", glyph.Image);
 export const ImageIcon = /* @__PURE__ */ createIcon("ImageIcon", glyph.Image);
