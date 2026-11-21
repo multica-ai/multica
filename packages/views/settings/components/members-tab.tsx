@@ -94,9 +94,11 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureEnabled } from "@multica/core/config";
 import {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  BULK_MEMBER_PROVISIONING_FLAG,
   WORKSPACE_GUESTS_FLAG,
 } from "@multica/core/feature-flags";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { BulkMemberProvisionDialog } from "./bulk-member-provision-dialog";
 import {
   invitationListOptions,
   memberListOptions,
@@ -527,6 +529,8 @@ export function MembersTab() {
     mode: "demote" | "edit";
   } | null>(null);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [provisionOpen, setProvisionOpen] = useState(false);
+  const bulkProvisioningEnabled = useFeatureEnabled(BULK_MEMBER_PROVISIONING_FLAG);
   const [inviteSeatPurchase, setInviteSeatPurchase] =
     useState<InviteSeatPurchase | null>(null);
   const dispatchedInvitePurchaseKey = useRef<string | null>(null);
@@ -1230,10 +1234,17 @@ export function MembersTab() {
       scope="workspace"
       actions={
         canManageWorkspace ? (
-          <Button onClick={() => setInviteOpen(true)}>
-            <Plus />
-            {t(($) => $.members.invite_title)}
-          </Button>
+          <>
+            {bulkProvisioningEnabled && isOwner && (
+              <Button variant="outline" onClick={() => setProvisionOpen(true)}>
+                {t(($) => $.members.provision.open_button)}
+              </Button>
+            )}
+            <Button onClick={() => setInviteOpen(true)}>
+              <Plus />
+              {t(($) => $.members.invite_title)}
+            </Button>
+          </>
         ) : undefined
       }
     >
@@ -1782,6 +1793,16 @@ export function MembersTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <BulkMemberProvisionDialog
+        workspaceId={wsId}
+        open={provisionOpen}
+        onOpenChange={setProvisionOpen}
+        onCompleted={() => {
+          void qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+          void qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+          void qc.invalidateQueries({ queryKey: workspaceSubscriptionSummaryOptions(wsId).queryKey });
+        }}
+      />
     </SettingsTab>
   );
 }
