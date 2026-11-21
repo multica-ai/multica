@@ -851,11 +851,17 @@
       "manual_description": "사이드바의 행이나 알림 상단에서",
       "manual_value": "언제든지",
       "auto_label": "내가 처리한 태스크 보관",
-      "auto_description": "어떤 내 동작이 태스크 알림을 보관할지 고르세요. 다른 사람의 동작으로는 보관되지 않으며, 새 알림이 오면 태스크가 다시 돌아옵니다.",
-      "auto_never": "안 함",
-      "auto_separator": ", ",
+      "auto_description": "내 동작만 해당됩니다. 새 알림이 오면 태스크가 다시 돌아옵니다.",
+      "auto_presets": {
+        "never": "안 함",
+        "completed": "완료했을 때",
+        "handled": "답글, 상태 변경, 담당자 변경 후",
+        "custom": "사용자 지정",
+        "custom_item": "사용자 지정..."
+      },
+      "auto_recommended": "추천",
       "auto_groups": {
-        "settle": "처리 · 기본으로 켜짐",
+        "settle": "처리",
         "tidy": "정리"
       },
       "auto_actions": {

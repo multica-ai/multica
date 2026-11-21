@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/inbox"
@@ -64,6 +65,14 @@ var notifValuesByGroup = map[string]map[string]bool{
 	"after_auto_archive": {"stay": true, "next": true},
 }
 
+// autoArchivePromptKey marks a workspace where the member has not yet answered
+// the one-time question of which actions archive their notifications. Migration
+// 718 writes it for members who archived notifications before replying,
+// changing status and reassigning did so by default. It is stored with the
+// preferences but answered as the response's own `auto_archive_prompt` flag,
+// so no client ever echoes it back in a write.
+const autoArchivePromptKey = "auto_archive_prompt"
+
 func validNotifValue(group, value string) bool {
 	if values, ok := notifValuesByGroup[group]; ok {
 		return values[value]
@@ -85,8 +94,9 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusOK, map[string]any{
-				"workspace_id": workspaceID,
-				"preferences":  inbox.WithDefaults(nil),
+				"workspace_id":        workspaceID,
+				"preferences":         inbox.WithDefaults(nil),
+				"auto_archive_prompt": false,
 			})
 			return
 		}
@@ -150,10 +160,13 @@ func writeNotificationPreferenceResponse(
 	if err := json.Unmarshal(pref.Preferences, &prefs); err != nil {
 		prefs = map[string]string{}
 	}
+	_, prompt := prefs[autoArchivePromptKey]
+	delete(prefs, autoArchivePromptKey)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"workspace_id": workspaceID,
-		"preferences":  inbox.WithDefaults(prefs),
+		"workspace_id":        workspaceID,
+		"preferences":         inbox.WithDefaults(prefs),
+		"auto_archive_prompt": prompt,
 	})
 }
 
@@ -217,4 +230,40 @@ func (h *Handler) PatchNotificationPreferences(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeNotificationPreferenceResponse(w, workspaceID, pref)
+}
+
+// ResolveAutoArchivePrompt answers the one-time auto-archive question once for
+// all of the caller's workspaces: the supplied `auto_archive_*` values are
+// merged into every one of their preference rows still marked with
+// auto_archive_prompt, and the marker is dropped. An empty map keeps what each
+// workspace has. Answers with the current workspace's preferences.
+func (h *Handler) ResolveAutoArchivePrompt(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	prefs, ok := decodeNotificationPreferenceRequest(w, r)
+	if !ok {
+		return
+	}
+	for k := range prefs {
+		if !strings.HasPrefix(k, "auto_archive_") {
+			writeError(w, http.StatusBadRequest, "invalid preference group: "+k)
+			return
+		}
+	}
+	prefsJSON, ok := marshalNotificationPreferences(w, prefs)
+	if !ok {
+		return
+	}
+
+	if err := h.Queries.ResolveAutoArchivePrompt(r.Context(), db.ResolveAutoArchivePromptParams{
+		UserID:      parseUUID(userID),
+		Preferences: prefsJSON,
+	}); err != nil {
+		slog.Warn("ResolveAutoArchivePrompt failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update notification preferences")
+		return
+	}
+	h.GetNotificationPreferences(w, r)
 }

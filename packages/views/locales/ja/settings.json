@@ -851,11 +851,17 @@
       "manual_description": "サイドバーの行、または通知の上部から",
       "manual_value": "いつでも",
       "auto_label": "自分が対応したタスクをアーカイブ",
-      "auto_description": "どの操作でタスクの通知をアーカイブするか選びます。他の人の操作ではアーカイブされず、新しい通知が届くとタスクは戻ってきます。",
-      "auto_never": "しない",
-      "auto_separator": "、",
+      "auto_description": "自分の操作だけが対象です。新しい通知が届くとタスクは戻ってきます。",
+      "auto_presets": {
+        "never": "しない",
+        "completed": "完了したとき",
+        "handled": "返信・ステータス変更・担当変更の後",
+        "custom": "カスタム",
+        "custom_item": "カスタム..."
+      },
+      "auto_recommended": "おすすめ",
       "auto_groups": {
-        "settle": "対応 · 既定でオン",
+        "settle": "対応",
         "tidy": "整理"
       },
       "auto_actions": {

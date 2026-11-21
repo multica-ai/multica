@@ -20,20 +20,26 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
 }));
-const { mutate } = vi.hoisted(() => ({ mutate: vi.fn() }));
+const { mutate, resolve } = vi.hoisted(() => ({ mutate: vi.fn(), resolve: vi.fn() }));
 vi.mock("@multica/core/notification-preferences/mutations", () => ({
   useUpdateNotificationPreferences: () => ({ mutate }),
+  useResolveAutoArchivePrompt: () => ({ mutate: resolve }),
 }));
 vi.mock("./browser-notification-setting", () => ({ BrowserNotificationSetting: () => null }));
 
 afterEach(() => {
   cleanup();
   mutate.mockReset();
+  resolve.mockReset();
 });
 
-function renderTab(preferences: Record<string, string> = {}) {
+function renderTab(preferences: Record<string, string> = {}, { prompt = false } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-  qc.setQueryData(notificationPreferenceKeys.all("ws-a"), { workspace_id: "ws-a", preferences });
+  qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+    workspace_id: "ws-a",
+    preferences,
+    auto_archive_prompt: prompt,
+  });
   render(
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={{ en: { settings: enSettings } }}>
@@ -103,7 +109,7 @@ describe("Inbox notification settings", () => {
     renderTab();
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
     expect(leaving).toHaveTextContent("Reading a notification doesn't take it out of the Inbox.");
-    expect(leaving).toHaveTextContent("Other people's actions never do");
+    expect(leaving).toHaveTextContent("Only your own actions count.");
     expect(within(leaving).getByRole("link", { name: "View archived" })).toHaveAttribute(
       "href",
       "/acme/inbox?view=archived",
@@ -116,64 +122,100 @@ describe("Inbox notification settings", () => {
     auto_archive_on_status: "muted",
     auto_archive_on_assignee: "muted",
   };
+  const ACTIONS_OFF_BUT = (on: string[]) =>
+    Object.fromEntries(
+      [
+        "auto_archive_completed",
+        "auto_archive_on_comment",
+        "auto_archive_on_status",
+        "auto_archive_on_assignee",
+        "auto_archive_on_priority",
+        "auto_archive_on_project",
+        "auto_archive_on_dates",
+        "auto_archive_on_labels",
+      ].map((key) => [key, on.includes(key) ? "all" : "muted"]),
+    );
+  const archiveChoice = () =>
+    within(screen.getByRole("region", { name: "Leaving the Inbox" })).getByRole("combobox", {
+      name: "Archive issues you handle",
+    });
 
-  it.each<{ preferences: Record<string, string>; shown: string }>([
-    { preferences: {}, shown: "Complete, Reply, Change status, Reassign" },
-    { preferences: ALL_ACTIONS_OFF, shown: "Never" },
-    { preferences: { ...ALL_ACTIONS_OFF, auto_archive_on_labels: "all" }, shown: "Change labels" },
-    { preferences: { auto_archive_on_comment: "muted", auto_archive_on_dates: "all" }, shown: "Complete, Change status, Reassign, Change dates" },
-  ])("lists which of your actions archive an issue: %j", ({ preferences, shown }) => {
+  it.each<{ preferences: Record<string, string>; shown: string; custom: boolean }>([
+    { preferences: {}, shown: "After you reply, change status or reassign", custom: false },
+    { preferences: { ...ALL_ACTIONS_OFF, auto_archive_completed: "all" }, shown: "When you complete it", custom: false },
+    { preferences: ALL_ACTIONS_OFF, shown: "Never", custom: false },
+    { preferences: { auto_archive_on_labels: "all" }, shown: "Custom", custom: true },
+  ])("names the choice your actions match: %j", ({ preferences, shown, custom }) => {
     renderTab(preferences);
-    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
-    expect(within(leaving).getByRole("combobox", { name: "Archive issues you handle" })).toHaveTextContent(shown);
+    expect(archiveChoice()).toHaveTextContent(shown);
+    expect(screen.queryByRole("checkbox", { name: "Change labels" }) !== null).toBe(custom);
   });
 
-  it("groups the actions into handling an issue and tidying it, with the defaults picked", async () => {
+  it("offers the presets, the recommended one marked, then a custom choice", async () => {
     const user = userEvent.setup();
     renderTab();
+    await user.click(archiveChoice());
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => [option.textContent, option.getAttribute("aria-selected")])).toEqual([
+      ["Never", "false"],
+      ["When you complete it", "false"],
+      ["After you reply, change status or reassignRecommended", "true"],
+      ["Custom...", "false"],
+    ]);
+  });
+
+  it("saves every action when you pick a preset", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(archiveChoice());
+    await user.click(await screen.findByRole("option", { name: "When you complete it" }));
+    expect(mutate).toHaveBeenCalledWith(ACTIONS_OFF_BUT(["auto_archive_completed"]), expect.anything());
+  });
+
+  it("lists every action under a custom choice, grouped, with yours checked", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(archiveChoice());
+    await user.click(await screen.findByRole("option", { name: "Custom..." }));
+    expect(mutate).not.toHaveBeenCalled();
+    expect(archiveChoice()).toHaveTextContent("Custom");
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
-    await user.click(within(leaving).getByRole("combobox", { name: "Archive issues you handle" }));
-    const handling = await screen.findByRole("group", { name: "Handling it · on by default" });
-    const tidying = screen.getByRole("group", { name: "Tidying it" });
-    const picked = (group: HTMLElement) =>
-      within(group).getAllByRole("option").map((option) => [option.textContent, option.getAttribute("aria-selected")]);
-    expect(picked(handling)).toEqual([
+    expect(leaving).toHaveTextContent("Handling it");
+    expect(leaving).toHaveTextContent("Tidying it");
+    const checked = within(leaving)
+      .getAllByRole("checkbox")
+      .map((box) => [box.closest("label")?.textContent, box.getAttribute("aria-checked")]);
+    expect(checked).toEqual([
       ["Complete", "true"],
       ["Reply", "true"],
       ["Change status", "true"],
       ["Reassign", "true"],
-    ]);
-    expect(picked(tidying)).toEqual([
       ["Change priority", "false"],
       ["Change project", "false"],
       ["Change dates", "false"],
       ["Change labels", "false"],
     ]);
-  });
 
-  it.each<{ option: string; sent: Record<string, string> }>([
-    { option: "Reply", sent: { auto_archive_on_comment: "muted" } },
-    { option: "Change labels", sent: { auto_archive_on_labels: "all" } },
-  ])("toggles one action at a time: $option", async ({ option, sent }) => {
-    const user = userEvent.setup();
-    renderTab();
-    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
-    await user.click(within(leaving).getByRole("combobox", { name: "Archive issues you handle" }));
-    await user.click(await screen.findByRole("option", { name: option }));
+    await user.click(within(leaving).getByRole("checkbox", { name: "Change labels" }));
     expect(mutate).toHaveBeenCalledWith(
-      {
-        auto_archive_completed: "all",
-        auto_archive_on_comment: "all",
-        auto_archive_on_status: "all",
-        auto_archive_on_assignee: "all",
-        auto_archive_on_priority: "muted",
-        auto_archive_on_project: "muted",
-        auto_archive_on_dates: "muted",
-        auto_archive_on_labels: "muted",
-        ...sent,
-      },
+      ACTIONS_OFF_BUT([
+        "auto_archive_completed",
+        "auto_archive_on_comment",
+        "auto_archive_on_status",
+        "auto_archive_on_assignee",
+        "auto_archive_on_labels",
+      ]),
       expect.anything(),
     );
+  });
+
+  it("answers the pending one-time question when you choose here", async () => {
+    const user = userEvent.setup();
+    renderTab({ ...ALL_ACTIONS_OFF, auto_archive_completed: "all" }, { prompt: true });
+    await user.click(archiveChoice());
+    await user.click(await screen.findByRole("option", { name: "Never" }));
+    expect(resolve).toHaveBeenCalledWith(ACTIONS_OFF_BUT([]), expect.anything());
+    expect(mutate).not.toHaveBeenCalled();
   });
 
   it("nests where to go after archiving under the archive choice, hidden while it is off", () => {

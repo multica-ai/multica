@@ -861,11 +861,17 @@
       "manual_description": "Depuis sa ligne dans la barre latérale ou le haut de la notification",
       "manual_value": "À tout moment",
       "auto_label": "Archiver les tâches que vous traitez",
-      "auto_description": "Choisissez lesquelles de vos actions archivent les notifications d'une tâche. Celles des autres ne le font jamais, et une nouvelle notification fait revenir la tâche.",
-      "auto_never": "Jamais",
-      "auto_separator": ", ",
+      "auto_description": "Seules vos propres actions comptent. Une nouvelle notification fait revenir la tâche.",
+      "auto_presets": {
+        "never": "Jamais",
+        "completed": "Quand vous la terminez",
+        "handled": "Après une réponse, un changement de statut ou une réattribution",
+        "custom": "Personnalisé",
+        "custom_item": "Personnalisé..."
+      },
+      "auto_recommended": "Recommandé",
       "auto_groups": {
-        "settle": "La traiter · activé par défaut",
+        "settle": "La traiter",
         "tidy": "La ranger"
       },
       "auto_actions": {

@@ -49,4 +49,10 @@ export type NotificationPreferences = Partial<Record<NotificationGroupKey, Notif
 export interface NotificationPreferenceResponse {
   workspace_id: string;
   preferences: NotificationPreferences;
+  /**
+   * The member has not yet chosen which of their actions archive notifications
+   * since replying, changing status and reassigning started doing so by
+   * default. Their auto-archive keys keep the old behavior until they answer.
+   */
+  auto_archive_prompt?: boolean;
 }

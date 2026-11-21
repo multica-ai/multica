@@ -2833,6 +2833,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.GetNotificationPreferences)
 				r.Patch("/", h.PatchNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
+				r.Post("/auto-archive-prompt", h.ResolveAutoArchivePrompt)
 			})
 		})
 	})

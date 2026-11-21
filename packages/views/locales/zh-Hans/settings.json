@@ -851,11 +851,17 @@
       "manual_description": "在侧边栏行上或通知详情顶部点归档",
       "manual_value": "随时",
       "auto_label": "自动归档我处理过的任务",
-      "auto_description": "选择哪些操作会归档通知。别人的操作不算，有新动态会重新进收件箱。",
-      "auto_never": "从不",
-      "auto_separator": "、",
+      "auto_description": "只算你自己的操作。归档后有新动态，会重新进收件箱。",
+      "auto_presets": {
+        "never": "从不",
+        "completed": "完成任务时",
+        "handled": "回复、改状态或转交后",
+        "custom": "自定义",
+        "custom_item": "自定义..."
+      },
+      "auto_recommended": "推荐",
       "auto_groups": {
-        "settle": "处理 · 默认开启",
+        "settle": "处理",
         "tidy": "整理"
       },
       "auto_actions": {

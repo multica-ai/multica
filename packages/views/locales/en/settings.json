@@ -861,11 +861,17 @@
       "manual_description": "From its row in the sidebar, or the top of the notification",
       "manual_value": "Anytime",
       "auto_label": "Archive issues you handle",
-      "auto_description": "Pick which of your own actions archive an issue's notifications. Other people's actions never do, and a later notification brings an issue back.",
-      "auto_never": "Never",
-      "auto_separator": ", ",
+      "auto_description": "Only your own actions count. A later notification brings an issue back.",
+      "auto_presets": {
+        "never": "Never",
+        "completed": "When you complete it",
+        "handled": "After you reply, change status or reassign",
+        "custom": "Custom",
+        "custom_item": "Custom..."
+      },
+      "auto_recommended": "Recommended",
       "auto_groups": {
-        "settle": "Handling it · on by default",
+        "settle": "Handling it",
         "tidy": "Tidying it"
       },
       "auto_actions": {

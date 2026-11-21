@@ -212,5 +212,16 @@
     "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。",
     "col_updates": "延后期间",
     "col_back": "恢复时间"
+  },
+  "auto_archive_prompt": {
+    "title": "处理完的通知，可以自动归档",
+    "description": "收件箱新增了自动归档：你处理完一个任务，它的通知就会移出收件箱。只算你自己的操作，有新动态会重新进收件箱。",
+    "options": {
+      "handled": "处理过的任务不再留在收件箱",
+      "completed": "只有完成或取消任务才归档",
+      "never": "自己手动归档"
+    },
+    "hint": "之后可以在 设置 › 通知 里修改",
+    "confirm": "确定"
   }
 }

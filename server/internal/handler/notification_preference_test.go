@@ -433,3 +433,116 @@ func TestPatchNotificationPreferencesValidatesAfterAutoArchiveValues(t *testing.
 		}
 	}
 }
+
+// Members asked once which actions archive their notifications (migration 718)
+// answer for every workspace at once; the marker never reaches a client as a
+// preference it could write back.
+func TestAutoArchivePromptResolvesEveryPendingWorkspace(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	suffix := strings.ReplaceAll(t.Name(), "/", "-")
+	otherWorkspaceID := dbfx.Workspace(t, "Auto-archive prompt", strings.ToLower(suffix))
+	dbfx.Member(t, otherWorkspaceID, testUserID, "member")
+	otherUserID := dbfx.User(t, "Auto-archive teammate", strings.ToLower(suffix)+"@multica.test")
+	dbfx.Member(t, testWorkspaceID, otherUserID, "member")
+
+	pending := `{"auto_archive_on_comment": "muted", "auto_archive_on_status": "muted",
+		"auto_archive_on_assignee": "muted", "auto_archive_prompt": "pending", "updates": "muted"}`
+	rows := [][2]string{{testWorkspaceID, testUserID}, {otherWorkspaceID, testUserID}, {testWorkspaceID, otherUserID}}
+	for _, row := range rows {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO notification_preference (workspace_id, user_id, preferences)
+			VALUES ($1, $2, $3::jsonb)
+			ON CONFLICT (workspace_id, user_id) DO UPDATE SET preferences = EXCLUDED.preferences
+		`, row[0], row[1], pending); err != nil {
+			t.Fatalf("seed preference: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, row := range rows {
+			_, _ = testPool.Exec(context.Background(), `
+				DELETE FROM notification_preference WHERE workspace_id = $1 AND user_id = $2
+			`, row[0], row[1])
+		}
+	})
+
+	type response struct {
+		Preferences       map[string]string `json:"preferences"`
+		AutoArchivePrompt bool              `json:"auto_archive_prompt"`
+	}
+	decode := func(recorder *httptest.ResponseRecorder) response {
+		t.Helper()
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		var got response
+		if err := json.NewDecoder(recorder.Body).Decode(&got); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return got
+	}
+	stored := func(workspaceID, userID string) map[string]string {
+		t.Helper()
+		var raw []byte
+		if err := testPool.QueryRow(ctx, `
+			SELECT preferences FROM notification_preference WHERE workspace_id = $1 AND user_id = $2
+		`, workspaceID, userID).Scan(&raw); err != nil {
+			t.Fatalf("load preference: %v", err)
+		}
+		var prefs map[string]string
+		if err := json.Unmarshal(raw, &prefs); err != nil {
+			t.Fatalf("decode preference: %v", err)
+		}
+		return prefs
+	}
+
+	get := httptest.NewRecorder()
+	testHandler.GetNotificationPreferences(get, notificationPreferenceRequest(t, http.MethodGet, nil))
+	before := decode(get)
+	if !before.AutoArchivePrompt {
+		t.Fatal("auto_archive_prompt = false, want true while pending")
+	}
+	if _, ok := before.Preferences[autoArchivePromptKey]; ok {
+		t.Fatalf("preferences expose the prompt marker: %#v", before.Preferences)
+	}
+
+	for _, invalid := range []map[string]string{
+		{"updates": "all"},
+		{"after_auto_archive": "next"},
+		{"auto_archive_prompt": "pending"},
+	} {
+		recorder := httptest.NewRecorder()
+		testHandler.ResolveAutoArchivePrompt(recorder, notificationPreferenceRequest(t, http.MethodPost, invalid))
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("resolve with %v: status=%d want 400", invalid, recorder.Code)
+		}
+	}
+
+	resolve := httptest.NewRecorder()
+	testHandler.ResolveAutoArchivePrompt(resolve, notificationPreferenceRequest(t, http.MethodPost, map[string]string{
+		"auto_archive_completed":   "all",
+		"auto_archive_on_comment":  "all",
+		"auto_archive_on_status":   "all",
+		"auto_archive_on_assignee": "all",
+	}))
+	after := decode(resolve)
+	if after.AutoArchivePrompt {
+		t.Fatal("auto_archive_prompt still true after resolving")
+	}
+	if after.Preferences["auto_archive_on_comment"] != "all" || after.Preferences["updates"] != "muted" {
+		t.Fatalf("resolved preferences = %#v", after.Preferences)
+	}
+
+	for _, workspaceID := range []string{testWorkspaceID, otherWorkspaceID} {
+		prefs := stored(workspaceID, testUserID)
+		if _, ok := prefs[autoArchivePromptKey]; ok || prefs["auto_archive_on_status"] != "all" {
+			t.Errorf("workspace %s not resolved: %#v", workspaceID, prefs)
+		}
+	}
+	if prefs := stored(testWorkspaceID, otherUserID); prefs[autoArchivePromptKey] != "pending" ||
+		prefs["auto_archive_on_status"] != "muted" {
+		t.Errorf("another member's prompt changed: %#v", prefs)
+	}
+}

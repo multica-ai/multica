@@ -14,6 +14,7 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { resolveClickIntent, useHeldUntilArrival, useNavigation } from "../../navigation";
+import { AutoArchivePromptDialog } from "../../inbox/components/auto-archive-prompt-dialog";
 import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
@@ -246,6 +247,7 @@ export function WorkPanel() {
               activeIssueId={inboxClaimsIssue ? currentIssueId : null}
             />
           )}
+          {wsId && <AutoArchivePromptDialog wsId={wsId} active={!!inboxOpenKey} />}
 
           {wsId && (
             <ViewsSection

@@ -1,12 +1,22 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
-import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
+import {
+  useResolveAutoArchivePrompt,
+  useUpdateNotificationPreferences,
+} from "@multica/core/notification-preferences/mutations";
 import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
+import {
+  AUTO_ARCHIVE_PRESETS,
+  autoArchiveActionsOn,
+  autoArchivePreferences,
+  autoArchivePreset,
+  type AutoArchivePreset,
+} from "@multica/core/notification-preferences/auto-archive-presets";
 import type {
   AfterAutoArchiveValue,
   AutoArchiveKey,
@@ -14,13 +24,13 @@ import type {
   NotificationPreferences,
   OthersIssuesValue,
 } from "@multica/core/types";
+import { Badge } from "@multica/ui/components/ui/badge";
 import { buttonVariants } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectSeparator,
   SelectTrigger,
   SelectValue,
@@ -49,8 +59,8 @@ const INBOX_CATEGORIES = [
 ] as const;
 
 // The actions of yours that can archive an issue's notifications, one key
-// each: those that settle the issue, on by default, then those that only tidy
-// it.
+// each, as the custom choice lists them: those that settle the issue, then
+// those that only tidy it.
 const AUTO_ARCHIVE_GROUPS = [
   {
     key: "settle",
@@ -72,11 +82,7 @@ const AUTO_ARCHIVE_GROUPS = [
   },
 ] as const satisfies readonly { key: string; actions: readonly { key: AutoArchiveKey; label: string }[] }[];
 
-type AutoArchiveAction = (typeof AUTO_ARCHIVE_GROUPS)[number]["actions"][number];
-
-const AUTO_ARCHIVE_ACTIONS: readonly AutoArchiveAction[] = AUTO_ARCHIVE_GROUPS.flatMap(
-  (group): readonly AutoArchiveAction[] => group.actions,
-);
+const AUTO_ARCHIVE_PRESET_ORDER: readonly AutoArchivePreset[] = ["never", "completed", "handled"];
 
 export function NotificationsTab() {
   const { t } = useT("settings");
@@ -84,18 +90,19 @@ export function NotificationsTab() {
   const p = useWorkspacePaths();
   const { data } = useQuery(notificationPreferenceOptions(wsId));
   const mutation = useUpdateNotificationPreferences();
+  const resolvePrompt = useResolveAutoArchivePrompt();
+  const [autoArchiveCustom, setAutoArchiveCustom] = useState(false);
 
   const preferences = data?.preferences ?? {};
 
+  const onSaveError = (err: unknown) =>
+    toast.error(
+      err instanceof Error && err.message
+        ? err.message
+        : t(($) => $.notifications.toast_failed),
+    );
   const save = (updated: NotificationPreferences) => {
-    mutation.mutate(updated, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.notifications.toast_failed),
-        ),
-    });
+    mutation.mutate(updated, { onError: onSaveError });
   };
 
   const handleToggle = (key: NotificationGroupKey, enabled: boolean) => {
@@ -113,26 +120,34 @@ export function NotificationsTab() {
     { value: "all", label: t(($) => $.notifications.others_issues.all) },
   ];
 
-  const autoArchiveItems: { value: AutoArchiveKey; label: string }[] = AUTO_ARCHIVE_ACTIONS.map((action) => ({
-    value: action.key,
-    label: t(($) => $.notifications.leaving.auto_actions[action.label]),
-  }));
-  const autoArchiveOn = AUTO_ARCHIVE_ACTIONS.filter(
-    (action) => notificationPreferenceValue(preferences, action.key) === "all",
-  ).map((action) => action.key);
-  const autoArchiveSummary =
-    autoArchiveOn.length === 0
-      ? t(($) => $.notifications.leaving.auto_never)
-      : autoArchiveItems
-          .filter((item) => autoArchiveOn.includes(item.value))
-          .map((item) => item.label)
-          .join(t(($) => $.notifications.leaving.auto_separator));
-  const handleAutoArchive = (on: AutoArchiveKey[]) => {
-    const updated = { ...preferences };
-    for (const action of AUTO_ARCHIVE_ACTIONS) {
-      updated[action.key] = on.includes(action.key) ? "all" : "muted";
+  const autoArchiveOn = autoArchiveActionsOn(preferences);
+  const autoArchiveChoice: AutoArchivePreset | "custom" = autoArchiveCustom
+    ? "custom"
+    : autoArchivePreset(preferences);
+  const autoArchiveItems: { value: AutoArchivePreset | "custom"; label: string }[] = [
+    ...AUTO_ARCHIVE_PRESET_ORDER.map((preset) => ({
+      value: preset,
+      label: t(($) => $.notifications.leaving.auto_presets[preset]),
+    })),
+    { value: "custom", label: t(($) => $.notifications.leaving.auto_presets.custom) },
+  ];
+  // Until the member answers the one-time question, a choice made here is
+  // their answer, for every workspace where it is pending.
+  const saveAutoArchive = (on: readonly AutoArchiveKey[]) => {
+    const values = autoArchivePreferences(on);
+    if (data?.auto_archive_prompt) {
+      resolvePrompt.mutate(values, { onError: onSaveError });
+    } else {
+      save({ ...preferences, ...values });
     }
-    save(updated);
+  };
+  const handleAutoArchivePreset = (next: AutoArchivePreset | "custom") => {
+    setAutoArchiveCustom(next === "custom");
+    if (next !== "custom") saveAutoArchive(AUTO_ARCHIVE_PRESETS[next]);
+  };
+  const handleAutoArchiveAction = (key: AutoArchiveKey, on: boolean) => {
+    setAutoArchiveCustom(true);
+    saveAutoArchive(on ? [...autoArchiveOn, key] : autoArchiveOn.filter((k) => k !== key));
   };
   const afterAutoArchiveItems: { value: AfterAutoArchiveValue; label: string }[] = [
     { value: "stay", label: t(($) => $.notifications.leaving.after_stay) },
@@ -220,36 +235,75 @@ export function NotificationsTab() {
               {t(($) => $.notifications.leaving.manual_value)}
             </span>
           </SettingsRow>
-          <SettingsRow
-            anchor="auto_archive_completed"
-            label={t(($) => $.notifications.leaving.auto_label)}
-            description={t(($) => $.notifications.leaving.auto_description)}
-          >
-            <Select multiple items={autoArchiveItems} value={autoArchiveOn} onValueChange={handleAutoArchive}>
-              <SelectTrigger
-                size="sm"
-                className="w-56"
-                aria-label={t(($) => $.notifications.leaving.auto_label)}
+          <div>
+            <SettingsRow
+              anchor="auto_archive_completed"
+              className={cn(autoArchiveChoice === "custom" && "pb-2")}
+              label={t(($) => $.notifications.leaving.auto_label)}
+              description={t(($) => $.notifications.leaving.auto_description)}
+            >
+              <Select
+                items={autoArchiveItems}
+                value={autoArchiveChoice}
+                onValueChange={(next) => next && handleAutoArchivePreset(next as AutoArchivePreset | "custom")}
               >
-                <SelectValue className="truncate">{() => autoArchiveSummary}</SelectValue>
-              </SelectTrigger>
-              <SelectContent align="end" alignItemWithTrigger={false}>
-                {AUTO_ARCHIVE_GROUPS.map((group, index) => (
+                <SelectTrigger
+                  size="sm"
+                  className="w-auto min-w-56"
+                  aria-label={t(($) => $.notifications.leaving.auto_label)}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end" alignItemWithTrigger={false} className="w-auto min-w-(--anchor-width)">
+                  {AUTO_ARCHIVE_PRESET_ORDER.map((preset) => (
+                    <SelectItem key={preset} value={preset}>
+                      {t(($) => $.notifications.leaving.auto_presets[preset])}
+                      {preset === "handled" && (
+                        <Badge variant="secondary">
+                          {t(($) => $.notifications.leaving.auto_recommended)}
+                        </Badge>
+                      )}
+                    </SelectItem>
+                  ))}
+                  <SelectSeparator />
+                  <SelectItem value="custom">
+                    {t(($) => $.notifications.leaving.auto_presets.custom_item)}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </SettingsRow>
+            {autoArchiveChoice === "custom" && (
+              <div className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2.5 px-4 pb-3.5">
+                {AUTO_ARCHIVE_GROUPS.map((group) => (
                   <Fragment key={group.key}>
-                    {index > 0 && <SelectSeparator />}
-                    <SelectGroup className="p-0">
-                      <SelectLabel>{t(($) => $.notifications.leaving.auto_groups[group.key])}</SelectLabel>
-                      {group.actions.map((action) => (
-                        <SelectItem key={action.key} value={action.key}>
-                          {t(($) => $.notifications.leaving.auto_actions[action.label])}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
+                    <div className="text-caption text-muted-foreground">
+                      {t(($) => $.notifications.leaving.auto_groups[group.key])}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {group.actions.map((action) => {
+                        const on = autoArchiveOn.includes(action.key);
+                        return (
+                          <label
+                            key={action.key}
+                            className={cn(
+                              "inline-flex h-7 cursor-pointer items-center gap-2 rounded-md border border-border pr-2.5 pl-2 text-label transition-colors hover:bg-surface-hover",
+                              !on && "text-muted-foreground",
+                            )}
+                          >
+                            <Checkbox
+                              checked={on}
+                              onCheckedChange={(checked) => handleAutoArchiveAction(action.key, checked)}
+                            />
+                            {t(($) => $.notifications.leaving.auto_actions[action.label])}
+                          </label>
+                        );
+                      })}
+                    </div>
                   </Fragment>
                 ))}
-              </SelectContent>
-            </Select>
-          </SettingsRow>
+              </div>
+            )}
+          </div>
           {autoArchiveOn.length > 0 && (
             <SettingsRow
               anchor="after_auto_archive"
