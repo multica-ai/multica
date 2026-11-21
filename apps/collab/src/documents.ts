@@ -16,6 +16,11 @@ const EPOCH_KEY = "epoch";
 /** The API refuses to store more Markdown than this (docContentMaxSize). */
 export const MAX_CONTENT_BYTES = 2 << 20;
 const META_MAP = "meta";
+/** A saved Yjs state keeps the id of everything ever typed, so it outgrows
+ *  the Markdown it holds. Past both limits it is rebuilt from the Markdown on
+ *  load, before it nears what the API accepts in one store. */
+export const COMPACT_STATE_MIN_BYTES = 1 << 20;
+export const COMPACT_STATE_RATIO = 4;
 
 export function parseDocumentName(name: string): { type: "doc"; id: string } | null {
   const match = /^doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(name);
@@ -41,6 +46,9 @@ interface DocState {
   loadedRaw: string | null;
   /** Editors whose changes are not persisted yet. */
   contributors: Map<string, Actor>;
+  /** Changed since the last store. Serializing the document is the costly
+   *  part of a store, and reads flush documents nobody has touched. */
+  dirty: boolean;
   /** Serializes persistence and server-side writes per document. */
   queue: Promise<unknown>;
 }
@@ -97,7 +105,8 @@ export class DocumentStore {
    *  was down, or an older API instance wrote during a deploy). Clients that
    *  kept editing offline still share that state's history, so their edits
    *  merge in. Only without a usable saved state is the document rebuilt
-   *  from Markdown under a new epoch, which resets every client. */
+   *  from Markdown under a new epoch, which resets every client; that is also
+   *  how an oversized state is compacted. */
   async load(name: string): Promise<Uint8Array> {
     const parsed = parseDocumentName(name);
     if (!parsed) throw new Error(`unknown document ${name}`);
@@ -106,15 +115,23 @@ export class DocumentStore {
 
     let ydoc: Y.Doc | null = null;
     let from = "markdown";
-    if (stored.ystate && stored.ystate_revision !== null && stored.ystate_revision <= stored.revision) {
+    const state = stored.ystate ? Buffer.from(stored.ystate, "base64") : null;
+    const oversized =
+      state !== null &&
+      state.byteLength > COMPACT_STATE_MIN_BYTES &&
+      state.byteLength > COMPACT_STATE_RATIO * Buffer.byteLength(stored.content, "utf8");
+    if (oversized) from = "compacted";
+    if (state && !oversized && stored.ystate_revision !== null && stored.ystate_revision <= stored.revision) {
       const candidate = new Y.Doc();
-      Y.applyUpdate(candidate, Buffer.from(stored.ystate, "base64"));
+      Y.applyUpdate(candidate, state);
       if (documentEpoch(candidate)) {
         ydoc = candidate;
         from = "state";
-        const target = this.codec.serialize(this.codec.parse(stored.content));
-        if (this.codec.ydocToMarkdown(candidate) !== target) {
-          this.codec.applyJSON(candidate, this.codec.parse(stored.content), serverOrigin({ type: "member", id: "", name: "" }));
+        // A state saved with this revision is the doc; re-parsing its Markdown
+        // only risks the round trip changing something.
+        const target = stored.ystate_revision < stored.revision ? this.codec.parse(stored.content) : null;
+        if (target && this.codec.ydocToMarkdown(candidate) !== this.codec.serialize(target)) {
+          this.codec.applyJSON(candidate, target, serverOrigin({ type: "member", id: "", name: "" }));
           from = "state+catch-up";
         }
       }
@@ -143,9 +160,10 @@ export class DocumentStore {
       persisted: this.codec.ydocToMarkdown(ydoc),
       loadedRaw: stored.content,
       contributors: new Map(),
+      dirty: false,
       queue: Promise.resolve(),
     });
-    this.log.info("loaded", { doc: parsed.id, revision: stored.revision, from });
+    this.log.info("loaded", { doc: parsed.id, revision: stored.revision, from, state_bytes: state?.byteLength ?? 0 });
     return Y.encodeStateAsUpdate(ydoc);
   }
 
@@ -154,6 +172,7 @@ export class DocumentStore {
     if (!state || !actor) return;
     state.contributors.set(`${actor.type}:${actor.id}`, actor);
     state.loadedRaw = null;
+    state.dirty = true;
   }
 
   async autosave(name: string, document: Document): Promise<void> {
@@ -301,11 +320,12 @@ export class DocumentStore {
   ): Promise<number> {
     const state = this.states.get(name);
     if (!state) throw new GoneError(name);
-    const content = this.codec.ydocToMarkdown(document);
     const explicit = req.actor !== undefined;
-    if (content === state.persisted && req.title === undefined && !req.action && !req.message) {
-      return state.revision;
-    }
+    const own = req.title !== undefined || !!req.action || !!req.message;
+    if (!explicit && !own && !state.dirty) return state.revision;
+    state.dirty = false;
+    const content = this.codec.ydocToMarkdown(document);
+    if (content === state.persisted && !own) return state.revision;
     // Taken now, not cleared after the store: someone typing while it is in
     // flight must be credited in the next one.
     const taken = explicit ? null : state.contributors;
@@ -331,6 +351,7 @@ export class DocumentStore {
       result = await this.api.storeDoc(state.id, body);
     } catch (error) {
       giveBack();
+      state.dirty = true;
       throw error;
     }
     if (result.status === "gone") {
@@ -342,6 +363,7 @@ export class DocumentStore {
       // during a deploy, or a write while the service was down). Fold that
       // change into the live document and try again.
       giveBack();
+      state.dirty = true;
       if (attempt >= 2) throw new Error(`doc ${state.id}: store kept conflicting`);
       this.reconcile(name, document, state, result.content);
       state.revision = result.revision;

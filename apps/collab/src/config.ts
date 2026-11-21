@@ -6,7 +6,9 @@ export interface CollabConfig {
   /** Base URL of the Go API's internal collaboration endpoints. */
   apiUrl: string;
   cdnDomain: string;
-  /** Quiet period before a changed document is written back. */
+  /** Quiet period before a changed document is written back. Every store
+   *  rewrites the doc, its version and a revision in Postgres. Agents' reads
+   *  and every API write flush the live doc first, so they never wait on it. */
   storeDebounceMs: number;
   /** Longest a continuously edited document goes unsaved. */
   storeMaxDebounceMs: number;
@@ -22,7 +24,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollabConfig {
     secret,
     apiUrl,
     cdnDomain: env.MULTICA_CDN_DOMAIN?.trim() ?? "",
-    storeDebounceMs: Number(env.COLLAB_STORE_DEBOUNCE_MS || 2000),
-    storeMaxDebounceMs: Number(env.COLLAB_STORE_MAX_DEBOUNCE_MS || 10000),
+    storeDebounceMs: Number(env.COLLAB_STORE_DEBOUNCE_MS || 5000),
+    storeMaxDebounceMs: Number(env.COLLAB_STORE_MAX_DEBOUNCE_MS || 30000),
   };
 }

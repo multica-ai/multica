@@ -1,10 +1,11 @@
 import "./dom";
 import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { COLLAB_FIELD, createDocumentCodec } from "@multica/views/editor/schema/codec";
+import { COMPACT_STATE_MIN_BYTES } from "./documents";
 import { createCollabServer } from "./server";
 import { signTicket, type Actor } from "./ticket";
 
@@ -260,6 +261,23 @@ describe("collaboration server", () => {
     expect(fake.content).toBe("One (agent)\n\nTwo\n\nThree (live)");
   });
 
+  it("merges a stale write to formatted text nobody else touched", async () => {
+    const original = "**Name check**: see [Kaon AI](https://kaon.ai)\n\nTwo\n\nThree";
+    resetDoc(original);
+    const a = await connect(ada);
+    typeInto(a.document, 2, 5, " (live)");
+    await waitFor(() => markdown(a.document).includes("live"));
+    const result = await internal("write", {
+      actor: agent,
+      base_revision: 1,
+      base_content: original,
+      content: original.replace("**Name check**", "**Name check (done)**"),
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.merged).toBe(true);
+    expect(fake.content).toBe("**Name check (done)**: see [Kaon AI](https://kaon.ai)\n\nTwo\n\nThree (live)");
+  });
+
   it("refuses a whole-document write that collides with a live edit", async () => {
     resetDoc("One\n\nTwo");
     const a = await connect(ada);
@@ -376,5 +394,39 @@ describe("collaboration server", () => {
     const result = await internal("flush", {});
     expect(result.body.loaded).toBe(true);
     expect(fake.content).toBe("Before after");
+  });
+
+  it("does not serialize or store a document nobody changed since its last save", async () => {
+    resetDoc("Quiet");
+    const a = await connect(ada);
+    typeInto(a.document, 0, 5, " doc");
+    await internal("flush", {});
+    const stores = fake.stores.length;
+    const serialize = vi.spyOn(codec, "ydocToMarkdown");
+    try {
+      await internal("flush", {});
+      await internal("flush", {});
+      expect(serialize).not.toHaveBeenCalled();
+      expect(fake.stores.length).toBe(stores);
+    } finally {
+      serialize.mockRestore();
+    }
+    typeInto(a.document, 0, 9, "!");
+    await internal("flush", {});
+    expect(fake.content).toBe("Quiet doc!");
+  });
+
+  it("rebuilds an oversized saved state from Markdown on load", async () => {
+    resetDoc("Small doc");
+    const bloated = codec.createYDoc("Small doc");
+    bloated.getMap("meta").set("epoch", "old-epoch");
+    bloated.getMap("history").set("weight", "x".repeat(COMPACT_STATE_MIN_BYTES + 1));
+    fake.ystate = Buffer.from(Y.encodeStateAsUpdate(bloated)).toString("base64");
+    fake.ystateRevision = fake.revision;
+
+    const a = await connect(ada);
+    expect(markdown(a.document)).toBe("Small doc");
+    expect(a.document.getMap("meta").get("epoch")).not.toBe("old-epoch");
+    expect(Buffer.from(fake.ystate!, "base64").byteLength).toBeLessThan(10_000);
   });
 });

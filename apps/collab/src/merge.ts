@@ -18,9 +18,10 @@ export type MergeResult =
  * `base` is what the writer read, `current` is the live document, `incoming`
  * is what the writer wants. Blocks only one side changed are taken from that
  * side; a block both sides changed differently is a conflict, and the writer
- * has to re-read and retry. Blocks are compared as parsed nodes, not as
- * Markdown lines, so formatting the serializer normalizes away is not a
- * change.
+ * has to re-read and retry. Each block is compared by its own serialized
+ * Markdown, not line by line: the live document and freshly parsed Markdown
+ * describe the same block with different field order and default attributes,
+ * and formatting the serializer normalizes away is not a change.
  */
 export function mergeDocuments(
   codec: DocumentCodec,
@@ -31,7 +32,7 @@ export function mergeDocuments(
   const blocks = new Map<string, JSONContent>();
   const keys = (doc: JSONContent) =>
     (doc.content ?? []).map((block) => {
-      const key = JSON.stringify(block);
+      const key = codec.serialize({ type: "doc", content: [block] });
       blocks.set(key, block);
       return key;
     });
