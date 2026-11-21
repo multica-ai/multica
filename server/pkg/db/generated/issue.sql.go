@@ -1042,6 +1042,26 @@ func (q *Queries) GetIssueMetadataInWorkspace(ctx context.Context, arg GetIssueM
 	return i, err
 }
 
+const getIssueParentID = `-- name: GetIssueParentID :one
+SELECT parent_issue_id FROM issue
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetIssueParentIDParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Read without a row lock: a parent change takes LockIssueParentTree before
+// any issue row, because the parent foreign key makes the write key-share its
+// new parent's row, which a writer waiting on that lock could hold.
+func (q *Queries) GetIssueParentID(ctx context.Context, arg GetIssueParentIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getIssueParentID, arg.ID, arg.WorkspaceID)
+	var parent_issue_id pgtype.UUID
+	err := row.Scan(&parent_issue_id)
+	return parent_issue_id, err
+}
+
 const getIssueRefInWorkspace = `-- name: GetIssueRefInWorkspace :one
 SELECT id, number, title, status FROM issue
 WHERE id = $1 AND workspace_id = $2
@@ -1084,6 +1104,34 @@ func (q *Queries) GetIssueTriageState(ctx context.Context, id pgtype.UUID) (pgty
 	var triage_state pgtype.Text
 	err := row.Scan(&triage_state)
 	return triage_state, err
+}
+
+const issueHasAncestor = `-- name: IssueHasAncestor :one
+WITH RECURSIVE ancestors(id) AS (
+    SELECT i.parent_issue_id FROM issue AS i
+    WHERE i.id = $2 AND i.workspace_id = $3
+      AND i.parent_issue_id IS NOT NULL
+    UNION
+    SELECT i.parent_issue_id FROM issue AS i
+    JOIN ancestors AS a ON i.id = a.id
+    WHERE i.workspace_id = $3 AND i.parent_issue_id IS NOT NULL
+)
+SELECT EXISTS (SELECT 1 FROM ancestors WHERE id = $1::uuid)::boolean
+`
+
+type IssueHasAncestorParams struct {
+	AncestorID  pgtype.UUID `json:"ancestor_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Whether ancestor_id is anywhere above issue_id in the parent chain. UNION
+// drops ids already visited, so the walk ends even on a chain with a loop.
+func (q *Queries) IssueHasAncestor(ctx context.Context, arg IssueHasAncestorParams) (bool, error) {
+	row := q.db.QueryRow(ctx, issueHasAncestor, arg.AncestorID, arg.IssueID, arg.WorkspaceID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const issueHasDuplicates = `-- name: IssueHasDuplicates :one
@@ -1918,6 +1966,18 @@ func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIss
 		&i.RequesterUserID,
 	)
 	return i, err
+}
+
+const lockIssueParentTree = `-- name: LockIssueParentTree :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text || ':issue_parent', 0))
+`
+
+// Serializes parent changes within a workspace. Two changes can each pass the
+// cycle check against the committed tree and still close a loop together
+// (A -> B racing B -> A), so each takes this lock before its final check.
+func (q *Queries) LockIssueParentTree(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockIssueParentTree, workspaceID)
+	return err
 }
 
 const lockIssuesForDuplicateMark = `-- name: LockIssuesForDuplicateMark :many
