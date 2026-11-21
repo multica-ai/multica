@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { EMPTY_ISSUE_VIEW_PREFERENCE } from "@multica/core/api/schemas";
@@ -300,10 +300,23 @@ function inboxItem(issue: Issue): InboxItem {
 }
 
 describe("WorkPanel sections", () => {
-  it("orders Inbox, Pinned, Views, Projects", () => {
+  const sections = () => Array.from(document.querySelectorAll<HTMLElement>("[data-mc='panel-section']"));
+  const labels = () => sections().map((section) => section.querySelector("h3")?.textContent);
+
+  it("orders Pinned, Inbox, Views, Projects", () => {
     renderPanel("/acme/my-issues", [PIN], [PROJECT]);
-    const labels = Array.from(document.querySelectorAll("[data-mc='panel-section'] h3"), (h) => h.textContent);
-    expect(labels).toEqual(["Inbox", "Pinned", "Views", "Projects"]);
+    expect(labels()).toEqual(["Pinned", "Inbox", "Views", "Projects"]);
+  });
+
+  // The panel body drops the top margin of a section that is its first child.
+  it("starts the panel with its first section, with or without pins", () => {
+    renderPanel("/acme/my-issues", [PIN], [PROJECT]);
+    expect(sections()[0]!.parentElement!.firstElementChild).toBe(sections()[0]);
+    cleanup();
+
+    renderPanel("/acme/my-issues", [], [PROJECT]);
+    expect(labels()[0]).toBe("Inbox");
+    expect(sections()[0]!.parentElement!.firstElementChild).toBe(sections()[0]);
   });
 });
 
