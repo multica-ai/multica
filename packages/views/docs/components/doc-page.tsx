@@ -35,7 +35,9 @@ import {
   holdLiveDoc,
   isDocNotFound,
 } from "@multica/core/docs";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWS } from "@multica/core/realtime";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Doc } from "@multica/core/types";
@@ -46,6 +48,7 @@ import { AppLink, useNavigation } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 import { useDocDraft } from "./use-doc-draft";
 import { useDocCollab, type DocCollaborator } from "./use-doc-collab";
+import { findDocSession, liveEditingOff, peekDocLive, prefetchDocLive } from "./doc-live-session";
 import { useLiveDocTitle } from "./use-live-doc-title";
 import { DocOutline, MIN_OUTLINE_HEADINGS, useDocOutline } from "./doc-outline";
 import { DocCommentsPanel, groupDocThreads } from "./doc-comments-panel";
@@ -65,13 +68,52 @@ export function DocPage({ docId }: { docId: string }) {
   );
 }
 
+/** How long the page waits for the doc's live session info before showing
+ *  the doc without it. The two requests leave together, so this is rarely
+ *  reached. */
+const LIVE_INFO_WAIT_MS = 1000;
+
+/**
+ * Whether the page knows how the doc opens: solo, or live with the saved
+ * state to show at once. Waiting for that briefly lets the doc appear in its
+ * editor in one paint instead of as a static copy swapped out later. Once
+ * settled it stays so for the doc: the editor consumes what settled it, and
+ * falling back to the skeleton would unmount the editor.
+ */
+function useLiveInfoSettled(docId: string): boolean {
+  const { collabUrl } = useWS();
+  const userId = useAuthStore((s) => s.user?.id ?? "");
+  const [settledDoc, setSettledDoc] = useState<string | null>(null);
+  const settled =
+    settledDoc === docId ||
+    liveEditingOff.has(collabUrl) ||
+    peekDocLive(collabUrl, docId, userId) !== undefined ||
+    !!findDocSession(collabUrl, docId, userId)?.getState().ready;
+  if (settled && settledDoc !== docId) setSettledDoc(docId);
+  useEffect(() => {
+    if (settled) return;
+    let cancelled = false;
+    const done = () => {
+      if (!cancelled) setSettledDoc(docId);
+    };
+    prefetchDocLive(collabUrl, docId, userId).then(done, done);
+    const wait = setTimeout(done, LIVE_INFO_WAIT_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(wait);
+    };
+  }, [settled, collabUrl, docId, userId]);
+  return settled;
+}
+
 function DocPageContent({ docId }: { docId: string }) {
   const wsId = useWorkspaceId();
   const { t } = useT("docs");
   const query = useQuery(docDetailOptions(wsId, docId));
+  const liveSettled = useLiveInfoSettled(docId);
   // Also when it was open: a refetch answered 404 once someone deleted it.
   if (isDocNotFound(query.error)) return <DocNotFound docId={docId} />;
-  if (!query.data)
+  if (!query.data || !liveSettled)
     return (
       <DocPageSkeleton docId={docId}>
         {query.isError ? (
@@ -158,15 +200,22 @@ function DocEditor({ doc }: { doc: Doc }) {
   // itself; only the title goes through the API. Until the page knows which
   // mode it is in, nothing is saved: the body is shown read-only and a typed
   // title is held.
-  const collab = useDocCollab(doc.id);
+  const collab = useDocCollab(doc.id, doc.content);
   const live = collab.mode === "live" ? collab : null;
   const solo = collab.mode === "solo";
   const { draft, status, dirty, change, retry, reload, setAside } = useDocDraft(doc, solo);
   const liveTitle = useLiveDocTitle(doc, !!live);
+  // The live editor appears once its Tiptap instance exists; until then the
+  // static copy stands in, so the body never goes blank.
+  const [editorReadyFor, setEditorReadyFor] = useState<number | null>(null);
+  const showLiveEditor = !!live?.ready && editorReadyFor === live.generation;
   useEffect(() => {
     if (solo) {
       const title = liveTitle.take();
-      if (title !== null) change({ title });
+      const content = collab.carried ?? null;
+      if (title !== null || content !== null) {
+        change({ ...(title !== null ? { title } : {}), ...(content !== null ? { content } : {}) });
+      }
     } else if (live) {
       setAside();
     }
@@ -190,7 +239,9 @@ function DocEditor({ doc }: { doc: Doc }) {
   const uploadFile = useCallback((file: File) => uploadWithToast(file), [uploadWithToast]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const outline = useDocOutline(bodyRef, scrollRef);
+  // Changes when the body switches between the static copy and an editor.
+  const bodyKey = solo ? "solo" : showLiveEditor ? live!.generation : "static";
+  const outline = useDocOutline(bodyRef, scrollRef, bodyKey);
   const showOutline = outline.headings.length >= MIN_OUTLINE_HEADINGS;
 
   // Discussions. A link from the inbox names one with ?thread=.
@@ -218,7 +269,7 @@ function DocEditor({ doc }: { doc: Doc }) {
         })),
     [threads, activeThread],
   );
-  const highlights = useDocCommentHighlights(bodyRef, anchored, activeThread);
+  const highlights = useDocCommentHighlights(bodyRef, anchored, activeThread, bodyKey);
   const activateThread = (id: string) => {
     setActiveThread(id);
     setCommentsOpen(true);
@@ -268,6 +319,7 @@ function DocEditor({ doc }: { doc: Doc }) {
               <LiveStatus
                 connected={live.connected}
                 synced={live.synced}
+                slow={live.slow}
                 collaborators={live.collaborators}
                 titleFailed={liveTitle.failed}
                 onRetryTitle={liveTitle.retry}
@@ -416,20 +468,26 @@ function DocEditor({ doc }: { doc: Doc }) {
                 </Tooltip>
               </div>
               <div ref={bodyRef} onClick={onBodyClick}>
-                {collab.mode === "checking" || (live && !live.synced) ? (
-                  <ReadonlyContent content={doc.content} className="min-h-80" />
-                ) : live ? (
-                  <ContentEditor
-                    key={live.generation}
-                    collaboration={live.collaboration}
-                    selectionAction={commentAction}
-                    placeholder={t(($) => $.editor.placeholder)}
-                    enableSlashCommands
-                    slashCommandMode="blocks"
-                    showBlockHandles
-                    onUploadFile={uploadFile}
-                    className="min-h-80"
-                  />
+                {!solo ? (
+                  <>
+                    {!showLiveEditor && <ReadonlyContent content={doc.content} className="min-h-80" />}
+                    {live?.ready && (
+                      <div hidden={!showLiveEditor}>
+                        <ContentEditor
+                          key={live.generation}
+                          collaboration={live.collaboration}
+                          onReady={() => setEditorReadyFor(live.generation)}
+                          selectionAction={commentAction}
+                          placeholder={t(($) => $.editor.placeholder)}
+                          enableSlashCommands
+                          slashCommandMode="blocks"
+                          showBlockHandles
+                          onUploadFile={uploadFile}
+                          className="min-h-80"
+                        />
+                      </div>
+                    )}
+                  </>
                 ) : (
                 <ContentEditor
                   selectionAction={commentAction}
@@ -495,12 +553,14 @@ function DocEditor({ doc }: { doc: Doc }) {
 function LiveStatus({
   connected,
   synced,
+  slow,
   collaborators,
   titleFailed,
   onRetryTitle,
 }: {
   connected: boolean;
   synced: boolean;
+  slow: boolean;
   collaborators: DocCollaborator[];
   titleFailed: boolean;
   onRetryTitle: () => void;
@@ -557,9 +617,11 @@ function LiveStatus({
           <span aria-hidden className="size-1.5 rounded-full bg-success" />
           {t(($) => $.editor.live)}
         </span>
-      ) : (
-        t(($) => (synced ? $.editor.reconnecting : $.editor.connecting))
-      )}
+      ) : synced ? (
+        t(($) => $.editor.reconnecting)
+      ) : slow ? (
+        t(($) => $.editor.connecting)
+      ) : null}
     </span>
   );
 }

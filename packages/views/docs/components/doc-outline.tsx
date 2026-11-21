@@ -17,13 +17,15 @@ const ACTIVE_OFFSET = 96;
 /** Space kept above a heading the outline scrolls to. */
 const SCROLL_MARGIN = 24;
 
-/** Top-level H1–H3 of the rendered document, in order; empty headings skipped. */
+/** Top-level H1–H3 of the rendered document, in order; empty headings skipped.
+ *  An editor still mounting behind `hidden` has no positions yet, so it is not read. */
 export function readOutline(root: ParentNode): OutlineHeading[] {
   return Array.from(
     root.querySelectorAll<HTMLElement>(
       ".ProseMirror > h1, .ProseMirror > h2, .ProseMirror > h3",
     ),
   )
+    .filter((element) => !element.closest("[hidden]"))
     .map((element) => ({
       level: Number(element.tagName.slice(1)),
       text: element.textContent?.trim() ?? "",
@@ -46,11 +48,13 @@ function sameOutline(a: OutlineHeading[], b: OutlineHeading[]): boolean {
 
 /**
  * Headings of the editor under `rootRef`, kept current as the user types, and
- * which one the scroll position of `scrollRef` is in.
+ * which one the scroll position of `scrollRef` is in. A new `bodyKey` reads
+ * them again at once, for a host that swaps what the root shows.
  */
 export function useDocOutline(
   rootRef: RefObject<HTMLElement | null>,
   scrollRef: RefObject<HTMLElement | null>,
+  bodyKey?: string | number,
 ) {
   const [headings, setHeadings] = useState<OutlineHeading[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -64,7 +68,7 @@ export function useDocOutline(
       const next = readOutline(root);
       setHeadings((prev) => (sameOutline(prev, next) ? prev : next));
     });
-  }, [rootRef]);
+  }, [rootRef, bodyKey]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -80,7 +84,7 @@ export function useDocOutline(
     update();
     scroller.addEventListener("scroll", update, { passive: true });
     return () => scroller.removeEventListener("scroll", update);
-  }, [headings, scrollRef]);
+  }, [headings, scrollRef, bodyKey]);
 
   const scrollTo = (heading: OutlineHeading) => {
     const scroller = scrollRef.current;

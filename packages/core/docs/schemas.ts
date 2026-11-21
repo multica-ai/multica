@@ -168,9 +168,16 @@ export const DocCollabTicketSchema = z
     token: z.string().optional(),
     document: z.string().optional(),
     expires_at: z.string().optional(),
+    state: z.string().optional(),
   })
   .transform((t) =>
     t.enabled && t.token && t.document
-      ? { enabled: true as const, token: t.token, document: t.document, expiresAt: t.expires_at ?? "" }
+      ? {
+          enabled: true as const,
+          token: t.token,
+          document: t.document,
+          expiresAt: t.expires_at ?? "",
+          ...(t.state ? { state: t.state } : {}),
+        }
       : { enabled: false as const },
   );

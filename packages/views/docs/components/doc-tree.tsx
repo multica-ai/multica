@@ -54,6 +54,7 @@ import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { MoveDialog, type MoveTarget } from "./move-dialog";
 import { useCanDeleteDoc } from "./use-can-delete-doc";
+import { usePrefetchDoc, useWarmDocPage } from "./use-prefetch-doc";
 
 type Item =
   | { kind: "doc"; item: DocSummary }
@@ -168,6 +169,8 @@ export function DocTree() {
   const wsId = useWorkspaceId();
   const { pathname, push } = useNavigation();
   const tree = useQuery(docTreeOptions(wsId));
+  const prefetchDoc = usePrefetchDoc();
+  useWarmDocPage(tree.data?.docs[0]?.id);
   const createDoc = useCreateDoc();
   const createFolder = useCreateDocFolder();
   const renameFolder = useRenameDocFolder();
@@ -404,6 +407,7 @@ export function DocTree() {
             <FileText className="size-4 shrink-0 text-muted-foreground" />
             <AppLink
               href={p.docDetail(doc.id)}
+              {...prefetchDoc(doc.id)}
               className="min-w-0 flex-1 truncate"
             >
               {doc.title || t(($) => $.untitled)}
