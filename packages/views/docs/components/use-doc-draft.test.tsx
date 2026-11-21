@@ -432,3 +432,42 @@ it("keeps a space typed at the end of the title after the server saves it trimme
   });
   expect(view.result.current.draft.title).toBe("Release notes");
 });
+
+it("sends nothing while the doc is edited live, not even on exit", async () => {
+  const client = new QueryClient();
+  setDocDraft("ws-review:doc-review", {
+    title: doc.title,
+    content: "Left over from an earlier solo session",
+    baseTitle: doc.title,
+    baseContent: doc.content,
+    baseRevision: 1,
+  });
+  const view = renderHook(() => useDocDraft(doc, false), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  view.unmount();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.updateDoc).not.toHaveBeenCalled();
+});
+
+it("sets unsaved edits aside as a backup instead of saving them", async () => {
+  const view = mount();
+  act(() => view.result.current.change({ content: "Stale edit" }));
+  act(() => view.result.current.setAside());
+  expect(view.result.current.dirty).toBe(false);
+  expect(useDocDraftStore.getState().draft.entries["ws-review:doc-review"]).toMatchObject({
+    content: doc.content,
+    backup: { title: doc.title, content: "Stale edit" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.updateDoc).not.toHaveBeenCalled();
+});

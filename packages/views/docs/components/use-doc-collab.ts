@@ -11,6 +11,10 @@ import type { EditorCollaboration } from "../../editor/extensions";
  *  live session. Saves then go through the API, which merges them in. */
 const CONNECT_TIMEOUT_MS = 8000;
 
+/** Servers that answered that live editing is off. That is server
+ *  configuration, so later docs open for solo editing without asking again. */
+const liveEditingOff = new Set<string>();
+
 const COLORS = ["#2563eb", "#db2777", "#059669", "#d97706", "#7c3aed", "#0891b2", "#dc2626", "#4f46e5"];
 
 function colorFor(id: string): string {
@@ -53,7 +57,9 @@ interface Session {
 export function useDocCollab(docId: string): DocCollabState {
   const { collabUrl } = useWS();
   const user = useAuthStore((s) => s.user);
-  const [mode, setMode] = useState<"checking" | "solo" | "live">("checking");
+  const [mode, setMode] = useState<"checking" | "solo" | "live">(() =>
+    liveEditingOff.has(collabUrl) ? "solo" : "checking",
+  );
   const [document, setDocument] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const [session, setSession] = useState<Session | null>(null);
@@ -62,11 +68,17 @@ export function useDocCollab(docId: string): DocCollabState {
   const [collaborators, setCollaborators] = useState<DocCollaborator[]>([]);
 
   useEffect(() => {
+    if (liveEditingOff.has(collabUrl)) {
+      setMode("solo");
+      return;
+    }
     let cancelled = false;
     setMode("checking");
     api
       .createDocCollabTicket(docId)
       .then((ticket) => {
+        if (ticket.enabled) liveEditingOff.delete(collabUrl);
+        else liveEditingOff.add(collabUrl);
         if (cancelled) return;
         setDocument(ticket.enabled ? ticket.document : null);
         setMode(ticket.enabled ? "live" : "solo");
@@ -77,7 +89,7 @@ export function useDocCollab(docId: string): DocCollabState {
     return () => {
       cancelled = true;
     };
-  }, [docId]);
+  }, [docId, collabUrl]);
 
   useEffect(() => {
     if (mode !== "live" || !document) return;

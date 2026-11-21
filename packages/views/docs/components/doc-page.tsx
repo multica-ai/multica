@@ -34,7 +34,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Doc } from "@multica/core/types";
-import { ContentEditor, useEditorUpload } from "../../editor";
+import { ContentEditor, ReadonlyContent, useEditorUpload } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
@@ -87,12 +87,25 @@ function DocEditor({ doc }: { doc: Doc }) {
   const { data: tree } = useQuery(docTreeOptions(wsId));
   const { getActorName } = useActorName();
   const timeAgo = useTimeAgo();
-  const { draft, status, dirty, change, retry, reload } = useDocDraft(doc);
   // With live editing on, the shared document holds the body and saves
-  // itself; only the title goes through the API.
+  // itself; only the title goes through the API. Until the page knows which
+  // mode it is in, nothing is saved: the body is shown read-only and a typed
+  // title is held.
   const collab = useDocCollab(doc.id);
   const live = collab.mode === "live" ? collab : null;
+  const solo = collab.mode === "solo";
+  const { draft, status, dirty, change, retry, reload, setAside } = useDocDraft(doc, solo);
   const liveTitle = useLiveDocTitle(doc, !!live);
+  useEffect(() => {
+    if (solo) {
+      const title = liveTitle.take();
+      if (title !== null) change({ title });
+    } else if (live) {
+      setAside();
+    }
+    // Once per mode change: the handlers are recreated every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solo, !!live]);
   const [moving, setMoving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const canDelete = useCanDeleteDoc()(doc);
@@ -188,6 +201,7 @@ function DocEditor({ doc }: { doc: Doc }) {
                 synced={live.synced}
                 collaborators={live.collaborators}
                 titleFailed={liveTitle.failed}
+                onRetryTitle={liveTitle.retry}
               />
             ) : collab.mode === "checking" ? null : (
             <span role="status" className="px-1 text-caption text-muted-foreground">
@@ -262,7 +276,7 @@ function DocEditor({ doc }: { doc: Doc }) {
           </>
         }
       />
-      {!live && status === "conflict" && (
+      {solo && status === "conflict" && (
         <div
           role="alert"
           className="flex flex-wrap items-center gap-2 border-b bg-warning/10 px-6 py-2 text-body"
@@ -280,7 +294,7 @@ function DocEditor({ doc }: { doc: Doc }) {
         <div className="flex min-h-full">
           <div className="min-w-0 flex-1">
             <div className="mx-auto max-w-4xl px-6 py-8 @3xl:px-16">
-              {!live && draft.backup && (
+              {draft.backup && (
                 <details className="mb-5 rounded-md border p-3 text-body">
                   <summary className="cursor-pointer">
                     {t(($) => $.editor.draft)}
@@ -295,15 +309,15 @@ function DocEditor({ doc }: { doc: Doc }) {
               )}
               <input
                 aria-label={t(($) => $.editor.title_label)}
-                value={live ? liveTitle.value : draft.title}
+                value={solo ? draft.title : liveTitle.value}
                 // A doc just created from the tree is blank: start in its title.
                 autoFocus={!doc.title && !doc.content}
                 maxLength={300}
                 placeholder={t(($) => $.untitled)}
                 onChange={(e) =>
-                  live ? liveTitle.change(e.target.value) : change({ title: e.target.value })
+                  solo ? change({ title: e.target.value }) : liveTitle.change(e.target.value)
                 }
-                onBlur={live ? liveTitle.blur : undefined}
+                onBlur={solo ? undefined : liveTitle.blur}
                 className="w-full bg-transparent text-display-sm font-semibold outline-none"
               />
               <div className="mt-3 mb-8 flex items-center gap-2 text-caption text-muted-foreground">
@@ -327,9 +341,7 @@ function DocEditor({ doc }: { doc: Doc }) {
               </div>
               <div ref={bodyRef} onClick={onBodyClick}>
                 {collab.mode === "checking" || (live && !live.synced) ? (
-                  <p className="min-h-80 text-body text-muted-foreground">
-                    {t(($) => $.editor.connecting)}
-                  </p>
+                  <ReadonlyContent content={doc.content} className="min-h-80" />
                 ) : live ? (
                   <ContentEditor
                     key={live.generation}
@@ -409,11 +421,13 @@ function LiveStatus({
   synced,
   collaborators,
   titleFailed,
+  onRetryTitle,
 }: {
   connected: boolean;
   synced: boolean;
   collaborators: DocCollaborator[];
   titleFailed: boolean;
+  onRetryTitle: () => void;
 }) {
   const { t } = useT("docs");
   return (
@@ -459,7 +473,9 @@ function LiveStatus({
         </span>
       )}
       {titleFailed ? (
-        t(($) => $.editor.title_save_failed)
+        <Button size="xs" variant="ghost" onClick={onRetryTitle}>
+          {t(($) => $.editor.title_save_failed)}
+        </Button>
       ) : connected && synced ? (
         <span className="flex items-center gap-1">
           <span aria-hidden className="size-1.5 rounded-full bg-success" />
