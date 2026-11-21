@@ -133,3 +133,42 @@ func moveRequestWithActor(source, target, project, actor string) *http.Request {
 	req.Header.Set("X-Actor-Source", actor)
 	return req
 }
+
+func TestProjectMoveFolderAndProjectMembership(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database not available")
+	}
+	source, target, project := moveFixture(t)
+	folder := dbfx.Insert(t, "project_folder", testutil.Cols{"workspace_id": source, "name": "Source Folder"})
+	dbfx.Exec(t, `UPDATE project SET folder_id=$1,visibility='private' WHERE id=$2`, folder, project)
+	shared := dbfx.User(t, "Shared Member", "shared-pm@test.local")
+	sourceOnly := dbfx.User(t, "Source Only", "source-pm@test.local")
+	dbfx.Member(t, source, shared, "member")
+	dbfx.Member(t, target, shared, "member")
+	dbfx.Member(t, source, sourceOnly, "member")
+	dbfx.Exec(t, `INSERT INTO project_member(workspace_id,project_id,user_id) VALUES ($1,$2,$3),($1,$2,$4)`, source, project, shared, sourceOnly)
+	dbfx.Exec(t, `INSERT INTO project_subscriber(workspace_id,project_id,user_id) VALUES ($1,$2,$3),($1,$2,$4)`, source, project, shared, sourceOnly)
+
+	var plan map[string]any
+	testutil.Call(t, testHandler.PreviewProjectMove, moveRequest(source, target, project, "")).Want(200).JSON(&plan)
+	hash, _ := plan["plan_hash"].(string)
+	testutil.Call(t, testHandler.MoveProject, moveRequest(source, target, project, hash)).Want(200)
+
+	var folderID *string
+	dbfx.QueryRow(t, `SELECT folder_id::text FROM project WHERE id=$1`, project).Scan(&folderID)
+	if folderID != nil {
+		t.Fatalf("folder_id was not cleared: %s", *folderID)
+	}
+	for _, table := range []string{"project_member", "project_subscriber"} {
+		var count int
+		var ws string
+		dbfx.QueryRow(t, `SELECT count(*) FROM `+table+` WHERE project_id=$1`, project).Scan(&count)
+		if count != 1 {
+			t.Fatalf("%s count=%d, want 1", table, count)
+		}
+		dbfx.QueryRow(t, `SELECT workspace_id::text FROM `+table+` WHERE project_id=$1 AND user_id=$2`, project, shared).Scan(&ws)
+		if ws != target {
+			t.Fatalf("%s workspace_id=%s, want %s", table, ws, target)
+		}
+	}
+}

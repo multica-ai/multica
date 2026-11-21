@@ -266,7 +266,7 @@ func (q *Queries) MoveProjectIssue(ctx context.Context, arg MoveProjectIssuePara
 }
 
 const moveProjectRoot = `-- name: MoveProjectRoot :execrows
-UPDATE project SET workspace_id= $1::uuid,workflow_id=NULL,
+UPDATE project SET workspace_id= $1::uuid,workflow_id=NULL,folder_id=NULL,
  lead_type=CASE WHEN $2::boolean THEN NULL ELSE lead_type END,
  lead_id=CASE WHEN $2::boolean THEN NULL ELSE lead_id END,updated_at=now()
 WHERE id= $3::uuid AND workspace_id= $4::uuid
@@ -279,7 +279,7 @@ type MoveProjectRootParams struct {
 	SourceWorkspaceID pgtype.UUID `json:"source_workspace_id"`
 }
 
-// workflow_id names a source-workspace workflow; the target's Default applies.
+// workflow_id and folder_id name source-workspace records; clear both on move.
 func (q *Queries) MoveProjectRoot(ctx context.Context, arg MoveProjectRootParams) (int64, error) {
 	result, err := q.db.Exec(ctx, moveProjectRoot,
 		arg.TargetWorkspaceID,
@@ -360,6 +360,10 @@ d_preferences AS (DELETE FROM issue_view_preference r USING p WHERE r.workspace_
 d_inbox AS (DELETE FROM inbox_item r USING p WHERE r.workspace_id=p.source AND r.issue_id=ANY(p.issues) RETURNING 1),
 d_unread AS (DELETE FROM issue_unread r USING p WHERE r.workspace_id=p.source AND r.issue_id=ANY(p.issues) RETURNING 1),
 d_subscribers AS (DELETE FROM issue_subscriber r USING p WHERE r.issue_id=ANY(p.issues) AND (r.user_type<>'member' OR NOT EXISTS (SELECT 1 FROM member m WHERE m.workspace_id=p.target AND m.user_id=r.user_id)) RETURNING 1),
+d_project_members AS (DELETE FROM project_member r USING p WHERE r.workspace_id=p.source AND r.project_id=p.project AND NOT EXISTS (SELECT 1 FROM member m WHERE m.workspace_id=p.target AND m.user_id=r.user_id) RETURNING 1),
+m_project_members AS (UPDATE project_member r SET workspace_id=p.target FROM p WHERE r.workspace_id=p.source AND r.project_id=p.project AND EXISTS (SELECT 1 FROM member m WHERE m.workspace_id=p.target AND m.user_id=r.user_id) RETURNING 1),
+d_project_subscribers AS (DELETE FROM project_subscriber r USING p WHERE r.workspace_id=p.source AND r.project_id=p.project AND NOT EXISTS (SELECT 1 FROM member m WHERE m.workspace_id=p.target AND m.user_id=r.user_id) RETURNING 1),
+m_project_subscribers AS (UPDATE project_subscriber r SET workspace_id=p.target FROM p WHERE r.workspace_id=p.source AND r.project_id=p.project AND EXISTS (SELECT 1 FROM member m WHERE m.workspace_id=p.target AND m.user_id=r.user_id) RETURNING 1),
 d_wakeups AS (DELETE FROM issue_wakeup r USING p WHERE r.workspace_id=p.source AND r.issue_id=ANY(p.issues) AND NOT r.enabled RETURNING id),
 d_receipts AS (DELETE FROM issue_wakeup_receipt r WHERE r.wakeup_id IN (SELECT id FROM d_wakeups) RETURNING 1),
 d_github_links AS (DELETE FROM issue_pull_request r USING p WHERE r.issue_id=ANY(p.issues) RETURNING 1),
