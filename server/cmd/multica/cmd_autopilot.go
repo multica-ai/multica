@@ -79,7 +79,7 @@ var autopilotTriggerAddCmd = &cobra.Command{
 
 var autopilotTriggerListCmd = &cobra.Command{
 	Use:   "trigger-list <autopilot-id>",
-	Short: "List an autopilot's triggers (ids for trigger-update/-delete/-rotate-url)",
+	Short: "List an autopilot's trigger IDs, recorded owners, and schedules",
 	Args:  exactArgs(1),
 	RunE:  runAutopilotTriggerList,
 }
@@ -766,7 +766,7 @@ func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 	}
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
-	headers := []string{"ID", "KIND", "ENABLED", "SCHEDULE", "NEXT_RUN", "LABEL"}
+	headers := []string{"ID", "KIND", "ENABLED", "OWNER", "SCHEDULE", "NEXT_RUN", "LABEL"}
 	rows := make([][]string, 0, len(triggers))
 	for _, t := range triggers {
 		enabled := "no"
@@ -781,6 +781,7 @@ func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 			displayID(strVal(t, "id"), fullID),
 			strVal(t, "kind"),
 			enabled,
+			autopilotTriggerOwner(t, fullID),
 			schedule,
 			relativeTimestamp(strVal(t, "next_run_at")),
 			strVal(t, "label"),
@@ -788,6 +789,16 @@ func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func autopilotTriggerOwner(trigger map[string]any, fullID bool) string {
+	ownerType, _ := trigger["created_by_type"].(string)
+	ownerID, _ := trigger["created_by_id"].(string)
+	ownerType, ownerID = strings.TrimSpace(ownerType), strings.TrimSpace(ownerID)
+	if ownerType == "" || ownerID == "" {
+		return "unknown"
+	}
+	return ownerType + ":" + displayID(ownerID, fullID)
 }
 
 func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
