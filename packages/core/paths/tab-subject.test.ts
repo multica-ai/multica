@@ -8,6 +8,7 @@ describe("parseTabSubject", () => {
   // `unknown` — which the presentation layer renders neutrally, never as Issues.
   const cases: Array<[string, TabSubject]> = [
     // Collection / tool pages
+    ["/acme/start", { kind: "page", page: "issues" }],
     ["/acme/issues", { kind: "page", page: "issues" }],
     ["/acme/my-issues", { kind: "page", page: "myIssues" }],
     ["/acme/my-issues?scope=agents", { kind: "myAgents" }],

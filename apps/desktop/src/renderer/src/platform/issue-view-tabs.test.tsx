@@ -135,11 +135,13 @@ describe("desktop issue views per tab", () => {
     // still mounted when the URL already names the Issues page's view.
     useTabStore.getState().navigateActiveSession("/acme/my-issues?view=m");
     render(
+      <QueryClientProvider client={createQueryClient()}>
       <DesktopNavigationProvider>
         <IssueViewUrlSync scope={{ scope_type: "my" }}>
           <span />
         </IssueViewUrlSync>
-      </DesktopNavigationProvider>,
+      </DesktopNavigationProvider>
+      </QueryClientProvider>,
     );
     expect(useActiveIssueViewStore.getState().active["ws-1:my"]).toBe("m");
 
@@ -151,11 +153,13 @@ describe("desktop issue views per tab", () => {
 
   it("adopts the next project's view once the reused page renders that project", () => {
     const sync = (id: string) => (
+      <QueryClientProvider client={createQueryClient()}>
       <DesktopNavigationProvider>
         <IssueViewUrlSync scope={{ scope_type: "project", scope_id: id }}>
           <span />
         </IssueViewUrlSync>
       </DesktopNavigationProvider>
+      </QueryClientProvider>
     );
     const active = () => useActiveIssueViewStore.getState().active;
     useTabStore.getState().navigateActiveSession("/acme/projects/p1?view=a");

@@ -204,7 +204,7 @@ func TestWorkspaceLinkHome(t *testing.T) {
 	}
 	assertHomes(winner, projectHome)
 
-	// Exercise migration 620 directly, bypassing the handler's home clearing.
+	// Exercise migration 721 directly, bypassing the handler's home clearing.
 	_, err := testPool.Exec(context.Background(), `INSERT INTO workspace_link (id, workspace_id, name, url_template, open_mode, is_home)
 		VALUES ($1, $2, 'Duplicate', 'https://example.com', 'embed', true)`, uuid.NewString(), ws)
 	var pgErr *pgconn.PgError

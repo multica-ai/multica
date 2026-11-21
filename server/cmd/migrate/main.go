@@ -194,7 +194,7 @@ var concurrentIndexCleanups = map[string]string{
 	"619_workspace_composio_connection_status_idx":              "idx_workspace_composio_connection_status",
 	"618_workspace_composio_connection_account_idx":             "idx_workspace_composio_connection_account",
 	"719_workspace_link_scope_index":                            "workspace_link_scope_position_idx",
-	"620_workspace_link_home_scope_index":                       "workspace_link_home_scope_idx",
+	"721_workspace_link_home_scope_index":                       "workspace_link_home_scope_idx",
 	"613_skill_version_index":                                   "idx_skill_version_skill_version",
 	"606_agent_task_queue_runtime_active_index":                 "idx_agent_task_queue_runtime_active",
 	"604_wecom_install_session_begin_rate_idx":                  "idx_wecom_install_session_begin_rate",

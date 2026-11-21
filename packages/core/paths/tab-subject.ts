@@ -83,6 +83,8 @@ export function parseTabSubject(url: string): TabSubject {
   const id = segments[2] ?? "";
 
   switch (segment) {
+    case "start":
+      return { kind: "page", page: "issues" };
     case "issues":
       return id ? { kind: "issue", id } : { kind: "page", page: "issues" };
     case "my-issues":
