@@ -163,7 +163,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 </Accordion>
 <Accordion title="不会静默丢东西" id="nothing-is-silently-lost">
 
-在 worktree 运行期间，受跟踪的运行时指令文件（如 `CLAUDE.md` 或 `AGENTS.md`）会在任务独立的索引中标记为 `skip-worktree`，防止注入的简报进入智能体的提交，不影响你的 checkout。对该文件的正常修改会保持未提交状态，直到清理阶段恢复跟踪，再按下面的规则交付。未跟踪的运行时文件和技能目录仍需从智能体的提交中排除。
+使用内置 Claude Code 2.1.281+ 或 Codex 0.169.0+ 时，Multica 不往 worktree 写任何运行所需的文件：运行时说明、技能和任务元数据都放在任务自己的目录里，你对 `CLAUDE.md`、`AGENTS.md` 的修改和检出目录中的其他改动一样可以正常提交。对于其他 provider 以及旧版或自定义 CLI，受跟踪的运行时指令文件（如 `CLAUDE.md` 或 `AGENTS.md`）会在任务独立的索引中标记为 `skip-worktree`，防止注入的简报进入智能体的提交，不影响你的 checkout。对该文件的正常修改会保持未提交状态，直到清理阶段恢复跟踪，再按下面的规则交付。未跟踪的运行时文件和技能目录仍需从智能体的提交中排除。
 
 智能体留下的未提交改动不会随 worktree 一起删除，运行中途失败时同样如此。它们去哪里，取决于智能体这次运行有没有自己提交：
 

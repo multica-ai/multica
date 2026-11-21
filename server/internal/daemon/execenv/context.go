@@ -983,6 +983,13 @@ func writeSkillFilesWithNames(skillsDir string, skills []SkillContextForEnv, man
 // non-nil, each successful write's absolute directory by skill ID, so
 // explicit invocation never has to repeat the allocator.
 func writeSkillFilesWithNamesTracked(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest, installed map[string]string) ([]string, error) {
+	return writeSkillFilesWithReservedNames(skillsDir, skills, manifest, installed)
+}
+
+// writeSkillFilesWithReservedNames also avoids names already taken in
+// reservedRoots, other skill directories the runtime discovers alongside
+// skillsDir, without writing into them.
+func writeSkillFilesWithReservedNames(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest, installed map[string]string, reservedRoots ...string) ([]string, error) {
 	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
 		return nil, fmt.Errorf("create skills dir: %w", err)
 	}
@@ -997,7 +1004,7 @@ func writeSkillFilesWithNamesTracked(skillsDir string, skills []SkillContextForE
 	preparedSkillNames := make([]string, len(skills))
 
 	for i, skill := range skills {
-		slug, dir, err := allocateCollisionFreeSkillDir(skillsDir, batchSlugs[i])
+		slug, dir, err := allocateCollisionFreeSkillDirAcrossRoots(skillsDir, batchSlugs[i], reservedRoots)
 		if err != nil {
 			return nil, fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
 		}

@@ -168,6 +168,15 @@ func TestBuildContextReceiptLoadStates(t *testing.T) {
 			name:     "no file target and not inline",
 			in:       contextReceiptInput{Provider: "no-such-runtime"},
 			delivery: ReceiptDeliveryNone, load: ReceiptLoadNotDelivered,
+		}, {
+			name:     "Claude brief outside the worktree",
+			in:       contextReceiptInput{Provider: "claude", RuntimeVersion: "2.1.281", BriefPath: "../../runtime/CLAUDE.md"},
+			delivery: ReceiptDeliveryFile, load: ReceiptLoadVerified, path: "../../runtime/CLAUDE.md",
+		},
+		{
+			name:     "Codex brief in the task CODEX_HOME above the verified version",
+			in:       contextReceiptInput{Provider: "codex", RuntimeVersion: "0.170.1", BriefPath: "$CODEX_HOME/AGENTS.md"},
+			delivery: ReceiptDeliveryFile, load: ReceiptLoadVerifiedOtherVersion, path: "$CODEX_HOME/AGENTS.md",
 		},
 	}
 	for _, tc := range cases {

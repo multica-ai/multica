@@ -162,7 +162,7 @@ A run that could not record its branch — it failed before finishing, the recor
 </Accordion>
 <Accordion title="Nothing is silently dropped" id="nothing-is-silently-lost">
 
-During a worktree run, a tracked runtime instruction file such as `CLAUDE.md` or `AGENTS.md` is marked `skip-worktree` in the task's private index. This keeps the injected brief out of the agent's commits without changing your checkout. Intentional edits to that file remain uncommitted until cleanup restores normal tracking: they follow the delivery rules below. Untracked runtime files and skill directories still need to be excluded from the agent's commits.
+With built-in Claude Code 2.1.281+ or Codex 0.169.0+, nothing Multica needs for the run is written into the worktree: runtime instructions, skills, and task metadata stay in the task's own directory, so your `CLAUDE.md` and `AGENTS.md` edits, and the rest of the checkout, commit like any other change. For other providers and older or custom CLIs, a tracked runtime instruction file such as `CLAUDE.md` or `AGENTS.md` is marked `skip-worktree` in the task's private index. This keeps the injected brief out of the agent's commits without changing your checkout. Intentional edits to that file remain uncommitted until cleanup restores normal tracking: they follow the delivery rules below. Untracked runtime files and skill directories still need to be excluded from the agent's commits.
 
 Nothing the agent leaves uncommitted is deleted with the worktree, including when the run fails partway. Where it goes depends on whether the agent committed during the run:
 

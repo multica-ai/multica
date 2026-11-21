@@ -34,6 +34,15 @@ type ExecOptions struct {
 	// PiSkillPaths contains only the SKILL.md files written for this task by
 	// the daemon. Pi loads them explicitly without trusting other project files.
 	PiSkillPaths []string
+	// ClaudeRuntimeDir supplies the task's CLAUDE.md and skills from outside
+	// the checkout (local worktree runs only). It is passed as --add-dir.
+	ClaudeRuntimeDir string
+	// CodexDeveloperInstructions is fixed text Codex receives as developer
+	// instructions on thread/start and thread/resume, after the user's own
+	// developer_instructions (local worktree runs only); a resumed thread
+	// started without it gets it once as an injected developer message. It
+	// must not vary between runs: Codex keeps a resumed thread's original value.
+	CodexDeveloperInstructions string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every
 	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
