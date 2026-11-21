@@ -225,6 +225,25 @@ multica issue wakeup runs MUL-123 <wakeup-id>
 
 在終端裡以成員身份建立時需要 `--agent-id`；AI 代理在自己的執行中建立時預設喚醒它自己。
 
+## 聊天喚醒 [#chat-wakeups]
+
+`chat wakeup` 僅供聊天執行中的 AI 代理使用，目標就是目前對話。不接受工作階段 ID，也不能從一般成員終端或任務執行中使用。使用者入口見[稍後跟進](/chat#follow-up-later)。
+
+```bash
+multica chat wakeup create --title "Review ready" \
+  --until-issue MUL-123 --state in_review --expires-in 48h \
+  --instruction "Summarize the result in this conversation"
+multica chat wakeup create --title "Check back in two hours" \
+  --after 2h --instruction "Remind the user to review the result"
+multica chat wakeup list
+```
+
+從單個 `--until-*` 條件、`--at` / `--after`、`--every` 中選一種。建立和更新都需要 `--title` 與 `--instruction`（或 `--instruction-file`）。`update` 會取代設定，並從更新時重新計算相對截止時間，但不能在條件、提醒和定期檢查之間切換。條件等待和檢查預設 24 小時，可用 `--expires-in` 或 `--expires-at` 設定，最長 7 天；單次提醒最遠 30 天，不接受到期參數。檢查間隔至少 10 分鐘，截止時間內最多容納 100 次檢查：`--every 10m` 搭配預設 24 小時會達到 144 次而被拒絕，需要加大間隔或提前截止時間，例如 `--expires-in 16h`。
+
+條件包括 `--until-issue` 搭配 `--state` 或 `--status`、`--until-children-done` 搭配可選的 `--stage`、`--until-pr`、`--until-run`，以及 `--until-reply` 搭配可選的 `--from <user-id>`。PR 條件使用目前工作區已鏡像的 GitHub PR，格式為 `owner/repo#N[:merged|closed|checks]`。`checks` 等待目前 head 的檢查結束，成功或失敗都算結束。只有伺服器能從 GitHub 讀取 CI 狀態時才能建立 `checks` 條件；自託管伺服器需要設定 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY`（見 [GitHub 整合](/github-integration)）。建立時已經結束的檢查結果會作為基準，不會立即喚醒 AI 代理。
+
+用 `list`、`get <id>` 查看記錄，`cancel <id>` 取消喚醒。定期檢查執行中，`checkin <id> --note "..."` 記錄進展但不傳送回覆；目標達成後用 `finish <id>` 結束檢查。到期的最後一次執行必須回報，不能靜默簽到。
+
 ## AI 代理和 skill
 
 ```bash
@@ -264,7 +283,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-env` 系列只在 `agent create` 中可用。之後修改用 `agent env set`，它整體替換原有變數，值寫成 `****` 的鍵保留原值。
 - `agent update --mcp-config null` 清除 MCP 配置。
 - `--custom-args` 是 JSON 陣列，排在啟動引數的最後。選模型用 `--model`，部分工具會拒絕出現在自定義引數裡的 `--model`。
-- 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。
+- 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。在 Multica Cloud 上，Business 包含成員名單。Free 和 Pro 工作區開啟強制後，`agent create` 或 `agent update` 新建名單或往名單裡加人會以 `feature_locked` 拒絕；移除成員、原樣儲存名單、改成 `private` 或 `--public-to-workspace` 仍然可以。
 
 ### AI 代理執行記錄
 
@@ -295,7 +314,7 @@ multica runtime profile create --display-name "內部 Claude 封裝" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` 為當前 profile 登記開機自啟，平臺差異見[開機自啟](/daemon-runtimes#autostart)。`runtime usage` 預設統計 90 天，`--days` 最多 365。`runtime update` 讓那臺電腦上的守護程序把 CLI 更新到指定版本，`--wait` 等待更新結束；更新失敗、更新逾時或等待本身逾時時，命令會以非零狀態退出。`runtime profile create` 用 `--runtime-type` 指定相容的工具（舊的 `--protocol-family` 仍可用）；固定引數目前只能在網頁端填寫。
+`daemon autostart` 為當前 profile 登記開機自啟，平臺差異見[開機自啟](/daemon-runtimes#autostart)。`runtime usage` 預設統計 90 天，`--days` 最多 365。`runtime update` 讓那臺電腦上的守護程序把 CLI 更新到指定版本。與在**執行時**頁面點選**更新**（忙碌時會[排隊等待閒置](/daemon-runtimes#updating-cli)）不同，這項請求不會排隊：如果機器正在執行任務，這次更新會直接失敗，而不會等待。`--wait` 等待更新結束；更新失敗、更新逾時或等待本身逾時時，命令會以非零狀態退出。`runtime profile create` 用 `--runtime-type` 指定相容的工具（舊的 `--protocol-family` 仍可用）；固定引數目前只能在網頁端填寫。 `runtime profile create` 預設綁定目前機器；使用 `--daemon-id <id>` 可以選擇另一臺已登記的本機。 舊配置可以透過 `multica runtime profile update <profile-id> --daemon-id <id>` 綁定機器。
 
 刪除仍繫結活躍 AI 代理的執行時時，命令預設拒絕。`multica runtime delete <id> --cascade` 會解綁這些 AI 代理、保留其配置與歷史記錄，並取消它們的活動執行。
 
@@ -343,6 +362,20 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 ]
 ```
 
+每行還可以包含 `conditions`，使用與介面相同的本文欄位規則。例如，下面的規則只接收目標分支為 `main` 的非草稿 PR：
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+每條規則最多 20 個條件，欄位路徑最多 256 個字元，`in` 候選值清單最多 100 項。建立或更新觸發器時，超出上限的條件會回傳 HTTP 400。
+
 這個範例接收 PR 評審提交和所有 push 事件。省略 `actions` 或使用空的 actions 陣列，表示接收該事件的所有 action。
 
 ```bash
@@ -368,7 +401,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | 建立、更新、分配和搜尋任務；管理評論、訂閱、標籤、屬性、喚醒、時間線與執行記錄 |
 | `project` | 管理專案、專案資源和專案使用的工作流 |
-| `inbox` | 讀取自己的通知，不改變已讀狀態 |
+| `inbox` | 讀取和管理自己的通知：列出、標為已讀、封存、稍後提醒 |
 | `workflow` | 管理工作流：狀態以及每個狀態交給誰處理 |
 | `issue-status` | 管理工作區狀態目錄：狀態及其顏色和圖示 |
 | `label`、`property` | 管理工作區標籤和自定義屬性 |
@@ -485,11 +518,11 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `env get/set <agent-id>` | 讀寫自定義環境變數（AI 代理所有者或工作區 owner/admin；每次讀取都會記錄） | `set`：`--custom-env` / `--custom-env-file` / `--custom-env-stdin`，整體替換，值為 `****` 的鍵保留原值 |
 | | `skills list/set/add <agent-id>` | 管理繫結的 skill | `--skill-ids`（`set` 全量替換，`add` 增量新增） |
 | | `mcp list/add/enable/disable/remove <agent-id>` | 給該 agent 分配工作區 MCP 服務 | server id 從 `workspace mcp list` 獲取。庫裡的條目在這裡新增之前不會生效；`disable` 只停止下發，保留分配 |
-| `autopilot` | `list/get/create/update/delete` | 管理自動化 | `create`：`--title`、`--agent`、`--mode`（均必填）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（可重複） |
+| `autopilot` | `list/get/create/update/delete` | 管理自動化 | `create`：`--title`、`--mode`（均必填）、`--agent` / `--squad` / `--squad-id`（三選一，必填）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（可重複） |
 | | `trigger <id>` | 手動觸發一次 | |
 | | `runs <id>` | 檢視執行歷史 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 管理定時和 webhook 觸發器 | `trigger-add`：`--kind`（`schedule` 或 `webhook`）、`--cron`、`--timezone`（預設 UTC）、`--label` |
-| `workspace` | `list/get/create/update/switch` | 管理工作區；`switch` 設定當前 profile 的預設工作區 | `create`：`--name`、`--slug`（均必填）、`--issue-prefix`、`--description`、`--context` / `--context-stdin`；`update` 可改除 slug 外的同類欄位 |
+| `workspace` | `list/get/create/update/switch` | 管理工作區；`switch` 設定當前 profile 的預設工作區；AI 代理執行時 `list` 只回傳所在工作區 | `create`：`--name`、`--slug`（均必填）、`--issue-prefix`、`--description`、`--context` / `--context-stdin`；`update` 可改除 slug 外的同類欄位 |
 | | `mcp list/add/update/remove` | 管理工作區的 MCP 服務庫 | 寫操作需要 owner/admin。這裡新增的服務不會分配給任何 agent——用 `multica agent mcp add` 分配給某個 agent。`list` 只列出名稱與 transport；儲存的條目是只寫的，任何角色都讀不回。`--server-config-file` / `--server-config-stdin` 避免 token 進入 shell 歷史 |
 | | `member list/invite <email>` | 檢視成員、發出邀請 | `invite`：`--role`（member 或 admin，預設 member） |
 | `repo` | `list/add/remove/checkout` | 管理工作區倉庫並檢出到本機 | `--url`（可重複）；`checkout`：`--ref` |
@@ -502,7 +535,15 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `member list/add/set-role/remove` | 管理小隊成員 | |
 | | `activity <issue-id> <outcome>` | 記錄隊長評價 | |
 | `chat` | `history`、`thread [id]` | 讀取 AI 代理當前正在處理的外部聊天會話 | `--limit`、`--before` |
-| `inbox` | `list` | [讀取目前通知](/inbox)，不標為已讀 | `--project`、`--type`、`--output`（`table` 或 `json`）；篩選在本機套用 |
+| | `wakeup create/list/get/update/cancel/finish/checkin` | 管理目前聊天執行的跟進；見[聊天喚醒](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
+| `inbox` | `list` | [列出通知](/inbox)，不標為已讀；`--archived` 或 `--snoozed` 改為列出封存或稍後提醒的內容 | `--unread`、`--issue`、`--since`、`--project`、`--type`、`--output`（`table` 或 `json`）；`--archived` 讀取全部分頁 |
+| | `count` | 目前工作區及你所在各工作區的未讀數；AI 代理執行時只回傳所在工作區 | `--output` |
+| | `read [<id>...]` | 將通知標為已讀（作用於所在任務的全部通知）；或一個任務上的全部通知，或全部 | `--issue`、`--all`（需要 `--yes`） |
+| | `unread <id>...` | 將通知標為未讀 | |
+| | `archive [<id>...]` | 封存通知（作用於所在任務的全部通知）；或批次封存 | `--all`、`--read`、`--completed`（皆需 `--yes`） |
+| | `unarchive <id>...` | 還原已封存的通知 | |
+| | `snooze <id>...` | 讓通知所在任務暫時離開收件箱，直到指定時間 | `--until`（RFC 3339、`30m`、`3h`、`1d`、`1w`、`tomorrow`） |
+| | `unsnooze <id>...` | 讓稍後提醒的任務立即回到收件箱 | |
 
 ### Runtime
 

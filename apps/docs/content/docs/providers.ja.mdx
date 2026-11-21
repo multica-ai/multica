@@ -53,6 +53,8 @@ Multica は、普段使っている AI コーディングツールの代わり�
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+Claude Code では、デーモンの環境変数 `CLAUDE_CONFIG_DIR` に絶対パスを指定すると、Multica はその場所からユーザーとプラグインのスキルを一覧表示・インポートします。起動ラッパー内だけで指定したパスはスキャンに反映されません。
+
 Amp のモデル欄では、基盤モデルの ID ではなく `high` などの Amp の**モード**を指定します。空欄なら Amp の既定値を使います。
 
 Amp ではデーモンまたはエージェントの環境に `AMP_API_KEY` も必要で、保存済みの対話型ログインだけでは実行できません。
@@ -74,6 +76,8 @@ Devin は `WINDSURF_API_KEY` があれば使用し、なければ `devin auth lo
 モデルを選択しない場合、Multica はそのツールのデフォルト設定を使用します。一覧が空の場合は、ランタイムがオンラインでツールにログイン済みであることを確認してから、モデル一覧を更新してください。
 
 QwenPaw、MiniMax Code、ZeroClaw は例外です。Multica 側で選んだモデルを受け付けないため、選択欄は操作できず「ランタイムで管理」と表示されます。モデルは各ツール側の設定で選んでください。これらのツールでモデル一覧が空なのは正常で、ランタイムがオフラインという意味ではありません。
+
+Antigravity の推論バリアントが `agy models` にある場合、それぞれが別のモデルとして表示されます。モデル選択欄で、接尾辞を含む正確なバリアントを選んでください。Multica には Antigravity 専用の 推論設定はありません。カスタム引数で `--effort` を渡す場合、選択したモデルと併用できるかどうかは Antigravity が判定します。
 
 DeepSeek Harness のモデルカタログはランタイム自身が提供します（`dsh --profile multica --list-models`）。モデル ID は `provider/model` 形式（例: `deepseek-official/deepseek-chat`）なので、一覧から完全な ID を選択してください。
 

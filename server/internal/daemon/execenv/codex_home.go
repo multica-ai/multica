@@ -272,6 +272,16 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}
+	// Expose the desktop app's bundled plugin marketplaces (openai-bundled:
+	// browser, chrome, ...) inside the task home. The CLI resolves bundled
+	// marketplace sources against the ACTIVE CODEX_HOME and silently drops
+	// ones outside it, so without this the task loses the marketplace whose
+	// browser plugin owns the Stop/Interrupt hooks that tell node_repl
+	// "turn_ended" — no notification, no tab cleanup, no session release.
+	// See codex_bundled_marketplaces.go.
+	if err := exposeSharedCodexBundledMarketplaces(codexHome, sharedHome); err != nil {
+		logger.Warn("execenv: codex-home bundled marketplaces exposure failed", "error", err)
+	}
 
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
 	// need to fall back to danger-full-access because of openai/codex#10390,

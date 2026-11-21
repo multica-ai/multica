@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
@@ -342,6 +343,9 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip.
+	req.Title = sanitizeNullBytes(req.Title)
+	req.Description = sanitizeNullBytesPtr(req.Description)
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
@@ -490,6 +494,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		private = true
 		privateMemberIDs = ids
 	}
+	var admission featureAdmission
+	if private {
+		if admission, ok = h.requireFeatureAddition(w, r, wsUUID, entitlement.FeaturePrivateProjects, privateProjectOpCreate); !ok {
+			return
+		}
+	}
+	// A new project shared with a guest is a guest addition (MUL-9420).
+	guestAdmission, ok := h.requireGuestProjectAddition(w, r, wsUUID, pgtype.UUID{}, privateMemberIDs)
+	if !ok {
+		return
+	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	creatorID, ok := parseUUIDOrBadRequest(w, actorID, "creator_id")
@@ -598,6 +613,8 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit project create")
 		return
 	}
+	admission.admitted(r.Context())
+	guestAdmission.admitted(r.Context())
 
 	resourceResp := make([]ProjectResourceResponse, len(resourceRows))
 	for i, row := range resourceRows {
@@ -659,6 +676,8 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Title = sanitizeNullBytesPtr(req.Title)
+	req.Description = sanitizeNullBytesPtr(req.Description)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
@@ -754,10 +773,24 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var admission featureAdmission
+	if access.privateAddition != "" {
+		if admission, ok = h.requireFeatureAddition(w, r, prevProject.WorkspaceID, entitlement.FeaturePrivateProjects, access.privateAddition); !ok {
+			return
+		}
+	}
+	// Adding a guest to the member list (or naming one lead of a private
+	// project) shares the project with it (MUL-9420).
+	guestAdmission, ok := h.requireGuestProjectAddition(w, r, prevProject.WorkspaceID, prevProject.ID, access.addIDs)
+	if !ok {
+		return
+	}
 	project, ok := h.writeProjectUpdate(w, r, params, access, userID)
 	if !ok {
 		return
 	}
+	admission.admitted(r.Context())
+	guestAdmission.admitted(r.Context())
 	resp := projectToResponse(project)
 	h.fillProjectIssueStats(r.Context(), &resp, project)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)

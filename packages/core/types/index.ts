@@ -169,7 +169,6 @@ export {
 } from "./quick-action";
 export type {
   TimelineEntry,
-  AssigneeFrequencyEntry,
 } from "./activity";
 export type { IssueSubscriber, IssueSubscriberDelivery } from "./subscriber";
 export type * from "./events";
@@ -203,6 +202,9 @@ export type {
   CancelTaskResponse,
   ChatDraftRestore,
   ChatDraftRestoresResponse,
+  ChatWakeup,
+  ChatWakeupKind,
+  ChatWakeupStatus,
 } from "./chat";
 export type { StorageAdapter } from "./storage";
 export type {
@@ -351,6 +353,9 @@ export type {
   AutopilotRunSource,
   AutopilotQuotaUsage,
   WebhookEventFilter,
+  WebhookPayloadCondition,
+  WebhookPayloadConditionFailure,
+  WebhookPayloadConditionValue,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
   CreateAutopilotTriggerRequest,
@@ -400,26 +405,51 @@ export type {
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
   WorkspaceSubscriptionInterval,
+  WorkspaceSubscriptionPaidPlan,
   WorkspaceEntitlementLimitMode,
   WorkspaceEntitlementLimit,
   WorkspaceSubscriptionEntitlements,
   WorkspaceSubscriptionSummary,
-  IssueLimitUsage,
   WorkspaceSeatCapacity,
   WorkspaceSeatPurchaseSummary,
   WorkspaceSubscriptionPrice,
+  WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
+  WorkspacePlanLimitPlan,
+  WorkspacePlanLimit,
+  WorkspacePlanLimits,
+  WorkspaceAutopilotAddonSummary,
+  WorkspaceAutopilotAddonPrice,
+  CreateWorkspaceAutopilotAddonCheckoutRequest,
+  CreateWorkspaceAutopilotAddonCheckoutResponse,
+  WorkspaceAutopilotAddonCheckoutStatus,
+  WorkspaceAutopilotAddonCheckout,
+  WorkspacePlanChangeHold,
+  WorkspaceTrial,
+  WorkspaceTrialState,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   PreviewWorkspaceSeatPurchaseRequest,
   WorkspaceSeatPurchasePreview,
   PurchaseWorkspaceSeatsRequest,
   PurchaseWorkspaceSeatsResponse,
+  PreviewWorkspacePlanChangeRequest,
+  WorkspacePlanChangePreview,
+  ChangeWorkspacePlanRequest,
+  ChangeWorkspacePlanResponse,
   WorkspaceSubscriptionSeatReconcileResult,
   CreateWorkspaceSubscriptionPortalResponse,
+  PaidFeature,
+  WorkspaceFeatureState,
+  WorkspaceFeatures,
+  WorkspaceFeatureLimits,
+  MemberLimit,
+  StorageUsage,
 } from "./billing";
 export type { IssueWakeup, IssueWakeupInput, SystemWakeup, WorkspaceSystemWakeup, WakeupPreview, IssueWakeupSummaryRow, WakeupCondition, WakeupPausedReason, WakeupRun, PausedWakeup, WakeupSource } from "./issue-wakeup";
 
 export type { WorkspaceWakeup, WorkspaceWakeupPage, WorkspaceWakeupFilters, WakeupScope } from "./issue-wakeup";
 
 export type { WeixinInstallation, ListWeixinInstallationsResponse, WeixinLogin } from "./weixin";
+
+export * from "./doc";

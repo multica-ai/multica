@@ -58,6 +58,7 @@ type GitHubInstallationResponse struct {
 	AccountType      string  `json:"account_type"`
 	AccountAvatarURL *string `json:"account_avatar_url"`
 	CreatedAt        string  `json:"created_at"`
+	ConnectedBy      string  `json:"connected_by,omitempty"`
 }
 
 type GitHubPullRequestResponse struct {
@@ -738,14 +739,15 @@ func (h *Handler) ListGitHubInstallations(w http.ResponseWriter, r *http.Request
 	member, _ := middleware.MemberFromContext(r.Context())
 	canManage := roleAllowed(member.Role, "owner", "admin")
 
-	rows, err := h.Queries.ListGitHubInstallationsByWorkspace(r.Context(), wsUUID)
+	rows, err := h.Queries.ListGitHubInstallationsWithConnectedBy(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list installations")
 		return
 	}
 	out := make([]GitHubInstallationResponse, 0, len(rows))
 	for _, row := range rows {
-		resp := githubInstallationToResponse(row)
+		resp := githubInstallationToResponse(row.GithubInstallation)
+		resp.ConnectedBy = row.ConnectedBy
 		if !canManage {
 			resp.InstallationID = nil
 		}

@@ -107,6 +107,13 @@ const (
 	// synchronous restore — a client without this capability would silently
 	// drop the user's prompt, and keeps the legacy synchronous restore instead.
 	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
+
+	// AppCapabilityWorkspaceGuestsV1 is advertised (X-Client-Capabilities) by
+	// clients that can render the guest member role. Workspace member and
+	// invitation lists leave guest rows out for any other caller: clients
+	// released before guests index their role tables by role and crash on an
+	// unknown one. Authorization never depends on it.
+	AppCapabilityWorkspaceGuestsV1 = "workspace-guests-v1"
 )
 
 // ChatQuickAction is a server-validated follow-up attached to one assistant
@@ -308,6 +315,10 @@ const (
 	// the opening self-describes: chat renders the starter cards under this
 	// kind instead of quick-action chips (MUL-5765).
 	ChatMessageKindOnboardingOpening = "onboarding_opening"
+	// ChatMessageKindWakeup is the server-authored input of a turn a chat
+	// wakeup started. Its content is for the runtime; clients render a
+	// divider naming the wakeup (wakeup_id) instead of the text.
+	ChatMessageKindWakeup = "wakeup"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat
@@ -426,6 +437,16 @@ type ChatSessionDeletedPayload struct {
 // chat session changes (today: title via inline rename). Other tabs/devices
 // patch the session row in their cached list so the dropdown stays in sync
 // without a full refetch.
+// ChatWakeupChangedPayload says one chat wakeup was created, changed, fired or
+// ended. Receivers refetch the session's wakeups; TaskID is set when the
+// change started a turn, so they can also pick up its hidden input row.
+type ChatWakeupChangedPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	WakeupID      string `json:"wakeup_id"`
+	Status        string `json:"status"`
+	TaskID        string `json:"task_id,omitempty"`
+}
+
 type ChatSessionUpdatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	Title         string `json:"title"`
@@ -448,6 +469,9 @@ type ChatSessionUpdatedPayload struct {
 type DaemonHeartbeatRequestPayload struct {
 	RuntimeID           string `json:"runtime_id"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	// SupportsQueuedUpdate: the daemon can hold a deferrable update while
+	// busy and install it once idle (see DaemonHeartbeatPendingUpdate).
+	SupportsQueuedUpdate bool `json:"supports_queued_update,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
@@ -487,6 +511,12 @@ const HeartbeatStatusRuntimeGone = "runtime_gone"
 type DaemonHeartbeatPendingUpdate struct {
 	ID            string `json:"id"`
 	TargetVersion string `json:"target_version"`
+	// Deferrable: a busy daemon should hold this update, report "scheduled",
+	// and install it once idle — only after the server accepts its "running"
+	// report, which it refuses once the update was cancelled or expired. The
+	// offer repeats on every heartbeat until then. Without it, the update
+	// is running from delivery and a busy daemon fails it.
+	Deferrable bool `json:"deferrable,omitempty"`
 }
 
 // DaemonHeartbeatPendingModelList describes a request for the daemon to

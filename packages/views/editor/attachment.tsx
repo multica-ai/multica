@@ -35,7 +35,8 @@ import {
   Maximize2,
   Trash2,
 } from "@multica/ui/icons";
-import { useCallback, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { autoUpdate, computePosition, flip, hide, offset, shift } from "@floating-ui/dom";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -536,9 +537,79 @@ function ImageAttachmentView({
   className,
 }: ImageAttachmentViewProps) {
   const { t } = useT("editor");
-  const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
   const copyLink = useCopyAttachmentLink();
   const handleCopyLink = () => copyLink(linkUrl);
+  const figureRef = useRef<HTMLSpanElement>(null);
+  const toolbarRef = useRef<HTMLSpanElement>(null);
+  const [toolbarActivation, setToolbarActivation] = useState<"hover-or-focus" | "touch" | null>(null);
+  const showToolbar = () => setToolbarActivation((activation) => activation ?? "hover-or-focus");
+  const hideToolbarIfIdle = (event?: "pointerleave" | "blur") => {
+    const figure = figureRef.current;
+    if (!figure) return;
+    const hovered = event !== "pointerleave" && figure.matches(":hover");
+    const keyboardFocused = event !== "blur" && figure.querySelector(":focus-visible") !== null;
+    setToolbarActivation((activation) => {
+      // A touch tap emits pointerleave as soon as the finger lifts.
+      if (activation === "touch") return event === "blur" ? null : activation;
+      return hovered || keyboardFocused ? activation : null;
+    });
+  };
+  // Chromium can omit pointerleave when the hovered download button becomes disabled.
+  const { downloading, handleDownload } = useAttachmentDownloadState(() =>
+    onDownload()?.finally(hideToolbarIfIdle),
+  );
+  const hasToolbar = !uploading && !!src;
+  const toolbarOpen = hasToolbar && (toolbarActivation !== null || downloading);
+
+  useEffect(() => {
+    const figure = figureRef.current;
+    if (toolbarActivation !== "touch" || !figure) return;
+
+    const onOutsidePointerDown = (event: PointerEvent) => {
+      if (!event.composedPath().includes(figure)) {
+        setToolbarActivation((activation) => activation === "touch" ? null : activation);
+      }
+    };
+    const ownerDocument = figure.ownerDocument;
+    ownerDocument.addEventListener("pointerdown", onOutsidePointerDown, true);
+    return () => ownerDocument.removeEventListener("pointerdown", onOutsidePointerDown, true);
+  }, [toolbarActivation]);
+
+  useEffect(() => {
+    const figure = figureRef.current;
+    const toolbar = toolbarRef.current;
+    if (!toolbarOpen || !figure || !toolbar) return;
+
+    const boundary = { padding: 4, altBoundary: true };
+    let active = true;
+    toolbar.dataset.placement = "pending";
+    const cleanup = autoUpdate(figure, toolbar, () => {
+      void computePosition(figure, toolbar, {
+        strategy: "fixed",
+        placement: "top",
+        middleware: [
+          offset(4),
+          flip({ ...boundary, crossAxis: false }),
+          shift(({ rects }) => ({
+            ...boundary,
+            // After trying both sides, a tall figure can spare room for reachable controls.
+            crossAxis: rects.reference.height >= rects.floating.height * 2,
+          })),
+          hide(),
+        ],
+      }).then(({ x, y, placement, middlewareData }) => {
+        if (!active) return;
+        toolbar.style.setProperty("--image-toolbar-x", `${x}px`);
+        toolbar.style.setProperty("--image-toolbar-y", `${y}px`);
+        toolbar.dataset.placement = middlewareData.hide?.referenceHidden ? "pending" : placement;
+      });
+    });
+    return () => {
+      active = false;
+      cleanup();
+      delete toolbar.dataset.placement;
+    };
+  }, [toolbarOpen]);
 
   // Click on figure opens the preview only in non-editor / non-uploading
   // surfaces — inside the editor we let ProseMirror own the click for
@@ -572,6 +643,7 @@ function ImageAttachmentView({
   return (
     <span ref={scopeRef} className="image-node">
       <span
+        ref={figureRef}
         className={cn(
           "image-figure",
           selected && editable && "image-selected",
@@ -583,6 +655,17 @@ function ImageAttachmentView({
         style={sizeStyle}
         contentEditable={false}
         onClick={clickable ? onView : undefined}
+        onPointerEnter={(event) => {
+          if (!editable || event.pointerType !== "touch") showToolbar();
+        }}
+        onPointerUp={(event) => {
+          if (editable && hasToolbar && event.pointerType === "touch") setToolbarActivation("touch");
+        }}
+        onPointerLeave={() => hideToolbarIfIdle("pointerleave")}
+        onFocus={showToolbar}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) hideToolbarIfIdle("blur");
+        }}
       >
         <img
           ref={imgRef}
@@ -598,10 +681,10 @@ function ImageAttachmentView({
           onLoad={() => setLoadedSrc(src)}
           onError={() => setLoadedSrc(src)}
         />
-        {!uploading && src && (
+        {hasToolbar && (
           <span
+            ref={toolbarRef}
             className="image-toolbar"
-            style={downloading ? { opacity: 1 } : undefined}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >

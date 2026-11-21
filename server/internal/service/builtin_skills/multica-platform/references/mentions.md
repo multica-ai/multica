@@ -44,14 +44,20 @@ blockquotes, or `<details>`. A fenced `diff` of agent instructions cannot invoke
 its mention targets. Copy the mention syntax out of code and paste it into
 ordinary prose to trigger it. Prose mentions in blockquotes still count.
 
-One `mention://` form deliberately sits OUTSIDE this parser:
+Two `mention://` forms deliberately sit OUTSIDE this parser. The first is
 `[Label](mention://project/<uuid>)`. `project` is absent from the type group
 above, so the backend never parses it and it can enqueue nothing — it is a
 render-only link every client makes navigable (a chip on web and desktop, an
 ordinary link that opens the project on tap on mobile). That is the whole point:
 a project reference should never be able to start a run. Use it freely to point
-at a project; everything else in this document is about the four types (plus
-`all`) the parser does recognize.
+at a project.
+
+The second is `[Doc Title](mention://doc/<doc-id>)`:
+`doc` is not in the type group either, so a doc link is render-only and
+enqueues nothing. Read the doc it points at with `multica doc get <doc-id>`.
+
+Everything else in this document is about the four types (plus `all`) the
+parser does recognize.
 
 ## Step 1 — look up the UUID
 
@@ -114,18 +120,25 @@ is a no-op; a malformed UUID is rejected at the request boundary.
 
 It notifies every human member of the workspace except the author, not just
 people on this issue; notification preferences and private-project access
-still apply. It does NOT make any specific agent run. And it is special at
-trigger time: a comment that carries an `@all` mention is treated as a
-broadcast that SUPPRESSES the issue assignee's automatic on-comment trigger
-(and the other implicit routing fallbacks — thread parent / conversation
-owner). Use `@all` to announce, not to request work from the assignee.
+still apply. The mention itself does NOT make any specific agent run.
 
-`@all` only suppresses those IMPLICIT routes. An EXPLICIT `@agent` / `@squad`
+For MEMBER-authored comments, `@all` (or a member mention) SUPPRESSES the issue
+assignee's automatic on-comment trigger and the other implicit routing
+fallbacks — thread parent / conversation owner. Members can use `@all` to
+announce without requesting work from the assignee.
+
+For AGENT-authored comments, member mentions and `@all` do NOT suppress the
+squad leader fallback. A worker's result on a squad-assigned issue still
+returns to the assigned leader; in a guest squad's delegation thread, it still
+returns to the guest leader. People receive notifications as usual, and the
+existing leader self-trigger protection and pending-run dedup still apply.
+
+For any author, an EXPLICIT `@agent` / `@squad`
 mention in the same comment still fires normally: a comment reading
 `[@all](mention://all/all) heads up — [@Preflight](mention://agent/<uuid>)
 please take this` enqueues Preflight and nobody else. The explicit-mention
-branch is evaluated BEFORE the `@all` short-circuit, so explicit mentions win
-over the broadcast.
+branch is evaluated BEFORE the member-only suppression, so explicit mentions
+win and there is no additional squad leader fallback.
 
 ## What does NOT happen
 
@@ -294,7 +307,9 @@ Correct:
      → a real `user_id` parses; the link renders and resolves to Alice.
 
 @all broadcast: `[@all](mention://all/all) heads up` — notifies human workspace
-members, runs no specific agent, and suppresses the assignee auto-trigger.
+members and runs no specific agent by itself. It suppresses the assignee
+auto-trigger only for member authors; worker-agent comments still return to
+the assigned or guest squad leader as described above.
 
 Using the wrong `type` for a real UUID still parses — it just resolves to the
 wrong entity, or to nothing. That is why the type must match the id source.

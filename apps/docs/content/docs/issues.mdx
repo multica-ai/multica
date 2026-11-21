@@ -140,6 +140,8 @@ An issue belongs to at most one [project](/projects); the project provides share
 
 Larger work can be split into sub-issues: the parent issue keeps the overall goal while sub-issues progress independently. Parent and child statuses do not affect each other.
 
+Open a direct child from **Sub-issues** in the issue's right sidebar. With 10 or fewer children, their order matches the inline list. With more, it initially shows 10, putting unfinished children first and keeping stage order within each group. **Show N more** expands all children in the sidebar; **Collapse** returns to the first 10. Both keep your reading position and leave the narrow-screen sidebar open. Progress counts all children. **Customize sidebar** lets you hide or reorder this section.
+
 Creating a sub-issue from a parent prefills its project and, when set, its assignee. In manual create, **Copy parent fields** lets you choose priority, labels, dates, or individual custom properties to copy. Only the selected values replace your form values, once; later parent changes do not sync. The child keeps its own description and status. Labels, start date, and custom properties stay in the manual draft when switching to Create with agent.
 
 Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. When every sub-issue in the earliest unfinished stage reaches `done` or `cancelled`, the parent issue receives a "sub-issues completed" notification; when the parent's assignee is an agent, it wakes up and decides whether to start the next stage. Sub-issues without a stage count as one batch and notify once when they all finish. The system triggers this wakeup; see [Issue wakeups](/issue-wakeups) for its rules and the other kinds of wakeup.
@@ -157,7 +159,7 @@ Save a combination of filters and display settings you use often as a view: clic
 | Visibility | Who sees it | Who can edit and delete it |
 |---|---|---|
 | **Only visible to me** | Only you | You |
-| **Visible to workspace members** | Every workspace member | You, plus workspace `owner` and `admin` |
+| **Visible to workspace members** | Members with the `owner`, `admin`, or `member` role | You, plus workspace `owner` and `admin` |
 
 The display settings saved in a view are its **Default display**: members see the view that way the first time they open it, then adjust it for themselves without affecting anyone else. A view lives on the page it was created on: one created in a project belongs to that project, and views created on the **My Issues** page are always private.
 

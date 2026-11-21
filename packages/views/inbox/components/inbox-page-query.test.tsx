@@ -21,8 +21,8 @@ vi.mock("@multica/core/paths", () => ({
     issueDetail: (id: string) => `/acme/issues/${id}`,
   }),
 }));
-vi.mock("../../modals/use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: () => vi.fn(),
+vi.mock("../../modals/use-limit-recovery-prompt", () => ({
+  useLimitRecoveryPrompt: () => vi.fn(),
 }));
 
 const detailUnmounted = vi.hoisted(() => vi.fn());

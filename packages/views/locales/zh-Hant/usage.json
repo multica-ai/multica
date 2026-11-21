@@ -10,6 +10,16 @@
     "all_projects": "全部專案",
     "period_label": "時間範圍"
   },
+  "history_limit": {
+    "note": "目前方案可以查看最近 {{days}} 天。升級後可以查看更早的資料，資料一直保留。",
+    "fell_back": "目前方案只能查看最近 {{days}} 天。",
+    "view_plans": "查看套餐",
+    "locked": "目前方案不包含",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
   "kpi": {
     "cost_label": "費用 · {{days}}天",
     "tokens_label": "Token · {{days}}天",

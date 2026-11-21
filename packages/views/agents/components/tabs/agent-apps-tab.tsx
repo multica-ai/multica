@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Radio } from "@base-ui/react/radio";
 import { RadioGroup } from "@base-ui/react/radio-group";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ import {
   useRestoreAppAccess,
 } from "@multica/core/connected-apps";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { refreshFeaturesOnLockedError, usePaidFeatureAccess } from "@multica/core/billing";
 import { cn } from "@multica/ui/lib/utils";
 import type {
   Agent,
@@ -26,6 +27,7 @@ import type {
 import { ComposioToolkitLogo } from "../../../common/composio-toolkit-logo";
 import { SavedAppRestriction } from "../../../common/saved-app-restriction";
 import { AppLink } from "../../../navigation";
+import { PaidFeatureNotice, usePaidFeatureErrorMessage } from "../../../billing";
 import { useT } from "../../../i18n";
 import { ObjectSectionEmpty } from "../../../layout/object-page";
 
@@ -43,6 +45,8 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   const catalog = useQuery(appCatalogOptions(wsId));
   const update = useUpdateAgentApps(agent.id);
   const restore = useRestoreAppAccess();
+  const qc = useQueryClient();
+  const paidFeatureError = usePaidFeatureErrorMessage();
 
   const canManageTeam = overview.data?.can_manage ?? false;
   const apps = useMemo(() => appsQuery.data ?? [], [appsQuery.data]);
@@ -57,6 +61,13 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
     for (const c of overview.data?.personal ?? []) if (c.status === "active") set.add(`personal:${c.toolkit_slug}`);
     return set;
   }, [overview.data]);
+  // Without the paid feature the agent keeps its team-account apps: they can
+  // be removed, switched to the triggerer's account or lowered to read, but
+  // no app can move onto the team account and none can be raised from read.
+  const teamAccess = usePaidFeatureAccess(wsId, "team_app_accounts", {
+    hasExistingConfig: apps.some((a) => a.account_scope === "team"),
+  });
+  const canAddTeam = teamAccess.canAdd;
   const visibleSlugs = useMemo(() => {
     const slugs = new Set(apps.map((app) => app.toolkit_slug));
     for (const scope of SCOPES) {
@@ -78,7 +89,12 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
           level: a.level,
         })),
       },
-      { onError: (e) => toast.error(e instanceof Error && e.message ? e.message : t(($) => $.tab_body.connected_apps.save_failed_toast)) },
+      {
+        onError: (e) => {
+          refreshFeaturesOnLockedError(qc, wsId, e);
+          toast.error(paidFeatureError(e, e instanceof Error && e.message ? e.message : t(($) => $.tab_body.connected_apps.save_failed_toast)));
+        },
+      },
     );
   };
   const patch = (slug: string, change: Partial<AgentApp>) =>
@@ -110,6 +126,11 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
           ? () => restore.mutateAsync({ catalog: true }) : undefined} />
       )}
 
+      {canManageTeam && (teamAccess.state === "read_only" || teamAccess.state === "unavailable") &&
+        (overview.data?.team ?? []).some((c) => c.status === "active") ? (
+        <PaidFeatureNotice state={teamAccess.state} />
+      ) : null}
+
       {visibleSlugs.length === 0 ? (
         <ObjectSectionEmpty icon={Plug} description={t(($) => $.tab_body.connected_apps.empty)} />
       ) : (
@@ -121,12 +142,14 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
             const hasTeam = connected.has(`team:${slug}`);
             const hasPersonal = connected.has(`personal:${slug}`);
             const availableScopes = SCOPES.filter((scope) => connected.has(`${scope}:${slug}`));
-            const defaultScope: AppAccountScope = hasTeam && canManageTeam && (entry?.recommended_scope === "team" || !hasPersonal)
+            const canUseTeam = canManageTeam && (canAddTeam || app?.account_scope === "team");
+            const defaultScope: AppAccountScope = hasTeam && canManageTeam && canAddTeam && (entry?.recommended_scope === "team" || !hasPersonal)
               ? "team" : "personal";
             const scope = app?.account_scope ?? defaultScope;
             const isConnected = connected.has(`${scope}:${slug}`);
             const lockedTeam = scope === "team" && !canManageTeam;
-            const canEnable = catalog.isSuccess && !!entry && entry.allowed !== false && (hasPersonal || (hasTeam && canManageTeam));
+            const canEnable = catalog.isSuccess && !!entry && entry.allowed !== false && (hasPersonal || (hasTeam && canManageTeam && canAddTeam));
+            const canRaiseLevel = scope !== "team" || canAddTeam;
             const AccountIcon = scope === "team" ? Users : User;
             const status =
               scope === "team"
@@ -173,7 +196,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                       value={scope}
                       disabled={update.isPending || lockedTeam || entry?.allowed === false}
                       onValueChange={(value) => {
-                        if ((value === "team" || value === "personal") && value !== scope && canManageTeam && entry?.allowed !== false && !update.isPending) patch(slug, { account_scope: value });
+                        if ((value === "team" || value === "personal") && value !== scope && canManageTeam && (value !== "team" || canUseTeam) && entry?.allowed !== false && !update.isPending) patch(slug, { account_scope: value });
                       }}
                     >
                       {SCOPES.map((value) => (
@@ -181,7 +204,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                           key={value}
                           value={value}
                           className="inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-[calc(var(--radius)-3px)] border border-transparent px-1.5 py-0.5 text-caption font-medium whitespace-nowrap text-muted-foreground transition-[color,background-color,border-color,box-shadow] hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring data-disabled:pointer-events-none data-disabled:opacity-50 data-checked:bg-background data-checked:text-foreground data-checked:shadow-sm dark:data-checked:bg-input/60"
-                          disabled={value === "team" && !canManageTeam}
+                          disabled={value === "team" && !canUseTeam}
                           title={!canManageTeam && value === "team" ? t(($) => $.tab_body.connected_apps.team_admin_only) : undefined}
                         >
                           {value === "team" && !canManageTeam && <Lock className="size-3" />}
@@ -203,13 +226,20 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                 </div>
                 {app?.level === "read" && (
                   <div className="w-full">
-                    <SavedAppRestriction kind="agent" onRestore={lockedTeam ? undefined : () => update.mutateAsync({
-                      apps: apps.map((a) => ({
-                        toolkit_slug: a.toolkit_slug,
-                        account_scope: a.account_scope,
-                        level: a.toolkit_slug === slug ? "write" : a.level,
-                      })),
-                    })} />
+                    <SavedAppRestriction
+                      kind="agent"
+                      restoreUnavailable={!lockedTeam && !canRaiseLevel ? <PaidFeatureNotice state="read_only" /> : undefined}
+                      onRestore={lockedTeam || !canRaiseLevel ? undefined : () => update.mutateAsync({
+                        apps: apps.map((a) => ({
+                          toolkit_slug: a.toolkit_slug,
+                          account_scope: a.account_scope,
+                          level: a.toolkit_slug === slug ? "write" : a.level,
+                        })),
+                      }).catch((e: unknown) => {
+                        refreshFeaturesOnLockedError(qc, wsId, e);
+                        throw e;
+                      })}
+                    />
                   </div>
                 )}
                 {app && (overview.data?.[scope]?.some((c) => c.toolkit_slug === slug && c.actions_blocked === true)) && (

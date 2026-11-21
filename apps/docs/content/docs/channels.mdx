@@ -18,6 +18,7 @@ Feishu/Lark, Slack, DingTalk, WeCom, Telegram, and WeChat are available. WeChat 
 | DM the agent | Supported | Supported | Supported | Supported | Supported | Only the account that scanned the QR code |
 | Groups or channels | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning or replying to the Bot | Not supported |
 | Create issues | `/issue` message command; creates the issue from your input as-is | `/issue` slash command; the agent writes up the description before creating | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is |
+| List commands | `/help` | `@Multica /help` | `/help` | `/help` | `/help` | `/help` |
 | Start a new Chat | `/new [message]` | DM: `/new [message]`; channel/thread: `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
 | Clear the current Chat context | `/clear [message]` | DM: `/clear [message]`; channel/thread: `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
 | Connection | Platform long connection | Socket Mode | Stream mode | Platform long connection | `getUpdates` long polling | iLink long polling |
@@ -56,6 +57,8 @@ Channel messages that don't @-mention the Bot never trigger the agent and never 
 
 ## Conversation controls
 
+Send `/help` in a DM (on Slack, use `@Multica /help`), or @-mention the Bot with `/help` in a group or channel, to list the available commands: `/help`, `/new [message]`, `/clear [message]`, and `/issue <title>` (subsequent lines become the description). This includes WeCom and WeChat (DMs only). Multica replies directly without creating a Chat or run or changing the active Chat. On Slack, `@Multica /help` lists the message commands. Native `/issue <description>` starts a separate flow where the agent creates an issue from your description.
+
 `/new` creates a new Multica Chat and routes later messages from that external conversation to it. `/new <message>` creates the Chat and uses the message as its first turn. The previous Chat remains stored and usable in Multica.
 
 `/clear` stays in the current Multica Chat but starts a new agent-visible context. The full Chat history remains available in Multica, while the agent cannot retrieve messages from before the boundary. `/clear <message>` uses the message as the first turn in the new context; a bare `/clear` applies to the next real message.
@@ -87,7 +90,7 @@ Account binding only confirms who the sender is. Other members on the chat platf
 
 ## Manage connections
 
-Workspace owners and admins can connect or disconnect Bots; for Feishu/Lark Bots, connecting and disconnecting is also open to the agent's owner. Regular members can view connected integrations and use the agents they have access to.
+Workspace owners and admins can connect or disconnect Bots; for Feishu/Lark, DingTalk, and WeChat, the agent's owner can also connect and disconnect its Bots. Regular members can view connected integrations and use the agents they have access to.
 
 After disconnecting, the Bot stops receiving new messages. Existing Multica conversations and run records are kept.
 

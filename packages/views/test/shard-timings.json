@@ -427,7 +427,7 @@
     "modals/create-squad.test.tsx": 1362,
     "modals/delete-issue-confirm.test.tsx": 928,
     "modals/feedback.test.tsx": 1002,
-    "modals/issue-limit-upgrade-dialog.test.tsx": 1236,
+    "modals/limit-recovery-dialog.test.tsx": 1236,
     "modals/issue-parent-modals.test.tsx": 736,
     "modals/issue-picker-modal.test.tsx": 1797,
     "modals/mark-duplicate-issue.test.tsx": 3588,

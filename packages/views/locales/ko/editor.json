@@ -102,6 +102,8 @@
   "mention": {
     "group_users": "사용자",
     "group_issues": "태스크",
+    "group_projects": "프로젝트",
+    "group_docs": "문서",
     "all_members": "모든 멤버",
     "agent_badge": "에이전트",
     "squad_badge": "스쿼드",
@@ -226,5 +228,31 @@
       "later": "나중에",
       "start": "받아쓰기 시작"
     }
+  },
+  "block_menu": {
+    "label": "블록 삽입",
+    "blocks": {
+      "paragraph": "텍스트",
+      "heading1": "제목 1",
+      "heading2": "제목 2",
+      "heading3": "제목 3",
+      "bulletList": "글머리 기호 목록",
+      "orderedList": "번호 매기기 목록",
+      "taskList": "체크리스트",
+      "blockquote": "인용",
+      "codeBlock": "코드 블록",
+      "mermaid": "Mermaid 다이어그램",
+      "table": "표",
+      "divider": "구분선",
+      "image": "이미지",
+      "file": "파일"
+    }
+  },
+  "block_handle": {
+    "add": "아래에 추가",
+    "options": "드래그하여 이동, 클릭하여 메뉴 열기",
+    "turn_into": "변환",
+    "duplicate": "복제",
+    "delete": "삭제"
   }
 }

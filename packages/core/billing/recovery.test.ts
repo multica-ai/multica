@@ -6,8 +6,19 @@ const actions = (
     checkout: boolean;
     portal: boolean;
     purchaseSeats: boolean;
+    changePlan: boolean;
+    checkPlanChange: boolean;
+    purchaseAutopilotRuns: boolean;
   }> = {},
-) => ({ checkout: false, portal: false, purchaseSeats: false, ...overrides });
+) => ({
+  checkout: false,
+  portal: false,
+  purchaseSeats: false,
+  changePlan: false,
+  checkPlanChange: false,
+  purchaseAutopilotRuns: false,
+  ...overrides,
+});
 
 describe("resolveBillingRecovery", () => {
   it("fails closed when workspace billing is disabled", () => {
@@ -61,5 +72,58 @@ describe("resolveBillingRecovery", () => {
         portalFailed: true,
       }),
     ).toBe("billing_unavailable");
+  });
+
+  it("offers add-on runs to a paying workspace only on autopilot surfaces", () => {
+    // Pro/Business manager: Cloud allows both the add-on and the portal.
+    const paidManager = actions({
+      portal: true,
+      purchaseSeats: true,
+      changePlan: true,
+      purchaseAutopilotRuns: true,
+    });
+    expect(
+      resolveBillingRecovery({
+        actions: paidManager,
+        billingEnabled: true,
+        loading: false,
+        autopilotAddon: true,
+      }),
+    ).toBe("autopilot_addon");
+    // Other limit surfaces keep their previous recovery.
+    expect(
+      resolveBillingRecovery({
+        actions: paidManager,
+        billingEnabled: true,
+        loading: false,
+      }),
+    ).toBe("portal");
+    // Free or a no-card trial: upgrading still comes first.
+    expect(
+      resolveBillingRecovery({
+        actions: actions({ checkout: true, purchaseAutopilotRuns: true }),
+        billingEnabled: true,
+        loading: false,
+        autopilotAddon: true,
+      }),
+    ).toBe("checkout");
+    // past_due: Cloud withholds the add-on, so the portal is the way back.
+    expect(
+      resolveBillingRecovery({
+        actions: actions({ portal: true }),
+        billingEnabled: true,
+        loading: false,
+        autopilotAddon: true,
+      }),
+    ).toBe("portal");
+    // A member: nothing to buy.
+    expect(
+      resolveBillingRecovery({
+        actions: actions(),
+        billingEnabled: true,
+        loading: false,
+        autopilotAddon: true,
+      }),
+    ).toBe("contact_admin");
   });
 });

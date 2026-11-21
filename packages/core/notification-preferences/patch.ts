@@ -5,11 +5,12 @@ type PreferenceValues = Record<PreferenceKey, string | undefined>;
 
 /**
  * The value each key means when it is missing. Every key the settings UI can
- * write must be listed, or its change is silently never sent.
+ * write must be listed, or its change is silently never sent. Must match the
+ * server's defaults (`mutedByDefault` in server/internal/inbox/registry.go).
  */
 const PREFERENCE_DEFAULTS: { [K in PreferenceKey]-?: NonNullable<NotificationPreferences[K]> } = {
   assignments: "all",
-  status_changes: "all",
+  status_changes: "muted",
   comments: "all",
   chat_replies: "all",
   mentions: "all",

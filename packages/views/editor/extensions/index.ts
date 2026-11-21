@@ -32,6 +32,7 @@ import TableCell from "@tiptap/extension-table-cell";
 import { Table } from "@tiptap/extension-table";
 import { TaskList } from "@tiptap/extension-list";
 import { Markdown } from "@tiptap/markdown";
+import { Marked, type marked } from "marked";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -46,6 +47,7 @@ import {
 import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import type { BuiltinCommandSuggestionOptions } from "./slash-command-suggestion";
+import { createBlockInsertSuggestion } from "./block-insert-suggestion";
 import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import { CodeBlockView } from "./code-block-view";
 import { TableView } from "./table-view";
@@ -169,19 +171,20 @@ export interface EditorExtensionsOptions {
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
+  mentionHideGuests?: boolean;
   /** When true, attach the `/` picker. Default false. */
   enableSlashCommands?: boolean;
   /**
    * Which `/` menu to attach when enableSlashCommands is true:
    * - "skill" (default) — the chat picker listing the active agent's skills.
-   * - "command" — the fixed built-in command menu (issue comments), e.g. /note.
+   * - "command" — Issue quick actions, skills matching a nonempty query, and /note.
+   * - "blocks" — the document block menu: headings, lists, code, tables, uploads.
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "blocks";
   /**
-   * Quick actions offered in the "command" `/` menu, plus the resolver that
-   * turns a pick into the text it would post (MUL-5465). Both are functions so
-   * the editor is created once while still reading live data; the setup layer
-   * owns React Query access. Omit on composers with no issue context.
+   * Quick actions and Issue target-agent skills offered in the "command" `/`
+   * menu, plus the resolver that turns a quick-action pick into draft text.
+   * Functions keep the editor mounted while reading live React Query data.
    */
   quickActionMenu?: BuiltinCommandSuggestionOptions;
   /**
@@ -266,7 +269,18 @@ export function createEditorExtensions(
     InlineMathExtension,
     HighlightExtension,
     // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
-    Markdown.configure({ indentation: { style: "space", size: 3 } }),
+    // Each editor gets its own marked instance. Without one, @tiptap/markdown
+    // registers every editor's tokenizers on the global `marked` with `use()`
+    // and never removes them: the list grows by one editor's worth per mount,
+    // every inline parse runs all of them, and each tokenizer keeps its editor,
+    // the React refs its extensions close over and the unmounted DOM alive
+    // (MUL-9634: ~1,000 DOM nodes retained per issue opened).
+    Markdown.configure({
+      indentation: { style: "space", size: 3 },
+      // A Marked instance has every member MarkdownManager uses (use, Lexer,
+      // defaults, lexer, setOptions); the option is typed as the global's.
+      marked: new Marked() as unknown as typeof marked,
+    }),
     // Make Cmd+C / Cmd+X / drag write Markdown source to clipboard text/plain
     // so users can copy rich content out as the original Markdown.
     createMarkdownCopyExtension(),
@@ -279,7 +293,7 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems }) }
+          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, hideGuests: options.mentionHideGuests }) }
           : {}),
     }),
     // Linear-style bare identifier → issue mention. Attached only when a
@@ -296,11 +310,13 @@ export function createEditorExtensions(
       HTMLAttributes: { class: "slash-command" },
       suggestion: !options.enableSlashCommands
         ? { char: "/", allow: () => false }
-        : options.slashCommandMode === "command"
-          ? createBuiltinCommandSuggestion(options.quickActionMenu)
-          : options.queryClient
-            ? createSlashCommandSuggestion(options.queryClient)
-            : { char: "/", allow: () => false },
+        : options.slashCommandMode === "blocks"
+          ? createBlockInsertSuggestion(options.onUploadFileRef)
+          : options.slashCommandMode === "command"
+            ? createBuiltinCommandSuggestion(options.quickActionMenu)
+            : options.queryClient
+              ? createSlashCommandSuggestion(options.queryClient)
+              : { char: "/", allow: () => false },
     }),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),

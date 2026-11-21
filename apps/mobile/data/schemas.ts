@@ -282,7 +282,7 @@ export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
-  message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  message_kind: z.enum(["message", "no_response", "wakeup"]).catch("message").optional(),
   // One malformed optional suggestion must not erase an otherwise valid
   // conversation. The server validates these too; this is mixed-version and
   // corrupted-cache defense at the mobile boundary.
@@ -620,7 +620,9 @@ export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   user_id: z.string().default(""),
-  role: z.enum(["owner", "admin", "member"]).catch("member"),
+  // `guest` (MUL-9420) must survive parsing: folded into `member`, a guest
+  // would be offered every member control the server then refuses.
+  role: z.enum(["owner", "admin", "member", "guest"]).catch("member"),
   created_at: z.string().default(""),
   name: z.string().default(""),
   email: z.string().default(""),

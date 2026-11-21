@@ -235,6 +235,36 @@ func (q *Queries) DeleteWorkspaceConnections(ctx context.Context, workspaceID pg
 	return err
 }
 
+const deleteWorkspaceDashboardRangeViews = `-- name: DeleteWorkspaceDashboardRangeViews :exec
+DELETE FROM dashboard_range_view
+WHERE dashboard_range_view.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceDashboardRangeViews(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceDashboardRangeViews, workspaceID)
+	return err
+}
+
+const deleteWorkspaceEntitlementFeatureAttempts = `-- name: DeleteWorkspaceEntitlementFeatureAttempts :exec
+DELETE FROM entitlement_feature_attempt
+WHERE entitlement_feature_attempt.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceEntitlementFeatureAttempts(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceEntitlementFeatureAttempts, workspaceID)
+	return err
+}
+
+const deleteWorkspaceEntitlementLimitOverages = `-- name: DeleteWorkspaceEntitlementLimitOverages :exec
+DELETE FROM entitlement_limit_overage
+WHERE entitlement_limit_overage.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceEntitlementLimitOverages(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceEntitlementLimitOverages, workspaceID)
+	return err
+}
+
 const deleteWorkspaceIssueRoots = `-- name: DeleteWorkspaceIssueRoots :exec
 WITH deleted_wakeup_receipts AS (
  DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE workspace_id=$1)
@@ -345,6 +375,9 @@ deleted_chat_submission_receipts AS (
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
+),
+deleted_chat_wakeups AS (
+    DELETE FROM chat_wakeup WHERE workspace_id = $1
 ),
 deleted_agent_builder_drafts AS (
     DELETE FROM agent_builder_draft WHERE workspace_id = $1
@@ -666,6 +699,9 @@ deleted_project_members AS (
 ),
 deleted_project_subscribers AS (
     DELETE FROM project_subscriber WHERE project_subscriber.workspace_id = $1
+),
+deleted_project_folders AS (
+    DELETE FROM project_folder WHERE project_folder.workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1
 `

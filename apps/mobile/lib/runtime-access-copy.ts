@@ -3,5 +3,3 @@
 // locale bundles.
 export const RUNTIME_ACCESS_DENIED_RECOVERY_COPY =
   "This agent can't run on its private runtime. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.";
-
-export const RUNTIME_ACCESS_DENIED_BADGE = "No runtime access";

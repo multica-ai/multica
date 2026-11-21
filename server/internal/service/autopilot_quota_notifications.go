@@ -38,8 +38,12 @@ func (s *AutopilotService) deliverAutopilotQuotaRejectionNotice(
 	source string,
 	params db.CreateAutopilotRunParams,
 ) {
-	if policy.action != entitlement.ActionEnforce || policy.notifications == nil ||
-		policy.notifications.OnRejection != entitlement.NotificationFirstRejectionPerPeriod {
+	if policy.action != entitlement.ActionEnforce || policy.notifications == nil {
+		return
+	}
+	switch policy.notifications.OnRejection {
+	case entitlement.NotificationFirstRejectionPerPeriod, entitlement.NotificationFirstRejectionPerLimit:
+	default:
 		return
 	}
 	if _, err := s.createAutopilotQuotaRejectionNotice(ctx, policy, workspaceID, source, params); err != nil {
@@ -52,8 +56,26 @@ func (s *AutopilotService) deliverAutopilotQuotaRejectionNotice(
 	}
 }
 
-// createAutopilotQuotaRejectionNotice writes the period's first rejection
-// notice and, once that commits, announces each row.
+// autopilotQuotaRejectionAlreadyNotified reports whether the period's marker
+// already covers a rejection at limit. Per period, any notice covers the rest
+// of the period. Per limit, a notice covers only the limit it was sent at, so
+// a limit raised by an add-on re-arms it. A notice from before the limit was
+// recorded counts as covering the period: it cannot be told apart, and a
+// duplicate notice is worse than a missed re-arm in that one period.
+func autopilotQuotaRejectionAlreadyNotified(period db.AutopilotQuotaPeriod, mode string, limit int64) bool {
+	if !period.RejectionNotifiedAt.Valid {
+		return false
+	}
+	if mode != entitlement.NotificationFirstRejectionPerLimit || !period.RejectionNotifiedLimit.Valid {
+		return true
+	}
+	return period.RejectionNotifiedLimit.Int64 == limit
+}
+
+// createAutopilotQuotaRejectionNotice writes the first rejection notice of the
+// period (or of the limit, per the notification policy) and, once that
+// commits, announces each row. The period row lock serialises concurrent
+// rejections, so one limit is notified once.
 func (s *AutopilotService) createAutopilotQuotaRejectionNotice(
 	ctx context.Context,
 	policy autopilotQuotaPolicy,
@@ -75,7 +97,11 @@ func (s *AutopilotService) createAutopilotQuotaRejectionNotice(
 	if err != nil {
 		return nil, fmt.Errorf("lock quota period for rejection notice: %w", err)
 	}
-	if period.RejectionNotifiedAt.Valid {
+	mode := entitlement.NotificationFirstRejectionPerPeriod
+	if policy.notifications != nil {
+		mode = policy.notifications.OnRejection
+	}
+	if autopilotQuotaRejectionAlreadyNotified(period, mode, policy.limit) {
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit already-delivered quota rejection notice: %w", err)
 		}
@@ -105,9 +131,10 @@ func (s *AutopilotService) createAutopilotQuotaRejectionNotice(
 		return nil, nil
 	}
 	if _, err := q.MarkAutopilotQuotaRejectionNotified(ctx, db.MarkAutopilotQuotaRejectionNotifiedParams{
-		WorkspaceID: period.WorkspaceID,
-		PeriodStart: period.PeriodStart,
-		PeriodEnd:   period.PeriodEnd,
+		WorkspaceID:   period.WorkspaceID,
+		PeriodStart:   period.PeriodStart,
+		PeriodEnd:     period.PeriodEnd,
+		NotifiedLimit: pgtype.Int8{Int64: policy.limit, Valid: true},
 	}); err != nil {
 		return nil, fmt.Errorf("mark autopilot quota rejection notified: %w", err)
 	}
@@ -126,7 +153,8 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 ) ([]db.InboxItem, error) {
 	autopilotTitle := ""
 	autopilot, err := q.GetAutopilot(ctx, facts.AutopilotID)
-	if err == nil {
+	autopilotFound := err == nil
+	if autopilotFound {
 		autopilotTitle = autopilot.Title
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("load autopilot for quota notice: %w", err)
@@ -135,10 +163,23 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 	if err != nil {
 		return nil, fmt.Errorf("list workspace billing notification recipients: %w", err)
 	}
+	// The person responsible for the rejected autopilot hears about it too,
+	// even without billing access: its member creator, or the owner of the
+	// agent that created it. A creator who left the workspace is skipped, and
+	// one who already manages billing is not notified twice.
+	if autopilotFound {
+		creator, ok, err := ResolveAutopilotNotificationRecipient(ctx, q, autopilot)
+		if err != nil {
+			return nil, fmt.Errorf("resolve autopilot creator for quota notice: %w", err)
+		}
+		if ok && !containsAutopilotNotificationRecipient(recipients, creator) {
+			recipients = append(recipients, creator)
+		}
+	}
 	resetAt := facts.ResetAt.UTC().Format("January 2, 2006 at 15:04 UTC")
 
 	body := fmt.Sprintf(
-		"This workspace has reached its limit of %d autopilot runs for the current period. Further autopilot runs will not start until the allowance resets at %s.",
+		"This workspace has reached its limit of %d autopilot runs for the current period. Further autopilot runs will not start until the allowance resets at %s, or until the workspace upgrades its plan or buys more runs.",
 		facts.Limit, resetAt,
 	)
 	details, err := json.Marshal(map[string]string{
@@ -176,4 +217,13 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func containsAutopilotNotificationRecipient(recipients []AutopilotNotificationRecipient, candidate AutopilotNotificationRecipient) bool {
+	for _, recipient := range recipients {
+		if recipient.Type == candidate.Type && recipient.ID == candidate.ID {
+			return true
+		}
+	}
+	return false
 }
