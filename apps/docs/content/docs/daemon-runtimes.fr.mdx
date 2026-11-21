@@ -328,7 +328,10 @@ Supprimer le remplacement de chemin :
 multica runtime profile unset-path <profile-id>
 ```
 
-Modifier un profil n'affecte que les exécutions prises en charge par la suite. Avant de supprimer un profil, occupez-vous des agents actifs encore liés à ses runtimes. Supprimer uniquement l'instance de runtime sur un ordinateur ne supprime pas le profil — un daemon en cours d'exécution le réenregistrera.
+Modifier un profil n’affecte que les exécutions prises en charge par la suite.
+
+- **Retirer une seule machine.** Vous ne pouvez pas supprimer directement une instance de runtime tant que son profil personnalisé existe. Arrêtez le daemon de la machine retirée pour éviter qu’il ne réenregistre l’instance. Une instance hors ligne peut être nettoyée automatiquement après 7 jours si aucun agent actif ni aucune tâche inachevée n’y est associé. Si un ancien profil conserve une instance sur la machine de la personne qui l’a créé, modifiez le profil et sélectionnez la machine qui doit la conserver.
+- **Retirer le profil.** La suppression du profil retire ses runtimes de toutes les machines où ils sont enregistrés. Déplacez d’abord les agents actifs vers des runtimes hors de ce profil, ou archivez ceux que vous retirez. Si vous ne pouvez pas gérer un agent qui bloque la suppression, demandez à son propriétaire de le déplacer ou de l’archiver.
 
 ## Runtime distant Qoder Cloud Agents
 
