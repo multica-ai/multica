@@ -124,6 +124,19 @@ function connect() {
 }
 
 describe("CodeTab — GitHub", () => {
+  it("opts into initiator commit attribution without replacing other settings", async () => {
+    const user = userEvent.setup();
+    render(<CodeTab />, { wrapper: Wrapper });
+    const toggle = screen.getByRole("switch", { name: "Use run initiator as commit author" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await user.click(toggle);
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+        settings: { pr_merge_status: "done", commit_author_is_initiator_enabled: true },
+      });
+    });
+  });
+
   it("offers to connect GitHub through the shared connection action", async () => {
     const user = userEvent.setup();
     render(<CodeTab />, { wrapper: Wrapper });

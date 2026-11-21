@@ -7,13 +7,15 @@ export interface GitHubSettings {
   prSidebar: boolean;
   /** Co-authored-by trailer in agent commits. Implies `enabled`. */
   coAuthor: boolean;
+  /** Use the human run initiator as commit author. Opt-in; implies `enabled`. */
+  commitAuthorIsInitiator: boolean;
   /** Auto-link issues ↔ PRs from webhook payloads. Implies `enabled`. */
   autoLinkPRs: boolean;
 }
 
 /**
- * Pure derivation from a workspace's settings JSONB. Defaults every flag to
- * true so workspaces predating MUL-2414 keep the historical "all on" behavior.
+ * Pure derivation from a workspace's settings JSONB. Existing flags default
+ * to true; initiator commit attribution is explicitly opt-in.
  */
 export function deriveGitHubSettings(
   workspace: Pick<Workspace, "settings"> | null | undefined,
@@ -24,6 +26,7 @@ export function deriveGitHubSettings(
     enabled,
     prSidebar: enabled && s.github_pr_sidebar_enabled !== false,
     coAuthor: enabled && s.co_authored_by_enabled !== false,
+    commitAuthorIsInitiator: enabled && s.commit_author_is_initiator_enabled === true,
     autoLinkPRs: enabled && s.github_auto_link_prs_enabled !== false,
   };
 }
