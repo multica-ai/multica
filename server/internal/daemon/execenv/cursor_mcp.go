@@ -319,6 +319,7 @@ func PrepareCursorMcpLoginWorkspace(mcpAuthSource, mcpAuthStore string, mcpConfi
 	if _, err := prepareCursorMcpLoginWorkDir(envRoot, workDir); err != nil {
 		return "", "", err
 	}
+	baseLegacyCursorMcpLogin(CursorMcpAuthPath(filepath.Join(envRoot, "cursor-data"), workDir), envRoot, mcpAuthSource, mcpAuthStore)
 
 	managed, err := parseCursorManagedMcpServers(mcpConfig)
 	if err != nil && hasManagedCursorMcpConfig(mcpConfig) {
@@ -360,6 +361,7 @@ func PrepareCursorMcpUserLoginWorkspace(userDataDir, mcpAuthSource, mcpAuthStore
 		return "", err
 	}
 	projectDataDir := filepath.Join(userDataDir, "projects", cursorSlugifyPath(projectRoot))
+	baseLegacyCursorMcpLogin(filepath.Join(projectDataDir, cursorMcpAuthFile), envRoot, mcpAuthSource, mcpAuthStore)
 	if _, err := linkCursorProjectMcpAuth(projectDataDir, envRoot, mcpAuthSource, mcpAuthStore, nil); err != nil {
 		return "", fmt.Errorf("seed cursor mcp login workspace with the agent's login: %w", err)
 	}
@@ -392,7 +394,11 @@ func SyncCursorMcpLoginWorkspaces(mcpAuthSource, mcpAuthStore, userDataDir strin
 	}
 	for _, m := range mirrors {
 		m.Target = target
-		if err := m.Sync(); err != nil && logger != nil {
+		err := m.baseLegacyLogin()
+		if err == nil {
+			err = m.Sync()
+		}
+		if err != nil && logger != nil {
 			logger.Warn("execenv: merge cursor mcp login workspace login failed", "project_auth", m.ProjectAuth, "error", err)
 		}
 	}
@@ -450,7 +456,7 @@ func linkCursorUserMcpAuthMirror(userDataDir, envRoot, workDir, mcpAuthSource, m
 	projectDataDir := filepath.Join(userDataDir, "projects", cursorSlugifyPath(projectRoot))
 	mirror, err := linkCursorProjectMcpAuth(projectDataDir, envRoot, mcpAuthSource, mcpAuthStore, logger)
 	if err == nil {
-		err = writeCursorMcpAuthLinkRecord(envRoot, filepath.Join(projectDataDir, cursorMcpAuthFile), mirror.Target)
+		err = writeCursorMcpAuthLinkRecord(envRoot, filepath.Join(projectDataDir, cursorMcpAuthFile), mirror.Target, projectRoot)
 		if err != nil {
 			_ = removeCursorMcpAuthFile(projectDataDir)
 		}
@@ -512,10 +518,14 @@ func adoptCursorMcpAuthLogin(projectAuth, store string) error {
 type cursorMcpAuthLinkRecord struct {
 	Link   string `json:"link"`
 	Target string `json:"target"`
+	// Project is the task's Cursor project root, resolved when the copy was
+	// placed. The GC may run after the project itself is gone (a worktree
+	// removed at finalize), so it cannot be derived again then.
+	Project string `json:"project,omitempty"`
 }
 
-func writeCursorMcpAuthLinkRecord(envRoot, link, target string) error {
-	data, err := json.Marshal(cursorMcpAuthLinkRecord{Link: link, Target: target})
+func writeCursorMcpAuthLinkRecord(envRoot, link, target, project string) error {
+	data, err := json.Marshal(cursorMcpAuthLinkRecord{Link: link, Target: target, Project: project})
 	if err != nil {
 		return err
 	}
@@ -534,10 +544,11 @@ func RemoveCursorMcpAuthLink(envRoot, daemonProfile string) error {
 
 // removeCursorMcpAuthLink trusts the env root's record only as far as it
 // matches what linkCursorUserMcpAuth creates: an mcp-auth.json directly under
-// a project of userDataDir that is the task's own project (its workdir lies in
-// the env root), or, for records written by daemons that linked the login, a
-// symlink to the recorded target or a hard link to a file in the agent stores.
-// Any other file Cursor wrote is left alone.
+// a project of userDataDir that is the task's own project (the recorded
+// project, or for older records the workdir, lies in the env root), or, for
+// records written by daemons that linked the login, a symlink to the recorded
+// target or a hard link to a file in the agent stores. Any other file Cursor
+// wrote is left alone.
 func removeCursorMcpAuthLink(envRoot, userDataDir, storeRoot string) error {
 	data, err := os.ReadFile(filepath.Join(envRoot, cursorMcpAuthLinkRecordFile))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -559,8 +570,11 @@ func removeCursorMcpAuthLink(envRoot, userDataDir, storeRoot string) error {
 	if err != nil {
 		return nil
 	}
-	taskProject := cursorProjectRoot(filepath.Join(envRoot, "workdir"))
-	ownProject := cursorPathWithin(envRoot, taskProject) &&
+	taskProject := filepath.Clean(record.Project)
+	if record.Project == "" {
+		taskProject = cursorProjectRoot(filepath.Join(envRoot, "workdir"))
+	}
+	ownProject := filepath.IsAbs(taskProject) && cursorPathWithin(envRoot, taskProject) &&
 		link == filepath.Join(userDataDir, "projects", cursorSlugifyPath(taskProject), cursorMcpAuthFile)
 	switch {
 	case ownProject && (info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0):
@@ -748,8 +762,50 @@ func (m *CursorMcpAuthMirror) SyncIfChanged() error {
 	if stamp == m.seen {
 		return nil
 	}
+	if err := m.syncLocked(); err != nil {
+		return err
+	}
 	m.seen = stamp
-	return m.syncLocked()
+	return nil
+}
+
+// baseLegacyLogin gives a login workspace set up by an older daemon a base to
+// sync from. That daemon linked the workspace's mcp-auth.json to the login and
+// recorded no base, so once Cursor replaced the link with a file of its own, a
+// login made there would never be merged, and the next seed would overwrite
+// it. The whole file counts as changed when it is newer than the login it
+// copies, or that login holds none; tokenless entries still never replace a
+// login (mergeCursorMcpAuthEntries).
+func (m *CursorMcpAuthMirror) baseLegacyLogin() error {
+	if m == nil || m.Target == "" {
+		return nil
+	}
+	if _, err := os.Stat(m.BaseFile); !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	info, err := os.Lstat(m.ProjectAuth)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	if targetInfo, err := os.Stat(m.Target); err == nil {
+		if os.SameFile(info, targetInfo) {
+			return nil
+		}
+		if cursorMcpAuthHasLogin(m.Target) && !info.ModTime().After(targetInfo.ModTime()) {
+			return nil
+		}
+	}
+	return m.writeBase([]byte("{}"))
+}
+
+// baseLegacyCursorMcpLogin is baseLegacyLogin for a login workspace about to
+// be seeded again, whose own sync then merges the login.
+func baseLegacyCursorMcpLogin(projectAuth, envRoot, mcpAuthSource, mcpAuthStore string) {
+	target, err := cursorMcpAuthTarget(mcpAuthSource, mcpAuthStore)
+	if err != nil || target == "" {
+		return
+	}
+	_ = newCursorMcpAuthMirror(projectAuth, envRoot, target).baseLegacyLogin()
 }
 
 func (m *CursorMcpAuthMirror) syncLocked() error {

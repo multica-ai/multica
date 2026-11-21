@@ -392,6 +392,40 @@ func TestCursorMcpAuthMirrorMergesOnlyWhatEachTaskChanged(t *testing.T) {
 	}
 }
 
+func TestCursorMcpAuthMirrorRetriesFailedPoll(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
+	writeTestFile(t, store, `{}`)
+	data, work, mirror := prepareCursorTask(t, root, "task-1", store, json.RawMessage(`{"mcpServers":{}}`))
+	login := `{"mobbin":{"tokens":{"access_token":"a","refresh_token":"r"}}}`
+	cursorSave(t, CursorMcpAuthPath(data, work), login)
+
+	// The store cannot be read for one poll.
+	aside := store + ".aside"
+	if err := os.Rename(store, aside); err != nil {
+		t.Fatalf("move store aside: %v", err)
+	}
+	if err := os.Mkdir(store, 0o700); err != nil {
+		t.Fatalf("block store: %v", err)
+	}
+	if err := mirror.SyncIfChanged(); err == nil {
+		t.Fatal("poll with an unreadable store succeeded")
+	}
+	if err := os.Remove(store); err != nil {
+		t.Fatalf("unblock store: %v", err)
+	}
+	if err := os.Rename(aside, store); err != nil {
+		t.Fatalf("restore store: %v", err)
+	}
+
+	if err := mirror.SyncIfChanged(); err != nil {
+		t.Fatalf("next poll: %v", err)
+	}
+	assertCursorAuthJSON(t, store, login)
+}
+
 func TestCursorMcpAuthMirrorNeverSignsTheAgentOut(t *testing.T) {
 	t.Parallel()
 
@@ -615,6 +649,58 @@ func loginThroughWorkspaceAfterTaskCleanup(t *testing.T, store, authSource strin
 	login := `{"oauth":{"clientInfo":{"client_id":"c"},"tokens":{"access_token":"a","refresh_token":"r"}}}`
 	cursorSave(t, CursorMcpAuthPath(loginData, loginWork), login)
 	return loginWork, login
+}
+
+// A login workspace an older daemon set up holds a link to the store and no
+// base. A login made there after the upgrade replaces the link, and must reach
+// the store whether the agent's next task collects it or the workspace is
+// seeded again first, although the store still holds the spent login.
+func TestCursorMcpLoginWorkspaceFromOlderDaemonKeepsNewLogin(t *testing.T) {
+	t.Parallel()
+
+	mcpConfig := json.RawMessage(`{"mcpServers":{"oauth":{"url":"https://mcp.example.com/mcp"}}}`)
+	spent := `{"oauth":{"clientInfo":{"client_id":"c"},"tokens":{"access_token":"old","refresh_token":"spent"}}}`
+	fresh := `{"oauth":{"clientInfo":{"client_id":"c"},"tokens":{"access_token":"new","refresh_token":"r"}}}`
+	legacyLogin := func(t *testing.T) (string, string) {
+		t.Helper()
+		root := t.TempDir()
+		store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
+		writeTestFile(t, store, spent)
+		loginWork, loginData, err := PrepareCursorMcpLoginWorkspace("", store, mcpConfig, []string{"oauth"})
+		if err != nil {
+			t.Fatalf("PrepareCursorMcpLoginWorkspace: %v", err)
+		}
+		makeCursorLoginWorkspaceLegacy(t, store, cursorMcpLoginWorkspaceDir)
+		cursorSave(t, CursorMcpAuthPath(loginData, loginWork), fresh)
+		return root, store
+	}
+
+	t.Run("next task collects it", func(t *testing.T) {
+		t.Parallel()
+		root, store := legacyLogin(t)
+		dataDir, workDir, _ := prepareCursorTask(t, root, "task-1", store, mcpConfig)
+		assertCursorAuthJSON(t, store, fresh)
+		assertCursorAuthJSON(t, CursorMcpAuthPath(dataDir, workDir), fresh)
+	})
+
+	t.Run("workspace seeded again first", func(t *testing.T) {
+		t.Parallel()
+		_, store := legacyLogin(t)
+		loginWork, loginData, err := PrepareCursorMcpLoginWorkspace("", store, mcpConfig, []string{"oauth"})
+		if err != nil {
+			t.Fatalf("rebuild login workspace: %v", err)
+		}
+		assertCursorAuthJSON(t, store, fresh)
+		assertCursorAuthJSON(t, CursorMcpAuthPath(loginData, loginWork), fresh)
+	})
+
+	t.Run("file older than the login is left out", func(t *testing.T) {
+		t.Parallel()
+		_, store := legacyLogin(t)
+		writeTestFile(t, store, spent)
+		SyncCursorMcpLoginWorkspaces("", store, "", nil)
+		assertCursorAuthJSON(t, store, spent)
+	})
 }
 
 func TestCursorMcpLoginWorkspaceSurvivesInPlaceCleanup(t *testing.T) {

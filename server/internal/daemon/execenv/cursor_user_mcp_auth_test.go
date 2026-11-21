@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 const (
@@ -120,14 +121,25 @@ func TestCursorUserMcpAuthLinksWorktreeTask(t *testing.T) {
 	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
 	repo := newTestRepo(t)
 	envRoot := filepath.Join(root, "task-1")
-	worktree := filepath.Join(envRoot, "workdir")
+	worktree := filepath.Join(envRoot, "worktree")
 	gitRun(t, repo, "worktree", "add", "-b", "agent/task-1", worktree)
 
 	writeTestFile(t, store, testCursorLogin)
 	if got := linkCursorUserMcpAuth(userData, envRoot, worktree, "", store, nil); got != userData {
 		t.Fatalf("worktree link = %q, want %q", got, userData)
 	}
-	assertCursorUserTaskCopy(t, CursorMcpAuthPath(userData, worktree), testCursorLogin)
+	taskAuth := CursorMcpAuthPath(userData, worktree)
+	assertCursorUserTaskCopy(t, taskAuth, testCursorLogin)
+
+	// The worktree is removed at finalize, before the GC removes the env root.
+	gitRun(t, repo, "worktree", "remove", "--force", worktree)
+	if err := removeCursorMcpAuthLink(envRoot, userData, filepath.Dir(filepath.Dir(store))); err != nil {
+		t.Fatalf("removeCursorMcpAuthLink: %v", err)
+	}
+	if _, err := os.Lstat(taskAuth); !os.IsNotExist(err) {
+		t.Fatalf("worktree task's login copy should be removed, lstat err=%v", err)
+	}
+	assertCursorAuthJSON(t, store, testCursorLogin)
 }
 
 func assertCursorUserTaskCopy(t *testing.T, path, want string) {
@@ -204,7 +216,7 @@ func TestRemoveCursorMcpAuthLinkRemovesOnlyTheTaskLink(t *testing.T) {
 	if err := os.Link(store, hardLink); err != nil {
 		t.Fatalf("hard link: %v", err)
 	}
-	if err := writeCursorMcpAuthLinkRecord(hardRoot, hardLink, store); err != nil {
+	if err := writeCursorMcpAuthLinkRecord(hardRoot, hardLink, store, ""); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	if err := removeCursorMcpAuthLink(hardRoot, userData, storeRoot); err != nil {
@@ -219,14 +231,56 @@ func TestRemoveCursorMcpAuthLinkRemovesOnlyTheTaskLink(t *testing.T) {
 	userAuth := CursorMcpAuthPath(userData, userRepo)
 	writeTestFile(t, userAuth, `{"mine":true}`)
 	tamperedRoot, _ := newCursorUserTaskRoot(t, root, "task-3")
-	if err := writeCursorMcpAuthLinkRecord(tamperedRoot, userAuth, userAuth); err != nil {
-		t.Fatalf("record: %v", err)
+	for _, project := range []string{"", userRepo, "workdir"} {
+		if err := writeCursorMcpAuthLinkRecord(tamperedRoot, userAuth, userAuth, project); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+		if err := removeCursorMcpAuthLink(tamperedRoot, userData, storeRoot); err != nil {
+			t.Fatalf("removeCursorMcpAuthLink tampered with project %q: %v", project, err)
+		}
+		if readFile(t, userAuth) != `{"mine":true}` {
+			t.Fatalf("user's own login was removed with recorded project %q", project)
+		}
 	}
-	if err := removeCursorMcpAuthLink(tamperedRoot, userData, storeRoot); err != nil {
-		t.Fatalf("removeCursorMcpAuthLink tampered: %v", err)
+}
+
+// A user login workspace an older daemon set up holds a link to the store and
+// no base. A login made there after the upgrade replaces the link, and must
+// reach the store before the workspace is seeded again, although the store
+// still holds the spent login.
+func TestCursorMcpUserLoginWorkspaceFromOlderDaemonKeepsNewLogin(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	userData := filepath.Join(root, "home", ".cursor")
+	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
+	writeTestFile(t, store, `{"mobbin":{"clientInfo":{"client_id":"c"},"tokens":{"access_token":"old","refresh_token":"spent"}}}`)
+
+	loginWork, err := PrepareCursorMcpUserLoginWorkspace(userData, "", store)
+	if err != nil {
+		t.Fatalf("PrepareCursorMcpUserLoginWorkspace: %v", err)
 	}
-	if readFile(t, userAuth) != `{"mine":true}` {
-		t.Fatal("user's own login was removed")
+	makeCursorLoginWorkspaceLegacy(t, store, cursorMcpUserLoginWorkspaceDir)
+	cursorSave(t, CursorMcpAuthPath(userData, loginWork), testCursorLogin)
+
+	if _, err := PrepareCursorMcpUserLoginWorkspace(userData, "", store); err != nil {
+		t.Fatalf("rebuild user login workspace: %v", err)
+	}
+	assertCursorAuthJSON(t, store, testCursorLogin)
+	assertCursorUserTaskCopy(t, CursorMcpAuthPath(userData, loginWork), testCursorLogin)
+}
+
+// makeCursorLoginWorkspaceLegacy leaves an agent's login workspace the way an
+// older daemon set it up, with no base, and its store written before any
+// login made there.
+func makeCursorLoginWorkspaceLegacy(t *testing.T, store, workspace string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(filepath.Dir(store), workspace, cursorMcpAuthBaseFile)); err != nil {
+		t.Fatalf("remove base: %v", err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(store, past, past); err != nil {
+		t.Fatalf("age store: %v", err)
 	}
 }
 
