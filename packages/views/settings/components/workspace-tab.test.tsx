@@ -82,8 +82,14 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: vi.fn() }),
 }));
 
+vi.mock("../../billing/storage-limit-notice", () => ({ useStorageLimitToast: () => () => false }));
+
 vi.mock("./delete-workspace-dialog", () => ({
   DeleteWorkspaceDialog: () => null,
+}));
+
+vi.mock("./private-projects-section", () => ({
+  PrivateProjectsSection: () => <div data-testid="private-projects" />,
 }));
 
 vi.mock("sonner", () => ({
@@ -234,6 +240,20 @@ describe("WorkspaceTab — automatic updates", () => {
       });
     });
     expect(mockSetQueryData).toHaveBeenCalledWith(["workspaces"], expect.any(Function));
+  });
+
+  it.each([
+    ["owner", true],
+    ["admin", false],
+    ["member", false],
+  ] as const)("shows the private projects overview to a workspace %s: %s", (role, shown) => {
+    membersRef.current = [
+      { user_id: "user-1", role, name: "Ada" },
+      { user_id: "user-2", role: "owner", name: "Grace" },
+    ];
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    expect(screen.queryByTestId("private-projects") !== null).toBe(shown);
   });
 
   it("shows regular members the values read-only, with who to ask", () => {

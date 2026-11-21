@@ -62,14 +62,17 @@ After the first dispatch, the leader is woken up automatically by **most subsequ
 |---|---|---|
 | A non-member (human reporter, external agent) posts a comment | Yes | |
 | A squad member posts a progress update with no `@mention` | Yes | The leader re-evaluates whether a next step is needed |
-| Anyone posts a comment that explicitly `@`-mentions another agent / member / squad / `@all` | No | The explicit `@` is the routing signal, so the leader stays out of the way |
+| A member or worker explicitly mentions the assigned squad’s leader as an agent | Yes | Runs as the squad leader, so `multica squad activity` can record its decision |
+| A human member mentions only other members or `@all` | No | People receive notifications; implicit agent routing is suppressed |
+| A non-leader agent mentions only members or `@all` | Yes | The worker result still reaches the leader; people receive notifications as usual |
+| Anyone explicitly mentions an agent or squad | Only if named | Only the named agents or squad leaders run; there is no additional leader fallback |
 | The leader's own comment | No | Guarded so the leader can't trigger itself |
 | A comment containing only an issue cross-reference (`[MUL-123](mention://issue/...)`) | Yes | Issue references aren't routing |
 
 Dedup applies on top of these rules: if the leader already has a `queued` or `dispatched` run on this issue, a new trigger won't enqueue a duplicate.
 
 <Callout type="info">
-**Why the leader doesn't trigger when a member posts an `@`-mention.** Once a squad member directly `@`s someone, that comment is a deliberate hand-off — having the leader wake up to "observe" the routing would just produce a no-op turn and clutter the timeline. Agent-authored comments are the exception: when an agent posts a result that `@`s another agent, the leader still wakes up so it can coordinate the thread.
+A human member's `@member` / `@all` comment only notifies people. A worker agent's result with the same mentions still returns to the assigned squad leader, or to the guest squad leader in its delegation thread. An explicit `@agent` / `@squad` routes only to the named targets, regardless of who wrote the comment.
 </Callout>
 
 ## Assigning vs. @-mentioning a squad

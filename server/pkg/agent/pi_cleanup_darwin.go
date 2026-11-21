@@ -13,6 +13,13 @@ type piDarwinProcessIdentity struct {
 	unique uint64
 }
 
+func checkPiCleanupSupport() error {
+	if err := probePiIdentitySignalling(signalCursorDarwinIdentity); err != nil {
+		return fmt.Errorf("this macOS kernel cannot safely clean up Pi/omp processes; use a macOS kernel with process identity signalling support: %w", err)
+	}
+	return nil
+}
+
 func piProcessMissing(pid int, err error) bool {
 	if errors.Is(err, syscall.ESRCH) {
 		return true
@@ -38,8 +45,8 @@ func capturePiProcessIdentity(info cursorUnixProcessInfo) (piProcessIdentity, er
 		return nil, fmt.Errorf("process identity changed during capture: %d", info.pid)
 	}
 	// Probe the kernel-checked signalling operation; no numeric-PID fallback.
-	if err := signalCursorDarwinIdentity(1<<31-1, 0, syscall.SIGKILL); err != syscall.ESRCH {
-		return nil, fmt.Errorf("kernel process identity signalling is unavailable: %v", err)
+	if err := probePiIdentitySignalling(signalCursorDarwinIdentity); err != nil {
+		return nil, err
 	}
 	return &piDarwinProcessIdentity{pid: info.pid, unique: identity.unique}, nil
 }

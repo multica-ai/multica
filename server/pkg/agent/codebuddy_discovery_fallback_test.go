@@ -5,7 +5,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,9 +59,7 @@ while IFS= read -r line; do
   esac
 done
 `
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write codebuddy ACP stub: %v", err)
-	}
+	writeTestExecutable(t, path, []byte(script))
 	return path
 }
 

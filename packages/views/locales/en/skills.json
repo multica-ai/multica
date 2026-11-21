@@ -60,7 +60,7 @@
     "my_agents": "My agents",
     "other_agents": "Other agents",
     "no_agents": "No agents available",
-    "search_placeholder": "Search agents…",
+    "search_placeholder": "Search agents...",
     "no_agents_match": "No agents match your search.",
     "has_partial": "{{owned}}/{{total}} added",
     "added_toast": "Added to {{name}}",
@@ -82,7 +82,7 @@
     "update_summary_skipped_one": "{{count}} can't be updated from a source — skipped",
     "update_summary_skipped_other": "{{count}} can't be updated from a source — skipped",
     "update_confirm": "Update {{count}}",
-    "update_updating": "Updating {{done}}/{{total}}…",
+    "update_updating": "Updating {{done}}/{{total}}...",
     "updated_toast_one": "Updated {{count}} skill from source",
     "updated_toast_other": "Updated {{count}} skills from source",
     "update_partial_toast": "Updated {{count}}, {{failed}} failed",
@@ -97,16 +97,14 @@
     "section_labels": "Labels",
     "filter_search_placeholder": "Filter...",
     "no_labels": "No labels yet",
-    "no_results": "No results",
-    "manage_labels": "Manage labels...",
-    "manage_labels_title": "Skill labels"
+    "no_results": "No results"
   },
   "detail": {
     "read_only": "Read-only",
     "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete until the next refresh.",
     "delete_file": "Delete file",
     "name_placeholder": "skill-name",
-    "description_placeholder": "One sentence describing when an agent should use this skill…",
+    "description_placeholder": "One sentence describing when an agent should use this skill...",
     "subline": {
       "origin_runtime_named": "Local runtime · {{name}}",
       "origin_runtime_provider": "Local runtime · {{provider}}",
@@ -126,7 +124,7 @@
       "changed_files_other": "{{count}} files",
       "discard": "Discard",
       "save": "Save changes",
-      "saving": "Saving…"
+      "saving": "Saving..."
     },
     "not_found": {
       "title": "Skill not found",
@@ -151,7 +149,7 @@
         "warning": "Local edits to this skill will be overwritten. Agent assignments, labels, and creator are preserved.",
         "cancel": "Cancel",
         "confirm": "Update",
-        "refreshing": "Updating…"
+        "refreshing": "Updating..."
       }
     },
     "delete_dialog": {
@@ -162,7 +160,7 @@
       "warning": "This action cannot be undone.",
       "cancel": "Cancel",
       "confirm": "Delete permanently",
-      "deleting": "Deleting…"
+      "deleting": "Deleting..."
     },
     "add_file": {
       "placeholder": "templates/review.md",
@@ -192,7 +190,8 @@
       "permissions_owner": "You can edit and delete this skill. Changes take effect on the next agent run.",
       "permissions_locked_creator": "Only the creator ({{name}}) or a workspace admin can edit this skill.",
       "permissions_locked": "Only the creator or a workspace admin can edit this skill.",
-      "character_count": "{{count}} characters"
+      "character_count_one": "{{count}} character",
+      "character_count_other": "{{count}} characters"
     },
     "files": {
       "list_aria": "Skill files",
@@ -254,15 +253,9 @@
     }
   },
   "create": {
-    "back": "Back",
-    "back_aria": "Back to method chooser",
     "close": "Close",
     "close_aria": "Close",
     "method": {
-      "chooser": {
-        "title": "New skill",
-        "desc": "Choose how to add a skill to this workspace."
-      },
       "manual": {
         "title": "Create manually",
         "desc": "Start from a blank SKILL.md."
@@ -290,7 +283,7 @@
       "fallback_error": "Failed to create skill",
       "cancel": "Cancel",
       "submit": "Create skill",
-      "submitting": "Creating…",
+      "submitting": "Creating...",
       "toast_created": "Skill created"
     },
     "local": {
@@ -308,17 +301,29 @@
       "fallback_error": "Import failed",
       "cancel": "Cancel",
       "import": "Import",
-      "importing": "Importing…",
-      "toast_imported": "Skill imported"
+      "importing": "Importing...",
+      "toast_imported": "Skill imported",
+      "select_all": "Select all",
+      "import_count": "Import {{count}}",
+      "done": "Done",
+      "stop": "Stop after current",
+      "unreadable": "Could not read this skill. Choose the folder again.",
+      "uncertain": "The result is uncertain. Check the refreshed skill list before retrying. Existing names remain locked; review them in the list.",
+      "check_results": "Check results",
+      "retry_ready": "Not found in the refreshed list. You can retry this item.",
+      "uncertain_manual": "The result is uncertain and the archive’s skill name is unknown. Check the skills list manually before importing this archive again.",
+      "check_failed": "Could not verify the skill list. Imports with uncertain results remain locked. Try checking again or review the list manually.",
+      "workspace_changed": "The workspace changed. Remaining imports were stopped. Close this dialog and reopen it in the intended workspace.",
+      "summary": "Imported: {{success}} · Failed or uncertain: {{failed}}"
     },
     "url": {
       "url_label": "Skill URL",
       "supported_sources": "Supported sources",
       "import": "Import",
-      "importing": "Importing…",
-      "importing_clawhub": "Importing from ClawHub…",
-      "importing_skills_sh": "Importing from Skills.sh…",
-      "importing_github": "Importing from GitHub…",
+      "importing": "Importing...",
+      "importing_clawhub": "Importing from ClawHub...",
+      "importing_skills_sh": "Importing from Skills.sh...",
+      "importing_github": "Importing from GitHub...",
       "name_conflict_hint": " The imported skill's name already exists — delete the existing one before retrying.",
       "fallback_error": "Import failed",
       "cancel": "Cancel",
@@ -341,8 +346,8 @@
     "ready": "Ready to import",
     "into_workspace": "into this workspace.",
     "select_skill": "Select a skill to continue.",
-    "import_button": "Import to Workspace",
-    "importing": "Importing…",
+    "import_button": "Import to workspace",
+    "importing": "Importing...",
     "skill_files_one": "{{count}} file",
     "skill_files_other": "{{count}} files",
     "skill_name_label": "Workspace skill name",
@@ -351,9 +356,7 @@
     "toast_imported": "Skill imported",
     "toast_import_failed": "Failed to import skill",
     "select_all": "Select all ({{count}})",
-    "bulk_ready": "{{count}} skills selected",
-    "bulk_import_button": "Import {{count}} Skills",
-    "bulk_progress": "Importing {{completed}} / {{total}}…",
+    "bulk_progress": "Importing {{completed}} / {{total}}...",
     "bulk_cancel_button": "Cancel",
     "bulk_complete_hint": "Import complete.",
     "bulk_cancelled_hint": "Import cancelled.",
@@ -364,7 +367,6 @@
     "bulk_summary_skipped": "Skipped",
     "bulk_summary_failed": "Failed",
     "conflict_single_title": "A skill with this name already exists",
-    "conflict_bulk_title": "{{count}} skills need a decision",
     "conflict_hint": "Choose whether to overwrite the existing workspace skill, import with a new name, or skip it.",
     "conflict_locked_creator": "This skill was created by {{creator}}. Only the creator can overwrite it from local import; edit it from the Skill detail page if you need to change it.",
     "conflict_locked": "Only the creator can overwrite this skill from local import; edit it from the Skill detail page if you need to change it.",
@@ -375,10 +377,17 @@
     "conflict_overwrite_all": "Overwrite all",
     "conflict_skip_all": "Skip all",
     "conflict_rename_label": "New skill name",
-    "conflict_footer": "{{count}} conflict decisions pending.",
     "conflict_apply_button": "Apply decisions",
     "conflict_missing_resolution": "Choose how to resolve this conflict.",
-    "conflict_name_still_exists": "That name already exists. Choose another name or skip."
+    "conflict_name_still_exists": "That name already exists. Choose another name or skip.",
+    "bulk_ready_one": "{{count}} skill selected",
+    "bulk_ready_other": "{{count}} skills selected",
+    "bulk_import_button_one": "Import {{count}} skill",
+    "bulk_import_button_other": "Import {{count}} skills",
+    "conflict_bulk_title_one": "{{count}} skill needs a decision",
+    "conflict_bulk_title_other": "{{count}} skills need a decision",
+    "conflict_footer_one": "{{count}} conflict decision pending.",
+    "conflict_footer_other": "{{count}} conflict decisions pending."
   },
   "file_tree": {
     "no_files": "No files",

@@ -9,6 +9,7 @@ import {
   isShortcutAllowedForAction,
   parseLegacyShortcut,
   shortcutChordEquals,
+  shortcutMatchesEvent,
   type ShortcutActionId,
   type ShortcutChord,
 } from "./definitions";
@@ -166,14 +167,21 @@ export function getShortcut(actionId: ShortcutActionId): ShortcutChord | null {
   return resolveShortcut(useShortcutStore.getState().overrides, actionId);
 }
 
+/**
+ * Pass the recorded `event` so bindings stored in an older form that the same
+ * keypress would also trigger (an Option chord saved as "©") count as taken.
+ */
 export function findShortcutConflict(
   actionId: ShortcutActionId,
   shortcut: ShortcutChord,
+  event?: KeyboardEvent,
 ): ShortcutActionId | null {
   for (const action of SHORTCUT_ACTIONS) {
+    if (action.id === actionId) continue;
+    const existing = getShortcut(action.id);
     if (
-      action.id !== actionId &&
-      shortcutChordEquals(getShortcut(action.id), shortcut)
+      shortcutChordEquals(existing, shortcut) ||
+      (event !== undefined && shortcutMatchesEvent(existing, event))
     ) {
       return action.id;
     }

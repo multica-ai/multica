@@ -1,0 +1,149 @@
+{
+  "object_kind": "merge_request",
+  "event_type": "merge_request",
+  "user": {
+    "id": 101,
+    "name": "example-merge-bot",
+    "username": "project_200_bot_00000000000000000000000000000000",
+    "avatar_url": "https://secure.gravatar.com/avatar/0000000000000000000000000000000000000000000000000000000000000000?s=80&d=identicon",
+    "email": "[REDACTED]"
+  },
+  "project": {
+    "id": 200,
+    "name": "Example Project",
+    "description": "",
+    "web_url": "https://gitlab.example.com/example-user/example-project",
+    "avatar_url": null,
+    "git_ssh_url": "git@gitlab.example.com:example-user/example-project.git",
+    "git_http_url": "https://gitlab.example.com/example-user/example-project.git",
+    "namespace": "Example User",
+    "visibility_level": 0,
+    "path_with_namespace": "example-user/example-project",
+    "default_branch": "main",
+    "ci_config_path": "",
+    "homepage": "https://gitlab.example.com/example-user/example-project",
+    "url": "git@gitlab.example.com:example-user/example-project.git",
+    "ssh_url": "git@gitlab.example.com:example-user/example-project.git",
+    "http_url": "https://gitlab.example.com/example-user/example-project.git"
+  },
+  "object_attributes": {
+    "assignee_id": null,
+    "author_id": 100,
+    "created_at": "2026-11-01T08:26:40.226Z",
+    "description": null,
+    "draft": false,
+    "head_pipeline_id": 300,
+    "id": 400,
+    "iid": 10,
+    "last_edited_at": null,
+    "last_edited_by_id": null,
+    "merge_commit_sha": "1111111111111111111111111111111111111111",
+    "merge_error": null,
+    "merge_params": {
+      "force_remove_source_branch": true
+    },
+    "merge_status": "can_be_merged",
+    "merge_user_id": null,
+    "merge_when_pipeline_succeeds": false,
+    "milestone_id": null,
+    "source_branch": "feature/example-change",
+    "source_project_id": 200,
+    "squash_commit_sha": null,
+    "state_id": 3,
+    "target_branch": "main",
+    "target_project_id": 200,
+    "time_estimate": 0,
+    "title": "Example merge request",
+    "updated_at": "2026-11-01T09:15:57.549Z",
+    "updated_by_id": null,
+    "prepared_at": "2026-11-01T08:26:40.951Z",
+    "assignee_ids": [],
+    "blocking_discussions_resolved": true,
+    "detailed_merge_status": "not_open",
+    "first_contribution": false,
+    "human_time_change": null,
+    "human_time_estimate": null,
+    "human_total_time_spent": null,
+    "labels": [],
+    "last_commit": {
+      "id": "2222222222222222222222222222222222222222",
+      "message": "Example commit message\n\nCo-Authored-By: Example Contributor <contributor@example.com>\n",
+      "title": "Example commit message",
+      "timestamp": "2026-11-01T11:26:30+03:00",
+      "url": "https://gitlab.example.com/example-user/example-project/-/commit/2222222222222222222222222222222222222222",
+      "author": {
+        "name": "example-user",
+        "email": "[REDACTED]"
+      }
+    },
+    "merged_at": "2026-11-01T09:15:57.652Z",
+    "reviewer_ids": [],
+    "source": {
+      "id": 200,
+      "name": "Example Project",
+      "description": "",
+      "web_url": "https://gitlab.example.com/example-user/example-project",
+      "avatar_url": null,
+      "git_ssh_url": "git@gitlab.example.com:example-user/example-project.git",
+      "git_http_url": "https://gitlab.example.com/example-user/example-project.git",
+      "namespace": "Example User",
+      "visibility_level": 0,
+      "path_with_namespace": "example-user/example-project",
+      "default_branch": "main",
+      "ci_config_path": "",
+      "homepage": "https://gitlab.example.com/example-user/example-project",
+      "url": "git@gitlab.example.com:example-user/example-project.git",
+      "ssh_url": "git@gitlab.example.com:example-user/example-project.git",
+      "http_url": "https://gitlab.example.com/example-user/example-project.git"
+    },
+    "state": "merged",
+    "system": false,
+    "target": {
+      "id": 200,
+      "name": "Example Project",
+      "description": "",
+      "web_url": "https://gitlab.example.com/example-user/example-project",
+      "avatar_url": null,
+      "git_ssh_url": "git@gitlab.example.com:example-user/example-project.git",
+      "git_http_url": "https://gitlab.example.com/example-user/example-project.git",
+      "namespace": "Example User",
+      "visibility_level": 0,
+      "path_with_namespace": "example-user/example-project",
+      "default_branch": "main",
+      "ci_config_path": "",
+      "homepage": "https://gitlab.example.com/example-user/example-project",
+      "url": "git@gitlab.example.com:example-user/example-project.git",
+      "ssh_url": "git@gitlab.example.com:example-user/example-project.git",
+      "http_url": "https://gitlab.example.com/example-user/example-project.git"
+    },
+    "target_branch_protected": true,
+    "time_change": 0,
+    "total_time_spent": 0,
+    "url": "https://gitlab.example.com/example-user/example-project/-/merge_requests/10",
+    "work_in_progress": false,
+    "approval_rules": [],
+    "action": "merge",
+    "actioned_at": "2026-11-01T09:15:57.902Z"
+  },
+  "labels": [],
+  "changes": {
+    "merge_commit_sha": {
+      "previous": null,
+      "current": "1111111111111111111111111111111111111111"
+    },
+    "state_id": {
+      "previous": 1,
+      "current": 3
+    },
+    "updated_at": {
+      "previous": "2026-11-01T08:26:40.969Z",
+      "current": "2026-11-01T09:15:57.549Z"
+    }
+  },
+  "repository": {
+    "name": "Example Project",
+    "url": "git@gitlab.example.com:example-user/example-project.git",
+    "description": "",
+    "homepage": "https://gitlab.example.com/example-user/example-project"
+  }
+}

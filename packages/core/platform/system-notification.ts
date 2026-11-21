@@ -1,13 +1,13 @@
 "use client";
 
+import { paths } from "../paths/paths";
+
 // Native system notification bridge for the WEB app.
 //
 // The desktop app renders OS banners through its Electron main process
 // (`window.desktopAPI.showNotification`); the web app has no such bridge, so it
-// uses the browser Notification API here. `handleInboxNew` (realtime sync) is
-// the single decision point — it already gates on focus + the source
-// workspace's mute preference — and calls `showWebNotification` as the web path
-// when no `desktopAPI` is present.
+// uses the browser Notification API here. Realtime sync checks source-workspace
+// preferences and browser focus; native main owns desktop focus and dedupe.
 //
 // Lives in `packages/core` (not `packages/views`) because the caller
 // (`handleInboxNew`) lives in core and `views` cannot be imported from core
@@ -21,12 +21,40 @@ export interface SystemNotificationPayload {
    * then a no-op rather than routing to the wrong workspace (#3766).
    */
   slug: string;
-  /** Inbox row id — lets the click mark the item read. */
+  /** Stable delivery ID: an inbox row ID or a chat reply's message ID. */
   itemId: string;
   /** `?issue=<…>` selector for the inbox page (issue id, else the item id). */
-  issueKey: string;
+  issueKey?: string;
+  /** Chat alerts open Chat directly, without an inbox item. */
+  chatSessionId?: string;
   title: string;
   body: string;
+}
+
+export function systemNotificationPath(
+  { slug, issueKey, chatSessionId }: Pick<SystemNotificationPayload, "slug" | "issueKey" | "chatSessionId">,
+): string | null {
+  if (!slug) return null;
+  if (chatSessionId) return `${paths.workspace(slug).chat()}?session=${encodeURIComponent(chatSessionId)}`;
+  return issueKey ? `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}` : null;
+}
+
+function getNativeNotificationAPI() {
+  return (globalThis as unknown as {
+    desktopAPI?: { showNotification?: (value: SystemNotificationPayload) => void };
+  }).desktopAPI;
+}
+
+/** Native main owns app-wide focus; Electron's DOM focus can remain stale. */
+export function systemNotificationSuppressedByFocus(): boolean {
+  return !getNativeNotificationAPI()?.showNotification &&
+    typeof document !== "undefined" && document.hasFocus();
+}
+
+export function showSystemNotification(payload: SystemNotificationPayload): void {
+  const desktopAPI = getNativeNotificationAPI();
+  if (desktopAPI?.showNotification) desktopAPI.showNotification(payload);
+  else showWebNotification(payload);
 }
 
 type ClickHandler = (payload: SystemNotificationPayload) => void;
@@ -38,7 +66,7 @@ let clickHandler: ClickHandler | null = null;
 
 /**
  * Register how a clicked web notification routes (focus + navigate to the
- * source workspace's inbox, focused on the item). Called once by the web app
+ * source workspace's inbox or chat). Called once by the web app
  * shell; pass `null` to unregister. Desktop does NOT use this — it routes
  * through its own Electron IPC bridge (`onInboxOpen`).
  */
@@ -88,9 +116,9 @@ export async function requestWebNotificationPermission(): Promise<WebNotificatio
 }
 
 /**
- * Show a native browser notification for a new inbox item. No-op unless the
+ * Show a native browser notification. No-op unless the
  * Notification API is supported AND permission is "granted" — the caller
- * (`handleInboxNew`) owns the WHETHER (focus + mute gating); this owns only the
+ * owns focus and mute checks; this owns only the
  * rendering. Clicking the banner focuses the tab and routes via the registered
  * click handler.
  */
@@ -101,8 +129,7 @@ export function showWebNotification(payload: SystemNotificationPayload): void {
   try {
     notification = new ctor(payload.title, {
       body: payload.body,
-      // Collapse repeat banners for the same inbox row (e.g. a reconnect
-      // replays the `inbox:new` event).
+      // Collapse repeated delivery of the same inbox item or chat reply.
       tag: payload.itemId,
     });
   } catch {

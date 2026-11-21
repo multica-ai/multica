@@ -39,6 +39,7 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
 import { useCommentSelectStore } from "@/data/comment-select-store";
+import { resolveTimelineHighlight } from "@/lib/inbox-display";
 
 interface Props {
   issue: Issue;
@@ -82,6 +83,7 @@ export function TimelineList({
   highlightCommentId,
   highlightNonce,
 }: Props) {
+  const { t } = useT("issues");
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to comment cards / chip rows / reactions normally.
@@ -129,7 +131,8 @@ export function TimelineList({
   // Gates single-shot per (commentId, nonce) tuple. Re-tap from inbox
   // bumps the nonce → ref no longer matches → effect re-fires.
   const lastStampRef = useRef<string | null>(null);
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState<{ id: string; stamp: string } | null>(null);
+  const highlightedId = highlight?.id ?? null;
 
   // ── "New since last view" divider ─────────────────────────────────────
   // Snapshot the last-viewed timestamp ONCE on mount. Subsequent WS
@@ -149,17 +152,30 @@ export function TimelineList({
   }, [data, lastViewedSnapshot]);
   const dividerScrolledPastRef = useRef(false);
 
+  // A cached timeline can open without the target and gain it on refresh,
+  // possibly as a reply that leaves the row count unchanged, so the
+  // highlight is consumed only once its row exists.
+  const highlightTarget = useMemo(
+    () =>
+      highlightCommentId && entries
+        ? resolveTimelineHighlight(entries, highlightCommentId)
+        : null,
+    [entries, highlightCommentId],
+  );
+
   useEffect(() => {
-    if (!highlightCommentId || data.length === 0) return;
+    if (!highlightCommentId || !highlightTarget) return;
     const stamp = `${highlightCommentId}:${highlightNonce ?? ""}`;
     if (lastStampRef.current === stamp) return;
     lastStampRef.current = stamp;
+    setHighlight({ id: highlightTarget, stamp });
+  }, [highlightCommentId, highlightNonce, highlightTarget]);
 
-    setHighlightedId(highlightCommentId);
-
-    const fade = setTimeout(() => setHighlightedId(null), HIGHLIGHT_HOLD_MS);
+  useEffect(() => {
+    if (!highlight) return;
+    const fade = setTimeout(() => setHighlight(null), HIGHLIGHT_HOLD_MS);
     return () => clearTimeout(fade);
-  }, [highlightCommentId, highlightNonce, data.length]);
+  }, [highlight]);
 
   // ── New-comment-while-reading chip ────────────────────────────────────
   // After landing, if WS appends new entries while the user is NOT at the
@@ -295,7 +311,7 @@ export function TimelineList({
       <IssueReactionRow issue={issue} />
       <View className="px-4 pt-4 pb-2 border-t border-border">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-          Activity
+          {t("detail.activity")}
         </Text>
       </View>
       {timelineLoading && (!entries || entries.length === 0) ? (
@@ -469,10 +485,7 @@ function NewCommentChip({
       onPress={onPress}
       className="absolute bottom-3 self-center px-3.5 py-1.5 rounded-full bg-primary active:opacity-80 flex-row items-center gap-1.5"
       accessibilityRole="button"
-      accessibilityLabel={t(
-        count === 1 ? "jump_a11y_one" : "jump_a11y_other",
-        { count },
-      )}
+      accessibilityLabel={t("jump_a11y", { count })}
       style={{
         // shadow comes from system, not Tailwind — keeps the chip readable
         // against either light or dark timeline content beneath.
@@ -485,7 +498,7 @@ function NewCommentChip({
     >
       <Ionicons name="arrow-down" size={14} color={fg} />
       <Text className="text-xs font-semibold text-primary-foreground">
-        {count} new
+        {t("jump_new", { count })}
       </Text>
     </Pressable>
   );

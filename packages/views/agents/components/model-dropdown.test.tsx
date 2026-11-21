@@ -70,7 +70,7 @@ function renderDropdown(props: Partial<ComponentProps<typeof ModelDropdown>> = {
 
 function openDropdown(container: HTMLElement) {
   const trigger = container.querySelector<HTMLButtonElement>(
-    '[data-slot="popover-trigger"]',
+    '[data-trigger="popover"]',
   );
   if (!trigger) throw new Error("model dropdown trigger not rendered");
   fireEvent.click(trigger);
@@ -86,6 +86,18 @@ describe("ModelDropdown", () => {
     discovery = async () => CODEX_MODELS;
     mockRefreshRuntimeModels.mockReset();
     discoveryKey += 1;
+  });
+
+  it("keeps an overlong model id ellipsized inside the trigger instead of overflowing", () => {
+    // Regression: the trigger label sits in a flex row; without min-w-0 the
+    // flex item refuses to shrink below its content width, so hex-encoded
+    // model ids (e.g. Claude Code custom models) stretched the picker panel.
+    const longModel = `anthropic/claude-ccr-h${"3656e6f76612f646565707365656b".repeat(8)}`;
+    const { container } = renderDropdown({ value: longModel });
+    const trigger = container.querySelector('[data-trigger="popover"]');
+    const label = trigger?.querySelector("span.truncate");
+    expect(label?.textContent).toBe(longModel);
+    expect(label?.className).toContain("min-w-0");
   });
 
   it("offers the gpt-5.6 Codex models and submits their canonical IDs", async () => {

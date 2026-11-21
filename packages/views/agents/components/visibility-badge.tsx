@@ -7,9 +7,8 @@ import { useT } from "../../i18n";
 
 /**
  * Read-only visibility badge — used wherever a user should *see* an agent's
- * visibility (Personal / Workspace) without being able to change it. Replaces
- * the interactive `<VisibilityPicker>` for non-managers on the detail page,
- * and is also the canonical badge for hover cards and list rows.
+ * visibility (Personal / Workspace) without being able to change it: the
+ * canonical badge for the detail page, hover cards, and list rows.
  *
  * `compact` drops the text label and shows just the icon — for tight spaces
  * like the agent table where the column header already labels the field.

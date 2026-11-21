@@ -102,6 +102,32 @@ describe("duplicate access", () => {
       }).permissionScope,
     ).toBe("workspace");
   });
+
+  it("starts the copy as Only me when the plan cannot add a member list", () => {
+    const source = sourceAgent({
+      permission_mode: "public_to",
+      invocation_targets: [
+        { target_type: "member", target_id: "member-1" },
+        { target_type: "team", target_id: "team-1" },
+      ],
+    });
+    const duplicate = buildDuplicateDraft(source, {
+      runtimes: [CODEX_RUNTIME],
+      currentUserId: "user-1",
+      fallbackRuntimeId: "runtime-1",
+      nameSuffix: " copy",
+      canAddInvocationMembers: false,
+    });
+    expect(duplicate).toMatchObject({ permissionScope: "private", memberIds: new Set(), teamIds: new Set() });
+    expect(buildInvocationTargets(duplicate)).toEqual([]);
+    // Workspace-wide access is free, so it is copied either way.
+    expect(
+      deriveDuplicateAccess(
+        { permission_mode: "public_to", invocation_targets: [{ target_type: "workspace", target_id: null }] },
+        false,
+      ).permissionScope,
+    ).toBe("workspace");
+  });
 });
 
 describe("agent conversation starters", () => {

@@ -9,6 +9,7 @@ import {
   type LinkClickIntent,
   type NavigationAdapter,
 } from "@multica/views/navigation";
+import { useT } from "@multica/views/i18n";
 import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 /**
@@ -42,6 +43,7 @@ function openInBrowser(
 function useContentLinkHandler(
   navigate: ReturnType<typeof useNavigate>,
   runtimeConfig: typeof window.desktopAPI.runtimeConfig,
+  issueWindowTitle: string,
 ) {
   useEffect(() => {
     const handler = (e: Event) => {
@@ -58,7 +60,7 @@ function useContentLinkHandler(
           // thing the adapter's openInNewTab produces.
           void window.desktopAPI.openIssueWindow({
             path: issuePath.path,
-            title: "Issue",
+            title: issueWindowTitle,
           });
           return;
         }
@@ -69,7 +71,7 @@ function useContentLinkHandler(
     };
     window.addEventListener("multica:navigate", handler);
     return () => window.removeEventListener("multica:navigate", handler);
-  }, [navigate, runtimeConfig]);
+  }, [navigate, runtimeConfig, issueWindowTitle]);
 }
 
 /**
@@ -87,6 +89,9 @@ export function IssueWindowNavigationProvider({
   const navigate = useNavigate();
   const runtimeConfig = window.desktopAPI.runtimeConfig;
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const { t } = useT("layout");
+  // Seed title for a new issue window; its page replaces it once it loads.
+  const issueWindowTitle = t(($) => $.tab.issue);
 
   useEffect(() => {
     // Both freeze observers need the route: main for a hang this window never
@@ -102,7 +107,7 @@ export function IssueWindowNavigationProvider({
     });
   }, [currentPath]);
 
-  useContentLinkHandler(navigate, runtimeConfig);
+  useContentLinkHandler(navigate, runtimeConfig, issueWindowTitle);
 
   const adapter = useMemo<NavigationAdapter>(() => {
     // Another issue opens in place; any other page goes to the browser, the
@@ -126,7 +131,7 @@ export function IssueWindowNavigationProvider({
       openInNewTab: (path, title) => {
         void window.desktopAPI.openIssueWindow({
           path,
-          title: title ?? "Issue",
+          title: title?.trim() || issueWindowTitle,
         });
       },
       getShareableUrl: (path) =>
@@ -138,6 +143,7 @@ export function IssueWindowNavigationProvider({
     location.hash,
     navigate,
     runtimeConfig,
+    issueWindowTitle,
   ]);
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;

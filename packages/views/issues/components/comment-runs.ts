@@ -263,6 +263,23 @@ export function orderTimelineWithRuns(
   });
 }
 
+/**
+ * The rows an open thread shows. Folded behind the reply that resolved it
+ * (`foldedTo`), only that reply stays, with any run still working on the root
+ * or on it; otherwise every reply and run, in reading order.
+ */
+export function orderVisibleThreadRows(
+  root: TimelineEntry,
+  replies: readonly TimelineEntry[],
+  runs: readonly CommentRun[],
+  foldedTo: string | null,
+): (TimelineEntry | ThreadRunSlot)[] {
+  if (!foldedTo) return orderThreadWithRuns(root, replies, runs);
+  const resolution = replies.find((reply) => reply.id === foldedTo);
+  return orderThreadWithRuns(root, resolution ? [resolution] : [], runs.filter((run) => !run.hasReply
+    && (run.anchorCommentId === root.id || run.anchorCommentId === foldedTo)));
+}
+
 /** A run's slot in a thread. */
 export interface ThreadRunSlot {
   run: CommentRun;

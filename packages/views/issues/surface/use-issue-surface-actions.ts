@@ -58,24 +58,26 @@ export function useIssueSurfaceActions({
       updates: Partial<UpdateIssueRequest>,
       options?: IssueSurfaceMutationOptions,
     ) => {
-      updateIssueMutation.mutate(
-        { id: issueId, ...updates },
-        {
-          onSuccess: (issue) => options?.onSuccess?.(issue),
-          onError: (err) => {
-            toast.error(
-              errorCode(err) === "revision_conflict"
-                ? tIssues(($) => $.revision.conflict)
-                : err instanceof Error && err.message
-                ? err.message
-                : (options?.errorMessage ??
-                    t(($) => $.detail.toast_move_issue_failed)),
-            );
-            options?.onError?.(err);
+      // Keep UI callbacks observer-scoped; error feedback belongs to the request.
+      void updateIssueMutation
+        .mutateAsync(
+          { id: issueId, ...updates },
+          {
+            onSuccess: (issue) => options?.onSuccess?.(issue),
+            onError: (err) => options?.onError?.(err),
+            onSettled: () => options?.onSettled?.(),
           },
-          onSettled: () => options?.onSettled?.(),
-        },
-      );
+        )
+        .catch((err: unknown) => {
+          toast.error(
+            errorCode(err) === "revision_conflict"
+              ? tIssues(($) => $.revision.conflict)
+              : err instanceof Error && err.message
+              ? err.message
+              : (options?.errorMessage ??
+                  t(($) => $.detail.toast_move_issue_failed)),
+          );
+        });
     },
     [t, tIssues, updateIssueMutation],
   );
@@ -132,7 +134,8 @@ export function useIssueSurfaceActions({
           errorMessage: t(($) => $.detail.toast_move_issue_failed),
           ...options,
         }),
-      batchUpdate: (issueIds, updates) => batchUpdateMutation.mutateAsync({ ids: issueIds, updates }),
+      batchUpdate: (issueIds, updates, ops) =>
+        batchUpdateMutation.mutateAsync({ ids: issueIds, updates, ...ops }),
       batchDelete: async (issueIds) => {
         await batchDeleteMutation.mutateAsync(issueIds);
       },

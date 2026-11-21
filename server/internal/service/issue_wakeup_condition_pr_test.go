@@ -21,6 +21,10 @@ type prConditionTx struct {
 	pgx.Tx
 	issue     pgtype.UUID
 	prs       [][]any
+	workspace pgtype.UUID
+	hasVCS    bool
+	vcsErr    error
+	vcsChecks int
 	queryErr  error
 	lastError pgtype.Text
 	next      pgtype.Timestamptz
@@ -41,6 +45,28 @@ func (tx *prConditionTx) Query(_ context.Context, sql string, args ...any) (pgx.
 		return nil, fmt.Errorf("unexpected PR scope: %s %v", sql, args)
 	}
 	return &sliceRows{rows: tx.prs}, tx.queryErr
+}
+
+// QueryRow answers whether the workspace has a self-hosted VCS connection.
+func (tx *prConditionTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if !strings.Contains(sql, "FROM vcs_connection") || len(args) != 1 || args[0] != tx.workspace {
+		return prConditionRow{err: fmt.Errorf("unexpected VCS connection scope: %s %v", sql, args)}
+	}
+	tx.vcsChecks++
+	return prConditionRow{value: tx.hasVCS, err: tx.vcsErr}
+}
+
+type prConditionRow struct {
+	value bool
+	err   error
+}
+
+func (r prConditionRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	*dest[0].(*bool) = r.value
+	return nil
 }
 
 func (tx *prConditionTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -107,6 +133,50 @@ func TestWakeupConditionPREvaluation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Without the snapshot client an unlinked checks rule is blocked by the
+// missing client only when no self-hosted VCS PR could be linked instead;
+// otherwise the missing link is what to fix. Conflicts need snapshots
+// whichever PR is linked, so they keep the snapshot diagnostic.
+func TestWakeupConditionPRUnlinkedDiagnostic(t *testing.T) {
+	for _, event := range []string{"checks_finished", "conflicts", "merged"} {
+		for _, available := range []bool{false, true} {
+			for _, hasVCS := range []bool{false, true} {
+				// merged needs no snapshots; only checks without the client
+				// asks whether a VCS PR could be linked.
+				wantErr, wantChecks := errPRNotLinked, 0
+				switch {
+				case event == "checks_finished" && !available:
+					wantChecks = 1
+					if !hasVCS {
+						wantErr = errPRSnapshotsUnavailable
+					}
+				case event == "conflicts" && !available:
+					wantErr = errPRSnapshotsUnavailable
+				}
+				t.Run(fmt.Sprintf("%s/snapshots=%t/vcs=%t", event, available, hasVCS), func(t *testing.T) {
+					s := &IssueWakeupService{Tasks: &TaskService{PRSnapshotsEnabled: available}}
+					w := db.IssueWakeup{IssueID: dbid.NewV7(), WorkspaceID: dbid.NewV7(), Condition: condition(t, map[string]any{"type": "pull_request", "event": event})}
+					tx := &prConditionTx{issue: w.IssueID, workspace: w.WorkspaceID, hasVCS: hasVCS}
+					met, _, _, err := s.evaluateCondition(context.Background(), tx, db.New(tx), w)
+					if met || !errors.Is(err, wantErr) || tx.vcsChecks != wantChecks {
+						t.Fatalf("met=%t err=%v connection lookups=%d; want unmet with %v and %d lookups", met, err, tx.vcsChecks, wantErr, wantChecks)
+					}
+				})
+			}
+		}
+	}
+	t.Run("lookup failure", func(t *testing.T) {
+		s := &IssueWakeupService{Tasks: &TaskService{}}
+		w := db.IssueWakeup{IssueID: dbid.NewV7(), WorkspaceID: dbid.NewV7(), Condition: condition(t, map[string]any{"type": "pull_request", "event": "checks_finished"})}
+		lookupErr := errors.New("connection lookup failed")
+		tx := &prConditionTx{issue: w.IssueID, workspace: w.WorkspaceID, vcsErr: lookupErr}
+		_, _, _, err := s.evaluateCondition(context.Background(), tx, db.New(tx), w)
+		if !errors.Is(err, lookupErr) || conditionDiagnostic(err) {
+			t.Fatalf("err=%v; want the lookup failure, not a diagnostic", err)
+		}
+	})
 }
 
 func TestConditionNewlyMet(t *testing.T) {

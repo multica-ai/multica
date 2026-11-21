@@ -29,30 +29,60 @@
 
 import {
   Download,
+  Eye,
+  Loader2,
   Link as LinkIcon,
   Maximize2,
   Trash2,
 } from "@multica/ui/icons";
-import type { ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
+import { autoUpdate, computePosition, flip, hide, offset, shift } from "@floating-ui/dom";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
-import { attachmentIdFromStorageURL } from "@multica/core/types/attachment-url";
+import {
+  attachmentDownloadPath,
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
+} from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
 import { DeferredTooltip } from "../common/deferred-tooltip";
+import {
+  ContextMenuScopeSubmenu,
+  findContextMenuScope,
+  useContextMenuScope,
+  useScopeSubmenuFocus,
+  type ResolvedContextMenuScope,
+} from "../common/context-menu-scope";
+import { dropdownPrimitives } from "../common/menu-primitives";
+import { CLOSED_ROW_MENU, yieldsToTextMenu, type RowMenuState } from "../common/point-menu";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
 import { usePreviewSequence } from "./preview-sequence-context";
+import { useImageThumbnails } from "./image-thumbnails-context";
+import { OriginalImageMenu } from "./original-image-menu";
 import {
   isObjectURL,
+  useAttachmentThumbnailURL,
   useResignedInlineMedia,
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
+import { imageDimensions } from "./utils/image-metadata";
 import "./styles/attachment.css";
 
 // Public API
@@ -121,6 +151,17 @@ interface Normalized {
   height?: number;
 }
 
+function recordImageFields(
+  record: AttachmentRecord | undefined,
+): Pick<Normalized, "width" | "height"> {
+  if (!record) return {};
+  const dims = imageDimensions(record);
+  return {
+    width: dims?.width,
+    height: dims?.height,
+  };
+}
+
 function normalize(
   input: AttachmentInput,
   resolve: (url: string) => AttachmentRecord | undefined,
@@ -137,9 +178,12 @@ function normalize(
       attachmentId: input.attachment.id,
       record: input.attachment,
       uploading: false,
+      ...recordImageFields(input.attachment),
     };
   }
   const record = input.url ? resolve(input.url) : undefined;
+  const fromRecord = recordImageFields(record);
+  const ownSize = input.width !== undefined || input.height !== undefined;
   return {
     filename: input.filename || record?.filename || "",
     contentType: input.contentType || record?.content_type || "",
@@ -170,8 +214,8 @@ function normalize(
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
-    width: input.width,
-    height: input.height,
+    width: ownSize ? input.width : fromRecord.width,
+    height: ownSize ? input.height : fromRecord.height,
   };
 }
 
@@ -211,8 +255,8 @@ function absolutizeMediaURL(rawUrl: string): string {
 // for rendering but must not replace durable Markdown references.
 //
 // Use known public/CDN URLs directly only when cdn_signed is false; unsigned URLs
-// on a private CDN fail even when the domain matches. Local /uploads paths remain
-// valid after origin normalization. Otherwise prefer the server's markdown_url,
+// on a private CDN fail even when the domain matches. Historical local uploads
+// use the authenticated API. Otherwise prefer the server's markdown_url,
 // then legacy storage URLs, then the original input.
 function pickInlineMediaURL(
   record: AttachmentRecord,
@@ -227,17 +271,11 @@ function pickInlineMediaURL(
   ) {
     return dl;
   }
+  if (attachmentIdFromLocalUploadURL(record.url)) return attachmentDownloadPath(record.id);
   if (!cdnSigned && storageURLMatchesCdnDomain(record.url, cdnDomain)) return record.url;
-  if (isSiteRelativeLocalUploadURL(record.url)) return record.url;
   if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
   return fallback;
-}
-
-function isSiteRelativeLocalUploadURL(rawURL: string): boolean {
-  if (!rawURL || !rawURL.startsWith("/")) return false;
-  const path = rawURL.split(/[?#]/, 1)[0] ?? "";
-  return path === "/uploads" || path.startsWith("/uploads/");
 }
 
 function storageURLMatchesCdnDomain(rawURL: string, cdnDomain: string): boolean {
@@ -281,6 +319,8 @@ export function Attachment({
   badge,
   className,
 }: AttachmentProps) {
+  const { t } = useT("editor");
+  const copyLink = useCopyAttachmentLink();
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
   const cdnSigned = useConfigStore((s) => s.cdnSigned);
@@ -296,6 +336,26 @@ export function Attachment({
     (state.filename || state.contentType
       ? getPreviewKind(state.contentType, state.filename)
       : null);
+  // Where the surface asks for thumbnails, a large image paints the server's
+  // downscaled copy and never loads its original; a failed thumbnail falls
+  // back to the original.
+  const preferThumbnails = useImageThumbnails();
+  const [failedThumbnail, setFailedThumbnail] = useState<string | null>(null);
+  const thumbnailPath = state.record?.thumbnail_url ?? "";
+  const wantsThumbnail =
+    kind === "image" &&
+    preferThumbnails &&
+    !editable &&
+    !state.uploading &&
+    !!state.attachmentId &&
+    !!thumbnailPath &&
+    failedThumbnail !== thumbnailPath;
+  const thumbnail = useAttachmentThumbnailURL(
+    state.attachmentId ?? "",
+    thumbnailPath,
+    wantsThumbnail,
+  );
+  const showThumbnail = wantsThumbnail && !thumbnail.failed;
   // The picked URL may still be the auth-gated API endpoint (reopened drafts
   // whose persisted record has no signed download_url). Upgrade it to a
   // freshly signed URL on clients that can't load the endpoint natively, or —
@@ -306,14 +366,18 @@ export function Attachment({
     state.attachmentId,
     state.url,
     kind === "image",
+    { enabled: !showThumbnail },
   );
+  const [imageMenu, setImageMenu] = useState<RowMenuState>(CLOSED_ROW_MENU);
+  const [outerScope, setOuterScope] = useState<ResolvedContextMenuScope["submenu"]>(null);
+  const outerScopeFocus = useScopeSubmenuFocus(outerScope);
   // Object URLs are session-local, so anything that hands a URL to the user or
   // to another surface keeps the durable pick instead.
   const shareUrl = isObjectURL(mediaUrl) ? state.url : mediaUrl;
 
   // Identity this attachment has in the surrounding surface's sequence: the
-  // attachment id once the URL resolves to a record, otherwise the URL exactly
-  // as written in the body — the same pair `collectAttachmentSequence` keys on.
+  // attachment id once the URL resolves to a record, otherwise the URL as the
+  // renderer received it — the same pair `collectAttachmentSequence` keys on.
   const sequenceKey =
     state.attachmentId ?? (attachment.kind === "url" ? attachment.url : "");
 
@@ -336,7 +400,7 @@ export function Attachment({
     if (mediaUrl) {
       preview.tryOpen({
         kind: "url",
-        url: mediaUrl,
+        url: isObjectURL(mediaUrl) ? state.url : mediaUrl,
         filename: state.filename,
         // This dispatcher has already decided what the slot is — from the
         // call site's `forceKind`, or from a content-type the modal's
@@ -354,19 +418,60 @@ export function Attachment({
     // its attachment id, so re-sign it instead of opening the bare URL,
     // which a signed CDN rejects outside the app.
     const attachmentId =
-      state.attachmentId ?? attachmentIdFromStorageURL(shareUrl, cdnDomain);
+      state.attachmentId ??
+      attachmentIdFromDownloadURL(shareUrl) ??
+      attachmentIdFromLocalUploadURL(shareUrl) ??
+      attachmentIdFromStorageURL(shareUrl, cdnDomain);
     if (attachmentId) {
-      download(attachmentId);
-      return;
+      return download(attachmentId);
     }
-    if (shareUrl) openByUrl(shareUrl);
+    if (shareUrl) return openByUrl(shareUrl);
   };
 
+  const canPreview =
+    kind === "image"
+      ? !!mediaUrl
+      : !!shareUrl && canOpenPreview(kind, !!state.attachmentId);
+  const canDownload = !!shareUrl || !!state.attachmentId;
+  // Read-only content offers these on right-click too; an editor keeps its
+  // edit menu.
+  const scopeRef = useContextMenuScope(() => {
+    if (editable || state.uploading) return null;
+    const contentActions = [
+      canPreview && {
+        key: "preview",
+        icon: <Eye className="size-3.5" />,
+        label: t(($) => $.attachment.preview),
+        onSelect: openPreview,
+      },
+      canDownload && {
+        key: "download",
+        icon: <Download className="size-3.5" />,
+        label: t(($) => $.image.download),
+        onSelect: () => void handleDownload(),
+      },
+      shareUrl && {
+        key: "copy-link",
+        icon: <LinkIcon className="size-3.5" />,
+        label: t(($) => $.image.copy_link),
+        onSelect: () => void copyLink(shareUrl),
+      },
+    ].filter((item) => !!item);
+    return { contentActions };
+  }, { content: !editable });
+
   if (kind === "image") {
+    const openImageMenu = (event: MouseEvent<HTMLElement>) => {
+      if (yieldsToTextMenu(event.target as Element)) return;
+      event.preventDefault();
+      // The comment around the image, read when the menu opens.
+      setOuterScope(findContextMenuScope(event.currentTarget.parentElement).submenu);
+      setImageMenu({ open: true, point: { x: event.clientX, y: event.clientY } });
+    };
     return (
       <>
         <ImageAttachmentView
-          src={mediaUrl}
+          src={showThumbnail ? thumbnail.url : mediaUrl}
           linkUrl={shareUrl}
           alt={state.filename}
           uploading={state.uploading}
@@ -377,8 +482,28 @@ export function Attachment({
           onView={openPreview}
           onDownload={handleDownload}
           onDelete={onDelete}
+          onError={showThumbnail ? () => setFailedThumbnail(thumbnailPath) : undefined}
+          onContextMenu={showThumbnail ? openImageMenu : undefined}
+          scopeRef={scopeRef}
           className={cn(layout === "card" && "image-standalone", className)}
         />
+        {showThumbnail && imageMenu.point && (
+          <OriginalImageMenu
+            attachmentId={state.attachmentId!}
+            link={shareUrl}
+            menu={imageMenu}
+            onOpenChange={(open) => setImageMenu((current) => ({ ...current, open }))}
+            onView={openPreview}
+            onDownload={() => void handleDownload()}
+            trailing={
+              <ContextMenuScopeSubmenu
+                submenu={outerScopeFocus.submenu}
+                primitives={dropdownPrimitives}
+              />
+            }
+            finalFocus={outerScopeFocus.finalFocus}
+          />
+        )}
         {preview.modal}
       </>
     );
@@ -392,8 +517,9 @@ export function Attachment({
           contentType={state.contentType}
           sizeBytes={state.record?.size_bytes}
           // Same gate as the row's Eye button: text kinds need the record.
-          canPreview={!!shareUrl && canOpenPreview(kind, !!state.attachmentId)}
-          canDownload={!!shareUrl || !!state.attachmentId}
+          canPreview={canPreview}
+          canDownload={canDownload}
+          scopeRef={scopeRef}
           uploading={state.uploading}
           badge={badge}
           onPreview={openPreview}
@@ -416,10 +542,22 @@ export function Attachment({
         onPreview={openPreview}
         onDownload={handleDownload}
         onDelete={editable ? onDelete : undefined}
+        scopeRef={scopeRef}
       />
       {preview.modal}
     </>
   );
+}
+
+function useCopyAttachmentLink() {
+  const { t } = useT("editor");
+  return async (url: string) => {
+    if (await copyText(url)) {
+      toast.success(t(($) => $.image.link_copied));
+    } else {
+      toast.error(t(($) => $.image.copy_link_failed));
+    }
+  };
 }
 
 // ImageAttachmentView — inline image with hover toolbar
@@ -445,8 +583,14 @@ interface ImageAttachmentViewProps {
   editable?: boolean;
   selected?: boolean;
   onView: () => void;
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
+  /** Called when `src` fails to load. */
+  onError?: () => void;
+  /** Replaces the host's right-click menu on the image. */
+  onContextMenu?: (event: MouseEvent<HTMLElement>) => void;
+  /** Registers the image with the right-click menu. */
+  scopeRef?: (element: HTMLElement | null) => void;
   className?: string;
 }
 
@@ -462,17 +606,85 @@ function ImageAttachmentView({
   onView,
   onDownload,
   onDelete,
+  onError,
+  onContextMenu,
+  scopeRef,
   className,
 }: ImageAttachmentViewProps) {
   const { t } = useT("editor");
-
-  const handleCopyLink = async () => {
-    if (await copyText(linkUrl)) {
-      toast.success(t(($) => $.image.link_copied));
-    } else {
-      toast.error(t(($) => $.image.copy_link_failed));
-    }
+  const copyLink = useCopyAttachmentLink();
+  const handleCopyLink = () => copyLink(linkUrl);
+  const figureRef = useRef<HTMLSpanElement>(null);
+  const toolbarRef = useRef<HTMLSpanElement>(null);
+  const [toolbarActivation, setToolbarActivation] = useState<"hover-or-focus" | "touch" | null>(null);
+  const showToolbar = () => setToolbarActivation((activation) => activation ?? "hover-or-focus");
+  const hideToolbarIfIdle = (event?: "pointerleave" | "blur") => {
+    const figure = figureRef.current;
+    if (!figure) return;
+    const hovered = event !== "pointerleave" && figure.matches(":hover");
+    const keyboardFocused = event !== "blur" && figure.querySelector(":focus-visible") !== null;
+    setToolbarActivation((activation) => {
+      // A touch tap emits pointerleave as soon as the finger lifts.
+      if (activation === "touch") return event === "blur" ? null : activation;
+      return hovered || keyboardFocused ? activation : null;
+    });
   };
+  // Chromium can omit pointerleave when the hovered download button becomes disabled.
+  const { downloading, handleDownload } = useAttachmentDownloadState(() =>
+    onDownload()?.finally(hideToolbarIfIdle),
+  );
+  const hasToolbar = !uploading && !!src;
+  const toolbarOpen = hasToolbar && (toolbarActivation !== null || downloading);
+
+  useEffect(() => {
+    const figure = figureRef.current;
+    if (toolbarActivation !== "touch" || !figure) return;
+
+    const onOutsidePointerDown = (event: PointerEvent) => {
+      if (!event.composedPath().includes(figure)) {
+        setToolbarActivation((activation) => activation === "touch" ? null : activation);
+      }
+    };
+    const ownerDocument = figure.ownerDocument;
+    ownerDocument.addEventListener("pointerdown", onOutsidePointerDown, true);
+    return () => ownerDocument.removeEventListener("pointerdown", onOutsidePointerDown, true);
+  }, [toolbarActivation]);
+
+  useEffect(() => {
+    const figure = figureRef.current;
+    const toolbar = toolbarRef.current;
+    if (!toolbarOpen || !figure || !toolbar) return;
+
+    const boundary = { padding: 4, altBoundary: true };
+    let active = true;
+    toolbar.dataset.placement = "pending";
+    const cleanup = autoUpdate(figure, toolbar, () => {
+      void computePosition(figure, toolbar, {
+        strategy: "fixed",
+        placement: "top",
+        middleware: [
+          offset(4),
+          flip({ ...boundary, crossAxis: false }),
+          shift(({ rects }) => ({
+            ...boundary,
+            // After trying both sides, a tall figure can spare room for reachable controls.
+            crossAxis: rects.reference.height >= rects.floating.height * 2,
+          })),
+          hide(),
+        ],
+      }).then(({ x, y, placement, middlewareData }) => {
+        if (!active) return;
+        toolbar.style.setProperty("--image-toolbar-x", `${x}px`);
+        toolbar.style.setProperty("--image-toolbar-y", `${y}px`);
+        toolbar.dataset.placement = middlewareData.hide?.referenceHidden ? "pending" : placement;
+      });
+    });
+    return () => {
+      active = false;
+      cleanup();
+      delete toolbar.dataset.placement;
+    };
+  }, [toolbarOpen]);
 
   // Click on figure opens the preview only in non-editor / non-uploading
   // surfaces — inside the editor we let ProseMirror own the click for
@@ -481,32 +693,75 @@ function ImageAttachmentView({
   // cursor: zoom-in }` keys off this same flag for the cursor affordance.
   const clickable = !editable && !uploading;
 
+  // An image that has not loaded has no size of its own (the figure shrinks
+  // to it), so its box is reserved up front: from its pixel size when known,
+  // otherwise as a fixed-ratio placeholder. Once anything has painted the box
+  // follows the image.
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const loaded = !!src && loadedSrc === src;
+  const imgRef = useCallback((img: HTMLImageElement | null) => {
+    if (img?.complete && img.naturalWidth > 0) setLoadedSrc(src);
+  }, [src]);
+  const sized = !!width && !!height;
+  const pending = !loaded && !sized && !uploading;
+  const sizeStyle = sized
+    ? ({
+        "--image-width": `${width}px`,
+        "--image-aspect": `${width! / height!}`,
+      } as CSSProperties)
+    : undefined;
+
   // DOM mirrors the original ReadonlyImage (span-only chain so it stays
   // valid HTML5 when rendered inside a markdown <p>). In editor surfaces
   // the NodeViewWrapper still emits its own outer .image-node div around
   // this — the duplicate `image-node` class is harmless.
   return (
-    <span className="image-node">
+    <span ref={scopeRef} className="image-node" onContextMenu={onContextMenu}>
       <span
+        ref={figureRef}
         className={cn(
           "image-figure",
           selected && editable && "image-selected",
           className,
         )}
         data-clickable={clickable || undefined}
+        data-sized={sized || undefined}
+        data-pending={pending || undefined}
+        style={sizeStyle}
         contentEditable={false}
         onClick={clickable ? onView : undefined}
+        onPointerEnter={(event) => {
+          if (!editable || event.pointerType !== "touch") showToolbar();
+        }}
+        onPointerUp={(event) => {
+          if (editable && hasToolbar && event.pointerType === "touch") setToolbarActivation("touch");
+        }}
+        onPointerLeave={() => hideToolbarIfIdle("pointerleave")}
+        onFocus={showToolbar}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) hideToolbarIfIdle("blur");
+        }}
       >
         <img
+          ref={imgRef}
           src={src || undefined}
           alt={alt}
           width={width}
           height={height}
+          loading="lazy"
+          decoding="async"
+          data-loaded={loaded || undefined}
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
+          onLoad={() => setLoadedSrc(src)}
+          onError={() => {
+            setLoadedSrc(src);
+            onError?.();
+          }}
         />
-        {!uploading && src && (
+        {hasToolbar && (
           <span
+            ref={toolbarRef}
             className="image-toolbar"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
@@ -522,8 +777,18 @@ function ImageAttachmentView({
             <DeferredTooltip
               content={t(($) => $.image.download)}
               trigger={
-                <button type="button" onClick={onDownload} aria-label={t(($) => $.image.download)}>
-                  <Download className="size-3.5" />
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  aria-busy={downloading}
+                  aria-label={t(($) => $.image.download)}
+                >
+                  {downloading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
                 </button>
               }
             />

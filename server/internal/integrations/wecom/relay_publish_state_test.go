@@ -148,8 +148,11 @@ func TestRelayPublish_FenceHoldsAgainstThePublishingReplica(t *testing.T) {
 	t.Parallel()
 	relay, dedupe := &fanoutRelay{}, newSharedDedupe()
 	reg := newSendersRegistry()
+	// Keep the normal acceptance budget, as the no-holder test above does: a
+	// 40ms window leaves the poll 6ms of slack before its backstop context
+	// fires, and a loaded race runner then reports relayUncertain instead.
 	router := inboxPublishRouter(t, relay, dedupe,
-		RelayConfig{AcceptanceWindow: 40 * time.Millisecond},
+		RelayConfig{},
 		NewOutbound(nil, reg, nil, slog.Default()))
 
 	instID := mustTestUUID(t)

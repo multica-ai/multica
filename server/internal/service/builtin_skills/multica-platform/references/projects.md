@@ -7,6 +7,7 @@ display metadata; it is context later injected into task briefs and
 - [Core model](#core-model)
 - [CLI](#cli)
 - [local_directory execution modes](#local_directory-execution-modes)
+- [Archived projects](#archived-projects)
 - [Referring to a project in a comment](#referring-to-a-project-in-a-comment)
 - [When to add a resource](#when-to-add-a-resource)
 - [Debugging wrong context](#debugging-wrong-context)
@@ -53,6 +54,9 @@ multica project update <project-id> --title "<title>" --output json
 multica project update <project-id> --due-date 2026-04-15 --output json
 multica project update <project-id> --start-date "" --output json   # clear the start date
 multica project status <project-id> in_progress --output json
+multica project list --archived --output json
+multica project archive <project-id> --output json
+multica project restore <project-id> --output json
 multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json
@@ -110,6 +114,31 @@ run in place. Saving `worktree` is refused (HTTP 422, code
 advertise the capability — the fix is updating the Multica app there, then
 retrying. Pass an empty value to clear it back to the default.
 
+## Archived projects
+
+Archiving is separate from status: a `completed` or `cancelled` project can be
+archived or not, and restoring it keeps its status. An archived project has a
+non-null `archived_at` (plus `archived_by_type` / `archived_by_id`).
+
+- `project list` hides archived projects; `--archived` lists only them.
+  `project get`, `project restore` and `issue list --project` still reach
+  them. An ID prefix resolves to a live project first and to an archived one
+  only when nothing live matches; `--project` on `issue create` and
+  `autopilot create` refuses an archived-only match and prints the restore
+  command. Updates resolve it normally and leave the decision to the server.
+- It accepts no new issues. Creating an issue with `--project` set to it, or
+  moving an issue into it, fails with HTTP 409 code `project_archived`. Issues
+  already in it stay readable and editable, and sub-issues of those issues
+  inherit the project as before.
+- Archiving pauses every active autopilot that files issues into the project
+  (`pause_reason: project_archived`; `project archive` lists them). Restoring
+  does not resume them, and an autopilot cannot be resumed or pointed at the
+  project while it stays archived.
+- When your task's project is archived, the brief says so. Finish the work at
+  hand; restore the project only when the user asks.
+
+Archive and restore need the same permission as editing the project.
+
 ## Referring to a project in a comment
 
 A project has no `MUL-123`-style identifier, so writing its title as prose
@@ -152,8 +181,8 @@ is task-local checkout state.
 
 ## Side effects
 
-Project create/update/delete/status and project resource add/update/remove
-mutate durable workspace state and affect future tasks. Ask before changing
+Project create/update/delete/status/archive/restore and project resource
+add/update/remove mutate durable workspace state and affect future tasks. Ask before changing
 `local_directory` unless the user explicitly requested that exact local path.
 
 ## Project workflows
@@ -221,6 +250,16 @@ issue inside a workflow needs none of them.
 - Whole workflow: `multica workflow create|update --steps-file <json>`
   replaces all steps; `multica workflow delete` is refused for Default and for
   a workflow a project still uses.
+- Status catalog: a step's `new_status` may carry `icon` (`dotted`, `circle`,
+  `half`, `three_quarters`, `check`, `slash`, `cross`; empty keeps the category
+  default), so a definition applied in a fresh workspace renders the glyph its
+  author declared. The field applies only when the status is created — a
+  status that already exists by name is reused unchanged. Repair an existing
+  catalog row, including on a workspace that synced before the field was
+  declared, with `multica issue-status update <key-or-name> --icon <value>`
+  (`--icon ""` resets it), and read the catalog with `multica issue-status
+  list`. These commands edit the workspace catalog, not a workflow, and need
+  workspace owner/admin.
 - Switching: `multica project workflow set <project-id> <workflow|default>`.
   Run it with `--dry-run` first. Issues on statuses the target lacks need
   `--map old=new`; a missing mapping fails with

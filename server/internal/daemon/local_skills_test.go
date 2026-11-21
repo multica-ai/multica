@@ -1449,3 +1449,33 @@ func TestCollectLocalSkillFiles_ValidUTF8TextPassesThroughUntouched(t *testing.T
 		}
 	}
 }
+
+func TestClaudeLocalSkillsUseDaemonConfigRootForListAndImport(t *testing.T) {
+	home := t.TempDir()
+	redirectTestHome(t, home)
+	isolatedHome := t.TempDir()
+	configDir := filepath.Join(isolatedHome, ".claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	skillFiles := map[string]string{"SKILL.md": "---\nname: Fixture\ndescription: Fixture\n---\nFixture\n"}
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "host-skill", skillFiles)
+	writeTestLocalSkill(t, filepath.Join(configDir, "skills"), "isolated-skill", skillFiles)
+	installPath := writeTestClaudePlugin(t, isolatedHome, "example@fixture", "example", true)
+	writeTestLocalSkill(t, filepath.Join(installPath, "skills"), "plugin-skill", skillFiles)
+
+	skills, supported, err := listRuntimeLocalSkills("claude")
+	if err != nil || !supported || len(skills) != 2 {
+		t.Fatalf("list: supported=%v err=%v skills=%+v", supported, err, skills)
+	}
+	for _, key := range []string{"isolated-skill", "example:plugin-skill"} {
+		found := false
+		for _, skill := range skills {
+			found = found || skill.Key == key
+		}
+		if !found {
+			t.Errorf("missing %q in list: %+v", key, skills)
+		}
+		if bundle, _, err := loadRuntimeLocalSkillBundle("claude", key); err != nil || bundle == nil {
+			t.Errorf("load %q: bundle=%v err=%v", key, bundle, err)
+		}
+	}
+}

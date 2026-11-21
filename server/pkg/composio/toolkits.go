@@ -19,6 +19,12 @@ type Toolkit struct {
 	Categories  []string       `json:"categories,omitempty"`
 	AuthSchemes []string       `json:"auth_schemes,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
+	// ComposioManagedAuthSchemes lists the schemes Composio can authenticate
+	// with its own managed app — the toolkit is connectable without the project
+	// bringing an OAuth client.
+	ComposioManagedAuthSchemes []string `json:"composio_managed_auth_schemes,omitempty"`
+	// NoAuth is true for toolkits that need no credential at all.
+	NoAuth bool `json:"no_auth,omitempty"`
 }
 
 // ListToolkitsRequest carries the optional filters of GET /toolkits.
