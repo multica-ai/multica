@@ -112,3 +112,12 @@ func fetchRegistryArchive(ctx context.Context, client *http.Client, apiBase, slu
 	}
 	return parseSkillArchive(data, slug+".zip")
 }
+
+// registryFileReadUnsupported reports whether a per-file read failed in a way
+// that means the registry does not serve individual files, so the ZIP archive
+// endpoint should be tried instead: any 4xx, or 501 Not Implemented. Other
+// server errors keep the normal error path.
+func registryFileReadUnsupported(err error) bool {
+	msg := err.Error()
+	return strings.HasPrefix(msg, "HTTP 4") || msg == "HTTP 501"
+}

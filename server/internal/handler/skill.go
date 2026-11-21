@@ -1229,7 +1229,7 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 		}
 		body, err := fetchRawFile(ctx, httpClient, fileURL)
 		if err != nil {
-			if customRegistry && strings.HasPrefix(err.Error(), "HTTP 4") {
+			if customRegistry && registryFileReadUnsupported(err) {
 				archive, archiveErr := fetchRegistryArchive(ctx, httpClient, apiBase, slug)
 				if archiveErr != nil {
 					return nil, archiveErr

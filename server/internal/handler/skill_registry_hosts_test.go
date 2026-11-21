@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,6 +32,10 @@ func registryFixture(t *testing.T, zipMode string) (*httptest.Server, *int) {
 		case r.URL.Path == "/custom/api/skills/example--skill/file":
 			if zipMode == "file" {
 				http.Error(w, "unsupported", http.StatusBadRequest)
+				return
+			}
+			if zipMode == "file501" {
+				http.Error(w, "unsupported", http.StatusNotImplemented)
 				return
 			}
 			if r.URL.Query().Get("path") == "SKILL.md" {
@@ -83,7 +88,7 @@ func TestRegistryWebURLSlug(t *testing.T) {
 }
 
 func TestRegistryHostImportAndRefresh(t *testing.T) {
-	for _, mode := range []string{"files", "listing", "file"} {
+	for _, mode := range []string{"files", "listing", "file", "file501"} {
 		t.Run(mode, func(t *testing.T) {
 			srv, calls := registryFixture(t, mode)
 			defer srv.Close()
@@ -205,5 +210,21 @@ func TestRegistryHostAllowlist(t *testing.T) {
 	}
 	if src, _, err := detectImportSource("https://clawhub.ai/owner/skill"); err != nil || src != sourceClawHub {
 		t.Fatalf("existing clawhub: %v %v", src, err)
+	}
+}
+
+func TestRegistryFileReadUnsupported(t *testing.T) {
+	cases := map[string]bool{
+		"HTTP 400": true,
+		"HTTP 404": true,
+		"HTTP 501": true,
+		"HTTP 500": false,
+		"HTTP 502": false,
+		"HTTP 503": false,
+	}
+	for msg, want := range cases {
+		if got := registryFileReadUnsupported(errors.New(msg)); got != want {
+			t.Errorf("%s: got %v want %v", msg, got, want)
+		}
 	}
 }
