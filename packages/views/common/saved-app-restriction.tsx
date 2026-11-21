@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -10,9 +10,12 @@ import {
 import { useT } from "../i18n";
 
 /** A one-time recovery action, shown only while saved restrictions apply. */
-export function SavedAppRestriction({ kind, onRestore }: {
+export function SavedAppRestriction({ kind, onRestore, restoreUnavailable }: {
   kind: "account" | "agent" | "catalog";
   onRestore?: () => Promise<unknown>;
+  /** Shown instead of the admin hint when the restore is withheld for another
+   *  reason, such as the workspace's plan. */
+  restoreUnavailable?: ReactNode;
 }) {
   const { t } = useT("settings");
   const [open, setOpen] = useState(false);
@@ -56,7 +59,7 @@ export function SavedAppRestriction({ kind, onRestore }: {
             </AlertDialogContent>
           </AlertDialog>
         </>
-      ) : <span className="text-muted-foreground">{t(($) => $.connected_apps.saved_access.admin_required)}</span>}
+      ) : restoreUnavailable ?? <span className="text-muted-foreground">{t(($) => $.connected_apps.saved_access.admin_required)}</span>}
     </div>
   );
 }

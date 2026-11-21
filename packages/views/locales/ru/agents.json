@@ -1103,6 +1103,7 @@
       "codex_resume_oversized": "Сессия слишком велика для возобновления",
       "idle_watchdog": "Агент остановлен после простоя",
       "local_directory_error": "Ошибка локального каталога",
+      "local_directory_missing": "Локальная папка проекта больше не существует",
       "cancelled": "Отменено системой",
       "agent_error": "Ошибка выполнения агента",
       "codex_semantic_inactivity": "Тайм-аут семантического простоя Codex",

@@ -136,6 +136,16 @@ func TestNotificationPolicyDoesNotControlQuotaValidity(t *testing.T) {
 		t.Fatalf("valid notification gate = %+v, err = %v", gate, err)
 	}
 
+	perLimit := base
+	perLimit.Notifications = &wireNotificationPolicy{
+		OnRejection: NotificationFirstRejectionPerLimit,
+	}
+	gate, err = normalizeGate(GateAutopilotRuns, perLimit)
+	if err != nil || gate.Notifications == nil ||
+		gate.Notifications.OnRejection != NotificationFirstRejectionPerLimit {
+		t.Fatalf("per-limit notification gate = %+v, err = %v", gate, err)
+	}
+
 	malformed := base
 	malformed.Notifications = &wireNotificationPolicy{
 		OnRejection: "future_mode",

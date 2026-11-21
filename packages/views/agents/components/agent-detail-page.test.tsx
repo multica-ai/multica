@@ -14,6 +14,7 @@ import { ApiError } from "@multica/core/api";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { RESOURCES } from "../../locales";
+import enBilling from "../../locales/en/billing.json";
 import {
   NavigationProvider,
   type NavigationAdapter,
@@ -39,7 +40,9 @@ vi.mock("./agent-properties-panel", () => ({
       <span>model:{agent.model}</span>
       <button
         type="button"
-        onClick={() => void onUpdate(agent.id, { model: "new-model" })}
+        // The page rethrows a failed update for the caller; the real panel
+        // handles it, so the stub swallows it.
+        onClick={() => void onUpdate(agent.id, { model: "new-model" }).catch(() => {})}
       >
         update model
       </button>
@@ -226,9 +229,11 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("@multica/core/api", () => {
   class ApiError extends Error {
     status: number;
-    constructor(message: string, status: number) {
+    body: unknown;
+    constructor(message: string, status: number, _statusText?: string, body?: unknown) {
       super(message);
       this.status = status;
+      this.body = body;
     }
   }
   return {
@@ -479,6 +484,23 @@ describe("AgentDetailPage direct-detail fallback", () => {
     expect(
       screen.queryByText("Couldn't load this agent"),
     ).not.toBeInTheDocument();
+  });
+
+  it("rolls back and explains a feature_locked refusal, refetching the plan", async () => {
+    mockUpdateAgent.mockRejectedValue(
+      new ApiError("locked", 403, "Forbidden", { code: "feature_locked", feature: "agent_invocation_members" }),
+    );
+    const { queryClient } = renderPage();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await screen.findByRole("button", { name: "Assign work" });
+
+    fireEvent.click(screen.getByRole("button", { name: "update model" }));
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(enBilling.paid_feature.locked_error),
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["workspace-features", "ws-1"] });
+    expect(await screen.findByText("model:")).toBeInTheDocument();
   });
 
   it("optimistically updates a detail-only cache entry", async () => {

@@ -89,9 +89,9 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	_, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
 	if ok && userID != "" {
-		h.MembershipCache.Set(r.Context(), userID, workspaceID)
+		h.cacheMembership(r.Context(), member)
 	}
 	return ok
 }
@@ -317,11 +317,13 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
 		return true
 	}
-	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
-	if err != nil {
+	// The same rule as requireWorkspaceMember: a guest reaches only the
+	// routes on its allowlist, which no daemon route is.
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	if err != nil || (projectaccess.IsGuestRole(member.Role) && !middleware.GuestMayRequest(r)) {
 		return false
 	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	h.cacheMembership(r.Context(), member)
 	return true
 }
 
@@ -1121,6 +1123,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	})
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings, h.cfg.GitExtraCACerts)
+	if !h.daemonCredentialSeesWorkspaceConfig(r, req.WorkspaceID) {
+		repoResp = workspaceReposResponse(req.WorkspaceID, nil, nil, h.cfg.GitExtraCACerts)
+	}
 
 	body := map[string]any{
 		"runtimes":      resp,
@@ -1332,6 +1337,10 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
 		return
 	}
+	if !h.daemonCredentialSeesWorkspaceConfig(r, workspaceID) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
 
 	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {
@@ -1340,6 +1349,25 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings, h.cfg.GitExtraCACerts))
+}
+
+// daemonCredentialSeesWorkspaceConfig reports whether a daemon request may
+// read the workspace's repositories and settings. They configure the
+// workspace, which a guest is not shown (MUL-9420), so the person the
+// credential acts for (a PAT or JWT user, or the owner a daemon token is bound
+// to) must hold a non-guest role now. The membership cache cannot answer this:
+// it holds no role. Qoder-managed and pre-owner daemon tokens act for no
+// person and keep their access.
+func (h *Handler) daemonCredentialSeesWorkspaceConfig(r *http.Request, workspaceID string) bool {
+	userID := requestUserID(r)
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) != "" {
+		userID = middleware.DaemonTokenOwnerIDFromContext(r.Context())
+		if userID == "" {
+			return true
+		}
+	}
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	return err == nil && !projectaccess.IsGuestRole(member.Role)
 }
 
 // setRuntimeOffline flips a runtime offline, recording the daemon's reason when
@@ -1441,10 +1469,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-type DaemonHeartbeatRequest struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
-}
+type DaemonHeartbeatRequest = protocol.DaemonHeartbeatRequestPayload
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
 // heartbeat hot path. Probes are read-only (ZCARD in Redis) so a timeout is
@@ -1585,7 +1610,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	updateMs = time.Since(updateStart).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req.SupportsBatchImport)
+	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req)
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
 	probeSkillsMs = m.ProbeSkillsMs
@@ -1629,7 +1654,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, req protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
@@ -1649,7 +1674,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		}
 		return nil, err
 	}
-	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
+	ack, _, err := h.processHeartbeat(ctx, runtimeID, req)
 	return ack, err
 }
 
@@ -1789,7 +1814,7 @@ type heartbeatMetrics struct {
 // heartbeats using only the runtime ID. Each transport records liveness first:
 // HTTP uses its stateless runtime row, while WebSocket uses the connection
 // lease. Auth and request decoding also remain transport-specific.
-func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, req protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
@@ -1805,13 +1830,14 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	cancelProbeUpdate()
 	switch {
 	case probeUpdateErr == nil && hasUpdate:
-		pending, popUpdateErr := h.UpdateStore.PopPending(ctx, runtimeID)
+		pending, popUpdateErr := h.UpdateStore.PopPending(ctx, runtimeID, req.SupportsQueuedUpdate)
 		if popUpdateErr != nil {
 			slog.Warn("update PopPending failed", "error", popUpdateErr, "runtime_id", runtimeID)
 		} else if pending != nil {
 			ack.PendingUpdate = &protocol.DaemonHeartbeatPendingUpdate{
 				ID:            pending.ID,
 				TargetVersion: pending.TargetVersion,
+				Deferrable:    offerDeferrable(pending, req.SupportsQueuedUpdate),
 			}
 		}
 	case probeUpdateErr != nil:
@@ -1886,7 +1912,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	switch {
 	case probeErr == nil && hasImport:
 		popStart := time.Now()
-		if supportsBatchImport {
+		if req.SupportsBatchImport {
 			pendingImports, popErr := h.LocalSkillImportStore.PopPendingBatch(ctx, runtimeID, maxLocalSkillImportBatch)
 			m.PopImportMs = time.Since(popStart).Milliseconds()
 			if popErr != nil {
@@ -6324,6 +6350,15 @@ func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) 
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
+	}
+	// A guest (MUL-9420) learns only that an agent is working on the issue,
+	// not where or on what instructions.
+	if h.isGuest(r, workspaceID, requestUserID(r)) {
+		for i := range resp {
+			resp[i] = guestTaskView(resp[i])
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"tasks": resp})
+		return
 	}
 	// Same issue-facing attribution surface as ListTasksByIssue — hydrate names.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))

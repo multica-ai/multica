@@ -316,15 +316,16 @@ type AutopilotCollaborator struct {
 }
 
 type AutopilotQuotaPeriod struct {
-	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
-	PeriodStart         pgtype.Timestamptz `json:"period_start"`
-	PeriodEnd           pgtype.Timestamptz `json:"period_end"`
-	UsedCount           int64              `json:"used_count"`
-	ReservedCount       int64              `json:"reserved_count"`
-	BlockedCounts       []byte             `json:"blocked_counts"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	RejectionNotifiedAt pgtype.Timestamptz `json:"rejection_notified_at"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	PeriodStart            pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd              pgtype.Timestamptz `json:"period_end"`
+	UsedCount              int64              `json:"used_count"`
+	ReservedCount          int64              `json:"reserved_count"`
+	BlockedCounts          []byte             `json:"blocked_counts"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	RejectionNotifiedAt    pgtype.Timestamptz `json:"rejection_notified_at"`
+	RejectionNotifiedLimit pgtype.Int8        `json:"rejection_notified_limit"`
 }
 
 type AutopilotQuotaReservation struct {
@@ -371,6 +372,7 @@ type AutopilotRun struct {
 	WebhookDeliveryID  pgtype.UUID        `json:"webhook_delivery_id"`
 	QuotaReservationID pgtype.UUID        `json:"quota_reservation_id"`
 	ReasonCode         pgtype.Text        `json:"reason_code"`
+	IdempotencyKey     pgtype.Text        `json:"idempotency_key"`
 }
 
 type AutopilotSubscriber struct {
@@ -808,6 +810,24 @@ type DaemonToken struct {
 	OwnerID     pgtype.UUID        `json:"owner_id"`
 }
 
+type DashboardRangeView struct {
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	Day                    pgtype.Date        `json:"day"`
+	RequestedDays          int32              `json:"requested_days"`
+	ReturnedDays           int32              `json:"returned_days"`
+	ViewCount              int64              `json:"view_count"`
+	ObservedOverLimitCount int64              `json:"observed_over_limit_count"`
+	DegradedOverLimitCount int64              `json:"degraded_over_limit_count"`
+	TruncatedCount         int64              `json:"truncated_count"`
+	LastLimitDays          pgtype.Int4        `json:"last_limit_days"`
+	LastAction             string             `json:"last_action"`
+	LastReason             string             `json:"last_reason"`
+	FirstViewedAt          pgtype.Timestamptz `json:"first_viewed_at"`
+	LastViewedAt           pgtype.Timestamptz `json:"last_viewed_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DingtalkBotIdentity struct {
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	InstallationID   pgtype.UUID        `json:"installation_id"`
@@ -857,6 +877,24 @@ type Doc struct {
 	UpdatedByID   pgtype.UUID        `json:"updated_by_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DocComment struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	DocID          pgtype.UUID        `json:"doc_id"`
+	ParentID       pgtype.UUID        `json:"parent_id"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Content        string             `json:"content"`
+	AnchorQuote    string             `json:"anchor_quote"`
+	AnchorPrefix   string             `json:"anchor_prefix"`
+	AnchorSuffix   string             `json:"anchor_suffix"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type DocFolder struct {
@@ -1509,6 +1547,13 @@ type Member struct {
 type MemberDelegationDay struct {
 	UserID       pgtype.UUID `json:"user_id"`
 	ActivityDate pgtype.Date `json:"activity_date"`
+}
+
+type MemberSearchAccess struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	ChangedXid  pgtype.Uint64      `json:"changed_xid"`
+	ChangedAt   pgtype.Timestamptz `json:"changed_at"`
 }
 
 type NotificationPreference struct {
@@ -2222,6 +2267,7 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	ProjectIds    []pgtype.UUID      `json:"project_ids"`
 }
 
 type WorkspaceMcpServer struct {

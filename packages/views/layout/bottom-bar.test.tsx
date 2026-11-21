@@ -17,6 +17,10 @@ const h = vi.hoisted(() => ({
   team: { working: [], stuck: [], byAgent: new Map() } as TeamStatus,
 }));
 
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/chat", () => ({
   useChatStore: Object.assign(
     (selector: (state: typeof h.chat) => unknown) => selector(h.chat),

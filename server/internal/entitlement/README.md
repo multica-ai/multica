@@ -17,7 +17,7 @@ The client reads:
 
 - `schema_version`: only version 1 is accepted.
 - `policy_revision`: the effective-instruction generation, currently fixed at
-  `4` by Cloud and not deployment configuration. Cloud advances it when the
+  `9` by Cloud and not deployment configuration. Cloud advances it when the
   meaning or set of actionable instructions changes, including additive
   instructions; `schema_version` changes only for incompatible wire parsing.
 - `subscription_version`: the workspace's monotonic subscription revision. A
@@ -35,10 +35,13 @@ The client reads:
   limit and period parameters as `enforce`. Multica also downgrades an expired
   cached `enforce` instruction to `observe` locally (see below).
 - `gates.*.notifications`: an optional, additive delivery policy. The autopilot
-  quota consumer recognizes `first_rejection_per_period` and delivers one
-  workspace notice for the first rejected execution in the Cloud-defined quota
-  period. A malformed notification policy is ignored without invalidating an
-  otherwise valid enforcement gate.
+  quota consumer recognizes two values. `first_rejection_per_period` delivers
+  one notice for the first rejected execution in the Cloud-defined quota
+  period. `first_rejection_per_limit` (revision 6) delivers one notice for the
+  first rejection at each limit within the period, so a limit raised by an
+  add-on purchase re-arms the notice. Any other value, or a malformed
+  notification policy, disables notices without invalidating an otherwise
+  valid enforcement gate.
 - `features`: paid-feature restrictions, one `{"action": ...}` per feature
   (revision 4). See [Paid features](#paid-features). Each feature is parsed on
   its own, after the rest of the policy: a missing, unknown, or malformed
@@ -63,6 +66,18 @@ older consumer ignores the unknown gate, and this consumer reads a policy
 without it, or with a malformed one, as `members` `off` with reason
 `gate_missing` or `gate_invalid`. Only that gate falls back; `autopilot_runs`
 and the features keep their instructions. See [Member limit](#member-limit).
+`gates.storage_bytes` (revision 6) is optional the same way; see
+[Attachment storage limit](#attachment-storage-limit).
+
+Revision 7 adds the `agent_invocation_members`, `runtime_member_sharing` and
+`team_app_accounts` features. It is safe in either order: an older consumer
+ignores features it does not know, and this consumer reads a policy without
+one as that feature `off` with reason `feature_missing`.
+
+`gates.dashboard_history_days` (revision 9) is optional like `members`: a
+missing or malformed gate, including a `limit` outside 1–365 or one carrying a
+period, is `off` with reason `gate_missing` or `gate_invalid` for that gate
+alone. See [Dashboard history limit](#dashboard-history-limit).
 
 Responses tolerate unknown JSON fields and gates for additive compatibility.
 Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
@@ -137,6 +152,14 @@ refusals cost at most one Cloud request per workspace per five seconds. A
 failed fetch answers exactly like `Gate`. The Cloud client implements it;
 `entitlementtest.Stub` does too (`SetRefreshed`).
 
+`FreshRefresher.RefreshGateNow` fetches without the reuse window; concurrent
+callers for a workspace share one fetch. The autopilot quota calls it right
+before rejecting a run: the admission transaction sees the quota is full on
+the cached policy, leaves the transaction, fetches the current policy and runs
+the admission once more on it. A limit Cloud raised moments ago, such as an
+add-on Stripe's webhook confirmed before the payer returned to the app, admits
+the next run on every instance. Each rejection costs one Cloud request.
+
 ## Member limit
 
 `members` caps the members of a workspace on a plan with a member limit
@@ -167,6 +190,38 @@ Clients read `GET /api/workspaces/{id}/member-limit` (member-readable), which
 returns `action` and, while a limit applies, `limit`, `members` and
 `pending_invitations`.
 
+## Attachment storage limit
+
+`storage_bytes` caps the attachment bytes a workspace holds, on every plan:
+Cloud sends Free's flat limit or the paid plan's per-seat limit. It carries a
+`limit` and no period. `service.StorageQuota`
+(`server/internal/service/storage_quota.go`) checks it.
+
+Usage is not stored: it is `SUM(size_bytes)` over the workspace's attachment
+rows (`SumWorkspaceAttachmentBytes`, an index-only scan on
+`idx_attachment_workspace_size`), so cascade deletes are reflected at once.
+Every attachment row counts; thumbnails are not rows. `off` reads nothing.
+The sum has its own timeout (`DefaultStorageSumTimeout`, 300 ms); a timeout or
+error admits the upload and is counted in `multica_storage_quota_sum_total`.
+
+| Path | Checked as |
+| --- | --- |
+| `POST /api/upload-file` with a workspace | used + file size, before the object is written |
+| Create a sub-issue from a comment (copies the source attachments) | used + copied bytes, before the sub-issue or any copy exists |
+| Files received through a messaging channel | recorded after they are stored, never refused |
+
+`enforce` refuses with `403 storage_limit_reached`, `used_bytes` and
+`limit_bytes`, after re-reading the policy with `RefreshGate`. `observe`
+admits and records. Reads, downloads, thumbnails and deletes are never
+checked. It is a soft limit: no lock is taken, so uploads in flight when a
+workspace crosses its limit all pass. Attempts are recorded in
+`entitlement_limit_overage` under gate `storage_bytes`, grouped by UTC
+calendar month.
+
+Clients read `GET /api/workspaces/{id}/storage-usage` (member-readable), which
+returns `action` and, while a limit applies, `used_bytes` and `limit_bytes`;
+`reached` is present only under `enforce`.
+
 ## Paid features
 
 A paid feature is restricted for a workspace whose plan does not include it.
@@ -189,11 +244,18 @@ configured, including the access control it defines: a private project stays
 visible only to its members after a downgrade. Each feature classifies its own
 writes; the handler entry point is `requireFeatureAddition`
 (`server/internal/handler/paid_feature.go`), called after the ordinary
-permission checks, so a caller refused by those gets the ordinary error.
+permission checks, so a caller refused by those gets the ordinary error. A
+handler that can only tell whether its write adds while holding row locks
+reads the decision first (`paidFeature`) and decides on the locked state, so
+it never waits on Cloud under a lock.
 
 | Feature | Restricted additions | Always allowed |
 | --- | --- | --- |
 | `private_projects` | create a private project; make a project private; add someone who is not a member yet, directly or by making them the lead | remove members; make it workspace-visible; delete or archive; set the lead to an existing member, an agent or nobody; other fields; the owner's recovery join |
+| `guests` | invite a guest; make a member a guest; share another project with a guest | remove a guest; narrow a guest's projects; make a guest a member; accept an invitation sent while the plan included guests |
+| `agent_invocation_members` | create an agent that specific members may invoke (including duplicating one and the CLI `--public-to-member`); add someone to the list; switch from "only me" or "whole workspace" to specific members | remove someone; switch to "only me" or "whole workspace" (an emptied list is the whole workspace); re-save the same list; other fields; invoking the agent |
+| `runtime_member_sharing` | add someone to a private runtime's `shared_with`, including switching from "only me" or public to specific members (decided on the locked runtime row) | remove someone; make it public or "only me"; re-save the same list; using the runtime |
+| `team_app_accounts` | connect a team account for an app that has none, including after a disconnect (checked when the connect starts and again in the OAuth callback before the account is written); give an agent a team-account app or switch one from a personal account; raise an agent's level on a team account; set a team rule to a value that is neither its current value nor the default | reauthorize an app's existing team account; disconnect; remove an app from an agent; lower a level; restore default team rules (Allow all actions); personal accounts and rules; gateway calls, including existing `block` rules |
 
 A stale cached `enforce` is downgraded to `observe` with reason `stale` and
 `Downgraded` set, then to `off`, exactly like gates, so a Cloud outage admits additions rather than
@@ -216,3 +278,39 @@ Clients read `GET /api/workspaces/{id}/features`, which returns only
 `available` (off or observe) or `locked` (enforce) per feature, and render
 read-only and upgrade states from it. The server enforces on every write
 regardless.
+
+## Dashboard history limit
+
+`dashboard_history_days` caps how many calendar days back the workspace
+dashboard can read. Its `limit` is a day count (1–365) and it has no period.
+Cloud sends it for every known plan: Free, Pro and Business (trials included)
+each get their own configured day count.
+
+Only `enforce` limits anything (`server/internal/handler/dashboard_history.go`).
+The six `/api/dashboard/*` endpoints then cut their cutoff to the first of the
+most recent N calendar days in the viewing time zone, whatever `days` asked
+for, including the date series' extra day of headroom and the days a weekly
+chart fetches to fill its leftmost week, and send the limit in
+`X-Dashboard-History-Limit-Days`. `off`, `observe` (including a downgraded
+stale `enforce`, marked `Downgraded` on the `Decision`) and self-hosted
+deployments read up to the request maximum of 371 days with no header. The
+runtime usage endpoints keep their own 365-day maximum and no plan limit.
+The dashboard's `365d` range follows the frontend flag
+`dashboard_history_365d`: published on by default, and
+`FF_DASHBOARD_HISTORY_365D=off` hides the range should the year-long queries
+be too slow for a deployment.
+
+`GET /api/workspaces/{id}/features` reports `limits.dashboard_history_days`
+only under `enforce`, so an observed rollout is invisible to users.
+
+Reads of `GET /api/dashboard/usage/by-agent`, the one dashboard endpoint
+fetched once per page load or range change with the range the viewer picked,
+are aggregated per workspace, UTC day, requested days and returned days in
+`dashboard_range_view` while Cloud is connected: view count, reads past the
+limit admitted under a configured observe, admitted because of a downgrade,
+and cut short under enforce, with the latest limit, action and reason. The
+write runs off the request path with its own 500 ms timeout; a failure drops
+the row and never changes the response. It selects its workspace row under
+`FOR KEY SHARE`, so a write racing workspace deletion either waits for it and
+inserts nothing or is removed by it. Counts are read requests, including
+the dashboard's periodic refresh, so use distinct workspaces for reach.

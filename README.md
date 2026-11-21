@@ -111,7 +111,7 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 - **[Self-host everything](SELF_HOSTING.md) →** Docker Compose or Helm, on your own infrastructure.
 - **[Your Git host](https://multica.ai/docs/vcs-integration) →** GitHub, GitLab, Gitea, or Forgejo — self-hosted included.
 - **[Workspaces](https://multica.ai/docs/workspaces) →** Separate agents, issues, and settings per team.
-- **[Roles](https://multica.ai/docs/members-roles) and [access scopes](https://multica.ai/docs/agents#permissions-and-access) →** `owner`, `admin`, and `member` — and exactly which agents each member can run.
+- **[Roles](https://multica.ai/docs/members-roles) and [access scopes](https://multica.ai/docs/agents#permissions-and-access) →** Give guests access to selected projects, manage workspace roles, and choose who can run each agent.
 - **[Security model](https://multica.ai/docs/security-model) →** What an agent can reach, and what it can't.
 - **[Slack, Feishu/Lark, DingTalk, WeCom, Telegram, and WeChat](https://multica.ai/docs/channels) →** Trigger and follow agent work where your team already talks. WeChat accepts private messages only from the account that scans its connection QR code. New Feishu/Lark connections are open to mainland-China Feishu only for now; DingTalk, WeCom, and Telegram are [community-maintained](https://multica.ai/docs/community-maintained).
 - **Web, [desktop](https://multica.ai/docs/desktop-app), and [mobile](https://multica.ai/docs/mobile-app) →** The same workspace on macOS, Windows, Linux, iPhone, and iPad — the iOS app builds from source today, not yet on the App Store.

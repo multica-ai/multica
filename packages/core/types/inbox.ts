@@ -15,6 +15,10 @@ export type InboxItemType =
   | "due_date_changed"
   | "new_comment"
   | "mentioned"
+  // A new comment in a doc discussion the recipient wrote in, or one that
+  // mentions them. Details carry doc_id, thread_id and the quoted text.
+  | "doc_comment"
+  | "doc_mentioned"
   | "task_failed"
   | "reaction_added"
   // No longer written, but older servers wrote them and those rows remain;

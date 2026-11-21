@@ -78,6 +78,64 @@ func (q *Queries) CreateDoc(ctx context.Context, arg CreateDocParams) (Doc, erro
 	return i, err
 }
 
+const createDocComment = `-- name: CreateDocComment :one
+INSERT INTO doc_comment (
+    id, workspace_id, doc_id, parent_id, author_type, author_id, content,
+    anchor_quote, anchor_prefix, anchor_suffix
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10
+)
+RETURNING id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at
+`
+
+type CreateDocCommentParams struct {
+	ID           pgtype.UUID `json:"id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	DocID        pgtype.UUID `json:"doc_id"`
+	ParentID     pgtype.UUID `json:"parent_id"`
+	AuthorType   string      `json:"author_type"`
+	AuthorID     pgtype.UUID `json:"author_id"`
+	Content      string      `json:"content"`
+	AnchorQuote  string      `json:"anchor_quote"`
+	AnchorPrefix string      `json:"anchor_prefix"`
+	AnchorSuffix string      `json:"anchor_suffix"`
+}
+
+func (q *Queries) CreateDocComment(ctx context.Context, arg CreateDocCommentParams) (DocComment, error) {
+	row := q.db.QueryRow(ctx, createDocComment,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.DocID,
+		arg.ParentID,
+		arg.AuthorType,
+		arg.AuthorID,
+		arg.Content,
+		arg.AnchorQuote,
+		arg.AnchorPrefix,
+		arg.AnchorSuffix,
+	)
+	var i DocComment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DocID,
+		&i.ParentID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.AnchorQuote,
+		&i.AnchorPrefix,
+		&i.AnchorSuffix,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createDocFolder = `-- name: CreateDocFolder :one
 INSERT INTO doc_folder (workspace_id, parent_id, title, created_by_type, created_by_id)
 VALUES ($1, $2, $3, $4, $5)
@@ -115,7 +173,8 @@ func (q *Queries) CreateDocFolder(ctx context.Context, arg CreateDocFolderParams
 }
 
 const deleteDoc = `-- name: DeleteDoc :exec
-WITH v AS (DELETE FROM doc_version WHERE doc_version.doc_id = $1 AND doc_version.workspace_id = $2)
+WITH v AS (DELETE FROM doc_version WHERE doc_version.doc_id = $1 AND doc_version.workspace_id = $2),
+c AS (DELETE FROM doc_comment WHERE doc_comment.doc_id = $1 AND doc_comment.workspace_id = $2)
 DELETE FROM doc WHERE doc.id = $1 AND doc.workspace_id = $2
 `
 
@@ -126,6 +185,24 @@ type DeleteDocParams struct {
 
 func (q *Queries) DeleteDoc(ctx context.Context, arg DeleteDocParams) error {
 	_, err := q.db.Exec(ctx, deleteDoc, arg.ID, arg.WorkspaceID)
+	return err
+}
+
+const deleteDocCommentThread = `-- name: DeleteDocCommentThread :exec
+DELETE FROM doc_comment
+WHERE workspace_id = $1 AND doc_id = $2
+  AND (id = $3 OR parent_id = $3)
+`
+
+type DeleteDocCommentThreadParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DocID       pgtype.UUID `json:"doc_id"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+// Deletes a comment; deleting a root takes its replies with it.
+func (q *Queries) DeleteDocCommentThread(ctx context.Context, arg DeleteDocCommentThreadParams) error {
+	_, err := q.db.Exec(ctx, deleteDocCommentThread, arg.WorkspaceID, arg.DocID, arg.ID)
 	return err
 }
 
@@ -145,6 +222,7 @@ func (q *Queries) DeleteDocFolder(ctx context.Context, arg DeleteDocFolderParams
 
 const deleteWorkspaceDocs = `-- name: DeleteWorkspaceDocs :exec
 WITH v AS (DELETE FROM doc_version WHERE doc_version.workspace_id = $1),
+c AS (DELETE FROM doc_comment WHERE doc_comment.workspace_id = $1),
 f AS (DELETE FROM doc_folder WHERE doc_folder.workspace_id = $1)
 DELETE FROM doc WHERE doc.workspace_id = $1
 `
@@ -179,6 +257,40 @@ func (q *Queries) GetDoc(ctx context.Context, arg GetDocParams) (Doc, error) {
 		&i.CreatedByID,
 		&i.UpdatedByType,
 		&i.UpdatedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDocComment = `-- name: GetDocComment :one
+SELECT id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at FROM doc_comment
+WHERE id = $1 AND doc_id = $2 AND workspace_id = $3
+`
+
+type GetDocCommentParams struct {
+	ID          pgtype.UUID `json:"id"`
+	DocID       pgtype.UUID `json:"doc_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetDocComment(ctx context.Context, arg GetDocCommentParams) (DocComment, error) {
+	row := q.db.QueryRow(ctx, getDocComment, arg.ID, arg.DocID, arg.WorkspaceID)
+	var i DocComment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DocID,
+		&i.ParentID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.AnchorQuote,
+		&i.AnchorPrefix,
+		&i.AnchorSuffix,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -336,6 +448,53 @@ func (q *Queries) InsertDocVersion(ctx context.Context, arg InsertDocVersionPara
 	return i, err
 }
 
+const listDocComments = `-- name: ListDocComments :many
+SELECT id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at FROM doc_comment
+WHERE doc_id = $1 AND workspace_id = $2
+ORDER BY created_at, id
+`
+
+type ListDocCommentsParams struct {
+	DocID       pgtype.UUID `json:"doc_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ListDocComments(ctx context.Context, arg ListDocCommentsParams) ([]DocComment, error) {
+	rows, err := q.db.Query(ctx, listDocComments, arg.DocID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DocComment{}
+	for rows.Next() {
+		var i DocComment
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DocID,
+			&i.ParentID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.AnchorQuote,
+			&i.AnchorPrefix,
+			&i.AnchorSuffix,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocFolders = `-- name: ListDocFolders :many
 SELECT id, workspace_id, parent_id, title, created_by_type, created_by_id, created_at, updated_at FROM doc_folder
 WHERE workspace_id = $1
@@ -364,6 +523,40 @@ func (q *Queries) ListDocFolders(ctx context.Context, workspaceID pgtype.UUID) (
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocThreadParticipants = `-- name: ListDocThreadParticipants :many
+SELECT DISTINCT author_id FROM doc_comment
+WHERE workspace_id = $1 AND doc_id = $2
+  AND (id = $3 OR parent_id = $3)
+  AND author_type = 'member'
+`
+
+type ListDocThreadParticipantsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DocID       pgtype.UUID `json:"doc_id"`
+	RootID      pgtype.UUID `json:"root_id"`
+}
+
+// Members who wrote in a discussion: its root author and every reply author.
+func (q *Queries) ListDocThreadParticipants(ctx context.Context, arg ListDocThreadParticipantsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listDocThreadParticipants, arg.WorkspaceID, arg.DocID, arg.RootID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var author_id pgtype.UUID
+		if err := rows.Scan(&author_id); err != nil {
+			return nil, err
+		}
+		items = append(items, author_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -632,6 +825,56 @@ func (q *Queries) RenameDocFolder(ctx context.Context, arg RenameDocFolderParams
 		&i.Title,
 		&i.CreatedByType,
 		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setDocCommentResolution = `-- name: SetDocCommentResolution :one
+UPDATE doc_comment SET
+    resolved_at = $1,
+    resolved_by_type = $2,
+    resolved_by_id = $3,
+    updated_at = now()
+WHERE id = $4 AND doc_id = $5 AND workspace_id = $6 AND parent_id IS NULL
+RETURNING id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at
+`
+
+type SetDocCommentResolutionParams struct {
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	ID             pgtype.UUID        `json:"id"`
+	DocID          pgtype.UUID        `json:"doc_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+}
+
+// Resolves (or, with null fields, reopens) a discussion. Roots only.
+func (q *Queries) SetDocCommentResolution(ctx context.Context, arg SetDocCommentResolutionParams) (DocComment, error) {
+	row := q.db.QueryRow(ctx, setDocCommentResolution,
+		arg.ResolvedAt,
+		arg.ResolvedByType,
+		arg.ResolvedByID,
+		arg.ID,
+		arg.DocID,
+		arg.WorkspaceID,
+	)
+	var i DocComment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DocID,
+		&i.ParentID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.AnchorQuote,
+		&i.AnchorPrefix,
+		&i.AnchorSuffix,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

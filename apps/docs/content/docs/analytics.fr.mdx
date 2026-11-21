@@ -12,7 +12,7 @@ La page **Statistiques** de la barre latérale regroupe la consommation des agen
 
 La page a deux onglets, **Consommation** et **Erreurs**, qui partagent les deux filtres en haut à droite :
 
-- **Période** : `1d`, `7d`, `30d` (par défaut), `90d`, `180d`. `1d` signifie aujourd'hui, à partir de minuit dans votre fuseau horaire, et non les dernières 24 heures.
+- **Période** : `1d`, `7d`, `30d` (par défaut), `90d`, `180d`, `365d`. `1d` signifie aujourd'hui, à partir de minuit dans votre fuseau horaire, et non les dernières 24 heures. Sur Multica Cloud, votre forfait détermine jusqu'où vous pouvez remonter ; les périodes au-delà sont verrouillées dans le menu, et passer à un forfait supérieur affiche les données plus anciennes, qui sont toujours conservées.
 - **Projet** : **Tous les projets** par défaut. Avec un projet sélectionné, seules les exécutions des tâches de ce projet comptent ; celles qui n'appartiennent à aucune tâche, comme les exécutions de chat, sont exclues.
 
 Les jours sont découpés selon votre fuseau horaire : celui choisi dans **Paramètres → Préférences → Fuseau horaire**, ou celui du navigateur si vous n'en avez pas choisi. L'en-tête affiche ce fuseau et l'heure de la dernière mise à jour. Le serveur agrège les chiffres toutes les 5 minutes et une page ouverte se rafraîchit au même rythme ; une exécution qui vient de se terminer peut donc mettre quelques minutes à apparaître. Le bouton d'actualisation récupère tout de suite les derniers chiffres.
@@ -32,7 +32,7 @@ Quatre chiffres en haut :
 
 Le temps d'exécution et le nombre d'exécutions ne comptent que les exécutions réellement démarrées (terminées, en échec ou annulées en cours de route) ; une exécution annulée alors qu'elle attendait encore dans la file n'est pas comptée.
 
-La carte de tendance affiche Tokens, Coût, Temps ou Exécutions sur un même axe temporel, en **Quotidien** ou **Hebdomadaire**. `30d` et `90d` proposent les deux ; `1d` et `7d` sont uniquement quotidiens, `180d` uniquement hebdomadaire. Les semaines commencent le lundi, et la semaine en cours, pas encore terminée, est dessinée plus pâle ; au survol, la barre est marquée comme partielle avec le nombre de jours écoulés sur 7.
+La carte de tendance affiche Tokens, Coût, Temps ou Exécutions sur un même axe temporel, en **Quotidien** ou **Hebdomadaire**. `30d` et `90d` proposent les deux ; `1d` et `7d` sont uniquement quotidiens, `180d` et `365d` uniquement hebdomadaires. Les semaines commencent le lundi, et la semaine en cours, pas encore terminée, est dessinée plus pâle ; au survol, la barre est marquée comme partielle avec le nombre de jours écoulés sur 7. Quand la période de votre forfait commence au milieu de la première semaine, cette semaine est marquée partielle de la même façon.
 
 Le **Classement** liste les tokens, le coût, le temps et les exécutions de chaque agent, triés selon l'une de ces quatre valeurs. Il affiche les 10 premiers ; **Tout afficher** montre le reste. Deux lignes peuvent regrouper plusieurs agents :
 

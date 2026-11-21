@@ -107,6 +107,8 @@ Privilégiez un bundle que votre propre équipe publie ou compile : cette valeur
 
 **Après une mise à niveau de DSH.** Si la sonde signale des paquets cœur incompatibles dans le profil, sauvegardez le manifeste indiqué dans le diagnostic du daemon. Vérifiez les substitutions de `@deepseek-ai/dsh-agent`, `@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-tools` et `@deepseek-ai/dsh-llm` : préférez les paquets fournis par l’application, ou alignez les substitutions sur la version installée de DSH. Conservez les plugins et hooks indépendants nécessaires ; ne supprimez pas toutes les dépendances. Relancez `dsh --profile multica --probe` après la réparation. Multica indique que ce refus de compatibilité confirmé nécessite une réparation manuelle et n’écrase pas le profil existant.
 
+Si la sonde indique que DSH a ignoré `@multica-ai/dsh-runtime` car ses exigences ne correspondent pas à la version installée de DSH, sauvegardez le manifeste et mettez à jour le pont Multica vers une version compatible. Relancez ensuite `dsh --profile multica --probe`.
+
 Le daemon enregistre DeepSeek Harness uniquement après la réussite de `dsh --profile multica --probe`. Le diagnostic de `/health` distingue un profil absent, une réparation manuelle confirmée, une incompatibilité de protocole et une sonde indisponible. En cas d’échec au démarrage, il inclut la version détectée du CLI, l’emplacement du manifeste et les diagnostics expurgés disponibles.
 
 </Accordion>
@@ -128,6 +130,13 @@ Choisissez le fournisseur et le modèle dans la configuration propre de QwenPaw.
 <Accordion title="Reasonix" id="reasonix">
 
 Exécutez `reasonix setup` et configurez un fournisseur et un modèle par défaut avant de démarrer le daemon.
+
+</Accordion>
+<Accordion title="Qoder CLI / Qoder CN CLI" id="qoder">
+
+Si l'application de bureau Qoder fonctionne mais qu'une exécution locale Multica signale une erreur d'authentification, testez le même modèle avec la CLI Qoder sur la machine du daemon, sous le compte système qui l'exécute. La détection de l'exécutable confirme uniquement que le daemon sait le trouver. La CLI démarre avec l'environnement du daemon et les variables d'environnement configurées pour l'agent. Un identifiant accessible uniquement à l'application de bureau Qoder peut manquer. Si la CLI échoue aussi, connectez-vous depuis la CLI ou terminez la configuration du fournisseur avant de relancer l'exécution Multica.
+
+Un test réussi dans le terminal peut utiliser des identifiants que le shell charge et que le daemon ne reçoit pas. Si votre fournisseur attend une clé ou un jeton dans une variable d'environnement, définissez cette variable dans l'environnement de démarrage du daemon, puis redémarrez-le. Pour les identifiants à privilèges limités, vous pouvez aussi utiliser l'onglet **Environnement** de l'agent. Multica stocke les valeurs ajoutées dans cet onglet [en clair dans la base de données du serveur](/agents-create#variables-denvironnement-et-identifiants).
 
 </Accordion>
 </Accordions>

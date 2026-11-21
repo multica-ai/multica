@@ -58,12 +58,14 @@ import { DimSegmented } from "../../dashboard/components/dim-segmented";
 // Single source of truth for the period selector. KPIs, the When-chart, the
 // Cost-by tabs, and the CSV export all read from the same `days` value so
 // the labels ("· 30D") and the data slice never disagree. Same ranges as the
-// Analytics page except 1d.
+// Analytics page except 1d, and except 365d: this page reads a fixed 180-day
+// cache.
 const PERIODS = TIME_RANGES.filter(
-  (r): r is Exclude<(typeof TIME_RANGES)[number], { days: 1 }> => r.days !== 1,
+  (r): r is Exclude<(typeof TIME_RANGES)[number], { days: 1 | 365 }> =>
+    r.days !== 1 && r.days !== 365,
 );
 
-type TimeRange = Exclude<DashboardTimeRange, 1>;
+type TimeRange = Exclude<DashboardTimeRange, 1 | 365>;
 
 // Top-level orchestrator. Owns the time window, fetches a 180-day usage
 // cache once, slices it into "current" / "prior" windows for delta math,

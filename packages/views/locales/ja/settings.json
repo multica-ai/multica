@@ -1596,6 +1596,10 @@
       "member": {
         "label": "メンバー",
         "description": "タスクの作成と作業"
+      },
+      "guest": {
+        "label": "ゲスト",
+        "description": "共有されたプロジェクトの閲覧とコメントのみ。エージェントは実行できません。"
       }
     },
     "share_links_create_title": "共有リンクを作成",
@@ -1645,7 +1649,32 @@
     "toast_invitation_pending": "{{email}} への招待はすでに保留中です。",
     "toast_invite_check_unavailable": "既存のメンバーと招待を確認できませんでした。しばらくしてからもう一度お試しください。",
     "member_limit_full_description_billing": "ワークスペースのサブスクリプションに対応が必要です。請求とプランで復旧するとメンバーを追加できます。先にメンバーを削除することもできます。",
-    "open_billing": "請求とプランを開く"
+    "open_billing": "請求とプランを開く",
+    "guest_free_tag": "無料・席を使わない",
+    "guest_projects_label": "アクセスできるプロジェクト",
+    "guest_projects_add": "プロジェクトを追加…",
+    "guest_projects_remove": "{{project}} を外す",
+    "guest_projects_hint": "ゲストは他のプロジェクト、エージェント、オートパイロット、設定を見られません。",
+    "invite_guest_button": "ゲストを招待",
+    "all_label": "すべて",
+    "guests_label": "ゲスト",
+    "guest_count": "ゲスト {{count}} 人",
+    "list_separator": "、",
+    "takes_seat": "1 席を使用",
+    "frees_seat": "席が空く",
+    "make_member": "メンバーにする",
+    "make_member_title": "{{name}} をメンバーにしますか？",
+    "make_member_description": "{{name}} はワークスペース全体を見られ、エージェントを実行できます。1 席を使用します。",
+    "make_member_seat_description": "{{name}} はワークスペース全体を見られ、エージェントを実行できます。購入済みの席がすべて使用中のため、1 席を追加購入します。",
+    "purchase_seat_and_make_member": "席を購入してメンバーにする",
+    "making_member": "メンバーにしています…",
+    "make_guest_title": "{{name}} をゲストにする",
+    "make_guest_description": "{{name}} は下のプロジェクトだけを見られ、席が空きます。エージェント、オートパイロット、ランタイムへのアクセスは回収されます。",
+    "make_guest_button": "ゲストにする",
+    "manage_projects": "アクセスできるプロジェクトを管理",
+    "manage_projects_title": "{{name}} がアクセスできるプロジェクト",
+    "save_projects": "保存",
+    "toast_projects_updated": "プロジェクトを更新しました"
   },
   "integrations": {
     "status_connected": "接続済み",

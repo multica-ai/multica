@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+CLI가 토큰을 확인할 수 없으면 다시 로그인하기 전에 표시된 오류를 확인하세요.
+
 일반적인 원인은 다음과 같습니다.
 
 - CLI에 아직 로그인하지 않았거나 로컬에 저장된 token이 만료됨
@@ -65,6 +67,8 @@ multica daemon restart
 ```bash
 multica config show
 ```
+
+macOS에서 데몬 로그에 `connect: no route to host`가 표시되지만 같은 Mac의 터미널에서 `curl -fsS <server-url>/health`가 성공한다면, 같은 시간대의 두 결과를 기록하세요. 데몬을 시작한 방법(Desktop, 로그인 서비스, 터미널)과 macOS 및 데몬 버전도 함께 남기세요. 터미널 결과는 해당 셸 프로세스의 연결만 확인합니다.
 
 </Accordion>
 <Accordion title={<><code>multica setup</code>이 서버에 도달할 수 없다고 보고함</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">

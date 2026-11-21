@@ -38,7 +38,7 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
  ) r ON true
  WHERE w.workspace_id= @workspace_id AND w.system_rule IS NULL
   -- MUL-8472: private projects the caller cannot see.
-  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
  UNION ALL
  -- The child-done system rule of each open parent that still waits for a
  -- sub-issue: every child when unstaged, else its lowest unfinished stage.
@@ -78,7 +78,7 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
  ) sr ON true
  WHERE w.workspace_id= @workspace_id AND w.system_rule IS NOT NULL AND agg.open_count>0
   -- MUL-8472: private projects the caller cannot see.
-  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR p.project_id IS NULL OR NOT (p.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(p.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
   AND p.status NOT IN ('done','cancelled')
   AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=p.workspace_id AND s.key=p.status AND s.category IN ('done','closed'))
 ), classified AS (

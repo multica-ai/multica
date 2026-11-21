@@ -8,12 +8,16 @@ import {
   DocVersionSchema,
   DocVersionListSchema,
   DocSearchResponseSchema,
+  DocCommentSchema,
+  DocCommentListSchema,
 } from "../docs/schemas";
 import type {
   Doc,
   DocSummary,
   DocFolder,
   SearchDocsResponse,
+  DocComment,
+  CreateDocCommentRequest,
   DocTree,
   DocVersion,
   CreateDocRequest,
@@ -121,7 +125,6 @@ import type {
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
   TimelineEntry,
-  AssigneeFrequencyEntry,
   TaskMessagePayload,
   TaskContextReceiptResponse,
   RuntimeRateLimitsResponse,
@@ -284,8 +287,12 @@ import type {
   CreateBillingPortalSessionResponse,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrices,
+  CreateWorkspaceAutopilotAddonCheckoutRequest,
+  CreateWorkspaceAutopilotAddonCheckoutResponse,
+  WorkspaceAutopilotAddonCheckout,
   WorkspaceFeatures,
   MemberLimit,
+  StorageUsage,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
@@ -413,6 +420,8 @@ import {
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
   RuntimeRateLimitsResponseSchema,
+  RuntimeUpdateSchema,
+  ActiveRuntimeUpdateResponseSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
   ArchiveProjectResponseSchema,
@@ -447,8 +456,11 @@ import {
   BatchUpdateIssuesResponseSchema,
   UNCONFIRMED_BATCH_UPDATE,
   WorkspaceSubscriptionPricesSchema,
+  CreateWorkspaceAutopilotAddonCheckoutResponseSchema,
+  WorkspaceAutopilotAddonCheckoutSchema,
   WorkspaceFeaturesSchema,
   MemberLimitSchema,
+  StorageUsageSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
@@ -670,8 +682,31 @@ export interface LoginResponse {
   user: User;
 }
 
+/** Response header carrying the plan's enforced dashboard history limit. */
+export const DASHBOARD_HISTORY_LIMIT_HEADER = "X-Dashboard-History-Limit-Days";
+
+/** A positive whole number of days, or null for absent or malformed. */
+export function parseDashboardHistoryLimit(value: string | null): number | null {
+  if (value === null || !/^\d+$/.test(value.trim())) return null;
+  const days = Number(value.trim());
+  return Number.isSafeInteger(days) && days > 0 ? days : null;
+}
+
+export interface DashboardRequestParams {
+  days?: number;
+  project_id?: string | null;
+  tz?: string;
+  onHistoryLimit?: (limitDays: number | null) => void;
+}
+
 function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
   const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
+  if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
+  return parsed;
+}
+
+function parseRuntimeUpdate(raw: unknown, endpoint: string): RuntimeUpdate {
+  const parsed = parseWithFallback<RuntimeUpdate | null>(raw, RuntimeUpdateSchema, null, { endpoint });
   if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
   return parsed;
 }
@@ -861,6 +896,14 @@ function skillFromImportResult(raw: unknown, endpoint: string): Skill {
 export const CHAT_DRAFT_RESTORE_CAPABILITY = "chat-draft-restore-v1";
 
 /**
+ * Advertised in X-Client-Capabilities on member and invitation lists: without
+ * it the server leaves guest rows out, because clients released before guests
+ * crash on the unknown role. Must stay in sync with
+ * protocol.AppCapabilityWorkspaceGuestsV1.
+ */
+export const WORKSPACE_GUESTS_CAPABILITY = "workspace-guests-v1";
+
+/**
  * Body shared by both unsubscribe endpoints: an omitted target means "the
  * caller", which the server resolves from the request actor.
  */
@@ -1010,6 +1053,38 @@ export class ApiClient {
   }
   async deleteDoc(id: string): Promise<void> {
     await this.fetch(`/api/docs/${id}`, { method: "DELETE" });
+  }
+  async listDocComments(docId: string): Promise<DocComment[]> {
+    return parseWithFallback(
+      await this.fetch<unknown>(`/api/docs/${docId}/comments`),
+      DocCommentListSchema,
+      { comments: [] },
+      { endpoint: "GET /api/docs/{id}/comments" },
+    ).comments;
+  }
+  // Writes reject a malformed body instead of inventing a comment.
+  async createDocComment(docId: string, data: CreateDocCommentRequest): Promise<DocComment> {
+    const raw = await this.fetch<unknown>(`/api/docs/${docId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        content: data.content,
+        ...(data.parentId ? { parent_id: data.parentId } : {}),
+        ...(data.anchorQuote !== undefined
+          ? { anchor_quote: data.anchorQuote, anchor_prefix: data.anchorPrefix ?? "", anchor_suffix: data.anchorSuffix ?? "" }
+          : {}),
+      }),
+    });
+    return DocCommentSchema.parse(raw);
+  }
+  async setDocCommentResolved(docId: string, commentId: string, resolved: boolean): Promise<DocComment> {
+    const raw = await this.fetch<unknown>(
+      `/api/docs/${docId}/comments/${commentId}/${resolved ? "resolve" : "reopen"}`,
+      { method: "POST" },
+    );
+    return DocCommentSchema.parse(raw);
+  }
+  async deleteDocComment(docId: string, commentId: string): Promise<void> {
+    await this.fetch(`/api/docs/${docId}/comments/${commentId}`, { method: "DELETE" });
   }
   async listDocVersions(id: string): Promise<DocVersion[]> {
     return parseWithFallback(
@@ -2098,10 +2173,6 @@ export class ApiClient {
     });
   }
 
-  async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
-    return this.fetch("/api/assignee-frequency");
-  }
-
   async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}`, {
       method: "PUT",
@@ -2644,7 +2715,7 @@ export class ApiClient {
     return parseWithFallback<WorkspaceFeatures>(
       raw,
       WorkspaceFeaturesSchema,
-      { features: {} },
+      { features: {}, limits: { dashboardHistoryDays: null } },
       { endpoint: "GET /api/workspaces/:id/features" },
     );
   }
@@ -2658,6 +2729,18 @@ export class ApiClient {
       MemberLimitSchema,
       { action: "off", limit: null, members: null, pendingInvitations: null },
       { endpoint: "GET /api/workspaces/:id/member-limit" },
+    );
+  }
+
+  // The plan's attachment storage limit (MUL-9489). A response that cannot
+  // be read falls back to no limit: the server still checks every upload.
+  async getStorageUsage(workspaceId: string): Promise<StorageUsage> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/storage-usage`);
+    return parseWithFallback<StorageUsage>(
+      raw,
+      StorageUsageSchema,
+      { action: "off", usedBytes: null, limitBytes: null, reached: null },
+      { endpoint: "GET /api/workspaces/:id/storage-usage" },
     );
   }
 
@@ -2826,6 +2909,51 @@ export class ApiClient {
       CreateWorkspaceSubscriptionPortalResponseSchema,
       null,
       { endpoint: "POST /api/cloud-subscriptions/portal-sessions" },
+    );
+  }
+
+  // Autopilot add-on packs (managers only), paid on Stripe Checkout. A
+  // non-2xx answer throws ApiError with Cloud's status: 409 not purchasable or
+  // price changed.
+  async createWorkspaceAutopilotAddonCheckout(
+    data: CreateWorkspaceAutopilotAddonCheckoutRequest,
+  ): Promise<CreateWorkspaceAutopilotAddonCheckoutResponse | null> {
+    const res = await this.fetchRaw(
+      "/api/cloud-subscriptions/autopilot-addon/checkout-sessions",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          packs: data.packs,
+          expected_unit_amount: data.expectedUnitAmount,
+          currency: data.currency,
+          idempotency_key: data.idempotencyKey,
+        }),
+        extraHeaders: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": data.idempotencyKey,
+        },
+      },
+    );
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback<CreateWorkspaceAutopilotAddonCheckoutResponse | null>(
+      raw,
+      CreateWorkspaceAutopilotAddonCheckoutResponseSchema,
+      null,
+      { endpoint: "POST /api/cloud-subscriptions/autopilot-addon/checkout-sessions" },
+    );
+  }
+
+  async getWorkspaceAutopilotAddonCheckout(
+    sessionId: string,
+  ): Promise<WorkspaceAutopilotAddonCheckout | null> {
+    const raw = await this.fetch<unknown>(
+      `/api/cloud-subscriptions/autopilot-addon/checkout-sessions/${encodeURIComponent(sessionId)}`,
+    );
+    return parseWithFallback<WorkspaceAutopilotAddonCheckout | null>(
+      raw,
+      WorkspaceAutopilotAddonCheckoutSchema,
+      null,
+      { endpoint: "GET /api/cloud-subscriptions/autopilot-addon/checkout-sessions/:id" },
     );
   }
 
@@ -3059,128 +3187,123 @@ export class ApiClient {
     );
   }
 
-  // Workspace dashboard — three independent rollups for `/{slug}/dashboard`.
-  // Each accepts an optional `project_id` to narrow the scope to one project.
-  // Cost is computed client-side from the model pricing table (same contract
-  // as the per-runtime endpoints above).
-
-  async getDashboardUsageDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardUsageDaily[]> {
+  // Workspace dashboard — six rollups for `/{slug}/usage`. Each accepts an
+  // optional `project_id` to narrow the scope to one project and `tz` to cut
+  // its day boundary in the viewer's calendar. Cost is computed client-side
+  // from the model pricing table (same contract as the per-runtime endpoints
+  // above).
+  //
+  // `onHistoryLimit` receives the plan's enforced history limit the response
+  // was served under (X-Dashboard-History-Limit-Days), or null for none, so a
+  // page open across a plan change notices it (MUL-9490).
+  private async fetchDashboardRows<T>(
+    path: string,
+    params: DashboardRequestParams,
+    schema: ZodType,
+    endpoint: string,
+  ): Promise<T[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
-    return parseWithFallback<DashboardUsageDaily[]>(
-      raw,
+    const res = await this.fetchRaw(`${path}?${search}`, {
+      extraHeaders: { "Content-Type": "application/json" },
+    });
+    params.onHistoryLimit?.(
+      parseDashboardHistoryLimit(res.headers.get(DASHBOARD_HISTORY_LIMIT_HEADER)),
+    );
+    const raw: unknown = await res.json();
+    return parseWithFallback<T[]>(raw, schema, [], { endpoint });
+  }
+
+  async getDashboardUsageDaily(params: DashboardRequestParams): Promise<DashboardUsageDaily[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/daily",
+      params,
       DashboardUsageDailyListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/usage/daily" },
+      "GET /api/dashboard/usage/daily",
     );
   }
 
-  async getDashboardUsageByAgent(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardUsageByAgent[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
-    return parseWithFallback<DashboardUsageByAgent[]>(
-      raw,
+  async getDashboardUsageByAgent(params: DashboardRequestParams): Promise<DashboardUsageByAgent[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-agent",
+      params,
       DashboardUsageByAgentListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/usage/by-agent" },
+      "GET /api/dashboard/usage/by-agent",
     );
   }
 
-  async getDashboardAgentRunTime(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardAgentRunTime[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` aligns the "last N days" cutoff with the viewer's calendar,
-    // matching the per-agent token card.
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
-    return parseWithFallback<DashboardAgentRunTime[]>(
-      raw,
+  async getDashboardAgentRunTime(params: DashboardRequestParams): Promise<DashboardAgentRunTime[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/agent-runtime",
+      params,
       DashboardAgentRunTimeListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/agent-runtime" },
+      "GET /api/dashboard/agent-runtime",
     );
   }
 
-  async getDashboardRunTimeDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardRunTimeDaily[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` cuts the day buckets in the viewer's calendar so Time / Tasks
-    // align with the Cost / Tokens charts.
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/runtime/daily?${search}`);
-    return parseWithFallback<DashboardRunTimeDaily[]>(
-      raw,
+  async getDashboardRunTimeDaily(params: DashboardRequestParams): Promise<DashboardRunTimeDaily[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/runtime/daily",
+      params,
       DashboardRunTimeDailyListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/runtime/daily" },
+      "GET /api/dashboard/runtime/daily",
     );
   }
 
-  async getDashboardFailuresDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardFailureDaily[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` cuts the day buckets in the viewer's calendar so the Errors chart
-    // shares an x-axis with the other four metrics.
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/failures/daily?${search}`);
-    return parseWithFallback<DashboardFailureDaily[]>(
-      raw,
+  async getDashboardFailuresDaily(params: DashboardRequestParams): Promise<DashboardFailureDaily[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/failures/daily",
+      params,
       DashboardFailureDailyListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/failures/daily" },
+      "GET /api/dashboard/failures/daily",
     );
   }
 
-  async getDashboardFailuresByAgent(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardFailureByAgent[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/failures/by-agent?${search}`);
-    return parseWithFallback<DashboardFailureByAgent[]>(
-      raw,
+  async getDashboardFailuresByAgent(params: DashboardRequestParams): Promise<DashboardFailureByAgent[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/failures/by-agent",
+      params,
       DashboardFailureByAgentListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/failures/by-agent" },
+      "GET /api/dashboard/failures/by-agent",
     );
   }
 
+  // queue_when_busy: a busy daemon holds the update and installs it once
+  // idle, instead of failing it; this UI can show and cancel the queue.
   async initiateUpdate(
     runtimeId: string,
     targetVersion: string,
   ): Promise<RuntimeUpdate> {
-    return this.fetch(`/api/runtimes/${runtimeId}/update`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update`, {
       method: "POST",
-      body: JSON.stringify({ target_version: targetVersion }),
+      body: JSON.stringify({ target_version: targetVersion, queue_when_busy: true }),
     });
+    return parseRuntimeUpdate(raw, "POST /api/runtimes/:id/update");
   }
 
   async getUpdateResult(
     runtimeId: string,
     updateId: string,
   ): Promise<RuntimeUpdate> {
-    return this.fetch(`/api/runtimes/${runtimeId}/update/${updateId}`);
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update/${updateId}`);
+    return parseRuntimeUpdate(raw, "GET /api/runtimes/:id/update/:updateId");
+  }
+
+  /** The machine's unfinished update, started through any of its runtimes. */
+  async getActiveUpdate(runtimeId: string): Promise<RuntimeUpdate | null> {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update`);
+    return parseWithFallback(raw, ActiveRuntimeUpdateResponseSchema, { update: null }, {
+      endpoint: "GET /api/runtimes/:id/update",
+    }).update;
+  }
+
+  async cancelUpdate(runtimeId: string, updateId: string): Promise<RuntimeUpdate> {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update/${updateId}/cancel`, {
+      method: "POST",
+    });
+    return parseRuntimeUpdate(raw, "POST /api/runtimes/:id/update/:updateId/cancel");
   }
 
   // Both discovery endpoints feed a UI state machine (poll while
@@ -4005,7 +4128,9 @@ export class ApiClient {
 
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`);
+    return this.fetch(`/api/workspaces/${workspaceId}/members`, {
+      headers: { "X-Client-Capabilities": WORKSPACE_GUESTS_CAPABILITY },
+    });
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
@@ -4019,6 +4144,13 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  async setMemberProjects(workspaceId: string, memberId: string, projectIds: string[]): Promise<MemberWithUser> {
+    return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}/projects`, {
+      method: "PUT",
+      body: JSON.stringify({ project_ids: projectIds }),
     });
   }
 
@@ -4036,7 +4168,9 @@ export class ApiClient {
 
   // Invitations
   async listWorkspaceInvitations(workspaceId: string): Promise<Invitation[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/invitations`);
+    return this.fetch(`/api/workspaces/${workspaceId}/invitations`, {
+      headers: { "X-Client-Capabilities": WORKSPACE_GUESTS_CAPABILITY },
+    });
   }
 
   async revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
@@ -4328,9 +4462,11 @@ export class ApiClient {
 
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized(credentialUsed);
-      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
+      // An ApiError, so callers can branch on the body's `code` (for example
+      // storage_limit_reached) instead of the message.
+      const { message, body } = await this.parseErrorBody(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+      throw new ApiError(message, res.status, res.statusText, body);
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
@@ -5142,11 +5278,20 @@ export class ApiClient {
   }
 
   // Custom issue properties
-  async listProperties(includeArchived = false): Promise<ListPropertiesResponse> {
-    const suffix = includeArchived ? "?include_archived=true" : "";
+  /**
+   * Usage counts cost the server a pass over the workspace's issues, so they
+   * are opt-in: without `includeUsage` every `usage_count` comes back 0.
+   */
+  async listProperties(
+    includeArchived = false,
+    { includeUsage = false }: { includeUsage?: boolean } = {},
+  ): Promise<ListPropertiesResponse> {
+    const params = new URLSearchParams();
+    if (includeArchived) params.set("include_archived", "true");
+    if (!includeUsage) params.set("include_usage", "false");
     let raw: unknown;
     try {
-      raw = await this.fetch<unknown>(`/api/properties${suffix}`);
+      raw = await this.fetch<unknown>(`/api/properties?${params}`);
     } catch (error) {
       // A backend predating custom properties 404s here (e.g. after a
       // server-only rollback). Treat it as an empty catalog: the property

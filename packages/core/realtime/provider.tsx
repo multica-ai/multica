@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { WSClient, type WSConnectionStatus } from "../api/ws-client";
 import type { WSEventType, StorageAdapter } from "../types";
 import type { ClientIdentity } from "../platform/types";
@@ -22,7 +23,10 @@ import {
 import { useLocalSearchIndexSync } from "../search-index/hooks";
 import { useGitHubConnectionStore } from "../github/connection-store";
 import { createLogger } from "../logger";
+import { useIsGuest } from "../permissions/use-current-member";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
+
+const GUEST_REFRESH_MS = 30_000;
 
 type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
 
@@ -76,6 +80,20 @@ export function WSProvider({
   );
   const wsId = useSyncExternalStore(subscribeToCurrentSlug, getCurrentWsId, () => null);
   const [wsClient, setWsClient] = useState<WSClient | null>(null);
+  // The server streams nothing to a guest (MUL-9420), so a guest polls the
+  // queries on screen instead of holding a socket.
+  const isGuest = useIsGuest(wsId);
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!isGuest) return;
+    const refresh = () => void queryClient.invalidateQueries({ type: "active" });
+    const timer = window.setInterval(refresh, GUEST_REFRESH_MS);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [isGuest, queryClient]);
 
   useEffect(() => () => useGitHubConnectionStore.getState().reset(), [user?.id]);
 
@@ -88,7 +106,7 @@ export function WSProvider({
   const identityOS = identity?.os;
 
   useEffect(() => {
-    if (!user || !wsSlug) return;
+    if (!user || !wsSlug || isGuest) return;
 
     // In token mode we need a token from storage; in cookie mode the HttpOnly
     // cookie is sent automatically with the WS upgrade request.
@@ -122,6 +140,7 @@ export function WSProvider({
   }, [
     user,
     wsSlug,
+    isGuest,
     wsUrl,
     storage,
     cookieAuth,

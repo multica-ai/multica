@@ -192,7 +192,11 @@
       "pinned_settings": "Pinned display",
       "views_settings": "Views display",
       "views_builtin": "Built-in views",
-      "views_show_count": "Counts"
+      "views_show_count": "Counts",
+      "guest_badge": "Guest",
+      "guest_badge_hint": "You can view and comment on the projects shared with you.",
+      "involved": "Involved",
+      "shared_projects": "Shared with you"
     },
     "team": {
       "new_agent": "New agent",

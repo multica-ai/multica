@@ -169,7 +169,6 @@ export {
 } from "./quick-action";
 export type {
   TimelineEntry,
-  AssigneeFrequencyEntry,
 } from "./activity";
 export type { IssueSubscriber, IssueSubscriberDelivery } from "./subscriber";
 export type * from "./events";
@@ -416,6 +415,15 @@ export type {
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
+  WorkspacePlanLimitPlan,
+  WorkspacePlanLimit,
+  WorkspacePlanLimits,
+  WorkspaceAutopilotAddonSummary,
+  WorkspaceAutopilotAddonPrice,
+  CreateWorkspaceAutopilotAddonCheckoutRequest,
+  CreateWorkspaceAutopilotAddonCheckoutResponse,
+  WorkspaceAutopilotAddonCheckoutStatus,
+  WorkspaceAutopilotAddonCheckout,
   WorkspacePlanChangeHold,
   WorkspaceTrial,
   WorkspaceTrialState,
@@ -434,7 +442,9 @@ export type {
   PaidFeature,
   WorkspaceFeatureState,
   WorkspaceFeatures,
+  WorkspaceFeatureLimits,
   MemberLimit,
+  StorageUsage,
 } from "./billing";
 export type { IssueWakeup, IssueWakeupInput, SystemWakeup, WorkspaceSystemWakeup, WakeupPreview, IssueWakeupSummaryRow, WakeupCondition, WakeupPausedReason, WakeupRun, PausedWakeup, WakeupSource } from "./issue-wakeup";
 

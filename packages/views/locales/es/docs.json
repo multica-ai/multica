@@ -66,5 +66,31 @@
   "unavailable": {
     "title": "Documentos no está disponible",
     "description": "Este espacio de trabajo no tiene Documentos activado."
+  },
+  "comments": {
+    "title": "Comentarios",
+    "add": "Comentar",
+    "open": "Abiertos {{count}}",
+    "resolved": "Resueltos {{count}}",
+    "close": "Cerrar comentarios",
+    "quote_missing": "El texto comentado cambió",
+    "reply_placeholder": "Responde o menciona con @…",
+    "new_placeholder": "Escribe un comentario, @ para mencionar…",
+    "submit": "Comentar",
+    "reply": "Responder",
+    "cancel": "Cancelar",
+    "resolve": "Resolver",
+    "reopen": "Reabrir",
+    "delete": "Eliminar comentario",
+    "resolved_by": "Resuelto por {{name}}",
+    "replies_one": "{{count}} respuesta",
+    "replies_other": "{{count}} respuestas",
+    "empty_open": "No hay comentarios abiertos. Selecciona texto y elige Comentar para empezar uno.",
+    "empty_resolved": "No hay comentarios resueltos.",
+    "errors": {
+      "save": "No se pudo publicar el comentario",
+      "delete": "No se pudo eliminar el comentario",
+      "resolve": "No se pudo actualizar la conversación"
+    }
   }
 }

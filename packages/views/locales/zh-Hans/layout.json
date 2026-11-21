@@ -188,7 +188,11 @@
       "pinned_settings": "固定显示",
       "views_settings": "视图显示",
       "views_builtin": "内置视图",
-      "views_show_count": "数量"
+      "views_show_count": "数量",
+      "guest_badge": "访客",
+      "guest_badge_hint": "你可以查看和评论分享给你的项目。",
+      "involved": "我参与的",
+      "shared_projects": "分享给你的项目"
     },
     "team": {
       "new_agent": "新建智能体",
