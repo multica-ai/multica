@@ -277,6 +277,7 @@ Codex 기본 하위 에이전트도 기본적으로 꺼져 있습니다. Multica
 | `MULTICA_TASK_SLOT` | 데몬 전체 동시 실행 풀의 슬롯. GPU 같은 슬롯 번호 기반 리소스에 사용 가능 | 참고 정보 |
 | `MULTICA_REPO_CHECKOUT_MODE` | Linux와 Windows의 Codex 실행에서만 `isolated`로 설정되어, `multica repo checkout`이 작업 디렉터리 안에 `.git`이 있는 독립 클론을 만듭니다. 다른 실행에서는 설정되지 않습니다 | 참고 정보 |
 | `TMPDIR` | 실행 중인 작업의 비공개 임시 디렉터리. `TMP`와 `TEMP`로도 제공하지만, Windows에서는 Git Bash의 공유 `/tmp`를 위해 작업이 사용자 temp 경로를 상속합니다. Windows Claude Code는 `CLAUDE_CODE_TMPDIR`의 기본값을 작업 임시 디렉터리로 지정 | 참고 정보 |
+| `CLAUDE_CODE_ENTRYPOINT` | Claude Code 실행에서는 `multica`. Claude Code가 호출자를 헤드리스 기본값 `sdk-cli` 대신 Multica로 보고합니다. 에이전트의 사용자 지정 환경 변수로 재정의할 수 있음 | 참고 정보 |
 
 `MULTICA_TOKEN`을 사용하는 요청의 작성자는 서버가 결정하며, 태스크 댓글 같은 쓰기는 할당된 에이전트와 실행 중인 작업에 귀속됩니다. 자격 증명의 전체 바인딩, 권한, 귀속, 최대 24시간의 유효 기간 및 정리 동작은 [에이전트 실행용 임시 토큰](/auth-tokens#에이전트-실행용-임시-토큰)을 참고하세요.
 
