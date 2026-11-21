@@ -9510,6 +9510,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			pendingCursorLoginCheck = &check
 		}
 	}
+	stopCursorMcpAuthMirror := startCursorMcpAuthMirror(env.CursorMcpAuthMirror, cursorMcpAuthSyncInterval, taskLog)
+	defer stopCursorMcpAuthMirror()
 	outputObserver := &taskOutputObserver{}
 	ctx = withTaskOutputObserver(ctx, outputObserver)
 	// STOE-30: mirror the agent's cumulative token counters into task_usage
@@ -9631,6 +9633,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	phaseRecorder.Mark(taskPhaseTurnCompleted)
 
+	stopCursorMcpAuthMirror()
 	// Cursor records a server's OAuth challenge only after connecting to it, so
 	// an agent's first run can only learn about a missing login here.
 	if pendingCursorLoginCheck != nil {
