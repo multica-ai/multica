@@ -1488,7 +1488,12 @@
       "check_failed": "No se pudieron buscar actualizaciones. Inténtalo de nuevo.",
       "download_failed": "La descarga falló. Puedes seguir usando la versión actual e intentarlo de nuevo.",
       "download_ready": "v{{version}} está lista para instalar.",
-      "retry": "Reintentar"
+      "retry": "Reintentar",
+      "banner_dismiss": "Cerrar",
+      "banner_title": "Actualización lista",
+      "banner_body": "v{{version}} se aplicará en el próximo inicio.",
+      "banner_changelog": "Ver registro de cambios",
+      "banner_restart": "Reiniciar ahora"
     },
     "daemon": {
       "title": "Daemon",
@@ -1564,6 +1569,22 @@
       "reconnect_failed": "No se ha podido reconectar el daemon",
       "try_again_moment": "Inténtalo de nuevo en un momento.",
       "try_again": "Inténtalo de nuevo."
+    },
+    "errors": {
+      "not_found_title": "Esta página no existe",
+      "not_found_description": "Esta dirección no está disponible. Comprueba el enlace o vuelve atrás.",
+      "tab_error_title": "Algo ha ido mal en esta pestaña",
+      "tab_error_description": "No se pudo cargar esta pestaña. Recárgala o envía un informe si el problema continúa.",
+      "go_to_issues": "Ir a incidencias",
+      "reload_tab": "Recargar pestaña",
+      "close_tab": "Cerrar pestaña",
+      "report_error": "Informar error",
+      "issue_unavailable_title": "Incidencia no disponible",
+      "issue_unavailable_description": "Este espacio de trabajo ya no está disponible en tu cuenta.",
+      "something_went_wrong": "Algo ha ido mal",
+      "reload": "Recargar",
+      "close_window": "Cerrar ventana",
+      "unknown_route_error": "Error de ruta desconocido"
     }
   },
   "members": {

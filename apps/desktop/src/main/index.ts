@@ -575,8 +575,9 @@ function createMainWindow(saved: WindowState = {}): BrowserWindow {
 
   installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
     isDev: is.dev,
-    showReloadPrompt: createElectronReloadPrompt((options) =>
-      dialog.showMessageBox(window, options),
+    showReloadPrompt: createElectronReloadPrompt(
+      (options) => dialog.showMessageBox(window, options),
+      getSystemLocale,
     ),
     getDiagnosticContext: () => {
       // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`
@@ -665,8 +666,9 @@ function createIssueWindow(context: IssueWindowContext): void {
   }
   installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
     isDev: is.dev,
-    showReloadPrompt: createElectronReloadPrompt((options) =>
-      dialog.showMessageBox(window, options),
+    showReloadPrompt: createElectronReloadPrompt(
+      (options) => dialog.showMessageBox(window, options),
+      getSystemLocale,
     ),
     getDiagnosticContext: () => {
       // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`
@@ -1090,7 +1092,7 @@ if (!gotTheLock) {
           return parent && !parent.isDestroyed()
             ? dialog.showMessageBox(parent, options)
             : dialog.showMessageBox(options);
-        }),
+        }, getSystemLocale),
       },
     });
     setupDaemonManager(

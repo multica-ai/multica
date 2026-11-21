@@ -3,6 +3,10 @@ import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { Button } from "@multica/ui/components/ui/button";
 import { captureException } from "@multica/core/analytics";
 import { DragStrip } from "@multica/views/platform";
+import {
+  DESKTOP_EMERGENCY_COPY,
+  resolveDesktopEmergencyLocale,
+} from "./emergency-copy";
 
 /**
  * Last-resort boundary around the entire desktop renderer.
@@ -58,6 +62,7 @@ export function AppCrashBoundary({ children }: { children: ReactNode }) {
  * hooks, stores or workspace context.
  */
 function CrashFallback({ error }: { error: Error }) {
+  const copy = DESKTOP_EMERGENCY_COPY[resolveDesktopEmergencyLocale()];
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <DragStrip />
@@ -66,17 +71,15 @@ function CrashFallback({ error }: { error: Error }) {
         className="flex flex-1 items-center justify-center overflow-auto p-8"
       >
         <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-          <h1 className="text-title font-semibold">Something went wrong</h1>
+          <h1 className="text-title font-semibold">{copy.crashTitle}</h1>
           <p className="mt-3 text-body text-muted-foreground">
-            Multica Desktop hit an unexpected error and could not keep
-            rendering. Reloading usually recovers — your work is stored on the
-            server.
+            {copy.crashDescription}
           </p>
           <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-caption text-muted-foreground">
-            {error.message || "An unexpected error occurred."}
+            {error.message || copy.crashFallbackError}
           </pre>
           <Button className="mt-4" onClick={() => window.location.reload()}>
-            Reload
+            {copy.reload}
           </Button>
         </div>
       </div>

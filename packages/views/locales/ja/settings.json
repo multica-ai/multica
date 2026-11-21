@@ -1476,7 +1476,12 @@
       "check_failed": "アップデートの確認に失敗しました。再試行してください。",
       "download_failed": "更新のダウンロードに失敗しました。現在のバージョンを使い続け、再試行できます。",
       "download_ready": "v{{version}} をインストールできます。",
-      "retry": "再試行"
+      "retry": "再試行",
+      "banner_dismiss": "閉じる",
+      "banner_title": "アップデートの準備ができました",
+      "banner_body": "v{{version}} は次回の起動時に適用されます。",
+      "banner_changelog": "変更履歴を見る",
+      "banner_restart": "今すぐ再起動"
     },
     "daemon": {
       "title": "デーモン",
@@ -1548,6 +1553,22 @@
       "reconnect_failed": "デーモンに再接続できませんでした",
       "try_again_moment": "しばらくしてからもう一度お試しください。",
       "try_again": "もう一度お試しください。"
+    },
+    "errors": {
+      "not_found_title": "このページは存在しません",
+      "not_found_description": "このアドレスは利用できません。リンクを確認するか戻ってください。",
+      "tab_error_title": "このタブで問題が発生しました",
+      "tab_error_description": "このタブを読み込めませんでした。再読み込みするか、問題が続く場合は報告してください。",
+      "go_to_issues": "課題へ移動",
+      "reload_tab": "タブを再読み込み",
+      "close_tab": "タブを閉じる",
+      "report_error": "エラーを報告",
+      "issue_unavailable_title": "課題を利用できません",
+      "issue_unavailable_description": "このワークスペースはあなたのアカウントでは利用できなくなっています。",
+      "something_went_wrong": "問題が発生しました",
+      "reload": "再読み込み",
+      "close_window": "ウィンドウを閉じる",
+      "unknown_route_error": "不明なルートエラー"
     }
   },
   "members": {

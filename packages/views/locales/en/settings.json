@@ -1488,7 +1488,12 @@
       "check_failed": "Unable to check for updates. Please try again.",
       "download_failed": "Update download failed. You can keep using the current version and retry.",
       "download_ready": "v{{version}} is ready to install.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "banner_dismiss": "Dismiss",
+      "banner_title": "Update ready",
+      "banner_body": "v{{version}} will be applied on next launch.",
+      "banner_changelog": "See changelog",
+      "banner_restart": "Restart now"
     },
     "daemon": {
       "title": "Daemon",
@@ -1564,6 +1569,22 @@
       "reconnect_failed": "Couldn't reconnect the daemon",
       "try_again_moment": "Please try again in a moment.",
       "try_again": "Please try again."
+    },
+    "errors": {
+      "not_found_title": "This page doesn't exist",
+      "not_found_description": "This address is unavailable. Check the link or go back.",
+      "tab_error_title": "Something went wrong in this tab",
+      "tab_error_description": "This tab could not load. Reload it, or send a report if the problem continues.",
+      "go_to_issues": "Go to issues",
+      "reload_tab": "Reload tab",
+      "close_tab": "Close tab",
+      "report_error": "Report error",
+      "issue_unavailable_title": "Issue unavailable",
+      "issue_unavailable_description": "This workspace is no longer available in your account.",
+      "something_went_wrong": "Something went wrong",
+      "reload": "Reload",
+      "close_window": "Close window",
+      "unknown_route_error": "Unknown route error"
     }
   },
   "members": {

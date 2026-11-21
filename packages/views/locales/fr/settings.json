@@ -1488,7 +1488,12 @@
       "check_failed": "La recherche de mises à jour a échoué. Réessayez.",
       "download_failed": "Le téléchargement a échoué. Vous pouvez continuer à utiliser la version actuelle et réessayer.",
       "download_ready": "La version {{version}} est prête à être installée.",
-      "retry": "Réessayer"
+      "retry": "Réessayer",
+      "banner_dismiss": "Fermer",
+      "banner_title": "Mise à jour prête",
+      "banner_body": "La version v{{version}} sera appliquée au prochain lancement.",
+      "banner_changelog": "Voir le journal des modifications",
+      "banner_restart": "Redémarrer maintenant"
     },
     "daemon": {
       "title": "Démon",
@@ -1564,6 +1569,22 @@
       "reconnect_failed": "Impossible de reconnecter le démon",
       "try_again_moment": "Veuillez réessayer dans un instant.",
       "try_again": "Veuillez réessayer."
+    },
+    "errors": {
+      "not_found_title": "Cette page n'existe pas",
+      "not_found_description": "Cette adresse est indisponible. Vérifiez le lien ou revenez en arrière.",
+      "tab_error_title": "Une erreur s'est produite dans cet onglet",
+      "tab_error_description": "Cet onglet n'a pas pu se charger. Rechargez-le ou envoyez un rapport si le problème persiste.",
+      "go_to_issues": "Aller aux tâches",
+      "reload_tab": "Recharger l'onglet",
+      "close_tab": "Fermer l'onglet",
+      "report_error": "Signaler l'erreur",
+      "issue_unavailable_title": "Tâche indisponible",
+      "issue_unavailable_description": "Cet espace de travail n'est plus disponible dans votre compte.",
+      "something_went_wrong": "Une erreur s'est produite",
+      "reload": "Recharger",
+      "close_window": "Fermer la fenêtre",
+      "unknown_route_error": "Erreur de routage inconnue"
     }
   },
   "members": {
