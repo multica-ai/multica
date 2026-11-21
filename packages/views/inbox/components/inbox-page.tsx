@@ -1023,7 +1023,7 @@ export function InboxPage() {
             // longer exists.
             setSelectedKey("");
           }}
-          onDone={() => {
+          onArchive={() => {
             handleArchive(detailItem.id);
           }}
           onUnsubscribeArchive={

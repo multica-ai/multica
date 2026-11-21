@@ -48,7 +48,6 @@
   "list": {
     "loading_selection": "Cargando notificación…",
     "empty": "No hay notificaciones",
-    "mark_done_tooltip": "Marcar como hecho",
     "archive_tooltip": "Archivar",
     "time": {
       "just_now": "ahora mismo",
@@ -158,7 +157,6 @@
     "mark_read_failed": "No se ha podido marcar como leído",
     "mark_unread_failed": "No se ha podido marcar como no leído",
     "archive_failed": "No se ha podido archivar",
-    "mark_done_failed": "No se ha podido marcar como hecho",
     "mark_all_read_failed": "No se ha podido marcar todo como leído",
     "archive_all_failed": "No se ha podido archivar todo",
     "archive_all_read_failed": "No se ha podido archivar los elementos leídos",
