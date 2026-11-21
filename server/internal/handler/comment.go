@@ -4074,6 +4074,29 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 		}
 	}
 
+	// Preserve the locked comment's posting run, not the deleting run. Pruned
+	// ancestors were already audited when they became tombstones.
+	details, _ := json.Marshal(map[string]any{
+		"comment_id":     uuidToString(target.ID),
+		"parent_id":      uuidToPtr(target.ParentID),
+		"author_type":    target.AuthorType,
+		"author_id":      uuidToString(target.AuthorID),
+		"source_task_id": uuidToPtr(target.SourceTaskID),
+		"tombstoned":     out.Tombstone != nil,
+	})
+	actor, _ := ctx.Value(wakeupActorKey{}).(wakeupActor)
+	if _, err := qtx.CreateActivity(ctx, db.CreateActivityParams{
+		ID:          dbid.NewV7(),
+		WorkspaceID: target.WorkspaceID,
+		IssueID:     target.IssueID,
+		ActorType:   strToText(actor.kind),
+		ActorID:     optionalActorUUID(actor.id),
+		Action:      "comment_deleted",
+		Details:     details,
+	}); err != nil {
+		return out, err
+	}
+
 	out.IssueRevision, err = qtx.TouchIssueForCommentDelete(ctx, db.TouchIssueForCommentDeleteParams{
 		IssueID:     target.IssueID,
 		WorkspaceID: target.WorkspaceID,
