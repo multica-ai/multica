@@ -983,7 +983,6 @@ export function ManualCreatePanel({
           {sendShortcut ? (
             <ShortcutKeycaps
               shortcut={sendShortcut}
-              tone="on-primary"
               decorative
               className="ml-1 max-sm:hidden"
             />

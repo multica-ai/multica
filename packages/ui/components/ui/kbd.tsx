@@ -17,7 +17,6 @@ export type KbdGlyphName =
   | "space";
 
 export type KbdSize = "sm" | "md";
-export type KbdTone = "default" | "on-primary";
 
 interface KbdGlyphSpec {
   /** Proportional advance width on a shared 16-unit vertical em-box. */
@@ -168,7 +167,6 @@ const KBD_CASE_STYLE: CSSProperties = {
 
 interface KbdProps extends React.ComponentProps<"kbd"> {
   size?: KbdSize;
-  tone?: KbdTone;
   /** Tighter horizontal padding for single-glyph / single-character keycaps. */
   compact?: boolean;
 }
@@ -176,7 +174,6 @@ interface KbdProps extends React.ComponentProps<"kbd"> {
 function Kbd({
   className,
   size = "sm",
-  tone = "default",
   compact = false,
   style,
   ...props
@@ -187,15 +184,15 @@ function Kbd({
       style={style ? { ...KBD_CASE_STYLE, ...style } : KBD_CASE_STYLE}
       className={cn(
         "pointer-events-none inline-flex w-fit items-center justify-center font-sans leading-none font-medium tracking-[-0.01em] select-none [&_svg:not([data-kbd-glyph]):not([class*='size-'])]:size-[1.1em]",
-        tone === "on-primary"
-          ? "border border-primary-foreground/25 bg-primary-foreground/14 text-primary-foreground shadow-none"
-          : [
-              "border border-input bg-card text-muted-foreground shadow-[0_1px_0_0_color-mix(in_oklab,var(--input)_85%,transparent)]",
-              "dark:border-white/12 dark:bg-surface-raised dark:shadow-[0_1px_0_0_rgb(0_0_0/0.5)]",
-              // Tooltips use a dark surface in both themes; override both light and
-              // dark default styles so keycaps stay crisp without passing a tone.
-              "in-data-[slot=tooltip-content]:border-white/14! in-data-[slot=tooltip-content]:bg-white/10! in-data-[slot=tooltip-content]:text-tooltip-foreground/90! in-data-[slot=tooltip-content]:shadow-none!",
-            ],
+        "border border-input bg-card text-muted-foreground shadow-[0_1px_0_0_color-mix(in_oklab,var(--input)_85%,transparent)]",
+        "dark:border-white/12 dark:bg-surface-raised dark:shadow-[0_1px_0_0_rgb(0_0_0/0.5)]",
+        // Tooltips use a dark surface in both themes; override both light and
+        // dark default styles so keycaps stay crisp without passing a tone.
+        "in-data-[slot=tooltip-content]:border-white/14! in-data-[slot=tooltip-content]:bg-white/10! in-data-[slot=tooltip-content]:text-tooltip-foreground/90! in-data-[slot=tooltip-content]:shadow-none!",
+        // Themes recolor the primary button through --button-primary-foreground
+        // (appearance.css), which --primary-foreground does not follow; deriving
+        // from the label's currentColor keeps the keycap legible on every theme.
+        "in-[[data-slot=button][data-variant=default]]:border-current/25! in-[[data-slot=button][data-variant=default]]:bg-current/14! in-[[data-slot=button][data-variant=default]]:text-current! in-[[data-slot=button][data-variant=default]]:shadow-none!",
         size === "md"
           ? cn(
               "h-[2.15em] min-w-[2.15em] gap-[0.34em] rounded-md text-caption",

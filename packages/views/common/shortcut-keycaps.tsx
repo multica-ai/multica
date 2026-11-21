@@ -13,7 +13,6 @@ import {
   KbdGlyph,
   type KbdGlyphName,
   type KbdSize,
-  type KbdTone,
 } from "@multica/ui/components/ui/kbd";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -95,7 +94,6 @@ export function ShortcutKeycaps({
   platform = getShortcutPlatform(),
   size = "sm",
   layout = "pill",
-  tone = "default",
   decorative = false,
   className,
   keyClassName,
@@ -109,7 +107,6 @@ export function ShortcutKeycaps({
    * shortcut recording where individual physical keys are the subject.
    */
   layout?: ShortcutKeycapsLayout;
-  tone?: KbdTone;
   /** Hide a redundant hint when its parent already names the action. */
   decorative?: boolean;
   className?: string;
@@ -132,7 +129,6 @@ export function ShortcutKeycaps({
         <Kbd
           aria-hidden="true"
           size={size}
-          tone={tone}
           compact={compact}
           className={keyClassName}
         >
@@ -167,7 +163,6 @@ export function ShortcutKeycaps({
           title={token.label}
           data-shortcut-key={token.id}
           size={size}
-          tone={tone}
           compact={isSingleCompactToken(token)}
           className={keyClassName}
         >
