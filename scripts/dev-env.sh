@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Local development environments as named, listable, deletable objects.
 #
-#   make up                      # start this checkout's environment (api + web)
+#   make up                      # start this checkout's environment (api + collab + web)
 #   make up C=api,web,daemon     # pick the components
 #   make status                  # what is running, and is it mine
 #   make list                    # every environment on this machine
@@ -40,8 +40,8 @@ DEV_CODE_DEFAULT=888888
 WORKSPACE_NAME="${MULTICA_DEV_WORKSPACE_NAME:-Dev}"
 WORKSPACE_SLUG="${MULTICA_DEV_WORKSPACE_SLUG:-dev}"
 
-ALL_COMPONENTS="api web daemon desktop"
-DEFAULT_COMPONENTS="api web"
+ALL_COMPONENTS="api collab web daemon desktop"
+DEFAULT_COMPONENTS="api collab web"
 
 # An agent runs with TMPDIR=/tmp/multica-task-<id>, deleted when the run ends.
 # Anything the Go toolchain builds there goes with it, so a binary started from
@@ -258,6 +258,10 @@ renderer_port_for_offset() {
   printf '%s' "$port"
 }
 
+collab_port_for_offset() {
+  printf '%s' $((14000 + $1))
+}
+
 desktop_app_data_root() {
   if [ -n "$DEV_DESKTOP_APP_DATA" ]; then
     printf '%s' "$DEV_DESKTOP_APP_DATA"
@@ -339,17 +343,19 @@ EOF
 # are actually free — the registry alone cannot see a process started before
 # this tooling existed.
 allocate_offset() {
-  local dir=$1 self=${2:-} start i offset backend frontend renderer
+  local dir=$1 self=${2:-} start i offset backend frontend renderer collab
   start="$(path_offset "$dir")"
   for i in $(seq 0 999); do
     offset=$(((start + i) % 1000))
     backend=$((18080 + offset))
     frontend=$((13000 + offset))
     renderer="$(renderer_port_for_offset "$offset")"
+    collab="$(collab_port_for_offset "$offset")"
     offset_registered "$offset" "$self" && continue
     port_free "$backend" || continue
     port_free "$frontend" || continue
     port_free "$renderer" || continue
+    port_free "$collab" || continue
     printf '%s' "$offset"
     return 0
   done
@@ -670,12 +676,56 @@ api_stale_reason() {
   return 0
 }
 
+# The API forwards editor WebSockets to collab and merges its own doc writes
+# through it, so it is pointed only at a collab this environment runs: one
+# that is down leaves every doc page waiting for a session before it gives up.
+# The API reads the setting once, at startup, so `start_api` records it in
+# api.collab and restarts an API launched with a different one.
+api_collab_file() { printf '%s/api.collab' "$STATE_DIR"; }
+
+api_collab_url() {
+  [ -n "${COLLAB_PORT:-}" ] || return 0
+  if component_selected collab || listener_belongs_to_component collab "$COLLAB_PORT"; then
+    printf 'http://localhost:%s' "$COLLAB_PORT"
+  fi
+  return 0
+}
+
+api_collab_reason() {
+  local recorded
+  recorded="$(cat "$(api_collab_file)" 2>/dev/null || true)"
+  [ "$recorded" != "$1" ] || return 0
+  if [ -n "$1" ]; then
+    printf 'is not connected to collab on :%s' "$COLLAB_PORT"
+  else
+    printf 'points at a collab service that is not running'
+  fi
+}
+
+# Signs editor tickets and authenticates the API and collab to each other.
+# Generated once per environment and kept with its state rather than in the env
+# file, where a self-hosted stack reading the same file would take it as the
+# switch that turns live editing on. A value set in the env file wins.
+collab_secret() {
+  local file="$STATE_DIR/collab.secret"
+  if [ -n "${COLLAB_SECRET:-}" ]; then
+    printf '%s' "$COLLAB_SECRET"
+    return 0
+  fi
+  if [ ! -s "$file" ]; then
+    (umask 077; node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' > "$file")
+  fi
+  cat "$file"
+}
+
 start_api() {
-  local launched_at health waited=0 expected_commit fingerprint reason
+  local launched_at health waited=0 expected_commit fingerprint reason collab_url
   expected_commit="$(checkout_commit)"
+  collab_url="$(api_collab_url)"
   if health="$(health_json)" && [ -n "$health" ] && component_pid api >/dev/null; then
     if api_identity_matches "$health" "$expected_commit"; then
       reason="$(api_stale_reason)"
+      [ -n "$reason" ] || reason="$(api_collab_reason "$collab_url")"
       if [ -z "$reason" ]; then
         record_component_listener api "$BACKEND_PORT" >/dev/null \
           || die "The API listener changed while its identity was being verified. Refusing to reuse it."
@@ -700,8 +750,14 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
   # Taken before the compile starts, so an edit made while it runs reads as
   # stale next time instead of being assumed compiled in.
   fingerprint="$(api_source_fingerprint)"
-  launch_detached api make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE"
+  if [ -n "$collab_url" ]; then
+    launch_detached api env COLLAB_INTERNAL_URL="$collab_url" COLLAB_SECRET="$(collab_secret)" \
+      make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE"
+  else
+    launch_detached api env COLLAB_INTERNAL_URL= make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE"
+  fi
   printf '%s %s\n' "$(cat "$(pid_file api)")" "$fingerprint" > "$(api_build_file)"
+  printf '%s\n' "$collab_url" > "$(api_collab_file)"
   info "api launching (pid $(cat "$(pid_file api)")), log: $(log_file api)"
 
   while [ "$waited" -lt 300 ]; do
@@ -779,6 +835,60 @@ start_web() {
     waited=$((waited + 2))
   done
   die "web never came up. Log: $(log_file web)"
+}
+
+collab_healthy() {
+  curl -sf --max-time 3 "http://localhost:${COLLAB_PORT}/health" >/dev/null 2>&1
+}
+
+# The CDN domain the API reports (Storage.CdnDomain): CLOUDFRONT_DOMAIN with
+# S3, otherwise the host of LOCAL_UPLOAD_BASE_URL. Collab needs the same value
+# to turn links to uploaded files into the same nodes the editor makes.
+collab_cdn_domain() {
+  if [ -n "${S3_BUCKET:-}" ]; then
+    printf '%s' "${CLOUDFRONT_DOMAIN:-}"
+    return 0
+  fi
+  node -e 'try { process.stdout.write(new URL(process.argv[1]).hostname); } catch {}' \
+    "${LOCAL_UPLOAD_BASE_URL:-http://localhost:${BACKEND_PORT}}"
+}
+
+# `tsx watch` restarts the service on every source change, so a running collab
+# of this environment is always current and is reused as it is.
+start_collab() {
+  local waited=0 listener
+  if listener_belongs_to_component collab "$COLLAB_PORT"; then
+    if collab_healthy && listener="$(record_component_listener collab "$COLLAB_PORT")"; then
+      ok "collab already running on :$COLLAB_PORT (pid $listener)"
+      return 0
+    fi
+    warn "collab on :$COLLAB_PORT is ours but not answering /health; restarting it."
+    stop_component collab
+  fi
+  if ! port_free "$COLLAB_PORT"; then
+    die "Port $COLLAB_PORT is busy: $(describe_port_owner "$COLLAB_PORT"). Run 'make down' here first."
+  fi
+
+  launch_detached collab env COLLAB_PORT="$COLLAB_PORT" COLLAB_SECRET="$(collab_secret)" \
+    MULTICA_API_URL="http://localhost:${BACKEND_PORT}" MULTICA_CDN_DOMAIN="$(collab_cdn_domain)" \
+    make -C "$REPO_ROOT" -s collab-dev ENV_FILE="$ENV_FILE"
+  info "collab launching (pid $(cat "$(pid_file collab)")), log: $(log_file collab)"
+
+  while [ "$waited" -lt 120 ]; do
+    if collab_healthy; then
+      listener="$(record_component_listener collab "$COLLAB_PORT" || true)"
+      if [ -z "$listener" ]; then
+        stop_component collab
+        die "Collab on :$COLLAB_PORT is not descended from the process this environment launched."
+      fi
+      ok "collab serving ws://localhost:$COLLAB_PORT (pid $listener)"
+      return 0
+    fi
+    component_pid collab >/dev/null || { tail -20 "$(log_file collab)" | sed 's/^/    /' >&2; die "collab exited during startup. Log: $(log_file collab)"; }
+    sleep 2
+    waited=$((waited + 2))
+  done
+  die "collab never became healthy. Log: $(log_file collab)"
 }
 
 # send-code once, verify-code once. Repeated verify attempts lock the code out
@@ -1178,6 +1288,7 @@ stop_component() {
 
   case "$name" in
     api) port="$BACKEND_PORT" ;;
+    collab) port="$COLLAB_PORT" ;;
     web) port="$FRONTEND_PORT" ;;
     desktop) port="$DESKTOP_RENDERER_PORT" ;;
   esac
@@ -1295,6 +1406,20 @@ component_state() {
         printf 'stopped|http://localhost:%s|' "$BACKEND_PORT"
       fi
       ;;
+    collab)
+      local listener
+      listener="$(port_listener_pid "$COLLAB_PORT")"
+      if [ -z "$listener" ]; then
+        printf 'stopped|ws://localhost:%s|' "$COLLAB_PORT"
+      elif ! listener_pid_belongs_to_component collab "$listener"; then
+        printf 'mismatch|ws://localhost:%s|listener pid %s is not owned by this environment' \
+          "$COLLAB_PORT" "$listener"
+      elif collab_healthy; then
+        printf 'running|ws://localhost:%s|pid %s' "$COLLAB_PORT" "$listener"
+      else
+        printf 'busy|ws://localhost:%s|pid %s is ours but not answering /health' "$COLLAB_PORT" "$listener"
+      fi
+      ;;
     web)
       local listener
       listener="$(port_listener_pid "$FRONTEND_PORT")"
@@ -1392,8 +1517,8 @@ print_status_json() {
   printf '{"name":"%s","dir":"%s","owner":"%s","created_at":"%s","ttl_hours":%s,"expires_at":"%s",' \
     "$(json_escape "$NAME")" "$(json_escape "$DIR")" "$(json_escape "$OWNER")" \
     "$(json_escape "$CREATED_AT")" "${TTL_HOURS:-0}" "$(json_escape "$EXPIRES_AT")"
-  printf '"backend_port":%s,"frontend_port":%s,"desktop_renderer_port":%s,"desktop_cdp_port":%s,"workspace_slug":"%s","database":"%s","profile":"%s","env_file":"%s","logs":"%s","components":{' \
-    "$BACKEND_PORT" "$FRONTEND_PORT" "$DESKTOP_RENDERER_PORT" "${DESKTOP_CDP_PORT:-null}" \
+  printf '"backend_port":%s,"frontend_port":%s,"collab_port":%s,"desktop_renderer_port":%s,"desktop_cdp_port":%s,"workspace_slug":"%s","database":"%s","profile":"%s","env_file":"%s","logs":"%s","components":{' \
+    "$BACKEND_PORT" "$FRONTEND_PORT" "$COLLAB_PORT" "$DESKTOP_RENDERER_PORT" "${DESKTOP_CDP_PORT:-null}" \
     "$(json_escape "$WORKSPACE_SLUG")" "$(json_escape "$DB_NAME")" "$(json_escape "$PROFILE")" \
     "$(json_escape "$ENV_FILE")" "$(json_escape "$LOG_DIR")"
   for comp in $ALL_COMPONENTS; do
@@ -1409,7 +1534,12 @@ print_status_json() {
 }
 
 print_handoff() {
-  local entrypoint
+  local entrypoint live_docs
+  if [ -n "$(api_collab_url)" ]; then
+    live_docs="collab on :${COLLAB_PORT}, reached through the backend's /collab"
+  else
+    live_docs="off (collab is not running); docs save through the API"
+  fi
   if component_selected web; then
     entrypoint="Open        http://localhost:${FRONTEND_PORT}/${WORKSPACE_SLUG}/issues"
   elif component_selected desktop; then
@@ -1432,6 +1562,7 @@ ${C_GREEN}✓ Environment ready.${C_OFF}
   Token       profile ${PROFILE} (onboarded, workspace /${WORKSPACE_SLUG})
   Fixtures    make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"
   Backend     http://localhost:${BACKEND_PORT}   (GET /health reports pid + commit + started_at)
+  Live docs   ${live_docs}
   Commit      $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
   Environment ${NAME}$( [ "${TTL_HOURS:-0}" != 0 ] && printf ' (expires %s)' "$EXPIRES_AT" )
 
@@ -1460,6 +1591,7 @@ bind_paths() {
   PROFILE_DIR="$DEV_PROFILES_HOME/$PROFILE"
   WORKSPACES_ROOT="${WORKSPACES_ROOT:-$DEV_WORKSPACES_PARENT/multica_workspaces_$PROFILE}"
   DESKTOP_RENDERER_PORT="${DESKTOP_RENDERER_PORT:-$(renderer_port_for_offset "$OFFSET")}"
+  COLLAB_PORT="${COLLAB_PORT:-$(collab_port_for_offset "$OFFSET")}"
   DESKTOP_APP_SUFFIX="${DESKTOP_APP_SUFFIX:-$NAME}"
   DESKTOP_USER_DATA_DIR="${DESKTOP_USER_DATA_DIR:-$(desktop_user_data_dir "$DESKTOP_APP_SUFFIX")}"
   DESKTOP_ENV_FILE="${DESKTOP_ENV_FILE:-$DIR/apps/desktop/.env.development.local}"
@@ -1484,6 +1616,7 @@ save_manifest() {
     write_manifest_value OFFSET "$OFFSET"
     write_manifest_value BACKEND_PORT "$BACKEND_PORT"
     write_manifest_value FRONTEND_PORT "$FRONTEND_PORT"
+    write_manifest_value COLLAB_PORT "$COLLAB_PORT"
     write_manifest_value DB_NAME "$DB_NAME"
     write_manifest_value DATABASE_URL "$DATABASE_URL"
     write_manifest_value PROFILE "$PROFILE"
@@ -1532,7 +1665,7 @@ cmd_up() {
     *) [ -z "$cdp_request" ] \
          || die "--cdp, --remote-debugging-port and --no-cdp need the desktop component (C=desktop)." ;;
   esac
-  # web, daemon and desktop are all clients of the backend; selecting one
+  # collab, web, daemon and desktop are all clients of the backend; selecting one
   # without api would produce an environment that cannot serve a single request.
   case " $requested " in *" api "*) ;; *) requested="api $requested" ;; esac
   COMPONENTS="$requested"
@@ -1545,7 +1678,7 @@ cmd_up() {
   local missing=() tool needed="node go curl"
   # pnpm is only required by the components that actually build JavaScript, so
   # `up C=api` works on a checkout that has never run an install.
-  if component_selected web || component_selected desktop; then needed="$needed pnpm"; fi
+  if component_selected web || component_selected desktop || component_selected collab; then needed="$needed pnpm"; fi
   for tool in $needed; do
     command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
   done
@@ -1594,11 +1727,13 @@ cmd_up() {
     # A slot is adopted only when the registry does not hold it and both ports
     # are genuinely free; otherwise a fresh one is allocated and the env file is
     # rewritten, which is the whole point of allocating instead of computing.
-    local candidate_renderer
+    local candidate_renderer candidate_collab
     candidate_renderer="$(renderer_port_for_offset "$offset")"
+    candidate_collab="$(collab_port_for_offset "$offset")"
     if [ "$PORT" -lt 18080 ] || [ "$FRONTEND_PORT" -ne $((13000 + offset)) ] \
       || offset_registered "$offset" || ! port_free "$PORT" \
-      || ! port_free "$FRONTEND_PORT" || ! port_free "$candidate_renderer"; then
+      || ! port_free "$FRONTEND_PORT" || ! port_free "$candidate_renderer" \
+      || ! port_free "$candidate_collab"; then
       if [ "$PORT" -ge 18080 ] && { offset_registered "$offset" || ! port_free "$PORT"; }; then
         warn "Slot $offset (port $PORT) is taken: $(describe_port_owner "$PORT"). Allocating another."
       fi
@@ -1615,6 +1750,7 @@ cmd_up() {
     PROFILE="dev-$(slugify "$(basename "$REPO_ROOT")")-${offset}"
     WORKSPACES_ROOT="$DEV_WORKSPACES_PARENT/multica_workspaces_$PROFILE"
     DESKTOP_RENDERER_PORT="$(renderer_port_for_offset "$offset")"
+    COLLAB_PORT="$(collab_port_for_offset "$offset")"
     DESKTOP_APP_SUFFIX="$NAME"
     DESKTOP_USER_DATA_DIR="$(desktop_user_data_dir "$DESKTOP_APP_SUFFIX")"
     DESKTOP_ENV_FILE="$REPO_ROOT/apps/desktop/.env.development.local"
@@ -1666,7 +1802,7 @@ cmd_up() {
   # sees the same values the registry recorded.
   export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
 
-  if [ ! -d "$REPO_ROOT/node_modules" ] && { component_selected web || component_selected desktop; }; then
+  if [ ! -d "$REPO_ROOT/node_modules" ] && { component_selected web || component_selected desktop || component_selected collab; }; then
     step "Dependencies"
     (cd "$REPO_ROOT" && pnpm install) || die "pnpm install failed."
   fi
@@ -1680,12 +1816,20 @@ cmd_up() {
 
   step "Components: $COMPONENTS"
   component_selected api && start_api
+  component_selected collab && start_collab
   seed_dev_workspace
   component_selected web && start_web
   component_selected daemon && start_daemon
   component_selected desktop && start_desktop
 
   print_handoff
+}
+
+# collab saves open docs through the API on its way out, so it stops first.
+stop_order() {
+  local comp
+  for comp in "$@"; do [ "$comp" != collab ] || printf 'collab '; done
+  for comp in "$@"; do [ "$comp" = collab ] || printf '%s ' "$comp"; done
 }
 
 cmd_down() {
@@ -1704,6 +1848,8 @@ cmd_down() {
   local comp
   for comp in $requested; do
     case " $ALL_COMPONENTS " in *" $comp "*) ;; *) die "Unknown component '$comp'. Valid: $ALL_COMPONENTS" ;; esac
+  done
+  for comp in $(stop_order $requested); do
     stop_component "$comp"
   done
   if [ "$requested" = "$ALL_COMPONENTS" ]; then
@@ -1734,7 +1880,7 @@ cmd_destroy() {
   export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
   step "Destroying $NAME"
   local comp desktop_stopped=1
-  for comp in $ALL_COMPONENTS; do
+  for comp in $(stop_order $ALL_COMPONENTS); do
     if ! stop_component "$comp"; then
       failures=$((failures + 1))
       [ "$comp" != desktop ] || desktop_stopped=0
@@ -1948,7 +2094,7 @@ usage() {
   cat <<'EOF'
 Local development environments: named, listable, deletable.
 
-  dev-env.sh up      [--components api,web,daemon,desktop] [--all]
+  dev-env.sh up      [--components api,collab,web,daemon,desktop] [--all]
                      [--name N] [--ephemeral] [--ttl HOURS]
                      [--cdp | --remote-debugging-port N | --no-cdp]
   dev-env.sh status  [name] [--json]
@@ -1958,8 +2104,10 @@ Local development environments: named, listable, deletable.
   dev-env.sh gc      [--dry-run]
   dev-env.sh exec    [name] -- <command> [args...]
 
-Components: api (Go backend), web (Next.js), daemon (agent daemon),
-desktop (Electron). Anything selected implies api.
+Components: api (Go backend), collab (live doc co-editing), web (Next.js),
+daemon (agent daemon), desktop (Electron). Anything selected implies api.
+The default is api,collab,web. Without a running collab, docs save through
+the API instead of being edited live.
 
 Every environment has an onboarded workspace with two issues, signed in
 through its CLI profile; scripts/dev-fixtures.mjs adds chat, Agent Builder,
