@@ -354,6 +354,13 @@
       "default": "標準",
       "comfortable": "寬鬆"
     },
+    "comment_threads": {
+      "title": "討論展開方式",
+      "description": "手動展開或收起的討論會保持原樣。",
+      "expanded": "展開",
+      "collapsed": "收起",
+      "latest": "僅展開最新討論"
+    },
     "reduce_motion": {
       "title": "減少動態效果",
       "description": "關閉動畫和轉場。關閉時仍遵循系統設定。"

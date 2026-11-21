@@ -5,11 +5,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentTask, Attachment, Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
 import { issueKeys } from "@multica/core/issues/queries";
 import { issueStatusKeys } from "@multica/core/issue-statuses";
+import { getShortcutPlatform } from "@multica/core/shortcuts";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { ApiError } from "@multica/core/api/client";
 import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { DEFAULT_APPEARANCE, useAppearanceStore } from "@multica/core/appearance";
 import {
   DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
   useSubIssueDisplayStore,
@@ -422,28 +424,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
     },
   ),
   selectRecentIssues: () => () => [],
-  // Reactive in-memory stand-in: a quick-jump to a reply reopens a thread the
-  // reader collapsed, so the card has to re-render when `toggle` runs.
-  useCommentCollapseStore: (await vi.importActual<typeof import("zustand")>("zustand")).create<{
-    collapsedByIssue: Record<string, string[]>;
-    isCollapsed: (issueId: string, commentId: string) => boolean;
-    toggle: (issueId: string, commentId: string) => void;
-  }>()((set, get) => ({
-    collapsedByIssue: {},
-    isCollapsed: (issueId, commentId) => get().collapsedByIssue[issueId]?.includes(commentId) ?? false,
-    toggle: (issueId, commentId) =>
-      set((s) => {
-        const current = s.collapsedByIssue[issueId] ?? [];
-        return {
-          collapsedByIssue: {
-            ...s.collapsedByIssue,
-            [issueId]: current.includes(commentId)
-              ? current.filter((c) => c !== commentId)
-              : [...current, commentId],
-          },
-        };
-      }),
-  })),
+  useCommentCollapseStore: (await vi.importActual<typeof import("@multica/core/issues/stores/comment-collapse-store")>("@multica/core/issues/stores/comment-collapse-store")).useCommentCollapseStore,
   useCommentDraftStore: Object.assign(
     (selector?: any) => {
       const state = {
@@ -619,7 +600,8 @@ beforeEach(() => {
   // The resolved-expand store is module-global (not per-mount like the old
   // useState); reset so one test's expansions can't leak into the next.
   useResolvedExpandStore.setState({ expandedByIssue: {} });
-  useCommentCollapseStore.setState({ collapsedByIssue: {} });
+  useCommentCollapseStore.setState({ collapsedByIssue: {}, expandedByIssue: {} });
+  useAppearanceStore.setState(DEFAULT_APPEARANCE);
 });
 
 // Mock modals
@@ -1067,7 +1049,13 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetail();
       await screen.findByText("Historical comment 0");
 
-      fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+      const isMac = getShortcutPlatform() === "macos";
+      fireEvent.keyDown(document, {
+        key: "f",
+        code: "KeyF",
+        metaKey: isMac,
+        ctrlKey: !isMac,
+      });
       fireEvent.change(await screen.findByRole("textbox", { name: "Find in issue..." }), { target: { value: "needle" } });
 
       // Counted from the comment's Markdown while it is not mounted.
@@ -3425,6 +3413,19 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
+  it("keeps a reply resolution visible under a collapsed starting default", async () => {
+    useAppearanceStore.setState({ commentThreadDefault: "collapsed" });
+    const root = mockTimeline[0]!;
+    const resolution = { ...root, id: "resolution", parent_id: root.id, content: "Resolution remains visible",
+      created_at: "2026-01-18T00:00:00Z", resolved_at: "2026-01-19T00:00:00Z" };
+    mockApiObj.listTimeline.mockResolvedValue([root, resolution]);
+    const { container } = renderIssueDetail();
+    await screen.findByRole("button", { name: "Started working on this (resolved)" });
+    expect(container.querySelector('[data-comment-content="resolution"]')).not.toBeNull();
+    useCommentCollapseStore.getState().setCollapsed("issue-1", root.id, true);
+    await waitFor(() => expect(container.querySelector('[data-comment-content="resolution"]')).toBeNull());
+  });
+
   it("marks a reply-resolved thread as resolved on the quick-jump rail", async () => {
     // A resolution on a REPLY leaves the thread expanded, so it flattens to a
     // plain `comment` item, not a `resolved-bar`. The rail must still read it
@@ -3507,8 +3508,12 @@ describe("IssueDetail (shared)", () => {
 
     // "Show in comments" for a file shares the rail's path, so a file posted
     // in a reply is reachable whatever hides that reply (MUL-7649).
-    it("reopens a collapsed thread when a file's reply is located from the overview", async () => {
-      useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": ["comment-1"] } });
+    it.each(["manual", "default"] as const)("reopens a collapsed thread when a file's reply is located from the overview (%s)", async (source) => {
+      if (source === "manual") {
+        useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": ["comment-1"] } });
+      } else {
+        useAppearanceStore.getState().set({ commentThreadDefault: "collapsed" });
+      }
       const csv: Attachment = {
         id: "csv",
         workspace_id: "ws-1",
@@ -4643,7 +4648,8 @@ describe("IssueDetail (shared)", () => {
   // reply's own time. It used to render in the run's ENQUEUE slot while the
   // card showed the reply time, pushing it above every comment written while
   // the run worked. Ordering matrix lives in comment-runs.test.ts.
-  it("renders an assignment run's reply after the comments it followed", async () => {
+  it.each(["expanded", "latest"] as const)("renders an assignment run's reply after the comments it followed with %s defaults", async (commentThreadDefault) => {
+    useAppearanceStore.setState({ commentThreadDefault });
     mockApiObj.listTimeline.mockResolvedValue([
       {
         type: "comment", id: "midway", actor_type: "member", actor_id: "user-1",
@@ -4670,6 +4676,7 @@ describe("IssueDetail (shared)", () => {
 
     const rendered = Array.from(container.querySelectorAll("[id^='comment-']")).map((el) => el.id);
     expect(rendered.indexOf("comment-midway")).toBeLessThan(rendered.indexOf("comment-run-reply"));
+    expect(container.querySelector('[data-comment-content="midway"]')).not.toBeNull();
   });
 
   // MUL-7548 regression: a comment-triggered run that posts several comments

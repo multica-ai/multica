@@ -300,3 +300,26 @@ describe("isSafeFontValue", () => {
     expect(isSafeFontValue("Inter}")).toBe(false);
   });
 });
+
+
+describe("comment thread appearance preference", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useAppearanceStore.setState(DEFAULT_APPEARANCE);
+  });
+
+  it("keeps expanded behavior for missing and unknown saved choices", () => {
+    expect(sanitizeAppearance({}).commentThreadDefault).toBe("expanded");
+    expect(sanitizeAppearance({ commentThreadDefault: "unknown" }).commentThreadDefault).toBe("expanded");
+  });
+
+  it.each(["expanded", "collapsed", "latest"] as const)("persists %s on this device", async (choice) => {
+    useAppearanceStore.getState().set({ commentThreadDefault: choice });
+    const saved = localStorage.getItem(APPEARANCE_STORAGE_KEY)!;
+    expect(JSON.parse(saved).state).toMatchObject({ commentThreadDefault: choice });
+    useAppearanceStore.setState(DEFAULT_APPEARANCE);
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, saved);
+    await useAppearanceStore.persist.rehydrate();
+    expect(useAppearanceStore.getState().commentThreadDefault).toBe(choice);
+  });
+});

@@ -1134,7 +1134,7 @@ describe("SearchCommand", () => {
       await user.type(input(), "unfold");
       await user.click(await rowText("Unfold all comments"));
 
-      await waitFor(() => expect(mockCommentExpandAll).toHaveBeenCalledWith("issue-1"));
+      await waitFor(() => expect(mockCommentExpandAll).toHaveBeenCalledWith("issue-1", ["root-1", "root-2", "root-3"]));
       expect(mockResolvedExpandAll).toHaveBeenCalledWith("issue-1", ["root-2", "root-3"]);
       expect(mockCommentCollapseAll).not.toHaveBeenCalled();
     });

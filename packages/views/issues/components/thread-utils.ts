@@ -92,6 +92,16 @@ export function rootCommentIds(entries: readonly TimelineEntry[]): string[] {
     .map((e) => e.id);
 }
 
+/** Resolved threads keep their independent bar/expansion behavior. */
+export function latestUnresolvedThreadId(
+  entries: readonly TimelineEntry[],
+  repliesByRoot: ReadonlyMap<string, TimelineEntry[]>,
+): string | null {
+  const roots = entries.filter((entry) => entry.type === "comment" && !entry.parent_id &&
+    deriveThreadResolution(entry, repliesByRoot.get(entry.id) ?? []).kind === "none");
+  return sortTimelineEntriesAsc(roots).at(-1)?.id ?? null;
+}
+
 /**
  * IDs of thread roots that carry a resolution (on the root itself or on a
  * reply) — the threads that render folded behind a bar until expanded via
