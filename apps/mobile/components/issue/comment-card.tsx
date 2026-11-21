@@ -276,17 +276,17 @@ function ResolvedThreadBar({
         className="flex-row items-center gap-2.5 px-4 py-3 rounded-xl bg-surface-1 active:opacity-70"
         style={continuousCorners}
         accessibilityRole="button"
-        accessibilityLabel={t(
-          total === 1 ? "resolved.a11y_folded_one" : "resolved.a11y_folded_other",
-          { authors: authorsLabel, count: total },
-        )}
+        accessibilityLabel={t("resolved.a11y_folded", {
+          authors: authorsLabel,
+          count: total,
+        })}
       >
         <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
         <Text
           className="flex-1 text-sm text-muted-foreground"
           numberOfLines={1}
         >
-          {t(total === 1 ? "resolved.summary_one" : "resolved.summary_other", {
+          {t("resolved.summary", {
             count: total,
             authors: authorsLabel,
           })}

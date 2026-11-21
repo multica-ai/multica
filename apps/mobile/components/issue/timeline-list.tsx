@@ -485,10 +485,7 @@ function NewCommentChip({
       onPress={onPress}
       className="absolute bottom-3 self-center px-3.5 py-1.5 rounded-full bg-primary active:opacity-80 flex-row items-center gap-1.5"
       accessibilityRole="button"
-      accessibilityLabel={t(
-        count === 1 ? "jump_a11y_one" : "jump_a11y_other",
-        { count },
-      )}
+      accessibilityLabel={t("jump_a11y", { count })}
       style={{
         // shadow comes from system, not Tailwind — keeps the chip readable
         // against either light or dark timeline content beneath.
@@ -501,7 +498,7 @@ function NewCommentChip({
     >
       <Ionicons name="arrow-down" size={14} color={fg} />
       <Text className="text-xs font-semibold text-primary-foreground">
-        {t(count === 1 ? "jump_new_one" : "jump_new_other", { count })}
+        {t("jump_new", { count })}
       </Text>
     </Pressable>
   );

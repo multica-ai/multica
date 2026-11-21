@@ -202,7 +202,7 @@
     "delete_with_replies": "該評論將被永久刪除，討論中的回覆也會一併移除。此操作無法撤銷。",
     "more_reactions": "更多表情…",
     "add_reaction": "新增表情回應",
-    "deleted": "該留言已刪除",
+    "deleted": "該評論已刪除",
     "fallback_actor": "評論",
     "composer_placeholder": "新增評論…",
     "composer_pill": "新增評論，輸入 @ 提及…"
