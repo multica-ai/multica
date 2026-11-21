@@ -96,6 +96,12 @@ La commande enregistrée est `multica daemon start --foreground` pour ce profil,
 - Si un fichier que Multica n'a pas créé occupe déjà cet emplacement (votre propre unité systemd, par exemple), `enable` et `disable` refusent de le modifier.
 - Un daemon lancé par Desktop est géré par Desktop ; `daemon start` n'affiche pas d'indication et ne met pas à jour d'enregistrement pour lui.
 
+### Mettre à jour la CLI depuis Runtimes [#updating-cli]
+
+Lorsqu'une version plus récente est disponible pour un daemon CLI autonome, les propriétaires du runtime et les administrateurs de l'espace de travail peuvent cliquer sur **Mettre à jour** depuis la page **Runtimes**. Si la machine exécute des tâches et que le daemon prend en charge la mise en file d'attente, le daemon retient la mise à jour sans interrompre le travail en cours et affiche **Mise à jour à l'inactivité**, le nombre de tâches en cours et un bouton **Annuler** sur tous les runtimes de cette machine.
+
+L'installation démarre automatiquement dès que la dernière tâche en cours se termine. Une seule mise à jour inachevée est autorisée par machine ; une mise à jour en attente expire après 24 heures si la machine ne devient jamais inactive, et peut être annulée tant que l'installation n'a pas commencé. Les daemons sur une version plus ancienne sans prise en charge de la file d'attente refusent la mise à jour à distance tant que la machine est occupée. Les daemons lancés par Multica Desktop sont gérés par Desktop et mis à jour avec l'application Desktop.
+
 ## Distribution et statut en ligne
 
 Une fois enregistré, un runtime maintient une connexion persistante. Lorsqu'une nouvelle exécution entre dans la file d'attente, le serveur prévient le daemon concerné ; le daemon interroge aussi le serveur périodiquement pour ne pas manquer une notification si la connexion tombe. Lorsqu'un runtime est en ligne et dispose de capacité libre, les exécutions démarrent généralement immédiatement.

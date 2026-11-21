@@ -98,7 +98,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 </p>
 
 - **[実行ログ](https://multica.ai/docs/ja/tasks) →** すべてのツール呼び出し、コマンド、エラーをタイムスタンプ付きで再生できます。
-- **実行中のエージェントに指示を出す →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Grok、Kiro に対応しています。
+- **実行中のエージェントに指示を出す →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Cursor Agent、Grok、Kiro、Pi に対応しています。
 - **利用状況の分析 →** 各実行にかかったコストを、エージェント別・タスク別に確認できます。
 - **[レビューゲート](https://multica.ai/docs/ja/issues) →** 作業は main に直接入らず、まずレビューに回ります。何をリリースするかはあなたが決めます。
 - **[インボックス](https://multica.ai/docs/ja/inbox) →** 細かなステップごとではなく、エージェントが判断を求めてきたときだけ通知が届きます。
@@ -216,7 +216,7 @@ Multica はモデルを同梱していません。インストールと認証を
 | Codex、Claude Code、Cursor から Multica を操作したい | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
 | エージェントが止まっている理由を突き止めたい | [実行](https://multica.ai/docs/ja/tasks) · [トラブルシューティング](https://multica.ai/docs/ja/troubleshooting) |
 
-ドキュメントは [English](https://multica.ai/docs)、[简体中文](https://multica.ai/docs/zh)、
+ドキュメントは [English](https://multica.ai/docs)、[简体中文](https://multica.ai/docs/zh)、[繁體中文](https://multica.ai/docs/zh-Hant)、
 [한국어](https://multica.ai/docs/ko)、[Français](https://multica.ai/docs/fr) でもご覧いただけます。
 
 ---

@@ -82,7 +82,7 @@ The create dialog carries a context with it: the current issue's title, descript
 
 The new sub-issue shows **Created from**, which opens the **Context snapshot** taken at creation. The snapshot does not follow the source: if the original issue or thread is edited or deleted later, the snapshot keeps what it captured and is marked **Source updated**, with the parts that changed.
 
-Context that is too large cannot be captured: up to 256 comments from the thread, 1 MiB of text, and 100 attachments totaling 500 MiB. For Create with agent, the agent's runtime must be on a version that supports this; otherwise the dialog asks you to switch to manual or update the runtime. If the agent fails to create the issue, the failure notification in your inbox offers **Retry with context**.
+Context that is too large cannot be captured: up to 256 comments from the thread, 1 MiB of text, and 100 attachments totaling 500 MiB. On Multica Cloud, if copying the source attachments would exceed the workspace's [attachment storage limit](/workspaces#attachment-storage), the sub-issue is not created. For Create with agent, the agent's runtime must be on a version that supports this; otherwise the dialog asks you to switch to manual or update the runtime. If the agent fails to create the issue, the failure notification in your inbox offers **Retry with context**.
 
 ## Reuse a frequent request
 

@@ -82,7 +82,7 @@ La fenêtre de création emporte un contexte : le titre, la description et les p
 
 La sous-tâche créée affiche **Créé à partir de**, qui ouvre l'**Instantané du contexte** pris à la création. L'instantané ne suit pas la source : si la tâche ou le fil d'origine est modifié ou supprimé plus tard, il garde ce qu'il a capturé et signale **Source mise à jour**, avec les parties qui ont changé.
 
-Un contexte trop volumineux ne peut pas être capturé : au plus 256 commentaires du fil, 1 Mio de texte et 100 pièces jointes pour 500 Mio au total. Pour la création avec un agent, le runtime de l'agent doit être dans une version qui prend en charge cette fonction ; sinon la fenêtre propose de passer en mode manuel ou de mettre à jour le runtime. Si l'agent n'arrive pas à créer la tâche, la notification d'échec dans la boîte de réception propose **Réessayer avec le contexte**.
+Un contexte trop volumineux ne peut pas être capturé : au plus 256 commentaires du fil, 1 Mio de texte et 100 pièces jointes pour 500 Mio au total. Sur Multica Cloud, si la copie des pièces jointes source dépasse la [limite de stockage des pièces jointes](/workspaces#attachment-storage) de l'espace de travail, la sous-tâche n'est pas créée. Pour la création avec un agent, le runtime de l'agent doit être dans une version qui prend en charge cette fonction ; sinon la fenêtre propose de passer en mode manuel ou de mettre à jour le runtime. Si l'agent n'arrive pas à créer la tâche, la notification d'échec dans la boîte de réception propose **Réessayer avec le contexte**.
 
 ## Réutiliser une demande fréquente
 
