@@ -2400,6 +2400,51 @@ func (q *Queries) ListChannelOutboundMessagesByIDs(ctx context.Context, arg List
 	return items, nil
 }
 
+const listChannelUserBindingsForMember = `-- name: ListChannelUserBindingsForMember :many
+SELECT installation_id, channel_user_id
+FROM channel_user_binding
+WHERE workspace_id = $1
+  AND multica_user_id = $2
+  AND channel_type = $3
+ORDER BY bound_at DESC, id ASC
+`
+
+type ListChannelUserBindingsForMemberParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ChannelType   string      `json:"channel_type"`
+}
+
+type ListChannelUserBindingsForMemberRow struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelUserID  string      `json:"channel_user_id"`
+}
+
+// Returns the requesting Multica member's platform identities for ONE channel
+// type. The installation list is member-visible, so returning every member's
+// platform id here would expose those values more broadly than necessary; the
+// channel_type is a sqlc arg so each adapter (dingtalk, infoflow, …) reuses the
+// same query instead of growing a private copy.
+func (q *Queries) ListChannelUserBindingsForMember(ctx context.Context, arg ListChannelUserBindingsForMemberParams) ([]ListChannelUserBindingsForMemberRow, error) {
+	rows, err := q.db.Query(ctx, listChannelUserBindingsForMember, arg.WorkspaceID, arg.MulticaUserID, arg.ChannelType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelUserBindingsForMemberRow{}
+	for rows.Next() {
+		var i ListChannelUserBindingsForMemberRow
+		if err := rows.Scan(&i.InstallationID, &i.ChannelUserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockChannelChatContextGenerationByRevision = `-- name: LockChannelChatContextGenerationByRevision :one
 SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id FROM channel_chat_context_generation
 WHERE chat_session_id = $1

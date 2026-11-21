@@ -32,6 +32,7 @@ import (
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
+	"github.com/multica-ai/multica/server/internal/integrations/infoflow"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
@@ -414,6 +415,14 @@ type Handler struct {
 
 	WeixinInstall  *weixin.InstallService
 	WeixinOutbound *weixin.Outbound
+
+	// InfoFlowInstall owns the bring-your-own-app InfoFlow lifecycle (register a
+	// pasted app key/secret / list / revoke) and the at-rest encryption of each
+	// bot's secret. Nil unless MULTICA_INFOFLOW_SECRET_KEY is set.
+	InfoFlowInstall *infoflow.InstallService
+	// InfoFlowBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your InfoFlow account" prompt. Nil unless InfoFlow is configured.
+	InfoFlowBindingTokens *infoflow.BindingTokenService
 
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the

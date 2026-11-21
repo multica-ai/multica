@@ -68,6 +68,7 @@
     "./lark": "./lark/index.ts",
     "./slack": "./slack/index.ts",
     "./dingtalk": "./dingtalk/index.ts",
+    "./infoflow": "./infoflow/index.ts",
     "./wecom": "./wecom/index.ts",
     "./telegram": "./telegram/index.ts",
     "./invitations": "./invitations/index.ts",

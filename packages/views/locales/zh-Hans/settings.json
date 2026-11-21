@@ -1355,6 +1355,18 @@
     "scan_error_rate_limited": "尝试次数过多，请几分钟后再试。",
     "byo_failed_toast": "无法连接企业微信机器人"
   },
+  "infoflow": {
+    "section_title": "如流",
+    "page_description": "在如流中与智能体对话，或用 /issue 创建议题。机器人通过自己的 WebSocket 连接，无需公网回调地址。",
+    "byo_app_key_label": "App Key",
+    "byo_app_secret_label": "App Secret",
+    "byo_conflict_same_workspace": "这个如流应用已连接到本工作区的另一个智能体，请先在那里断开，再在这里连接。",
+    "byo_conflict_archived_agent": "这个如流应用连接的是本工作区中已归档的智能体。请先恢复该智能体，或断开它的应用，然后再连接。",
+    "byo_conflict_other_workspace": "这个如流应用已连接到另一个 Multica 工作区，请先在那里断开，再在这里连接。",
+    "byo_install_failed": "无法连接如流机器人。请检查如流管理后台中的 App Key 和 App Secret，然后重试。",
+    "byo_install_rejected": "缺少 App Key 或 App Secret，请从如流管理后台复制后都填上。",
+    "byo_not_configured": "本服务器未启用如流集成。"
+  },
   "telegram": {
     "section_title": "Telegram",
     "page_description": "在 Telegram 中与智能体对话，或用 /issue 创建任务。",

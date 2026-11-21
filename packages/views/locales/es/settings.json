@@ -1365,6 +1365,18 @@
     "scan_error_already_connected": "Este agente ya tiene un bot de WeCom conectado. Desconéctalo primero.",
     "scan_error_rate_limited": "Demasiados intentos. Espera unos minutos y vuelve a intentarlo."
   },
+  "infoflow": {
+    "section_title": "InfoFlow",
+    "page_description": "Chatea con agentes en InfoFlow (如流) o crea incidencias con /issue. El bot se conecta mediante su propio WebSocket, así que no hace falta una URL de devolución de llamada pública.",
+    "byo_app_key_label": "Clave de aplicación",
+    "byo_app_secret_label": "Secreto de aplicación",
+    "byo_conflict_same_workspace": "Esta aplicación de InfoFlow ya está conectada a otro Agente de este espacio de trabajo. Desconéctala allí y luego conéctala aquí.",
+    "byo_conflict_archived_agent": "Esta aplicación de InfoFlow está conectada a un Agente archivado de este espacio de trabajo. Restaura ese Agente o desconecta su aplicación antes de conectarla aquí.",
+    "byo_conflict_other_workspace": "Esta aplicación de InfoFlow ya está conectada a otro espacio de trabajo de Multica. Desconéctala allí antes de conectarla aquí.",
+    "byo_install_failed": "No se pudo conectar el bot de InfoFlow. Comprueba la clave y el secreto de aplicación en la consola de administración de InfoFlow y vuelve a intentarlo.",
+    "byo_install_rejected": "Falta la clave o el secreto de aplicación: rellena ambos campos desde la consola de administración de InfoFlow.",
+    "byo_not_configured": "La integración de InfoFlow no está habilitada en este servidor."
+  },
   "telegram": {
     "section_title": "Telegram",
     "page_description": "Chatea con agentes en Telegram o usa /issue para crear una tarea.",

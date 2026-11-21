@@ -192,6 +192,12 @@ services:
       # at rest, so this single deployment-wide key is all the operator needs
       # to set here.
       MULTICA_DINGTALK_SECRET_KEY: ${MULTICA_DINGTALK_SECRET_KEY:-}
+      # InfoFlow (如流) bot integration. MULTICA_INFOFLOW_SECRET_KEY is the
+      # opt-in: unset = integration disabled, and the InfoFlow endpoints refuse
+      # with 403 infoflow_not_configured. It encrypts each installation's App
+      # Secret at rest, so this single deployment-wide key is all the operator
+      # needs to set here.
+      MULTICA_INFOFLOW_SECRET_KEY: ${MULTICA_INFOFLOW_SECRET_KEY:-}
       # Self-hosted Git provider integration (Forgejo / Gitea / GitLab). This
       # is a self-host-only feature, so the compose file turns it on by default;
       # the managed cloud leaves it unset (off). It still needs a valid
