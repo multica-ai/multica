@@ -567,8 +567,6 @@
     "members_group": "成员",
     "agents_group": "智能体",
     "archive_tooltip": "归档",
-    "pin_tooltip": "固定到侧边栏",
-    "unpin_tooltip": "从侧边栏取消固定",
     "quick_jump_label": "快捷跳转",
     "description_nav_label": "任务描述",
     "sub_issues_nav_progress": "已完成 {{done}}/{{total}}",

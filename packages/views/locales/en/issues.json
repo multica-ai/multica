@@ -579,8 +579,6 @@
     "members_group": "Members",
     "agents_group": "Agents",
     "archive_tooltip": "Archive",
-    "pin_tooltip": "Pin to sidebar",
-    "unpin_tooltip": "Unpin from sidebar",
     "quick_jump_label": "Quick navigation",
     "description_nav_label": "Issue description",
     "sub_issues_nav_progress": "{{done}}/{{total}} completed",
