@@ -279,7 +279,7 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	// Insert source issues directly: this test is about the working-agent
 	// projection, so it must not inherit unrelated CreateIssue validation or
 	// side effects. The fixtures cover every direct My Issues relation plus
-	// all three squad-involvement branches.
+	// owned-leader squads (included) and non-leader squad memberships (excluded).
 	insertedIssueIDs := make([]string, 0, 6)
 	insertIssue := func(
 		title, creatorType, creatorID string,
@@ -457,25 +457,21 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		{
 			name:      "mine defaults to any",
 			query:     "?type=issue&scope=mine",
-			wantCount: 5,
+			wantCount: 3,
 			wantIssueIDs: []string{
 				assignedIssueID,
 				ownedAgentIssueID,
-				directMemberSquadIssueID,
 				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
 		},
 		{
 			name:      "mine any",
 			query:     "?type=issue&scope=mine&relation=any",
-			wantCount: 5,
+			wantCount: 3,
 			wantIssueIDs: []string{
 				assignedIssueID,
 				ownedAgentIssueID,
-				directMemberSquadIssueID,
 				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
 		},
 		{
@@ -493,12 +489,10 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		{
 			name:      "mine involved",
 			query:     "?type=issue&scope=mine&relation=involved",
-			wantCount: 4,
+			wantCount: 2,
 			wantIssueIDs: []string{
 				ownedAgentIssueID,
-				directMemberSquadIssueID,
 				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
 		},
 	} {
