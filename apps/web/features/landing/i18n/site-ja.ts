@@ -144,7 +144,7 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
         },
         chat: {
           title: "チャットでエージェントにメンション",
-          body: "Slack、Lark、DingTalk、WeCom、Telegram から。エージェントがスレッドを読み、Issue を作って作業を始めます。",
+          body: "Slack、Lark、DingTalk、WeCom、WeChat、Telegram から。エージェントがスレッドを読み、Issue を作って作業を始めます。",
           alt: "チームのチャットチャンネル。Mia がエクスポートの失敗について Backend Agent にメンションし、エージェントが作成して対応中の Multica Issue へのリンク付きで返信している",
         },
         autopilots: {
@@ -162,7 +162,7 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     agents: {
       lead: "新しいエージェントを覚える必要はありません。",
       title: "いま使っているものを、そのまま。",
-      all: "全 27 種のエージェント",
+      all: "全 31 種のエージェント",
     },
     updates: {
       eyebrow: "変更履歴",

@@ -13,11 +13,11 @@ export function createKoDict(): LandingDict {
       label: "FAQ",
       headline: "자주 묻는 질문.",
       items: [
-      { question: "WeChat에서 에이전트와 채팅할 수 있나요?", answer: "네. 워크스페이스 관리자가 에이전트의 연동 탭에서 본인의 WeChat 계정으로 QR 코드를 스캔하면 연결됩니다. 스캔한 계정의 개인 메시지는 해당 관리자의 권한으로 실행되며 답변과 지원되는 첨부 파일이 같은 대화로 돌아옵니다. 그룹 채팅은 지원하지 않으며 자체 호스팅 서버에서는 WeChat 연동을 먼저 활성화해야 합니다." },
+      { question: "WeChat에서 에이전트와 채팅할 수 있나요?", answer: "네. 본인이 소유한 에이전트를 열고 '메시징'에서 '메시징 채널 추가' → WeChat을 선택한 뒤 본인 WeChat으로 QR 코드를 스캔하면 연결됩니다. 스캔한 계정의 개인 메시지는 본인의 워크스페이스 권한으로 실행되며 답변과 지원되는 첨부 파일이 같은 대화로 돌아옵니다. 그룹 채팅은 지원하지 않으며 자체 호스팅 서버에서는 WeChat 연동을 먼저 활성화해야 합니다." },
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, ZCode 등 29개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다. 셀프 호스팅에서는 Qoder PAT와 Qoder Cloud Agents의 기존 에이전트를 사용하여 태스크 실행용 관리형 원격 런타임으로 Qoder Cloud Agents를 설정할 수 있습니다.",
+            "Multica는 Amp, Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Factory Droid, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, ZCode 등 31개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다. 셀프 호스팅에서는 Qoder PAT와 Qoder Cloud Agents의 기존 에이전트를 사용하여 태스크 실행용 관리형 원격 런타임으로 Qoder Cloud Agents를 설정할 수 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
