@@ -131,7 +131,7 @@ RETURNING *;
 
 -- name: DeleteWorkspaceDocs :exec
 WITH v AS (DELETE FROM doc_version WHERE doc_version.workspace_id = @workspace_id),
-s AS (DELETE FROM doc_collab_state WHERE doc_collab_state.workspace_id = @workspace_id),
+s AS (DELETE FROM doc_collab_state WHERE doc_collab_state.doc_id IN (SELECT id FROM doc WHERE doc.workspace_id = @workspace_id)),
 r AS (DELETE FROM doc_revision WHERE doc_revision.doc_id IN (SELECT id FROM doc WHERE doc.workspace_id = @workspace_id)),
 c AS (DELETE FROM doc_comment WHERE doc_comment.workspace_id = @workspace_id),
 f AS (DELETE FROM doc_folder WHERE doc_folder.workspace_id = @workspace_id)

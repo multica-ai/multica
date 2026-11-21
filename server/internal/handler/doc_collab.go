@@ -26,9 +26,10 @@ const (
 	docCollabFlushTimeout = 2 * time.Second
 	docCollabBodyMaxBytes = 16 << 20
 	docEditsMax           = 100
-	// Live editing saves every few seconds. A writer whose base is more than
-	// this many revisions old gets a revision conflict instead of a merge.
-	docRevisionsKept = 200
+	// Live editing saves every 5 to 30 seconds while someone types, each save
+	// a full copy of the doc. A writer whose base is more than this many
+	// revisions old gets a revision conflict instead of a merge.
+	docRevisionsKept = 50
 )
 
 // DocContributor is someone whose edits a version carries.
