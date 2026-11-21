@@ -1028,6 +1028,7 @@ export function MembersTab() {
       title: t(($) => $.members.revoke_invitation_title),
       description: t(($) => $.members.revoke_invitation_description, { email: invitation.invitee_email }),
       variant: "destructive",
+      actionLabel: t(($) => $.members.revoke_invitation_confirm),
       onConfirm: async () => {
         setInvitationActionId(invitation.id);
         try {
@@ -1116,6 +1117,7 @@ export function MembersTab() {
       title: t(($) => $.members.remove_member_title, { name: member.name }),
       description: t(($) => $.members.remove_member_description, { name: member.name, workspace: workspace.name }),
       variant: "destructive",
+      actionLabel: t(($) => $.members.remove_member_confirm),
       onConfirm: async () => {
         setMemberActionId(member.id);
         try {

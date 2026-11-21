@@ -6,6 +6,7 @@
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs chat issue --json"
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --queued --json"
+//   make env-exec ARGS="-- node scripts/dev-fixtures.mjs sidebar"
 //
 // Replies come from the daemon API, driven with the environment profile's user
 // token: the script registers a fixture runtime, then claims, starts and
@@ -21,20 +22,24 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const KINDS = ["chat", "builder", "issue", "task"];
+const KINDS = ["chat", "builder", "issue", "task", "sidebar"];
+// `sidebar` fills the whole Work panel, so `all` leaves it out.
+const ALL_KINDS = ["chat", "builder", "issue", "task"];
 const FIXTURE_DAEMON_ID = "dev-fixtures";
 const FIXTURE_AGENT_NAME = "Fixture Agent";
 const FIXTURE_WORKER_NAME = "Fixture Worker";
 // Matches the daemon's own heartbeat period.
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
-const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issue | task>... [--queued] [--hold] [--json]
+const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issue | task | sidebar>... [--queued] [--hold] [--json]
 
   chat      a chat session: a user message and an assistant reply with a table, code and a long log line
   builder   an Agent Builder session with the same kind of reply and a filled-in draft
   issue     an issue with a wide description and a comment holding a diff
   task      an issue assigned to the Fixture Worker agent whose task stays running, with an execution log
-  all       all four
+  sidebar   a Work panel in use: 11 issues in 3 projects, read and unread notifications from 3 agents,
+            pinned issues and a pinned project, and 2 saved views
+  all       chat, builder, issue and task
   --queued  task: also leave a second task queued behind the running one, on the same issue
   --hold    task: keep the fixture runtime heartbeating until Ctrl-C, so it stays online
   --json    print the created ids and URLs as JSON instead of text; task adds task_id, auth_token and agent_id
@@ -61,7 +66,7 @@ function parseCli(argv) {
     } else if (arg === "--json") json = true;
     else if (arg === "--queued") queued = true;
     else if (arg === "--hold") hold = true;
-    else if (arg === "all") KINDS.forEach((kind) => kinds.add(kind));
+    else if (arg === "all") ALL_KINDS.forEach((kind) => kinds.add(kind));
     else if (KINDS.includes(arg)) kinds.add(arg);
     else fail(`unknown argument ${arg}\n\n${USAGE}`);
   }
@@ -287,6 +292,118 @@ const TASK_MESSAGES = [
   },
 ];
 
+// The sidebar fixture's cast. Each agent picks up one issue assigned to it and,
+// with that task's token, acts on issues the dev user created; every inbox row
+// comes from the server's own notification listeners.
+const SIDEBAR_AGENTS = {
+  atlas: { name: "Atlas", description: "Works through Desktop bugs." },
+  nova: { name: "Nova", description: "Keeps the API reliable." },
+  sage: { name: "Sage", description: "Writes product copy and onboarding research." },
+};
+for (const agent of Object.values(SIDEBAR_AGENTS)) {
+  agent.instructions = "Fixture agent for local UI evidence. Its actions are scripted by scripts/dev-fixtures.mjs.";
+}
+
+// Statuses the sidebar's Projects section shows by default.
+const SIDEBAR_PROJECTS = {
+  desktop: { title: "Desktop 2.0", status: "in_progress", priority: "high" },
+  onboarding: { title: "Onboarding revamp", status: "planned", priority: "medium" },
+  reliability: { title: "API reliability", status: "in_progress", priority: "urgent" },
+};
+
+const SIDEBAR_VIEWS = [
+  { name: "In review", query: { statusFilters: ["in_review"] } },
+  { name: "Urgent and high", query: { priorityFilters: ["urgent", "high"] } },
+];
+
+// ageMinutes backdates the issue's notifications, so the inbox shows a spread
+// of times rather than "just now"; read marks them read afterwards.
+const SIDEBAR_ISSUES = {
+  tabs: { title: "Tabs lose their scroll position after switching workspaces", project: "desktop", status: "todo", priority: "high", pinned: true, ageMinutes: 3 },
+  menus: { title: "Native menu shortcuts ignore the focused window", project: "desktop", status: "todo", priority: "medium", ageMinutes: 26 },
+  updater: { title: "Ship auto-update for the Windows build", project: "desktop", status: "todo", priority: "medium", ageMinutes: 26 * 60, read: true },
+  checklist: { title: "Rewrite the first-run checklist copy", project: "onboarding", status: "todo", priority: "low", ageMinutes: 3 * 60 },
+  invites: { title: "Invite step skips the role picker", project: "onboarding", status: "todo", priority: "medium", ageMinutes: 5 * 60, read: true },
+  dropoff: { title: "Measure drop-off between sign-up and the first issue", project: "onboarding", status: "in_progress", priority: "medium", ageMinutes: 7 * 60, read: true },
+  webhooks: { title: "Retry webhook deliveries with exponential backoff", project: "reliability", status: "todo", priority: "high", pinned: true, ageMinutes: 11 },
+  ratelimit: { title: "Rate-limit the public search endpoint", project: "reliability", status: "todo", priority: "high", ageMinutes: 48 },
+  claims: { title: "Slow claims on cloud-pool-b", project: "reliability", status: "in_progress", priority: "urgent", pinned: true, ageMinutes: 2 * 60 + 10 },
+  flags: { title: "Clean up stale feature flags", status: "todo", priority: "low", ageMinutes: 2 * 24 * 60, read: true },
+  roadmap: {
+    title: "Q4 roadmap review notes",
+    status: "todo",
+    priority: "none",
+    ageMinutes: 4 * 24 * 60,
+    read: true,
+    devComment: "Draft agenda is up. Please flag anything missing before Thursday.",
+  },
+};
+
+const DROPOFF_TABLE = `| Step | Users | Drop-off |
+| --- | ---: | ---: |
+| Signed up | 1,204 | — |
+| Created a workspace | 1,031 | 14% |
+| Invited a teammate | 642 | 38% |
+| Created the first issue | 518 | 19% |`;
+
+const devMention = (dev) => `[@${dev.name}](mention://member/${dev.id})`;
+const daysFromNow = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+// One agent at a time holds a running task on the issue it owns; its actions
+// use that task's token, so they are attributed to the agent. No action
+// touches an issue assigned to another agent, which would wake that agent.
+// Status changes are muted by default (MUL-9449), so they move the board but
+// every issue also gets an action that notifies.
+const SIDEBAR_SCRIPTS = [
+  {
+    agent: "atlas",
+    owns: "tabs",
+    report:
+      "The scroll position is stored per tab but restored before the list has rendered, so it clamps to 0. Restoring it after the first paint fixes it; a PR is up.",
+    actions: [
+      { issue: "tabs", update: { status: "in_progress" } },
+      {
+        issue: "menus",
+        comment: (dev) =>
+          `${devMention(dev)} the accelerators are registered on the first window only. Should Cmd+W close the focused issue window or always the main one?`,
+      },
+      { issue: "claims", update: { status: "in_review" } },
+      {
+        issue: "claims",
+        comment: () => "Moving the lease extension after the cache copy brings p95 back under 7 seconds. Over to review.",
+      },
+    ],
+  },
+  {
+    agent: "nova",
+    owns: "webhooks",
+    report:
+      "Deliveries now retry 5 times with backoff from 30 seconds to 1 hour, and a delivery that keeps failing is marked failed instead of retrying forever. Ready for review.",
+    actions: [
+      { issue: "webhooks", update: { status: "in_review" } },
+      { issue: "ratelimit", update: (dev) => ({ assignee_type: "member", assignee_id: dev.id }) },
+      {
+        issue: "invites",
+        comment: () =>
+          "Reproduced: the role picker is skipped whenever the invite link carries a `role` parameter, even an empty one.",
+      },
+      { issue: "updater", update: () => ({ due_date: daysFromNow(10) }) },
+    ],
+  },
+  {
+    agent: "sage",
+    owns: "checklist",
+    report:
+      "I drafted the new checklist copy, but the step order depends on whether invites move before the first issue. Blocked until that is decided.",
+    actions: [
+      { issue: "checklist", update: { status: "blocked" } },
+      { issue: "flags", update: { priority: "urgent" } },
+      { issue: "dropoff", comment: () => `Last 30 days, by step:\n\n${DROPOFF_TABLE}\n\nThe invite step loses the most people.` },
+      { issue: "roadmap", react: "🎉" },
+    ],
+  },
+];
+
 // -------------------------------------------------------------- fixtures ---
 
 // The version a daemon built from this checkout reports, as the Makefile
@@ -376,7 +493,7 @@ async function waitForQueuedTask(request, issueId, agentId, ignore = new Set()) 
       (run) => run.agent_id === agentId && run.status === "queued" && !ignore.has(run.id),
     );
     if (task) return task;
-    if (Date.now() > deadline) throw new Error(`no queued task for ${FIXTURE_WORKER_NAME} appeared on issue ${issueId}`);
+    if (Date.now() > deadline) throw new Error(`no queued task for agent ${agentId} appeared on issue ${issueId}`);
     await sleep(300);
   }
 }
@@ -450,6 +567,134 @@ async function seedTask({ request, profile, runtime, worker, appUrl, slug, queue
   return result;
 }
 
+const listOf = (response, key) => (Array.isArray(response) ? response : response?.[key] ?? []);
+
+async function ensureProject(request, existing, project) {
+  return existing.find((p) => p.title === project.title && !p.archived_at) ?? request("POST", "/api/projects", project);
+}
+
+async function ensureView(request, existing, view) {
+  return (
+    existing.find((v) => v.name === view.name) ??
+    request("POST", "/api/issue-views", { ...view, scope_type: "workspace", display: {} })
+  );
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The API stamps every notification with the time it was delivered, so the
+// fixture's rows would all read "just now". Shifting them back is the one
+// direct database write; without psql the rows keep their real times.
+function backdateInbox({ workspaceId, recipientId, issues }) {
+  const skip = (reason) => console.error(`[dev-fixtures] sidebar: notifications keep their real times; ${reason}`);
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) return skip("DATABASE_URL is not set.");
+  const ids = [workspaceId, recipientId, ...issues.map((issue) => issue.id)];
+  if (!ids.every((id) => UUID.test(id))) return skip("an id is not a UUID.");
+  const values = issues.map((issue) => `('${issue.id}'::uuid, ${Math.trunc(issue.ageMinutes)})`).join(", ");
+  const sql = `UPDATE inbox_item AS i SET created_at = i.created_at - make_interval(mins => v.minutes)
+    FROM (VALUES ${values}) AS v(issue_id, minutes)
+    WHERE i.issue_id = v.issue_id AND i.workspace_id = '${workspaceId}'
+      AND i.recipient_type = 'member' AND i.recipient_id = '${recipientId}'`;
+  try {
+    execFileSync("psql", [databaseUrl, "-v", "ON_ERROR_STOP=1", "-qAt", "-c", sql], { stdio: ["ignore", "ignore", "pipe"] });
+  } catch (error) {
+    if (error.code === "ENOENT") skip("psql is not installed.");
+    else skip(`psql failed: ${String(error.stderr ?? "").trim().split("\n")[0]}`);
+  }
+}
+
+async function seedSidebar({ request, profile, runtime, appUrl, slug }) {
+  const dev = await request("GET", "/api/me");
+
+  const agents = {};
+  for (const [key, agent] of Object.entries(SIDEBAR_AGENTS)) agents[key] = await ensureAgent(request, runtime, agent);
+
+  const existingProjects = listOf(await request("GET", "/api/projects"), "projects");
+  const projects = {};
+  for (const [key, project] of Object.entries(SIDEBAR_PROJECTS)) {
+    projects[key] = await ensureProject(request, existingProjects, project);
+  }
+
+  const existingViews = listOf(await request("GET", "/api/issue-views?scope_type=all"), "views");
+  const views = [];
+  for (const view of SIDEBAR_VIEWS) views.push(await ensureView(request, existingViews, view));
+
+  const owner = Object.fromEntries(SIDEBAR_SCRIPTS.map((script) => [script.owns, script.agent]));
+  const issues = {};
+  for (const [key, spec] of Object.entries(SIDEBAR_ISSUES)) {
+    if (owner[key]) continue;
+    issues[key] = await createSidebarIssue(request, spec, projects);
+    if (spec.devComment) {
+      issues[key].devComment = await request("POST", `/api/issues/${issues[key].id}/comments`, { content: spec.devComment });
+    }
+  }
+
+  for (const script of SIDEBAR_SCRIPTS) {
+    const agent = agents[script.agent];
+    const own = await createSidebarIssue(request, SIDEBAR_ISSUES[script.owns], projects, agent);
+    issues[script.owns] = own;
+    const pending = await waitForQueuedTask(request, own.id, agent.id);
+    const task = await claimAndStart(request, runtime, pending.id, script.report);
+    const asAgent = client({ ...profile, token: task.auth_token });
+    for (const action of script.actions) {
+      const issue = issues[action.issue];
+      if (action.update) {
+        const body = typeof action.update === "function" ? action.update(dev) : action.update;
+        await asAgent("PUT", `/api/issues/${issue.id}`, body);
+      }
+      if (action.comment) await asAgent("POST", `/api/issues/${issue.id}/comments`, { content: action.comment(dev) });
+      if (action.react) await asAgent("POST", `/api/comments/${issue.devComment.id}/reactions`, { emoji: action.react });
+    }
+    await request("POST", `/api/daemon/tasks/${task.id}/complete`, { output: script.report });
+  }
+
+  for (const [key, spec] of Object.entries(SIDEBAR_ISSUES)) {
+    if (spec.read) await request("POST", `/api/inbox/issues/${issues[key].id}/read`);
+  }
+  backdateInbox({
+    workspaceId: profile.workspaceId,
+    recipientId: dev.id,
+    issues: Object.entries(SIDEBAR_ISSUES).map(([key, spec]) => ({ id: issues[key].id, ageMinutes: spec.ageMinutes })),
+  });
+
+  // Pins persist across runs, so only the issues of this run are added.
+  const pinned = new Set((listOf(await request("GET", "/api/pins"), "pins")).map((pin) => `${pin.item_type}:${pin.item_id}`));
+  const toPin = [
+    ...Object.entries(SIDEBAR_ISSUES)
+      .filter(([, spec]) => spec.pinned)
+      .map(([key]) => ({ item_type: "issue", item_id: issues[key].id })),
+    { item_type: "project", item_id: projects.desktop.id },
+  ];
+  for (const pin of toPin) {
+    if (!pinned.has(`${pin.item_type}:${pin.item_id}`)) await request("POST", "/api/pins", pin);
+  }
+
+  const inbox = listOf(await request("GET", "/api/inbox"), "items");
+  const notified = new Set(inbox.map((item) => item.issue_id));
+  const unread = new Set(inbox.filter((item) => !item.read).map((item) => item.issue_id));
+  return {
+    url: `${appUrl}/${slug}/issues`,
+    inbox_issues: notified.size,
+    inbox_unread_issues: unread.size,
+    issues: Object.fromEntries(Object.entries(issues).map(([key, issue]) => [key, issue.identifier])),
+    project_ids: Object.values(projects).map((project) => project.id),
+    view_ids: views.map((view) => view.id),
+    agent_ids: Object.values(agents).map((agent) => agent.id),
+  };
+}
+
+function createSidebarIssue(request, spec, projects, agent) {
+  return request("POST", "/api/issues", {
+    title: spec.title,
+    status: spec.status,
+    priority: spec.priority,
+    project_id: spec.project ? projects[spec.project].id : undefined,
+    ...(agent ? { assignee_type: "agent", assignee_id: agent.id } : {}),
+    allow_duplicate: true,
+  });
+}
+
 // Keeps the runtime online, and its held tasks with it, the way a daemon does.
 // A failed beat (an API restart) is reported and retried on the next tick.
 async function holdRuntime(request, runtime) {
@@ -481,7 +726,7 @@ async function main() {
   if (kinds.includes("chat")) context.agent = await ensureAgent(request, context.runtime, FIXTURE_AGENT);
   if (kinds.includes("task")) context.worker = await ensureAgent(request, context.runtime, FIXTURE_WORKER);
 
-  const seeders = { chat: seedChat, builder: seedBuilder, issue: seedIssue, task: seedTask };
+  const seeders = { chat: seedChat, builder: seedBuilder, issue: seedIssue, task: seedTask, sidebar: seedSidebar };
   const result = {};
   for (const kind of kinds) {
     result[kind] = await seeders[kind](context);

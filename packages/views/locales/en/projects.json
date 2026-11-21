@@ -93,7 +93,7 @@
     "description_hint": "Shared with agents as context for every run in this project.",
     "empty_issues_title": "No issues in this project yet",
     "empty_issues_hint": "Create one, or move an existing issue here.",
-    "empty_issues_new_button": "New Issue",
+    "empty_issues_new_button": "New issue",
     "empty_issues_add_existing": "Add existing issue",
     "no_issues_yet": "No issues yet",
     "toast_link_copied": "Link copied",
@@ -128,7 +128,7 @@
     "local_daemon_offline_hint": "Start the local daemon to choose a folder.",
     "chat_hint_prefix": "Agent will work in-place at",
     "chat_hint_worktree_prefix": "Agent will work in an isolated worktree of",
-    "chat_hint_worktree_note": "Your working copy stays untouched — each run hands its work back as an agent/… branch.",
+    "chat_hint_worktree_note": "Your working copy stays untouched — each run hands its work back as an agent/... branch.",
     "toast_local_attached": "Folder added",
     "toast_local_pick_failed": "Couldn't choose the folder",
     "local_validate_not_absolute": "Choose an absolute path.",
@@ -140,7 +140,7 @@
     "mode_in_place_title": "Edit directly",
     "mode_in_place_description": "One run at a time. Changes land straight in this folder.",
     "mode_worktree_title": "Run in parallel",
-    "mode_worktree_description": "Runs happen side by side without touching your working copy. Each hands back an agent/… branch to review and merge.",
+    "mode_worktree_description": "Runs happen side by side without touching your working copy. Each hands back an agent/... branch to review and merge.",
     "mode_worktree_needs_git": "This folder is not a git repository, so runs can't be parallel.",
     "mode_worktree_needs_server_upgrade": "Your Multica server is too old for parallel runs and would run them in this folder instead. Update the server first.",
     "mode_cancel": "Cancel",
@@ -152,7 +152,7 @@
     "mode_badge_in_place": "Direct",
     "ref_label": "Starting branch",
     "ref_placeholder": "main",
-    "ref_hint": "Tasks start here and open pull requests against it. Leave empty for the default branch.",
+    "ref_hint": "Agent runs branch off this branch and open pull requests against it. Leave empty to use the default branch.",
     "ref_error_too_long": "Use at most 255 characters.",
     "ref_error_characters": "Branch names can't contain spaces or ~ ^ : ? * [ \\",
     "ref_error_format": "Not a valid branch name.",
@@ -164,7 +164,7 @@
     "toast_ref_update_failed": "Couldn't update the branch",
     "ref_error_commit": "That's a commit, not a branch. For a specific revision, use --ref with multica repo checkout.",
     "ref_default_label": "Default branch",
-    "ref_running_note": "Tasks already running aren't affected."
+    "ref_running_note": "Runs already in progress aren't affected."
   },
   "delete_dialog": {
     "offline_error": "You're offline. Reconnect and try deleting again.",
@@ -173,7 +173,7 @@
     "confirm": "Delete",
     "cancel": "Cancel",
     "archive_instead": "Archive instead",
-    "archive_hint": "Archiving hides the project but keeps its issues, history and settings. You can restore it any time."
+    "archive_hint": "Archiving keeps all issues, history, and settings intact."
   },
   "picker": {
     "no_project": "No project",
@@ -196,7 +196,7 @@
     "slides": {
       "progress": {
         "title": "See progress at a glance",
-        "description": "Status, lead, target date, and completion sit on one card, so you don't have to open every issue."
+        "description": "Status, lead, due date, and completion sit on one card, so you don't have to open every issue."
       },
       "context": {
         "title": "Context travels with every run",

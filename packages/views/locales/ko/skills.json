@@ -180,7 +180,7 @@
       "permissions_owner": "이 스킬을 편집하고 삭제할 수 있습니다. 변경 사항은 다음 에이전트 실행부터 적용됩니다.",
       "permissions_locked_creator": "작성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
       "permissions_locked": "작성자 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
-      "character_count": "{{count}}자"
+      "character_count_other": "{{count}}자"
     },
     "files": {
       "list_aria": "스킬 파일",
@@ -342,8 +342,6 @@
     "toast_imported": "스킬을 가져왔습니다",
     "toast_import_failed": "스킬을 가져오지 못했습니다",
     "select_all": "전체 선택({{count}})",
-    "bulk_ready": "스킬 {{count}}개 선택됨",
-    "bulk_import_button": "스킬 {{count}}개 가져오기",
     "bulk_progress": "가져오는 중 {{completed}} / {{total}}...",
     "bulk_cancel_button": "취소",
     "bulk_complete_hint": "가져오기가 완료되었습니다.",
@@ -355,7 +353,6 @@
     "bulk_summary_skipped": "건너뜀",
     "bulk_summary_failed": "실패",
     "conflict_single_title": "이 이름의 스킬이 이미 있습니다",
-    "conflict_bulk_title": "{{count}}개의 스킬에 결정이 필요합니다",
     "conflict_hint": "기존 워크스페이스 스킬을 덮어쓸지, 새 이름으로 가져올지, 건너뛸지 선택하세요.",
     "conflict_locked_creator": "이 스킬은 {{creator}}님이 만들었습니다. 로컬 가져오기에서 덮어쓰기는 생성자만 할 수 있습니다. 변경이 필요하면 스킬 상세 페이지에서 편집하세요.",
     "conflict_locked": "로컬 가져오기에서 이 스킬은 생성자만 덮어쓸 수 있습니다. 변경이 필요하면 스킬 상세 페이지에서 편집하세요.",
@@ -366,10 +363,13 @@
     "conflict_overwrite_all": "모두 덮어쓰기",
     "conflict_skip_all": "모두 건너뛰기",
     "conflict_rename_label": "새 스킬 이름",
-    "conflict_footer": "{{count}}개의 충돌 결정이 남아 있습니다.",
     "conflict_apply_button": "결정 적용",
     "conflict_missing_resolution": "이 충돌을 처리할 방법을 선택하세요.",
-    "conflict_name_still_exists": "해당 이름이 이미 있습니다. 다른 이름을 선택하거나 건너뛰세요."
+    "conflict_name_still_exists": "해당 이름이 이미 있습니다. 다른 이름을 선택하거나 건너뛰세요.",
+    "bulk_ready_other": "스킬 {{count}}개 선택됨",
+    "bulk_import_button_other": "스킬 {{count}}개 가져오기",
+    "conflict_bulk_title_other": "{{count}}개의 스킬에 결정이 필요합니다",
+    "conflict_footer_other": "{{count}}개의 충돌 결정이 남아 있습니다."
   },
   "file_tree": {
     "no_files": "파일 없음",

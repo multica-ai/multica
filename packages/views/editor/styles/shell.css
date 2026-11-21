@@ -94,3 +94,29 @@
   max-width: min(360px, calc(100vw - 2rem));
   white-space: nowrap;
 }
+
+/* Collaborators' carets (CollaborationCaret). The colour comes inline from
+   each collaborator's awareness state. */
+.rich-text-editor .collaboration-carets__caret {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 1px solid;
+  border-right: 1px solid;
+  word-break: normal;
+  pointer-events: none;
+}
+
+.rich-text-editor .collaboration-carets__label {
+  position: absolute;
+  top: -1.4em;
+  left: -1px;
+  border-radius: 3px 3px 3px 0;
+  padding: 0.1rem 0.3rem;
+  color: white;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: normal;
+  white-space: nowrap;
+  user-select: none;
+}

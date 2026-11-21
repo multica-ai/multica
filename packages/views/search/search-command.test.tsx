@@ -1355,7 +1355,7 @@ describe("SearchCommand", () => {
       await user.type(input(), "localized");
 
       await waitFor(() => expect(screen.getByText("进行中")).toBeInTheDocument(), { timeout: 2000 });
-      expect(screen.queryByText("In Progress")).toBeNull();
+      expect(screen.queryByText("In progress")).toBeNull();
     });
 
     it("keeps live rows of both types above every cancelled row", async () => {

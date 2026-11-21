@@ -29,18 +29,21 @@ import {
   docTreeOptions,
   docCommentsOptions,
   folderAncestry,
+  holdLiveDoc,
   isDocNotFound,
 } from "@multica/core/docs";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Doc } from "@multica/core/types";
-import { ContentEditor, useEditorUpload } from "../../editor";
+import { ContentEditor, ReadonlyContent, useEditorUpload } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 import { useDocDraft } from "./use-doc-draft";
+import { useDocCollab, type DocCollaborator } from "./use-doc-collab";
+import { useLiveDocTitle } from "./use-live-doc-title";
 import { DocOutline, MIN_OUTLINE_HEADINGS, useDocOutline } from "./doc-outline";
 import { DocCommentsPanel, groupDocThreads } from "./doc-comments-panel";
 import { captureDocAnchor, type DocAnchor } from "./doc-comment-anchors";
@@ -148,7 +151,27 @@ function DocEditor({ doc }: { doc: Doc }) {
   const { data: tree } = useQuery(docTreeOptions(wsId));
   const { getActorName } = useActorName();
   const timeAgo = useTimeAgo();
-  const { draft, status, dirty, change, retry, reload } = useDocDraft(doc);
+  // With live editing on, the shared document holds the body and saves
+  // itself; only the title goes through the API. Until the page knows which
+  // mode it is in, nothing is saved: the body is shown read-only and a typed
+  // title is held.
+  const collab = useDocCollab(doc.id);
+  const live = collab.mode === "live" ? collab : null;
+  const solo = collab.mode === "solo";
+  const { draft, status, dirty, change, retry, reload, setAside } = useDocDraft(doc, solo);
+  const liveTitle = useLiveDocTitle(doc, !!live);
+  useEffect(() => {
+    if (solo) {
+      const title = liveTitle.take();
+      if (title !== null) change({ title });
+    } else if (live) {
+      setAside();
+    }
+    // Once per mode change: the handlers are recreated every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solo, !!live]);
+  const liveSynced = !!live?.synced;
+  useEffect(() => (liveSynced ? holdLiveDoc(doc.id) : undefined), [liveSynced, doc.id]);
   const [moving, setMoving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const canDelete = useCanDeleteDoc()(doc);
@@ -238,6 +261,15 @@ function DocEditor({ doc }: { doc: Doc }) {
         }
         actions={
           <>
+            {live ? (
+              <LiveStatus
+                connected={live.connected}
+                synced={live.synced}
+                collaborators={live.collaborators}
+                titleFailed={liveTitle.failed}
+                onRetryTitle={liveTitle.retry}
+              />
+            ) : collab.mode === "checking" ? null : (
             <span role="status" className="px-1 text-caption text-muted-foreground">
               {status === "error" ? (
                 <Button size="xs" variant="ghost" onClick={() => void retry()}>
@@ -249,6 +281,7 @@ function DocEditor({ doc }: { doc: Doc }) {
                 t(($) => $.editor.saved)
               ) : null}
             </span>
+            )}
             <Button
               size="icon-sm"
               variant="ghost"
@@ -309,7 +342,7 @@ function DocEditor({ doc }: { doc: Doc }) {
           </>
         }
       />
-      {status === "conflict" && (
+      {solo && status === "conflict" && (
         <div
           role="alert"
           className="flex flex-wrap items-center gap-2 border-b bg-warning/10 px-6 py-2 text-body"
@@ -342,12 +375,15 @@ function DocEditor({ doc }: { doc: Doc }) {
               )}
               <input
                 aria-label={t(($) => $.editor.title_label)}
-                value={draft.title}
+                value={solo ? draft.title : liveTitle.value}
                 // A doc just created from the tree is blank: start in its title.
                 autoFocus={!doc.title && !doc.content}
                 maxLength={300}
                 placeholder={t(($) => $.untitled)}
-                onChange={(e) => change({ title: e.target.value })}
+                onChange={(e) =>
+                  solo ? change({ title: e.target.value }) : liveTitle.change(e.target.value)
+                }
+                onBlur={solo ? undefined : liveTitle.blur}
                 className="w-full bg-transparent text-display-sm font-semibold outline-none"
               />
               <div className="mt-3 mb-8 flex items-center gap-2 text-caption text-muted-foreground">
@@ -370,6 +406,21 @@ function DocEditor({ doc }: { doc: Doc }) {
                 </Tooltip>
               </div>
               <div ref={bodyRef} onClick={onBodyClick}>
+                {collab.mode === "checking" || (live && !live.synced) ? (
+                  <ReadonlyContent content={doc.content} className="min-h-80" />
+                ) : live ? (
+                  <ContentEditor
+                    key={live.generation}
+                    collaboration={live.collaboration}
+                    selectionAction={commentAction}
+                    placeholder={t(($) => $.editor.placeholder)}
+                    enableSlashCommands
+                    slashCommandMode="blocks"
+                    showBlockHandles
+                    onUploadFile={uploadFile}
+                    className="min-h-80"
+                  />
+                ) : (
                 <ContentEditor
                   selectionAction={commentAction}
                   value={draft.content}
@@ -383,6 +434,7 @@ function DocEditor({ doc }: { doc: Doc }) {
                   onUploadFile={uploadFile}
                   className="min-h-80"
                 />
+                )}
               </div>
             </div>
           </div>
@@ -427,5 +479,77 @@ function DocEditor({ doc }: { doc: Doc }) {
         onOpenChange={setDeleting}
       />
     </div>
+  );
+}
+
+function LiveStatus({
+  connected,
+  synced,
+  collaborators,
+  titleFailed,
+  onRetryTitle,
+}: {
+  connected: boolean;
+  synced: boolean;
+  collaborators: DocCollaborator[];
+  titleFailed: boolean;
+  onRetryTitle: () => void;
+}) {
+  const { t } = useT("docs");
+  return (
+    <span role="status" className="flex items-center gap-2 px-1 text-caption text-muted-foreground">
+      {collaborators.length > 0 && (
+        <span className="flex -space-x-1" aria-label={t(($) => $.editor.editing_now)}>
+          {collaborators.slice(0, 5).map((c) => (
+            <Tooltip key={c.key}>
+              <TooltipTrigger
+                render={
+                  <span
+                    data-collaborator={c.name}
+                    className="rounded-full ring-2"
+                    style={{ ["--tw-ring-color" as string]: c.color }}
+                  />
+                }
+              >
+                <ActorAvatar actorType={c.kind} actorId={c.id} size="xs" />
+              </TooltipTrigger>
+              <TooltipContent>{c.name}</TooltipContent>
+            </Tooltip>
+          ))}
+          {collaborators.length > 5 && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    data-collaborators-more
+                    className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1 text-caption ring-2 ring-background"
+                  />
+                }
+              >
+                +{collaborators.length - 5}
+              </TooltipTrigger>
+              <TooltipContent>
+                {collaborators
+                  .slice(5)
+                  .map((c) => c.name)
+                  .join(", ")}
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </span>
+      )}
+      {titleFailed ? (
+        <Button size="xs" variant="ghost" onClick={onRetryTitle}>
+          {t(($) => $.editor.title_save_failed)}
+        </Button>
+      ) : connected && synced ? (
+        <span className="flex items-center gap-1">
+          <span aria-hidden className="size-1.5 rounded-full bg-success" />
+          {t(($) => $.editor.live)}
+        </span>
+      ) : (
+        t(($) => (synced ? $.editor.reconnecting : $.editor.connecting))
+      )}
+    </span>
   );
 }

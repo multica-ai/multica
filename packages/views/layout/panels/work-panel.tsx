@@ -239,6 +239,8 @@ export function WorkPanel() {
             the pointer moves between rows. The fade is decorative. */}
         <PanelScrollFadeContext.Provider value={false}>
           <PanelBody onClickCapture={rememberClickedIssue} onAuxClickCapture={rememberClickedIssue}>
+            {wsId && <PinnedSection pins={pins} wsId={wsId} />}
+
             {wsId && (
               <InboxSection
                 wsId={wsId}
@@ -246,12 +248,6 @@ export function WorkPanel() {
                 pathname={pathname}
                 activeIssueId={inboxClaimsIssue ? currentIssueId : null}
               />
-            )}
-
-            {wsId && (
-              <div data-pinned-section className="contents">
-                <PinnedSection pins={pins} wsId={wsId} />
-              </div>
             )}
 
             {wsId && (

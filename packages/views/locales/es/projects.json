@@ -152,7 +152,7 @@
     "mode_badge_in_place": "Directo",
     "ref_label": "Rama inicial",
     "ref_placeholder": "main",
-    "ref_hint": "Las tareas parten de esta rama y abren sus pull requests contra ella. Déjala vacía para usar la rama por defecto.",
+    "ref_hint": "Las ejecuciones de agentes parten de esta rama y abren pull requests contra ella. Déjala vacía para usar la rama predeterminada.",
     "ref_error_too_long": "Usa como máximo 255 caracteres.",
     "ref_error_characters": "El nombre de la rama no puede contener espacios ni ~ ^ : ? * [ \\",
     "ref_error_format": "No es un nombre de rama válido.",
@@ -164,7 +164,7 @@
     "toast_ref_update_failed": "No se ha podido actualizar la rama",
     "ref_error_commit": "Eso es un commit, no una rama. Para una revisión concreta, usa --ref con multica repo checkout.",
     "ref_default_label": "Rama por defecto",
-    "ref_running_note": "Las tareas en curso no se ven afectadas."
+    "ref_running_note": "Las ejecuciones ya en curso no se ven afectadas."
   },
   "delete_dialog": {
     "offline_error": "Estás sin conexión. Vuelve a conectarte e intenta eliminar de nuevo.",
@@ -173,7 +173,7 @@
     "confirm": "Eliminar",
     "cancel": "Cancelar",
     "archive_instead": "Archivar en su lugar",
-    "archive_hint": "Archivar oculta el proyecto pero conserva sus tareas, historial y ajustes. Puedes restaurarlo cuando quieras."
+    "archive_hint": "Archivar mantiene intactas todas las tareas, el historial y la configuración."
   },
   "picker": {
     "no_project": "Sin proyecto",
@@ -196,7 +196,7 @@
     "slides": {
       "progress": {
         "title": "Consulta el progreso de un vistazo",
-        "description": "El estado, el responsable, la fecha objetivo y el avance aparecen en una sola tarjeta, para que no tengas que abrir cada tarea."
+        "description": "El estado, el responsable, la fecha límite y el progreso aparecen en una sola tarjeta, para que no tengas que abrir cada tarea."
       },
       "context": {
         "title": "El contexto acompaña a cada ejecución",

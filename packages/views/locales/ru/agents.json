@@ -114,7 +114,6 @@
     "archive": "Архивировать",
     "set_access": "Настроить область доступа",
     "set_access_dialog_title": "Настроить область доступа",
-    "set_access_applies_to": "Применяется к агентам: {{count}}.",
     "set_access_skipped": "Пропущено: {{count}} (не принадлежат вам).",
     "set_access_dialog_confirm": "Применить",
     "set_access_bulk_partial": "Применено к {{succeeded}}; ошибка для {{failed}} (оставлены в текущем состоянии).",
@@ -149,7 +148,11 @@
     "cancel_dialog_queued_few": "{{count}} в очереди",
     "cancel_dialog_queued_many": "{{count}} в очереди",
     "cancel_dialog_impact_few": "Будут отменены запуски ({{summary}}).",
-    "cancel_dialog_impact_many": "Будут отменены запуски ({{summary}})."
+    "cancel_dialog_impact_many": "Будут отменены запуски ({{summary}}).",
+    "set_access_applies_to_one": "Применяется к {{count}} агенту.",
+    "set_access_applies_to_few": "Применяется к агентам: {{count}}.",
+    "set_access_applies_to_many": "Применяется к агентам: {{count}}.",
+    "set_access_applies_to_other": "Применяется к агентам: {{count}}."
   },
   "detail": {
     "back_to_agents_full": "Назад к агентам",
@@ -165,7 +168,7 @@
     "bind_runtime": "Привязать среду выполнения",
     "restore": "Восстановить",
     "archive_dialog_title": "Архивировать агента?",
-    "archive_dialog_description": "«{{name}}» будет архивирован. Его нельзя будет назначить или упомянуть, но вся история сохранится. Позже вы сможете его восстановить.",
+    "archive_dialog_description": "Агент «{{name}}» будет архивирован, его нельзя будет назначать и упоминать. Текущие запуски будут отменены, но вся история сохранится. Вы сможете восстановить его позже.",
     "archive_dialog_cancel": "Отмена",
     "archive_dialog_confirm": "Архивировать",
     "more_archive": "Архивировать агента",
@@ -275,7 +278,7 @@
     "thinking_default": "Как в конфигурации CLI",
     "thinking_tooltip": "Рассуждения · {{value}}",
     "thinking_clear": "Как в конфигурации CLI",
-    "thinking_clear_title": "Сбросить переопределение и позволить локальной конфигурации CLI (claude/codex) определить уровень рассуждений",
+    "thinking_clear_title": "Сбросить переопределение и использовать настройку рассуждений среды выполнения по умолчанию",
     "service_tier_default": "По умолчанию для среды выполнения",
     "service_tier_standard": "Стандартная",
     "service_tier_standard_description": "Стандартная скорость и стандартное использование",
@@ -363,7 +366,7 @@
       "runtime_online": "Среда выполнения в сети",
       "runtime_offline": "Среда выполнения не в сети",
       "empty_title": "Что должен делать этот агент?",
-      "empty_description": "Опишите, что должен делать этот агент.",
+      "empty_description": "Опишите роль, рабочий процесс или инструменты — я подготовлю черновик конфигурации.",
       "prompt_review": "Проверять pull request'ы фронтенда",
       "prompt_research": "Исследовать конкурентов и обобщать результаты",
       "prompt_assistant": "Помогать команде планировать и писать проекты",
@@ -387,8 +390,11 @@
       "discard_confirm": "Диалог и его конфигурация будут удалены безвозвратно.",
       "discard_title": "Удалить этот черновик?",
       "discard_cancel": "Продолжить редактирование",
-      "banner": "У вас есть незавершённых черновиков: {{count}}",
-      "pick_hint": "Выберите один, чтобы продолжить."
+      "pick_hint": "Выберите один, чтобы продолжить.",
+      "banner_one": "У вас {{count}} незавершённый черновик",
+      "banner_few": "У вас есть незавершённых черновиков: {{count}}",
+      "banner_many": "У вас есть незавершённых черновиков: {{count}}",
+      "banner_other": "У вас есть незавершённых черновиков: {{count}}"
     },
     "close": "Закрыть",
     "steps": {
@@ -420,7 +426,7 @@
     },
     "runtime_step": {
       "title": "Где будет работать агент?",
-      "search_placeholder": "Поиск инструментов или машин",
+      "search_placeholder": "Поиск сред выполнения или машин",
       "groups": {
         "machines": "Машины",
         "cloud": "Облачные сервисы"
@@ -428,12 +434,12 @@
       "this_machine": "Эта машина",
       "owner_you": "Вы",
       "custom_badge": "Пользовательский",
-      "web_local_title": "Используйте инструменты этого компьютера через приложение для компьютера",
+      "web_local_title": "Используйте среды выполнения этого компьютера в настольном приложении",
       "download_desktop": "Скачать приложение",
-      "harness_count_one": "{{count}} инструмент",
-      "harness_count_other": "{{count}} инструмента",
+      "harness_count_one": "{{count}} среда выполнения",
+      "harness_count_other": "{{count}} среды выполнения",
       "local_starting": "Запуск локального демона…",
-      "local_empty_title": "На этой машине не найдены инструменты",
+      "local_empty_title": "На этой машине не найдены CLI агентов",
       "local_empty_hint": "Установите CLI, например Claude Code или Codex, и он появится здесь.",
       "more_harnesses_one": "Ещё {{count}}: {{names}}",
       "more_harnesses_other": "Ещё {{count}}: {{names}}",
@@ -458,8 +464,8 @@
       "footer_selected": "Выбрано:",
       "cancel": "Отмена",
       "next": "Далее",
-      "harness_count_few": "{{count}} инструмента",
-      "harness_count_many": "{{count}} инструментов",
+      "harness_count_few": "{{count}} среды выполнения",
+      "harness_count_many": "{{count}} сред выполнения",
       "more_harnesses_few": "Ещё {{count}}: {{names}}",
       "more_harnesses_many": "Ещё {{count}}: {{names}}",
       "hidden_remote_few": "Ещё {{count}} машины доступны только своим владельцам",
@@ -472,9 +478,9 @@
     "description_label": "Описание",
     "description_placeholder": "Чем занимается этот агент?",
     "access": {
-      "private_title": "Приватный",
+      "private_title": "Только я",
       "private_desc": "Запускать этого агента можете только вы",
-      "public_title": "Публичный",
+      "public_title": "Общий доступ",
       "public_desc": "Выберите, кто может запускать этого агента",
       "public_workspace_option": "Все в этом рабочем пространстве",
       "public_members_group": "Определённые участники",
@@ -551,8 +557,8 @@
       "discard": "Отменить изменения"
     },
     "instructions": {
-      "intro": "Задайте системный промпт, используемый для каждого запуска. Поддерживается Markdown.",
-      "system_prompt_label": "Системный промпт",
+      "intro": "Опишите, как этот агент должен работать при каждом запуске. Поддерживается Markdown.",
+      "system_prompt_label": "Инструкции",
       "placeholder": "Опишите роль, экспертизу и стиль работы этого агента.\n\n# Пример\nВы фронтенд-инженер, специализирующийся на React и TypeScript.\n\n## Стиль работы\n- Пишите небольшие, сфокусированные PR — один коммит на одно логическое изменение\n- Предпочитайте композицию наследованию\n- Всегда добавляйте юнит-тесты для новых компонентов\n\n## Ограничения\n- Не изменяйте типы в shared/ без явного согласования\n- Следуйте существующим паттернам компонентов в features/",
       "system_layer_label": "Поддерживается Multica",
       "system_layer_hint": "Обновляется с каждым релизом Multica. Вы не можете это редактировать, а ваши заметки ниже никогда не перезаписываются.",
@@ -640,7 +646,7 @@
       "workspace_none_assigned": "Этому агенту пока не назначены MCP-серверы рабочего пространства.",
       "workspace_add_action": "Добавить из рабочего пространства",
       "workspace_loading": "Загрузка назначенных серверов…",
-      "dialog_name_locked": "Имя нельзя изменить здесь — переименование добавило бы второй сервер, оставив этот без изменений. Вместо этого удалите его и добавьте заново.",
+      "dialog_name_locked": "Имя сервера нельзя изменить здесь. Воспользуйтесь пунктом «Переименовать» в меню сервера или удалите запись и добавьте её заново.",
       "workspace_overridden_badge": "Переопределён",
       "workspace_disabled_badge": "Отключён",
       "runtime_title": "Унаследовано от среды выполнения",
@@ -730,7 +736,7 @@
       "model_override_hint": "Применяется ко всем запускам этого агента до изменения или сброса. После сброса используется модель выбранного агента OpenClaw; сам агент остаётся прежним.",
       "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "Работает на этом компьютере.",
-      "mode_gateway_hint": "Демон подключается к OpenClaw Gateway. Оставьте поля адреса пустыми, чтобы унаследовать их из `~/.openclaw/openclaw.json` на хосте демона.",
+      "mode_gateway_hint": "Подключение к шлюзу OpenClaw. Оставьте поля конечной точки пустыми, чтобы унаследовать их из `~/.openclaw/openclaw.json` на машине.",
       "gateway_legend": "Адрес Gateway",
       "host_label": "Хост",
       "host_placeholder": "gw.internal",
@@ -796,7 +802,7 @@
       "status": {
         "queued": "В очереди",
         "dispatched": "Отправлена",
-        "waiting_local_directory": "Ожидание каталога",
+        "waiting_local_directory": "Ожидание локальной папки",
         "running": "Выполняется",
         "completed": "Успешно",
         "failed": "Ошибка",
@@ -845,7 +851,7 @@
       "loading": "Загрузка приложений…",
       "load_failed": "Не удалось загрузить приложения этого агента.",
       "empty": "Нет доступных подключённых приложений.",
-      "level": "Уровень доступа",
+      "level": "Область действия аккаунта",
       "team_connected": "Аккаунт команды подключён",
       "team_missing": "Аккаунт команды не подключён",
       "personal_connected": "Ваш аккаунт подключён",
@@ -871,11 +877,11 @@
   },
   "visibility": {
     "private": {
-      "label": "Личный",
-      "tooltip": "Личный · запускать этого агента может только владелец и те, кому он разрешит"
+      "label": "Только я",
+      "tooltip": "Приватный · запускать этого агента могут только владелец и пользователи, которым он разрешил доступ"
     },
     "workspace": {
-      "label": "Рабочее пространство",
+      "label": "Всё рабочее пространство",
       "tooltip": "Рабочее пространство · использовать этого агента может любой участник рабочего пространства"
     }
   },
@@ -889,7 +895,6 @@
       "specific_people": "Определённые участники",
       "owner_only": "Только владелец"
     },
-    "trigger_members_count": "{{count}} участников",
     "trigger_members_empty": "Определённые участники",
     "trigger_team": "Команда",
     "private_title": "Только я",
@@ -908,7 +913,11 @@
     "public_group": "Публичный доступ",
     "owner_only_readonly": "Изменить, кто может запускать этого агента, может только его владелец.",
     "members_empty": "Нет участников рабочего пространства для выбора",
-    "composio_switch_hint": "Обратите внимание — у этого агента включены приложения Composio. Предоставление доступа позволит всем, у кого он есть, использовать эти приложения через этого агента."
+    "composio_switch_hint": "Обратите внимание: у этого агента включены подключённые приложения. Если поделиться им, любой пользователь с доступом сможет использовать эти приложения через этого агента.",
+    "trigger_members_count_one": "{{count}} участник",
+    "trigger_members_count_few": "{{count}} участников",
+    "trigger_members_count_many": "{{count}} участников",
+    "trigger_members_count_other": "{{count}} участников"
   },
   "profile_card": {
     "unavailable": "Агент недоступен",
@@ -1096,17 +1105,17 @@
       "agent_error_context_overflow": "Превышено окно контекста",
       "agent_error_missing_config": "Отсутствует API-ключ или конфигурация",
       "agent_error_model_not_found_or_unavailable": "Модель недоступна",
-      "agent_error_runtime_version_unsupported": "Версия CLI среды выполнения не поддерживается",
-      "agent_error_runtime_missing_executable": "CLI среды выполнения не установлен",
+      "agent_error_runtime_version_unsupported": "Версия CLI агента не поддерживается",
+      "agent_error_runtime_missing_executable": "CLI агента не установлен",
       "agent_error_unknown": "Ошибка выполнения агента",
-      "agent_fallback_message": "Агент вернул запасное сообщение",
+      "agent_fallback_message": "Агент не смог сформировать корректный ответ",
       "codex_resume_oversized": "Сессия слишком велика для возобновления",
       "idle_watchdog": "Агент остановлен после простоя",
       "local_directory_error": "Ошибка локального каталога",
       "local_directory_missing": "Локальная папка проекта больше не существует",
       "cancelled": "Отменено системой",
       "agent_error": "Ошибка выполнения агента",
-      "codex_semantic_inactivity": "Тайм-аут семантического простоя Codex",
+      "codex_semantic_inactivity": "Codex перестал продвигаться вперёд",
       "manual": "Отменено пользователем",
       "user_cancelled": "Отменено пользователем"
     }

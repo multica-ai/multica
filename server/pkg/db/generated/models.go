@@ -879,6 +879,14 @@ type Doc struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type DocCollabState struct {
+	DocID       pgtype.UUID        `json:"doc_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Ystate      []byte             `json:"ystate"`
+	Revision    int64              `json:"revision"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DocComment struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -908,21 +916,29 @@ type DocFolder struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type DocRevision struct {
+	DocID     pgtype.UUID        `json:"doc_id"`
+	Revision  int64              `json:"revision"`
+	Content   string             `json:"content"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type DocVersion struct {
-	DocID       pgtype.UUID        `json:"doc_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Number      int32              `json:"number"`
-	Title       string             `json:"title"`
-	Content     string             `json:"content"`
-	AuthorType  string             `json:"author_type"`
-	AuthorID    pgtype.UUID        `json:"author_id"`
-	Message     string             `json:"message"`
-	Action      string             `json:"action"`
-	ActionRef   pgtype.Int4        `json:"action_ref"`
-	TaskID      pgtype.UUID        `json:"task_id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DocID        pgtype.UUID        `json:"doc_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Number       int32              `json:"number"`
+	Title        string             `json:"title"`
+	Content      string             `json:"content"`
+	AuthorType   string             `json:"author_type"`
+	AuthorID     pgtype.UUID        `json:"author_id"`
+	Message      string             `json:"message"`
+	Action       string             `json:"action"`
+	ActionRef    pgtype.Int4        `json:"action_ref"`
+	TaskID       pgtype.UUID        `json:"task_id"`
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Contributors []byte             `json:"contributors"`
 }
 
 type EntitlementFeatureAttempt struct {

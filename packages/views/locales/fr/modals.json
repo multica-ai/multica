@@ -11,7 +11,7 @@
     "description": "Les espaces de travail sont des environnements partagés où les équipes travaillent sur des projets et des tâches."
   },
   "delete_issue": {
-    "title": "Supprimer la tâche",
+    "title": "Supprimer la tâche ?",
     "description": "Cette tâche et tous ses commentaires seront définitivement supprimés. Cette action est irréversible.",
     "cancel": "Annuler",
     "confirm": "Supprimer",
@@ -170,7 +170,7 @@
   },
   "create_issue": {
     "sr_manual": "Nouvelle tâche",
-    "sr_agent": "Création rapide de tâche",
+    "sr_agent": "Créer une tâche avec un agent",
     "manual_breadcrumb": "Créer manuellement",
     "agent_breadcrumb": "Créer avec un agent",
     "title_placeholder": "Titre de la tâche",
@@ -245,9 +245,9 @@
       "search_placeholder": "Rechercher des agents et des squads…",
       "agents_group": "Agents",
       "squads_group": "Squads",
-      "version_missing": "Le daemon de cet agent ne communique pas de version du CLI. La création avec un agent exige le CLI multica ≥ {{min}}. Mettez le daemon à jour et reconnectez-vous, ou passez à la création manuelle.",
+      "version_missing": "Le daemon de cet agent ne signale pas de version du CLI. La création avec un agent nécessite multica CLI ≥ {{min}}. Mettez à jour le daemon et reconnectez-le, ou passez à la création manuelle.",
       "version_below": "Le CLI du daemon de cet agent est en {{current}} — la création avec un agent exige ≥ {{min}}. Mettez le daemon à jour, ou passez à la création manuelle.",
-      "prompt_placeholder": "Dites à l'agent quoi faire, par exemple « confier à Bohan la lenteur de chargement de la boîte de réception dans le projet Web »",
+      "prompt_placeholder": "Dites à l'agent quoi faire, par exemple « confier à Mika la lenteur de chargement de la boîte de réception dans le projet Web »",
       "source_context_prompt_placeholder": "Indiquez à l'agent quoi faire de ce contexte, par exemple « poursuivez l'enquête et corrigez le problème décrit ici »",
       "more_fields_aria": "Plus de champs",
       "set_project": "Définir le projet...",
@@ -280,8 +280,9 @@
     "trigger": "Copier les champs du parent",
     "title": "Copier les champs du parent",
     "description": "Depuis {{identifier}}. Remplace une fois les valeurs sélectionnées ; les modifications ultérieures ne sont pas synchronisées.",
-    "apply": "Copier {{count}} champs",
     "no_labels": "Aucune étiquette",
-    "manual_only": "Les étiquettes, la date de début et les propriétés personnalisées ne concernent que la création manuelle."
+    "manual_only": "Les étiquettes, la date de début et les propriétés personnalisées ne concernent que la création manuelle.",
+    "apply_one": "Copier {{count}} champ",
+    "apply_other": "Copier {{count}} champs"
   }
 }

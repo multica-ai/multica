@@ -263,7 +263,7 @@ describe("RuntimesPage", () => {
     const user = userEvent.setup();
     renderPage({ desktop: true });
 
-    expect(screen.getByText("This device")).toBeInTheDocument();
+    expect(screen.getByText("This machine")).toBeInTheDocument();
     expect(screen.queryByText("Run on this computer")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Add runtime" }));

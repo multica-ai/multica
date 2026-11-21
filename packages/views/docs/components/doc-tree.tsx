@@ -137,7 +137,9 @@ export function DeleteDocDialog({
           </AlertDialogTitle>
           <AlertDialogDescription>
             {target?.kind === "folder"
-              ? t(($) => $.delete.folder_description)
+              ? t(($) => $.delete.folder_description, {
+                  title: target?.item.title ?? "",
+                })
               : t(($) => $.delete.description, {
                   title: target?.item.title ?? "",
                 })}

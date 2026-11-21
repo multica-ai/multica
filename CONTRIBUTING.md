@@ -70,6 +70,13 @@ default.** Reviewers should request changes or close the PR until one is
 provided. PRs
 missing the problem, goal, or high-level proposal are also not ready for review.
 
+Do not add or translate docs in `apps/docs/content/docs/` or root `README*.md`
+for features gated behind a default-off flag in
+`server/internal/featureflags/keys.go` (permanently enabled compat keys do not
+count); note why docs were skipped in the PR description instead. When a PR
+flips a flag to default-on or removes it for general availability, add the docs
+across all locales in the same PR.
+
 ### Screenshots and Recordings
 
 Store PR evidence as [GitHub attachments](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
@@ -746,7 +753,7 @@ fixtures:
 
 ```bash
 make up C=api,web ARGS="--ephemeral"
-make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task, --json
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task sidebar, --json
 make destroy ARGS="--yes"
 ```
 
@@ -756,6 +763,17 @@ with a wide description and a comment with a diff. The script registers a
 fixture runtime with the profile token and completes each task with canned
 Markdown through the daemon API, so it also works inside a daemon-managed task.
 It prints the URL of everything it created and exits.
+
+`sidebar` makes the Work panel look used, for sidebar mocks and screenshots. It
+creates 11 issues across three projects, pins three of them and the Desktop 2.0
+project, and adds two saved views. Three agents (Atlas, Nova and Sage) then
+comment, mention, assign, change dates and priorities, and react through their
+own task tokens, so every inbox row comes from the server's notification
+listeners: 11 notified issues, 6 of them unread, enough for "Show 6 more". The
+notifications are then backdated with `psql` to read from minutes to days old;
+without `psql` they keep their real times. `all` leaves `sidebar` out. Running
+it again adds new issues and notifications and reuses the agents, projects and
+views.
 
 `task` is for UI and CLI work that needs an agent mid-run: agent status,
 the issue's execution log, Working / Idle filters, task panels. It assigns a new

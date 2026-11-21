@@ -196,7 +196,7 @@ function SortableTabItem({
   // session's first-frame fallback. The tab strip itself always renders the
   // live resolved `title`; `tab.title` is just the persisted seed. This
   // replaces the old document.title → MutationObserver → tab.title path (the OS
-  // window title stays page-driven via useDocumentTitle).
+  // window title resolves from the same URL via DocumentTitleSync).
   useEffect(() => {
     if (!titleResolved) return;
     if (tab.title !== title) updateTab(tab.id, { title });
@@ -526,7 +526,7 @@ function NewTabButton() {
     const activeSlug = useTabStore.getState().activeWorkspaceSlug;
     if (!activeSlug) return;
     const path = paths.workspace(activeSlug).issues();
-    const tabId = addTab(path, "Issues");
+    const tabId = addTab(path, "");
     if (tabId) setActiveTab(tabId);
   };
 

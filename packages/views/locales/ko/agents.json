@@ -102,7 +102,6 @@
     "archive": "보관",
     "set_access": "접근 범위 설정",
     "set_access_dialog_title": "접근 범위 설정",
-    "set_access_applies_to": "{{count}}개 agent에 적용됩니다.",
     "set_access_skipped": "{{count}}개 건너뜀(본인 소유 아님).",
     "set_access_dialog_confirm": "적용",
     "set_access_bulk_partial": "{{succeeded}}개 적용, {{failed}}개 실패(현재 상태 유지).",
@@ -125,7 +124,8 @@
     "archive_dialog_title": "\"{{name}}\"을(를) 보관할까요?",
     "archive_dialog_description": "이 에이전트는 할당하거나 멘션할 수 없고, 활성 실행은 모두 취소됩니다. 기록은 유지되며 나중에 복원할 수 있습니다.",
     "archive_dialog_cancel": "취소",
-    "archive_dialog_confirm": "보관"
+    "archive_dialog_confirm": "보관",
+    "set_access_applies_to_other": "{{count}}개 agent에 적용됩니다."
   },
   "detail": {
     "back_to_agents_full": "에이전트로 돌아가기",
@@ -141,7 +141,7 @@
     "bind_runtime": "런타임 연결",
     "restore": "복원",
     "archive_dialog_title": "에이전트를 보관할까요?",
-    "archive_dialog_description": "\"{{name}}\"이(가) 보관됩니다. 할당하거나 멘션할 수 없지만 기록은 유지됩니다. 나중에 복원할 수 있습니다.",
+    "archive_dialog_description": "\"{{name}}\"을(를) 보관하면 더 이상 담당자로 지정하거나 멘션할 수 없습니다. 진행 중인 실행은 취소되지만 기록은 유지되며 나중에 복원할 수 있습니다.",
     "archive_dialog_cancel": "취소",
     "archive_dialog_confirm": "보관",
     "more_archive": "에이전트 보관",
@@ -242,7 +242,7 @@
     "thinking_default": "CLI 설정 따르기",
     "thinking_tooltip": "추론 · {{value}}",
     "thinking_clear": "CLI 설정 따르기",
-    "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다",
+    "thinking_clear_title": "재정의를 지우고 런타임의 기본 추론 설정을 사용합니다",
     "service_tier_default": "런타임 기본값",
     "service_tier_standard": "표준",
     "service_tier_standard_description": "기본 속도 및 표준 사용량",
@@ -289,9 +289,9 @@
     "description_label": "설명",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
     "access": {
-      "private_title": "비공개",
+      "private_title": "나만 보기",
       "private_desc": "본인만 이 에이전트를 실행할 수 있습니다",
-      "public_title": "공개",
+      "public_title": "공유됨",
       "public_desc": "이 에이전트를 실행할 수 있는 사람을 선택하세요",
       "public_workspace_option": "이 워크스페이스의 모든 사람",
       "public_members_group": "특정 사용자",
@@ -362,8 +362,8 @@
       "discard": "변경 취소"
     },
     "instructions": {
-      "intro": "모든 실행에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
-      "system_prompt_label": "System Prompt",
+      "intro": "이 에이전트가 매 실행마다 따라야 할 작업 방식을 알려 주세요. Markdown을 지원합니다.",
+      "system_prompt_label": "지침",
       "placeholder": "이 에이전트의 역할, 전문성, 작업 방식을 정의하세요.\n\n# 예시\n당신은 React와 TypeScript에 특화된 프런트엔드 엔지니어입니다.\n\n## 작업 방식\n- 작고 집중된 PR을 작성합니다. 논리적 변경 단위마다 커밋 하나를 사용합니다\n- 상속보다 조합을 선호합니다\n- 새 컴포넌트에는 항상 단위 테스트를 추가합니다\n\n## 제약\n- 명시적인 승인 없이 shared/ 타입을 수정하지 않습니다\n- features/의 기존 컴포넌트 패턴을 따릅니다",
       "system_layer_label": "Multica가 관리",
       "system_layer_hint": "Multica 릴리스마다 업데이트됩니다. 편집할 수 없으며, 아래에 작성한 내용은 절대 덮어쓰이지 않습니다.",
@@ -445,7 +445,7 @@
       "workspace_none_assigned": "이 에이전트에 할당된 워크스페이스 MCP 서버가 아직 없습니다.",
       "workspace_add_action": "워크스페이스에서 추가",
       "workspace_loading": "할당된 서버를 불러오는 중…",
-      "dialog_name_locked": "여기서는 이름을 바꿀 수 없습니다. 이름을 바꾸면 서버가 하나 더 추가되고 기존 서버가 남습니다. 제거 후 다시 추가하세요.",
+      "dialog_name_locked": "서버 이름은 여기에서 변경할 수 없습니다. 대신 서버 메뉴의 \"이름 변경\"을 사용하거나 항목을 제거한 뒤 다시 추가하세요.",
       "workspace_overridden_badge": "재정의됨",
       "workspace_disabled_badge": "비활성화됨",
       "runtime_title": "런타임에서 상속",
@@ -535,7 +535,7 @@
       "model_override_hint": "변경하거나 비울 때까지 이 에이전트가 가져오는 모든 실행에 적용됩니다. 비우면 OpenClaw 에이전트의 정체성은 그대로 유지하면서 연결된 모델을 사용합니다.",
       "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "이 컴퓨터에서 실행합니다.",
-      "mode_gateway_hint": "daemon이 OpenClaw Gateway에 다이얼합니다. 엔드포인트 필드를 비워두면 daemon 호스트의 `~/.openclaw/openclaw.json`에서 상속받습니다.",
+      "mode_gateway_hint": "OpenClaw Gateway에 연결합니다. 엔드포인트 필드를 비워 두면 머신의 `~/.openclaw/openclaw.json`에서 설정을 그대로 가져옵니다.",
       "gateway_legend": "Gateway 엔드포인트",
       "host_label": "Host",
       "host_placeholder": "gw.internal",
@@ -545,7 +545,7 @@
       "token_placeholder": "Gateway가 발급한 bearer 토큰",
       "token_masked_placeholder": "저장됨 — 회전하려면 새 값을 입력. 비워두면 유지됩니다",
       "tls_label": "TLS 사용",
-      "tls_hint": "http:// 대신 https://로 다이얼",
+      "tls_hint": "http:// 대신 https://로 연결",
       "saved_toast": "라우팅 설정이 저장되었습니다",
       "save_failed_toast": "라우팅 설정 저장 실패"
     },
@@ -598,7 +598,7 @@
       "status": {
         "queued": "대기 중",
         "dispatched": "디스패치됨",
-        "waiting_local_directory": "디렉터리 대기 중",
+        "waiting_local_directory": "로컬 폴더 대기 중",
         "running": "실행 중",
         "completed": "성공",
         "failed": "실패",
@@ -644,7 +644,7 @@
       "loading": "앱을 불러오는 중…",
       "load_failed": "이 에이전트의 앱을 불러오지 못했습니다.",
       "empty": "연결된 앱이 없습니다.",
-      "level": "수준",
+      "level": "계정 범위",
       "team_connected": "팀 계정 연결됨",
       "team_missing": "팀 계정 미연결",
       "personal_connected": "내 계정 연결됨",
@@ -670,11 +670,11 @@
   },
   "visibility": {
     "private": {
-      "label": "개인",
-      "tooltip": "개인 · 소유자와 소유자가 허용한 사람만 이 에이전트를 실행할 수 있습니다"
+      "label": "나만 보기",
+      "tooltip": "비공개 · 소유자와 소유자가 허용한 사람만 이 에이전트를 실행할 수 있습니다"
     },
     "workspace": {
-      "label": "워크스페이스",
+      "label": "전체 워크스페이스",
       "tooltip": "워크스페이스 · 이 워크스페이스의 모든 사람이 이 에이전트를 사용할 수 있습니다"
     }
   },
@@ -688,7 +688,6 @@
       "specific_people": "특정 사용자",
       "owner_only": "소유자만"
     },
-    "trigger_members_count": "{{count}}명",
     "trigger_members_empty": "특정 사용자",
     "trigger_team": "팀",
     "private_title": "비공개",
@@ -707,11 +706,12 @@
     "public_group": "공개 액세스",
     "owner_only_readonly": "이 에이전트를 실행할 수 있는 대상은 소유자만 변경할 수 있습니다.",
     "members_empty": "선택할 워크스페이스 구성원이 없습니다",
-    "composio_switch_hint": "참고 — 이 에이전트에는 Composio 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 모든 사람이 이 에이전트를 통해 해당 앱을 사용할 수 있습니다."
+    "composio_switch_hint": "참고: 이 에이전트에는 연결된 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 누구나 이 에이전트를 통해 해당 앱을 사용할 수 있습니다.",
+    "trigger_members_count_other": "{{count}}명"
   },
   "profile_card": {
     "unavailable": "에이전트를 사용할 수 없습니다",
-    "detail_link": "자세히 →",
+    "detail_link": "자세히 보기 →",
     "runtime_label": "런타임",
     "skills_label": "스킬",
     "owner_label": "소유자",
@@ -880,17 +880,17 @@
       "agent_error_context_overflow": "컨텍스트 창 한도 초과",
       "agent_error_missing_config": "API 키 또는 설정 누락",
       "agent_error_model_not_found_or_unavailable": "모델을 사용할 수 없음",
-      "agent_error_runtime_version_unsupported": "러너 CLI 버전이 지원되지 않음",
-      "agent_error_runtime_missing_executable": "러너 CLI가 설치되지 않음",
+      "agent_error_runtime_version_unsupported": "지원되지 않는 에이전트 CLI 버전",
+      "agent_error_runtime_missing_executable": "에이전트 CLI가 설치되지 않음",
       "agent_error_unknown": "에이전트 실행 오류",
-      "agent_fallback_message": "에이전트가 대체 메시지를 반환함",
+      "agent_fallback_message": "에이전트가 유효한 응답을 생성하지 못함",
       "codex_resume_oversized": "세션이 너무 커서 재개할 수 없음",
       "idle_watchdog": "에이전트가 장시간 응답하지 않아 중지됨",
       "local_directory_error": "로컬 디렉터리 오류",
       "local_directory_missing": "프로젝트의 로컬 폴더가 더 이상 없음",
       "cancelled": "시스템에서 취소함",
       "agent_error": "에이전트 실행 오류",
-      "codex_semantic_inactivity": "Codex 의미 진행 없음 시간 초과",
+      "codex_semantic_inactivity": "Codex의 작업 진행이 중단됨",
       "manual": "사용자가 취소함",
       "user_cancelled": "사용자가 취소함"
     }
@@ -954,7 +954,7 @@
       "runtime_online": "런타임 온라인",
       "runtime_offline": "런타임 오프라인",
       "empty_title": "이 에이전트는 무엇을 해야 하나요?",
-      "empty_description": "이 에이전트가 할 일을 설명하세요.",
+      "empty_description": "역할, 워크플로 또는 도구를 설명해 주시면 설정 초안을 작성해 드립니다.",
       "prompt_review": "프런트엔드 Pull Request 검토",
       "prompt_research": "경쟁사를 조사하고 결과 요약",
       "prompt_assistant": "팀의 프로젝트 계획과 작성 지원",
@@ -978,8 +978,8 @@
       "discard_confirm": "대화와 오른쪽 설정이 영구적으로 삭제됩니다.",
       "discard_title": "이 생성을 취소할까요?",
       "discard_cancel": "계속 편집",
-      "banner": "미완료 초안이 {{count}}개 있습니다",
-      "pick_hint": "이어서 진행할 항목을 선택하세요."
+      "pick_hint": "이어서 진행할 항목을 선택하세요.",
+      "banner_other": "미완료 초안이 {{count}}개 있습니다"
     },
     "close": "닫기",
     "steps": {
@@ -1011,7 +1011,7 @@
     },
     "runtime_step": {
       "title": "이 에이전트를 어디서 실행할까요?",
-      "search_placeholder": "하네스 또는 머신 검색",
+      "search_placeholder": "런타임 또는 머신 검색",
       "groups": {
         "machines": "머신",
         "cloud": "클라우드 서비스"
@@ -1019,11 +1019,11 @@
       "this_machine": "이 머신",
       "owner_you": "나",
       "custom_badge": "사용자 지정",
-      "web_local_title": "데스크톱 앱에서 이 컴퓨터의 하네스를 사용할 수 있습니다",
+      "web_local_title": "데스크톱 앱에서 이 컴퓨터의 런타임 사용하기",
       "download_desktop": "데스크톱 앱 다운로드",
-      "harness_count_other": "하네스 {{count}}개",
+      "harness_count_other": "런타임 {{count}}개",
       "local_starting": "로컬 데몬을 시작하는 중…",
-      "local_empty_title": "이 머신에서 하네스를 찾지 못했습니다",
+      "local_empty_title": "이 머신에서 에이전트 CLI를 찾지 못했습니다",
       "local_empty_hint": "Claude Code나 Codex 같은 CLI를 설치하면 여기에 표시됩니다.",
       "more_harnesses_other": "{{count}}개 더: {{names}}",
       "add_remote": "머신 연결",
@@ -1048,7 +1048,6 @@
       "next": "다음"
     }
   },
-  "actions": {},
   "intro": {
     "title": "첫 AI 팀원을 맞이하세요",
     "description": "에이전트는 팀원처럼 태스크를 맡습니다. 런타임에서 Claude Code, Codex 같은 도구로 작업하고, 끝나면 댓글로 결과를 전달합니다.",

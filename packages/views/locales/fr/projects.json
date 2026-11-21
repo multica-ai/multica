@@ -152,7 +152,7 @@
     "mode_badge_in_place": "Direct",
     "ref_label": "Branche de départ",
     "ref_placeholder": "main",
-    "ref_hint": "Les tâches démarrent depuis cette branche et y ouvrent leurs pull requests. Laissez vide pour la branche par défaut.",
+    "ref_hint": "Les exécutions d'agents partent de cette branche et ouvrent des pull requests dessus. Laissez vide pour utiliser la branche par défaut.",
     "ref_error_too_long": "255 caractères maximum.",
     "ref_error_characters": "Un nom de branche ne peut pas contenir d'espace ni ~ ^ : ? * [ \\",
     "ref_error_format": "Nom de branche invalide.",
@@ -164,7 +164,7 @@
     "toast_ref_update_failed": "Impossible de mettre à jour la branche",
     "ref_error_commit": "Ceci est un commit, pas une branche. Pour une révision précise, utilisez multica repo checkout --ref.",
     "ref_default_label": "Branche par défaut",
-    "ref_running_note": "Les tâches en cours ne sont pas affectées."
+    "ref_running_note": "Les exécutions déjà en cours ne sont pas affectées."
   },
   "delete_dialog": {
     "offline_error": "Vous êtes hors ligne. Reconnectez-vous, puis réessayez la suppression.",
@@ -173,7 +173,7 @@
     "confirm": "Supprimer",
     "cancel": "Annuler",
     "archive_instead": "Archiver plutôt",
-    "archive_hint": "L'archivage masque le projet mais conserve ses tâches, son historique et ses réglages. Vous pouvez le restaurer à tout moment."
+    "archive_hint": "L'archivage conserve intacts toutes les tâches, l'historique et les paramètres."
   },
   "picker": {
     "no_project": "Aucun projet",
@@ -196,7 +196,7 @@
     "slides": {
       "progress": {
         "title": "L'avancement en un coup d'œil",
-        "description": "Statut, responsable, échéance et taux d'achèvement tiennent sur une carte : inutile d'ouvrir chaque tâche."
+        "description": "Le statut, le responsable, la date d'échéance et l'avancement figurent sur une même carte, pour vous éviter d'ouvrir chaque tâche."
       },
       "context": {
         "title": "Le contexte suit chaque exécution",

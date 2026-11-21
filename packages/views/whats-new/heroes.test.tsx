@@ -21,8 +21,8 @@ describe("What's new hero art", () => {
   it.each([
     ["community-themes", ["Themes", "Search themes", "Install", "In use"]],
     ["environment-controls", ["Environments", "2 running", "Running", "Switch to window", "View logs"]],
-    ["chat-annotations", ["1 annotation", "Add a comment…", "Add"]],
-    ["inbox-snooze", ["Inbox", "Snooze until…", "1 hour", "3 hours", "1 day", "3 days"]],
+    ["chat-annotations", ["1 annotation", "Add a comment...", "Add"]],
+    ["inbox-snooze", ["Inbox", "Snooze until...", "1 hour", "3 hours", "1 day", "3 days"]],
     ["desktop-voice-input", ["Release to insert", "Leave a comment..."]],
     ["chat-wakeups", ["Will report back: PR #128", "ends in 24 hours", "Back to report · it happened · PR #128"]],
     ["chat-steering", ["Making edits", "Add to current run"]],

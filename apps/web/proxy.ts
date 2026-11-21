@@ -170,6 +170,7 @@ export const config = {
     "/auth/:path*",
     "/docs/:path*",
     "/ws",
+    "/collab",
     "/((?!api|v1|_next/static|_next/image|favicon.ico|.*\\.).*)",
   ],
 };

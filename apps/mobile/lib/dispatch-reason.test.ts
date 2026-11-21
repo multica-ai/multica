@@ -53,7 +53,7 @@ describe("sendFailureMessage", () => {
       "Bind a runtime to this agent before sending a message.",
     );
     expect(send("zh-Hans", err)).toBe("发送消息前，请先为该智能体绑定运行时。");
-    expect(send("zh-Hant", err)).toBe("傳送訊息前，請先為該 AI 代理繫結執行時。");
+    expect(send("zh-Hant", err)).toBe("傳送訊息前，請先為該 AI 代理綁定執行時。");
   });
 
   // PUCK-89: a private-runtime owner mismatch never resolves by retrying. The
@@ -61,13 +61,13 @@ describe("sendFailureMessage", () => {
   it("gives runtime_access_denied actionable copy, not a retry", () => {
     const err = apiError({ reason_code: "runtime_access_denied" });
     expect(send("en", err)).toBe(
-      "Message not sent — This agent can't run on its private runtime. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",
+      "Message not sent — This agent's private runtime isn't accessible. Make the runtime public, or bind the agent to an accessible runtime.",
     );
     expect(send("zh-Hans", err)).toBe(
-      "消息未发送：该智能体无法在其私有运行时上运行。请将该运行时设为公开，或将智能体重新绑定/复制到其所有者可用的运行时。",
+      "消息未发送：无法访问该智能体的私有运行时。请将该运行时设为公开，或将智能体绑定到可用的运行时。",
     );
     expect(send("zh-Hant", err)).toBe(
-      "訊息未傳送：該 AI 代理無法在其私有執行時上執行。請將該執行時設為公開，或將 AI 代理重新繫結/複製到其所有者可用的執行時。",
+      "訊息未傳送：無法存取該 AI 代理的私有執行時。請將該執行時設為公開，或將 AI 代理綁定到可用的執行時。",
     );
   });
 

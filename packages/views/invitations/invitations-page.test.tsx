@@ -306,7 +306,7 @@ describe("InvitationsPage", () => {
       expect(screen.getByText(/doesn't belong to your account/)).toBeInTheDocument(),
     );
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Go to dashboard" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Go to workspace" })).toHaveAttribute(
         "href",
         "/home/issues",
       ),

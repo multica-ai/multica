@@ -281,7 +281,9 @@ describe("comment quick-action catalog updates in the real editor", () => {
     fireEvent.keyDown(dom, { key: "Enter" });
 
     expect(editor.getText()).toBe("/delayed");
-    expect(toastError).toHaveBeenCalledWith("This target is unavailable");
+    expect(toastError).toHaveBeenCalledWith(
+      "This agent or squad can't be found — refresh the page and try again.",
+    );
     expect(renderQuickAction).not.toHaveBeenCalled();
   });
 

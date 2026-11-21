@@ -405,7 +405,7 @@ func buildInvitationParams(from, to, inviterName, workspaceName, inviteURL strin
 				<p style="margin: 24px 0;">
 					<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>
 				</p>
-				<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>
+				<p style="color: #666; font-size: 14px;">You'll need to sign in to accept or decline the invitation.</p>
 			</div>`, safeWorkspace, safeInviter, safeWorkspace, inviteURL),
 	}
 }

@@ -270,7 +270,7 @@ export function MentionSuggestionBar({
             return (
               <View className="px-3 py-3">
                 <Text className="text-xs text-muted-foreground">
-                  No matches.
+                  {t("picker.no_matches")}
                 </Text>
               </View>
             );

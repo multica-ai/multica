@@ -49,7 +49,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { StorageLimitNotice } from "../../billing/storage-limit-notice";
-import { ContentEditor, ReadonlyContent, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence } from "../../editor";
+import { ContentEditor, ReadonlyContent, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence, ImageThumbnailsProvider } from "../../editor";
 import {
   WAKEUP_ACTIVITY_ACTIONS,
   WakeupActivityIcon,
@@ -461,10 +461,18 @@ function formatActivity(
       return t(($) => $.activity.duplicate_removed, {
         identifier: details.duplicate_identifier || "?",
       });
-    case "task_completed":
-      return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
-    case "task_failed":
-      return t(($) => $.activity.task_failed, { count: entry.coalesced_count ?? 1 });
+    case "task_completed": {
+      const count = entry.coalesced_count ?? 1;
+      return count === 1
+        ? t(($) => $.activity.task_completed_single)
+        : t(($) => $.activity.task_completed, { count });
+    }
+    case "task_failed": {
+      const count = entry.coalesced_count ?? 1;
+      return count === 1
+        ? t(($) => $.activity.task_failed_single)
+        : t(($) => $.activity.task_failed, { count });
+    }
     case "squad_leader_evaluated": {
       const reason = details.reason?.trim();
       switch (details.outcome) {
@@ -1745,7 +1753,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // User preference: pin the bottom comment bar to the scroll viewport. Off
   // below `md` regardless of the preference — see the hook.
   const stickyComposer = useStickyComposer();
-  // Read by the image rules in editor/styles/attachment.css.
+  // Read by the image rules in editor/styles/attachment.css; under
+  // "thumbnails" the timeline's images also load the server's thumbnails.
   const commentImageLayout = useCommentComposerStore((s) => s.imageLayout);
 
   // Per-session: which resolved threads the user has temporarily expanded.
@@ -4527,28 +4536,30 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 // flash empty.
                 <TimelineSkeleton />
               ) : (
-                <div ref={virtualTimelineRef} className="mt-4">
-                  <Virtuoso
-                    key={`${wsId}:${id}`}
-                    ref={virtuosoRef}
-                    customScrollParent={scrollContainerEl}
-                    data={items}
-                    initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
-                    heightEstimates={timelineHeightEstimates}
-                    increaseViewportBy={timelineOverscan}
-                    totalListHeightChanged={handleTimelineHeightChange}
-                    rangeChanged={handleTimelineRangeChanged}
-                    computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
-                    // Also load-bearing for long threads: keepThreadRowAnchored
-                    // corrects after Virtuoso's resize handling in the same frame.
-                    skipAnimationFrameInResizeObserver
-                    // followOutput intentionally NOT set. Virtuoso treats
-                    // it as a sticky "is at bottom" flag and resets
-                    // scrollTop to maxScrollTop on every height-change
-                    // tick — issue-detail is document-shaped, not chat.
-                    itemContent={renderItem}
-                  />
-                </div>
+                <ImageThumbnailsProvider enabled={commentImageLayout === "thumbnails"}>
+                  <div ref={virtualTimelineRef} className="mt-4">
+                    <Virtuoso
+                      key={`${wsId}:${id}`}
+                      ref={virtuosoRef}
+                      customScrollParent={scrollContainerEl}
+                      data={items}
+                      initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
+                      heightEstimates={timelineHeightEstimates}
+                      increaseViewportBy={timelineOverscan}
+                      totalListHeightChanged={handleTimelineHeightChange}
+                      rangeChanged={handleTimelineRangeChanged}
+                      computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
+                      // Also load-bearing for long threads: keepThreadRowAnchored
+                      // corrects after Virtuoso's resize handling in the same frame.
+                      skipAnimationFrameInResizeObserver
+                      // followOutput intentionally NOT set. Virtuoso treats
+                      // it as a sticky "is at bottom" flag and resets
+                      // scrollTop to maxScrollTop on every height-change
+                      // tick — issue-detail is document-shaped, not chat.
+                      itemContent={renderItem}
+                    />
+                  </div>
+                </ImageThumbnailsProvider>
               )
             )}
 

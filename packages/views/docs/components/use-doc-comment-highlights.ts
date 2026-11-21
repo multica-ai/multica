@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { indexCommentText } from "../../issues/components/comment-annotation-selection";
 import { docAnchorRange, type DocAnchor } from "./doc-comment-anchors";
+import { watchDom } from "./dom-throttle";
 
 export interface AnchoredThread extends DocAnchor {
   id: string;
@@ -34,14 +36,14 @@ export function useDocCommentHighlights(
   useEffect(() => {
     const host = rootRef.current;
     if (!host) return;
-    let frame = 0;
     const paint = () => {
       const root = host.querySelector<HTMLElement>(".ProseMirror");
       if (!root) return;
       const ranges = new Map<string, Range>();
       const gone = new Set<string>();
+      const index = indexCommentText(root, true);
       for (const thread of threadsRef.current) {
-        const range = docAnchorRange(root, thread);
+        const range = docAnchorRange(root, thread, index);
         if (range) ranges.set(thread.id, range);
         else gone.add(thread.id);
       }
@@ -56,16 +58,9 @@ export function useDocCommentHighlights(
         else CSS.highlights.delete(ACTIVE_HIGHLIGHT);
       }
     };
-    const schedule = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(paint);
-    };
-    schedule();
-    const observer = new MutationObserver(schedule);
-    observer.observe(host, { childList: true, subtree: true, characterData: true });
+    const stop = watchDom(host, paint);
     return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
+      stop();
       if (canHighlight()) {
         CSS.highlights.delete(HIGHLIGHT);
         CSS.highlights.delete(ACTIVE_HIGHLIGHT);
