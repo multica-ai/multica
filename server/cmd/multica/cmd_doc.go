@@ -95,8 +95,49 @@ var docEditCmd = &cobra.Command{
 	RunE: runDocEdit,
 }
 
+var docFolderCmd = &cobra.Command{
+	Use:   "folder",
+	Short: "Manage knowledge base doc folders",
+	Long: "List, create, rename, and move folders in the workspace knowledge base.\n\n" +
+		"Folder arguments and --parent accept a full folder id or a unique prefix from " +
+		"`multica doc list` or `multica doc folder list`.",
+}
+
+var docFolderListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List doc folders",
+	RunE:  runDocFolderList,
+}
+
+var docFolderCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a doc folder",
+	RunE:  runDocFolderCreate,
+}
+
+var docFolderUpdateCmd = &cobra.Command{
+	Use:     "update <folder-id>",
+	Aliases: []string{"rename"},
+	Short:   "Rename a doc folder",
+	Long: "Rename a folder in the workspace knowledge base.\n\n" +
+		"<folder-id> accepts a full folder id or a unique prefix from `multica doc list` or `multica doc folder list`.",
+	Args: exactArgs(1),
+	RunE: runDocFolderUpdate,
+}
+
+var docFolderMoveCmd = &cobra.Command{
+	Use:   "move <folder-id>",
+	Short: "Move a doc folder into another folder, or to the top level",
+	Long: "Move a folder into another folder of the workspace knowledge base.\n\n" +
+		"<folder-id> and --parent accept a full folder id or a unique prefix from `multica doc list` or `multica doc folder list`. " +
+		"Pass `--parent root` to move the folder to the top level.",
+	Args: exactArgs(1),
+	RunE: runDocFolderMove,
+}
+
 func init() {
-	docCmd.AddCommand(docListCmd, docSearchCmd, docGetCmd, docCreateCmd, docUpdateCmd, docEditCmd, docMoveCmd)
+	docCmd.AddCommand(docListCmd, docSearchCmd, docGetCmd, docCreateCmd, docUpdateCmd, docEditCmd, docMoveCmd, docFolderCmd)
+	docFolderCmd.AddCommand(docFolderListCmd, docFolderCreateCmd, docFolderUpdateCmd, docFolderMoveCmd)
 	docMoveCmd.Flags().String("folder", "", "Destination folder id, or `root` for the top level (required)")
 	docMoveCmd.Flags().String("output", "json", "Output format: table or json")
 	docListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -120,6 +161,14 @@ func init() {
 	docEditCmd.Flags().Bool("replace-all", false, "Replace every occurrence of --old")
 	docEditCmd.Flags().String("message", "", "Change summary for history")
 	docEditCmd.Flags().String("output", "json", "Output format: table or json")
+	docFolderListCmd.Flags().String("output", "table", "Output format: table or json")
+	docFolderCreateCmd.Flags().String("title", "", "Folder title (required)")
+	docFolderCreateCmd.Flags().String("parent", "", "Parent folder id, or `root` for the top level (default: root)")
+	docFolderCreateCmd.Flags().String("output", "json", "Output format: table or json")
+	docFolderUpdateCmd.Flags().String("title", "", "Folder title (required)")
+	docFolderUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+	docFolderMoveCmd.Flags().String("parent", "", "Destination parent folder id, or `root` for the top level (required)")
+	docFolderMoveCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 type docTree struct {
@@ -137,7 +186,15 @@ func fetchDocTree(ctx context.Context, client *cli.APIClient) (docTree, error) {
 
 // resolveDocRef accepts a full id or an unambiguous id prefix from `doc list`.
 func resolveDocRef(ctx context.Context, client *cli.APIClient, ref string, folders bool) (string, error) {
-	if len(ref) == 36 {
+	kind := "doc"
+	if folders {
+		kind = "folder"
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("%s id is required", kind)
+	}
+	if uuidRegexp.MatchString(ref) {
 		return ref, nil
 	}
 	tree, err := fetchDocTree(ctx, client)
@@ -145,10 +202,8 @@ func resolveDocRef(ctx context.Context, client *cli.APIClient, ref string, folde
 		return "", err
 	}
 	items := tree.Docs
-	kind := "doc"
 	if folders {
 		items = tree.Folders
-		kind = "folder"
 	}
 	var matches []string
 	for _, item := range items {
@@ -167,6 +222,7 @@ func resolveDocRef(ctx context.Context, client *cli.APIClient, ref string, folde
 }
 
 func resolveDocFolderTarget(ctx context.Context, client *cli.APIClient, ref string) (any, error) {
+	ref = strings.TrimSpace(ref)
 	if ref == "root" || ref == "" {
 		return nil, nil
 	}
@@ -505,4 +561,137 @@ func runDocEdit(cmd *cobra.Command, args []string) error {
 	delete(doc, "content")
 	output, _ := cmd.Flags().GetString("output")
 	return printDocSummary(doc, output)
+}
+
+func printDocFolderSummary(folder map[string]any, output string) error {
+	if output == "table" {
+		parent := strVal(folder, "parent_id")
+		if parent == "" {
+			parent = "root"
+		}
+		cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "PARENT"}, [][]string{{
+			strVal(folder, "id"), strVal(folder, "title"), parent,
+		}})
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, folder)
+}
+
+func runDocFolderList(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	tree, err := fetchDocTree(ctx, client)
+	if err != nil {
+		return err
+	}
+	folders := tree.Folders
+	if folders == nil {
+		folders = []map[string]any{}
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, folders)
+	}
+
+	paths := docFolderPaths(folders)
+	rows := make([][]string, 0, len(folders))
+	for _, f := range folders {
+		id := strVal(f, "id")
+		updated := strVal(f, "updated_at")
+		if len(updated) >= 10 {
+			updated = updated[:10]
+		}
+		rows = append(rows, []string{id, paths[id] + "/", updated})
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i][1] < rows[j][1] })
+	cli.PrintTable(os.Stdout, []string{"ID", "PATH", "UPDATED"}, rows)
+	return nil
+}
+
+func runDocFolderCreate(cmd *cobra.Command, _ []string) error {
+	title, _ := cmd.Flags().GetString("title")
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("--title is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	body := map[string]any{"title": title}
+	if v, _ := cmd.Flags().GetString("parent"); strings.TrimSpace(v) != "" {
+		parent, err := resolveDocFolderTarget(ctx, client, v)
+		if err != nil {
+			return err
+		}
+		body["parent_id"] = parent
+	}
+	var folder map[string]any
+	if err := client.PostJSON(ctx, "/api/doc-folders", body, &folder); err != nil {
+		return fmt.Errorf("create doc folder: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	return printDocFolderSummary(folder, output)
+}
+
+func runDocFolderUpdate(cmd *cobra.Command, args []string) error {
+	title, _ := cmd.Flags().GetString("title")
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("--title is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	id, err := resolveDocRef(ctx, client, args[0], true)
+	if err != nil {
+		return err
+	}
+	var folder map[string]any
+	if err := client.PatchJSON(ctx, "/api/doc-folders/"+id, map[string]any{"title": title}, &folder); err != nil {
+		return fmt.Errorf("update doc folder: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	return printDocFolderSummary(folder, output)
+}
+
+func runDocFolderMove(cmd *cobra.Command, args []string) error {
+	destination, _ := cmd.Flags().GetString("parent")
+	if strings.TrimSpace(destination) == "" {
+		return fmt.Errorf("--parent is required: a folder id, or `root` for the top level")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	id, err := resolveDocRef(ctx, client, args[0], true)
+	if err != nil {
+		return err
+	}
+	parent, err := resolveDocFolderTarget(ctx, client, destination)
+	if err != nil {
+		return err
+	}
+	var folder map[string]any
+	if err := client.PostJSON(ctx, "/api/doc-folders/"+id+"/move", map[string]any{"parent_id": parent}, &folder); err != nil {
+		return fmt.Errorf("move doc folder: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	return printDocFolderSummary(folder, output)
 }

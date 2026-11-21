@@ -84,7 +84,7 @@ func TestBuildMetaSkillContentDocsFollowFlag(t *testing.T) {
 
 	for _, enabled := range []bool{false, true} {
 		out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1", DocsEnabled: enabled})
-		for _, line := range []string{"`multica doc list|search|get|create|edit|update|move`", "mention://doc/<doc-id>"} {
+		for _, line := range []string{"`multica doc list|search|get|create|edit|update|move|folder`", "mention://doc/<doc-id>"} {
 			if got := strings.Contains(out, line); got != enabled {
 				t.Errorf("DocsEnabled=%v: brief contains %q = %v\n---\n%s", enabled, line, got, out)
 			}
