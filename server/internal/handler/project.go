@@ -60,9 +60,11 @@ type ProjectResponse struct {
 	// ArchivedAt is non-null while the project is archived: hidden from
 	// default lists and pickers, closed to new issues, otherwise intact.
 	// Orthogonal to Status. (MUL-8861)
-	ArchivedAt     *string `json:"archived_at"`
-	ArchivedByType *string `json:"archived_by_type"`
-	ArchivedByID   *string `json:"archived_by_id"`
+	ArchivedAt              *string `json:"archived_at"`
+	ArchivedByType          *string `json:"archived_by_type"`
+	ArchivedByID            *string `json:"archived_by_id"`
+	MaxRunsPerIssue         *int32  `json:"max_runs_per_issue"`
+	MaxRunsPerAgentPerIssue *int32  `json:"max_runs_per_agent_per_issue"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -87,9 +89,11 @@ func projectToResponse(p db.Project) ProjectResponse {
 		WorkflowID:     uuidToPtr(p.WorkflowID),
 		Visibility:     projectVisibilityOrDefault(p.Visibility),
 
-		ArchivedAt:     timestampToPtr(p.ArchivedAt),
-		ArchivedByType: textToPtr(p.ArchivedByType),
-		ArchivedByID:   uuidToPtr(p.ArchivedByID),
+		ArchivedAt:              timestampToPtr(p.ArchivedAt),
+		ArchivedByType:          textToPtr(p.ArchivedByType),
+		ArchivedByID:            uuidToPtr(p.ArchivedByID),
+		MaxRunsPerIssue:         int4ToPtr(p.MaxRunsPerIssue),
+		MaxRunsPerAgentPerIssue: int4ToPtr(p.MaxRunsPerAgentPerIssue),
 	}
 }
 
@@ -191,8 +195,10 @@ type UpdateProjectRequest struct {
 	// Visibility switches between "workspace" and "private" (MUL-8472).
 	// MemberIDs adds project members to a project that is or becomes
 	// "private"; see prepareProjectAccessUpdate.
-	Visibility *string  `json:"visibility"`
-	MemberIDs  []string `json:"member_ids,omitempty"`
+	Visibility              *string  `json:"visibility"`
+	MemberIDs               []string `json:"member_ids,omitempty"`
+	MaxRunsPerIssue         *int32   `json:"max_runs_per_issue"`
+	MaxRunsPerAgentPerIssue *int32   `json:"max_runs_per_agent_per_issue"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -688,6 +694,26 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	_, params.LeadIDSet = rawFields["lead_id"]
 	_, params.StartDateSet = rawFields["start_date"]
 	_, params.DueDateSet = rawFields["due_date"]
+	_, params.MaxRunsPerIssueSet = rawFields["max_runs_per_issue"]
+	_, params.MaxRunsPerAgentPerIssueSet = rawFields["max_runs_per_agent_per_issue"]
+	if (params.MaxRunsPerIssueSet || params.MaxRunsPerAgentPerIssueSet) && isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "only human actors can change project run limits")
+		return
+	}
+	if req.MaxRunsPerIssue != nil {
+		if *req.MaxRunsPerIssue <= 0 {
+			writeError(w, http.StatusBadRequest, "max_runs_per_issue must be positive")
+			return
+		}
+		params.MaxRunsPerIssue = pgtype.Int4{Int32: *req.MaxRunsPerIssue, Valid: true}
+	}
+	if req.MaxRunsPerAgentPerIssue != nil {
+		if *req.MaxRunsPerAgentPerIssue <= 0 {
+			writeError(w, http.StatusBadRequest, "max_runs_per_agent_per_issue must be positive")
+			return
+		}
+		params.MaxRunsPerAgentPerIssue = pgtype.Int4{Int32: *req.MaxRunsPerAgentPerIssue, Valid: true}
+	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}

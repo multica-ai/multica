@@ -23,6 +23,13 @@ const t = ((selector: (bundle: unknown) => Leaf) => {
 }) as Parameters<typeof blockedReasonLabel>[1];
 
 describe("blocked trigger copy", () => {
+  it("distinguishes issue-wide and per-agent run ceilings", () => {
+    expect(blockedReasonLabel("issue_run_limit", t)).toBe(en.comment.trigger_blocked_issue_run_limit);
+    expect(blockedReasonLabel("issue_agent_run_limit", t)).toBe(en.comment.trigger_blocked_issue_agent_run_limit);
+    expect(blockedShortReasonLabel("issue_run_limit", t)).toBe(en.comment.trigger_blocked_short_issue_run_limit);
+    expect(blockedShortReasonLabel("issue_agent_run_limit", t)).toBe(en.comment.trigger_blocked_short_issue_agent_run_limit);
+  });
+
   it("distinguishes an unbound agent from an offline runtime", () => {
     const unbound = blockedReasonLabel("agent_runtime_required", t);
     const offline = blockedReasonLabel("runtime_offline", t);

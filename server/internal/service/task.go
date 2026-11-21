@@ -1275,10 +1275,10 @@ func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pg
 }
 
 func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin, false)
+	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin, false, false)
 }
 
-func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, freshRerun bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, freshRerun, replacePending bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1375,7 +1375,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 			FireAt:               fireAt,
 		})
 	} else {
-		task, err = s.Queries.CreateAgentTask(ctx, createParams)
+		task, err = s.createIssueAgentTask(ctx, createParams, replacePending)
 	}
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
@@ -1457,10 +1457,10 @@ func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, 
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, false, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, false, false, false)
 }
 
-func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, freshRerun, workflowHandoff bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, freshRerun, workflowHandoff, replacePending bool) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1528,7 +1528,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	if workflowHandoff {
 		task, err = s.createWorkflowSquadHandoffTask(ctx, issue, params)
 	} else {
-		task, err = s.Queries.CreateAgentTask(ctx, params)
+		task, err = s.createIssueAgentTask(ctx, params, replacePending)
 	}
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
@@ -6260,53 +6260,6 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		}
 	}
 
-	// Clear only the tasks that have not begun executing. Those are the rows the
-	// fresh enqueue would collide with under
-	// idx_one_pending_task_per_issue_agent_v2, and replacing them costs no work
-	// while keeping the new run attributed to the rerunning member (MUL-4302 §5)
-	// rather than inheriting whoever created the pending row.
-	//
-	// A running / waiting_local_directory task is deliberately left alone: an
-	// agent is executing in it. Neither status appears in that unique index, so
-	// the enqueue below inserts a queued row BEHIND the active one, and
-	// ClaimAgentTask's per-(issue, agent) serialization holds it there until the
-	// active run reaches a terminal state. Rerun used to cancel these too, so
-	// asking an agent for another pass silently killed the pass it was still
-	// working on; interrupting an in-flight run is what CancelTask /
-	// `multica issue cancel-task` is for.
-	clearPendingSlot := func() int {
-		var cancelled []db.AgentTaskQueue
-		// Atomic with the cancel: a pending coordinator task can already hold a
-		// recovery receipt, and nothing downstream could repair a settlement
-		// that failed after this committed.
-		cerr := s.runInTx(ctx, func(qtx *db.Queries) error {
-			var err error
-			cancelled, err = qtx.CancelPendingTasksByIssueAndAgentInThread(ctx, db.CancelPendingTasksByIssueAndAgentInThreadParams{
-				ThreadCommentID: triggerCommentID,
-				IssueID:         issueID,
-				AgentID:         agentID,
-			})
-			if err != nil {
-				return err
-			}
-			return SettleTerminalTaskState(ctx, qtx, cancelled...)
-		})
-		if cerr != nil {
-			slog.Warn("rerun: cancel pending tasks failed",
-				"issue_id", util.UUIDToString(issueID),
-				"agent_id", util.UUIDToString(agentID),
-				"error", cerr,
-			)
-		}
-		for _, t := range cancelled {
-			s.captureTaskCancelled(ctx, t)
-			s.ReconcileAgentStatus(ctx, t.AgentID)
-			s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
-		}
-		return len(cancelled)
-	}
-	cancelledCount := clearPendingSlot()
-
 	// A manual rerun is a NEW direct_human trigger attributed to the rerunning
 	// member, not the original run's human (MUL-4302 §5); actorUserID carries them.
 	// sourceTaskID is the rerun lineage: it rides the CreateAgentTask insert
@@ -6314,20 +6267,8 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	// lineage, and it stays distinct from system-retry's retry_of_task_id (§5).
 	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, actorUserID, sourceTaskID, rerunOrigin, fresh)
 	if pendingSlotTakenErr(err) {
-		// The clear above and this enqueue are separate commits, so a system
-		// retry created by a concurrent FailTask can take the pending slot in
-		// between. CreateRetryTask yields the slot when it is already occupied,
-		// but it cannot yield to a row that does not exist yet, so a retry
-		// committing inside this window gets there first. Clear once more and
-		// retry: the deliberate human action is the one that should hold the
-		// slot. Bounded to a single extra attempt — a second collision would mean
-		// something is enqueueing in a loop, which is worth surfacing rather than
-		// spinning on.
-		slog.Info("issue rerun: pending slot taken concurrently, reclaiming",
-			"issue_id", util.UUIDToString(issueID),
-			"agent_id", util.UUIDToString(agentID),
-		)
-		cancelledCount += clearPendingSlot()
+		// A concurrent insert can take the pending slot before the replacement
+		// commits. Retry once, with cancellation and insert rolled back together.
 		task, err = s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, actorUserID, sourceTaskID, rerunOrigin, fresh)
 	}
 	if err != nil {
@@ -6339,7 +6280,6 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		"agent_id", util.UUIDToString(agentID),
 		"source_task_id", util.UUIDToString(sourceTaskID),
 		"is_leader", isLeader,
-		"cancelled_pending", cancelledCount,
 	)
 	return &task, nil
 }
@@ -6416,9 +6356,47 @@ func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []p
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, fresh bool) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, origin, fresh)
+		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, origin, fresh, true)
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, origin, fresh, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, origin, fresh, false, true)
+}
+
+// Replace only pending runs in the same thread. A rejected enqueue must leave
+// those runs and their terminal-state receipts untouched.
+func (s *TaskService) createIssueAgentTask(ctx context.Context, params db.CreateAgentTaskParams, replacePending bool) (db.AgentTaskQueue, error) {
+	if !replacePending {
+		return s.Queries.CreateAgentTask(ctx, params)
+	}
+	var task db.AgentTaskQueue
+	var cancelled []db.AgentTaskQueue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if _, err := qtx.LockAgentForTaskEnqueue(ctx, params.AgentID); err != nil {
+			return err
+		}
+		var err error
+		cancelled, err = qtx.CancelPendingTasksByIssueAndAgentInThread(ctx, db.CancelPendingTasksByIssueAndAgentInThreadParams{
+			ThreadCommentID: params.TriggerCommentID,
+			IssueID:         params.IssueID,
+			AgentID:         params.AgentID,
+		})
+		if err != nil {
+			return err
+		}
+		task, err = qtx.CreateAgentTask(ctx, params)
+		if err != nil {
+			return err
+		}
+		return SettleTerminalTaskState(ctx, qtx, cancelled...)
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	for _, previous := range cancelled {
+		s.captureTaskCancelled(ctx, previous)
+		s.ReconcileAgentStatus(ctx, previous.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, previous)
+	}
+	return task, nil
 }
 
 // The bulk terminal writes below are the sweeper, archive and daemon-recovery

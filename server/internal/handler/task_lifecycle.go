@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -260,6 +261,10 @@ func (h *Handler) rerunIssue(w http.ResponseWriter, r *http.Request, issue db.Is
 	}
 	if errors.Is(err, service.ErrProjectAccessDenied) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonProjectAccessBlocked)
+		return
+	}
+	if reason := dispatch.IssueRunLimitReason(err); reason != "" {
+		h.writeDispatchBlocked(w, http.StatusConflict, reason)
 		return
 	}
 	// Not a dispatch refusal: the issue may well be runnable, and only the named

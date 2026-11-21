@@ -1836,6 +1836,8 @@ export const ProjectSchema = z.object({
   archived_at: z.string().nullable().default(null).catch(null),
   archived_by_type: z.enum(["member", "agent"]).nullable().default(null).catch(null),
   archived_by_id: z.string().nullable().default(null).catch(null),
+  max_runs_per_issue: z.number().int().positive().nullable().default(null).catch(null),
+  max_runs_per_agent_per_issue: z.number().int().positive().nullable().default(null).catch(null),
 }).loose();
 
 export const ArchiveProjectResponseSchema = ProjectSchema.extend({
@@ -4817,9 +4819,11 @@ export const WakeupRunSchema = z.object({
   commented: z.boolean().default(false),
 });
 
+const WakeupPausedReasonSchema = z.enum(["max_fires", "loop", "rate", "issue_run_limit", "issue_agent_run_limit"]);
+
 export const PausedWakeupSchema = z.object({
   issue_id: z.string(), id: z.string(), agent_id: z.string(),
-  paused_reason: z.enum(["max_fires", "loop", "rate"]).catch("rate"),
+  paused_reason: WakeupPausedReasonSchema.catch("rate"),
 });
 
 export const IssueWakeupSchema = z.object({
@@ -4841,14 +4845,14 @@ export const IssueWakeupSchema = z.object({
   // An unknown condition shape from a newer server reads as "no condition".
   condition: WakeupConditionSchema.nullish().catch(null),
   max_fires: z.number().int().nullish(), fire_count: z.number().int().nonnegative().optional().catch(undefined),
-  paused_reason: z.enum(["max_fires", "loop", "rate"]).nullish().catch(null),
+  paused_reason: WakeupPausedReasonSchema.nullish().catch(null),
 });
 
 export const SystemWakeupSchema = z.object({
   id: z.string().default(""), revision: z.number().int().nonnegative().default(0),
   rule: z.literal("child_done"), enabled: z.boolean(), instruction: z.string().default(""),
   default_instruction: z.string().default(""), customized: z.boolean().default(false),
-  paused_reason: z.enum(["max_fires", "loop", "rate"]).nullish().catch(null).transform((v) => v ?? null),
+  paused_reason: WakeupPausedReasonSchema.nullish().catch(null).transform((v) => v ?? null),
   staged: z.boolean(), stage: z.number().int().nullable(), total: z.number().int().nonnegative(),
   remaining: z.number().int().nonnegative(), waiting: z.array(z.string()).default([]),
   target: z.object({ type: z.enum(["agent", "squad", "member"]), id: z.string(), name: z.string() }).nullable().catch(null),

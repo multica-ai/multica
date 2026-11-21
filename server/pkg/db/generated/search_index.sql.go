@@ -389,7 +389,7 @@ func (q *Queries) ListSearchIndexIssuesPage(ctx context.Context, arg ListSearchI
 }
 
 const listSearchIndexProjects = `-- name: ListSearchIndexProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id, max_runs_per_issue, max_runs_per_agent_per_issue FROM project
 WHERE workspace_id = $1
 ORDER BY id
 `
@@ -425,6 +425,8 @@ func (q *Queries) ListSearchIndexProjects(ctx context.Context, workspaceID pgtyp
 			&i.ArchivedByType,
 			&i.ArchivedByID,
 			&i.FolderID,
+			&i.MaxRunsPerIssue,
+			&i.MaxRunsPerAgentPerIssue,
 		); err != nil {
 			return nil, err
 		}
@@ -437,7 +439,7 @@ func (q *Queries) ListSearchIndexProjects(ctx context.Context, workspaceID pgtyp
 }
 
 const listSearchIndexProjectsByIDs = `-- name: ListSearchIndexProjectsByIDs :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id, max_runs_per_issue, max_runs_per_agent_per_issue FROM project
 WHERE workspace_id = $1 AND id = ANY($2::uuid[])
 `
 
@@ -477,6 +479,8 @@ func (q *Queries) ListSearchIndexProjectsByIDs(ctx context.Context, arg ListSear
 			&i.ArchivedByType,
 			&i.ArchivedByID,
 			&i.FolderID,
+			&i.MaxRunsPerIssue,
+			&i.MaxRunsPerAgentPerIssue,
 		); err != nil {
 			return nil, err
 		}

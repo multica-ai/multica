@@ -1,5 +1,6 @@
 "use client";
 
+import { dispatchReasonCode } from "@multica/core/api";
 import type {
   AgentTask,
   IssueWakeup,
@@ -10,6 +11,7 @@ import { useLocale, useT } from "../../i18n";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { parseCron } from "../../autopilots/components/schedule-editor/cron-mapping";
 import { useDescribeSchedule } from "../../autopilots/components/schedule-editor/describe";
+import { issueRunLimitLabel } from "../blocked-trigger-copy";
 import { useConditionNames } from "./wakeup-condition-names";
 
 export function wakeupState(
@@ -343,6 +345,8 @@ export function useWakeupText() {
     return `${t(($) => $.wakeups.expiry_at, { time: at })} · ${then}`;
   };
   const error = (err: unknown, fallback: string) => {
+    const runLimit = issueRunLimitLabel(dispatchReasonCode(err), t);
+    if (runLimit) return runLimit;
     const status =
       err && typeof err === "object" && "status" in err
         ? err.status
@@ -386,7 +390,7 @@ export function useWakeupText() {
         ? t(($) => $.wakeups.paused.loop)
         : w.paused_reason === "rate"
           ? t(($) => $.wakeups.paused.rate)
-          : null;
+          : issueRunLimitLabel(w.paused_reason ?? undefined, t) ?? null;
   // The bare reason, for sentences that already say the rule was paused.
   const pausedReason = (w: Pick<IssueWakeup, "paused_reason" | "max_fires" | "fire_count">) =>
     w.paused_reason === "max_fires"
@@ -395,7 +399,7 @@ export function useWakeupText() {
         ? t(($) => $.wakeups.paused_reason.loop)
         : w.paused_reason === "rate"
           ? t(($) => $.wakeups.paused_reason.rate)
-          : null;
+          : issueRunLimitLabel(w.paused_reason ?? undefined, t) ?? null;
   const fires = (w: Pick<IssueWakeup, "max_fires" | "fire_count" | "mode">) => {
     const count = w.fire_count ?? 0;
     if (w.mode !== "continuous" || (!count && !w.max_fires)) return null;

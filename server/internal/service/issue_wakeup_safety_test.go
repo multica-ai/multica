@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -227,5 +229,86 @@ func TestCompleteTaskSkipsFallbackCommentOnlyAfterCheckIn(t *testing.T) {
 	}
 	if n := complete(`{}`, false); n != 1 {
 		t.Fatalf("assignment run posted %d fallback comments, want 1", n)
+	}
+}
+
+func TestWakeupPausesWhenTheIssueRunLimitIsReached(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	project := f.Project(t, "Capped wakeup project", testutil.Cols{"max_runs_per_issue": 1})
+	f.Exec(t, "UPDATE issue SET project_id=$1 WHERE id=$2", project, issue)
+	f.Task(t, agent, testutil.Cols{
+		"issue_id":   issue,
+		"status":     "completed",
+		"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')"),
+	})
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous",
+		EventTypes: []string{"comment.created"}, Instruction: "Answer new comments"})
+	f.Comment(t, util.UUIDToString(issue), "one more")
+	got := wakeTick(t, f, s, w.ID)
+	if got.Enabled || got.PausedReason.String != "issue_run_limit" || got.DisabledAt.Valid {
+		t.Fatalf("rule after refusal: enabled=%t reason=%q disabled_at=%v", got.Enabled, got.PausedReason.String, got.DisabledAt)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("rule started %d runs at the project limit", n)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM activity_log WHERE issue_id=$1 AND action='wakeup_paused' AND details->>'reason'='issue_run_limit'", issue); n != 1 {
+		t.Fatalf("pause timeline entries = %d, want 1", n)
+	}
+}
+
+func TestWakeNowReportsIssueRunLimitAndSettlesReceipt(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	project := f.Project(t, "Capped wake now project", testutil.Cols{"max_runs_per_agent_per_issue": 1})
+	f.Exec(t, "UPDATE issue SET project_id=$1 WHERE id=$2", project, issue)
+	f.Task(t, agent, testutil.Cols{
+		"issue_id": issue, "status": "completed",
+		"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')"),
+	})
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous",
+		EventTypes: []string{"comment.created"}, Instruction: "Answer new comments"})
+	err := s.Trigger(t.Context(), issue, w.ID, parseTestUUID(t, f.UserID))
+	if reason := dispatch.IssueRunLimitReason(err); reason != dispatch.ReasonIssueAgentRunLimit {
+		t.Fatalf("wake now returned %v, want %s", err, dispatch.ReasonIssueAgentRunLimit)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND processed_at IS NULL", w.ID); n != 0 {
+		t.Fatalf("refused wake now retained %d pending receipts", n)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("refused wake now started %d runs", n)
+	}
+}
+
+func TestChildDoneWakeupPausesAtProjectRunLimit(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := t.Context()
+	project := f.Project(t, "Capped parent project", testutil.Cols{"max_runs_per_issue": 1})
+	f.Exec(t, "UPDATE issue SET project_id=$1,status='in_progress',assignee_type='agent',assignee_id=$2 WHERE id=$3", project, agent, issue)
+	f.Task(t, agent, testutil.Cols{
+		"issue_id": issue, "status": "completed",
+		"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')"),
+	})
+	child := f.Issue(t, "Child at project run limit", testutil.Cols{"parent_issue_id": issue, "status": "in_progress"})
+	f.Cleanup(t, "DELETE FROM issue_child_event WHERE parent_id=$1", issue)
+	if err := s.ProcessChildEvents(ctx, issue); err != nil {
+		t.Fatal(err)
+	}
+	f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", child)
+	for range 2 {
+		if err := s.ProcessChildEvents(ctx, issue); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w, err := f.q.GetSystemWakeup(ctx, db.GetSystemWakeupParams{IssueID: issue, SystemRule: systemRuleText(SystemRuleChildDone)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Enabled || w.PausedReason.String != string(dispatch.ReasonIssueRunLimit) {
+		t.Fatalf("system wakeup: enabled=%t paused_reason=%q", w.Enabled, w.PausedReason.String)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("system wakeup started %d runs at the project limit", n)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM activity_log WHERE issue_id=$1 AND action='wakeup_paused' AND details->>'reason'='issue_run_limit'", issue); n != 1 {
+		t.Fatalf("pause timeline entries = %d, want 1", n)
 	}
 }

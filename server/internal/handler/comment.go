@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -2313,6 +2314,9 @@ func commentBlockedTargetOutcomes(targets []commentMentionTarget) []CommentTrigg
 // infrastructure error that stays an unclassified internal error rather than
 // leaking the raw message.
 func commentEnqueueFailureReason(err error) DispatchReasonCode {
+	if reason := dispatch.IssueRunLimitReason(err); reason != "" {
+		return reason
+	}
 	if errors.Is(err, service.ErrAttributionFailClosed) {
 		return ReasonAttributionBlocked
 	}

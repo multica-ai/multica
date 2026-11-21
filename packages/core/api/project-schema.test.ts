@@ -23,3 +23,20 @@ describe("project creator response compatibility", () => {
     }
   });
 });
+
+describe("project run limit response compatibility", () => {
+  it.each([{}, { max_runs_per_issue: "5", max_runs_per_agent_per_issue: 0 }])(
+    "defaults missing or invalid limits: %j",
+    (limits) => {
+      const parsed = ProjectSchema.parse({ ...project, ...limits });
+      expect(parsed.max_runs_per_issue).toBeNull();
+      expect(parsed.max_runs_per_agent_per_issue).toBeNull();
+    },
+  );
+
+  it("parses positive limits", () => {
+    const parsed = ProjectSchema.parse({ ...project, max_runs_per_issue: 5, max_runs_per_agent_per_issue: 3 });
+    expect(parsed.max_runs_per_issue).toBe(5);
+    expect(parsed.max_runs_per_agent_per_issue).toBe(3);
+  });
+});

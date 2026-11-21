@@ -698,7 +698,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	overlay := s.Tasks.buildRuntimeMCPOverlay(ctx, attr.UserID, agent)
 	source, delegatedFrom, _, _ := attributionCreateParams(attr)
 	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": SystemRuleChildDone})
-	task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{
+	task, err = createWakeupTaskWithSavepoint(ctx, q, tx, db.CreateWakeupTaskParams{
 		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, IssueID: issue.ID, Priority: priorityToInt(issue.Priority),
 		TriggerSummary: pgtype.Text{String: "Wakeup: sub-issues closed", Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true},
 		IsLeaderTask: pgtype.Bool{Bool: current.Type == "squad", Valid: current.Type == "squad"}, SquadID: current.SquadID,
@@ -706,6 +706,12 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		RuleVersionID: attr.RuleVersionID, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID,
 		HeadSha: headSHA, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps,
 	})
+	if reason := dispatch.IssueRunLimitReason(err); reason != "" {
+		if err := pauseWakeupForRunLimit(ctx, q, w.ID, reason, note); err != nil {
+			return err
+		}
+		return commit()
+	}
 	if err != nil {
 		return err
 	}

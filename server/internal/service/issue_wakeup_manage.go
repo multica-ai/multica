@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -98,7 +99,9 @@ func (s *IssueWakeupService) Trigger(ctx context.Context, issueID, id, member pg
 	}
 	// Dispatch now rather than on the next tick; the scheduler retries if
 	// this attempt loses a lock race.
-	_ = s.dispatch(ctx, w)
+	if err := s.dispatch(ctx, w); dispatch.IssueRunLimitReason(err) != "" {
+		return err
+	}
 	return nil
 }
 

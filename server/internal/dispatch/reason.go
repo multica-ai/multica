@@ -11,6 +11,12 @@
 // name, or its owner.
 package dispatch
 
+import (
+	"errors"
+
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
 // ReasonCode is a stable, client-localizable admission/dispatch reason.
 type ReasonCode string
 
@@ -88,7 +94,9 @@ const (
 	// same code, and the caller already sees the issue. Nothing is queued and
 	// nothing is pending — the trigger is answered by accepting the issue out of
 	// Triage, not by waiting.
-	ReasonIssueInTriage ReasonCode = "issue_in_triage"
+	ReasonIssueInTriage      ReasonCode = "issue_in_triage"
+	ReasonIssueRunLimit      ReasonCode = "issue_run_limit"
+	ReasonIssueAgentRunLimit ReasonCode = "issue_agent_run_limit"
 	// ReasonProjectAccessBlocked: the issue is in a private project that the
 	// run's member or the agent's owner cannot access (MUL-8472). The caller
 	// already sees the issue, so the code reveals nothing new about it.
@@ -99,3 +107,18 @@ const (
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
 )
+
+func IssueRunLimitReason(err error) ReasonCode {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		return ""
+	}
+	switch pgErr.ConstraintName {
+	case "issue_run_limit":
+		return ReasonIssueRunLimit
+	case "issue_agent_run_limit":
+		return ReasonIssueAgentRunLimit
+	default:
+		return ""
+	}
+}
