@@ -15,6 +15,18 @@ import enIssues from "../../locales/en/issues.json";
 // link/markdownLink fields are ignored by the engine, which re-derives them).
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
 const mockToastInfo = vi.hoisted(() => vi.fn());
+const voiceOptions = vi.hoisted(() => ({ last: null as { scope?: string; hidden?: boolean } | null }));
+
+vi.mock("../../voice/use-composer-voice", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../voice/use-composer-voice")>();
+  return {
+    ...actual,
+    useComposerVoice: (options: Parameters<typeof actual.useComposerVoice>[0]) => {
+      voiceOptions.last = options;
+      return actual.useComposerVoice(options);
+    },
+  };
+});
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { info: mockToastInfo, error: vi.fn(), success: vi.fn() }),
 }));
@@ -538,6 +550,43 @@ describe("ChatInput new-chat draft identity", () => {
   });
 });
 
+// The editor is shared across sessions and agents, so voice input is scoped to
+// what the composer is writing to: changing it cancels dictation in flight.
+describe("ChatInput voice scope", () => {
+  const state = () =>
+    useChatStore.getState() as unknown as { activeSessionId: string | null; selectedAgentId: string };
+
+  it("changes when the conversation or the agent changes", () => {
+    state().activeSessionId = "session-a";
+    const { rerender } = render(element({}));
+    expect(voiceOptions.last?.scope).toBe("session-a:agent-1");
+
+    state().activeSessionId = "session-b";
+    rerender(element({}));
+    expect(voiceOptions.last?.scope).toBe("session-b:agent-1");
+
+    state().activeSessionId = null;
+    rerender(element({}));
+    expect(voiceOptions.last?.scope).toBe("__draft_new__:agent-1");
+
+    state().selectedAgentId = "agent-2";
+    rerender(element({}));
+    expect(voiceOptions.last?.scope).toBe("__draft_new__:agent-2");
+  });
+
+  it("uses an embedded surface's own draft key", () => {
+    render(element({ draftKeyOverride: "builder:agent-9" }));
+    expect(voiceOptions.last?.scope).toBe("builder:agent-9");
+  });
+
+  it("passes hidden through so a closed window stops listening", () => {
+    const { rerender } = render(element({}));
+    expect(voiceOptions.last?.hidden).toBe(false);
+    rerender(element({ hidden: true }));
+    expect(voiceOptions.last?.hidden).toBe(true);
+  });
+});
+
 describe("ChatInput focusRequest", () => {
   it("focuses the editor when focusRequest becomes a non-zero value (new chat)", () => {
     const { rerender } = render(
@@ -945,7 +994,7 @@ describe("ChatInput project context", () => {
     expect(onProjectChange).toHaveBeenCalledWith(null);
   });
 
-  it("swaps Stop for Queue Send when the running composer has content", async () => {
+  it("offers a single Send action while replying and restores Stop after sending", async () => {
     const onSend = vi.fn<ChatInputOnSend>(async () => true);
     const onStop = vi.fn();
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend, onStop });
@@ -958,29 +1007,71 @@ describe("ChatInput project context", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
-    const queueButton = screen.getByRole("button", { name: "Queue message" });
-    expect(queueButton).not.toBeDisabled();
-    fireEvent.click(queueButton);
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend).toHaveBeenCalledWith("follow-up", undefined, expect.any(Function), []);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
   });
 
-  it("keeps Stop available while queued content is uploading", async () => {
+  it("sends guidance by default during a reply without forcing the queue", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "use the new location" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend).toHaveBeenCalledWith("use the new location", undefined, expect.any(Function), []);
+  });
+
+  it("shows whether a draft will join the current run", () => {
+    const props = { isRunning: true, allowSubmitWhileRunning: true, canSteerWhileRunning: true };
+    const { rerender } = renderInput(props);
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "also check this" } });
+    expect(screen.getByRole("status")).toHaveTextContent("Add to current run");
+    rerender(element({ ...props, canSteerWhileRunning: false }));
+    expect(screen.getByRole("status")).toHaveTextContent("Start after this run");
+    rerender(element({ ...props, canSteerWhileRunning: undefined }));
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    expect(screen.queryByText("Start after this run")).not.toBeInTheDocument();
+  });
+
+  it("shows queuing for a selected skill and restores steering when it is removed", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    const props = { isRunning: true, allowSubmitWhileRunning: true, canSteerWhileRunning: true, onSend };
+    const { rerender } = renderInput(props);
+    const editor = screen.getByTestId("editor");
+    const content = "[/release-notes](slash://skill/550e8400-e29b-41d4-a716-446655440000) Write release notes";
+
+    fireEvent.change(editor, { target: { value: content } });
+    expect(screen.getByRole("status")).toHaveTextContent("Start after this run");
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(content, undefined, expect.any(Function), []));
+
+    fireEvent.change(editor, { target: { value: "Write release notes" } });
+    rerender(element(props));
+    expect(screen.getByRole("status")).toHaveTextContent("Add to current run");
+  });
+
+  it("keeps Stop available and explains queuing while content is uploading", async () => {
     let resolveUpload!: (value: UploadResult) => void;
     mockApiUploadFile.mockImplementation(
       () => new Promise<UploadResult>((resolve) => (resolveUpload = resolve)),
     );
     const onStop = vi.fn();
-    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onStop });
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, canSteerWhileRunning: true, onStop });
 
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "follow-up with attachment" },
     });
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Add to current run");
 
     await act(async () => {
       dropHandlers.onDrop?.([
@@ -990,6 +1081,7 @@ describe("ChatInput project context", () => {
     });
 
     const stopButton = await screen.findByRole("button", { name: "Stop" });
+    expect(screen.getByRole("status")).toHaveTextContent("Start after this run");
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
     fireEvent.click(stopButton);
     expect(onStop).toHaveBeenCalledTimes(1);
@@ -1005,7 +1097,7 @@ describe("ChatInput project context", () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByRole("button", { name: "Queue message" })).not.toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Send" })).not.toBeDisabled();
   });
 
   it("shows only Stop while an older server is running", () => {
@@ -1747,7 +1839,7 @@ describe("ChatInput commit handoff", () => {
     // Editor untouched — it now shows the session the user navigated to.
     expect(editorState.cleared).toBe(0);
     expect(editorState.blurred).toBe(0);
-    // …but the sent session's persisted draft is cleared regardless.
+    // ...but the sent session's persisted draft is cleared regardless.
     expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__");
     // And the caret must NOT be pulled into an editor that is showing someone
     // else's draft: refocus is bound to having actually scrubbed the document.
@@ -1848,7 +1940,7 @@ describe("ChatInput revoked-access placeholder", () => {
   it("leaves the normal placeholder alone when access is intact", () => {
     renderInput({ agentName: "Multica" });
 
-    expect(editorProps.last?.placeholder).toBe("Message Multica…");
+    expect(editorProps.last?.placeholder).toBe("Message Multica...");
   });
 });
 

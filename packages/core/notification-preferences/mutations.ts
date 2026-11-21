@@ -7,6 +7,7 @@ import { useCallback, useRef } from "react";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import { useRequiredWorkspaceSlug } from "../paths";
+import { issueKeys } from "../issues/queries";
 import { notificationPreferenceKeys } from "./queries";
 import type {
   NotificationPreferences,
@@ -121,6 +122,9 @@ export function useUpdateNotificationPreferences() {
       // only after every queued optimistic patch for this workspace finishes.
       if (qc.isMutating({ mutationKey }) > 1) return;
       qc.invalidateQueries({ queryKey: context?.key ?? mutationKey });
+      // Subscriber lists carry the server's delivery tier, which depends on
+      // these preferences (MUL-9360).
+      qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
     },
   });
 

@@ -13,6 +13,7 @@ import { useModalStore } from "@multica/core/modals";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER } from "@multica/core/projects/config";
 import { useUpdateProject } from "@multica/core/projects/mutations";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { selectableProjects } from "@multica/core/projects";
 import type { Agent, ChatSession, Project } from "@multica/core/types";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
@@ -56,6 +57,8 @@ export function ThemePage({ query }: { query: string }) {
         <PaletteGroup heading={tLayout(($) => $.account.mode)}>
           {visibleModes.map((option) => (
             <CommandPrimitive.Item
+              data-mc="palette-item"
+              data-type="option"
               key={option.value}
               value={`theme:${option.value}`}
               onSelect={() => {
@@ -77,6 +80,8 @@ export function ThemePage({ query }: { query: string }) {
         <PaletteGroup heading={tLayout(($) => $.account.theme)}>
           {visibleThemes.map((manifest) => (
             <CommandPrimitive.Item
+              data-mc="palette-item"
+              data-type="option"
               key={manifest.id}
               value={`color-theme:${manifest.id}`}
               onSelect={() => {
@@ -111,6 +116,8 @@ export function ProjectStatusPage({ project, query }: { project: Project; query:
     <PaletteGroup heading={t(($) => $.pages.project_status)}>
       {visible.map((status) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={status}
           value={`project-status:${status}`}
           onSelect={() => {
@@ -171,6 +178,8 @@ export function AgentAssignIssuePage({ agent, query }: { agent: Agent; query: st
       {(!q || scoreText(newIssueLabel, q) > 0) && (
         <PaletteGroup heading={t(($) => $.groups.new)}>
           <CommandPrimitive.Item
+            data-mc="palette-item"
+            data-type="option"
             value="agent-new-issue"
             onSelect={() => {
               palette.close();
@@ -221,7 +230,7 @@ export function ChatProjectPage({
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = session.project_id ?? null;
   const q = query.trim().toLowerCase();
-  const visible = projects
+  const visible = selectableProjects(projects, current)
     .filter((project) => project.status !== "cancelled" || project.id === current)
     .filter((project) => !q || scoreText(project.title, q) > 0);
   const noProjectLabel = t(($) => $.pages.no_project);
@@ -232,13 +241,15 @@ export function ChatProjectPage({
   return (
     <PaletteGroup heading={t(($) => $.pages.project)}>
       {current && (!q || scoreText(noProjectLabel, q) > 0) && (
-        <CommandPrimitive.Item value="chat-project:none" onSelect={() => select(null)} className={ROW_CLASS}>
+        <CommandPrimitive.Item data-mc="palette-item" data-type="option" value="chat-project:none" onSelect={() => select(null)} className={ROW_CLASS}>
           <FolderMinus className={ROW_ICON_CLASS} />
           <span className="min-w-0 flex-1 truncate text-muted-foreground">{noProjectLabel}</span>
         </CommandPrimitive.Item>
       )}
       {visible.map((project) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={project.id}
           value={`chat-project:${project.id}`}
           onSelect={() => select(project.id)}

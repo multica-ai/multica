@@ -20,7 +20,7 @@
     "title": "대기 중인 초대가 없습니다",
     "hint": "내 워크스페이스 설정을 계속하세요.",
     "continue": "설정 계속하기",
-    "go_to_dashboard": "대시보드로 이동"
+    "go_to_dashboard": "워크스페이스로 이동"
   },
   "linked": {
     "not_found": "초대가 만료되었거나 취소되었거나, 현재 계정에 해당하지 않을 수 있습니다.",
@@ -30,6 +30,31 @@
   },
   "errors": {
     "accept_failed": "초대를 수락하지 못했습니다",
-    "decline_failed": "초대를 거절하지 못했습니다"
+    "decline_failed": "초대를 거절하지 못했습니다",
+    "member_limit_reached": "{{workspace}}의 멤버 자리가 모두 찼습니다. 초대한 사람에게 문의하세요. 워크스페이스가 업그레이드되면 참가할 수 있습니다."
+  },
+  "join": {
+    "no_code": "초대 코드를 찾을 수 없습니다. 유효한 공유 링크를 사용하세요.",
+    "invalid": "유효하지 않거나 만료된 초대 링크입니다.",
+    "joined_title": "참가했습니다",
+    "redirecting": "워크스페이스로 이동하는 중...",
+    "error_title": "초대를 열 수 없습니다",
+    "go_home": "홈으로",
+    "loading": "초대 정보를 불러오는 중...",
+    "title": "{{workspace}}에 초대되었습니다",
+    "invited_by": "초대한 사람: {{name}}",
+    "join_as": "참가 후 역할",
+    "role_admin": "관리자",
+    "role_member": "멤버",
+    "login_required": "이 워크스페이스에 참가하려면 로그인해야 합니다.",
+    "join": "워크스페이스 참가",
+    "joining": "참가하는 중...",
+    "log_in_to_join": "로그인하고 참가",
+    "join_failed": "워크스페이스에 참가하지 못했습니다. 링크가 만료되었을 수 있습니다.",
+    "seats_full": "구매한 멤버 좌석이 모두 사용 중입니다. 워크스페이스 관리자에게 좌석 추가를 요청한 뒤 다시 시도하세요.",
+    "seats_unavailable": "멤버 수용 인원을 확인하지 못했습니다. 다시 시도하세요.",
+    "full_title": "{{workspace}}의 멤버 자리가 모두 찼습니다",
+    "full_description": "초대한 사람에게 문의하세요. 워크스페이스가 업그레이드되면 이 링크를 다시 사용할 수 있습니다.",
+    "retry": "다시 시도"
   }
 }

@@ -55,6 +55,7 @@ export function useIssueSidebarSectionLabels(): Record<IssueSidebarSection, stri
     wakeups: t(($) => $.wakeups.title),
     plugins: t(($) => $.plugins.panels),
     parent: t(($) => $.detail.section_parent_issue),
+    sub_issues: t(($) => $.detail.sub_issues_label),
     duplicates: t(($) => $.duplicates.section_title),
     pull_requests: t(($) => $.detail.section_pull_requests),
     environments: t(($) => $.environments.section_title),
@@ -105,7 +106,7 @@ export function IssueSidebarSections({
     );
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} data-mc="issue-properties" className="relative">
       <IssueSidebarSettings
         available={available}
         getEmptySections={getEmptySections}

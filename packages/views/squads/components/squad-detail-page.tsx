@@ -252,6 +252,7 @@ export function SquadDetailPage() {
     if (squadError) {
       return (
         <ObjectPage
+          type="squad"
           layoutId={layoutId}
           segments={segments}
           leaf={
@@ -278,6 +279,7 @@ export function SquadDetailPage() {
     }
     return (
       <ObjectPage
+        type="squad"
         layoutId={layoutId}
         segments={segments}
         leaf={<Skeleton className="h-4 w-32" />}
@@ -323,6 +325,7 @@ export function SquadDetailPage() {
 
   return (
     <ObjectPage
+      type="squad"
       layoutId={layoutId}
       segments={segments}
       leaf={

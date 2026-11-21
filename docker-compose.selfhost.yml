@@ -1,4 +1,6 @@
-# Self-hosting Docker Compose — starts PostgreSQL, backend, and frontend.
+# Self-hosting Docker Compose — starts PostgreSQL, backend, and frontend, plus
+# the optional collab service for live doc co-editing (COLLAB_SECRET and
+# COMPOSE_PROFILES=collab in .env; see .env.example).
 #
 # Services bind to 127.0.0.1 only. For cross-machine or public access, front
 # them with a reverse proxy (Caddy / nginx / Cloudflare Tunnel) that terminates
@@ -119,6 +121,10 @@ services:
       MULTICA_CLOUD_URL: ${MULTICA_CLOUD_URL:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      # Required for new connections: verify the installing user's access.
+      GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+      GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+      # Required for new connections to prove organization repository control.
       # App API credentials. The pull_request webhook is what mirrors a PR
       # onto a card; these are what let the server authenticate as the App
       # and pull the CI / mergeability snapshot that enriches it, plus
@@ -232,9 +238,38 @@ services:
       # (bot_token_encrypted), so this single deployment-wide key is all
       # the operator needs to set here.
       MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
+      MULTICA_WEIXIN_SECRET_KEY: ${MULTICA_WEIXIN_SECRET_KEY:-}
       # Tool steps shown in the streamed reply: auto (default; details in
       # private chats, kind of work in groups), off, summary or detail.
       MULTICA_TELEGRAM_TOOL_PROGRESS: ${MULTICA_TELEGRAM_TOOL_PROGRESS:-}
+      # Workspace Docs is off until FF_DOCS_V1=true. Passed only when set: an
+      # empty FF_ value would pin the flag off instead of leaving the default.
+      FF_DOCS_V1:
+      # Live co-editing for Workspace Docs, served by the optional collab
+      # service below. Setting COLLAB_SECRET turns it on and points the API at
+      # that service; enable the service with COMPOSE_PROFILES=collab.
+      COLLAB_SECRET: ${COLLAB_SECRET:-}
+      COLLAB_INTERNAL_URL: ${COLLAB_INTERNAL_URL:-${COLLAB_SECRET:+http://collab:8095}}
+    restart: unless-stopped
+
+  # Optional: started only with COMPOSE_PROFILES=collab (or --profile collab),
+  # together with COLLAB_SECRET above. Editors reach it through the backend's
+  # /collab WebSocket, so it publishes no port. Every open doc lives in this
+  # process's memory: run exactly one.
+  collab:
+    image: ${MULTICA_COLLAB_IMAGE:-ghcr.io/multica-ai/multica-collab}:${MULTICA_IMAGE_TAG:-latest}
+    profiles: ["collab"]
+    depends_on:
+      - backend
+    environment:
+      COLLAB_SECRET: ${COLLAB_SECRET:-}
+      MULTICA_API_URL: http://backend:8080
+      COLLAB_PORT: "8095"
+      # Must match the CDN domain the backend reports: CLOUDFRONT_DOMAIN with
+      # S3 storage, empty with local uploads.
+      MULTICA_CDN_DOMAIN: ${MULTICA_CDN_DOMAIN:-${CLOUDFRONT_DOMAIN:-}}
+    # SIGTERM gives it up to 15s to store every open doc.
+    stop_grace_period: 30s
     restart: unless-stopped
 
   frontend:

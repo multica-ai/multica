@@ -1,0 +1,27 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "@multica/ui/styles/tokens.css";
+@import "@multica/ui/styles/theme-variables.css";
+@import "@multica/ui/styles/appearance.css";
+@import "@multica/ui/styles/base.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Same stack as apps/desktop/src/renderer/src/globals.css. */
+:root {
+  --font-sans: "Inter Variable", "Inter", var(--font-cjk-sans);
+  --font-cjk-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                   "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo",
+                   "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  background: var(--page-canvas);
+}
+
+@source "../../../packages/ui/**/*.tsx";
+@source "../src/**/*.tsx";

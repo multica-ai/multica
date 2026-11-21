@@ -16,7 +16,8 @@
     "file_too_large_title": "檔案過大",
     "file_too_large_message": "檔案必須小於 100 MB。",
     "failed": "上傳失敗",
-    "error": "未知錯誤"
-  },
-  "a11y.mention_someone": "提及某人"
+    "error": "未知錯誤",
+    "storage_full_title": "附件儲存空間已滿",
+    "storage_full_message": "這個檔案沒有上傳，既有附件不受影響。請聯絡管理員升級套餐，或刪除不需要的附件。"
+  }
 }

@@ -674,6 +674,32 @@ export function issueTimelineOptions(issueId: string) {
   });
 }
 
+/**
+ * Warm what the issue page holds its first paint and a comment landing on: the
+ * issue, its timeline, its runs and its sub-issues, so opening it renders from
+ * cache instead of waiting on a request chain. All four are keyed by UUID and
+ * fetched in parallel; `identifier` mirrors the issue under the key an
+ * identifier URL resolves through (`useCanonicalIssue`), so that hop is cached
+ * too. prefetchQuery honours each query's staleTime: a warm entry costs nothing.
+ */
+export async function prefetchIssuePage(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  identifier?: string | null,
+): Promise<void> {
+  await Promise.all([
+    qc.prefetchQuery(issueDetailOptions(wsId, issueId)),
+    qc.prefetchQuery(issueTimelineOptions(issueId)),
+    qc.prefetchQuery(issueTasksOptions(issueId)),
+    qc.prefetchQuery(childIssuesOptions(wsId, issueId)),
+  ]);
+  const issue = qc.getQueryData<Issue>(issueKeys.detail(wsId, issueId));
+  if (identifier && issue) {
+    qc.setQueryData<Issue>(issueKeys.detail(wsId, identifier), (old) => old ?? issue);
+  }
+}
+
 export function issueCommentThreadOptions(issueId: string, commentId: string) {
   return queryOptions({
     queryKey: issueKeys.commentThread(issueId, commentId),

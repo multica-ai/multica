@@ -1,5 +1,6 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
+import { useInboxSelectionStore } from "./selection-store";
 import type { InboxItem, IssueAssigneeType, IssuePriority, IssueStatus } from "../types";
 
 // Re-read a query because the server changed — in a way that is never answered
@@ -161,6 +162,8 @@ export async function onInboxIssueDeleted(
   patchInboxLists(qc, wsId, (items) =>
     items.filter((i) => i.issue_id !== issueId),
   );
+  // A row kept in place for the open issue must not bring a deleted issue back.
+  useInboxSelectionStore.getState().forgetRows(wsId, [issueId]);
   await Promise.all([
     onInboxSummaryInvalidate(qc),
     refreshInboxQuery(qc, inboxKeys.pages(wsId)),
@@ -190,6 +193,7 @@ export async function onInboxIssuesDeleted(
     const next = items.filter((i) => i.issue_id === null || !deleted.has(i.issue_id));
     return next.length === items.length ? items : next;
   });
+  useInboxSelectionStore.getState().forgetRows(wsId, issueIds);
   const refreshes: Promise<unknown>[] = [
     onInboxSummaryInvalidate(qc),
     refreshInboxQuery(qc, inboxKeys.pages(wsId)),

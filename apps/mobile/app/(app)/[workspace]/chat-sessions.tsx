@@ -20,6 +20,7 @@ import { useDeleteChatSession } from "@/data/mutations/chat";
 import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { cn } from "@/lib/utils";
+import { chatSessionDisplayTitle } from "@/lib/chat-session-title";
 import { useT } from "@/lib/i18n";
 
 export default function ChatSessionsRoute() {
@@ -33,7 +34,7 @@ export default function ChatSessionsRoute() {
   const confirmDelete = (session: ChatSession) => {
     Alert.alert(
       t("alerts.delete_title"),
-      session.title || t("sessions.new_chat"),
+      chatSessionDisplayTitle(session.title, t),
       [
         { text: t("common:actions.cancel"), style: "cancel" },
         {
@@ -104,7 +105,7 @@ export default function ChatSessionsRoute() {
                     )}
                     numberOfLines={1}
                   >
-                    {session.title || t("sessions.new_chat")}
+                    {chatSessionDisplayTitle(session.title, t)}
                   </Text>
                   {archived ? (
                     <Text className="text-xs text-muted-foreground mt-0.5">

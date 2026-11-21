@@ -1,7 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
+import type { DecorationSet } from "@tiptap/pm/view";
 import { createEditorExtensions } from ".";
 import { preprocessMarkdown } from "../utils/preprocess";
+import StarterKit from "@tiptap/starter-kit";
+import { Markdown } from "@tiptap/markdown";
+import { codeLowlight } from "../syntax-highlight";
+import { CodeBlockExtension } from "./code-block";
 import {
   MARKDOWN_CHUNK_THRESHOLD,
   parseMarkdownChunked,
@@ -145,4 +150,44 @@ describe("production preprocessing and large-document loading", () => {
       roundTrip(source, content, "markdown");
     },
   );
+});
+
+describe("syntax highlighting", () => {
+  const markdown = "Intro\n\n```ts\nconst a = 1;\n```\n\n```ts\nlet b = 2;\n```";
+  const highlightPlugins = (editor: Editor) =>
+    editor.state.plugins.filter((p) => /^(lowlight|codeHighlight)\$/.test((p as unknown as { key: string }).key));
+  const highlighted = (editor: Editor) =>
+    (highlightPlugins(editor)[0]!.getState(editor.state) as DecorationSet)
+      .find()
+      .filter((d) => (d as unknown as { type: { attrs: { class: string } } }).type.attrs.class === "hljs-keyword")
+      .map((d) => editor.state.doc.textBetween(d.from, d.to));
+
+  it("highlights each code block", () => {
+    const editor = load(markdown);
+    expect(highlighted(editor)).toEqual(["const", "let"]);
+    expect(highlightPlugins(editor)).toHaveLength(1);
+  });
+
+  it("highlights again only the code block that changed", () => {
+    const highlight = vi.fn(codeLowlight.highlight);
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const editor = new Editor({
+      element,
+      extensions: [StarterKit.configure({ codeBlock: false }), CodeBlockExtension.configure({ lowlight: { ...codeLowlight, highlight } }), Markdown],
+      content: markdown,
+      contentType: "markdown",
+    });
+    editors.push(editor);
+    expect(highlight).toHaveBeenCalledTimes(2);
+    editor.commands.insertContentAt(2, "x");
+    expect(highlight).toHaveBeenCalledTimes(2);
+    let second = 0;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "codeBlock") second = pos;
+    });
+    editor.commands.insertContentAt(second + 1, "var c;\n");
+    expect(highlight).toHaveBeenCalledTimes(3);
+    expect(highlighted(editor)).toEqual(["const", "var", "let"]);
+  });
 });

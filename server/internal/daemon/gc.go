@@ -920,6 +920,9 @@ func (d *Daemon) cleanTaskDir(taskDir string) (bytes int64, removed bool) {
 		d.logger.Warn("gc: refusing to remove unowned task directory", "dir", taskDir, "error", ownerErr)
 		return 0, false
 	}
+	if err := execenv.RemoveCursorMcpAuthLink(taskDir, d.cfg.Profile); err != nil {
+		d.logger.Warn("gc: remove cursor mcp auth link failed", "dir", taskDir, "error", err)
+	}
 	if err := os.RemoveAll(taskDir); err != nil {
 		d.logger.Warn("gc: remove task dir failed", "dir", taskDir, "error", err)
 		return 0, false

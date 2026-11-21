@@ -30,7 +30,7 @@ describe("OnboardingLogoutButton", () => {
     const user = userEvent.setup();
     render(<OnboardingLogoutButton />, { wrapper: I18nWrapper });
 
-    const button = screen.getByRole("button", { name: "Log out" });
+    const button = screen.getByRole("button", { name: "Sign out" });
     expect(button).toHaveClass("right-8", "top-8");
 
     await user.click(button);

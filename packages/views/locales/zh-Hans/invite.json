@@ -30,6 +30,31 @@
   },
   "errors": {
     "accept_failed": "接受邀请失败",
-    "decline_failed": "拒绝邀请失败"
+    "decline_failed": "拒绝邀请失败",
+    "member_limit_reached": "{{workspace}} 的成员已满。请联系邀请你的人，工作区升级后就能加入。"
+  },
+  "join": {
+    "no_code": "没有找到邀请码，请使用有效的分享链接。",
+    "invalid": "这个邀请链接无效或已过期。",
+    "joined_title": "已加入",
+    "redirecting": "正在进入工作区...",
+    "error_title": "出错了",
+    "go_home": "返回首页",
+    "loading": "正在加载邀请信息...",
+    "title": "你被邀请加入 {{workspace}}",
+    "invited_by": "邀请人：{{name}}",
+    "join_as": "加入后的角色",
+    "role_admin": "管理员",
+    "role_member": "成员",
+    "login_required": "需要先登录才能加入这个工作区。",
+    "join": "加入工作区",
+    "joining": "加入中...",
+    "log_in_to_join": "登录后加入",
+    "join_failed": "加入工作区失败，链接可能已过期。",
+    "seats_full": "已购买的成员席位都已用完。请联系工作区管理员增加席位后再试。",
+    "seats_unavailable": "暂时无法核验成员席位，请稍后重试。",
+    "full_title": "{{workspace}} 的成员已满",
+    "full_description": "请联系邀请你的人。工作区升级后，这个链接会恢复可用。",
+    "retry": "重试"
   }
 }

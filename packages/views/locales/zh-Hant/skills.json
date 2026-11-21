@@ -180,7 +180,7 @@
       "permissions_owner": "你可以編輯和刪除該技能。改動將在 AI 代理下次執行時生效。",
       "permissions_locked_creator": "只有建立者（{{name}}）或工作區管理員可以編輯該技能。",
       "permissions_locked": "只有建立者或工作區管理員可以編輯該技能。",
-      "character_count": "{{count}} 個字元"
+      "character_count_other": "{{count}} 個字元"
     },
     "files": {
       "list_aria": "技能檔案",
@@ -342,8 +342,6 @@
     "toast_imported": "已匯入 skill",
     "toast_import_failed": "匯入 skill 失敗",
     "select_all": "全選 ({{count}})",
-    "bulk_ready": "已選擇 {{count}} 個 skill",
-    "bulk_import_button": "匯入 {{count}} 個 skill",
     "bulk_progress": "正在匯入 {{completed}} / {{total}}…",
     "bulk_cancel_button": "取消",
     "bulk_complete_hint": "匯入完成。",
@@ -355,7 +353,6 @@
     "bulk_summary_skipped": "已跳過",
     "bulk_summary_failed": "失敗",
     "conflict_single_title": "工作區裡已存在同名 skill",
-    "conflict_bulk_title": "{{count}} 個 skill 需要處理衝突",
     "conflict_hint": "選擇覆蓋現有工作區 skill、改名匯入，或跳過。",
     "conflict_locked_creator": "該 skill 由 {{creator}} 建立，只能由建立者透過本地匯入覆蓋；如需修改請到 Skill 詳情頁編輯。",
     "conflict_locked": "該 skill 只能由建立者透過本地匯入覆蓋；如需修改請到 Skill 詳情頁編輯。",
@@ -366,10 +363,13 @@
     "conflict_overwrite_all": "全部覆蓋",
     "conflict_skip_all": "全部跳過",
     "conflict_rename_label": "新的 skill 名稱",
-    "conflict_footer": "還有 {{count}} 個衝突決策待處理。",
     "conflict_apply_button": "應用決策",
     "conflict_missing_resolution": "請選擇如何處理這個衝突。",
-    "conflict_name_still_exists": "這個名稱仍然已存在。請換一個名稱或跳過。"
+    "conflict_name_still_exists": "這個名稱仍然已存在。請換一個名稱或跳過。",
+    "bulk_ready_other": "已選擇 {{count}} 個 skill",
+    "bulk_import_button_other": "匯入 {{count}} 個 skill",
+    "conflict_bulk_title_other": "{{count}} 個 skill 需要處理衝突",
+    "conflict_footer_other": "還有 {{count}} 個衝突決策待處理。"
   },
   "file_tree": {
     "no_files": "無檔案",

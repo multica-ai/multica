@@ -56,7 +56,7 @@ describe("IssueFilterMenu opened by its host", () => {
   it("opens without a click and keeps rows in place while a filter lands", async () => {
     const store = renderHost();
     fireEvent.click(screen.getByRole("button", { name: "Open from host" }));
-    expect(await screen.findByRole("textbox", { name: "Filter by field or value…" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Filter by field or value..." })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("menuitem", { name: /^Agent status/ }));
     fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Running" }));
@@ -67,7 +67,7 @@ describe("IssueFilterMenu opened by its host", () => {
   it("reports closing back to the host", async () => {
     renderHost();
     fireEvent.click(screen.getByRole("button", { name: "Open from host" }));
-    const search = await screen.findByRole("textbox", { name: "Filter by field or value…" });
+    const search = await screen.findByRole("textbox", { name: "Filter by field or value..." });
 
     fireEvent.keyDown(search, { key: "Escape" });
     await waitFor(() => expect(screen.getByTestId("host-open")).toHaveTextContent("false"));
@@ -82,6 +82,6 @@ describe("IssueFilterMenu opened by its host", () => {
     act(() => store.getState().exitAdvancedFilter());
     await waitFor(() => expect(screen.getByTestId("host-open")).toHaveTextContent("false"));
     expect(screen.queryByTestId("advanced-filter-panel")).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "Filter by field or value…" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Filter by field or value..." })).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import { useImperativeHandle, useRef, useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AutopilotTrigger } from "@multica/core/types";
@@ -323,5 +323,76 @@ describe("AutopilotDialog schedule section on an autopilot with several triggers
     await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
     expect(mockUpdateTrigger).not.toHaveBeenCalled();
     expect(mockCreateTrigger).not.toHaveBeenCalled();
+  });
+});
+
+// Event filters are edited in one place, the per-webhook dialog. The webhook
+// panel (rendered when the first trigger is a webhook) reads them back and
+// opens that dialog; the autopilot's own Save never writes them.
+describe("AutopilotDialog webhook section", () => {
+  beforeEach(() => {
+    mockUpdateAutopilot.mockReset().mockResolvedValue({ id: AUTOPILOT_ID });
+    mockCreateTrigger.mockReset().mockResolvedValue({ id: "trg-new" });
+    mockUpdateTrigger.mockReset().mockResolvedValue({ id: "trg-hook" });
+  });
+
+  const webhook = (overrides: Partial<AutopilotTrigger> = {}) =>
+    trigger({
+      id: "trg-hook",
+      kind: "webhook",
+      cron_expression: null,
+      timezone: null,
+      webhook_token: "tok-1",
+      event_filters: [{ event: "pull_request" }],
+      ...overrides,
+    });
+
+  it("reads the filters back and edits them in the webhook's own dialog", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([webhook(), trigger({ id: "trg-sched" })]);
+
+    expect(screen.getByTitle("pull_request")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Event" })).not.toBeInTheDocument();
+    expect(screen.getByText("Event filters save immediately — clicking Cancel here won't undo them.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit filters" }));
+    const filters = await screen.findByRole("dialog", { name: "Edit webhook" });
+    await user.click(within(filters).getByRole("button", { name: "Remove rule" }));
+    await user.click(within(filters).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toEqual({
+      autopilotId: AUTOPILOT_ID,
+      triggerId: "trg-hook",
+      event_filters: [],
+    });
+  });
+
+  it("leaves the filters alone when the autopilot itself is saved", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([webhook()]);
+
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
+  });
+
+  it("sends the reader to the trigger rows instead of editing the first of several webhooks", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([webhook(), webhook({ id: "trg-hook-2", webhook_token: "tok-2" })]);
+
+    expect(
+      screen.getByText(
+        "This autopilot has more than one webhook. Close this dialog and edit each one under Triggers below.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit filters" })).not.toBeInTheDocument();
+
+    await user.click(saveButton());
+
+    // Other fields still save; the webhooks are left to their rows.
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
   });
 });

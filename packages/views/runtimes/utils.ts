@@ -499,8 +499,10 @@ const MODEL_PRICING: Record<
   //    is the bill, so Cursor rows use it even where it differs from the
   //    vendor rows above — except temporary promotional rates, which are not
   //    used: GPT-5.6 Sol keeps its $5 / $30 list rate (Fast at 2x) rather
-  //    than the sheet's promo price. Keys are the Cursor base id
-  //    left by `cursorBaseModel`, which drops the effort / thinking / fast
+  //    than the sheet's promo price, and Gemini 4 Carbon its $4 / $20 rate
+  //    from 2026-12-01 rather than the introductory $2 / $10 (the bare
+  //    gemini-4-carbon row above still carries the intro rate). Keys are the
+  //    Cursor base id left by `cursorBaseModel`, which drops the effort / thinking / fast
   //    variant parts — effort and thinking don't change per-token rates.
   //    A `-fast` row exists only where a Fast rate is published: on Cursor's
   //    sheet, or (where Cursor offers a Fast variant its sheet doesn't price)
@@ -523,6 +525,7 @@ const MODEL_PRICING: Record<
   "cursor/claude-opus-4-7-fast": { input: 30,   output: 150,  cacheRead: 3,     cacheWrite: 37.5 },
   "cursor/claude-4.6-opus":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
   "cursor/claude-4.5-opus":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-fable-5-2":     { input: 8,    output: 40,   cacheRead: 0.2,   cacheWrite: 10 },
   "cursor/claude-fable-5-1":     { input: 10,   output: 50,   cacheRead: 0.25,  cacheWrite: 12.5 },
   "cursor/claude-fable-5":       { input: 10,   output: 50,   cacheRead: 1,     cacheWrite: 12.5 },
   "cursor/claude-sonnet-5-5":    { input: 2,    output: 10,   cacheRead: 0.1,   cacheWrite: 2.5 },
@@ -556,6 +559,8 @@ const MODEL_PRICING: Record<
   "cursor/gpt-5-fast":           { input: 2.5,  output: 20,   cacheRead: 0.25,  cacheWrite: 0 },
   "cursor/gpt-5-mini":           { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0 },
   "cursor/gemini-4-argon":       { input: 2,    output: 10,   cacheRead: 0.1,   cacheWrite: 0 },
+  "cursor/gemini-4-carbon":      { input: 4,    output: 20,   cacheRead: 0.2,   cacheWrite: 0 },
+  "cursor/gemini-4-hydrogen":    { input: 1.5,  output: 7.5,  cacheRead: 0.075, cacheWrite: 0 },
   "cursor/gemini-3.8-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
   "cursor/gemini-3.7-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
   // Cursor bills 3.6 / 3.5 Flash above Google's current (promotional /
@@ -1325,6 +1330,9 @@ export function aggregateByWeek(
   usage: readonly WeeklyAggregable[],
   tz: string,
   weekCount: number,
+  // The first day the plan lets the dashboard read (MUL-9490); the leftmost
+  // week it cuts into is marked partial.
+  earliestDay: string | null = null,
 ): {
   weeklyTokens: WeeklyTokenData[];
   weeklyCostStack: WeeklyCostStackData[];
@@ -1356,6 +1364,9 @@ export function aggregateByWeek(
   }
 
   for (const u of usage) {
+    // Days before the plan's range never count, even when a response from a
+    // replica still on the old policy includes them.
+    if (earliestDay && u.date < earliestDay) continue;
     const wkStart = weekStartIso(u.date);
     if (wkStart < firstWeekStart || wkStart > currentWeekStart) continue;
     const tokens = tokenMap.get(wkStart);
@@ -1376,24 +1387,19 @@ export function aggregateByWeek(
 
   const decorate = (weekStart: string) => {
     const weekEnd = addDaysIso(weekStart, 6);
-    const partial = today < weekEnd;
-    // Inclusive count of how many days of this week have actually elapsed.
-    // Sits at 7 for closed weeks, 1..6 for the current week.
-    const elapsedDays = Math.min(
-      7,
-      Math.max(
-        1,
-        // Day index of `today` within [weekStart, weekEnd] + 1.
-        diffDaysIso(weekStart, today < weekStart ? weekStart : today < weekEnd ? today : weekEnd) + 1,
-      ),
-    );
+    // Inclusive count of the week's days that have elapsed and that the plan
+    // covers: 7 for a closed week, fewer for the current week or the leftmost
+    // week a history limit cuts into.
+    const from = earliestDay && earliestDay > weekStart ? earliestDay : weekStart;
+    const to = today < weekEnd ? today : weekEnd;
+    const daysCovered = Math.min(7, Math.max(1, diffDaysIso(from, to) + 1));
     return {
       weekStart,
       weekEnd,
       label: formatShortDate(weekStart),
       rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
-      partial,
-      daysCovered: partial ? elapsedDays : 7,
+      partial: daysCovered < 7,
+      daysCovered,
     };
   };
 

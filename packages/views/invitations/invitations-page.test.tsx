@@ -64,7 +64,8 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
   api: {
     getBaseUrl: () => "http://127.0.0.1:8080",
     acceptInvitation,
@@ -76,6 +77,7 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
+import { ApiError } from "@multica/core/api";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enInvite from "../locales/en/invite.json";
@@ -241,6 +243,26 @@ describe("InvitationsPage", () => {
     expect(markOnboardingComplete).not.toHaveBeenCalled();
   });
 
+  it("explains a join the workspace's member limit refused", async () => {
+    listMyInvitations.mockResolvedValue([mkInvite("inv-1", "ws-1", "Acme")]);
+    acceptInvitation.mockRejectedValue(
+      new ApiError("server fallback", 403, "Forbidden", { code: "member_limit_reached" }),
+    );
+    renderPage();
+    await waitFor(() => screen.getByText("Acme"));
+
+    fireEvent.click(within(row("Acme")).getByRole("button", { name: "Join" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Acme is full. Ask the person who invited you; you can join once the workspace upgrades.",
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("pins and highlights the linked invitation for an onboarded user", async () => {
     auth.user = { onboarded_at: "2026-01-01T00:00:00Z" };
     const linked = mkInvite("inv-2", "ws-2", "Beta");
@@ -284,7 +306,7 @@ describe("InvitationsPage", () => {
       expect(screen.getByText(/doesn't belong to your account/)).toBeInTheDocument(),
     );
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Go to dashboard" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Go to workspace" })).toHaveAttribute(
         "href",
         "/home/issues",
       ),
