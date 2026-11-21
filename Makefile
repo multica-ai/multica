@@ -24,7 +24,12 @@ NEXT_PUBLIC_API_URL ?= http://localhost:$(PORT)
 NEXT_PUBLIC_WS_URL ?= ws://localhost:$(PORT)/ws
 GOOGLE_REDIRECT_URI ?= $(FRONTEND_ORIGIN)/auth/callback
 MULTICA_SERVER_URL ?= ws://localhost:$(PORT)/ws
+# Local dev default only. Compose passes LOCAL_UPLOAD_BASE_URL to the self-host
+# backend, where unset keeps upload URLs relative to the API origin; matching on
+# the goal (not the variable's origin) also covers the nested selfhost-*start.
+ifeq ($(filter selfhost%,$(MAKECMDGOALS)),)
 LOCAL_UPLOAD_BASE_URL ?= http://localhost:$(PORT)
+endif
 
 export
 

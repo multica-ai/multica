@@ -335,6 +335,9 @@ printf '%s\n' \
   '.PHONY: print-public-url' \
   'print-public-url:' \
   '	@printf "%s\n" "$$MULTICA_PUBLIC_URL"' \
+  '.PHONY: print-upload-base-url' \
+  'print-upload-base-url:' \
+  '	@printf "%s\n" "$$LOCAL_UPLOAD_BASE_URL"' \
   >"$make_env_probe"
 
 resolve_make_public_url() {
@@ -354,6 +357,11 @@ require_env \
   "http://localhost:${worktree_backend_port}"
 require_env \
   "$(resolve_make_public_url "$old_worktree_env")" \
+  "http://localhost:${worktree_backend_port}"
+# Local dev still gets the derived upload base; the self-host recipes below
+# must not (see the run_recipe upload checks).
+require_env \
+  "$(make --no-print-directory -s -f Makefile -f "$make_env_probe" ENV_FILE="$old_worktree_env" print-upload-base-url)" \
   "http://localhost:${worktree_backend_port}"
 
 explicit_worktree_env="$tmp_dir/.env.worktree.explicit"
@@ -420,6 +428,7 @@ process.stdin.on("end", () => {
     console.log(service + "=" + config.services[service].ports[0].published);
   }
   console.log("postgres_password=" + config.services.postgres.environment.POSTGRES_PASSWORD);
+  console.log("local_upload_base_url=" + (config.services.backend.environment.LOCAL_UPLOAD_BASE_URL ?? ""));
 });
 ' >>"$STUB_PUBLISHED_RECORD"
   ;;
@@ -548,6 +557,26 @@ fi
 # selfhost-build resolves the port the same way.
 run_recipe selfhost-build 's/^PORT=8080/PORT=9400/' '' '' >/dev/null
 require_consistent 'selfhost-build with PORT edited' 9400
+
+# The Makefile derives LOCAL_UPLOAD_BASE_URL for local dev. Compose passes it to
+# the backend, so the self-host recipes must leave it unset unless .env sets it:
+# a localhost base would put http://localhost:8080 into every stored upload URL
+# and make the backend report "localhost" as its CDN domain.
+recorded_upload_base() {
+  grep '^local_upload_base_url=' "$record" | tail -n 1 | cut -d= -f2-
+}
+for upload_target in selfhost selfhost-build; do
+  run_recipe "$upload_target" '' '' '' >/dev/null
+  if [ "$(recorded_upload_base)" != "" ]; then
+    echo "[$upload_target] the backend received LOCAL_UPLOAD_BASE_URL=$(recorded_upload_base) that .env never set"
+    exit 1
+  fi
+  run_recipe "$upload_target" 's|^# LOCAL_UPLOAD_BASE_URL=.*|LOCAL_UPLOAD_BASE_URL=https://files.example.com|' '' '' >/dev/null
+  if [ "$(recorded_upload_base)" != "https://files.example.com" ]; then
+    echo "[$upload_target] LOCAL_UPLOAD_BASE_URL set in .env did not reach the backend, got: $(recorded_upload_base)"
+    exit 1
+  fi
+done
 
 # Every alias at once: BACKEND_PORT wins, and the probe follows it.
 run_recipe selfhost \
