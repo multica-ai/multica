@@ -265,6 +265,9 @@ const (
 	MessageToolResult MessageType = "tool-result"
 	MessageStatus     MessageType = "status"
 	MessageError      MessageType = "error"
+	// MessageDiagnostic is a visible runtime error/retry notice, not progress.
+	// It does not imply a failed result or refresh the daemon's idle watchdog.
+	MessageDiagnostic MessageType = "diagnostic"
 	MessageLog        MessageType = "log"
 )
 
