@@ -14,7 +14,7 @@
       "created": "Created"
     },
     "last_run_empty": "--",
-    "no_matches": "No automations match",
+    "no_matches": "No autopilots match",
     "retry": "Retry"
   },
   "status": {
@@ -25,8 +25,8 @@
     "paused_project_archived": "Paused — its project is archived"
   },
   "execution_mode": {
-    "create_issue": "Create Issue",
-    "run_only": "Run Only"
+    "create_issue": "Create issue",
+    "run_only": "Run only"
   },
   "relative_date": {
     "today": "Today",
@@ -70,16 +70,16 @@
     "bind_runtime": "Bind runtime",
     "edit": "Edit",
     "run_now": "Run now",
-    "running": "Running...",
+    "running": "Running…",
     "toast_triggered": "Autopilot triggered",
     "toast_trigger_failed": "Failed to trigger autopilot",
     "run_blocked_invocation_not_allowed": "Not triggered — you don't have permission to use this autopilot's agent",
     "run_blocked_runtime_offline": "Not triggered — the agent's runtime is offline",
     "run_blocked_agent_runtime_required": "Not triggered — the agent has no runtime; bind one to run it",
-    "run_blocked_runtime_access_denied": "Not triggered — the agent can't run on its private runtime; make it public or rebind/copy the agent",
+    "run_blocked_runtime_access_denied": "Not triggered — this agent's private runtime isn't accessible. Make the runtime public, or bind the agent to an accessible runtime.",
     "run_blocked_target_unavailable": "Not triggered — the agent is unavailable",
-    "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
-    "run_blocked_already_active": "Not triggered — a recent run already covers this",
+    "run_blocked_attribution": "Not triggered — no active member is available to run this autopilot.",
+    "run_blocked_already_active": "Not triggered — a run is already in progress or just finished.",
     "run_blocked_quota_exceeded": "Not triggered — the run limit for this period has been reached",
     "run_blocked_generic": "Not triggered — the run was blocked",
     "section_triggers": "Triggers",
@@ -90,10 +90,10 @@
     "field_project": "Project",
     "no_project": "No project",
     "project_unavailable": "Project unavailable",
-    "field_prompt": "Prompt",
+    "field_prompt": "Runbook",
     "field_subscribers": "Subscribers",
     "field_subscribers_none": "None",
-    "no_prompt": "No prompt yet.",
+    "no_prompt": "No runbook yet.",
     "copy_link": "Copy link",
     "link_copied": "Link copied",
     "link_copy_failed": "Couldn't copy the link",
@@ -104,7 +104,7 @@
       "with_trigger": "{{trigger}} · {{action}}"
     },
     "add_trigger": "Add trigger",
-    "no_triggers": "No triggers configured. Add a schedule to run automatically.",
+    "no_triggers": "No triggers configured. Add a schedule or webhook to run automatically.",
     "no_runs": "No runs yet. Click \"Run now\" to trigger manually.",
     "delete_button": "Delete autopilot",
     "toast_deleted": "Autopilot deleted",
@@ -114,7 +114,7 @@
       "description": "This will permanently delete \"{{title}}\", along with its triggers and run history. This action cannot be undone.",
       "cancel": "Cancel",
       "confirm": "Delete",
-      "deleting": "Deleting..."
+      "deleting": "Deleting…"
     },
     "paused_project_archived": "Paused because its project was archived. Restore the project, then reactivate this autopilot."
   },
@@ -133,7 +133,7 @@
     "owner_note": "The creator and workspace admins always have access."
   },
   "run_status": {
-    "issue_created": "Issue Created",
+    "issue_created": "Issue created",
     "running": "Running",
     "skipped": "Skipped",
     "completed": "Completed",
@@ -192,17 +192,17 @@
     "rotate_confirm_description": "The current URL will stop working immediately. Any external systems calling it must be updated with the new URL. Continue?",
     "rotate_confirm_cancel": "Cancel",
     "rotate_confirm_action": "Rotate URL",
-    "rotate_in_progress": "Rotating...",
+    "rotate_in_progress": "Rotating…",
     "toast_rotated": "Webhook URL rotated",
     "toast_rotate_failed": "Failed to rotate URL",
     "toast_deleted": "Trigger deleted",
     "toast_delete_failed": "Failed to delete trigger",
     "delete_dialog": {
       "title": "Delete trigger",
-      "description": "This trigger will be removed and the autopilot will stop firing on this schedule. This action cannot be undone.",
+      "description": "This trigger will be removed and will no longer fire this autopilot. This action cannot be undone.",
       "cancel": "Cancel",
       "confirm": "Delete",
-      "deleting": "Deleting..."
+      "deleting": "Deleting…"
     }
   },
   "deliveries": {
@@ -244,12 +244,12 @@
     },
     "replay": {
       "action": "Replay",
-      "in_progress": "Replaying...",
+      "in_progress": "Replaying…",
       "toast_success": "Delivery replayed",
       "toast_failed": "Replay failed",
       "disabled_invalid_signature": "Can't replay — signature was invalid",
       "disabled_rejected": "Can't replay a rejected delivery",
-      "disabled_queued": "Still queued — replay once it settles"
+      "disabled_queued": "A replay is already queued. Wait for it to finish."
     },
     "ignore": {
       "title": "Ignore reason",
@@ -265,7 +265,7 @@
     }
   },
   "add_trigger_dialog": {
-    "title": "Add Trigger",
+    "title": "Add trigger",
     "type_label": "Type",
     "type_schedule": "Schedule",
     "type_webhook": "Webhook",
@@ -273,7 +273,7 @@
     "label_placeholder": "e.g. Weekday morning",
     "webhook_help": "Multica will generate a webhook URL after you save. POST any JSON to it to fire this autopilot.",
     "submit": "Add trigger",
-    "submitting": "Adding...",
+    "submitting": "Adding…",
     "toast_added_schedule": "Schedule trigger added",
     "toast_added_webhook": "Webhook trigger added",
     "toast_add_failed": "Failed to add trigger"
@@ -284,7 +284,7 @@
     "label_placeholder": "e.g. Weekday morning",
     "enabled_label": "Enabled",
     "submit": "Save",
-    "submitting": "Saving...",
+    "submitting": "Saving…",
     "toast_updated": "Schedule updated",
     "toast_update_failed": "Failed to update schedule"
   },
@@ -295,11 +295,11 @@
     "toast_update_failed": "Failed to update webhook"
   },
   "dialog": {
-    "sr_create": "New Autopilot",
-    "sr_edit": "Edit Autopilot",
+    "sr_create": "New autopilot",
+    "sr_edit": "Edit autopilot",
     "header_create": "New autopilot",
     "header_edit": "Edit autopilot",
-    "subtitle": "Recurring AI work",
+    "subtitle": "Scheduled or webhook-triggered AI work",
     "expand": "Expand",
     "collapse": "Collapse",
     "close": "Close",
@@ -311,8 +311,8 @@
     "cancel": "Cancel",
     "create": "Create autopilot",
     "save": "Save",
-    "creating": "Creating...",
-    "saving": "Saving...",
+    "creating": "Creating…",
+    "saving": "Saving…",
     "toast_created": "Autopilot created",
     "toast_create_partial": "Autopilot created, but schedule failed to save",
     "toast_create_partial_with_reason": "Autopilot created, but schedule failed to save: {{reason}}",
@@ -382,7 +382,7 @@
     "schedule_multiple_notice": "This autopilot has {{count}} schedules. Close this dialog and edit each one under Triggers below.",
     "webhook_multiple_notice": "This autopilot has more than one webhook. Close this dialog and edit each one under Triggers below.",
     "webhook_edit_filters": "Edit filters",
-    "webhook_filters_saved_separately": "Saved on their own: Cancel here won't undo them.",
+    "webhook_filters_saved_separately": "Event filters save immediately — clicking Cancel here won't undo them.",
     "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",
     "schedule_add": "Add schedule",
     "error_title_required": "Enter a name for this autopilot.",
@@ -486,7 +486,7 @@
     }
   },
   "agent_picker": {
-    "filter_placeholder": "Filter agents or squads...",
+    "filter_placeholder": "Filter agents or squads…",
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
     "agents_group": "Agents",
@@ -495,7 +495,7 @@
     "squad_runtime_required": "Bind a runtime to this squad's leader before selecting it"
   },
   "timezone_picker": {
-    "search_placeholder": "Search timezone..."
+    "search_placeholder": "Search timezone…"
   },
   "toolbar": {
     "section_assignee": "Assignee",
@@ -504,18 +504,20 @@
     "section_creator": "Created by"
   },
   "actions": {
-    "row_menu": "Automation actions",
+    "row_menu": "Autopilot actions",
     "pause": "Pause",
     "resume": "Resume",
     "delete": "Delete",
     "delete_dialog": {
-      "title": "Delete automation?",
+      "title": "Delete autopilot?",
       "description_one": "This will permanently delete \"{{name}}\" and its run history.",
-      "description_other": "This will permanently delete {{count}} automations and their run history.",
+      "description_other": "This will permanently delete {{count}} autopilots and their run history.",
       "warning": "This action cannot be undone.",
       "cancel": "Cancel",
       "confirm": "Delete permanently",
-      "deleting": "Deleting…"
+      "deleting": "Deleting…",
+      "title_multiple": "Delete {{count}} autopilots?",
+      "description_single": "This will permanently delete \"{{name}}\" and its run history."
     }
   },
   "wakeups": {
@@ -538,13 +540,13 @@
     "loading": "Loading wakeups…",
     "disable_selected": "Turn off selected",
     "confirm_title": "Turn off {{count}} wakeups?",
-    "confirm_body": "Future wakeups will stop. Runs still queued and not handed to an agent will be withdrawn. Dispatched runs will continue; stop them from the execution log.",
+    "confirm_body": "Future wakeups will stop. Queued runs that haven't started yet will be cancelled. Runs already in progress will continue — stop them from the execution log.",
     "cancel": "Cancel",
     "confirm": "Turn off",
     "disabling": "Turning off…",
     "batch_result": "Turned off: {{succeeded}}. Failed: {{failed}}.",
     "scopes": {
-      "active": "Waiting or executing",
+      "active": "Waiting or running",
       "all": "All wakeups",
       "disabled": "Turned off",
       "ended": "Ended",
@@ -617,7 +619,8 @@
       "load_error": "Could not load wakeup defaults.",
       "edit_instruction": "Edit default instruction",
       "view_instruction": "View default instruction"
-    }
+    },
+    "banner_single": "1 wakeup was paused automatically: {{issue}} “{{condition}}” — {{reason}}"
   },
   "intro": {
     "label": "Autopilot",

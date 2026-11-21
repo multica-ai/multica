@@ -102,7 +102,6 @@
     "archive": "アーカイブ",
     "set_access": "アクセス範囲を設定",
     "set_access_dialog_title": "アクセス範囲を設定",
-    "set_access_applies_to": "{{count}} 件の agent に適用します。",
     "set_access_skipped": "{{count}} 件スキップ(あなた所有ではありません)。",
     "set_access_dialog_confirm": "適用",
     "set_access_bulk_partial": "{{succeeded}} 件適用、{{failed}} 件失敗(現在の状態を維持)。",
@@ -125,7 +124,8 @@
     "archive_dialog_title": "\"{{name}}\" をアーカイブしますか？",
     "archive_dialog_description": "このエージェントは割り当てやメンションができなくなり、アクティブな実行はすべてキャンセルされます。履歴はすべて保持され、後で復元できます。",
     "archive_dialog_cancel": "キャンセル",
-    "archive_dialog_confirm": "アーカイブ"
+    "archive_dialog_confirm": "アーカイブ",
+    "set_access_applies_to_other": "{{count}} 件の agent に適用します。"
   },
   "detail": {
     "back_to_agents_full": "エージェントに戻る",
@@ -688,7 +688,6 @@
       "specific_people": "特定のメンバー",
       "owner_only": "オーナーのみ"
     },
-    "trigger_members_count": "{{count}} 人",
     "trigger_members_empty": "特定のメンバー",
     "trigger_team": "チーム",
     "private_title": "プライベート",
@@ -707,7 +706,8 @@
     "public_group": "公開アクセス",
     "owner_only_readonly": "このエージェントを実行できる相手は、オーナーのみが変更できます。",
     "members_empty": "選択できるワークスペースメンバーがいません",
-    "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。"
+    "composio_switch_hint": "ご注意 — このエージェントは アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。",
+    "trigger_members_count_other": "{{count}} 人"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",
@@ -978,8 +978,8 @@
       "discard_confirm": "会話と右側の設定は完全に削除されます。",
       "discard_title": "この作成を破棄しますか？",
       "discard_cancel": "編集を続ける",
-      "banner": "未完了の下書きが {{count}} 件あります",
-      "pick_hint": "続きを選んでください。"
+      "pick_hint": "続きを選んでください。",
+      "banner_other": "未完了の下書きが {{count}} 件あります"
     },
     "close": "閉じる",
     "steps": {

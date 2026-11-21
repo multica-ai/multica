@@ -122,7 +122,7 @@
     "rename_dialog": {
       "title": "Renommer la machine",
       "description": "Utilisé pour cette machine et tous ses runtimes.",
-      "placeholder": "ex. MacBook de Bohan",
+      "placeholder": "ex. MacBook de Work",
       "hint": "Laissez vide pour utiliser le nom par défaut de l'appareil.",
       "cancel": "Annuler",
       "save": "Enregistrer",

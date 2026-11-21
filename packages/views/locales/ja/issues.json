@@ -21,7 +21,6 @@
     "load_failed": "実行過程を読み込めませんでした。",
     "try_again": "再試行",
     "empty": "実行記録はまだありません。",
-    "show_earlier": "前の {{count}} ステップを表示",
     "full_log": "完全なログを開く",
     "message": "エージェントのメッセージ",
     "error": "エラー",
@@ -40,7 +39,8 @@
     "steer_resend": "新しい実行として送信",
     "steer_resend_failed": "新しい実行として送信できませんでした。",
     "steer_step": "{{name}} が追加",
-    "steer_step_read": "既読"
+    "steer_step_read": "既読",
+    "show_earlier_other": "前の {{count}} ステップを表示"
   },
   "working_filter_error": {
     "title": "エージェントが作業中のタスクを読み込めませんでした"
@@ -365,7 +365,6 @@
     "export": "エクスポート",
     "export_all": "すべてエクスポート",
     "export_selected": "選択項目をエクスポート（{{count}}）",
-    "export_success": "{{count}} 件のタスクをエクスポートしました",
     "export_failed": "タスクをエクスポートできませんでした",
     "columns": {
       "section": "列",
@@ -398,7 +397,8 @@
       "sum": "合計",
       "average": "平均",
       "count": "件数"
-    }
+    },
+    "export_success_other": "{{count}} 件のタスクをエクスポートしました"
   },
   "gantt": {
     "header_issue": "タスク",
@@ -665,7 +665,11 @@
     "wakeup_chip_system": "システムルール",
     "environment_stopped": "環境 {{name}} を停止しました",
     "environment_restarted": "環境 {{name}} を再起動しました",
-    "environment_started": "環境 {{name}} を起動しました"
+    "environment_started": "環境 {{name}} を起動しました",
+    "task_completed_single": "実行を完了しました",
+    "task_failed_single": "実行に失敗しました",
+    "wakeup_child_done_all_single": "サブ課題が完了しました",
+    "wakeup_child_done_stage_single": "ステージ {{stage}} のサブ課題が完了しました"
   },
   "comment": {
     "add_reaction": "リアクションを追加",
@@ -1199,7 +1203,6 @@
     "ended": "ウェイクアップ履歴 · {{count}}",
     "waiting_event": "トリガー待ち",
     "triggered_by_wakeup": "自動起動による実行",
-    "upcoming": "有効なルール {{count}} 件",
     "more": "ほか {{count}} 件",
     "toggle": "{{agent}} の起動",
     "enable_error": "有効にできませんでした。再試行してください。",
@@ -1336,7 +1339,6 @@
       "members": "メンバー",
       "agents": "エージェント",
       "any_agent": "任意のエージェント",
-      "events_selected": "{{count}} 件のイベント",
       "instruction_placeholder": "例：結果を確認し、問題なければ次へ進む",
       "trigger_count": "トリガー回数",
       "max_wait": "最大待機",
@@ -1394,7 +1396,8 @@
       "missing_issue": "タスクを選択してください。",
       "checked": "オン",
       "unchecked": "オフ",
-      "assignee_comment_hint": "{{name}} は担当者のため、メンバーのコメントですでに起きます。このルールはその実行に合流し、別の実行は始めません。追加の指示を渡したいときだけ使ってください。"
+      "assignee_comment_hint": "{{name}} は担当者のため、メンバーのコメントですでに起きます。このルールはその実行に合流し、別の実行は始めません。追加の指示を渡したいときだけ使ってください。",
+      "events_selected_other": "{{count}} 件のイベント"
     },
     "system": {
       "badge": "システム",
@@ -1499,7 +1502,8 @@
       "max_fires": "上限の {{count}} 回に到達",
       "loop": "別のルールと互いに起こし合っていました",
       "rate": "1 時間に 12 回を超えて起動"
-    }
+    },
+    "upcoming_other": "有効なルール {{count}} 件"
   },
   "duplicates": {
     "banner_prefix": "重複元:",

@@ -275,7 +275,7 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
     // Linking to existing issues stays inside the "Relations" submenu.
-    expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Set parent issue…")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
   });
 
@@ -334,7 +334,7 @@ describe("IssueActionsDropdown", () => {
     // The search box and the "Members" group come from the shared assignee
     // picker, so the submenu offers what every other assignee entry point does.
     expect(
-      await screen.findByPlaceholderText("Assign to..."),
+      await screen.findByPlaceholderText("Assign to…"),
     ).toBeInTheDocument();
     expect(await screen.findByText("Members")).toBeInTheDocument();
     fireEvent.click(await screen.findByText("Test User"));
@@ -376,8 +376,8 @@ describe("IssueActionsDropdown", () => {
     fireEvent.click(screen.getByTestId("trigger"));
     fireEvent.click(await screen.findByText("Relations"));
 
-    // The sibling "Set parent issue..." proves the submenu opened.
-    expect(await screen.findByText("Set parent issue...")).toBeInTheDocument();
+    // The sibling "Set parent issue…" proves the submenu opened.
+    expect(await screen.findByText("Set parent issue…")).toBeInTheDocument();
     expect(screen.queryByText("Remove parent issue")).not.toBeInTheDocument();
   });
 
@@ -509,7 +509,7 @@ describe("IssueActionsDropdown", () => {
     await waitFor(() => {
       expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1", false, { view: "timeline" });
     });
-    fireEvent.click(await screen.findByText("Copy local workdir path"));
+    fireEvent.click(await screen.findByText("Copy local working directory path"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
@@ -641,7 +641,7 @@ describe("IssueActionsContextMenu", () => {
 
     fireEvent.contextMenu(screen.getByTestId("row"));
     await user.click(await screen.findByText("Assignee"));
-    const search = await screen.findByPlaceholderText("Assign to...");
+    const search = await screen.findByPlaceholderText("Assign to…");
     await screen.findByText("Test User");
     await waitFor(() => expect(search).toHaveFocus());
 
@@ -829,7 +829,7 @@ describe("Sidebar variant (MUL-8425)", () => {
       "Mark as unread",
       "Copy link",
       "Copy link with title",
-      "Copy identifier",
+      "Copy issue ID",
     ]);
     expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");
     // No workdir entry, so the menu has no reason to fetch the task list.
@@ -860,7 +860,7 @@ describe("Sidebar variant (MUL-8425)", () => {
 
   it("copies the identifier", async () => {
     openSidebarMenu();
-    fireEvent.click(await screen.findByText("Copy identifier"));
+    fireEvent.click(await screen.findByText("Copy issue ID"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("TES-1");

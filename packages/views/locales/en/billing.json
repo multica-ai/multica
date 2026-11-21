@@ -14,7 +14,7 @@
       "active": "Active",
       "trialing": "Trialing",
       "past_due": "Past due",
-      "canceled": "Canceled",
+      "canceled": "Cancelled",
       "incomplete": "Incomplete",
       "incomplete_expired": "Setup expired",
       "paused": "Paused",
@@ -42,7 +42,7 @@
       "temporarily_unavailable": "Billing is temporarily unavailable. Retry in a moment.",
       "not_enabled": "Workspace subscriptions are not enabled for this deployment. Contact your administrator.",
       "permission_changed": "Your workspace role no longer allows this action. Refresh the page to see your current access.",
-      "checkout_response": "Checkout could not open because the server response was unreadable. Retry without changing your selected interval.",
+      "checkout_response": "Couldn't open checkout due to an unexpected response. Please try again.",
       "already_subscribed": "This workspace already has a subscription. The current plan has been refreshed.",
       "checkout_failed": "Checkout could not be created. Retry in a moment.",
       "portal_response": "The Billing Portal could not open because the server response was unreadable.",
@@ -50,7 +50,7 @@
       "portal_failed": "The Billing Portal could not be opened. Retry in a moment."
     },
     "return": {
-      "cancel_title": "Checkout canceled",
+      "cancel_title": "Checkout cancelled",
       "cancel_description": "No plan change was made.",
       "portal_title": "Billing details refreshed",
       "syncing_title": "Activating your subscription",
@@ -76,13 +76,13 @@
       "paused_description": "Open billing management to review the pause and available recovery options.",
       "unpaid_title": "Subscription is unpaid",
       "unpaid_description": "Open billing management to resolve the unpaid balance.",
-      "canceled_title": "Subscription is canceled"
+      "canceled_title": "Subscription is cancelled"
     },
     "current": {
       "title": "Current plan",
       "plan": "Workspace plan",
       "members": "Human members",
-      "members_description": "Agents and pending invitations are not counted as seats.",
+      "members_description": "Active human members in this workspace. Agents never use a seat.",
       "member_count_one": "{{count}} member",
       "member_count_other": "{{count}} members",
       "billing_interval": "Billing interval",
@@ -104,13 +104,13 @@
       "unit_price_month": "{{price}} per human seat / month",
       "unit_price_year_monthly": "{{price}} per human seat / month, billed yearly",
       "unit_price_year": "{{price}} per human seat / year",
-      "price_at_checkout": "The server re-counts human members before purchase. Stripe Checkout shows the authoritative per-seat price and total before you pay.",
+      "price_at_checkout": "Active human members are counted at checkout. Stripe shows the final per-seat price and total before you pay.",
       "recommended": "Recommended",
       "features": {
         "pro_members": "Unlimited members",
         "pro_autopilots": "1,000 automation runs per member each month",
         "pro_storage": "10 GB of attachment storage per member",
-        "pro_dashboard": "90 days of dashboard history",
+        "pro_dashboard": "90 days of analytics history",
         "business_everything": "Everything in Pro",
         "business_access": "Private projects and member-level access",
         "business_apps": "Team app accounts and approval rules",
@@ -185,13 +185,13 @@
       "description": "Enter the number of seats to add. A fresh Stripe estimate appears before you confirm.",
       "additional_label": "Additional seats",
       "additional_hint": "Enter seats to add, not the new total.",
-      "preview_loading": "Updating estimate...",
+      "preview_loading": "Updating estimate…",
       "preview_unreadable": "The estimate could not be read. Change the seat count or retry.",
       "preview_failed": "The estimate is temporarily unavailable. Retry in a moment.",
       "capacity_out_of_sync": "The seat count in Stripe does not match the billing record. Contact support before retrying this purchase.",
-      "in_progress": "Another seat purchase is being processed. Wait for it to finish; contact support if it remains here.",
+      "in_progress": "Another seat purchase is being processed. Wait a moment for it to finish, or contact support if it stays stuck.",
       "plan_change_in_progress": "A plan change is still being processed. Try again in a few minutes.",
-      "purchase_unreadable": "The purchase response could not be read. Retry this quote; the same purchase request will be reused.",
+      "purchase_unreadable": "We couldn't confirm the purchase response. Retry safely — you won't be charged twice.",
       "purchase_failed": "Seats could not be added. Retry with the same quote, or refresh if it has expired.",
       "payment_failed": "Payment could not be completed. Update the payment method in Stripe, then request a new quote.",
       "quote_changed": "The seat count or estimate changed. Review the refreshed quote before confirming again.",
@@ -220,7 +220,7 @@
       "credit": "Credit on next invoice",
       "next_invoice": "Next renewal",
       "tax_notice": "Stripe determines taxes, credits, and final invoice details.",
-      "preview_loading": "Loading quote...",
+      "preview_loading": "Loading quote…",
       "preview_failed": "The quote is temporarily unavailable. Retry in a moment.",
       "rate_limited": "Too many quote requests. Wait a moment, then retry.",
       "in_progress": "A seat purchase is being processed. Try again after it finishes.",
@@ -340,7 +340,7 @@
     },
     "features": {
       "title": "Business features in your trial",
-      "description": "When the trial ends nothing is deleted or turned off; you just can't add more.",
+      "description": "When the trial ends, nothing is deleted or turned off — existing settings stay active as read-only, and you can't add new ones.",
       "private_projects": {
         "name": "Private projects",
         "after": "Stay private after the trial. Their access lists become read-only."
@@ -378,7 +378,7 @@
     "confirming_description": "Runs are added as soon as Stripe confirms the payment. Check the usage below in a moment.",
     "not_paid_title": "Payment not completed",
     "not_paid_description": "Nothing was charged and no runs were added.",
-    "cancel_title": "Payment canceled",
+    "cancel_title": "Payment cancelled",
     "cancel_description": "Nothing was charged."
   }
 }

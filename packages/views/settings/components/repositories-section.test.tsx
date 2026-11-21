@@ -161,7 +161,7 @@ describe("RepositoriesSection", () => {
     render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await openAddMenu(user);
-    await user.click(await screen.findByRole("menuitem", { name: "Enter a URL..." }));
+    await user.click(await screen.findByRole("menuitem", { name: "Enter a URL…" }));
     const dialog = await screen.findByRole("dialog", { name: "Add repository" });
     const save = within(dialog).getByRole("button", { name: "Save" });
     expect(save).toBeDisabled();
@@ -192,7 +192,7 @@ describe("RepositoriesSection", () => {
     render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await openAddMenu(user);
-    await user.click(await screen.findByRole("menuitem", { name: "Enter a URL..." }));
+    await user.click(await screen.findByRole("menuitem", { name: "Enter a URL…" }));
     const dialog = await screen.findByRole("dialog", { name: "Add repository" });
     await user.type(
       within(dialog).getByRole("textbox", { name: "Repository URL" }),
@@ -272,7 +272,7 @@ describe("RepositoriesSection", () => {
     const user = userEvent.setup();
     render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
     await openAddMenu(user);
-    expect(await screen.findByRole("menuitem", { name: "Enter a URL..." })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "Enter a URL…" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /GitHub|Add account/ })).toBeNull();
   });
 

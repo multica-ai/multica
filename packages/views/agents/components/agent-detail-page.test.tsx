@@ -754,7 +754,7 @@ describe("AgentDetailPage more actions", () => {
       within(menu).getByRole("menuitem", { name: "Copy link" }),
     ).toBeInTheDocument();
     expect(
-      within(menu).queryByRole("menuitem", { name: "Archive Agent" }),
+      within(menu).queryByRole("menuitem", { name: "Archive agent" }),
     ).not.toBeInTheDocument();
   });
 
@@ -764,7 +764,7 @@ describe("AgentDetailPage more actions", () => {
 
     await screen.findByRole("button", { name: "Assign work" });
     fireEvent.click(
-      within(openMoreActions()).getByRole("menuitem", { name: "Archive Agent" }),
+      within(openMoreActions()).getByRole("menuitem", { name: "Archive agent" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
 

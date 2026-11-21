@@ -177,7 +177,7 @@ describe("RuntimeDetailPage", () => {
     expect(header).toHaveTextContent("Studio Mac");
     expect(within(header).queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Studio Mac" })).toBeInTheDocument();
-    expect(screen.getByText("This device")).toBeInTheDocument();
+    expect(screen.getByText("This machine")).toBeInTheDocument();
 
     const daemon = screen.getByRole("heading", { level: 2, name: "Daemon" }).closest("section")!;
     expect(within(daemon).getByRole("button", { name: "Start" })).toBeInTheDocument();

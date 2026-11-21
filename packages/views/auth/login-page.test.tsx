@@ -140,7 +140,7 @@ describe("LoginPage", () => {
       screen.getByText(/sign in to multica/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/enter your email to get a login code/i),
+      screen.getByText(/enter your email to get a sign-in code/i),
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
     expect(
@@ -190,7 +190,7 @@ describe("LoginPage", () => {
     expect(mockSendCode).toHaveBeenCalledWith("test@example.com");
   });
 
-  it("shows 'Sending code...' while submitting", async () => {
+  it("shows 'Sending code…' while submitting", async () => {
     // Never resolve so loading stays true
     mockSendCode.mockReturnValueOnce(new Promise(() => {}));
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);

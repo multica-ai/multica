@@ -114,7 +114,6 @@
     "archive": "Архивировать",
     "set_access": "Настроить область доступа",
     "set_access_dialog_title": "Настроить область доступа",
-    "set_access_applies_to": "Применяется к агентам: {{count}}.",
     "set_access_skipped": "Пропущено: {{count}} (не принадлежат вам).",
     "set_access_dialog_confirm": "Применить",
     "set_access_bulk_partial": "Применено к {{succeeded}}; ошибка для {{failed}} (оставлены в текущем состоянии).",
@@ -149,7 +148,11 @@
     "cancel_dialog_queued_few": "{{count}} в очереди",
     "cancel_dialog_queued_many": "{{count}} в очереди",
     "cancel_dialog_impact_few": "Будут отменены запуски ({{summary}}).",
-    "cancel_dialog_impact_many": "Будут отменены запуски ({{summary}})."
+    "cancel_dialog_impact_many": "Будут отменены запуски ({{summary}}).",
+    "set_access_applies_to_one": "Применяется к агентам: {{count}}.",
+    "set_access_applies_to_few": "Применяется к агентам: {{count}}.",
+    "set_access_applies_to_many": "Применяется к агентам: {{count}}.",
+    "set_access_applies_to_other": "Применяется к агентам: {{count}}."
   },
   "detail": {
     "back_to_agents_full": "Назад к агентам",
@@ -387,8 +390,11 @@
       "discard_confirm": "Диалог и его конфигурация будут удалены безвозвратно.",
       "discard_title": "Удалить этот черновик?",
       "discard_cancel": "Продолжить редактирование",
-      "banner": "У вас есть незавершённых черновиков: {{count}}",
-      "pick_hint": "Выберите один, чтобы продолжить."
+      "pick_hint": "Выберите один, чтобы продолжить.",
+      "banner_one": "У вас есть незавершённых черновиков: {{count}}",
+      "banner_few": "У вас есть незавершённых черновиков: {{count}}",
+      "banner_many": "У вас есть незавершённых черновиков: {{count}}",
+      "banner_other": "У вас есть незавершённых черновиков: {{count}}"
     },
     "close": "Закрыть",
     "steps": {
@@ -889,7 +895,6 @@
       "specific_people": "Определённые участники",
       "owner_only": "Только владелец"
     },
-    "trigger_members_count": "{{count}} участников",
     "trigger_members_empty": "Определённые участники",
     "trigger_team": "Команда",
     "private_title": "Только я",
@@ -908,7 +913,11 @@
     "public_group": "Публичный доступ",
     "owner_only_readonly": "Изменить, кто может запускать этого агента, может только его владелец.",
     "members_empty": "Нет участников рабочего пространства для выбора",
-    "composio_switch_hint": "Обратите внимание — у этого агента включены приложения Composio. Предоставление доступа позволит всем, у кого он есть, использовать эти приложения через этого агента."
+    "composio_switch_hint": "Обратите внимание — у этого агента включены приложения . Предоставление доступа позволит всем, у кого он есть, использовать эти приложения через этого агента.",
+    "trigger_members_count_one": "{{count}} участников",
+    "trigger_members_count_few": "{{count}} участников",
+    "trigger_members_count_many": "{{count}} участников",
+    "trigger_members_count_other": "{{count}} участников"
   },
   "profile_card": {
     "unavailable": "Агент недоступен",

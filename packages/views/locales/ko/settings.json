@@ -16,7 +16,6 @@
       "reorder": "{{name}} 순서 변경"
     },
     "reorder_hint": "카테고리 안에서 드래그하면 보드, 목록, 메뉴의 순서가 바뀝니다.",
-    "built_in_dialog": {},
     "editor": {
       "create_title": "새 상태",
       "edit_title": "상태 편집",
@@ -810,10 +809,10 @@
     },
     "delete_dialog": {
       "title": "레이블을 삭제할까요?",
-      "description": "\"{{name}}\" 레이블을 삭제할까요? {{count}}개 리소스에서 제거되며 되돌릴 수 없습니다.",
       "cancel": "취소",
       "confirm": "레이블 삭제",
-      "failed": "레이블을 삭제하지 못했습니다"
+      "failed": "레이블을 삭제하지 못했습니다",
+      "description_other": "\"{{name}}\" 레이블을 삭제할까요? {{count}}개 리소스에서 제거되며 되돌릴 수 없습니다."
     }
   },
   "account": {
@@ -986,7 +985,7 @@
     "deleting": "삭제하는 중...",
     "toast_delete_failed": "워크스페이스를 삭제하지 못했습니다",
     "confirm_cancel": "취소",
-    "confirm_action": "확인",
+    "confirm_action": "워크스페이스 나가기",
     "context_hint": "이 워크스페이스의 에이전트에게 실행할 때마다 전달됩니다.",
     "slug_hint": "모든 워크스페이스 URL에 쓰이며 생성 후에는 변경할 수 없습니다.",
     "copy_slug": "slug 복사",
@@ -1417,7 +1416,9 @@
     "manage_projects": "접근 가능한 프로젝트 관리",
     "manage_projects_title": "{{name}} 님이 접근할 수 있는 프로젝트",
     "save_projects": "저장",
-    "toast_projects_updated": "프로젝트를 업데이트했습니다"
+    "toast_projects_updated": "프로젝트를 업데이트했습니다",
+    "revoke_invitation_confirm": "초대 취소",
+    "remove_member_confirm": "멤버 제거"
   },
   "lark": {
     "section_title": "Lark",
@@ -1464,16 +1465,16 @@
     "agent_bot_manage_tooltip_lark": "Lark 개발자 콘솔에서 이 봇의 앱 페이지를 열어 스코프 관리, 이름 변경, 추가 권한 신청을 할 수 있어요.",
     "agent_bot_disconnect_tooltip": "이 Lark 봇과 에이전트 연결을 해제합니다. 봇은 Lark 메시지 수신을 중단합니다.",
     "install_dialog_title": "Lark에 연결",
-    "install_dialog_description": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 PersonalAgent 봇을 만드세요.",
+    "install_dialog_description": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 Bot 봇을 만드세요.",
     "install_dialog_description_for_agent": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 {{agent}}용 봇을 만드세요.",
     "install_dialog_title_feishu": "Feishu에 연결",
     "install_dialog_title_lark": "Lark에 연결",
-    "install_dialog_description_feishu": "휴대폰에서 Feishu를 열고 아래 코드를 스캔해 PersonalAgent 봇을 만드세요.",
-    "install_dialog_description_lark": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 PersonalAgent 봇을 만드세요.",
+    "install_dialog_description_feishu": "휴대폰에서 Feishu를 열고 아래 코드를 스캔해 Bot 봇을 만드세요.",
+    "install_dialog_description_lark": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 Bot 봇을 만드세요.",
     "install_dialog_description_for_agent_feishu": "휴대폰에서 Feishu를 열고 아래 코드를 스캔해 {{agent}}용 봇을 만드세요.",
     "install_dialog_description_for_agent_lark": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 {{agent}}용 봇을 만드세요.",
     "install_starting": "QR 코드를 준비하는 중…",
-    "install_scan_hint": "Lark → 스캔 → 새 PersonalAgent를 승인하세요.",
+    "install_scan_hint": "Lark → 스캔 → 새 Bot를 승인하세요.",
     "install_open_link_fallback": "또는 여기를 눌러 Lark에서 열기",
     "install_success": "봇이 등록되었습니다. Feishu/Lark에서 메시지를 보내 수신을 확인하세요.",
     "install_success_toast": "Lark 봇이 설치되었어요",
@@ -1800,7 +1801,7 @@
     "disconnect": "연결 해제",
     "catalog_title": "사용 가능한 앱",
     "catalog_label": "멤버가 추가할 수 있는 앱",
-    "catalog_description": "엄선된 앱에는 검토된 기본 규칙이 있습니다. '모든 앱'은 Composio로 연결할 수 있는 모든 앱을 포함하며, Multica가 분류하지 못한 작업은 항상 먼저 확인을 받습니다. 사용자 지정 목록은 선택한 앱만 허용합니다.",
+    "catalog_description": "엄선된 앱에는 검토된 기본 규칙이 있습니다. '모든 앱'은 Multica로 연결할 수 있는 모든 앱을 포함하며, Multica가 분류하지 못한 작업은 항상 먼저 확인을 받습니다. 사용자 지정 목록은 선택한 앱만 허용합니다.",
     "catalog_all": "모든 앱",
     "catalog_curated": "엄선된 앱만",
     "catalog_custom": "사용자 지정 목록",

@@ -596,12 +596,18 @@ export function WorkspaceWakeups() {
         >
           <TriangleAlert className="size-4 shrink-0 text-destructive" aria-hidden="true" />
           <span className="min-w-0 flex-1">
-            {t(($) => $.wakeups.banner, {
-              count: pausedCount,
-              issue: latestPaused.issue_identifier,
-              condition: text.trigger(latestPaused),
-              reason: text.pausedReason(latestPaused) ?? "",
-            })}
+            {pausedCount === 1
+              ? t(($) => $.wakeups.banner_single, {
+                  issue: latestPaused.issue_identifier,
+                  condition: text.trigger(latestPaused),
+                  reason: text.pausedReason(latestPaused) ?? "",
+                })
+              : t(($) => $.wakeups.banner, {
+                  count: pausedCount,
+                  issue: latestPaused.issue_identifier,
+                  condition: text.trigger(latestPaused),
+                  reason: text.pausedReason(latestPaused) ?? "",
+                })}
           </span>
           <Button size="sm" variant="outline" onClick={() => change({ scope: "paused" })}>
             {t(($) => $.wakeups.banner_view)}

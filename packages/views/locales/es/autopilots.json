@@ -515,7 +515,9 @@
       "warning": "Esta acción no se puede deshacer.",
       "cancel": "Cancelar",
       "confirm": "Eliminar permanentemente",
-      "deleting": "Eliminando…"
+      "deleting": "Eliminando…",
+      "title_multiple": "¿Eliminar {{count}} autopilotos?",
+      "description_single": "Se eliminará permanentemente «{{name}}» y su historial de ejecuciones."
     }
   },
   "wakeups": {
@@ -617,7 +619,8 @@
       "saving": "Guardando…",
       "edit_instruction": "Editar instrucción predeterminada",
       "view_instruction": "Ver instrucción predeterminada"
-    }
+    },
+    "banner_single": "1 reactivación se pausó automáticamente: {{issue}} «{{condition}}» — {{reason}}"
   },
   "intro": {
     "label": "Automatizaciones",

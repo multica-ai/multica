@@ -319,7 +319,7 @@ describe("ProjectDetail lead permissions", () => {
     renderProjectDetail();
     expect(screen.getByRole("button", { name: "No lead" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "No lead" }));
-    expect(screen.queryByPlaceholderText("Assign lead...")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Assign lead…")).not.toBeInTheDocument();
   });
 
   it("keeps the lead of a workspace project editable for ordinary members", async () => {
@@ -327,7 +327,7 @@ describe("ProjectDetail lead permissions", () => {
     renderProjectDetail();
     expect(screen.getByRole("button", { name: "No lead" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "No lead" }));
-    expect(screen.getByPlaceholderText("Assign lead...")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Assign lead…")).toBeInTheDocument();
   });
 });
 

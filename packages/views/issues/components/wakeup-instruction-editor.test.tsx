@@ -27,7 +27,7 @@ function mount() {
   return client;
 }
 async function open() {
-  fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit instructions" }));
   return screen.findByRole("textbox", { name: "What to do when woken" });
 }
 it("loads instructions only on demand and saves only prompt fields with its editing snapshot", async () => {
@@ -81,7 +81,7 @@ it("prevents duplicate saves and dismissal while saving", async () => {
   const input = await open();
   fireEvent.change(input, { target: { value: "new prompt" } });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled());
   fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
   expect(edit).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();

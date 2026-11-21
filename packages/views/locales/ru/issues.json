@@ -22,7 +22,6 @@
     "load_failed": "Не удалось загрузить активность.",
     "try_again": "Повторить",
     "empty": "Активность пока не зафиксирована.",
-    "show_earlier": "Показать ещё {{count}} предыдущих шагов",
     "full_log": "Открыть полный журнал",
     "message": "Сообщение агента",
     "error": "Ошибка",
@@ -43,7 +42,11 @@
     "steer_step": "{{name}} добавил(а)",
     "steer_step_read": "Прочитано",
     "steps_few": "{{count}} шага",
-    "steps_many": "{{count}} шагов"
+    "steps_many": "{{count}} шагов",
+    "show_earlier_one": "Показать ещё {{count}} предыдущих шагов",
+    "show_earlier_few": "Показать ещё {{count}} предыдущих шагов",
+    "show_earlier_many": "Показать ещё {{count}} предыдущих шагов",
+    "show_earlier_other": "Показать ещё {{count}} предыдущих шагов"
   },
   "working_filter_error": {
     "title": "Не удалось загрузить задачи с работающими агентами"
@@ -382,7 +385,6 @@
     "export": "Экспорт",
     "export_all": "Экспортировать всё",
     "export_selected": "Экспортировать выбранные ({{count}})",
-    "export_success": "Экспортировано задач: {{count}}",
     "export_failed": "Не удалось экспортировать задачи",
     "columns": {
       "section": "Столбцы",
@@ -415,7 +417,11 @@
       "sum": "Сумма",
       "average": "Среднее",
       "count": "Количество"
-    }
+    },
+    "export_success_one": "Экспортировано задач: {{count}}",
+    "export_success_few": "Экспортировано задач: {{count}}",
+    "export_success_many": "Экспортировано задач: {{count}}",
+    "export_success_other": "Экспортировано задач: {{count}}"
   },
   "gantt": {
     "header_issue": "Задача",
@@ -718,7 +724,11 @@
     "wakeup_checkin_coalesced_many": "{{count}} тихих проверок · последняя: {{note}}",
     "environment_stopped": "остановил(а) окружение {{name}}",
     "environment_restarted": "перезапустил(а) окружение {{name}}",
-    "environment_started": "запустил(а) окружение {{name}}"
+    "environment_started": "запустил(а) окружение {{name}}",
+    "task_completed_single": "завершил запуск",
+    "task_failed_single": "запуск завершился с ошибкой",
+    "wakeup_child_done_all_single": "Подзадача завершена",
+    "wakeup_child_done_stage_single": "Подзадача этапа {{stage}} завершена"
   },
   "comment": {
     "add_reaction": "Добавить реакцию",
@@ -1363,7 +1373,6 @@
     "ended": "История пробуждений · {{count}}",
     "waiting_event": "Ожидание триггера",
     "triggered_by_wakeup": "Запущено будильником",
-    "upcoming": "{{count}} включённых правил будильника",
     "more": "ещё {{count}}",
     "toggle": "Пробуждение для {{agent}}",
     "enable_error": "Не удалось включить пробуждение. Попробуйте снова.",
@@ -1500,7 +1509,6 @@
       "members": "Участники",
       "agents": "Агенты",
       "any_agent": "Любой агент",
-      "events_selected": "Выбрано событий: {{count}}",
       "instruction_placeholder": "Например: проверь результат и продолжай, если всё в порядке",
       "trigger_count": "Триггеры",
       "max_wait": "Ждать не более",
@@ -1564,7 +1572,11 @@
       "wait_days_few": "{{count}} дня",
       "wait_days_many": "{{count}} дней",
       "max_fires_times_few": "{{count}} раза",
-      "max_fires_times_many": "{{count}} раз"
+      "max_fires_times_many": "{{count}} раз",
+      "events_selected_one": "Выбрано событий: {{count}}",
+      "events_selected_few": "Выбрано событий: {{count}}",
+      "events_selected_many": "Выбрано событий: {{count}}",
+      "events_selected_other": "Выбрано событий: {{count}}"
     },
     "system": {
       "badge": "Системное",
@@ -1675,7 +1687,11 @@
       "max_fires": "достигнут лимит в {{count}} запусков",
       "loop": "правило будило другие правила, которые будили его снова",
       "rate": "более 12 запусков за час"
-    }
+    },
+    "upcoming_one": "{{count}} включённых правил будильника",
+    "upcoming_few": "{{count}} включённых правил будильника",
+    "upcoming_many": "{{count}} включённых правил будильника",
+    "upcoming_other": "{{count}} включённых правил будильника"
   },
   "duplicates": {
     "banner_prefix": "Дубликат",

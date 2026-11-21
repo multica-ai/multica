@@ -21,7 +21,6 @@
     "load_failed": "실행 과정을 불러올 수 없습니다.",
     "try_again": "다시 시도",
     "empty": "아직 실행 기록이 없습니다.",
-    "show_earlier": "이전 {{count}}단계 보기",
     "full_log": "전체 로그 열기",
     "message": "에이전트 메시지",
     "error": "오류",
@@ -40,7 +39,8 @@
     "steer_resend": "새 실행으로 보내기",
     "steer_resend_failed": "새 실행으로 보내지 못했습니다.",
     "steer_step": "{{name}}이(가) 추가",
-    "steer_step_read": "읽음"
+    "steer_step_read": "읽음",
+    "show_earlier_other": "이전 {{count}}단계 보기"
   },
   "working_filter_error": {
     "title": "에이전트가 작업 중인 태스크를 불러오지 못했습니다"
@@ -365,7 +365,6 @@
     "export": "내보내기",
     "export_all": "모두 내보내기",
     "export_selected": "선택 항목 내보내기({{count}})",
-    "export_success": "태스크 {{count}}개를 내보냈습니다",
     "export_failed": "태스크를 내보내지 못했습니다",
     "columns": {
       "section": "열",
@@ -398,7 +397,8 @@
       "sum": "합계",
       "average": "평균",
       "count": "개수"
-    }
+    },
+    "export_success_other": "태스크 {{count}}개를 내보냈습니다"
   },
   "gantt": {
     "header_issue": "태스크",
@@ -665,7 +665,11 @@
     "wakeup_chip_system": "시스템 규칙",
     "environment_stopped": "환경 {{name}}을(를) 중지했습니다",
     "environment_restarted": "환경 {{name}}을(를) 재시작했습니다",
-    "environment_started": "환경 {{name}}을(를) 시작했습니다"
+    "environment_started": "환경 {{name}}을(를) 시작했습니다",
+    "task_completed_single": "실행을 완료했습니다",
+    "task_failed_single": "실행 실패",
+    "wakeup_child_done_all_single": "하위 이슈가 완료되었습니다",
+    "wakeup_child_done_stage_single": "{{stage}}단계 하위 이슈가 완료되었습니다"
   },
   "comment": {
     "add_reaction": "반응 추가",
@@ -1199,7 +1203,6 @@
     "ended": "깨우기 기록 · {{count}}",
     "waiting_event": "트리거 대기 중",
     "triggered_by_wakeup": "자동 깨우기로 시작됨",
-    "upcoming": "활성 깨우기 규칙 {{count}}개",
     "more": "{{count}}개 더",
     "toggle": "{{agent}} 깨우기",
     "enable_error": "깨우기를 활성화하지 못했습니다. 다시 시도하세요.",
@@ -1336,7 +1339,6 @@
       "members": "멤버",
       "agents": "에이전트",
       "any_agent": "모든 에이전트",
-      "events_selected": "이벤트 {{count}}개",
       "instruction_placeholder": "예: 결과를 확인하고 문제없으면 다음 단계로 진행",
       "trigger_count": "트리거 횟수",
       "max_wait": "최대 대기",
@@ -1394,7 +1396,8 @@
       "missing_issue": "태스크를 선택하세요.",
       "checked": "선택됨",
       "unchecked": "선택 안 됨",
-      "assignee_comment_hint": "{{name}}은(는) 담당자라 멤버가 댓글을 달면 이미 실행됩니다. 이 규칙은 그 실행에 합쳐지고 새 실행을 만들지 않습니다. 추가 지시가 필요할 때만 사용하세요."
+      "assignee_comment_hint": "{{name}}은(는) 담당자라 멤버가 댓글을 달면 이미 실행됩니다. 이 규칙은 그 실행에 합쳐지고 새 실행을 만들지 않습니다. 추가 지시가 필요할 때만 사용하세요.",
+      "events_selected_other": "이벤트 {{count}}개"
     },
     "system": {
       "badge": "시스템",
@@ -1499,7 +1502,8 @@
       "max_fires": "한도 {{count}}회에 도달",
       "loop": "다른 규칙과 서로 깨우고 있었습니다",
       "rate": "1시간에 12회 넘게 실행됨"
-    }
+    },
+    "upcoming_other": "활성 깨우기 규칙 {{count}}개"
   },
   "duplicates": {
     "banner_prefix": "중복 원본:",

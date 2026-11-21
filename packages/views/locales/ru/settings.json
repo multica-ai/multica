@@ -836,10 +836,13 @@
     },
     "delete_dialog": {
       "title": "Удалить метку?",
-      "description": "Удалить «{{name}}»? Она будет удалена из {{count}} ресурсов. Это действие нельзя отменить.",
       "cancel": "Отмена",
       "confirm": "Удалить метку",
-      "failed": "Не удалось удалить метку"
+      "failed": "Не удалось удалить метку",
+      "description_one": "Удалить «{{name}}»? Она будет удалена из {{count}} ресурсов. Это действие нельзя отменить.",
+      "description_few": "Удалить «{{name}}»? Она будет удалена из {{count}} ресурсов. Это действие нельзя отменить.",
+      "description_many": "Удалить «{{name}}»? Она будет удалена из {{count}} ресурсов. Это действие нельзя отменить.",
+      "description_other": "Удалить «{{name}}»? Она будет удалена из {{count}} ресурсов. Это действие нельзя отменить."
     }
   },
   "account": {
@@ -1012,7 +1015,7 @@
     "deleting": "Удаление...",
     "toast_delete_failed": "Не удалось удалить рабочее пространство",
     "confirm_cancel": "Отмена",
-    "confirm_action": "Подтвердить",
+    "confirm_action": "Покинуть рабочее пространство",
     "context_hint": "Передаётся каждому агенту в этом рабочем пространстве при каждом запуске.",
     "slug_hint": "Часть URL каждого рабочего пространства. Изменить нельзя.",
     "copy_slug": "Скопировать slug",
@@ -1169,16 +1172,16 @@
     "agent_bot_manage_tooltip_lark": "Открыть страницу приложения этого бота в Lark — управление областями доступа, изменение отображаемого имени, запрос дополнительных прав.",
     "agent_bot_disconnect_tooltip": "Отвязать этого бота Lark от агента. Бот перестанет получать сообщения Lark.",
     "install_dialog_title": "Привязать к Lark",
-    "install_dialog_description": "Откройте Lark на телефоне и отсканируйте код ниже, чтобы создать бота PersonalAgent.",
+    "install_dialog_description": "Откройте Lark на телефоне и отсканируйте код ниже, чтобы создать бота Bot.",
     "install_dialog_description_for_agent": "Откройте Lark на телефоне и отсканируйте код ниже, чтобы создать бота для {{agent}}.",
     "install_dialog_title_feishu": "Привязать к Feishu",
     "install_dialog_title_lark": "Привязать к Lark",
-    "install_dialog_description_feishu": "Откройте Feishu на телефоне и отсканируйте код ниже, чтобы создать бота PersonalAgent.",
-    "install_dialog_description_lark": "Откройте Lark на телефоне и отсканируйте код ниже, чтобы создать бота PersonalAgent.",
+    "install_dialog_description_feishu": "Откройте Feishu на телефоне и отсканируйте код ниже, чтобы создать бота Bot.",
+    "install_dialog_description_lark": "Откройте Lark на телефоне и отсканируйте код ниже, чтобы создать бота Bot.",
     "install_dialog_description_for_agent_feishu": "Откройте Feishu на телефоне и отсканируйте код ниже, чтобы создать бота для {{agent}}.",
     "install_dialog_description_for_agent_lark": "Откройте Lark на телефоне и отсканируйте код ниже, чтобы создать бота для {{agent}}.",
     "install_starting": "Подготовка QR-кода…",
-    "install_scan_hint": "Lark → Scan → авторизуйте нового PersonalAgent.",
+    "install_scan_hint": "Lark → Scan → авторизуйте нового Bot.",
     "install_open_link_fallback": "Или нажмите здесь, чтобы открыть в Lark",
     "install_success": "Бот привязан. Отправьте ему сообщение в Feishu/Lark для проверки приёма.",
     "install_success_toast": "Бот Lark установлен",
@@ -1718,7 +1721,9 @@
     "manage_projects": "Управлять доступными проектами",
     "manage_projects_title": "Проекты, доступные {{name}}",
     "save_projects": "Сохранить",
-    "toast_projects_updated": "Проекты обновлены"
+    "toast_projects_updated": "Проекты обновлены",
+    "revoke_invitation_confirm": "Отозвать приглашение",
+    "remove_member_confirm": "Удалить участника"
   },
   "integrations": {
     "status_connected": "Подключено",
@@ -1850,7 +1855,7 @@
     "disconnect": "Отключить",
     "catalog_title": "Доступные приложения",
     "catalog_label": "Приложения, которые могут добавлять участники",
-    "catalog_description": "Избранные приложения содержат проверенные правила по умолчанию. Режим «Все приложения» включает всё, что можно подключить через Composio; действия, которые Multica не может классифицировать, всегда требуют подтверждения. Свой список разрешает только выбранные приложения.",
+    "catalog_description": "Избранные приложения содержат проверенные правила по умолчанию. Режим «Все приложения» включает всё, что можно подключить через Multica; действия, которые Multica не может классифицировать, всегда требуют подтверждения. Свой список разрешает только выбранные приложения.",
     "catalog_all": "Все приложения",
     "catalog_curated": "Только избранные",
     "catalog_custom": "Свой список",

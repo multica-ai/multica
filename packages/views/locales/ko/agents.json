@@ -102,7 +102,6 @@
     "archive": "보관",
     "set_access": "접근 범위 설정",
     "set_access_dialog_title": "접근 범위 설정",
-    "set_access_applies_to": "{{count}}개 agent에 적용됩니다.",
     "set_access_skipped": "{{count}}개 건너뜀(본인 소유 아님).",
     "set_access_dialog_confirm": "적용",
     "set_access_bulk_partial": "{{succeeded}}개 적용, {{failed}}개 실패(현재 상태 유지).",
@@ -125,7 +124,8 @@
     "archive_dialog_title": "\"{{name}}\"을(를) 보관할까요?",
     "archive_dialog_description": "이 에이전트는 할당하거나 멘션할 수 없고, 활성 실행은 모두 취소됩니다. 기록은 유지되며 나중에 복원할 수 있습니다.",
     "archive_dialog_cancel": "취소",
-    "archive_dialog_confirm": "보관"
+    "archive_dialog_confirm": "보관",
+    "set_access_applies_to_other": "{{count}}개 agent에 적용됩니다."
   },
   "detail": {
     "back_to_agents_full": "에이전트로 돌아가기",
@@ -688,7 +688,6 @@
       "specific_people": "특정 사용자",
       "owner_only": "소유자만"
     },
-    "trigger_members_count": "{{count}}명",
     "trigger_members_empty": "특정 사용자",
     "trigger_team": "팀",
     "private_title": "비공개",
@@ -707,7 +706,8 @@
     "public_group": "공개 액세스",
     "owner_only_readonly": "이 에이전트를 실행할 수 있는 대상은 소유자만 변경할 수 있습니다.",
     "members_empty": "선택할 워크스페이스 구성원이 없습니다",
-    "composio_switch_hint": "참고 — 이 에이전트에는 Composio 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 모든 사람이 이 에이전트를 통해 해당 앱을 사용할 수 있습니다."
+    "composio_switch_hint": "참고 — 이 에이전트에는 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 모든 사람이 이 에이전트를 통해 해당 앱을 사용할 수 있습니다.",
+    "trigger_members_count_other": "{{count}}명"
   },
   "profile_card": {
     "unavailable": "에이전트를 사용할 수 없습니다",
@@ -978,8 +978,8 @@
       "discard_confirm": "대화와 오른쪽 설정이 영구적으로 삭제됩니다.",
       "discard_title": "이 생성을 취소할까요?",
       "discard_cancel": "계속 편집",
-      "banner": "미완료 초안이 {{count}}개 있습니다",
-      "pick_hint": "이어서 진행할 항목을 선택하세요."
+      "pick_hint": "이어서 진행할 항목을 선택하세요.",
+      "banner_other": "미완료 초안이 {{count}}개 있습니다"
     },
     "close": "닫기",
     "steps": {

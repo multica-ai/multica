@@ -342,7 +342,7 @@ describe("AgentTranscriptDialog", () => {
     renderDialog([], { task: liveTask, isLive: true });
 
     await screen.findByRole("button", { name: "Run details" });
-    expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for events…")).toBeInTheDocument();
   });
 
   it("keeps waiting for live events from other runtimes", async () => {
@@ -353,7 +353,7 @@ describe("AgentTranscriptDialog", () => {
     // Runtime detail now lives in the ⓘ popover; its trigger appearing proves
     // the runtime loaded. The non-antigravity live state still waits.
     await screen.findByRole("button", { name: "Run details" });
-    expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for events…")).toBeInTheDocument();
   });
 
   it("shows live Antigravity tool events", async () => {
@@ -365,7 +365,7 @@ describe("AgentTranscriptDialog", () => {
     ], { task: liveTask, isLive: true });
 
     await screen.findByRole("button", { name: "Run details" });
-    expect(screen.queryByText("Waiting for events...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Waiting for events…")).not.toBeInTheDocument();
     expect(screen.getAllByText(/run_command/).length).toBeGreaterThan(0);
   });
 
@@ -1066,7 +1066,7 @@ describe("AgentTranscriptDialog — reason vs raw diagnostics", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "运行详情" }));
 
-    expect(screen.getByText("原始诊断")).toBeInTheDocument();
+    expect(screen.getByText("技术详情")).toBeInTheDocument();
     expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
     // The diagnostic itself is not translated — it is the runner's own output.
     // Keeping it readable is the point; presenting it as the reason is not.

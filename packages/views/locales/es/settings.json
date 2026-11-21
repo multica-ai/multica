@@ -16,7 +16,6 @@
       "reorder": "Reordenar {{name}}"
     },
     "reorder_hint": "Arrastra dentro de una categoría para reordenar tableros, listas y menús.",
-    "built_in_dialog": {},
     "editor": {
       "create_title": "Nuevo estado",
       "edit_title": "Editar estado",
@@ -819,10 +818,11 @@
     },
     "delete_dialog": {
       "title": "¿Eliminar etiqueta?",
-      "description": "¿Eliminar \"{{name}}\"? Se quitará de {{count}} recursos. No se puede deshacer.",
       "cancel": "Cancelar",
       "confirm": "Eliminar etiqueta",
-      "failed": "No se ha podido eliminar la etiqueta"
+      "failed": "No se ha podido eliminar la etiqueta",
+      "description_one": "¿Eliminar \"{{name}}\"? Se quitará de {{count}} recursos. No se puede deshacer.",
+      "description_other": "¿Eliminar \"{{name}}\"? Se quitará de {{count}} recursos. No se puede deshacer."
     }
   },
   "account": {
@@ -995,7 +995,7 @@
     "deleting": "Eliminando...",
     "toast_delete_failed": "Error al eliminar el espacio de trabajo",
     "confirm_cancel": "Cancelar",
-    "confirm_action": "Confirmar",
+    "confirm_action": "Salir del espacio de trabajo",
     "change_prefix": "Cambiar prefijo...",
     "context_hint": "Se da a cada agente de este espacio de trabajo en cada ejecución.",
     "copy_failed": "No se ha podido copiar al portapapeles",
@@ -1152,16 +1152,16 @@
     "agent_bot_manage_tooltip_lark": "Abre la página de la app de este Bot en Lark: gestiona alcances, edita el nombre visible y solicita permisos adicionales.",
     "agent_bot_disconnect_tooltip": "Desvincula este Lark Bot del agente. El bot dejará de recibir mensajes de Lark.",
     "install_dialog_title": "Vincular a Lark",
-    "install_dialog_description": "Abre Lark en tu móvil y escanea el código de abajo para crear un PersonalAgent Bot.",
+    "install_dialog_description": "Abre Lark en tu móvil y escanea el código de abajo para crear un Bot.",
     "install_dialog_description_for_agent": "Abre Lark en tu móvil y escanea el código de abajo para crear un Bot para {{agent}}.",
     "install_dialog_title_feishu": "Vincular a Feishu",
     "install_dialog_title_lark": "Vincular a Lark",
-    "install_dialog_description_feishu": "Abre Feishu en tu móvil y escanea el código de abajo para crear un PersonalAgent Bot.",
-    "install_dialog_description_lark": "Abre Lark en tu móvil y escanea el código de abajo para crear un PersonalAgent Bot.",
+    "install_dialog_description_feishu": "Abre Feishu en tu móvil y escanea el código de abajo para crear un Bot.",
+    "install_dialog_description_lark": "Abre Lark en tu móvil y escanea el código de abajo para crear un Bot.",
     "install_dialog_description_for_agent_feishu": "Abre Feishu en tu móvil y escanea el código de abajo para crear un Bot para {{agent}}.",
     "install_dialog_description_for_agent_lark": "Abre Lark en tu móvil y escanea el código de abajo para crear un Bot para {{agent}}.",
     "install_starting": "Preparando el código QR…",
-    "install_scan_hint": "Lark → Escanear → autoriza el nuevo PersonalAgent.",
+    "install_scan_hint": "Lark → Escanear → autoriza el nuevo Bot.",
     "install_open_link_fallback": "O toca aquí para abrirlo en Lark",
     "install_success": "Bot vinculado. Envíale un mensaje en Feishu/Lark para verificar la recepción.",
     "install_success_toast": "Lark Bot instalado",
@@ -1689,7 +1689,9 @@
     "manage_projects": "Gestionar proyectos accesibles",
     "manage_projects_title": "Proyectos a los que {{name}} puede acceder",
     "save_projects": "Guardar",
-    "toast_projects_updated": "Proyectos actualizados"
+    "toast_projects_updated": "Proyectos actualizados",
+    "revoke_invitation_confirm": "Revocar invitación",
+    "remove_member_confirm": "Eliminar miembro"
   },
   "integrations": {
     "status_connected": "Conectado",
@@ -1817,7 +1819,7 @@
     "disconnect": "Desconectar",
     "catalog_title": "Aplicaciones disponibles",
     "catalog_label": "Aplicaciones que pueden añadir los miembros",
-    "catalog_description": "Las aplicaciones seleccionadas incluyen reglas predeterminadas revisadas. Todas las aplicaciones incluye todo lo que Composio puede conectar; las acciones que Multica no puede clasificar siempre piden confirmación. Una lista personalizada permite solo las aplicaciones que elijas.",
+    "catalog_description": "Las aplicaciones seleccionadas incluyen reglas predeterminadas revisadas. Todas las aplicaciones incluye todo lo que Multica puede conectar; las acciones que Multica no puede clasificar siempre piden confirmación. Una lista personalizada permite solo las aplicaciones que elijas.",
     "catalog_all": "Todas las aplicaciones",
     "catalog_curated": "Solo seleccionadas",
     "catalog_custom": "Lista personalizada",

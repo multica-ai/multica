@@ -513,7 +513,9 @@
       "warning": "이 작업은 되돌릴 수 없습니다.",
       "cancel": "취소",
       "confirm": "영구 삭제",
-      "deleting": "삭제 중…"
+      "deleting": "삭제 중…",
+      "title_multiple": "오토파일럿 {{count}}개를 삭제하시겠습니까?",
+      "description_single": "\"{{name}}\" 및 실행 기록을 영구적으로 삭제합니다."
     }
   },
   "wakeups": {
@@ -613,7 +615,8 @@
       "load_error": "깨우기 기본값을 불러오지 못했습니다.",
       "edit_instruction": "기본 지시 편집",
       "view_instruction": "기본 지시 보기"
-    }
+    },
+    "banner_single": "1개의 웨이크업이 자동 일시 중지되었습니다: {{issue}} \"{{condition}}\" — {{reason}}"
   },
   "intro": {
     "label": "오토파일럿",

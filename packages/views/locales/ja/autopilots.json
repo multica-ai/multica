@@ -513,7 +513,9 @@
       "warning": "この操作は取り消せません。",
       "cancel": "キャンセル",
       "confirm": "完全に削除",
-      "deleting": "削除中…"
+      "deleting": "削除中…",
+      "title_multiple": "{{count}} 件のオートパイロットを削除しますか？",
+      "description_single": "「{{name}}」とその実行履歴を完全に削除します。"
     }
   },
   "wakeups": {
@@ -613,7 +615,8 @@
       "load_error": "ウェイクアップの既定値を読み込めませんでした。",
       "edit_instruction": "既定の指示を編集",
       "view_instruction": "既定の指示を表示"
-    }
+    },
+    "banner_single": "1 件のウェイクアップが自動一時停止されました：{{issue}}「{{condition}}」— {{reason}}"
   },
   "intro": {
     "label": "オートパイロット",

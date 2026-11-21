@@ -22,7 +22,6 @@
     "load_failed": "No se ha podido cargar la actividad.",
     "try_again": "Reintentar",
     "empty": "Aún no hay actividad registrada.",
-    "show_earlier": "Mostrar {{count}} pasos anteriores",
     "full_log": "Abrir registro completo",
     "message": "Mensaje del agente",
     "error": "Error",
@@ -41,7 +40,9 @@
     "steer_resend": "Enviar como una ejecución nueva",
     "steer_resend_failed": "No se ha podido enviar como una ejecución nueva.",
     "steer_step": "{{name}} añadido",
-    "steer_step_read": "Leído"
+    "steer_step_read": "Leído",
+    "show_earlier_one": "Mostrar {{count}} pasos anteriores",
+    "show_earlier_other": "Mostrar {{count}} pasos anteriores"
   },
   "status_catalog_error": {
     "title": "No se ha podido cargar la lista de estados",
@@ -361,7 +362,6 @@
     "export": "Exportar",
     "export_all": "Exportar todo",
     "export_selected": "Exportar seleccionadas ({{count}})",
-    "export_success": "{{count}} tareas exportadas",
     "export_failed": "No se han podido exportar las tareas",
     "columns": {
       "section": "Columnas",
@@ -394,7 +394,9 @@
       "sum": "Suma",
       "average": "Media",
       "count": "Recuento"
-    }
+    },
+    "export_success_one": "{{count}} tareas exportadas",
+    "export_success_other": "{{count}} tareas exportadas"
   },
   "gantt": {
     "header_issue": "Tarea",
@@ -666,7 +668,11 @@
     "wakeup_created_scheduled": "añadió una activación para {{agent}}: {{condition}}",
     "environment_stopped": "detuvo el entorno {{name}}",
     "environment_restarted": "reinició el entorno {{name}}",
-    "environment_started": "inició el entorno {{name}}"
+    "environment_started": "inició el entorno {{name}}",
+    "task_completed_single": "completó una ejecución",
+    "task_failed_single": "la ejecución falló",
+    "wakeup_child_done_all_single": "La subincidencia finalizó",
+    "wakeup_child_done_stage_single": "La subincidencia de la etapa {{stage}} finalizó"
   },
   "comment": {
     "add_reaction": "Añadir reacción",
@@ -1168,7 +1174,6 @@
     "ended": "Historial de activaciones {{count}}",
     "waiting_event": "Esperando el disparador",
     "triggered_by_wakeup": "Activada por una activación",
-    "upcoming": "{{count}} reglas de activación activadas",
     "more": "{{count}} más",
     "toggle": "Activación de {{agent}}",
     "enable_error": "No se ha podido activar la activación. Inténtalo de nuevo.",
@@ -1305,7 +1310,6 @@
       "members": "Miembros",
       "agents": "Agentes",
       "any_agent": "Cualquier agente",
-      "events_selected": "{{count}} eventos",
       "instruction_placeholder": "Por ejemplo: comprueba el resultado y continúa si parece correcto",
       "trigger_count": "Disparadores",
       "max_wait": "Esperar hasta",
@@ -1365,7 +1369,9 @@
       "unchecked": "Sin marcar",
       "assignee_comment_hint": "{{name}} es el asignado y ya se ejecuta cuando un miembro comenta. Esta regla se une a esa ejecución en lugar de iniciar otra; añádela solo para darle una instrucción extra a esa ejecución.",
       "pr_conflicts": "Tiene conflictos de fusión",
-      "other_blocked": "pasa a Bloqueado"
+      "other_blocked": "pasa a Bloqueado",
+      "events_selected_one": "{{count}} eventos",
+      "events_selected_other": "{{count}} eventos"
     },
     "system": {
       "badge": "Sistema",
@@ -1472,7 +1478,9 @@
       "max_fires": "alcanzó su límite de {{count}} ejecuciones",
       "loop": "seguía activando reglas que la volvían a activar",
       "rate": "más de 12 ejecuciones en una hora"
-    }
+    },
+    "upcoming_one": "{{count}} reglas de activación activadas",
+    "upcoming_other": "{{count}} reglas de activación activadas"
   },
   "duplicates": {
     "banner_prefix": "Duplicada de",

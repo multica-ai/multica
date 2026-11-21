@@ -513,7 +513,9 @@
       "warning": "此操作無法撤銷。",
       "cancel": "取消",
       "confirm": "永久刪除",
-      "deleting": "刪除中…"
+      "deleting": "刪除中…",
+      "title_multiple": "刪除 {{count}} 個自動化任務？",
+      "description_single": "將永久刪除「{{name}}」及其執行歷史。"
     }
   },
   "wakeups": {
@@ -613,7 +615,8 @@
       "load_error": "無法載入喚醒預設值。",
       "edit_instruction": "編輯預設指令",
       "view_instruction": "查看預設指令"
-    }
+    },
+    "banner_single": "1 條喚醒已自動暫停：{{issue}}「{{condition}}」——{{reason}}"
   },
   "intro": {
     "label": "自動化",

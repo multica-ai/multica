@@ -7,7 +7,7 @@
     "new_doc": "新建文档",
     "new_folder": "新建文件夹",
     "rename": "重命名",
-    "move": "移动到...",
+    "move": "移动到…",
     "delete": "删除",
     "cancel": "取消",
     "history": "历史",
@@ -20,7 +20,7 @@
     "save": "保存失败"
   },
   "move": {
-    "title": "移动\"{{title}}\"",
+    "title": "移动「{{title}}」",
     "destination": "目标位置",
     "root": "知识库（顶层）",
     "current": "当前",
@@ -28,20 +28,20 @@
   },
   "delete": {
     "title": "删除这篇文档？",
-    "description": "\"{{title}}\"及其全部历史都会被删除，无法撤销。",
+    "description": "「{{title}}」及其全部历史都会被删除，无法撤销。",
     "confirm": "删除",
     "folder_title": "删除文件夹？",
-    "folder_description": "只能删除空文件夹。"
+    "folder_description": "确定删除「{{title}}」？仅支持删除空文件夹，此操作无法撤销。"
   },
   "tree": {
     "more": "{{title}} 的更多操作",
     "empty": "还没有文档",
-    "new_doc_in": "在“{{title}}”中新建文档"
+    "new_doc_in": "在「{{title}}」中新建文档"
   },
   "editor": {
-    "placeholder": "开始写，或输入 / 调出命令...",
+    "placeholder": "开始写，或输入 / 调出命令…",
     "title_label": "标题",
-    "saving": "保存中...",
+    "saving": "保存中…",
     "saved": "已保存",
     "save_failed": "保存失败 · 重试",
     "retry": "重试",
@@ -54,13 +54,13 @@
     "title": "历史",
     "current": "当前",
     "restore": "恢复此版本",
-    "loading": "加载中..."
+    "loading": "加载中…"
   },
   "not_found": {
     "title": "未找到该文档",
     "description": "它可能已被删除。"
   },
-  "edited": "{{time}}编辑",
+  "edited": "编辑于 {{time}}",
   "outline": "大纲",
   "link_copied": "链接已复制",
   "unavailable": {
@@ -89,7 +89,7 @@
     "errors": {
       "save": "评论发送失败",
       "delete": "评论删除失败",
-      "resolve": "无法更新讨论"
+      "resolve": "无法更新评论状态"
     }
   }
 }

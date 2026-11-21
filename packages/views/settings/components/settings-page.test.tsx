@@ -290,7 +290,7 @@ describe("SettingsPage workflows", () => {
 
     expect(screen.getByText("WorkflowsTab")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByRole("link", { name: "Issue Statuses" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Issue statuses" })).not.toBeInTheDocument();
   });
 
   it("opens old status catalog links in workflows", () => {
@@ -349,7 +349,7 @@ describe("SettingsPage information architecture", () => {
     ]);
     const personal = within(nav()).getByRole("region", { name: "Personal" });
     expect(within(personal).getByRole("link", { name: "Preferences" })).toBeInTheDocument();
-    expect(within(personal).getByRole("link", { name: "API Tokens" })).toBeInTheDocument();
+    expect(within(personal).getByRole("link", { name: "API tokens" })).toBeInTheDocument();
 
     const workspace = within(nav()).getByRole("region", { name: "Workspace" });
     expect(within(workspace).getByRole("link", { name: "Members" })).toBeInTheDocument();

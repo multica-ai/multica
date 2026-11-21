@@ -22,7 +22,6 @@
     "load_failed": "Impossible de charger l'activité.",
     "try_again": "Réessayer",
     "empty": "Aucune activité enregistrée pour l'instant.",
-    "show_earlier": "Afficher {{count}} étapes précédentes",
     "full_log": "Ouvrir le journal complet",
     "message": "Message de l'agent",
     "error": "Erreur",
@@ -41,7 +40,9 @@
     "steer_resend": "Envoyer comme nouvelle exécution",
     "steer_resend_failed": "Impossible de l'envoyer comme nouvelle exécution.",
     "steer_step": "{{name}} a ajouté",
-    "steer_step_read": "Lu"
+    "steer_step_read": "Lu",
+    "show_earlier_one": "Afficher {{count}} étapes précédentes",
+    "show_earlier_other": "Afficher {{count}} étapes précédentes"
   },
   "working_filter_error": {
     "title": "Impossible de charger les tâches en cours de traitement par les agents"
@@ -371,7 +372,6 @@
     "export": "Exporter",
     "export_all": "Tout exporter",
     "export_selected": "Exporter la sélection ({{count}})",
-    "export_success": "{{count}} tâches exportées",
     "export_failed": "Échec de l'export des tâches",
     "columns": {
       "section": "Colonnes",
@@ -404,7 +404,9 @@
       "sum": "Somme",
       "average": "Moyenne",
       "count": "Nombre"
-    }
+    },
+    "export_success_one": "{{count}} tâches exportées",
+    "export_success_other": "{{count}} tâches exportées"
   },
   "gantt": {
     "header_issue": "Tâche",
@@ -683,7 +685,11 @@
     "wakeup_chip_system": "Règle système",
     "environment_stopped": "a arrêté l'environnement {{name}}",
     "environment_restarted": "a redémarré l'environnement {{name}}",
-    "environment_started": "a démarré l'environnement {{name}}"
+    "environment_started": "a démarré l'environnement {{name}}",
+    "task_completed_single": "a terminé une exécution",
+    "task_failed_single": "l'exécution a échoué",
+    "wakeup_child_done_all_single": "La sous-tâche est terminée",
+    "wakeup_child_done_stage_single": "La sous-tâche de l'étape {{stage}} est terminée"
   },
   "comment": {
     "add_reaction": "Ajouter une réaction",
@@ -1254,7 +1260,6 @@
     "ended": "Historique des réveils · {{count}}",
     "waiting_event": "En attente du déclencheur",
     "triggered_by_wakeup": "Déclenché par un réveil",
-    "upcoming": "{{count}} règles de réveil activées",
     "more": "{{count}} de plus",
     "toggle": "Réveil de {{agent}}",
     "enable_error": "Impossible d’activer le réveil. Réessayez.",
@@ -1391,7 +1396,6 @@
       "members": "Membres",
       "agents": "Agents",
       "any_agent": "N’importe quel agent",
-      "events_selected": "{{count}} événements",
       "instruction_placeholder": "Par exemple : vérifier le résultat et continuer s’il est correct",
       "trigger_count": "Déclenchements",
       "max_wait": "Attendre au plus",
@@ -1451,7 +1455,9 @@
       "missing_issue": "Choisissez une tâche.",
       "checked": "Cochée",
       "unchecked": "Décochée",
-      "assignee_comment_hint": "{{name}} est le responsable et s’exécute déjà quand un membre commente. Cette règle rejoint cette exécution au lieu d’en lancer une autre ; ajoutez-la seulement pour lui donner une instruction de plus."
+      "assignee_comment_hint": "{{name}} est le responsable et s’exécute déjà quand un membre commente. Cette règle rejoint cette exécution au lieu d’en lancer une autre ; ajoutez-la seulement pour lui donner une instruction de plus.",
+      "events_selected_one": "{{count}} événements",
+      "events_selected_other": "{{count}} événements"
     },
     "system": {
       "badge": "Système",
@@ -1558,7 +1564,9 @@
       "max_fires": "limite de {{count}} exécutions atteinte",
       "loop": "il réveillait des règles qui le réveillaient à leur tour",
       "rate": "plus de 12 exécutions en une heure"
-    }
+    },
+    "upcoming_one": "{{count}} règles de réveil activées",
+    "upcoming_other": "{{count}} règles de réveil activées"
   },
   "duplicates": {
     "banner_prefix": "Doublon de",

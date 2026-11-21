@@ -342,7 +342,7 @@ describe("createMentionSuggestion", () => {
 
     render(<I18nWrapper><MentionList items={[]} query="协作" command={vi.fn()} /></I18nWrapper>);
 
-    expect(screen.getByText("Searching...")).toBeInTheDocument();
+    expect(screen.getByText("Searching…")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText("MUL-1007")).toBeInTheDocument();
@@ -598,7 +598,7 @@ describe("createMentionSuggestion", () => {
 
     render(<I18nWrapper><MentionList ref={ref} items={[]} query="协作" command={vi.fn()} /></I18nWrapper>);
 
-    expect(screen.getByText("Searching...")).toBeInTheDocument();
+    expect(screen.getByText("Searching…")).toBeInTheDocument();
     expect(pressPickerInteractionKeys(ref.current)).toEqual(
       PICKER_INTERACTION_KEYS.map(() => false),
     );

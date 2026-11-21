@@ -41,11 +41,11 @@
     },
     "pr_review": {
       "title": "PR review 提醒",
-      "summary": "标记需要 review 的滞留 pull request"
+      "summary": "标记需要审查的滞留 PR"
     },
     "bug_triage": {
       "title": "Bug 分诊",
-      "summary": "评估并安排新提交的 bug"
+      "summary": "评估新提交的 Bug 并确定优先级"
     },
     "weekly_progress": {
       "title": "每周进度报告",
@@ -70,16 +70,16 @@
     "bind_runtime": "绑定运行时",
     "edit": "编辑",
     "run_now": "立即运行",
-    "running": "运行中...",
+    "running": "运行中…",
     "toast_triggered": "已触发自动化",
     "toast_trigger_failed": "触发自动化失败",
     "run_blocked_invocation_not_allowed": "未触发——你没有该自动化所用智能体的使用权限",
     "run_blocked_runtime_offline": "未触发——该智能体的运行时已离线",
     "run_blocked_agent_runtime_required": "未触发——该智能体未绑定运行时，绑定后才能运行",
-    "run_blocked_runtime_access_denied": "未触发——该智能体无法在其私有运行时上运行。请将该运行时设为公开，或重新绑定/复制智能体",
+    "run_blocked_runtime_access_denied": "未触发——无法访问该智能体的私有运行时。请将该运行时设为公开，或将智能体绑定到可用的运行时。",
     "run_blocked_target_unavailable": "未触发——该智能体不可用",
     "run_blocked_attribution": "未触发——无法确定本次运行的负责成员",
-    "run_blocked_already_active": "未触发——最近已有一次运行覆盖了本次",
+    "run_blocked_already_active": "未触发——已有运行正在进行或刚刚完成。",
     "run_blocked_quota_exceeded": "未触发——本周期的运行额度已用尽",
     "run_blocked_generic": "未触发——本次运行已被拦截",
     "section_triggers": "触发器",
@@ -90,10 +90,10 @@
     "field_project": "关联项目",
     "no_project": "不关联项目",
     "project_unavailable": "项目不可用",
-    "field_prompt": "Prompt",
+    "field_prompt": "运行指令",
     "field_subscribers": "订阅者",
     "field_subscribers_none": "无",
-    "no_prompt": "还没有 Prompt。",
+    "no_prompt": "还没有运行指令。",
     "copy_link": "复制链接",
     "link_copied": "链接已复制",
     "link_copy_failed": "无法复制链接",
@@ -104,17 +104,17 @@
       "with_trigger": "{{trigger}} · {{action}}"
     },
     "add_trigger": "添加触发器",
-    "no_triggers": "未配置触发器。添加一个时间表让它自动运行。",
-    "no_runs": "暂无运行记录。点击\"立即运行\"手动触发。",
+    "no_triggers": "未配置触发器。添加定时计划或 Webhook 即可自动运行。",
+    "no_runs": "暂无运行记录。点击「立即运行」手动触发。",
     "delete_button": "删除自动化",
     "toast_deleted": "已删除自动化",
     "toast_delete_failed": "删除自动化失败",
     "delete_dialog": {
       "title": "删除自动化",
-      "description": "将永久删除\"{{title}}\"，连同它的触发器和运行历史。此操作不可撤销。",
+      "description": "将永久删除「{{title}}」，连同它的触发器和运行历史。此操作不可撤销。",
       "cancel": "取消",
       "confirm": "删除",
-      "deleting": "删除中..."
+      "deleting": "删除中…"
     },
     "paused_project_archived": "由于所属项目已归档，自动化已暂停。恢复项目后请重新启用。"
   },
@@ -164,7 +164,7 @@
     "copied": "已复制 Webhook payload",
     "copied_short": "已复制",
     "copy_failed": "复制失败",
-    "truncated_marker": "[已截断——点击\"复制\"获取完整 payload]"
+    "truncated_marker": "[已截断——点击「复制」获取完整 payload]"
   },
   "trigger_kind": {
     "schedule": "时间表",
@@ -191,17 +191,17 @@
     "rotate_confirm_description": "当前 URL 将立即失效。所有调用它的外部系统都需要更新为新 URL。继续吗？",
     "rotate_confirm_cancel": "取消",
     "rotate_confirm_action": "重新生成",
-    "rotate_in_progress": "生成中...",
+    "rotate_in_progress": "生成中…",
     "toast_rotated": "Webhook URL 已重新生成",
     "toast_rotate_failed": "重新生成 URL 失败",
     "toast_deleted": "已删除触发器",
     "toast_delete_failed": "删除触发器失败",
     "delete_dialog": {
       "title": "删除触发器",
-      "description": "将移除该触发器，自动化不再按此时间表运行。此操作不可撤销。",
+      "description": "将移除该触发器，之后它不再触发该自动化任务。此操作不可撤销。",
       "cancel": "取消",
       "confirm": "删除",
-      "deleting": "删除中..."
+      "deleting": "删除中…"
     }
   },
   "deliveries": {
@@ -237,13 +237,13 @@
       "content_type": "Content-Type",
       "replayed_from": "重放自",
       "error_label": "错误信息",
-      "raw_body": "原始 Body",
+      "raw_body": "原始正文",
       "selected_headers": "保留的请求头",
       "response_body": "响应 Body"
     },
     "replay": {
       "action": "重放",
-      "in_progress": "重放中...",
+      "in_progress": "重放中…",
       "toast_success": "已重放该投递",
       "toast_failed": "重放失败",
       "disabled_invalid_signature": "无法重放——签名校验失败",
@@ -257,7 +257,7 @@
       "trigger_disabled": "触发器已禁用",
       "autopilot_paused": "自动化已暂停",
       "autopilot_archived": "自动化已归档",
-      "quota_exceeded": "已达到运行配额",
+      "quota_exceeded": "已达到运行额度",
       "actual_value": "实际值",
       "missing": "字段不存在",
       "truncated": "预览已截断，完整值见原始正文。"
@@ -272,7 +272,7 @@
     "label_placeholder": "例如：工作日早晨",
     "webhook_help": "保存后 Multica 会生成一个 Webhook URL。向它 POST 任意 JSON 即可触发本自动化。",
     "submit": "添加触发器",
-    "submitting": "添加中...",
+    "submitting": "添加中…",
     "toast_added_schedule": "已添加时间表触发器",
     "toast_added_webhook": "已添加 Webhook 触发器",
     "toast_add_failed": "添加触发器失败"
@@ -283,7 +283,7 @@
     "label_placeholder": "例如：工作日早晨",
     "enabled_label": "已启用",
     "submit": "保存",
-    "submitting": "保存中...",
+    "submitting": "保存中…",
     "toast_updated": "时间表已更新",
     "toast_update_failed": "更新时间表失败"
   },
@@ -298,20 +298,20 @@
     "sr_edit": "编辑自动化",
     "header_create": "新建自动化",
     "header_edit": "编辑自动化",
-    "subtitle": "周期性的 AI 工作",
+    "subtitle": "定时或事件触发的智能体工作",
     "expand": "展开",
     "collapse": "收起",
     "close": "关闭",
     "title_placeholder": "自动化名称",
-    "runbook_label": "Runbook",
+    "runbook_label": "运行指令",
     "runbook_hint": "智能体每次运行时读取",
-    "description_placeholder": "# 目标\n你希望智能体完成什么？\n\n# 上下文\n这是给谁的？有什么约束？\n\n# 步骤\n1. ...\n2. ...",
+    "description_placeholder": "# 目标\n你希望智能体完成什么？\n\n# 上下文\n这是给谁的？有什么约束？\n\n# 步骤\n1. …\n2. …",
     "auto_run_hint": "保存后会自动运行，直到暂停。",
     "cancel": "取消",
     "create": "创建自动化",
     "save": "保存",
-    "creating": "创建中...",
-    "saving": "保存中...",
+    "creating": "创建中…",
+    "saving": "保存中…",
     "toast_created": "已创建自动化",
     "toast_create_partial": "自动化已创建，但时间表保存失败",
     "toast_create_partial_with_reason": "自动化已创建，但时间表保存失败：{{reason}}",
@@ -321,7 +321,7 @@
     "toast_update_partial_with_reason": "自动化已更新，但时间表保存失败：{{reason}}",
     "toast_update_failed": "更新自动化失败",
     "section_agent": "智能体",
-    "section_assignee": "执行方",
+    "section_assignee": "执行者",
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
     "section_project": "关联项目",
@@ -329,10 +329,10 @@
     "no_project": "不关联项目",
     "section_output_mode": "输出模式",
     "section_subscribers": "订阅者",
-    "subscribers_hint": "每次跑出来的任务默认订阅",
-    "subscribers_empty": "暂无订阅者——添加成员后，每次触发都会通知到他",
+    "subscribers_hint": "自动订阅该自动化任务创建的每个任务",
+    "subscribers_empty": "暂无订阅者——添加成员后，每次创建任务都会自动订阅并通知对方",
     "subscribers_add": "添加订阅者",
-    "subscribers_search_placeholder": "按名称搜索成员……",
+    "subscribers_search_placeholder": "按名称搜索成员…",
     "subscribers_no_results": "没有匹配的成员",
     "subscribers_remove_tooltip": "移除",
     "section_schedule": "时间表",
@@ -381,7 +381,7 @@
     "schedule_multiple_notice": "该自动化有 {{count}} 条时间表。关闭此弹窗，在下方「触发器」中逐条编辑。",
     "webhook_multiple_notice": "该自动化有多个 Webhook。关闭此弹窗，在下方「触发器」中逐条编辑。",
     "webhook_edit_filters": "编辑过滤",
-    "webhook_filters_saved_separately": "过滤单独保存，在这里点取消不会撤销。",
+    "webhook_filters_saved_separately": "事件过滤会立即保存，在此点击取消不会撤销。",
     "schedule_empty": "还没有时间表——这个自动化只在手动触发时运行。",
     "schedule_add": "添加时间表",
     "error_title_required": "请填写自动化名称。",
@@ -407,8 +407,8 @@
     "unit_minutes": "分钟",
     "days_label": "重复",
     "days_every": "每天",
-    "days_weekly": "每周特定几天",
-    "days_monthly": "每月",
+    "days_weekly": "每周指定几天",
+    "days_monthly": "每月指定日期",
     "monthly_short_month_hint": "没有 {{day}} 日的月份将跳过。",
     "days_short": {
       "sun": "日",
@@ -485,7 +485,7 @@
     }
   },
   "agent_picker": {
-    "filter_placeholder": "筛选智能体或小队...",
+    "filter_placeholder": "筛选智能体或小队…",
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
     "agents_group": "智能体",
@@ -494,7 +494,7 @@
     "squad_runtime_required": "请先为该小队的负责人绑定运行时"
   },
   "timezone_picker": {
-    "search_placeholder": "搜索时区..."
+    "search_placeholder": "搜索时区…"
   },
   "toolbar": {
     "section_assignee": "执行者",
@@ -513,7 +513,9 @@
       "warning": "此操作无法撤销。",
       "cancel": "取消",
       "confirm": "永久删除",
-      "deleting": "删除中…"
+      "deleting": "删除中…",
+      "title_multiple": "删除 {{count}} 个自动化任务？",
+      "description_single": "将永久删除「{{name}}」及其运行历史。"
     }
   },
   "wakeups": {
@@ -565,7 +567,7 @@
     "fires_once": "触发一次",
     "assignee_target": "负责人 · {{name}}",
     "no_target": "没有智能体负责人",
-    "banner_other": "{{count}} 条唤醒已自动暂停：{{issue}}「{{condition}}」——{{reason}}",
+    "banner_other": "{{count}} 条唤醒已自动暂停。最近一条：{{issue}}「{{condition}}」——{{reason}}",
     "banner_view": "查看",
     "create": "新建唤醒",
     "create_pick_issue": "选择要添加唤醒的任务",
@@ -580,7 +582,7 @@
         },
         "time": {
           "title": "或者定个时间",
-          "description": "单次定时适合\"明天下午再看看\"，周期适合每天的例行检查。"
+          "description": "单次定时适合「明天下午再看看」，周期适合每天的例行检查。"
         },
         "ends": {
           "title": "任务结束就停",
@@ -591,7 +593,7 @@
         "issue_inbox": "收件箱分组的空状态",
         "issue_board": "看板列宽可拖拽",
         "issue_paste": "评论支持粘贴图片",
-        "reply": "\"PR 已合并，开始更新文档并关闭任务。\"",
+        "reply": "「PR 已合并，开始更新文档并关闭任务。」",
         "event_examples": "PR 合并、有新评论"
       }
     },
@@ -613,11 +615,12 @@
       "load_error": "无法加载唤醒默认值。",
       "edit_instruction": "编辑默认指令",
       "view_instruction": "查看默认指令"
-    }
+    },
+    "banner_single": "1 条唤醒已自动暂停：{{issue}}「{{condition}}」——{{reason}}"
   },
   "intro": {
     "label": "自动化",
-    "title": "让智能体按时自己开工",
+    "title": "让智能体自主开工",
     "description": "设好时间表或 Webhook，每次触发都会自动建任务交给智能体，也可以直接运行。挑一个模板，改改就能用。",
     "templates": "从模板开始"
   }

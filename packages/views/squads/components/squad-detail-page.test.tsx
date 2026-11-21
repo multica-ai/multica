@@ -239,7 +239,7 @@ describe("SquadDetailPage", () => {
     expect(mocks.copyText).toHaveBeenCalledWith("https://multica.test/acme/squads/sq-1");
 
     await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Create Agent" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Create agent" }));
     expect(push).toHaveBeenCalledWith("/acme/agents/new?squad=sq-1");
 
     await user.click(screen.getByRole("button", { name: "More actions" }));

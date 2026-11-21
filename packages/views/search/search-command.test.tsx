@@ -251,7 +251,7 @@ vi.mock("@multica/ui/components/common/theme-provider", () => ({
 
 vi.mock("sonner", () => ({ toast: mockToast }));
 
-const PLACEHOLDER = "Search, or type what needs doing...";
+const PLACEHOLDER = "Search, or type what needs doing…";
 const ME = "user-me";
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -562,7 +562,7 @@ describe("SearchCommand", () => {
       mockTheme.current = "dark";
       renderSearch();
       await user.type(input(), "theme");
-      await user.click(await rowText("Change theme..."));
+      await user.click(await rowText("Change theme…"));
 
       expect(within(screen.getByRole("navigation", { name: "Current menu" })).getByText("Change theme")).toBeInTheDocument();
       expect(renderedHeadings()).toEqual(["Mode", "Theme"]);
@@ -592,7 +592,7 @@ describe("SearchCommand", () => {
       useAppearanceStore.setState({ theme: "github" });
       renderSearch();
       await user.type(input(), "主题");
-      await user.click(await rowText("Change theme..."));
+      await user.click(await rowText("Change theme…"));
 
       expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
         "data-value",
@@ -615,8 +615,8 @@ describe("SearchCommand", () => {
       });
       renderSearch();
       await user.type(input(), "theme");
-      await user.click(await rowText("Change theme..."));
-      await user.type(screen.getByPlaceholderText("Filter..."), "solar");
+      await user.click(await rowText("Change theme…"));
+      await user.type(screen.getByPlaceholderText("Filter…"), "solar");
 
       expect(renderedHeadings()).toEqual(["Theme"]);
       expect(renderedValues()).toEqual(["color-theme:solarized"]);
@@ -631,7 +631,7 @@ describe("SearchCommand", () => {
       useAppearanceStore.setState({ theme: "uninstalled" });
       renderSearch();
       await user.type(input(), "theme");
-      await user.click(await rowText("Change theme..."));
+      await user.click(await rowText("Change theme…"));
 
       expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
         "data-value",
@@ -643,14 +643,14 @@ describe("SearchCommand", () => {
       const user = userEvent.setup();
       renderSearch();
       await user.type(input(), "theme");
-      await user.click(await rowText("Change theme..."));
+      await user.click(await rowText("Change theme…"));
 
-      const pageInput = screen.getByPlaceholderText("Filter...");
+      const pageInput = screen.getByPlaceholderText("Filter…");
       await user.type(pageInput, "da");
       expect(renderedValues()).toEqual(["theme:dark"]);
       await user.keyboard("{Backspace}{Backspace}");
       // Clearing the filter keeps the submenu; one more Backspace leaves it.
-      expect(screen.getByPlaceholderText("Filter...")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Filter…")).toBeInTheDocument();
       await user.keyboard("{Backspace}");
 
       expect(await screen.findByPlaceholderText(PLACEHOLDER)).toBeInTheDocument();
@@ -1035,7 +1035,7 @@ describe("SearchCommand", () => {
     it("opens a submenu from its row, with the issue in the breadcrumb", async () => {
       const user = userEvent.setup();
       renderSearch();
-      await user.click(await rowText("Change status..."));
+      await user.click(await rowText("Change status…"));
 
       expect(screen.getByRole("navigation", { name: "Current menu" })).toHaveTextContent("MUL-42Change status");
       expect(renderedValues().length).toBeGreaterThan(0);
@@ -1081,7 +1081,7 @@ describe("SearchCommand", () => {
     it("writes a priority picked in the submenu to the issue", async () => {
       const user = userEvent.setup();
       renderSearch();
-      await user.click(await rowText("Set priority..."));
+      await user.click(await rowText("Set priority…"));
       await user.click(screen.getByText("High"));
 
       await waitFor(() => expect(api("updateIssue")).toHaveBeenCalledWith("issue-1", { priority: "high" }));
@@ -1180,7 +1180,7 @@ describe("SearchCommand", () => {
       renderSearch();
 
       expect(renderedHeadings()[0]).toBe("3 selected issues");
-      await user.click(await rowText("Set priority..."));
+      await user.click(await rowText("Set priority…"));
       expect(screen.getByRole("navigation", { name: "Current menu" })).toHaveTextContent(
         "3 selected issuesSet priority",
       );
@@ -1196,7 +1196,7 @@ describe("SearchCommand", () => {
       const user = userEvent.setup();
       seed(agentListOptions("ws-test"), [makeAgent("agent-lambda", "Lambda")]);
       renderSearch();
-      await user.click(await rowText("Assign to..."));
+      await user.click(await rowText("Assign to…"));
       await user.click(await screen.findByText((_, el) => el?.textContent === "Lambda" && el?.tagName === "SPAN"));
 
       expect(mockOpenModal).toHaveBeenCalledWith("issue-run-confirm", {
@@ -1355,7 +1355,7 @@ describe("SearchCommand", () => {
       await user.type(input(), "localized");
 
       await waitFor(() => expect(screen.getByText("进行中")).toBeInTheDocument(), { timeout: 2000 });
-      expect(screen.queryByText("In Progress")).toBeNull();
+      expect(screen.queryByText("In progress")).toBeNull();
     });
 
     it("keeps live rows of both types above every cancelled row", async () => {

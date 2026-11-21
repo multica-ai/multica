@@ -108,12 +108,12 @@ describe("HtmlBlockPreview — height", () => {
   it("shows a loading skeleton until the document reports, then takes its height", () => {
     render(<HtmlBlockPreview html="<p>hi</p>" />);
     const frame = inlineFrame();
-    expect(screen.getByText("Rendering...")).toBeTruthy();
+    expect(screen.getByText("Rendering…")).toBeTruthy();
     expect(frame.className).toContain("invisible");
 
     post(frame, { type: "height", height: 264 });
     expect(body(frame).style.height).toBe("264px");
-    expect(screen.queryByText("Rendering...")).toBeNull();
+    expect(screen.queryByText("Rendering…")).toBeNull();
     expect(frame.className).not.toContain("invisible");
   });
 
@@ -135,7 +135,7 @@ describe("HtmlBlockPreview — height", () => {
         }),
       );
     });
-    expect(screen.getByText("Rendering...")).toBeTruthy();
+    expect(screen.getByText("Rendering…")).toBeTruthy();
     expect(body(frame).style.height).toBe("120px");
   });
 
@@ -246,7 +246,7 @@ describe("HtmlBlockPreview — reload", () => {
     expect(fresh.getAttribute("srcdoc")).toBe(srcDoc);
     expect(fresh.getAttribute("sandbox")).toBe("allow-scripts");
     expect(within(block).queryByRole("alert")).toBeNull();
-    expect(within(block).getByText("Rendering...")).toBeTruthy();
+    expect(within(block).getByText("Rendering…")).toBeTruthy();
     act(() => {
       window.dispatchEvent(new MessageEvent("message", {
         source: staleWindow,
@@ -256,7 +256,7 @@ describe("HtmlBlockPreview — reload", () => {
     expect(within(block).queryByRole("alert")).toBeNull();
     post(fresh, { type: "height", height: 600 });
     expect(fresh.parentElement?.style.height).toBe("600px");
-    expect(within(block).queryByText("Rendering...")).toBeNull();
+    expect(within(block).queryByText("Rendering…")).toBeNull();
   });
 
   // Regression: the height handed up to the frame decides the inline collapse,
@@ -290,14 +290,14 @@ describe("HtmlBlockPreview — reload", () => {
       render(<HtmlBlockPreview html="<p>no bridge reports</p>" />);
       fireEvent.load(inlineFrame());
       act(() => vi.advanceTimersByTime(1000));
-      expect(screen.queryByText("Rendering...")).toBeNull();
+      expect(screen.queryByText("Rendering…")).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: "Reload" }));
       act(() => vi.advanceTimersByTime(1000));
-      expect(screen.getByText("Rendering...")).toBeTruthy();
+      expect(screen.getByText("Rendering…")).toBeTruthy();
       fireEvent.load(inlineFrame());
       act(() => vi.advanceTimersByTime(1000));
-      expect(screen.queryByText("Rendering...")).toBeNull();
+      expect(screen.queryByText("Rendering…")).toBeNull();
     } finally {
       vi.useRealTimers();
     }

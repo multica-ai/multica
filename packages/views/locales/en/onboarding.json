@@ -18,14 +18,14 @@
     "headline_line2": "in",
     "headline_emphasis": "one workspace.",
     "lede": "Assign them work like you'd assign a colleague — they pick it up, update status, and comment when done.",
-    "lede_web": "Desktop bundles the runtime — nothing to install. Continue on web to connect your own CLI.",
+    "lede_web": "Desktop includes the local runtime — no CLI setup required. Continue on web to connect your own CLI.",
     "download_desktop": "Download Desktop",
     "continue_on_web": "Continue on web",
     "start_exploring": "Start exploring",
     "skip_existing": "I've done this before",
     "illustration": {
       "card1_actor_name": "You",
-      "card1_actor_initial": "N",
+      "card1_actor_initial": "Y",
       "card1_body_prefix": " can you draft a short launch post? Pull from ",
       "card1_body_suffix": "'s interview findings.",
       "card1_mention_content": "@Content Agent",
@@ -50,7 +50,7 @@
     "skip": "Skip",
     "cancel": "Cancel",
     "close": "Close",
-    "log_out": "Log out"
+    "log_out": "Sign out"
   },
   "source_backfill": {
     "eyebrow": "Quick question",
@@ -163,7 +163,7 @@
     "create_failed_toast": "Failed to create workspace",
     "creation_disabled_headline": "Ask your administrator for an invitation.",
     "creation_disabled_lede": "This Multica instance does not allow new workspaces to be created. Once an administrator invites you to a workspace, accept the invitation and refresh to continue.",
-    "creation_disabled_logout": "Log out",
+    "creation_disabled_logout": "Sign out",
     "creation_disabled_headline_resume": "Continue with {{name}}.",
     "creation_disabled_lede_resume": "Workspace creation is disabled on this instance, so you'll continue into your existing workspace."
   },
@@ -224,7 +224,7 @@
   },
   "errors": {
     "skip_failed": "Failed to finish onboarding",
-    "guide_failed": "The runtime guide didn't get created. Please try again.",
+    "guide_failed": "Couldn't create the setup guide. Please try again.",
     "mika_setup_failed": "Couldn't start your Mika workspace"
   },
   "mika_intro": {

@@ -245,7 +245,7 @@
       "squads_group": "小隊",
       "version_missing": "該 AI 代理的守護程序沒有報告 CLI 版本。透過 AI 代理建立需要 multica CLI ≥ {{min}}。請升級守護程序並重連，或切換到手動建立。",
       "version_below": "該 AI 代理的守護程序 CLI 是 {{current}}——透過 AI 代理建立需要 ≥ {{min}}。請升級守護程序，或切換到手動建立。",
-      "prompt_placeholder": "告訴 AI 代理要做什麼，例如：\"讓 Bohan 修一下 Web 專案裡收件箱載入慢的問題\"",
+      "prompt_placeholder": "告訴 AI 代理要做什麼，例如：\"修復 Web 專案裡收件箱載入慢的問題\"",
       "source_context_prompt_placeholder": "告訴 AI 代理要基於這段上下文完成什麼，例如：\"繼續排查並修復這裡提到的問題\"",
       "more_fields_aria": "更多欄位",
       "set_project": "設定專案...",
@@ -278,8 +278,8 @@
     "trigger": "複製父任務欄位",
     "title": "複製父任務欄位",
     "description": "從 {{identifier}} 複製所選欄位，覆蓋目前值；後續不連動。",
-    "apply": "複製所選 {{count}} 項",
     "no_labels": "無標籤",
-    "manual_only": "標籤、開始日期和自訂屬性僅用於手動建立。"
+    "manual_only": "標籤、開始日期和自訂屬性僅用於手動建立。",
+    "apply_other": "複製所選 {{count}} 項"
   }
 }

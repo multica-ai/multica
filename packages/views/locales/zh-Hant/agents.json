@@ -102,7 +102,6 @@
     "archive": "歸檔",
     "set_access": "設定訪問範圍",
     "set_access_dialog_title": "設定訪問範圍",
-    "set_access_applies_to": "將應用於 {{count}} 個 AI 代理。",
     "set_access_skipped": "{{count}} 個已跳過(不是你所有)。",
     "set_access_dialog_confirm": "應用",
     "set_access_bulk_partial": "已應用 {{succeeded}} 個;{{failed}} 個失敗(保持當前狀態)。",
@@ -125,7 +124,8 @@
     "archive_dialog_title": "歸檔\"{{name}}\"？",
     "archive_dialog_description": "歸檔後這個 AI 代理將無法被分配或提及，進行中的執行會被取消。所有歷史會被保留，可以稍後恢復。",
     "archive_dialog_cancel": "取消",
-    "archive_dialog_confirm": "歸檔"
+    "archive_dialog_confirm": "歸檔",
+    "set_access_applies_to_other": "將應用於 {{count}} 個 AI 代理。"
   },
   "detail": {
     "back_to_agents_full": "返回 AI 代理列表",
@@ -354,8 +354,8 @@
       "discard_confirm": "對話和右側配置都會被永久刪除。",
       "discard_title": "放棄這次建立？",
       "discard_cancel": "繼續編輯",
-      "banner": "您有 {{count}} 條未完成的建立",
-      "pick_hint": "選一條繼續。"
+      "pick_hint": "選一條繼續。",
+      "banner_other": "您有 {{count}} 條未完成的建立"
     },
     "close": "關閉",
     "steps": {
@@ -829,7 +829,6 @@
       "specific_people": "指定成員",
       "owner_only": "僅所有者"
     },
-    "trigger_members_count": "{{count}} 人",
     "trigger_members_empty": "指定成員",
     "trigger_team": "團隊",
     "private_title": "僅自己",
@@ -848,7 +847,8 @@
     "public_group": "公開訪問",
     "owner_only_readonly": "只有該 AI 代理的所有者可以更改誰能呼叫它。",
     "members_empty": "沒有可選擇的工作區成員",
-    "composio_switch_hint": "提示——該 AI 代理已啟用 Composio 應用。共享後，所有獲得訪問權限的人都可以透過該 AI 代理使用這些應用。"
+    "composio_switch_hint": "提示——該 AI 代理已啟用 應用。共享後，所有獲得訪問權限的人都可以透過該 AI 代理使用這些應用。",
+    "trigger_members_count_other": "{{count}} 人"
   },
   "profile_card": {
     "unavailable": "AI 代理不可用",

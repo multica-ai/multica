@@ -618,9 +618,9 @@ describe("comment composers", () => {
 
     // Readonly-first: shell shows the placeholder text; clicking mounts the
     // real editor in place.
-    expect(screen.getByTestId("comment-composer-shell")).toHaveTextContent("Leave a comment...");
+    expect(screen.getByTestId("comment-composer-shell")).toHaveTextContent("Leave a comment…");
     activateComposer("comment-composer-shell");
-    expect(screen.getByPlaceholderText("Leave a comment...")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Leave a comment…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
 
@@ -632,9 +632,9 @@ describe("comment composers", () => {
   it("renders reply composer without a manual expand control", () => {
     const { container } = renderReplyInput();
 
-    expect(screen.getByTestId("reply-composer-shell")).toHaveTextContent("Leave a reply...");
+    expect(screen.getByTestId("reply-composer-shell")).toHaveTextContent("Leave a reply…");
     activateComposer("reply-composer-shell");
-    expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Leave a reply…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(1);
     act(() => screen.getByTestId("editor").focus());

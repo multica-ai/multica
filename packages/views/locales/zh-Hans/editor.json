@@ -43,8 +43,8 @@
     "copy_image": "复制图片",
     "image_copied": "已复制图片",
     "copy_image_failed": "无法复制图片",
-    "canvas_label": "图片画布,拖动可平移,滚动可缩放,双击可切换实际大小。",
-    "unavailable": "这张图片已失效,已跳过。"
+    "canvas_label": "图片画布，拖动可平移，滚动可缩放，双击可切换实际大小。",
+    "unavailable": "这张图片已失效，已跳过。"
   },
   "canvas": {
     "zoom_in": "放大",
@@ -100,14 +100,14 @@
     "copy_failed": "复制失败"
   },
   "mention": {
-    "group_users": "用户",
+    "group_users": "成员",
     "group_issues": "任务",
     "group_projects": "项目",
     "group_docs": "文档",
     "all_members": "所有成员",
     "agent_badge": "智能体",
     "squad_badge": "小队",
-    "searching": "搜索中...",
+    "searching": "搜索中…",
     "no_results": "无结果",
     "group_current": "当前页面",
     "group_recent": "最近浏览",
@@ -127,7 +127,7 @@
     "copy_code": "复制代码",
     "show_preview": "显示预览",
     "show_source": "显示源码",
-    "fullscreen": "放大"
+    "fullscreen": "全屏"
   },
   "dynamic_block": {
     "preview": "预览",
@@ -135,7 +135,7 @@
     "view": "视图",
     "copy_source": "复制源码",
     "show_all": "展开全部",
-    "rendering": "正在渲染...",
+    "rendering": "正在渲染…",
     "error_html": "预览中的脚本出错",
     "error_mermaid": "无法绘制这张图",
     "error_at_line": "{{message}}（第 {{line}} 行）",
@@ -161,7 +161,7 @@
     "render_error": "无法渲染 Mermaid 图。",
     "rendering": "渲染中…",
     "viewer_title": "图表",
-    "canvas_label": "图表画布,拖动可平移,滚动可缩放。",
+    "canvas_label": "图表画布，拖动可平移，滚动可缩放。",
     "open_viewer": "打开图表查看器",
     "close_viewer": "关闭",
     "copy_source": "复制图表源码",
@@ -178,7 +178,7 @@
     "copy_markdown": "复制为 Markdown",
     "copy_csv": "复制为 CSV",
     "copied": "已复制",
-    "resize_column": "调整“{{name}}”列宽",
+    "resize_column": "调整「{{name}}」列宽",
     "expanded_title": "表格",
     "filter_placeholder": "筛选行",
     "clear_filter": "清除筛选",
@@ -226,7 +226,7 @@
       "title": "设置语音输入",
       "description": "语音在这台电脑上转写，录音不会离开本机。先下载一个语音模型即可开始。",
       "later": "以后再说",
-      "start": "开始口述"
+      "start": "开始语音输入"
     }
   },
   "block_menu": {

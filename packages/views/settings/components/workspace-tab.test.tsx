@@ -174,7 +174,7 @@ describe("WorkspaceTab — automatic updates", () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("button", { name: "Change prefix..." }));
+    await user.click(screen.getByRole("button", { name: "Change prefix…" }));
     const dialog = await screen.findByRole("dialog", { name: "Change issue prefix" });
     const input = within(dialog).getByRole("textbox", { name: "New prefix" });
 
@@ -204,7 +204,7 @@ describe("WorkspaceTab — automatic updates", () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("button", { name: "Change prefix..." }));
+    await user.click(screen.getByRole("button", { name: "Change prefix…" }));
     const dialog = await screen.findByRole("dialog", { name: "Change issue prefix" });
     await user.type(within(dialog).getByRole("textbox", { name: "New prefix" }), "X");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -216,7 +216,7 @@ describe("WorkspaceTab — automatic updates", () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("button", { name: "Change prefix..." }));
+    await user.click(screen.getByRole("button", { name: "Change prefix…" }));
     const dialog = await screen.findByRole("dialog", { name: "Change issue prefix" });
     const input = within(dialog).getByRole("textbox", { name: "New prefix" });
     expect(within(dialog).getByRole("button", { name: "Change to TES" })).toBeDisabled();
@@ -250,6 +250,6 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(screen.getByRole("note")).toHaveTextContent("Ask Grace Hopper");
     expect(screen.queryByDisplayValue("Test Workspace")).toBeNull();
     expect(screen.getByText("Test Workspace")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Change prefix..." })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Change prefix…" })).toBeNull();
   });
 });

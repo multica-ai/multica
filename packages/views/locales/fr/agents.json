@@ -106,7 +106,6 @@
     "archive": "Archiver",
     "set_access": "Définir la portée d'accès",
     "set_access_dialog_title": "Définir la portée d'accès",
-    "set_access_applies_to": "S'applique à {{count}} agents.",
     "set_access_skipped": "{{count}} ignorés (dont vous n'êtes pas propriétaire).",
     "set_access_dialog_confirm": "Appliquer",
     "set_access_bulk_partial": "Appliqué à {{succeeded}} ; {{failed}} en échec (conservés dans leur état actuel).",
@@ -133,7 +132,9 @@
     "archive_dialog_title": "Archiver « {{name}} » ?",
     "archive_dialog_description": "L'agent ne pourra plus être assigné ni mentionné, et ses exécutions actives seront annulées. Tout l'historique sera conservé et vous pourrez le restaurer plus tard.",
     "archive_dialog_cancel": "Annuler",
-    "archive_dialog_confirm": "Archiver"
+    "archive_dialog_confirm": "Archiver",
+    "set_access_applies_to_one": "S'applique à {{count}} agents.",
+    "set_access_applies_to_other": "S'applique à {{count}} agents."
   },
   "detail": {
     "back_to_agents_full": "Retour aux agents",
@@ -365,8 +366,9 @@
       "discard_confirm": "La conversation et sa configuration sont définitivement supprimées.",
       "discard_title": "Abandonner ce brouillon ?",
       "discard_cancel": "Continuer à modifier",
-      "banner": "Vous avez {{count}} brouillon(s) inachevé(s)",
-      "pick_hint": "Choisissez-en un pour continuer."
+      "pick_hint": "Choisissez-en un pour continuer.",
+      "banner_one": "Vous avez {{count}} brouillon(s) inachevé(s)",
+      "banner_other": "Vous avez {{count}} brouillon(s) inachevé(s)"
     },
     "close": "Fermer",
     "steps": {
@@ -849,7 +851,6 @@
       "specific_people": "Personnes précises",
       "owner_only": "Propriétaire uniquement"
     },
-    "trigger_members_count": "{{count}} personnes",
     "trigger_members_empty": "Personnes précises",
     "trigger_team": "Équipe",
     "private_title": "Moi uniquement",
@@ -868,7 +869,9 @@
     "public_group": "Accès public",
     "owner_only_readonly": "Seul le propriétaire de l'agent peut modifier qui peut l'exécuter.",
     "members_empty": "Aucun membre de l'espace de travail à choisir",
-    "composio_switch_hint": "Attention — cet agent a des applications Composio activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent."
+    "composio_switch_hint": "Attention — cet agent a des applications activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent.",
+    "trigger_members_count_one": "{{count}} personnes",
+    "trigger_members_count_other": "{{count}} personnes"
   },
   "profile_card": {
     "unavailable": "Agent indisponible",

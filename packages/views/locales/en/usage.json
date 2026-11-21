@@ -12,7 +12,7 @@
   },
   "history_limit": {
     "note": "Your plan covers the last {{days}} days. Upgrade to see earlier data. Nothing is deleted.",
-    "fell_back": "Your plan covers the last {{days}} days.",
+    "fell_back": "Showing the last {{days}} days — the limit for your current plan.",
     "view_plans": "View plans",
     "locked": "Not included in your plan",
     "plan": {
@@ -30,7 +30,7 @@
     "tasks_hint": "{{failed}} failed"
   },
   "dim": {
-    "label": "Dimension",
+    "label": "Interval",
     "daily": "Daily",
     "weekly": "Weekly"
   },
@@ -60,8 +60,8 @@
     "kpi_failed_hint": "Of {{total}} runs",
     "kpi_rate_label": "Failure rate · {{days}}D",
     "kpi_agents_label": "Agents affected · {{days}}D",
-    "kpi_agents_hint": "Worst {{name}} · {{count}}",
-    "tooltip_rate": "Error rate",
+    "kpi_agents_hint": "Most: {{name}} ({{count}} failed)",
+    "tooltip_rate": "Failure rate",
     "class": {
       "auth": "Auth",
       "rate_limit": "Rate limit",
@@ -76,8 +76,8 @@
     "mix_title": "Failure mix · {{failed}}",
     "mix_label": "Failure mix",
     "codes_label": "Error codes",
-    "by_agent": "Top offenders",
-    "sort_label": "Rank offenders by",
+    "by_agent": "Errors by agent",
+    "sort_label": "Rank agents by",
     "sort_failed": "Failures",
     "sort_rate": "Rate",
     "header_agent": "Agent",

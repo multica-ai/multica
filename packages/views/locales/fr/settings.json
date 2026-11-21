@@ -16,7 +16,6 @@
       "reorder": "Réordonner {{name}}"
     },
     "reorder_hint": "Glissez les statuts au sein d’une catégorie pour réordonner les tableaux, listes et menus.",
-    "built_in_dialog": {},
     "editor": {
       "create_title": "Nouvel état",
       "edit_title": "Modifier l'état",
@@ -819,10 +818,11 @@
     },
     "delete_dialog": {
       "title": "Supprimer l'étiquette ?",
-      "description": "Supprimer « {{name}} » ? Elle sera retirée de {{count}} ressources. Cette action est irréversible.",
       "cancel": "Annuler",
       "confirm": "Supprimer l'étiquette",
-      "failed": "Impossible de supprimer l'étiquette"
+      "failed": "Impossible de supprimer l'étiquette",
+      "description_one": "Supprimer « {{name}} » ? Elle sera retirée de {{count}} ressources. Cette action est irréversible.",
+      "description_other": "Supprimer « {{name}} » ? Elle sera retirée de {{count}} ressources. Cette action est irréversible."
     }
   },
   "account": {
@@ -995,7 +995,7 @@
     "deleting": "Suppression...",
     "toast_delete_failed": "Échec de la suppression de l'espace de travail",
     "confirm_cancel": "Annuler",
-    "confirm_action": "Confirmer",
+    "confirm_action": "Quitter l'espace de travail",
     "context_hint": "Transmis à chaque agent de cet espace de travail à chaque exécution.",
     "slug_hint": "Utilisé dans toutes les URL de l'espace de travail. Il ne peut pas être modifié.",
     "copy_slug": "Copier le slug",
@@ -1152,16 +1152,16 @@
     "agent_bot_manage_tooltip_lark": "Ouvrir la page d'application de ce bot dans Lark — gérer les portées, modifier le nom affiché, demander des permissions supplémentaires.",
     "agent_bot_disconnect_tooltip": "Dissocier ce bot Lark de l'agent. Le bot cessera de recevoir les messages Lark.",
     "install_dialog_title": "Associer à Lark",
-    "install_dialog_description": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot PersonalAgent.",
+    "install_dialog_description": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot Bot.",
     "install_dialog_description_for_agent": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot pour {{agent}}.",
     "install_dialog_title_feishu": "Associer à Feishu",
     "install_dialog_title_lark": "Associer à Lark",
-    "install_dialog_description_feishu": "Ouvrez Feishu sur votre téléphone et scannez le code ci-dessous pour créer un bot PersonalAgent.",
-    "install_dialog_description_lark": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot PersonalAgent.",
+    "install_dialog_description_feishu": "Ouvrez Feishu sur votre téléphone et scannez le code ci-dessous pour créer un bot Bot.",
+    "install_dialog_description_lark": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot Bot.",
     "install_dialog_description_for_agent_feishu": "Ouvrez Feishu sur votre téléphone et scannez le code ci-dessous pour créer un bot pour {{agent}}.",
     "install_dialog_description_for_agent_lark": "Ouvrez Lark sur votre téléphone et scannez le code ci-dessous pour créer un bot pour {{agent}}.",
     "install_starting": "Préparation du QR code…",
-    "install_scan_hint": "Lark → Scanner → autorisez le nouveau PersonalAgent.",
+    "install_scan_hint": "Lark → Scanner → autorisez le nouveau Bot.",
     "install_open_link_fallback": "Ou touchez ici pour ouvrir dans Lark",
     "install_success": "Bot associé. Envoyez-lui un message dans Feishu/Lark pour vérifier la réception.",
     "install_success_toast": "Bot Lark installé",
@@ -1689,7 +1689,9 @@
     "manage_projects": "Gérer les projets accessibles",
     "manage_projects_title": "Projets accessibles à {{name}}",
     "save_projects": "Enregistrer",
-    "toast_projects_updated": "Projets mis à jour"
+    "toast_projects_updated": "Projets mis à jour",
+    "revoke_invitation_confirm": "Révoquer l'invitation",
+    "remove_member_confirm": "Retirer le membre"
   },
   "integrations": {
     "status_connected": "Connecté",
@@ -1817,7 +1819,7 @@
     "disconnect": "Déconnecter",
     "catalog_title": "Apps disponibles",
     "catalog_label": "Apps que les membres peuvent ajouter",
-    "catalog_description": "Les apps sélectionnées ont des règles par défaut vérifiées. « Toutes les apps » ajoute tout ce que Composio peut connecter ; les actions que Multica ne sait pas classer demandent toujours d'abord. Une liste personnalisée n'autorise que les apps choisies.",
+    "catalog_description": "Les apps sélectionnées ont des règles par défaut vérifiées. « Toutes les apps » ajoute tout ce que Multica peut connecter ; les actions que Multica ne sait pas classer demandent toujours d'abord. Une liste personnalisée n'autorise que les apps choisies.",
     "catalog_all": "Toutes les apps",
     "catalog_curated": "Sélection uniquement",
     "catalog_custom": "Liste personnalisée",

@@ -1135,7 +1135,7 @@ describe("CreateIssueModal", () => {
     }} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "First follow-up issue");
-    await user.type(screen.getByPlaceholderText("Add description..."), "Description to clear");
+    await user.type(screen.getByPlaceholderText("Add description…"), "Description to clear");
     await user.click(screen.getByRole("button", { name: "Create Issue" }));
 
     await waitFor(() => {
@@ -1157,7 +1157,7 @@ describe("CreateIssueModal", () => {
 
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Issue title")).toHaveValue("");
-    expect(screen.getByPlaceholderText("Add description...")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Add description…")).toHaveValue("");
     expect(mockSetManual).toHaveBeenCalledWith({
       title: "",
       description: "",
@@ -1383,7 +1383,7 @@ describe("CreateIssueModal", () => {
       expect(mockClearDraft).not.toHaveBeenCalled();
       expect(mockToastError).not.toHaveBeenCalled();
       expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Keep this draft");
-      expect(screen.getByPlaceholderText("Add description...")).toHaveValue("Keep this body");
+      expect(screen.getByPlaceholderText("Add description…")).toHaveValue("Keep this body");
       const remainingProperties = { "property-tier": "option-enterprise" };
       expect(mockSetManual).toHaveBeenCalledWith({ propertyValues: remainingProperties });
       expect(mockDraftStore.draft).toEqual({
@@ -1574,7 +1574,7 @@ describe("CreateIssueModal", () => {
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
-    expect(screen.getByPlaceholderText("Add description...")).toHaveAttribute(
+    expect(screen.getByPlaceholderText("Add description…")).toHaveAttribute(
       "data-attachments-count",
       "1",
     );
@@ -1907,7 +1907,7 @@ describe("CreateIssueModal", () => {
       />,
     );
 
-    const description = screen.getByPlaceholderText("Add description...").parentElement;
+    const description = screen.getByPlaceholderText("Add description…").parentElement;
     const sourceContext = document.querySelector<HTMLElement>('[data-slot="source-context-preview"]');
 
     expect(description).toHaveClass(
@@ -1942,7 +1942,7 @@ describe("CreateIssueModal", () => {
 
     expect(screen.getByTestId("manual-sub-issue-chip")).toHaveTextContent("Sub-issue of MUL-2534");
     await user.click(screen.getByRole("button", { name: "More options" }));
-    expect(screen.queryByText("Set parent issue...")).toBeNull();
+    expect(screen.queryByText("Set parent issue…")).toBeNull();
     expect(screen.queryByText("Remove parent")).toBeNull();
 
     contextRender.unmount();
@@ -1959,7 +1959,7 @@ describe("CreateIssueModal", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "More options" }));
-    expect(screen.getByText("Set parent issue...")).toBeInTheDocument();
+    expect(screen.getByText("Set parent issue…")).toBeInTheDocument();
   });
 
   it("submits source-context manual create through the dedicated endpoint", async () => {
@@ -2112,7 +2112,7 @@ describe("CreateIssueModal", () => {
     );
 
     await user.type(screen.getByPlaceholderText("Issue title"), "Update");
-    await user.type(screen.getByPlaceholderText("Add description..."), "Some body");
+    await user.type(screen.getByPlaceholderText("Add description…"), "Some body");
 
     mockSetManual.mockClear();
     mockSetAgent.mockClear();
@@ -2353,7 +2353,7 @@ describe("CreateIssueModal", () => {
       const user = userEvent.setup();
       renderManual();
       await user.type(screen.getByPlaceholderText("Issue title"), "Shortcut from body");
-      const description = screen.getByPlaceholderText("Add description...");
+      const description = screen.getByPlaceholderText("Add description…");
       await user.type(description, "Body text");
 
       fireEvent.keyDown(description, { key: "Enter", ctrlKey: true });
@@ -2372,7 +2372,7 @@ describe("CreateIssueModal", () => {
       renderManual();
       await user.type(screen.getByPlaceholderText("Issue title"), "Still typing");
 
-      fireEvent.keyDown(screen.getByPlaceholderText("Add description..."), { key: "Enter" });
+      fireEvent.keyDown(screen.getByPlaceholderText("Add description…"), { key: "Enter" });
       await Promise.resolve();
       expect(mockCreateIssue).not.toHaveBeenCalled();
     });
@@ -2380,7 +2380,7 @@ describe("CreateIssueModal", () => {
     it("focuses the title instead of silently doing nothing when it is empty", async () => {
       const user = userEvent.setup();
       renderManual();
-      const description = screen.getByPlaceholderText("Add description...");
+      const description = screen.getByPlaceholderText("Add description…");
       await user.type(description, "Body but no title");
 
       fireEvent.keyDown(description, { key: "Enter", metaKey: true });

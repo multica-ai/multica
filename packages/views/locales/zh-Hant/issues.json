@@ -21,7 +21,6 @@
     "load_failed": "無法載入執行過程。",
     "try_again": "重試",
     "empty": "暫無執行記錄。",
-    "show_earlier": "顯示前面的 {{count}} 個步驟",
     "full_log": "開啟完整日誌",
     "message": "AI 代理訊息",
     "error": "錯誤",
@@ -40,7 +39,8 @@
     "steer_resend": "作為新一輪傳送",
     "steer_resend_failed": "沒能作為新一輪傳送。",
     "steer_step": "{{name}} 插話",
-    "steer_step_read": "已讀取"
+    "steer_step_read": "已讀取",
+    "show_earlier_other": "顯示前面的 {{count}} 個步驟"
   },
   "working_filter_error": {
     "title": "無法載入 AI 代理正在處理的任務"
@@ -365,7 +365,6 @@
     "export": "匯出",
     "export_all": "匯出全部",
     "export_selected": "匯出已選擇（{{count}}）",
-    "export_success": "已匯出 {{count}} 個任務",
     "export_failed": "匯出任務失敗",
     "columns": {
       "section": "列",
@@ -398,7 +397,8 @@
       "sum": "總和",
       "average": "平均值",
       "count": "計數"
-    }
+    },
+    "export_success_other": "已匯出 {{count}} 個任務"
   },
   "gantt": {
     "header_issue": "任務",
@@ -665,7 +665,11 @@
     "wakeup_chip_system": "系統規則",
     "environment_stopped": "停止了環境 {{name}}",
     "environment_restarted": "重新啟動了環境 {{name}}",
-    "environment_started": "啟動了環境 {{name}}"
+    "environment_started": "啟動了環境 {{name}}",
+    "task_completed_single": "完成了執行",
+    "task_failed_single": "執行失敗",
+    "wakeup_child_done_all_single": "子任務已結束",
+    "wakeup_child_done_stage_single": "第 {{stage}} 階段的子任務已結束"
   },
   "comment": {
     "add_reaction": "新增表情回應",
@@ -1199,7 +1203,6 @@
     "ended": "歷史喚醒 · {{count}}",
     "waiting_event": "等待觸發",
     "triggered_by_wakeup": "由喚醒觸發",
-    "upcoming": "已開啟 {{count}} 條喚醒規則",
     "more": "另有 {{count}} 條",
     "toggle": "{{agent}} 的喚醒",
     "enable_error": "無法啟用喚醒，請重試。",
@@ -1336,7 +1339,6 @@
       "members": "成員",
       "agents": "AI 代理",
       "any_agent": "任意 AI 代理",
-      "events_selected": "{{count}} 個事件",
       "instruction_placeholder": "例如：檢查結果，沒有問題就繼續下一步",
       "trigger_count": "觸發次數",
       "max_wait": "最多等待",
@@ -1394,7 +1396,8 @@
       "missing_issue": "請選擇一個任務。",
       "checked": "已勾選",
       "unchecked": "未勾選",
-      "assignee_comment_hint": "{{name}} 是負責人，成員發評論時本來就會被觸發。這條規則會併入那次執行，不會多跑一次；只有想追加指令時才需要它。"
+      "assignee_comment_hint": "{{name}} 是負責人，成員發評論時本來就會被觸發。這條規則會併入那次執行，不會多跑一次；只有想追加指令時才需要它。",
+      "events_selected_other": "{{count}} 個事件"
     },
     "system": {
       "badge": "系統",
@@ -1499,7 +1502,8 @@
       "max_fires": "達到 {{count}} 次上限",
       "loop": "與其他喚醒規則互相觸發",
       "rate": "1 小時內觸發超過 12 次"
-    }
+    },
+    "upcoming_other": "已開啟 {{count}} 條喚醒規則"
   },
   "duplicates": {
     "banner_prefix": "重複於",

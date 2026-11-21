@@ -86,7 +86,7 @@ describe("IssueFilterMenu search", () => {
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
     const trigger = await screen.findByRole("menuitem", { name: field });
     fireEvent.click(trigger);
-    const search = await screen.findByPlaceholderText("Filter...");
+    const search = await screen.findByPlaceholderText("Filter…");
     await screen.findByRole("menuitemcheckbox", { name: other });
 
     await user.type(search, query);
@@ -110,7 +110,7 @@ describe("IssueFilterMenu search", () => {
 
     await user.click(search);
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByPlaceholderText("Filter...")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByPlaceholderText("Filter…")).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
   });
 

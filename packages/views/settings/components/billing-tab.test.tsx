@@ -564,7 +564,7 @@ describe("BillingTab", () => {
 
       expect(
         screen.getByText(
-          /Stripe Checkout shows the authoritative per-seat price/,
+          /Stripe shows the final per-seat price/,
         ),
       ).toBeInTheDocument();
       expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
@@ -1041,7 +1041,7 @@ describe("BillingTab", () => {
 
     renderWithI18n(<BillingTab />);
 
-    expect(screen.getByText("Checkout canceled")).toBeInTheDocument();
+    expect(screen.getByText("Checkout cancelled")).toBeInTheDocument();
     expect(navigationState.replace).toHaveBeenCalledOnce();
     expect(navigationState.replace).toHaveBeenCalledWith(
       "/acme/settings?tab=billing&source=email",
@@ -1062,7 +1062,7 @@ describe("BillingTab", () => {
 
     renderWithI18n(<BillingTab />);
 
-    expect(screen.getByText("Payment canceled")).toBeInTheDocument();
+    expect(screen.getByText("Payment cancelled")).toBeInTheDocument();
     expect(screen.getByText("Nothing was charged.")).toBeInTheDocument();
   });
 
@@ -1377,7 +1377,7 @@ describe("BillingTab", () => {
 
     await waitFor(() => expect(mocks.refetchSummary).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Updating estimate...",
+      "Updating estimate…",
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
@@ -1502,7 +1502,7 @@ describe("BillingTab", () => {
     ],
     [
       "seat_purchase_in_progress",
-      "Another seat purchase is being processed. Wait for it to finish; contact support if it remains here.",
+      "Another seat purchase is being processed. Wait a moment for it to finish, or contact support if it stays stuck.",
     ],
     [
       "plan_change_in_progress",
@@ -1576,7 +1576,7 @@ describe("BillingTab", () => {
     await user.click(screen.getByRole("button", { name: "Add 1 seat" }));
     expect(
       await screen.findByText(
-        "The purchase response could not be read. Retry this quote; the same purchase request will be reused.",
+        "We couldn't confirm the purchase response. Retry safely — you won't be charged twice.",
       ),
     ).toBeInTheDocument();
     const firstKey = mocks.purchaseSeats.mock.calls[0]?.[0].idempotencyKey;
@@ -1835,7 +1835,7 @@ describe("BillingTab", () => {
     ["incomplete_expired", "Subscription setup expired"],
     ["paused", "Subscription is paused"],
     ["unpaid", "Subscription is unpaid"],
-    ["canceled", "Subscription is canceled"],
+    ["canceled", "Subscription is cancelled"],
   ])("renders a recovery notice for %s", (status, title) => {
     mocks.entitlements.status = status;
 

@@ -55,7 +55,7 @@ describe("IssuePickerModal isSelectable", () => {
       />,
     );
 
-    fireEvent.change(screen.getByPlaceholderText("Search issues..."), { target: { value: "tap" } });
+    fireEvent.change(screen.getByPlaceholderText("Search issues…"), { target: { value: "tap" } });
     await waitFor(() => expect(searchIssues).toHaveBeenCalled());
     await screen.findByText("Tap targets too small");
     expect(screen.queryByText("Tap targets too small on iPhone")).toBeNull();

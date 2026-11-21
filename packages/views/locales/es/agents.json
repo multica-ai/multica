@@ -106,7 +106,6 @@
     "archive": "Archivar",
     "set_access": "Definir alcance de acceso",
     "set_access_dialog_title": "Definir alcance de acceso",
-    "set_access_applies_to": "Se aplica a {{count}} agentes.",
     "set_access_skipped": "{{count}} omitidos (no son de tu propiedad).",
     "set_access_dialog_confirm": "Aplicar",
     "set_access_bulk_partial": "Aplicado a {{succeeded}}; {{failed}} fallaron (se mantienen en su estado actual).",
@@ -133,7 +132,9 @@
     "archive_dialog_title": "¿Archivar \"{{name}}\"?",
     "archive_dialog_description": "El agente no podrá asignarse ni mencionarse, y sus ejecuciones activas se cancelarán. Todo el historial se conserva y podrás restaurarlo más tarde.",
     "archive_dialog_cancel": "Cancelar",
-    "archive_dialog_confirm": "Archivar"
+    "archive_dialog_confirm": "Archivar",
+    "set_access_applies_to_one": "Se aplica a {{count}} agentes.",
+    "set_access_applies_to_other": "Se aplica a {{count}} agentes."
   },
   "detail": {
     "back_to_agents_full": "Volver a agentes",
@@ -346,8 +347,9 @@
       "discard_confirm": "La conversación y su configuración se eliminan permanentemente.",
       "discard_title": "¿Descartar este borrador?",
       "discard_cancel": "Seguir editando",
-      "banner": "Tienes {{count}} borradores sin terminar",
-      "pick_hint": "Elige uno para continuar."
+      "pick_hint": "Elige uno para continuar.",
+      "banner_one": "Tienes {{count}} borradores sin terminar",
+      "banner_other": "Tienes {{count}} borradores sin terminar"
     },
     "create_agent": "Crear agente",
     "close": "Cerrar",
@@ -831,7 +833,6 @@
       "specific_people": "Personas concretas",
       "owner_only": "Solo el propietario"
     },
-    "trigger_members_count": "{{count}} personas",
     "trigger_members_empty": "Personas concretas",
     "trigger_team": "Equipo",
     "private_title": "Solo yo",
@@ -850,7 +851,9 @@
     "public_group": "Acceso público",
     "owner_only_readonly": "Solo el propietario del agente puede cambiar quién puede ejecutarlo.",
     "members_empty": "No hay miembros del espacio de trabajo para elegir",
-    "composio_switch_hint": "Ojo: este agente tiene apps de Composio activadas. Compartirlo permite que todos los que tengan acceso usen esas apps a través de este agente."
+    "composio_switch_hint": "Ojo: este agente tiene apps de activadas. Compartirlo permite que todos los que tengan acceso usen esas apps a través de este agente.",
+    "trigger_members_count_one": "{{count}} personas",
+    "trigger_members_count_other": "{{count}} personas"
   },
   "profile_card": {
     "unavailable": "Agente no disponible",

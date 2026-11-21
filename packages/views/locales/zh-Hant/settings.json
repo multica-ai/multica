@@ -16,7 +16,6 @@
       "reorder": "拖動排序 {{name}}"
     },
     "reorder_hint": "在分類內拖動排序，同步用於看板、列表和選單。",
-    "built_in_dialog": {},
     "editor": {
       "create_title": "新建狀態",
       "edit_title": "編輯狀態",
@@ -810,10 +809,10 @@
     },
     "delete_dialog": {
       "title": "刪除標籤？",
-      "description": "確認刪除 \"{{name}}\"？它將從 {{count}} 個資源中移除。此操作無法撤銷。",
       "cancel": "取消",
       "confirm": "刪除標籤",
-      "failed": "無法刪除標籤"
+      "failed": "無法刪除標籤",
+      "description_other": "確認刪除 \"{{name}}\"？它將從 {{count}} 個資源中移除。此操作無法撤銷。"
     }
   },
   "account": {
@@ -986,7 +985,7 @@
     "deleting": "刪除中...",
     "toast_delete_failed": "刪除工作區失敗",
     "confirm_cancel": "取消",
-    "confirm_action": "確認",
+    "confirm_action": "離開工作區",
     "context_hint": "每次執行都會提供給這個工作區裡的 AI 代理。",
     "slug_hint": "用於所有工作區連結，建立後不能修改。",
     "copy_slug": "複製 slug",
@@ -1143,16 +1142,16 @@
     "agent_bot_manage_tooltip_lark": "開啟 Lark 開發者控制檯中該 Bot 的應用頁面——管理權限、修改名稱、申請新的權限範圍。",
     "agent_bot_disconnect_tooltip": "將該飛書 Bot 與 AI 代理解綁，Bot 將停止接收飛書訊息。",
     "install_dialog_title": "繫結到飛書",
-    "install_dialog_description": "用飛書掃描下方二維碼，建立一個 PersonalAgent Bot。",
+    "install_dialog_description": "用飛書掃描下方二維碼，建立一個 Bot。",
     "install_dialog_description_for_agent": "用飛書掃描下方二維碼，為 {{agent}} 建立一個 Bot。",
     "install_dialog_title_feishu": "繫結到飛書",
     "install_dialog_title_lark": "繫結到 Lark",
-    "install_dialog_description_feishu": "用飛書掃描下方二維碼，建立一個 PersonalAgent Bot。",
-    "install_dialog_description_lark": "用 Lark 掃描下方二維碼，建立一個 PersonalAgent Bot。",
+    "install_dialog_description_feishu": "用飛書掃描下方二維碼，建立一個 Bot。",
+    "install_dialog_description_lark": "用 Lark 掃描下方二維碼，建立一個 Bot。",
     "install_dialog_description_for_agent_feishu": "用飛書掃描下方二維碼，為 {{agent}} 建立一個 Bot。",
     "install_dialog_description_for_agent_lark": "用 Lark 掃描下方二維碼，為 {{agent}} 建立一個 Bot。",
     "install_starting": "正在準備二維碼…",
-    "install_scan_hint": "飛書 → 掃一掃 → 授權新 PersonalAgent。",
+    "install_scan_hint": "飛書 → 掃一掃 → 授權新 Bot。",
     "install_open_link_fallback": "或點這裡直接在飛書中開啟",
     "install_success": "機器人已綁定。請在飛書/Lark 中傳送訊息以驗證接收。",
     "install_success_toast": "飛書 Bot 已安裝",
@@ -1674,7 +1673,9 @@
     "manage_projects": "管理可存取的專案",
     "manage_projects_title": "{{name}} 可以存取的專案",
     "save_projects": "儲存",
-    "toast_projects_updated": "已更新可存取的專案"
+    "toast_projects_updated": "已更新可存取的專案",
+    "revoke_invitation_confirm": "撤銷邀請",
+    "remove_member_confirm": "移除成員"
   },
   "integrations": {
     "status_connected": "已連線",
@@ -1800,7 +1801,7 @@
     "disconnect": "中斷連線",
     "catalog_title": "可用應用",
     "catalog_label": "成員可新增的應用",
-    "catalog_description": "精選應用附有審核過的預設規則。「全部應用」包含 Composio 能連線的所有應用；Multica 無法辨識的操作一律先徵得同意。「指定名單」只允許你選中的應用。",
+    "catalog_description": "精選應用附有審核過的預設規則。「全部應用」包含 Multica 能連線的所有應用；Multica 無法辨識的操作一律先徵得同意。「指定名單」只允許你選中的應用。",
     "catalog_all": "全部應用",
     "catalog_curated": "僅精選",
     "catalog_custom": "指定名單",

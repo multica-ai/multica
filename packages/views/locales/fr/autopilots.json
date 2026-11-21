@@ -515,7 +515,9 @@
       "warning": "Cette action est irréversible.",
       "cancel": "Annuler",
       "confirm": "Supprimer définitivement",
-      "deleting": "Suppression…"
+      "deleting": "Suppression…",
+      "title_multiple": "Supprimer {{count}} autopilotes ?",
+      "description_single": "« {{name}} » et son historique d'exécution seront définitivement supprimés."
     }
   },
   "wakeups": {
@@ -617,7 +619,8 @@
       "load_error": "Impossible de charger les valeurs par défaut des réveils.",
       "edit_instruction": "Modifier l’instruction par défaut",
       "view_instruction": "Voir l’instruction par défaut"
-    }
+    },
+    "banner_single": "1 réveil a été mis en pause automatiquement : {{issue}} « {{condition}} » — {{reason}}"
   },
   "intro": {
     "label": "Automatisation",

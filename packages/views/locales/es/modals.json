@@ -222,7 +222,7 @@
       "squads_group": "Squads",
       "version_missing": "El daemon de este agente no informa de la versión de la CLI. Crear con agente requiere multica CLI ≥ {{min}}. Actualiza el daemon y reconéctalo, o cambia a creación manual.",
       "version_below": "La CLI del daemon de este agente es {{current}}: Crear con agente requiere ≥ {{min}}. Actualiza el daemon o cambia a creación manual.",
-      "prompt_placeholder": "Dile al agente qué hacer, p. ej. \"que Bohan arregle la lentitud de carga de la bandeja en el proyecto Web\"",
+      "prompt_placeholder": "Dile al agente qué hacer, p. ej. \"que Mika arregle la lentitud de carga de la bandeja en el proyecto Web\"",
       "source_context_prompt_placeholder": "Dile al agente qué hacer con este contexto, p. ej. \"continúa investigando y corrige la tarea descrita aquí\"",
       "more_fields_aria": "Más campos",
       "set_project": "Establecer proyecto...",
@@ -280,8 +280,9 @@
     "trigger": "Copiar campos de la tarea principal",
     "title": "Copiar campos de la tarea principal",
     "description": "Desde {{identifier}}. Sustituye una vez los valores seleccionados; los cambios posteriores no se sincronizan.",
-    "apply": "Copiar {{count}} campos",
     "no_labels": "Sin etiquetas",
-    "manual_only": "Las etiquetas, la fecha de inicio y las propiedades personalizadas solo se aplican a la creación manual."
+    "manual_only": "Las etiquetas, la fecha de inicio y las propiedades personalizadas solo se aplican a la creación manual.",
+    "apply_one": "Copiar {{count}} campos",
+    "apply_other": "Copiar {{count}} campos"
   }
 }

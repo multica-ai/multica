@@ -13,7 +13,7 @@
     "row_menu": "项目操作",
     "rename": "重命名",
     "pin": "固定到侧边栏",
-    "unpin": "取消钉选",
+    "unpin": "取消固定",
     "delete": "删除",
     "no_matches": "没有匹配的项目",
     "scope_archived": "已归档的项目",
@@ -53,7 +53,7 @@
   },
   "lead": {
     "no_lead": "无负责人",
-    "assign_placeholder": "指派负责人...",
+    "assign_placeholder": "指派负责人…",
     "members_group": "成员",
     "agents_group": "智能体",
     "no_results": "未找到结果"
@@ -89,7 +89,7 @@
     "prop_due_date": "截止日期",
     "no_start_date": "无开始日期",
     "no_due_date": "无截止日期",
-    "description_placeholder": "添加描述...",
+    "description_placeholder": "添加描述…",
     "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每次运行。",
     "empty_issues_title": "这个项目还没有任务",
     "empty_issues_hint": "新建一个，或把已有任务移进来。",
@@ -109,7 +109,7 @@
     "repos_group": "仓库",
     "repos_add": "添加仓库",
     "repos_empty": "还没有仓库。",
-    "repos_input_placeholder": "搜索或粘贴 GitHub 链接...",
+    "repos_input_placeholder": "搜索或粘贴 GitHub 链接…",
     "repos_add_url": "添加 {{repo}}",
     "repos_search_empty": "没有匹配的仓库。",
     "attached_badge": "已添加",
@@ -124,7 +124,7 @@
     "local_unknown_computer": "另一台电脑",
     "local_offline": "离线",
     "local_slot_description": "在本机运行时直接使用你的文件夹，不再检出仓库。",
-    "local_pick": "选择文件夹...",
+    "local_pick": "选择文件夹…",
     "local_daemon_offline_hint": "启动本地守护进程后才能选择文件夹。",
     "chat_hint_prefix": "智能体将直接在以下目录中工作：",
     "chat_hint_worktree_prefix": "智能体将在以下仓库的独立 worktree 中工作：",
@@ -140,7 +140,7 @@
     "mode_in_place_title": "直接修改",
     "mode_in_place_description": "一次一个运行，改动直接写进这个文件夹。",
     "mode_worktree_title": "并行运行",
-    "mode_worktree_description": "多个运行同时进行，不改动你的工作区。每次运行交回一个 agent/… 分支，由你审查后合并。",
+    "mode_worktree_description": "多个运行同时进行，不改动你的工作副本。每次运行交回一个 agent/… 分支，由你审查后合并。",
     "mode_worktree_needs_git": "这个文件夹不是 git 仓库，无法并行运行。",
     "mode_worktree_needs_server_upgrade": "Multica 服务端版本过旧，并行运行会退回到直接修改这个文件夹。请先升级服务端。",
     "mode_cancel": "取消",
@@ -152,7 +152,7 @@
     "mode_badge_in_place": "直接修改",
     "ref_label": "起始分支",
     "ref_placeholder": "main",
-    "ref_hint": "任务从这条分支开始，PR 也提到这里。留空则使用默认分支。",
+    "ref_hint": "智能体运行会从此分支检出，并将 PR 提交到此分支。留空则使用默认分支。",
     "ref_error_too_long": "最多 255 个字符。",
     "ref_error_characters": "分支名不能包含空格或 ~ ^ : ? * [ \\",
     "ref_error_format": "不是有效的分支名。",
@@ -164,7 +164,7 @@
     "toast_ref_update_failed": "分支更新失败",
     "ref_error_commit": "这是 commit，不是分支。需要指定某个版本时，请用 multica repo checkout --ref。",
     "ref_default_label": "默认分支",
-    "ref_running_note": "进行中的任务不受影响。"
+    "ref_running_note": "进行中的运行不受影响。"
   },
   "delete_dialog": {
     "offline_error": "当前处于离线状态，请联网后重试删除。",
@@ -178,7 +178,7 @@
   "picker": {
     "no_project": "无项目",
     "empty": "还没有项目",
-    "search_placeholder": "搜索项目...",
+    "search_placeholder": "搜索项目…",
     "clear_aria": "清除项目"
   },
   "chip": {
@@ -203,8 +203,8 @@
         "description": "写一次项目描述、关联一次仓库，项目里每个任务的运行都会带上。"
       },
       "sidebar": {
-        "title": "钉在侧栏，随手进入",
-        "description": "常用项目固定在侧栏，展开就能看到里面的任务。"
+        "title": "固定到侧边栏，随手进入",
+        "description": "常用项目固定在侧边栏，展开就能看到里面的任务。"
       }
     },
     "art": {
@@ -224,19 +224,19 @@
   "access": {
     "agent_notice": "智能体的权限跟随其所有者。",
     "label": "访问权限",
-    "title": "{{title}}的访问权限",
+    "title": "{{title}} 的访问权限",
     "description": "控制谁能查看项目及其中的任务、评论和附件。",
     "workspace": "整个工作区",
     "private": "仅项目成员",
     "members_count": "项目成员 · {{count}}",
     "add": "添加工作区成员",
-    "search": "搜索姓名或邮箱...",
+    "search": "搜索姓名或邮箱…",
     "no_members": "没有匹配的成员",
     "no_selected": "暂无项目成员",
-    "members_only_notice": "只有名单里的成员可以访问，工作区 owner 和 admin 也需要加入名单。",
+    "members_only_notice": "只有名单里的成员可以访问，工作区所有者和管理员也需要加入名单。",
     "manager": "管理访问权限",
     "you": "你",
-    "remove": "移除{{name}}",
+    "remove": "移除 {{name}}",
     "failed": "无法保存访问权限。",
     "load_failed": "无法加载项目成员。",
     "publish_title": "将项目设为整个工作区可见？",
@@ -261,6 +261,6 @@
     "toast_restored": "已恢复「{{name}}」",
     "toast_completed": "「{{name}}」已完成",
     "notice": "该项目已归档：不会出现在项目列表和选择器中，也不能新建任务；已有任务仍可查看和编辑。",
-    "prop_label": "归档"
+    "prop_label": "归档于"
   }
 }

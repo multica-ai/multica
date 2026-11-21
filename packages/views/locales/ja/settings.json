@@ -16,7 +16,6 @@
       "reorder": "{{name}} を並べ替え"
     },
     "reorder_hint": "カテゴリ内でドラッグすると、ボード・一覧・メニューの順序が変わります。",
-    "built_in_dialog": {},
     "editor": {
       "create_title": "新しいステータス",
       "edit_title": "ステータスを編集",
@@ -810,10 +809,10 @@
     },
     "delete_dialog": {
       "title": "ラベルを削除しますか？",
-      "description": "「{{name}}」を削除しますか？{{count}} 件のリソースから削除されます。この操作は元に戻せません。",
       "cancel": "キャンセル",
       "confirm": "ラベルを削除",
-      "failed": "ラベルを削除できませんでした"
+      "failed": "ラベルを削除できませんでした",
+      "description_other": "「{{name}}」を削除しますか？{{count}} 件のリソースから削除されます。この操作は元に戻せません。"
     }
   },
   "account": {
@@ -983,7 +982,7 @@
     "deleting": "削除中...",
     "toast_delete_failed": "ワークスペースを削除できませんでした",
     "confirm_cancel": "キャンセル",
-    "confirm_action": "確認",
+    "confirm_action": "ワークスペースを退出",
     "change_logo_aria": "ワークスペースのロゴを変更",
     "click_logo_hint": "ロゴをクリックして画像をアップロードするか、文字アイコンを作成します",
     "toast_logo_failed": "ワークスペースのロゴをアップロードできませんでした",
@@ -1143,16 +1142,16 @@
     "agent_bot_manage_tooltip_lark": "Lark のデベロッパーコンソールでこのボットのアプリページを開き、スコープ管理 / 名称変更 / 追加権限の申請ができます。",
     "agent_bot_disconnect_tooltip": "この Lark ボットとエージェントの連携を解除します。ボットは Lark メッセージの受信を停止します。",
     "install_dialog_title": "Lark に接続",
-    "install_dialog_description": "Lark を開き、以下のコードをスキャンして PersonalAgent ボットを作成してください。",
+    "install_dialog_description": "Lark を開き、以下のコードをスキャンして Bot ボットを作成してください。",
     "install_dialog_description_for_agent": "Lark を開き、以下のコードをスキャンして {{agent}} 用のボットを作成してください。",
     "install_dialog_title_feishu": "Feishu に接続",
     "install_dialog_title_lark": "Lark に接続",
-    "install_dialog_description_feishu": "Feishu を開き、以下のコードをスキャンして PersonalAgent ボットを作成してください。",
-    "install_dialog_description_lark": "Lark を開き、以下のコードをスキャンして PersonalAgent ボットを作成してください。",
+    "install_dialog_description_feishu": "Feishu を開き、以下のコードをスキャンして Bot ボットを作成してください。",
+    "install_dialog_description_lark": "Lark を開き、以下のコードをスキャンして Bot ボットを作成してください。",
     "install_dialog_description_for_agent_feishu": "Feishu を開き、以下のコードをスキャンして {{agent}} 用のボットを作成してください。",
     "install_dialog_description_for_agent_lark": "Lark を開き、以下のコードをスキャンして {{agent}} 用のボットを作成してください。",
     "install_starting": "QR コードを準備しています…",
-    "install_scan_hint": "Lark → スキャン → 新しい PersonalAgent を承認してください。",
+    "install_scan_hint": "Lark → スキャン → 新しい Bot を承認してください。",
     "install_open_link_fallback": "ここをタップして Lark で開く",
     "install_success": "ボットを連携しました。Feishu/Lark でメッセージを送り、受信を確認してください。",
     "install_success_toast": "Lark ボットを設置しました",
@@ -1674,7 +1673,9 @@
     "manage_projects": "アクセスできるプロジェクトを管理",
     "manage_projects_title": "{{name}} がアクセスできるプロジェクト",
     "save_projects": "保存",
-    "toast_projects_updated": "プロジェクトを更新しました"
+    "toast_projects_updated": "プロジェクトを更新しました",
+    "revoke_invitation_confirm": "招待を取り消す",
+    "remove_member_confirm": "メンバーを削除"
   },
   "integrations": {
     "status_connected": "接続済み",
@@ -1800,7 +1801,7 @@
     "disconnect": "接続を解除",
     "catalog_title": "利用できるアプリ",
     "catalog_label": "メンバーが追加できるアプリ",
-    "catalog_description": "厳選アプリにはレビュー済みの既定ルールがあります。「すべてのアプリ」は Composio で接続できるすべてを含み、Multica が分類できない操作は必ず確認を求めます。カスタムリストでは選んだアプリだけを許可します。",
+    "catalog_description": "厳選アプリにはレビュー済みの既定ルールがあります。「すべてのアプリ」は Multica で接続できるすべてを含み、Multica が分類できない操作は必ず確認を求めます。カスタムリストでは選んだアプリだけを許可します。",
     "catalog_all": "すべてのアプリ",
     "catalog_curated": "厳選のみ",
     "catalog_custom": "カスタムリスト",

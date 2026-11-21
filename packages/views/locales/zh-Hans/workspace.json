@@ -5,7 +5,7 @@
     "url_label": "工作区 URL",
     "url_placeholder": "my-workspace",
     "submit": "创建工作区",
-    "submitting": "创建中...",
+    "submitting": "创建中…",
     "errors": {
       "slug_format": "只能包含小写字母、数字和连字符",
       "slug_taken": "该工作区 URL 已被占用。",

@@ -120,7 +120,7 @@ describe("IssueViewHeader copy link", () => {
     },
     {
       kind: "my",
-      title: "My Issues",
+      title: "My issues",
       pathname: "/acme/my-issues",
       search: "",
       expected: "/acme/my-issues",

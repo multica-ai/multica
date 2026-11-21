@@ -165,7 +165,7 @@ describe("AppRail global actions", () => {
   it("carries New issue and search", () => {
     renderRail();
     expect(screen.getByRole("button", { name: /^new issue$/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Search..." })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Search…" })).toBeTruthy();
   });
 });
 

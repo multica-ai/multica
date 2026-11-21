@@ -64,7 +64,7 @@ function mountPicker() {
 }
 
 async function select(issue = target) {
-  fireEvent.change(await screen.findByPlaceholderText("Search issues..."), {
+  fireEvent.change(await screen.findByPlaceholderText("Search issues…"), {
     target: { value: issue.title },
   });
   fireEvent.click(await screen.findByText(issue.title));

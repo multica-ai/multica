@@ -77,7 +77,7 @@ function CreateDialogHarness({ onUpdate }: { onUpdate: (u: object) => void }) {
 // project's title, so a name query would keep matching the trigger.
 function expectClosed() {
   return waitFor(() => {
-    expect(screen.queryByPlaceholderText("Search projects...")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search projects…")).not.toBeInTheDocument();
   });
 }
 
@@ -154,7 +154,7 @@ describe("ProjectPicker search", () => {
     render(withI18n(<ProjectPicker projectId={null} onUpdate={vi.fn()} triggerRender={<PillButton />} />));
 
     await user.click(screen.getByRole("button", { name: /no project/i }));
-    const search = await screen.findByPlaceholderText("Search projects...");
+    const search = await screen.findByPlaceholderText("Search projects…");
 
     await user.type(search, "mobile");
     expect(screen.getByRole("button", { name: /mobile web/i })).toBeInTheDocument();
@@ -167,7 +167,7 @@ describe("ProjectPicker search", () => {
     render(withI18n(<ProjectPicker projectId={null} onUpdate={vi.fn()} triggerRender={<PillButton />} />));
 
     await user.click(screen.getByRole("button", { name: /no project/i }));
-    const search = await screen.findByPlaceholderText("Search projects...");
+    const search = await screen.findByPlaceholderText("Search projects…");
 
     // "数据透明化" → full pinyin "shujutouminghua"; a prefix must match.
     await user.type(search, "shuju");
@@ -181,7 +181,7 @@ describe("ProjectPicker search", () => {
     render(withI18n(<ProjectPicker projectId={null} onUpdate={vi.fn()} triggerRender={<PillButton />} />));
 
     await user.click(screen.getByRole("button", { name: /no project/i }));
-    const search = await screen.findByPlaceholderText("Search projects...");
+    const search = await screen.findByPlaceholderText("Search projects…");
 
     await user.type(search, "zzzznomatch");
     expect(screen.getByText("No results")).toBeInTheDocument();
@@ -200,7 +200,7 @@ describe("ProjectPicker search", () => {
     render(<CreateDialogHarness onUpdate={onUpdate} />);
 
     await user.click(screen.getByRole("button", { name: /no project/i }));
-    await user.type(await screen.findByPlaceholderText("Search projects..."), "mobile");
+    await user.type(await screen.findByPlaceholderText("Search projects…"), "mobile");
     await user.keyboard("{Enter}");
 
     expect(onUpdate).toHaveBeenCalledWith({ project_id: "project-2" });
@@ -216,7 +216,7 @@ describe("ProjectPicker search", () => {
     render(<CreateDialogHarness onUpdate={onUpdate} />);
 
     await user.click(screen.getByRole("button", { name: /no project/i }));
-    await user.type(await screen.findByPlaceholderText("Search projects..."), "zzzznomatch");
+    await user.type(await screen.findByPlaceholderText("Search projects…"), "zzzznomatch");
     await user.keyboard("{Enter}");
 
     expect(onUpdate).not.toHaveBeenCalled();
@@ -233,7 +233,7 @@ describe("ProjectPicker search", () => {
     render(<CreateDialogHarness onUpdate={onUpdate} />);
 
     await user.click(screen.getByRole("button", { name: /no project/i }));
-    await user.type(await screen.findByPlaceholderText("Search projects..."), "mobile");
+    await user.type(await screen.findByPlaceholderText("Search projects…"), "mobile");
     await user.keyboard("{ArrowUp}{Enter}");
 
     expect(onUpdate).toHaveBeenCalledWith({ project_id: null });
@@ -249,13 +249,13 @@ describe("ProjectPicker search", () => {
     render(<CreateDialogHarness onUpdate={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: /no project/i }));
-    await user.type(await screen.findByPlaceholderText("Search projects..."), "mobile");
+    await user.type(await screen.findByPlaceholderText("Search projects…"), "mobile");
     await user.click(await screen.findByRole("button", { name: /mobile web/i }));
     await expectClosed();
 
     // Reopen: the input must be empty and the full list restored.
     await user.click(screen.getByRole("button", { name: /mobile web/i }));
-    const reopened = await screen.findByPlaceholderText("Search projects...");
+    const reopened = await screen.findByPlaceholderText("Search projects…");
     expect(reopened).toHaveValue("");
     expect(screen.getByRole("button", { name: /launch command center/i })).toBeInTheDocument();
     expect(screen.getByText("数据透明化")).toBeInTheDocument();
