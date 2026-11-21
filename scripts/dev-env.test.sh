@@ -185,6 +185,7 @@ assert_component_state() {
     mkdir -p "$STATE_DIR"
     BACKEND_PORT=18080
     FRONTEND_PORT=13000
+    COLLAB_PORT=14000
     TEST_LISTENER=$listener
     TEST_COMMIT=$reported_commit
     TEST_PROBE_OK=$probe_ok
@@ -315,6 +316,140 @@ assert_start_api() {
   )
 }
 
+# The same current api as above, with `components` selected and collab's
+# listener running or not. `recorded` is the collab URL the api was launched
+# with ("-" for an api started before collab existed).
+assert_start_api_collab() {
+  local case_name=$1 components=$2 collab_running=$3 recorded=$4 expected_output=$5
+  local expected_events=$6 expected_recorded=$7
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-api-collab-$case_name"
+    LOG_DIR="$STATE_DIR"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    COLLAB_PORT=14000
+    COMPONENTS="$components"
+    ENV_FILE=.env.example
+    COLLAB_SECRET=test-secret
+    local events="$STATE_DIR/events"
+    : > "$events"
+    printf '100\n' > "$(pid_file api)"
+    printf '100 fp-now\n' > "$(api_build_file)"
+    [ "$recorded" = - ] || printf '%s\n' "$recorded" > "$(api_collab_file)"
+    TEST_COLLAB_RUNNING=$collab_running
+
+    eval "original_$(declare -f listener_belongs_to_component)"
+    listener_belongs_to_component() {
+      if [ "$1" = collab ]; then [ "$TEST_COLLAB_RUNNING" = 1 ]; else original_listener_belongs_to_component "$@"; fi
+    }
+    component_pid() { cat "$(pid_file api)"; }
+    port_listener_pid() { printf '200'; }
+    port_free() { :; }
+    process_group_id() { [ "$1" = 200 ] && component_pid api || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    checkout_commit() { printf 'bbb2222'; }
+    api_source_fingerprint() { printf 'fp-now'; }
+    health_json() {
+      printf '{"pid":200,"commit":"bbb2222","started_at":"2026-01-01T00:00:00Z"}'
+    }
+    now_epoch() { printf '1000'; }
+    sleep() { :; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; }
+    launch_detached() {
+      local arg wiring=""
+      for arg in "$@"; do
+        case "$arg" in COLLAB_INTERNAL_URL=*) wiring="$arg" ;; esac
+      done
+      printf 'launch %s %s\n' "$1" "$wiring" >> "$events"
+      printf '101\n' > "$(pid_file api)"
+    }
+
+    local status=0
+    ( start_api ) > "$out" 2>&1 || status=$?
+    [ "$status" = 0 ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_api exited $status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+    [ "$(cat "$(api_collab_file)" 2>/dev/null)" = "$expected_recorded" ] \
+      || fail "$case_name recorded collab URL = '$(cat "$(api_collab_file)" 2>/dev/null)', want '$expected_recorded'"
+  )
+}
+
+# The generated secret is created once, private, and reused; one set in the env
+# file wins over it.
+assert_collab_secret() (
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  STATE_DIR="$tmp_dir/collab-secret"
+  mkdir -p "$STATE_DIR"
+  unset COLLAB_SECRET
+  local first second
+  first="$(collab_secret)"
+  second="$(collab_secret)"
+  [ "${#first}" = 64 ] || fail "generated collab secret has ${#first} characters, want 64"
+  [ "$first" = "$second" ] || fail "collab secret changed between calls"
+  case "$(ls -l "$STATE_DIR/collab.secret")" in
+    -rw-------*) ;;
+    *) fail "collab secret file is readable by others: $(ls -l "$STATE_DIR/collab.secret")" ;;
+  esac
+  [ "$(COLLAB_SECRET=from-env-file collab_secret)" = from-env-file ] \
+    || fail "a COLLAB_SECRET from the env file did not win"
+)
+
+# Launcher 100 owns listener 200; listener 999 is someone else's ("" for a free
+# port). /health answers when `healthy` is 1.
+assert_start_collab() {
+  local case_name=$1 listener=$2 healthy=$3 expected_status=$4
+  local expected_output=$5 expected_events=$6
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-collab-$case_name"
+    LOG_DIR="$STATE_DIR"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    COLLAB_PORT=14000
+    ENV_FILE=.env.example
+    COLLAB_SECRET=test-secret
+    local events="$STATE_DIR/events"
+    printf '%s' "$listener" > "$STATE_DIR/listener"
+    printf '%s' "$healthy" > "$STATE_DIR/healthy"
+    : > "$events"
+
+    component_pid() { printf '100'; }
+    port_listener_pid() { cat "$STATE_DIR/listener"; }
+    port_free() { [ -z "$(port_listener_pid)" ]; }
+    process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    describe_port_owner() { printf 'pid %s' "$(port_listener_pid "$1")"; }
+    collab_healthy() { [ "$(cat "$STATE_DIR/healthy")" = 1 ]; }
+    collab_cdn_domain() { printf 'localhost'; }
+    sleep() { :; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; : > "$STATE_DIR/listener"; }
+    launch_detached() {
+      local arg wiring=""
+      for arg in "$@"; do
+        case "$arg" in COLLAB_PORT=*|MULTICA_API_URL=*) wiring="$wiring $arg" ;; esac
+      done
+      printf 'launch %s%s\n' "$1" "$wiring" >> "$events"
+      printf '100\n' > "$(pid_file collab)"
+      printf '200' > "$STATE_DIR/listener"
+      printf '1' > "$STATE_DIR/healthy"
+    }
+
+    local status=0
+    ( start_collab ) > "$out" 2>&1 || status=$?
+    [ "$status" = "$expected_status" ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_collab exited $status, want $expected_status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+  )
+}
+
 # The fingerprint follows server/'s uncommitted state in a real repository:
 # tracked edits, staged edits and untracked files count, ignored files and
 # changes outside server/ do not, and undoing an edit restores it.
@@ -428,7 +563,9 @@ node -e '
   if (payload.backend_port !== 18981) throw new Error("backend_port = " + payload.backend_port);
   if (payload.desktop_cdp_port !== null) throw new Error("desktop_cdp_port = " + payload.desktop_cdp_port);
   if (payload.workspace_slug !== "dev") throw new Error("workspace_slug = " + payload.workspace_slug);
-  for (const key of ["api", "web", "daemon", "desktop"]) {
+  // Manifests written before collab existed derive its port from the offset.
+  if (payload.collab_port !== 14901) throw new Error("collab_port = " + payload.collab_port);
+  for (const key of ["api", "collab", "web", "daemon", "desktop"]) {
     if (!payload.components[key]) throw new Error("missing component " + key);
     if (payload.components[key].state !== "stopped") {
       throw new Error(key + " state = " + payload.components[key].state);
@@ -544,6 +681,38 @@ assert_start_api unchanged bbb2222 "100 fp-now" "api already running on :18080 (
 assert_start_api dirty bbb2222 "100 fp-old" "was compiled before server/ changed (uncommitted changes differ); restarting it" $'stop api\nlaunch api' "101 fp-now"
 assert_start_api unrecorded bbb2222 - "has no recorded source fingerprint" $'stop api\nlaunch api' "101 fp-now"
 assert_start_api old-commit aaa1111 "100 fp-now" "is ours but not commit bbb2222; restarting it" $'stop api\nlaunch api' "101 fp-now"
+
+# The api is wired to collab only when collab is selected or already running,
+# so a doc page never waits on a collab that is not there, and `make up`
+# restarts an api whose wiring no longer matches.
+assert_start_api_collab selected-new "api collab web" 0 - \
+  "is not connected to collab on :14000; restarting it" \
+  $'stop api\nlaunch api COLLAB_INTERNAL_URL=http://localhost:14000' "http://localhost:14000"
+assert_start_api_collab selected-wired "api collab web" 0 "http://localhost:14000" \
+  "api already running on :18080" "" "http://localhost:14000"
+assert_start_api_collab running-unselected "api web" 1 "" \
+  "is not connected to collab on :14000; restarting it" \
+  $'stop api\nlaunch api COLLAB_INTERNAL_URL=http://localhost:14000' "http://localhost:14000"
+assert_start_api_collab gone "api web" 0 "http://localhost:14000" \
+  "points at a collab service that is not running; restarting it" \
+  $'stop api\nlaunch api COLLAB_INTERNAL_URL=' ""
+assert_start_api_collab never-wired "api web" 0 - \
+  "api already running on :18080" "" ""
+
+stopped_in="$(bash -c 'source "$1"; stop_order api collab web daemon' _ "$root_dir/scripts/dev-env.sh")"
+[ "$stopped_in" = "collab api web daemon " ] \
+  || fail "down must stop collab before the api it saves docs through, got: $stopped_in"
+
+assert_collab_secret
+assert_start_collab running 200 1 0 "collab already running on :14000 (pid 200)" ""
+assert_start_collab hung 200 0 0 "is ours but not answering /health; restarting it" \
+  $'stop collab\nlaunch collab COLLAB_PORT=14000 MULTICA_API_URL=http://localhost:18080'
+assert_start_collab fresh "" 1 0 "collab serving ws://localhost:14000 (pid 200)" \
+  $'launch collab COLLAB_PORT=14000 MULTICA_API_URL=http://localhost:18080'
+assert_start_collab foreign 999 1 1 "Port 14000 is busy: pid 999" ""
+assert_component_state collab-running collab 200 - 1 running "pid 200"
+assert_component_state collab-busy collab 200 - 0 busy "not answering /health"
+assert_component_state collab-foreign collab 999 - 1 mismatch "listener pid 999 is not owned"
 
 # ---------------------------------------------------------------------------
 # Daemon: `daemon start` is a no-op while one is running, so `make up` has to
