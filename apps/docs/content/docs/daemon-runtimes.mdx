@@ -98,9 +98,9 @@ The registered command is `multica daemon start --foreground` for that profile, 
 
 ### Updating the CLI from Runtimes [#updating-cli]
 
-When a newer release is available for a standalone CLI daemon, runtime owners and workspace admins can click **Update** on the **Runtimes** page. If the machine is running tasks and the daemon supports queued updates, the daemon holds the update without interrupting active work and shows **Updates when idle** with the running task count and a **Cancel** button across every runtime on that machine.
+When a newer release is available for a standalone CLI daemon, runtime owners and workspace admins can click **Update** on the **Runtimes** page. If the machine is running tasks and the daemon supports queued updates, the update is held without interrupting active work, and the **Runtimes** page shows **Updates when idle** with the running task count and a **Cancel** button across every runtime on that machine.
 
-Installation starts automatically once the last running task finishes. Only one unfinished update is allowed per machine; a queued update expires after 24 hours if the machine never becomes idle, and can be cancelled until installation begins. Daemons on older CLI versions without queue support refuse remote updates while busy until the machine is idle. Daemons launched by Multica Desktop are managed by Desktop and upgraded with the Desktop app instead.
+Installation starts automatically once the last running task finishes. Only one unfinished update is allowed per machine; a queued update expires after 24 hours if the machine never becomes idle, and can be cancelled until installation begins. Daemons on older CLI versions without queue support refuse remote updates while busy; retry once the machine is idle. Daemons launched by Multica Desktop are managed by Desktop and upgraded with the Desktop app instead.
 
 ## Dispatch and online status
 
