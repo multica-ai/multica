@@ -3,11 +3,40 @@ import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { docCommentsOptions, docDetailOptions } from "@multica/core/docs";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useWS } from "@multica/core/realtime";
+import { useNavigation } from "../../navigation";
 import { liveEditingOff, prefetchDocLive } from "./doc-live-session";
 
 /** A pointer passing over a list is not heading for every row in it. */
 const HOVER_INTENT_MS = 80;
+
+let docPageWarmed = false;
+
+/**
+ * Prefetches one doc's route once per session when the browser is idle. On
+ * web the doc page's code is shared by every doc but only requested after a
+ * doc's route payload arrives, which put a whole round trip in front of the
+ * first doc opened; warming it here leaves each open with just its payload.
+ * Desktop bundles its routes and has no route prefetch, so this is a no-op.
+ */
+export function useWarmDocPage(docId: string | undefined) {
+  const { prefetch } = useNavigation();
+  const p = useWorkspacePaths();
+  useEffect(() => {
+    if (!docId || !prefetch || docPageWarmed) return;
+    const warm = () => {
+      docPageWarmed = true;
+      prefetch(p.docDetail(docId));
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(warm, { timeout: 3000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const timer = window.setTimeout(warm, 1500);
+    return () => window.clearTimeout(timer);
+  }, [docId, prefetch, p]);
+}
 
 /**
  * Hover and focus handlers for a link to a doc: they fetch what the doc page

@@ -9,7 +9,7 @@ import { PageHeader } from "../../layout/page-header";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
 import { DocsGate } from "./docs-gate";
-import { usePrefetchDoc } from "./use-prefetch-doc";
+import { usePrefetchDoc, useWarmDocPage } from "./use-prefetch-doc";
 export function DocsHomePage({
   folderId = null,
 }: {
@@ -31,6 +31,7 @@ function DocsHomePageContent({ folderId }: { folderId: string | null }) {
   const folders =
     tree.data?.folders.filter((f) => f.parentId === folderId) ?? [];
   const docs = tree.data?.docs.filter((d) => d.folderId === folderId) ?? [];
+  useWarmDocPage(docs[0]?.id ?? tree.data?.docs[0]?.id);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader>
