@@ -20,9 +20,11 @@ import (
 //   GET /api/dashboard/failures/daily     per-(date, failure_reason) counts
 //   GET /api/dashboard/failures/by-agent  per-(agent, failure_reason) counts
 //
-// All of them accept ?days=N (defaults to 30, capped at 365) and an optional
-// ?project_id=<uuid> to scope the rollup to a single project. With no
-// project_id the data spans the whole workspace.
+// All of them accept ?days=N (defaults to 30, at most 371 so a 365-day weekly
+// chart can round up to whole weeks) and an optional ?project_id=<uuid> to
+// scope the rollup to a single project. With no project_id the data spans the
+// whole workspace. The workspace's plan may cut the window shorter; see
+// dashboard_history.go.
 //
 // Cutoff convention: the three date-bucketed series use parseSinceParamInTZ
 // (N+1 calendar days, the surplus day trimmed client-side with `-(days-1)`),
@@ -203,7 +205,8 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 0)
+	since := window.since
 
 	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID)
 	if err != nil {
@@ -303,13 +306,18 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	// the chart directly above it, so at 1D a single agent's row could read
 	// higher than the workspace total (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
+	since := window.since
 
 	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage by agent")
 		return
 	}
+	// The one dashboard read recorded per page load or range change: this
+	// endpoint is fetched once per (range, project) and receives the range
+	// the viewer picked, where the date series receive it rounded to weeks.
+	h.recordDashboardRangeView(r.Context(), parseUUID(workspaceID), window)
 	writeJSON(w, http.StatusOK, foldRestrictedUsageByAgent(resp, restricted))
 }
 
@@ -427,7 +435,8 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	// Tasks KPI tiles, so the N+1 cutoff put those two tiles on a wider
 	// window than the Cost / Tokens tiles beside them (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
+	since := window.since
 
 	rows, err := h.Queries.ListDashboardAgentRunTime(r.Context(), db.ListDashboardAgentRunTimeParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -510,7 +519,8 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	// Slice day buckets in the viewer's tz so the Time / Tasks charts cut
 	// their calendar day identically to the Cost / Tokens charts.
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 0)
+	since := window.since
 
 	rows, err := h.Queries.ListDashboardRunTimeDaily(r.Context(), db.ListDashboardRunTimeDailyParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -578,7 +588,8 @@ func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Reque
 	// Same viewer-tz day boundary as every other daily series so the Errors
 	// tab lines up with Cost / Tokens / Time / Tasks.
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 0)
+	since := window.since
 
 	rows, err := h.Queries.ListDashboardFailuresDaily(r.Context(), db.ListDashboardFailuresDailyParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -637,7 +648,8 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 	// covered one extra day, so at days=1 the card could report yesterday's
 	// failures next to a chart showing none.
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
+	since := window.since
 
 	rows, err := h.Queries.ListDashboardFailuresByAgent(r.Context(), db.ListDashboardFailuresByAgentParams{
 		WorkspaceID: parseUUID(workspaceID),

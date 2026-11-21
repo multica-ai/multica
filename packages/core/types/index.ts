@@ -415,6 +415,9 @@ export type {
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
+  WorkspacePlanLimitPlan,
+  WorkspacePlanLimit,
+  WorkspacePlanLimits,
   WorkspaceAutopilotAddonSummary,
   WorkspaceAutopilotAddonPrice,
   CreateWorkspaceAutopilotAddonCheckoutRequest,
@@ -439,6 +442,7 @@ export type {
   PaidFeature,
   WorkspaceFeatureState,
   WorkspaceFeatures,
+  WorkspaceFeatureLimits,
   MemberLimit,
   StorageUsage,
 } from "./billing";

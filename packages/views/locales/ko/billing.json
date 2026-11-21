@@ -148,7 +148,9 @@
       "addon_none": "이번 달 추가 구매 없음",
       "addon_purchased": "이번 달 {{runs}}회 추가 구매함",
       "addon_buy": "추가 구매 · {{price}} / {{runs}}회",
-      "addon_buy_fallback": "실행 횟수 추가 구매"
+      "addon_buy_fallback": "실행 횟수 추가 구매",
+      "dashboard_history": "분석 조회 기간",
+      "dashboard_history_days": "최근 {{days}}일"
     },
     "seats": {
       "title": "좌석",

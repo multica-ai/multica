@@ -148,7 +148,9 @@
       "addon_none": "本月未加購",
       "addon_purchased": "本月已加購 {{runs}} 次",
       "addon_buy": "加購 · {{price}} / {{runs}} 次",
-      "addon_buy_fallback": "加購執行次數"
+      "addon_buy_fallback": "加購執行次數",
+      "dashboard_history": "統計查看範圍",
+      "dashboard_history_days": "最近 {{days}} 天"
     },
     "seats": {
       "title": "席位",

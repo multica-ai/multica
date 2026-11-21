@@ -810,6 +810,24 @@ type DaemonToken struct {
 	OwnerID     pgtype.UUID        `json:"owner_id"`
 }
 
+type DashboardRangeView struct {
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	Day                    pgtype.Date        `json:"day"`
+	RequestedDays          int32              `json:"requested_days"`
+	ReturnedDays           int32              `json:"returned_days"`
+	ViewCount              int64              `json:"view_count"`
+	ObservedOverLimitCount int64              `json:"observed_over_limit_count"`
+	DegradedOverLimitCount int64              `json:"degraded_over_limit_count"`
+	TruncatedCount         int64              `json:"truncated_count"`
+	LastLimitDays          pgtype.Int4        `json:"last_limit_days"`
+	LastAction             string             `json:"last_action"`
+	LastReason             string             `json:"last_reason"`
+	FirstViewedAt          pgtype.Timestamptz `json:"first_viewed_at"`
+	LastViewedAt           pgtype.Timestamptz `json:"last_viewed_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DingtalkBotIdentity struct {
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	InstallationID   pgtype.UUID        `json:"installation_id"`

@@ -149,7 +149,9 @@
       "addon_none": "Ninguna este mes",
       "addon_purchased": "{{runs}} compradas este mes",
       "addon_buy": "Comprar · {{price}} / {{runs}} ejecuciones",
-      "addon_buy_fallback": "Comprar más ejecuciones"
+      "addon_buy_fallback": "Comprar más ejecuciones",
+      "dashboard_history": "Historial de analítica",
+      "dashboard_history_days": "Últimos {{days}} días"
     },
     "seats": {
       "title": "Puestos",

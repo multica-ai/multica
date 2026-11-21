@@ -151,7 +151,9 @@
       "addon_none": "В этом месяце не покупались",
       "addon_purchased": "Куплено в этом месяце: {{runs}}",
       "addon_buy": "Купить · {{price}} за {{runs}}",
-      "addon_buy_fallback": "Купить запуски"
+      "addon_buy_fallback": "Купить запуски",
+      "dashboard_history": "История аналитики",
+      "dashboard_history_days": "Последние {{days}} дн."
     },
     "seats": {
       "title": "Места",

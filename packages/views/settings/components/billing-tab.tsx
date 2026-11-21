@@ -38,6 +38,7 @@ import {
   storageUsageProgress,
   readUpgradeInvite,
   type HeldInvite,
+  workspaceFeatureKeys,
   workspaceSubscriptionPricesOptions,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
@@ -446,6 +447,10 @@ function BillingTabContent() {
   }, [awaitingHeldCheckoutAt, refetchSummary]);
 
   const entitlements = summaryQuery.data?.entitlement;
+  // Absent from an older Cloud; the row is then left out.
+  const dashboardHistoryLimit = entitlements?.limits.dashboardHistoryDays;
+  const dashboardHistoryDays =
+    dashboardHistoryLimit?.mode === "limited" ? dashboardHistoryLimit.limit : null;
   // A confirmed upgrade or seat purchase changes the storage limit; the
   // entitlement already carries the new one, and this refreshes the usage
   // read behind it.
@@ -720,8 +725,11 @@ function BillingTabContent() {
       setIsSyncingCheckout(false);
       setSyncTimedOut(false);
       checkoutIntentRef.current = null;
+      // The paid plan is now recorded: re-read the paid features and plan
+      // limits so nothing stays locked under the plan the user just left.
+      void queryClient.invalidateQueries({ queryKey: workspaceFeatureKeys.all(wsId) });
     }
-  }, [isCheckoutConfirmed, isSyncingCheckout]);
+  }, [isCheckoutConfirmed, isSyncingCheckout, queryClient, wsId]);
 
   const sendHeldInvite = (held: HeldInvite) => {
     setHeldInvitesToConfirm([]);
@@ -2134,6 +2142,15 @@ function BillingTabContent() {
                   </Button>
                 ) : null}
               </div>
+            </SettingsRow>
+          ) : null}
+          {dashboardHistoryDays !== null ? (
+            <SettingsRow label={t(($) => $.workspace.limits.dashboard_history)}>
+              <span className="tabular-nums">
+                {t(($) => $.workspace.limits.dashboard_history_days, {
+                  days: dashboardHistoryDays,
+                })}
+              </span>
             </SettingsRow>
           ) : null}
           {memberLimit ? (

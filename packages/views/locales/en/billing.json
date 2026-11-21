@@ -149,7 +149,9 @@
       "addon_none": "None this month",
       "addon_purchased": "{{runs}} bought this month",
       "addon_buy": "Buy · {{price}} / {{runs}} runs",
-      "addon_buy_fallback": "Buy more runs"
+      "addon_buy_fallback": "Buy more runs",
+      "dashboard_history": "Analytics history",
+      "dashboard_history_days": "Last {{days}} days"
     },
     "seats": {
       "title": "Seats",

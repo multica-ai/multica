@@ -148,7 +148,9 @@
       "addon_none": "今月の追加購入なし",
       "addon_purchased": "今月 {{runs}} 回を追加購入済み",
       "addon_buy": "追加購入 · {{price}} / {{runs}} 回",
-      "addon_buy_fallback": "実行回数を追加購入"
+      "addon_buy_fallback": "実行回数を追加購入",
+      "dashboard_history": "分析の表示期間",
+      "dashboard_history_days": "直近 {{days}} 日"
     },
     "seats": {
       "title": "席数",

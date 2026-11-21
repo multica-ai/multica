@@ -461,6 +461,20 @@ describe("BillingTab", () => {
     expect(mocks.useQuery).not.toHaveBeenCalled();
   });
 
+  it("shows the plan's analytics history range only when Cloud reports it", () => {
+    const { unmount } = renderWithI18n(<BillingTab />);
+    expect(screen.queryByText("Analytics history")).toBeNull();
+    unmount();
+
+    mocks.entitlements.limits = {
+      ...mocks.entitlements.limits,
+      dashboardHistoryDays: { mode: "limited", limit: 30 },
+    };
+    renderWithI18n(<BillingTab />);
+    expect(screen.getByText("Analytics history")).toBeInTheDocument();
+    expect(screen.getByText("Last 30 days")).toBeInTheDocument();
+  });
+
   it("shows server prices and keeps the selected interval in sync", async () => {
     const user = userEvent.setup();
     renderWithI18n(<BillingTab />);
@@ -1141,6 +1155,10 @@ describe("BillingTab", () => {
       expect(screen.getByText("Unlimited")).toBeInTheDocument();
       expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
       expect(screen.queryByText(/Runs a member starts with Run now/)).not.toBeInTheDocument();
+      // The paid plan is recorded: paid features and plan limits are re-read.
+      expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ["workspace-features", "workspace-1"],
+      });
     } finally {
       vi.useRealTimers();
     }

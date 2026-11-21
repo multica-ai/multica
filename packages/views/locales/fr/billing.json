@@ -149,7 +149,9 @@
       "addon_none": "Aucune ce mois-ci",
       "addon_purchased": "{{runs}} achetées ce mois-ci",
       "addon_buy": "Acheter · {{price}} / {{runs}} exécutions",
-      "addon_buy_fallback": "Acheter des exécutions"
+      "addon_buy_fallback": "Acheter des exécutions",
+      "dashboard_history": "Historique des statistiques",
+      "dashboard_history_days": "{{days}} derniers jours"
     },
     "seats": {
       "title": "Sièges",
