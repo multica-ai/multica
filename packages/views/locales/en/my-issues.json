@@ -1,6 +1,6 @@
 {
   "page": {
-    "breadcrumb": "My Issues",
+    "breadcrumb": "My issues",
     "workspace_fallback": "Workspace",
     "empty_title": "No issues yet",
     "empty_description": "Issues assigned to you, created by you, or involving your agents and squads will appear here."

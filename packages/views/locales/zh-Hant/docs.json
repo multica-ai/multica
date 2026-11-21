@@ -31,7 +31,7 @@
     "description": "\"{{title}}\"及其全部歷史都會被刪除，無法復原。",
     "confirm": "刪除",
     "folder_title": "刪除資料夾？",
-    "folder_description": "要刪除「{{title}}」嗎？此資料夾中的文件與子資料夾將移至上層，且此操作無法復原。"
+    "folder_description": "要刪除「{{title}}」嗎？僅能刪除空資料夾，此操作無法復原。"
   },
   "tree": {
     "more": "{{title}} 的更多操作",

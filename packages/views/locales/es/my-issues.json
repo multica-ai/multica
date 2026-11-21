@@ -2,8 +2,8 @@
   "page": {
     "breadcrumb": "Mis tareas",
     "workspace_fallback": "Espacio de trabajo",
-    "empty_title": "No tienes tareas asignadas",
-    "empty_description": "Las tareas que crees o que te asignen aparecerán aquí."
+    "empty_title": "Aún no hay tareas",
+    "empty_description": "Las tareas asignadas a ti, creadas por ti o en las que participan tus agentes y squads aparecerán aquí."
   },
   "header": {
     "scope": {

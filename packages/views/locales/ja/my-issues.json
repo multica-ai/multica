@@ -2,8 +2,8 @@
   "page": {
     "breadcrumb": "マイタスク",
     "workspace_fallback": "ワークスペース",
-    "empty_title": "あなたに割り当てられたタスクはありません",
-    "empty_description": "あなたが作成したタスクや割り当てられたタスクがここに表示されます。"
+    "empty_title": "タスクはまだありません",
+    "empty_description": "自分に割り当てられたタスク、作成したタスク、または自分のエージェントやスクワッドが関わるタスクがここに表示されます。"
   },
   "header": {
     "scope": {

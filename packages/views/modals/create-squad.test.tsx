@@ -232,8 +232,8 @@ function makeSquad(overrides: Partial<Squad> = {}): Squad {
 function getSubmitButton(): HTMLButtonElement {
   const btn = screen
     .getAllByRole("button")
-    .find((b) => b.textContent === "Create Squad");
-  if (!btn) throw new Error("Create Squad submit button not found");
+    .find((b) => b.textContent === "Create squad");
+  if (!btn) throw new Error("Create squad submit button not found");
   return btn as HTMLButtonElement;
 }
 

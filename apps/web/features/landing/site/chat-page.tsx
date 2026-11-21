@@ -53,7 +53,7 @@ function Hero() {
         </>
       }
       frost="chat-page"
-      label="A team channel, eng-support: Mia mentions @Multica to ask why last night’s export job failed, and the Bot answers in the thread. Beside it, the Messaging settings show Bots for Backend Agent on Slack, Lead Agent on Feishu, and Triage Agent on Telegram."
+      label="A team channel, eng-support: Mia mentions @Multica to ask why last night’s export job failed, and the bot answers in the thread. Beside it, the Messaging settings show bots for Backend Agent on Slack, Lead Agent on Lark, and Triage Agent on Telegram."
     >
       <ChatScene />
     </SurfaceHero>
@@ -68,7 +68,7 @@ const WAYS: Walkthrough[] = [
   },
   {
     title: "Mention it in a group",
-    body: "@-mention the Bot in a group or channel. It answers in the thread and only sees messages addressed to it.",
+    body: "@-mention the bot in a group or channel. It answers in the thread and only sees messages addressed to it.",
     visual: MentionVisual,
   },
   {

@@ -5,7 +5,7 @@
     "add": "Ajouter un état",
     "show_archived": "Afficher les archivés ({{count}})",
     "archived_badge": "Archivé",
-    "archived_hint": "Retiré des nouvelles affectations. Les tâches qui le portent le gardent.",
+    "archived_hint": "Retiré des tableaux et des sélecteurs de statut.",
     "reorder_failed": "Le nouvel ordre n'a pas pu être enregistré.",
     "actions": {
       "move_up": "Monter",
@@ -47,7 +47,7 @@
     "archive_dialog": {
       "retry": "Réessayer l'archivage",
       "title": "Archiver cet état ?",
-      "description": "Déplacez toutes les tâches hors de « {{name}} » avant de l'archiver. Une fois vide, ce statut disparaîtra des tableaux et des sélecteurs de statut.",
+      "description": "« {{name}} » sera retiré des tableaux et des sélecteurs de statut. Vous pourrez consulter les statuts archivés plus tard.",
       "in_use_title": "Déplacer les tâches avant l'archivage",
       "in_use": "Tâches utilisant encore ce statut : {{count}}. Déplacez-les vers un autre statut, y compris les tâches terminées et annulées, puis réessayez.",
       "view_issues": "Voir les tâches",

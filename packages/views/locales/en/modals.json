@@ -115,7 +115,7 @@
     "no_agents": "No active agents available. Create an agent first.",
     "no_results": "No results",
     "cancel": "Cancel",
-    "submit": "Create Squad",
+    "submit": "Create squad",
     "submitting": "Creating...",
     "toast_created": "Squad created",
     "toast_failed": "Failed to create squad",

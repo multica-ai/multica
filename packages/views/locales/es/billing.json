@@ -82,7 +82,7 @@
       "title": "Plan actual",
       "plan": "Plan del espacio de trabajo",
       "members": "Miembros humanos",
-      "members_description": "Los miembros activos y las invitaciones pendientes cuentan en tus asientos. Los invitados no ocupan asiento.",
+      "members_description": "Miembros humanos activos en este espacio de trabajo. Los agentes nunca ocupan un asiento.",
       "member_count_one": "{{count}} miembro",
       "member_count_other": "{{count}} miembros",
       "billing_interval": "Intervalo de facturación",

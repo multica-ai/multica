@@ -82,7 +82,7 @@
       "title": "현재 요금제",
       "plan": "워크스페이스 요금제",
       "members": "사용자 좌석",
-      "members_description": "활성 멤버와 대기 중인 초대가 모두 좌석에 포함됩니다. 게스트는 포함되지 않습니다.",
+      "members_description": "이 워크스페이스의 활성 멤버 수입니다. 에이전트는 좌석을 차지하지 않습니다.",
       "member_count_other": "멤버 {{count}}명",
       "billing_interval": "결제 주기",
       "period_end": "현재 결제 기간 종료일",

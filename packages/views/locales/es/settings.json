@@ -5,7 +5,7 @@
     "add": "Añadir estado",
     "show_archived": "Mostrar archivados ({{count}})",
     "archived_badge": "Archivado",
-    "archived_hint": "Retirado de las nuevas asignaciones. Las tareas que ya lo usan lo conservan.",
+    "archived_hint": "Quitado de los tableros y de los selectores de estado.",
     "reorder_failed": "No se ha podido guardar el nuevo orden.",
     "actions": {
       "move_up": "Subir",
@@ -47,7 +47,7 @@
     "archive_dialog": {
       "retry": "Reintentar el archivado",
       "title": "¿Archivar este estado?",
-      "description": "Saca todas las tareas de \"{{name}}\" antes de archivarlo. Una vez vacío, desaparecerá de los tableros y de los selectores de estado.",
+      "description": "\"{{name}}\" se quitará de los tableros y de los selectores de estado. Podrás ver los estados archivados más adelante.",
       "in_use_title": "Mueve las tareas antes de archivar",
       "in_use": "Tareas que aún usan este estado: {{count}}. Muévelas a otro estado, incluidas las completadas y las canceladas, e inténtalo de nuevo.",
       "view_issues": "Ver tareas",

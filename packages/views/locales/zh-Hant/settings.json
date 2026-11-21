@@ -5,7 +5,7 @@
     "add": "新增狀態",
     "show_archived": "顯示已歸檔（{{count}}）",
     "archived_badge": "已歸檔",
-    "archived_hint": "已停止用於新的指派，已經在該狀態上的任務保持不變。",
+    "archived_hint": "已從看板與狀態選擇器中移除。",
     "reorder_failed": "排序儲存失敗。",
     "actions": {
       "move_up": "上移",
@@ -47,7 +47,7 @@
     "archive_dialog": {
       "retry": "重試歸檔",
       "title": "歸檔這個狀態？",
-      "description": "先將 \"{{name}}\" 中的所有任務移至其他狀態。清空後才能歸檔，歸檔後將從看板和狀態選項中移除。",
+      "description": "封存後，「{{name}}」將從看板與狀態選擇器中移除。你之後仍可檢視已封存的狀態。",
       "in_use_title": "先轉移任務，再歸檔",
       "in_use": "還有 {{count}} 個任務使用此狀態。請先將它們移至其他狀態，包括已完成和已取消的任務，然後重試。",
       "view_issues": "檢視任務",

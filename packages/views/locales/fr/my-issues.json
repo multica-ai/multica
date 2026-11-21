@@ -2,8 +2,8 @@
   "page": {
     "breadcrumb": "Mes tâches",
     "workspace_fallback": "Espace de travail",
-    "empty_title": "Aucune tâche ne vous est assignée",
-    "empty_description": "Les tâches que vous créez ou qui vous sont assignées apparaîtront ici."
+    "empty_title": "Aucune tâche pour l'instant",
+    "empty_description": "Les tâches qui vous sont assignées, que vous avez créées ou qui impliquent vos agents et squads apparaîtront ici."
   },
   "header": {
     "scope": {
