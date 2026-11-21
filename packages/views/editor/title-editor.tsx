@@ -40,6 +40,11 @@ interface TitleEditorProps {
   onBlur?: (value: string) => void;
   onChange?: (value: string) => void;
   /**
+   * Fires when defaultValue replaces the editor's text, including cache echoes
+   * of the host's own optimistic writes.
+   */
+  onExternalValueAdopted?: (value: string) => void;
+  /**
    * Called once when the Tiptap instance exists and its DOM is attached
    * (creation is deferred past first paint by `immediatelyRender: false`).
    * Same contract as ContentEditorProps.onReady.
@@ -119,6 +124,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
       onSubmitShortcut,
       onBlur,
       onChange,
+      onExternalValueAdopted,
       onReady,
     },
     ref,
@@ -128,12 +134,14 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
     const onSubmitShortcutRef = useRef(onSubmitShortcut);
     const onBlurRef = useRef(onBlur);
     const onChangeRef = useRef(onChange);
+    const onExternalValueAdoptedRef = useRef(onExternalValueAdopted);
     const onReadyRef = useRef(onReady);
 
     onSubmitRef.current = onSubmit;
     onSubmitShortcutRef.current = onSubmitShortcut;
     onBlurRef.current = onBlur;
     onChangeRef.current = onChange;
+    onExternalValueAdoptedRef.current = onExternalValueAdopted;
     onReadyRef.current = onReady;
 
     // `useEditor` reads `extensions` once at mount and no host toggles this
@@ -244,6 +252,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
           : "",
         { emitUpdate: false },
       );
+      onExternalValueAdoptedRef.current?.(defaultValue);
     }, [defaultValue, editor]);
 
     useImperativeHandle(ref, () => ({

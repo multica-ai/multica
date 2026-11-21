@@ -2839,17 +2839,31 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // keeps this single eager editor affordable; title and composers stay lazy.
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const titleBaseRef = useRef<string | undefined>(issue?.title);
+  // Text can return to an earlier value. Track ownership separately so a
+  // late save cannot replace a newer adoption, conflict, or issue session.
+  const titleSaveGenerationRef = useRef(0);
+  const pendingTitleSaveRef = useRef<{
+    issueId: string;
+    generation: number;
+    title: string;
+  } | null>(null);
   const [titleConflictDraft, setTitleConflictDraft] = useState<string | null>(null);
   // Bumped when a conflicting title draft is discarded. TitleEditor reads its
   // text from `defaultValue` at mount and exposes no imperative setter, so
   // remounting is the only way to put the server's title back in the editor.
   const [titleResetToken, setTitleResetToken] = useState(0);
   useEffect(() => {
+    titleSaveGenerationRef.current += 1;
+    pendingTitleSaveRef.current = null;
     setTitleConflictDraft(null);
     titleBaseRef.current = undefined;
     descriptionSaveInFlightRef.current = false;
     descriptionSaveIssueIdRef.current = id;
     pendingDescriptionSaveRef.current = null;
+    return () => {
+      titleSaveGenerationRef.current += 1;
+      pendingTitleSaveRef.current = null;
+    };
   }, [id]);
   const titleLazy = useLazyEditor({ editorRef: titleEditorRef, resetKey: id });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
@@ -3988,19 +4002,40 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 placeholder={t(($) => $.detail.title_placeholder)}
                 className={cn("w-full leading-snug", titleSizeClass)}
                 onReady={titleLazy.onReady}
+                onExternalValueAdopted={(value) => {
+                  if (titleConflictDraft === null) {
+                    const pending = pendingTitleSaveRef.current;
+                    // Trimming on blur can make our optimistic cache echo
+                    // replace the editor text while this save still owns it.
+                    if (pending?.issueId === id &&
+                        pending.generation === titleSaveGenerationRef.current &&
+                        pending.title === value) return;
+                    pendingTitleSaveRef.current = null;
+                    titleSaveGenerationRef.current += 1;
+                    titleBaseRef.current = value;
+                  }
+                }}
                 onBlur={(value) => {
                   const trimmed = value.trim();
                   if (trimmed && trimmed !== issue.title) {
+                    const titleBase = titleBaseRef.current;
+                    const generation = ++titleSaveGenerationRef.current;
+                    pendingTitleSaveRef.current = { issueId: id, generation, title: trimmed };
                     handleUpdateField({
                       title: trimmed,
-                      title_base: titleBaseRef.current,
+                      title_base: titleBase,
                     }, {
                       onSuccess: (serverIssue) => {
+                        if (titleSaveGenerationRef.current !== generation) return;
+                        pendingTitleSaveRef.current = null;
                         setTitleConflictDraft(null);
                         titleBaseRef.current = serverIssue.title;
                       },
                       onError: (error) => {
+                        if (titleSaveGenerationRef.current !== generation) return;
+                        pendingTitleSaveRef.current = null;
                         if (errorCode(error) === "revision_conflict") {
+                          titleSaveGenerationRef.current += 1;
                           setTitleConflictDraft(trimmed);
                         }
                       },
@@ -4020,12 +4055,16 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 const sel = window.getSelection();
                 if (sel && !sel.isCollapsed) return;
                 titleBaseRef.current = issue.title;
+                titleSaveGenerationRef.current += 1;
+                pendingTitleSaveRef.current = null;
                 titleLazy.activate({ x: e.clientX, y: e.clientY });
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   titleBaseRef.current = issue.title;
+                  titleSaveGenerationRef.current += 1;
+                  pendingTitleSaveRef.current = null;
                   titleLazy.activate();
                 }
               }}
@@ -4052,6 +4091,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                     // discarding writes nothing. The remount is what puts it
                     // back into the editor (see titleResetToken).
                     setTitleConflictDraft(null);
+                    titleSaveGenerationRef.current += 1;
+                    pendingTitleSaveRef.current = null;
                     titleBaseRef.current = issue.title;
                     setTitleResetToken((token) => token + 1);
                   }}
@@ -4067,10 +4108,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                   onClick={() => {
                     const draft = titleConflictDraft.trim();
                     if (!draft) return;
+                    const generation = ++titleSaveGenerationRef.current;
+                    pendingTitleSaveRef.current = null;
                     handleUpdateField(
                       { title: draft, title_base: issue.title },
                       {
                         onSuccess: (serverIssue) => {
+                          if (titleSaveGenerationRef.current !== generation) return;
                           setTitleConflictDraft(null);
                           titleBaseRef.current = serverIssue.title;
                         },
