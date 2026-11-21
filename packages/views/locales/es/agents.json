@@ -1059,7 +1059,6 @@
     "section_owner": "Propietario",
     "section_model": "Modelo"
   },
-  "actions": {},
   "sections": {
     "runs_count_one": "{{count}} ejecución",
     "runs_count_other": "{{count}} ejecuciones",

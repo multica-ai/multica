@@ -1077,7 +1077,6 @@
     "section_owner": "Owner",
     "section_model": "Model"
   },
-  "actions": {},
   "intro": {
     "title": "Hire your first AI teammate",
     "description": "Agents take on issues like teammates do: they work on your runtime with tools like Claude Code and Codex, then deliver in the comments.",

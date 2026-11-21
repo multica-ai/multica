@@ -1048,7 +1048,6 @@
     "section_owner": "所有者",
     "section_model": "模型"
   },
-  "actions": {},
   "intro": {
     "title": "招第一位 AI 队友",
     "description": "智能体像团队成员一样接任务：在你的运行时上用 Claude Code、Codex 等工具动手做，做完在评论里交付。",

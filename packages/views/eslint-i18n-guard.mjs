@@ -17,7 +17,7 @@
 // ``aria-label={`${overflow} more`}`` both sailed through it.
 
 const COPY_ATTRIBUTE =
-  "JSXAttribute[name.name=/^(placeholder|title|aria-label)$/]";
+  "JSXAttribute[name.name=/^(placeholder|title|aria-label|alt)$/]";
 
 // A literal with a letter in it. `https?:`-prefixed values are URLs and example
 // endpoints, never copy.
@@ -45,7 +45,7 @@ export const NO_UNTRANSLATED_ATTRIBUTES = {
     `${COPY_ATTRIBUTE} > JSXExpressionContainer > ${BARE_COPY_TEMPLATE}`,
   ].join(", "),
   message:
-    "User-visible text in placeholder/title/aria-label must come from useT() — a screen reader reads aria-label the way a sighted user reads a JSX child. Exempt technical values (a CLI command, a token prefix) with an inline eslint-disable and a reason.",
+    "User-visible text in placeholder/title/aria-label/alt must come from useT() — a screen reader reads aria-label and alt the way a sighted user reads a JSX child. Exempt technical values (a CLI command, a token prefix) with an inline eslint-disable and a reason.",
 };
 
 export const NO_UNTRANSLATED_TOAST = {
@@ -54,7 +54,11 @@ export const NO_UNTRANSLATED_TOAST = {
     `${TOAST} > ${BARE_COPY_TEMPLATE}`,
     `${TOAST} > ${FALLBACK} > ${BARE_COPY}`,
     `${TOAST} > ${FALLBACK} > ${BARE_COPY_TEMPLATE}`,
+    `${TOAST} > ObjectExpression > Property[key.name='description'] > ${BARE_COPY}`,
+    `${TOAST} > ObjectExpression > Property[key.name='description'] > ${BARE_COPY_TEMPLATE}`,
+    `${TOAST} > ObjectExpression > Property[key.name='action'] > ObjectExpression > Property[key.name='label'] > ${BARE_COPY}`,
+    `${TOAST} > ObjectExpression > Property[key.name='action'] > ObjectExpression > Property[key.name='label'] > ${BARE_COPY_TEMPLATE}`,
   ].join(", "),
   message:
-    "Toast copy must come from useT(). Pass a translated string, not a literal — including the fallback half of a `err.message : \"…\"` ternary.",
+    "Toast copy must come from useT(). Pass a translated string, not a literal — including fallback branches and description/action.label options.",
 };

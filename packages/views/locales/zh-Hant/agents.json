@@ -1048,7 +1048,6 @@
     "section_owner": "owner",
     "section_model": "模型"
   },
-  "actions": {},
   "intro": {
     "title": "招募第一位 AI 隊友",
     "description": "AI 代理像團隊成員一樣接任務：在你的執行時上用 Claude Code、Codex 等工具動手做，做完在評論裡交付。",

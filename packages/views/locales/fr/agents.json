@@ -1077,7 +1077,6 @@
     "section_owner": "Propriétaire",
     "section_model": "Modèle"
   },
-  "actions": {},
   "intro": {
     "title": "Recrutez votre premier coéquipier IA",
     "description": "Les agents prennent des tâches comme un membre de l'équipe : ils travaillent sur votre runtime avec Claude Code, Codex et d'autres outils, puis livrent dans les commentaires.",

@@ -126,7 +126,6 @@
     "mine": "My squads",
     "all": "All squads"
   },
-  "toolbar": {},
   "intro": {
     "title": "Put agents in a squad and they work like a team",
     "description": "Assign an issue to the squad. Its leader agent reads it, hands each step to the member whose role fits, and follows up until the goal is met. You only deal with one assignee.",

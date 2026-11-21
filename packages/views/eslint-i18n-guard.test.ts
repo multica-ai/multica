@@ -57,6 +57,7 @@ describe("no untranslated attribute copy", () => {
     ['direct literal', '<input placeholder="Search issues" />'],
     ['title', '<span title="Copy link" />'],
     ['aria-label', '<input aria-label="Select all sub-issues" />'],
+    ['alt', '<img alt="Workspace logo" />'],
     ['expression container', '<input title={"Expression copy"} />'],
     ['template literal', '<input aria-label={`Select ${id}`} />'],
     ['interpolated template', '<input aria-label={`${label} key ${i}`} />'],
@@ -92,6 +93,8 @@ describe("no untranslated toast copy", () => {
     ['logical fallback', 'toast.error(msg || "Something went wrong");'],
     ['nullish fallback', 'toast.error(msg ?? "Something went wrong");'],
     ['guarded literal', 'toast.error(shouldWarn && "Check your input");'],
+    ['options description', 'toast.error(t(($) => $.title), { description: "Try again later" });'],
+    ['options action label', 'toast.success(t(($) => $.done), { action: { label: "Undo", onClick } });'],
   ])("flags %s", (_name, code) => {
     expect(flags(code)).toBe(true);
   });

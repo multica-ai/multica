@@ -1048,7 +1048,6 @@
       "next": "다음"
     }
   },
-  "actions": {},
   "intro": {
     "title": "첫 AI 팀원을 맞이하세요",
     "description": "에이전트는 팀원처럼 태스크를 맡습니다. 런타임에서 Claude Code, Codex 같은 도구로 작업하고, 끝나면 댓글로 결과를 전달합니다.",
