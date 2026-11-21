@@ -242,9 +242,13 @@ services:
       # Tool steps shown in the streamed reply: auto (default; details in
       # private chats, kind of work in groups), off, summary or detail.
       MULTICA_TELEGRAM_TOOL_PROGRESS: ${MULTICA_TELEGRAM_TOOL_PROGRESS:-}
-      # Workspace Docs is off until FF_DOCS_V1=true. Passed only when set: an
-      # empty FF_ value would pin the flag off instead of leaving the default.
+      # Feature flags, documented in .env.example. Each is passed only when
+      # set: an empty FF_ value would pin the flag off instead of leaving the
+      # default. Workspace Docs is off until FF_DOCS_V1=true; the other two are
+      # kill switches for features that are on by default.
       FF_DOCS_V1:
+      FF_LOCAL_SEARCH_INDEX:
+      FF_DASHBOARD_HISTORY_365D:
       # Live co-editing for Workspace Docs, served by the optional collab
       # service below. Setting COLLAB_SECRET turns it on and points the API at
       # that service; enable the service with COMPOSE_PROFILES=collab.
