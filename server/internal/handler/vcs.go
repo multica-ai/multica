@@ -193,6 +193,10 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "instance_url must be an absolute http(s) URL")
 		return
 	}
+	if err := vcs.ValidateInstanceURL(r.Context(), instanceURL, nil); err != nil {
+		writeError(w, http.StatusBadRequest, "instance_url is not a permitted provider address")
+		return
+	}
 
 	account, err := provider.ValidateToken(r.Context(), instanceURL, token)
 	if err != nil {

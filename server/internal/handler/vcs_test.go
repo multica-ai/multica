@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/integrations/vcs"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -72,6 +74,7 @@ func TestListVCSConnectionsHonorsDeploymentSwitch(t *testing.T) {
 }
 
 func TestConnectVCSHonorsDeploymentSwitch(t *testing.T) {
+	t.Cleanup(allowLoopbackVCSInstances(t))
 	var validationCalls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		validationCalls.Add(1)
@@ -183,6 +186,7 @@ func TestRotateVCSConnectionWebhookHonorsDeploymentSwitch(t *testing.T) {
 // self-signed CA: the connect must fail as a certificate problem, not as an
 // unreachable instance, and must not store a connection.
 func TestConnectVCSReportsUntrustedCertificate(t *testing.T) {
+	t.Cleanup(allowLoopbackVCSInstances(t))
 	var reached atomic.Int32
 	provider := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached.Add(1)
@@ -260,6 +264,45 @@ func TestVCSValidationFailureMessage(t *testing.T) {
 			got := vcsValidationFailureMessage(fmt.Errorf("gitea: request: %w", err))
 			if !strings.Contains(got, tc.want) {
 				t.Fatalf("error %v: got message %q, want it to contain %q", err, got, tc.want)
+			}
+		})
+	}
+}
+
+func allowLoopbackVCSInstances(t *testing.T) func() {
+	t.Helper()
+	return vcs.OverrideInstanceAddressPolicyForTest(func(addr netip.Addr) bool {
+		addr = addr.Unmap()
+		if !addr.IsValid() {
+			return false
+		}
+		if addr.IsLoopback() {
+			return true
+		}
+		return !addr.IsLinkLocalUnicast() && !addr.IsLinkLocalMulticast() && !addr.IsMulticast() && !addr.IsUnspecified()
+	})
+}
+
+// TestConnectVCSRejectsMetadataInstanceURL is the GH #9439 guard: a workspace
+// admin must not be able to point instance_url at link-local cloud metadata
+// (or loopback) and have the server fetch it.
+func TestConnectVCSRejectsMetadataInstanceURL(t *testing.T) {
+	withVCSBox(t)
+	t.Cleanup(func() { cleanupVCS(context.Background(), "") })
+
+	for _, raw := range []string{"http://169.254.169.254/", "http://127.0.0.1:1", "http://localhost:3000"} {
+		t.Run(raw, func(t *testing.T) {
+			req := vcsHandlerRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/vcs/connections", map[string]any{
+				"provider":     "forgejo",
+				"instance_url": raw,
+				"access_token": "test-token",
+			}, "")
+			var resp struct {
+				Error string `json:"error"`
+			}
+			testutil.Call(t, testHandler.ConnectVCS, req).Want(http.StatusBadRequest).JSON(&resp)
+			if resp.Error != "instance_url is not a permitted provider address" {
+				t.Fatalf("error = %q", resp.Error)
 			}
 		})
 	}
