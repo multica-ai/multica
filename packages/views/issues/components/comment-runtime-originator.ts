@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { useCommentDraftStore, type CommentDraftKey, type CommentRuntimeRouting } from "@multica/core/issues/stores/comment-draft-store";
 
@@ -25,6 +25,23 @@ function routingOf(
 export function useCommentRuntimeOriginator(draftKey?: CommentDraftKey) {
   const requester = useRef(new Set<string>());
   const sourceTasks = useRef(new Map<string, string>());
+  // The draft store rehydrates from storage asynchronously. Before it has,
+  // neither the saved picks nor the saved draft text exist yet: restoring
+  // then would silently produce an empty routing, and a prune running before
+  // the draft text arrives would erase the picks the store was about to
+  // hand back (the main composer mounts before hydration; reply threads,
+  // which mount on click, never see this window). Gate every read and write
+  // on hydration.
+  const [hydrated, setHydrated] = useState(
+    () => useCommentDraftStore.persist?.hasHydrated() ?? true,
+  );
+  const hydratedRef = useRef(hydrated);
+  hydratedRef.current = hydrated;
+  useEffect(() => {
+    if (hydrated) return;
+    const unsub = useCommentDraftStore.persist?.onFinishHydration(() => setHydrated(true));
+    return () => unsub?.();
+  }, [hydrated]);
   // Persist asynchronously (merged per tick): the popup's prune runs inside
   // the editor's onUpdate, and a synchronous store write there would re-render
   // the composer mid-change and roll the controlled editor back to the stale
@@ -32,6 +49,7 @@ export function useCommentRuntimeOriginator(draftKey?: CommentDraftKey) {
   const pendingRouting = useRef<CommentRuntimeRouting | undefined>(undefined);
   const persistScheduled = useRef(false);
   const persist = useRef(() => {
+    if (!hydratedRef.current || !draftKey) return;
     pendingRouting.current = routingOf(requester.current, sourceTasks.current);
     if (persistScheduled.current) return;
     persistScheduled.current = true;
@@ -40,15 +58,19 @@ export function useCommentRuntimeOriginator(draftKey?: CommentDraftKey) {
       if (draftKey) useCommentDraftStore.getState().setRuntimeRouting(draftKey, pendingRouting.current);
     });
   });
-  // A reload restores the picks the draft persisted — before the composer's
-  // first prune runs, so the restored mentions keep their routing.
-  if (draftKey) {
+  // A reload restores the picks the draft persisted — after hydration has
+  // delivered them and before the composer's first prune runs, so the
+  // restored mentions keep their routing.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!hydrated || restoredRef.current || !draftKey) return;
+    restoredRef.current = true;
     const saved = useCommentDraftStore.getState().getRuntimeRouting(draftKey);
     if (saved && requester.current.size === 0 && sourceTasks.current.size === 0) {
       for (const id of saved.requesterAgentIds) requester.current.add(id);
       for (const [id, task] of Object.entries(saved.sourceTaskIds)) sourceTasks.current.set(id, task);
     }
-  }
+  }, [hydrated, draftKey]);
   return {
     select(item: MentionItem) {
       if (item.type !== "agent") return;
@@ -65,6 +87,7 @@ export function useCommentRuntimeOriginator(draftKey?: CommentDraftKey) {
       persist.current();
     },
     prune(markdown: string) {
+      if (!hydratedRef.current) return;
       const mentioned = new Set(Array.from(markdown.matchAll(AGENT_MENTION), (match) => match[1]));
       for (const id of requester.current) {
         if (!mentioned.has(id)) requester.current.delete(id);
