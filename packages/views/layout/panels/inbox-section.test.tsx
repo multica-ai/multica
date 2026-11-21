@@ -474,16 +474,16 @@ describe("InboxSection", () => {
     expect(screen.getByRole("link", { name: /^Other one/ })).not.toHaveAttribute("aria-current");
   });
 
-  it("shows the unread count beside the label unless turned off", () => {
+  it("shows the unread count beside the label only once turned on", () => {
     state.unread = 3;
     const { unmount } = renderSection([item({ id: "n1", issue_id: "issue-a" })]);
     const header = () => screen.getByRole("button", { name: "Inbox" }).closest("div")!;
-    expect(header()).toHaveTextContent("3");
+    expect(header()).not.toHaveTextContent("3");
     unmount();
 
-    useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, showCount: false } });
+    useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, showCount: true } });
     renderSection([item({ id: "n1", issue_id: "issue-a" })]);
-    expect(header()).not.toHaveTextContent("3");
+    expect(header()).toHaveTextContent("3");
   });
 
   it("collapses from the section label", () => {

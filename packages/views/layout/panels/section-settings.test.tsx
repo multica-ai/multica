@@ -93,13 +93,19 @@ describe("InboxSectionSettings", () => {
     );
   });
 
-  it("turns off the section count and the Work badge", () => {
+  it("leaves the section count off by default", () => {
+    open();
+    expect(toggle("Unread count")).not.toBeChecked();
+    expect(toggle("Unread badge on Work")).toBeChecked();
+  });
+
+  it("turns on the section count and off the Work badge", () => {
     open();
     fireEvent.click(toggle("Unread count"));
     fireEvent.click(toggle("Unread badge on Work"));
     expect(useSidebarTreeStore.getState().inboxSettings).toEqual({
       ...DEFAULT_SIDEBAR_INBOX_SETTINGS,
-      showCount: false,
+      showCount: true,
       railBadge: false,
     });
   });

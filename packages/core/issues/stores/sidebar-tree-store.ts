@@ -45,7 +45,7 @@ export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
   ordering: "manual",
   statuses: ["planned", "in_progress", "paused"],
   onlyMine: false,
-  showCount: true,
+  showCount: false,
   showNoProject: true,
   minimalIcons: false,
 };
@@ -66,7 +66,7 @@ export interface SidebarInboxSettings {
 
 export const DEFAULT_SIDEBAR_INBOX_SETTINGS: SidebarInboxSettings = {
   limit: 5,
-  showCount: true,
+  showCount: false,
   railBadge: true,
   compact: false,
 };
@@ -144,7 +144,7 @@ const INITIAL: PersistedSidebarTree = {
   projectOrder: [],
   inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS,
   pinnedLimit: 5,
-  viewsShowCount: true,
+  viewsShowCount: false,
   inboxCollapsed: false,
   projectsCollapsed: false,
   viewsCollapsed: false,
