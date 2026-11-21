@@ -233,7 +233,7 @@ interface LaneGroup {
   title: string;
   identifier: string;
   /** Parent issue (parent grouping only) — drives the open-parent link + status icon in the header. */
-  parentIssue: Pick<Issue, "id" | "status"> | null;
+  parentIssue: Pick<Issue, "id" | "identifier" | "status"> | null;
   /** Project metadata (project grouping only) — drives the icon in the header. */
   project: Project | null;
   /** Actor (assignee grouping only) — drives the avatar in the header. */
@@ -576,7 +576,7 @@ function buildServerLanes(
           (unavailable ? labels.otherParents : labels.noParent),
         identifier: value.parent?.identifier ?? "",
         parentIssue: value.parent
-          ? { id: value.parent.id, status: value.parent.status as IssueStatus }
+          ? { id: value.parent.id, identifier: value.parent.identifier, status: value.parent.status as IssueStatus }
           : null,
         project: null,
         actor: null,
@@ -1722,7 +1722,7 @@ function DraggableSwimLane({
             content={t(($) => $.swimlane.open_parent)}
             trigger={
               <AppLink
-                href={paths.issueDetail(lane.parentIssue.id)}
+                href={paths.issueDetail(lane.parentIssue.identifier || lane.parentIssue.id)}
                 aria-label={t(($) => $.swimlane.open_parent)}
                 className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               >

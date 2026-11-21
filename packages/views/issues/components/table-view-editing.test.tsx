@@ -475,7 +475,7 @@ describe("TableView cell editors under data refresh", () => {
     expect(navigationMocks.push).not.toHaveBeenCalled();
     // In preview mode Shift+Click opens the other target: the full page, in place.
     fireEvent.click(title, { shiftKey: true });
-    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/MUL-a");
     expect(peek.toggle).not.toHaveBeenCalled();
     fireEvent.click(row, { metaKey: true });
     expect(navigationMocks.openInNewTab).toHaveBeenCalledWith("/test/issues/MUL-a", "MUL-a");

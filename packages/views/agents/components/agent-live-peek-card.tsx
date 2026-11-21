@@ -129,7 +129,7 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
           issueId={currentIssueId}
           label={t(($) => $.live_peek.current_issue_label)}
           emptyLabel={t(($) => $.live_peek.no_current_issue)}
-          issueHref={(id) => p.issueDetail(id)}
+          issueHref={(ref) => p.issueDetail(ref)}
         />
         <LastActivityRow
           task={lastTerminal}
@@ -174,7 +174,7 @@ function CurrentIssueRow({
   issueId: string | null;
   label: string;
   emptyLabel: string;
-  issueHref: (id: string) => string;
+  issueHref: (ref: string) => string;
 }) {
   // Lazy issue detail — only enabled while the card is mounted AND we have
   // a running issue id. snapshot already gives us the id; this hook just
@@ -191,7 +191,7 @@ function CurrentIssueRow({
         issue ? (
           <TruncatedTooltip content={`${issue.identifier} ${issue.title}`}>
             <AppLink
-              href={issueHref(issueId)}
+              href={issueHref(issue.identifier)}
               className="min-w-0 truncate text-brand hover:underline"
             >
               <span className="mr-1 font-mono text-micro">{issue.identifier}</span>

@@ -1391,7 +1391,7 @@ describe("IssueDetail (shared)", () => {
     // single link to the issue's own detail route (used to open the full page
     // from the inline Inbox pane). A bare issue has no ancestor crumbs.
     const leaf = await screen.findByText("TES-1 Implement authentication");
-    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/issue-1");
+    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/TES-1");
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {
@@ -3933,7 +3933,7 @@ describe("IssueDetail (shared)", () => {
       await waitFor(() => expect(container.querySelector('[data-issue-sidebar-section="sub_issues"]')).not.toBeNull());
       const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
       expect(sidebar.getAllByRole("link")).toHaveLength(3);
-      expect(sidebar.getByRole("link", { name: /TES-11 Open destination/ })).toHaveAttribute("href", "/test/issues/child-open");
+      expect(sidebar.getByRole("link", { name: /TES-11 Open destination/ })).toHaveAttribute("href", "/test/issues/TES-11");
       expect(sidebar.getByRole("link", { name: /TES-13 Cancelled destination/ })).toBeInTheDocument();
       expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuenow", "1");
       expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuemax", "3");
@@ -3976,7 +3976,7 @@ describe("IssueDetail (shared)", () => {
       }
       const sidebar = within(document.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
       const childLinks = () => sidebar.getAllByRole("link").map((link) => link.getAttribute("href"));
-      const urls = (numbers: number[]) => numbers.map((n) => `/test/issues/child-${n}`);
+      const urls = (numbers: number[]) => numbers.map((n) => `/test/issues/TES-${n}`);
       const firstTen = [5, 8, 11, 14, 17, 20, 1, 4, 7, 10];
       expect(childLinks()).toEqual(urls(firstTen));
       expect(sidebar.getByText("6/25")).toBeInTheDocument();
@@ -4019,7 +4019,7 @@ describe("IssueDetail (shared)", () => {
       await findInlineChild("Child 10");
       const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
       expect(sidebar.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(
-        [2, 5, 8, 1, 4, 7, 10, 3, 6, 9].map((n) => `/test/issues/child-${n}`),
+        [2, 5, 8, 1, 4, 7, 10, 3, 6, 9].map((n) => `/test/issues/TES-${n}`),
       );
       expect(sidebar.queryByRole("button", { name: /Show .* more|Collapse|View all/ })).not.toBeInTheDocument();
       expect(sidebar.getByText("1/10")).toBeInTheDocument();

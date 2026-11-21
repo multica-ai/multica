@@ -167,7 +167,7 @@ function AgentPanelLink({
           </DropdownMenuItem>
         )}
         {currentIssue && (
-          <DropdownMenuItem onClick={() => push(p.issueDetail(currentIssue.id))}>
+          <DropdownMenuItem onClick={() => push(p.issueDetail(currentIssue.identifier))}>
             <ArrowUpRight className="h-3.5 w-3.5" />
             {t(($) => $.panels.team.open_issue, { identifier: currentIssue.identifier })}
           </DropdownMenuItem>

@@ -260,13 +260,13 @@ describe("SquadDetailPage", () => {
     expect(within(members).getByText("Lambda")).toBeInTheDocument();
     expect(within(members).getByText("Leader")).toBeInTheDocument();
     expect(within(members).getByText("Working on")).toBeInTheDocument();
-    expect(within(members).getByRole("link", { name: "ARIE-2" })).toHaveAttribute("href", "/acme/issues/i-1");
+    expect(within(members).getByRole("link", { name: "ARIE-2" })).toHaveAttribute("href", "/acme/issues/ARIE-2");
 
     expect(within(section("Instructions")).getByText("Start with a failing test.")).toBeInTheDocument();
     expect(within(section("Instructions")).getByRole("button", { name: "Edit" })).toBeInTheDocument();
 
     const recent = section("Recent work");
-    expect(within(recent).getByRole("link", { name: /Fix login/ })).toHaveAttribute("href", "/acme/issues/i-1");
+    expect(within(recent).getByRole("link", { name: /Fix login/ })).toHaveAttribute("href", "/acme/issues/ARIE-2");
   });
 
   it("keeps per-member actions in the row menu", async () => {

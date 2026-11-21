@@ -275,7 +275,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               issue={issue}
               query={server.results.query}
               disabled={server.stale}
-              onSelect={() => palette.navigate(p.issueDetail(issue.id))}
+              onSelect={() => palette.navigate(p.issueDetail(issue.identifier))}
             />
           ))}
         </PaletteGroup>
@@ -431,7 +431,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               issue={issue}
               query={server.results.query}
               disabled={server.stale}
-              onSelect={() => palette.navigate(p.issueDetail(issue.id))}
+              onSelect={() => palette.navigate(p.issueDetail(issue.identifier))}
             />
           ))}
         </PaletteGroup>
@@ -777,7 +777,7 @@ function EmptyState({ model }: { model: RootModel }) {
                     key={`issue:${item.id}`}
                     issue={item.issue}
                     query=""
-                    onSelect={() => palette.navigate(p.issueDetail(item.id))}
+                    onSelect={() => palette.navigate(p.issueDetail(item.issue.identifier))}
                     trailing={<RowHint>{t(($) => $.types.issue)}</RowHint>}
                   />
                 );

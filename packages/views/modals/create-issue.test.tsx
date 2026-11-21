@@ -899,7 +899,7 @@ describe("CreateIssueModal", () => {
 
     await user.click(screen.getByRole("button", { name: "View issue" }));
 
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/TES-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
   });
 
@@ -1747,7 +1747,7 @@ describe("CreateIssueModal", () => {
     expect(screen.getByText(/Login bug/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "View existing issue" }));
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-dup");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/MUL-7");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-dup");
   });
 

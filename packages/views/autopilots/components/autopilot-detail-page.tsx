@@ -19,6 +19,7 @@ import {
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueRouteRef } from "@multica/core/issues/canonical-id";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -204,6 +205,7 @@ function RunRow({
 }) {
   const { t, i18n } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
+  const issueRef = useIssueRouteRef(useWorkspaceId(), run.issue_id ?? "");
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
   const visual = RUN_VISUAL[status];
   const StatusIcon = visual.icon;
@@ -277,7 +279,7 @@ function RunRow({
 
   if (run.issue_id) {
     return (
-      <AppLink href={wsPaths.issueDetail(run.issue_id)} className={cn(rowClass, "cursor-pointer")}>
+      <AppLink href={wsPaths.issueDetail(issueRef)} className={cn(rowClass, "cursor-pointer")}>
         {content}
       </AppLink>
     );

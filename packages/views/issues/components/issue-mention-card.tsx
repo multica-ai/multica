@@ -85,7 +85,7 @@ function IssueMentionLink({ issueId, fallbackLabel }: IssueMentionCardProps) {
       : null;
   return (
     <AppLink
-      href={p.issueDetail(issueId)}
+      href={p.issueDetail(issue?.identifier || issueId)}
       newTabTitle={fallbackLabel}
       className="issue-mention align-middle"
       onContextMenu={

@@ -75,7 +75,7 @@ function ListRowContent({
   const locale = useLocale();
   const selection = useIssueSurfaceSelection();
   const peeked = useIsIssuePeeked(issue.id);
-  const peekLinkProps = useIssuePeekLinkProps(issue.id);
+  const peekLinkProps = useIssuePeekLinkProps(issue);
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
   const p = useWorkspacePaths();
