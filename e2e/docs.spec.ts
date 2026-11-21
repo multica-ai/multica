@@ -52,7 +52,8 @@ test("Markdown autosave, folder move, immutable history and restore", async ({
     animations: "disabled",
     style: "nextjs-portal { display: none; }",
   });
-  await page.getByRole("link", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "History", exact: true }).click();
   await page.getByRole("button", { name: /^v1 / }).click();
   await expect(
     page.getByRole("heading", { name: "Release runbook", exact: true }),
@@ -92,7 +93,7 @@ test("navigating to history saves the last title and Markdown before the debounc
   );
   await title.fill("Final title");
   await editor.fill("Last Markdown edit before leaving.");
-  await page.getByRole("link", { name: "History", exact: true }).click();
+  await page.getByRole("link", { name: /^Edited / }).click();
   await expect(page).toHaveURL(new RegExp(`/${doc.id}/history$`));
   expect((await saving).postDataJSON()).toMatchObject({
     title: "Final title", content: "Last Markdown edit before leaving.", base_revision: 1,

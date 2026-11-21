@@ -11,7 +11,9 @@ import {
 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Tooltip,
@@ -22,6 +24,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -282,35 +285,25 @@ function DocEditor({ doc }: { doc: Doc }) {
               ) : null}
             </span>
             )}
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label={t(($) => $.actions.copy_link)}
-              title={t(($) => $.actions.copy_link)}
-              onClick={copyLink}
-            >
-              <LinkIcon className="size-4" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-pressed={commentsOpen}
-              className={commentsOpen ? "bg-surface-selected" : undefined}
-              onClick={() => setCommentsOpen((open) => !open)}
-            >
-              <MessageSquare className="size-4" />
-              {t(($) => $.comments.title)}
-              {openThreads.length > 0 && (
-                <span className="text-caption text-muted-foreground">{openThreads.length}</span>
-              )}
-            </Button>
-            <AppLink
-              href={p.docHistory(doc.id)}
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-caption hover:bg-surface-hover"
-            >
-              <History className="size-4" />
-              {t(($) => $.actions.history)}
-            </AppLink>
+            <TooltipHint label={t(($) => $.comments.title)} side="bottom">
+              <Button
+                size={openThreads.length > 0 ? "sm" : "icon-sm"}
+                variant="ghost"
+                aria-pressed={commentsOpen}
+                className={cn(
+                  "text-muted-foreground",
+                  openThreads.length > 0 && "px-2",
+                  commentsOpen && "bg-surface-selected text-foreground",
+                )}
+                onClick={() => setCommentsOpen((open) => !open)}
+              >
+                <MessageSquare className="size-4" />
+                <span className="sr-only">{t(($) => $.comments.title)}</span>
+                {openThreads.length > 0 && (
+                  <span className="text-caption tabular-nums">{openThreads.length}</span>
+                )}
+              </Button>
+            </TooltipHint>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -324,6 +317,15 @@ function DocEditor({ doc }: { doc: Doc }) {
                 <MoreHorizontal className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={copyLink}>
+                  <LinkIcon />
+                  {t(($) => $.actions.copy_link)}
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<AppLink href={p.docHistory(doc.id)} />}>
+                  <History />
+                  {t(($) => $.actions.history)}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setMoving(true)}>
                   <FolderInput />
                   {t(($) => $.actions.move)}
@@ -396,12 +398,20 @@ function DocEditor({ doc }: { doc: Doc }) {
                 <span aria-hidden>·</span>
                 <Tooltip>
                   <TooltipTrigger
-                    render={<time dateTime={doc.updatedAt} className="shrink-0" />}
+                    render={
+                      <AppLink
+                        href={p.docHistory(doc.id)}
+                        className="shrink-0 underline-offset-3 decoration-faint-foreground hover:text-foreground hover:underline"
+                      />
+                    }
                   >
-                    {t(($) => $.edited, { time: timeAgo(doc.updatedAt) })}
+                    <time dateTime={doc.updatedAt}>
+                      {t(($) => $.edited, { time: timeAgo(doc.updatedAt) })}
+                    </time>
                   </TooltipTrigger>
-                  <TooltipContent>
+                  <TooltipContent side="bottom">
                     {new Date(doc.updatedAt).toLocaleString()}
+                    <span className="text-muted-foreground">{t(($) => $.view_history)}</span>
                   </TooltipContent>
                 </Tooltip>
               </div>

@@ -66,6 +66,7 @@
     "description": "Puede haberse eliminado."
   },
   "edited": "Editado {{time}}",
+  "view_history": "Ver historial",
   "outline": "Esquema",
   "link_copied": "Enlace copiado",
   "unavailable": {
