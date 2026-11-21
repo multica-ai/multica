@@ -102,6 +102,8 @@ Desktop 可以在本机把语音转成文字，填入聊天、评论、回复和
 - Linux 上自动更新只对 `.AppImage` 生效，`.deb` 和 `.rpm` 通过下载新安装包覆盖安装；
 - 自动更新失败时，同样从下载页获取对应安装包覆盖安装。
 
+如果 Desktop 在 Windows 上检查或应用更新时关闭，请查看 `%APPDATA%\Multica\updater.log`。此日志会记录各次启动时的 Desktop 版本和更新事件。
+
 ## 连接自托管实例
 
 Desktop 默认连接 Multica Cloud。连接自托管实例时，在用户目录的 `.multica` 下创建 `desktop.json`，内容如下：
