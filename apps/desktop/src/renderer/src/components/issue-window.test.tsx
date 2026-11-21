@@ -57,6 +57,10 @@ vi.mock("@multica/views/layout", () => ({
   WorkspacePresencePrefetch: () => null,
 }));
 
+vi.mock("./document-title-sync", () => ({
+  DocumentTitleSync: () => null,
+}));
+
 vi.mock("@multica/views/voice", () => ({
   VoiceWorkspaceWords: () => null,
 }));

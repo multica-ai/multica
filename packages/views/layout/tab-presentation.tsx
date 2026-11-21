@@ -24,7 +24,7 @@ import {
   squadListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import { runtimeDisplayName } from "@multica/core/runtimes";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import {
   inboxListOptions,
@@ -197,12 +197,12 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     }
     case "machine": {
       const rt = runtimes?.find((r) => r.id === subject.machineId);
-      if (rt) data.machine = { name: runtimeDisplayName(rt) };
+      if (rt) data.machine = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "runtime": {
       const rt = runtimes?.find((r) => r.id === subject.runtimeId);
-      if (rt) data.runtime = { name: runtimeDisplayName(rt) };
+      if (rt) data.runtime = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "chat":
