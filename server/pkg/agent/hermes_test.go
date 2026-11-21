@@ -3247,6 +3247,31 @@ func TestIsACPSessionNotFound(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "hermes gateway not_found at prompt time",
+			// GH #10081: after a gateway reconnect the adapter answers
+			// session/prompt with a bare "Internal error" and the reason only
+			// as {"details":"not_found"}. No wording check can see that.
+			err:  &acpRPCError{Method: "session/prompt", Code: -32603, Message: "Internal error", Data: `{"details":"not_found"}`},
+			want: true,
+		},
+		{
+			name: "hermes gateway not_found at prompt time, spaced json",
+			err:  &acpRPCError{Method: "session/prompt", Code: -32603, Message: "Internal error", Data: `{"details": "not_found"}`},
+			want: true,
+		},
+		{
+			name: "hermes gateway not_ready is not a lost session",
+			// Same envelope, different cause (GH #9272): the gateway is still
+			// starting, and the recorded session is fine.
+			err:  &acpRPCError{Method: "session/prompt", Code: -32603, Message: "Internal error", Data: `{"details":"not_ready"}`},
+			want: false,
+		},
+		{
+			name: "not_found outside the details field",
+			err:  &acpRPCError{Method: "session/prompt", Code: -32603, Message: "Internal error", Data: `{"details":"mcp_server_not_found"}`},
+			want: false,
+		},
+		{
 			name: "kimi session not found as invalid_params data",
 			// kimi-cli raises RequestError.invalid_params({"session_id":
 			// "Session not found"}) for every unknown-session path
@@ -3363,6 +3388,87 @@ func TestHermesBackendClearsSessionIDWhenResumedSessionNotFound(t *testing.T) {
 		}
 		if result.SessionID != "" {
 			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+		}
+		if !result.ResumeRejected {
+			t.Error("expected ResumeRejected=true so shouldRetryWithFreshSession fires")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// fakeHermesACPGatewayNotFoundPromptScript is the GH #10081 shape:
+// session/resume succeeds and echoes the requested id, then session/prompt
+// fails with a bare -32603 "Internal error" whose only evidence is
+// data={"details":"not_found"} -- what Hermes' gateway adapter reports after
+// a reconnect drops a session it can no longer re-attach.
+func fakeHermesACPGatewayNotFoundPromptScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"%s"}}\n' "$id" "$sid"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":{"details":"not_found"}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestHermesBackendClearsSessionIDOnGatewayNotFoundAtPrompt pins GH #10081.
+// The wording checks cannot see {"details":"not_found"}, so before the fix the
+// stale id survived and ResumeRejected stayed false: the daemon did not retry
+// from a fresh session in this turn.
+func TestHermesBackendClearsSessionIDOnGatewayNotFoundAtPrompt(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPGatewayNotFoundPromptScript()))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_stale",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "not_found") {
+			t.Errorf("expected error to surface the gateway not_found token, got %q", result.Error)
+		}
+		if result.SessionID != "" {
+			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+		}
+		if !result.ResumeRejected {
+			t.Error("expected ResumeRejected=true so shouldRetryWithFreshSession fires")
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
