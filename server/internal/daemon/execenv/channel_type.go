@@ -13,25 +13,26 @@ package execenv
 // agree on the wire strings below. WeCom keeps its reserved wire discriminator
 // here until its adapter lands.
 const (
+	ChannelTypeTelegram = "telegram"
 	ChannelTypeSlack    = "slack"
 	ChannelTypeFeishu   = "feishu"
 	ChannelTypeWecom    = "wecom"
 	ChannelTypeDingtalk = "dingtalk"
-	ChannelTypeTelegram = "telegram"
 	ChannelTypeWeixin   = "weixin"
+	ChannelTypeSharecrm = "sharecrm"
 )
 
 // SurfacePersistsTranscript reports whether a chat surface stores its
 // conversation in Multica's chat_message table, readable back via `multica chat
 // history` (handler/chat_history.go's non-Slack fallback). Web chat (empty
-// discriminator), Feishu, WeCom and DingTalk all persist via the shared
-// AppendUserMessage path; Slack reads the live channel instead. It is the single
+// discriminator), Feishu, WeCom, DingTalk, WeChat and ShareCRM all persist via the
+// shared AppendUserMessage path; Slack reads the live channel instead. It is the single
 // source of truth for "which surfaces are readable", shared by the
 // continuity-notice router, the chat-prompt history copy, and the surface list —
 // so a future non-persisting channel is never told "read it back".
 func SurfacePersistsTranscript(channelType string) bool {
 	switch channelType {
-	case "", ChannelTypeFeishu, ChannelTypeWecom, ChannelTypeDingtalk, ChannelTypeWeixin:
+	case "", ChannelTypeFeishu, ChannelTypeWecom, ChannelTypeDingtalk, ChannelTypeWeixin, ChannelTypeSharecrm:
 		return true
 	default:
 		return false
@@ -122,6 +123,8 @@ func ChannelCarriesFiles(channelType string, serverSaysDelivers bool) bool {
 // names itself in the prompt instead of silently reading as "unknown".
 func ChannelDisplayName(channelType string) string {
 	switch channelType {
+	case ChannelTypeTelegram:
+		return "Telegram"
 	case ChannelTypeSlack:
 		return "Slack"
 	case ChannelTypeFeishu:
@@ -132,8 +135,8 @@ func ChannelDisplayName(channelType string) string {
 		return "DingTalk"
 	case ChannelTypeWeixin:
 		return "WeChat"
-	case ChannelTypeTelegram:
-		return "Telegram"
+	case ChannelTypeSharecrm:
+		return "ShareCRM"
 	default:
 		return channelType
 	}

@@ -6,6 +6,7 @@ export const CHANNEL_INTEGRATIONS = [
   "wecom",
   "telegram",
   "weixin",
+  "sharecrm",
 ] as const;
 
 export type ChannelIntegration = (typeof CHANNEL_INTEGRATIONS)[number];

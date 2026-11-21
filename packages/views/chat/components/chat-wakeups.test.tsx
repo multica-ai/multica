@@ -4,12 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ChatWakeup } from "@multica/core/types";
 import enChat from "../../locales/en/chat.json";
 
-const cancelMutate = vi.hoisted(() => vi.fn());
-const retryMutate = vi.hoisted(() => vi.fn());
+const cancelMutate = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const retryMutate = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 vi.mock("@multica/core/chat/mutations", () => ({
-  useCancelChatWakeup: () => ({ mutate: cancelMutate }),
-  useRetryChatWakeup: () => ({ mutate: retryMutate, isPending: false }),
+  useCancelChatWakeup: () => ({ mutateAsync: cancelMutate }),
+  useRetryChatWakeup: () => ({ mutateAsync: retryMutate, isPending: false }),
 }));
 
 import { ChatQueue } from "./chat-queue";
@@ -108,10 +108,7 @@ describe("ChatWakeupStrip", () => {
     expect(screen.getByText(/ends in 20 hours/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel wakeup" }));
-    expect(cancelMutate).toHaveBeenCalledWith(
-      { sessionId: "session-1", wakeupId: "sooner" },
-      expect.anything(),
-    );
+    expect(cancelMutate).toHaveBeenCalledWith({ sessionId: "session-1", wakeupId: "sooner" });
   });
 
   it("renders nothing without an active wakeup", () => {
@@ -184,7 +181,7 @@ describe("ChatWakeupCards", () => {
     expect(screen.getByText("Couldn't report")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(retryMutate).toHaveBeenCalledWith({ sessionId: "session-1", wakeupId: "broken" }, expect.anything());
+    expect(retryMutate).toHaveBeenCalledWith({ sessionId: "session-1", wakeupId: "broken" });
   });
 });
 

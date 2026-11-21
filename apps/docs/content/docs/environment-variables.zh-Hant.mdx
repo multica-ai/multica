@@ -187,8 +187,11 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | 新連線必需，用於驗證安裝管理權限；也用於 PR 卡片和倉庫瀏覽 |
 | 飛書 | `MULTICA_LARK_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 編碼的 32 位元組 token 加密金鑰 |
+| 釘釘 | `MULTICA_DINGTALK_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰；為空則關閉釘釘 |
+| 企業微信 | `MULTICA_WECOM_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰；為空則關閉企業微信 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 編碼的 32 位元組 Bot token 加密金鑰 |
 | 微信 | `MULTICA_WEIXIN_SECRET_KEY` | base64 編碼的 32 位元組金鑰，用於加密 iLink 憑據、登入狀態與回覆上下文；未設定時不開放微信連線 |
+| 紛享銷客 | `MULTICA_SHARECRM_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰；為空則關閉紛享銷客 |
 | Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | 流式回覆中展示的工具步驟：`auto`（預設，私聊顯示細節，群聊只顯示工作型別）、`off`、`summary` 或 `detail` |
 | 自託管 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 整合開關，compose 預設開啟 |
 | 自託管 Git | `MULTICA_VCS_SECRET_KEY` | base64 編碼的 32 位元組加密金鑰（`openssl rand -base64 32`）；未配置時該功能整體不可用 |
@@ -196,7 +199,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 不配置 `GITHUB_APP_ID` 和私鑰時，PR 仍會正常關聯、映象，並在合併後改狀態，但卡片上不顯示 CI 與可合併狀態，"從 GitHub 選擇"倉庫入口也會禁用。
 
-配置步驟見 [GitHub 整合](/github-integration#自託管配置)、[飛書 Bot](/lark-bot-integration#自託管配置)、[Slack Bot](/slack-bot-integration#自託管配置)和 [Telegram Bot](/telegram-bot-integration#自託管配置)。
+配置步驟見 [GitHub 整合](/github-integration#自託管配置)、[飛書 Bot](/lark-bot-integration#自託管配置)、[Slack Bot](/slack-bot-integration#自託管配置)、[釘釘 Bot](/dingtalk-bot-integration#自部署配置)、[Telegram Bot](/telegram-bot-integration#自託管配置)、[紛享銷客 Bot](/sharecrm-bot-integration#自部署配置)、[微信 Bot](/weixin-bot-integration#自託管配置)和[聊天整合](/channels#自託管)。
 
 ## 服務端 LLM
 
