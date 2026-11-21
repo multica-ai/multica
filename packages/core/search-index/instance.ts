@@ -1,5 +1,10 @@
 import { api } from "../api";
-import type { SearchDocsResponse, SearchIssuesResponse, SearchProjectsResponse } from "../types";
+import type {
+  SearchChatMessagesResponse,
+  SearchDocsResponse,
+  SearchIssuesResponse,
+  SearchProjectsResponse,
+} from "../types";
 import { LocalSearchIndexClient, startSearchIndexWorker } from "./client";
 
 let client: LocalSearchIndexClient | null = null;
@@ -34,6 +39,12 @@ export async function searchProjects(params: Parameters<typeof api.searchProject
  */
 export async function searchDocs(params: Parameters<typeof api.searchDocs>[0]): Promise<SearchDocsResponse> {
   return api.searchDocs(params);
+}
+
+/** Chat message search with the same local-first behavior as `searchIssues`. */
+export async function searchChatMessages(params: SearchParams): Promise<SearchChatMessagesResponse> {
+  const local = await getLocalSearchIndex().searchMessages(params);
+  return local ?? api.searchChatMessages(params);
 }
 
 /** Whether searches in this tab are currently answered locally. */

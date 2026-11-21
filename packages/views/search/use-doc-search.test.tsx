@@ -5,6 +5,7 @@ const index = vi.hoisted(() => ({
   isLocalSearchReady: vi.fn(() => true),
   searchIssues: vi.fn(),
   searchProjects: vi.fn(),
+  searchChatMessages: vi.fn(),
   searchDocs: vi.fn(),
 }));
 vi.mock("@multica/core/search-index", () => index);
@@ -20,6 +21,7 @@ beforeEach(() => {
   index.isLocalSearchReady.mockReturnValue(true);
   index.searchIssues.mockResolvedValue({ issues: [issue], total: 1 });
   index.searchProjects.mockResolvedValue({ projects: [], total: 0 });
+  index.searchChatMessages.mockResolvedValue({ messages: [] });
 });
 afterEach(() => vi.useRealTimers());
 

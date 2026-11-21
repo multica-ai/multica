@@ -72,6 +72,9 @@ function payloadFor(path: string, workspace: string): unknown {
   };
   if (path === "/api/workspaces") return workspaces;
   if (path === "/api/issues/search") return { issues: [issue(workspace === "synthetic-b" ? "b" : "a")] };
+  // Chat message search runs beside the issue/project searches; an empty
+  // result keeps the palette free of chat rows this suite never asserts on.
+  if (path === "/api/chat/sessions/search") return { messages: [] };
   if (path === "/api/projects/search" || path === "/api/projects") return { projects: [], total: 0 };
   if (path === "/api/docs/search") return { docs: [] };
   if (path === "/api/docs") return { folders: [], docs: [] };
@@ -212,9 +215,9 @@ it("cancels an in-flight search when the production router switches workspace", 
   await openSearch();
   holdA = true;
   fireEvent.change(input(), { target: { value: "alpha" } });
-  // Issues, projects and docs: one held search request each. Docs search runs
-  // on its own debounce, so waiting for only the first two raced its arrival.
-  await waitFor(() => expect(held.length).toBe(3), NETWORK_WAIT);
+  // Four in-flight searches: issues, projects, docs, and chat messages.
+  // Docs search runs on its own debounce, so waiting for fewer raced its arrival.
+  await waitFor(() => expect(held.length).toBe(4), NETWORK_WAIT);
   await notify("synthetic-b");
   await act(async () => {
     for (const { response, payload } of held.splice(0)) response.end(JSON.stringify(payload));
