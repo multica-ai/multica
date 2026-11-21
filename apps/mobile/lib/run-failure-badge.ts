@@ -33,7 +33,7 @@ const FAILURE_REASON_BADGE: Record<string, string> = {
   environment_prepare_failed: "Environment setup failed",
   runtime_access_denied: RUNTIME_ACCESS_DENIED_BADGE,
 
-  "agent_error.provider_auth_or_access": "Auth failed",
+  "agent_error.provider_auth_or_access": "Auth or access failed",
   "agent_error.provider_quota_limit": "Quota exhausted",
   "agent_error.provider_capacity_or_rate_limit": "Rate limited",
   "agent_error.provider_server_error": "Provider error",

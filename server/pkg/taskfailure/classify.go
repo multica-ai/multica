@@ -1,6 +1,7 @@
 package taskfailure
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -59,6 +60,24 @@ var httpForbiddenCodeRe = regexp.MustCompile(`(^|[^0-9a-z])403([^0-9a-z]|$)`)
 // old daemons land on the same reason.
 func isUsageLimit403(lower string) bool {
 	return httpForbiddenCodeRe.MatchString(lower) && strings.Contains(lower, "usage limit")
+}
+
+// Trae wraps both access denials and unrelated provider failures in the same
+// prompt error. Require an explicit denial in the RPC data's message.
+func isTraePromptResourceDenied(message string) bool {
+	const prefix = "traecli session/prompt failed: session/prompt: internal error (code=-32603, data="
+	if len(message) < len(prefix) || !strings.EqualFold(message[:len(prefix)], prefix) {
+		return false
+	}
+	data, ok := strings.CutSuffix(message[len(prefix):], ")")
+	if !ok {
+		return false
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	return json.Unmarshal([]byte(data), &payload) == nil &&
+		strings.Contains(strings.ToLower(payload.Message), "do not have permission to access this resource")
 }
 
 // tokenRateLimitRe matches the per-minute quota labels a gateway prints on a
@@ -129,6 +148,9 @@ func Classify(rawError string) Reason {
 		// callers should never hand us empty input — if they do, the
 		// safest landing is the catchall.
 		return ReasonAgentUnknown
+	}
+	if isTraePromptResourceDenied(trimmed) {
+		return ReasonAgentProviderAuthOrAccess
 	}
 	lower := strings.ToLower(trimmed)
 	// Cursor's adapter adds event counts to known transport failures. Those
@@ -724,6 +746,9 @@ var legacyTokenRateLimitReasons = map[string]bool{
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
 	rawError = WithoutCodebuddyProtocolSummary(rawError)
+	if reason == ReasonAgentProviderServerError.String() && isTraePromptResourceDenied(strings.TrimSpace(rawError)) {
+		return ReasonAgentProviderAuthOrAccess
+	}
 	// Older daemons treated the billing rejection as a rate limit because
 	// they only recognized the numeric status and the structured balance code.
 	if reason == ReasonAgentProviderCapacityOrRateLimit.String() &&

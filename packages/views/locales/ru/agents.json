@@ -1085,7 +1085,7 @@
       "environment_prepare_failed": "Не удалось подготовить среду выполнения",
       "runtime_access_denied": "Этот агент не может работать на своей приватной среде выполнения, поэтому не смог ответить. Сделайте среду выполнения публичной или привяжите/скопируйте агента на среду, доступную её владельцу.",
       "invalid_task_identity": "Несоответствие идентификатора запуска",
-      "agent_error_provider_auth_or_access": "Ошибка авторизации у провайдера",
+      "agent_error_provider_auth_or_access": "Ошибка аутентификации или доступа к провайдеру",
       "agent_error_provider_quota_limit": "Квота провайдера исчерпана",
       "agent_error_provider_capacity_or_rate_limit": "Ограничение частоты запросов провайдером",
       "agent_error_provider_server_error": "Ошибка сервера провайдера",

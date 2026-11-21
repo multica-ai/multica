@@ -123,7 +123,7 @@
     "runtime_access_denied": "該 AI 代理無法在其私有執行時上執行，暫時無法回覆。請將該執行時設為公開，或將 AI 代理重新繫結/複製到其所有者可用的執行時。",
     "runtime_access_revoked": "執行時訪問權限已被撤銷。再次執行前，請為 AI 代理繫結可用的執行時。",
     "invalid_task_identity": "執行身份不匹配",
-    "agent_error_provider_auth_or_access": "提供商認證失敗",
+    "agent_error_provider_auth_or_access": "提供商認證或存取失敗。請檢查帳號登入狀態和資源權限。",
     "agent_error_provider_quota_limit": "提供商配額已用盡",
     "agent_error_provider_capacity_or_rate_limit": "受到提供商速率限制",
     "agent_error_provider_server_error": "提供商伺服器出錯",

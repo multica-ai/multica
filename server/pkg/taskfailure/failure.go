@@ -225,9 +225,8 @@ const (
 	// the right sub-reason from the string. IsAgentError returns true
 	// for all of these.
 
-	// ReasonAgentProviderAuthOrAccess: 401 / 403, "Not logged in",
-	// invalid API key, no access to the model. Not retryable; user
-	// must re-auth.
+	// ReasonAgentProviderAuthOrAccess covers rejected authentication or
+	// resource access. Check the model account's credentials and permissions.
 	ReasonAgentProviderAuthOrAccess Reason = "agent_error.provider_auth_or_access"
 
 	// ReasonAgentProviderQuotaLimit: 402, insufficient_balance,
