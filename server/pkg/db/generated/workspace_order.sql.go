@@ -14,11 +14,13 @@ import (
 const lockWorkspaceOrderMembers = `-- name: LockWorkspaceOrderMembers :many
 SELECT workspace_id FROM member
 WHERE user_id = $1
+  AND role IN ('owner', 'admin', 'member', 'guest')
 ORDER BY id
 FOR UPDATE
 `
 
-// Stable lock order serializes overlapping whole-list replacements.
+// Stable lock order serializes overlapping whole-list replacements. Same
+// role filter as ListWorkspaces, so the set matches what the client sees.
 func (q *Queries) LockWorkspaceOrderMembers(ctx context.Context, userID pgtype.UUID) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, lockWorkspaceOrderMembers, userID)
 	if err != nil {

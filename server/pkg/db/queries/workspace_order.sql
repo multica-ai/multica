@@ -1,7 +1,9 @@
 -- name: LockWorkspaceOrderMembers :many
--- Stable lock order serializes overlapping whole-list replacements.
+-- Stable lock order serializes overlapping whole-list replacements. Same
+-- role filter as ListWorkspaces, so the set matches what the client sees.
 SELECT workspace_id FROM member
 WHERE user_id = $1
+  AND role IN ('owner', 'admin', 'member', 'guest')
 ORDER BY id
 FOR UPDATE;
 
