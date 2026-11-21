@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore } from "zustand/vanilla";
 import { setApiInstance } from "@multica/core/api";
@@ -56,7 +56,7 @@ describe("IssueFilterMenu opened by its host", () => {
   it("opens without a click and keeps rows in place while a filter lands", async () => {
     const store = renderHost();
     fireEvent.click(screen.getByRole("button", { name: "Open from host" }));
-    expect(await screen.findByRole("textbox", { name: "Filter by field or value…" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Filter by field or value..." })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("menuitem", { name: /^Agent status/ }));
     fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Running" }));
@@ -67,9 +67,21 @@ describe("IssueFilterMenu opened by its host", () => {
   it("reports closing back to the host", async () => {
     renderHost();
     fireEvent.click(screen.getByRole("button", { name: "Open from host" }));
-    const search = await screen.findByRole("textbox", { name: "Filter by field or value…" });
+    const search = await screen.findByRole("textbox", { name: "Filter by field or value..." });
 
     fireEvent.keyDown(search, { key: "Escape" });
     await waitFor(() => expect(screen.getByTestId("host-open")).toHaveTextContent("false"));
+  });
+
+  it("opens the advanced panel in advanced mode, and closes it on leaving that mode", async () => {
+    const store = renderHost();
+    act(() => store.getState().enterAdvancedFilter());
+    fireEvent.click(screen.getByRole("button", { name: "Open from host" }));
+    expect(await screen.findByTestId("advanced-filter-panel")).toBeInTheDocument();
+
+    act(() => store.getState().exitAdvancedFilter());
+    await waitFor(() => expect(screen.getByTestId("host-open")).toHaveTextContent("false"));
+    expect(screen.queryByTestId("advanced-filter-panel")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Filter by field or value..." })).toBeNull();
   });
 });

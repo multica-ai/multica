@@ -70,9 +70,10 @@ export interface SurfaceBridge {
   /**
    * Arms the listener before the trusted outer document is assigned. The guest
    * creates the channel; the host accepts its port only once all launch proofs
-   * match.
+   * match. `theme` is read when the guest connects, so the first push is
+   * current even if the theme changed while the surface loaded.
    */
-  connect(frame: HTMLIFrameElement, theme: Record<string, string>): void;
+  connect(frame: HTMLIFrameElement, theme: Record<string, string> | (() => Record<string, string>)): void;
   /** Pushes a theme change to an already-connected frame. */
   pushTheme(theme: Record<string, string>): void;
   close(): void;
@@ -135,7 +136,7 @@ export function createSurfaceBridge(options: SurfaceBridgeOptions): SurfaceBridg
           void handle(portEvent.data, guestPort);
         };
         port.start();
-        port.postMessage({ kind: "theme", theme });
+        port.postMessage({ kind: "theme", theme: typeof theme === "function" ? theme() : theme });
       };
       connectListeners.push(onConnect);
       window.addEventListener("message", onConnect);

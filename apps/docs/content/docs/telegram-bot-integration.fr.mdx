@@ -40,8 +40,8 @@ Ne collez jamais le jeton dans une tâche, un message de discussion, un journal 
 
 ### Le connecter à un agent [#2-le-connecter-à-un-agent]
 
-1. Dans Multica, ouvrez **Agents**, sélectionnez un agent et ouvrez **Intégrations**.
-2. Cliquez sur **Connecter Telegram**.
+1. Dans Multica, ouvrez **Agents**, sélectionnez un agent et ouvrez **Messagerie**.
+2. Cliquez sur **Ajouter un canal de messagerie**, puis choisissez **Telegram**.
 3. Collez le jeton du bot et cliquez sur **Connecter**.
 
 Multica appelle Telegram pour vérifier le bot, s'assure qu'aucun webhook sortant n'entre en conflit avec le long polling, chiffre le jeton et démarre une connexion `getUpdates` supervisée. Un bot déjà connecté à un autre agent ou espace de travail doit d'abord y être déconnecté.
@@ -100,7 +100,7 @@ Lorsqu'une réponse adressée au bot cite un message contenant une photo ou un f
 
 ### Réponses et contenus pris en charge
 
-Le bot diffuse le texte en continu en publiant puis en modifiant un message Telegram, cite le message déclencheur, respecte les sujets de forum et découpe les longues réponses pour rester sous la limite de taille des messages Telegram.
+Le bot diffuse le texte en continu en publiant puis en modifiant un message Telegram, cite le message déclencheur, respecte les sujets de forum et découpe les longues réponses pour rester sous la limite de taille des messages Telegram. Pendant que l'agent travaille, le même message liste ses étapes en cours, comme l'exécution d'une commande ou la lecture d'un fichier, avec le temps écoulé. Une conversation privée montre sur quoi porte chaque étape ; un groupe ne montre que le type de travail. Définissez `MULTICA_TELEGRAM_TOOL_PROGRESS` sur `off`, `summary` ou `detail` pour changer ce comportement.
 
 Les photos, fichiers, vidéos, messages vocaux et audio parviennent à l'agent sous forme de pièces jointes dans la même conversation, la légende servant de texte du message ; les fichiers produits par l'agent sont renvoyés dans la conversation après sa réponse. Dans les deux sens, le serveur doit disposer d'un stockage objet (voir la section Configuration en auto-hébergement ci-dessous).
 
@@ -125,7 +125,7 @@ Sans stockage objet, le bot répond aux médias en indiquant qu'ils ne sont pas 
 
 ## Gérer les connexions
 
-Ouvrez **Paramètres → Messagerie → Telegram** pour voir les bots connectés. Les propriétaires et administrateurs peuvent en déconnecter un. La déconnexion arrête le long polling et les réponses sortantes, mais conserve les conversations Multica et les enregistrements d'audit.
+Ouvrez **Paramètres → Messagerie** pour voir les agents connectés, regroupés par plateforme. Sélectionnez un agent pour ouvrir sa section **Messagerie**. Les propriétaires et administrateurs de l'espace de travail peuvent y déconnecter le bot depuis son menu de gestion. La déconnexion arrête le long polling et les réponses sortantes, mais conserve les conversations Multica et les enregistrements d'audit.
 
 ## Configuration en auto-hébergement
 

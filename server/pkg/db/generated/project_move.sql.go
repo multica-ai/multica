@@ -42,7 +42,7 @@ func (q *Queries) ConsumeReturningIssueAlias(ctx context.Context, arg ConsumeRet
 
 const getProjectMoveState = `-- name: GetProjectMoveState :one
 WITH p AS (SELECT $1::uuid AS project, $2::uuid AS source, $3::uuid AS target),
-moving AS (SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id FROM issue i,p WHERE i.project_id=p.project AND i.workspace_id=p.source),
+moving AS (SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.requester_user_id FROM issue i,p WHERE i.project_id=p.project AND i.workspace_id=p.source),
 deleted_views AS (SELECT r.id, r.workspace_id, r.owner_id, r.name, r.scope_type, r.scope_id, r.scope_variant, r.visibility, r.definition_version, r.query, r.display, r.revision, r.created_at, r.updated_at FROM issue_view r,p WHERE r.workspace_id=p.source AND (r.scope_id=p.project OR r.scope_id IN (SELECT id FROM moving) OR r.query::text LIKE '%'||p.project::text||'%' OR EXISTS (SELECT 1 FROM moving i WHERE r.query::text LIKE '%'||i.id::text||'%'))),
 blockers AS (
 SELECT 'active_task'::text AS kind,t.issue_id,t.id AS resource_id FROM agent_task_queue t WHERE t.issue_id IN (SELECT id FROM moving) AND t.status NOT IN ('completed','failed','cancelled')
@@ -111,7 +111,7 @@ func (q *Queries) GetProjectMoveState(ctx context.Context, arg GetProjectMoveSta
 }
 
 const lockProjectMoveIssues = `-- name: LockProjectMoveIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue WHERE project_id=$1::uuid AND workspace_id=$2::uuid ORDER BY id FOR UPDATE
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, requester_user_id FROM issue WHERE project_id=$1::uuid AND workspace_id=$2::uuid ORDER BY id FOR UPDATE
 `
 
 type LockProjectMoveIssuesParams struct {
@@ -159,6 +159,7 @@ func (q *Queries) LockProjectMoveIssues(ctx context.Context, arg LockProjectMove
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
+			&i.RequesterUserID,
 		); err != nil {
 			return nil, err
 		}

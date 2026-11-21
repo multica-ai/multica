@@ -190,6 +190,18 @@ async function editCronText(expr: string) {
 }
 
 describe("ScheduleEditor", () => {
+  it.each(["ctrlKey", "metaKey", "altKey"] as const)(
+    "preserves a fixed-time schedule when %s+1 is pressed in the hour field",
+    (modifier) => {
+      renderEditor(cron("30 9 * * *"));
+      expect(fireEvent.keyDown(screen.getByLabelText("Hour"), {
+        key: "1",
+        [modifier]: true,
+      })).toBe(true);
+      expect(cronOut()).toBe("30 9 * * *");
+    },
+  );
+
 
   it("never fires onChange on mount (untouched save sends no update)", async () => {
     const onChange = vi.fn();

@@ -1,15 +1,11 @@
 import type { ComponentType, ReactNode } from "react";
 import type { ShortcutChord } from "@multica/core/shortcuts";
-import type { Agent, ChatSession, Issue, Project, Squad } from "@multica/core/types";
+import type { Agent, ChatSession, Issue, Project } from "@multica/core/types";
 
 /** The issues an issue command acts on: the open issue, or a list selection. */
 export type IssueTarget =
   | { kind: "single"; issue: Issue }
   | { kind: "batch"; issues: Issue[]; clearSelection: () => void };
-
-export type DelegateActor =
-  | { type: "agent"; id: string; name: string; agent: Agent }
-  | { type: "squad"; id: string; name: string; squad: Squad };
 
 /** A submenu the palette can push onto its page stack. */
 export type PalettePage =
@@ -24,8 +20,7 @@ export type PalettePage =
   | { type: "theme" }
   | { type: "project-status"; project: Project }
   | { type: "agent-assign-issue"; agent: Agent }
-  | { type: "chat-project"; session: ChatSession; changeProject: (projectId: string | null) => void }
-  | { type: "delegate-target"; prompt: string };
+  | { type: "chat-project"; session: ChatSession; changeProject: (projectId: string | null) => void };
 
 export interface PaletteStackEntry {
   page: PalettePage;

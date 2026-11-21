@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -32,6 +32,7 @@ import { PriorityIcon } from "./priority-icon";
 import { IssueActionsContextMenu } from "../actions";
 import { sortIssues } from "../utils/sort";
 import { useLocale, useT } from "../../i18n";
+import { useRestoredScrollEntry, useRestoredScrollRef } from "../../platform";
 
 // Date utilities — everything is UTC-day-aligned so a `due_date` ISO string
 // produced anywhere maps to exactly one column on the axis.
@@ -454,6 +455,8 @@ function ScheduledRow({
 
 // GanttView — public component
 
+const GANTT_SCROLL_KEY = "gantt";
+
 export function GanttView({ issues }: { issues: Issue[] }) {
   const { t } = useT("issues");
   const zoom = useViewStore((s) => s.ganttZoom);
@@ -498,9 +501,25 @@ export function GanttView({ issues }: { issues: Issue[] }) {
   const todayOffsetDays = daysBetween(range.start, today);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741) for the two-axis scroller. A
+  // restored horizontal offset replaces the jump to today on mount.
+  const restoreScrollRef = useRestoredScrollRef(GANTT_SCROLL_KEY);
+  const restoredLeft = useRestoredScrollEntry(GANTT_SCROLL_KEY)?.left ?? 0;
+  const keepRestoredLeftRef = useRef(restoredLeft > 0);
+  const attachScroller = useCallback(
+    (el: HTMLDivElement | null) => {
+      scrollRef.current = el;
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    if (keepRestoredLeftRef.current) {
+      keepRestoredLeftRef.current = false;
+      return;
+    }
     const target = Math.max(0, LEFT_COL_WIDTH + todayOffsetDays * dayPx - 240);
     el.scrollLeft = target;
   }, [todayOffsetDays, dayPx]);
@@ -552,7 +571,11 @@ export function GanttView({ issues }: { issues: Issue[] }) {
       </div>
 
       {/* Body — single scroll container drives both vertical + horizontal */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
+      <div
+        ref={attachScroller}
+        data-tab-scroll-root={GANTT_SCROLL_KEY}
+        className="flex-1 min-h-0 overflow-auto"
+      >
         <div style={{ minWidth: LEFT_COL_WIDTH + timelineWidth }}>
           {/* Sticky header row */}
           <div className="sticky top-0 z-20 flex">

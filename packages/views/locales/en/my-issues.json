@@ -1,9 +1,9 @@
 {
   "page": {
-    "breadcrumb": "My Issues",
+    "breadcrumb": "My issues",
     "workspace_fallback": "Workspace",
-    "empty_title": "No issues assigned to you",
-    "empty_description": "Issues you create or are assigned to will appear here."
+    "empty_title": "No issues yet",
+    "empty_description": "Issues assigned to you, created by you, or involving your agents and squads will appear here."
   },
   "header": {
     "scope": {
@@ -14,7 +14,7 @@
       "created_label": "Created",
       "created_description": "Issues I created",
       "agents_label": "My Agents and Squads",
-      "agents_description": "Issues assigned to my agents"
+      "agents_description": "Issues assigned to my agents and squads"
     },
     "filter_button": "Filter",
     "filter_status": "Status",

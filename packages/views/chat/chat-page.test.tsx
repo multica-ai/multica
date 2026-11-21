@@ -44,6 +44,10 @@ vi.mock("./components/chat-thread-list", () => ({
 vi.mock("./components/chat-session-header", () => ({
   ChatSessionHeader: () => <div>chat-session-header</div>,
 }));
+vi.mock("./components/chat-wakeups", () => ({
+  ChatWakeupStrip: () => null,
+  useChatWakeups: () => [],
+}));
 vi.mock("./components/chat-empty-state", () => ({
   EmptyState: () => <div>chat-empty-state</div>,
 }));
@@ -55,6 +59,12 @@ vi.mock("./components/offline-banner", () => ({
 }));
 vi.mock("./components/no-agent-banner", () => ({
   NoAgentBanner: () => null,
+}));
+vi.mock("../common/app-requests", () => ({
+  ChatAppRequests: () => null,
+}));
+vi.mock("../common/app-requests", () => ({
+  ChatAppRequests: () => null,
 }));
 vi.mock("./components/archived-agent-banner", () => ({
   ArchivedAgentBanner: () => null,

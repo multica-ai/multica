@@ -175,7 +175,9 @@ beforeEach(() => {
       getLastFreeze: vi.fn(),
       onAuthToken: () => () => {},
       onCloseActiveTab: () => () => {},
+      onContextMenu: () => () => {},
       onInviteOpen: () => () => {},
+      onIssueOpen: () => () => {},
       onSystemLocaleChanged: () => () => {},
       reportAuthSession: vi.fn(),
       runtimeConfig: {

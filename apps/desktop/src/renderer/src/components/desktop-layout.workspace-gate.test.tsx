@@ -79,13 +79,12 @@ vi.mock("@multica/views/platform", () => ({
 // Each workspace-scoped component gets a marker so the assertions can tell
 // which of them the shell decided to mount.
 vi.mock("@multica/views/layout", () => ({
+  AppBottomBar: () => <div data-testid="app-bottom-bar" />,
   AppRail: () => <div data-testid="app-rail" />,
   AppShellProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   CompactNavSheet: () => null,
   GlobalShortcuts: () => <div data-testid="global-shortcuts" />,
   NavigationProgress: () => <div data-testid="navigation-progress" />,
-  NewIssueButton: () => <div data-testid="title-bar-new-issue" />,
-  SearchButton: () => <div data-testid="title-bar-search" />,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => <div data-testid="space-panel" />,
   useAppShell: () => ({ hasPanel: true }),
@@ -115,6 +114,11 @@ vi.mock("@multica/views/search", () => ({
 vi.mock("@multica/views/chat", () => ({
   FloatingChat: () => <div data-testid="floating-chat" />,
 }));
+vi.mock("@multica/views/star-prompt", () => ({
+  StarPrompt: () => <div data-testid="star-prompt" />,
+}));
+vi.mock("@multica/views/whats-new", () => ({ WhatsNewDeck: () => null }));
+vi.mock("@multica/views/billing", () => ({ WorkspaceTrialNotices: () => null }));
 
 vi.mock("./tab-bar", () => ({ TabBar: () => null }));
 vi.mock("./window-overlay", () => ({ WindowOverlay: () => null }));
@@ -161,13 +165,13 @@ describe("DesktopShell workspace gating", () => {
     const { queryByRole, queryByTestId } = renderShell();
 
     expect(queryByTestId("app-rail")).not.toBeNull();
+    expect(queryByTestId("app-bottom-bar")).not.toBeNull();
     expect(queryByTestId("space-panel")).not.toBeNull();
     expect(queryByTestId("search-command")).not.toBeNull();
-    expect(queryByTestId("title-bar-new-issue")).not.toBeNull();
-    expect(queryByTestId("title-bar-search")).not.toBeNull();
     expect(queryByTestId("global-shortcuts")).not.toBeNull();
     expect(queryByTestId("modal-registry")).not.toBeNull();
     expect(queryByTestId("floating-chat")).not.toBeNull();
+    expect(queryByTestId("star-prompt")).not.toBeNull();
     expect(queryByRole("status", { name: /loading workspace/i })).toBeNull();
   });
 
@@ -178,7 +182,7 @@ describe("DesktopShell workspace gating", () => {
 
     expect(queryByTestId("app-rail")).toBeNull();
     expect(
-      container.querySelectorAll("[data-slot='sidebar-trigger']"),
+      container.querySelectorAll("[data-sidebar='trigger']"),
     ).toHaveLength(0);
     expect(
       container.querySelector('[data-slot="main-top-bar"]'),
@@ -197,9 +201,9 @@ describe("DesktopShell workspace gating", () => {
     const { queryByTestId } = renderShell();
 
     expect(queryByTestId("app-rail")).toBeNull();
+    expect(queryByTestId("app-bottom-bar")).toBeNull();
     expect(queryByTestId("space-panel")).toBeNull();
     expect(queryByTestId("search-command")).toBeNull();
-    expect(queryByTestId("title-bar-new-issue")).toBeNull();
     expect(queryByTestId("global-shortcuts")).toBeNull();
     expect(queryByTestId("modal-registry")).toBeNull();
     expect(queryByTestId("floating-chat")).toBeNull();
@@ -235,6 +239,5 @@ describe("DesktopShell workspace gating", () => {
 
     expect(queryByTestId("app-rail")).toBeNull();
     expect(queryByTestId("search-command")).toBeNull();
-    expect(queryByTestId("title-bar-new-issue")).toBeNull();
   });
 });

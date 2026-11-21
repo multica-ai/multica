@@ -7,6 +7,15 @@ SELECT * FROM github_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListGitHubInstallationsWithConnectedBy :many
+-- Only disclose the connector's display name while they belong to this workspace.
+SELECT sqlc.embed(gi), COALESCE(u.name, '')::text AS connected_by
+FROM github_installation gi
+LEFT JOIN member m ON m.user_id = gi.connected_by_id AND m.workspace_id = gi.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+WHERE gi.workspace_id = $1
+ORDER BY gi.created_at ASC;
+
 -- name: ListGitHubInstallationsByInstallationID :many
 -- One installation_id can be bound to several workspaces; webhook routing lists
 -- every binding and fans the event out to each bound workspace. Ordered oldest
@@ -193,6 +202,35 @@ JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = sqlc.arg('issue_id')
 ORDER BY pr.pr_created_at DESC;
+
+-- name: ListIssuePullRequestSummaries :many
+-- Every issue -> PR link in the workspace, GitHub and self-hosted providers
+-- together, newest first. Carries only what an issue card or row needs to
+-- render a PR chip (no CI/merge snapshot). Backs the workspace wide "Pull
+-- requests" display option on board / list / table views. Links on issues in
+-- private projects the caller cannot see are left out, as in the issue lists.
+SELECT
+    ipr.issue_id,
+    pr.id, 'github'::text AS provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = sqlc.arg('workspace_id')
+  AND i.workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+UNION ALL
+SELECT
+    ipr.issue_id,
+    pr.id, pr.provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = sqlc.arg('workspace_id')
+  AND i.workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+ORDER BY pr_created_at DESC;
 
 -- name: GetIssueReviewHeadSha :one
 -- Returns the head SHA of the commit currently "under review" for an issue:

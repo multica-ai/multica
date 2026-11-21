@@ -1,5 +1,6 @@
 "use client";
 
+import { subIssueCreateDefaults } from "@multica/core/issues";
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -12,9 +13,10 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { errorCode } from "@multica/core/api";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
-import { copyText } from "@multica/ui/lib/clipboard";
+import { copyText, copyTextAndHtml } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { titleLinkPayload } from "../../common/title-link";
 import { runConfirmIntent } from "./run-confirm-gate";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import type { IssueSurfaceMutationOptions } from "../surface/actions-context";
@@ -26,8 +28,11 @@ export interface UseIssueActionsResult {
     options?: IssueSurfaceMutationOptions,
   ) => void;
   openInNewTab: () => void;
+  openInDesktop?: () => void;
+  openInNewWindow?: () => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
+  copyTitleAsLink: () => Promise<void>;
   copyCommentLink: (commentId: string) => Promise<void>;
   openCreateSubIssue: () => void;
   openRename: () => void;
@@ -101,23 +106,25 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
           ...options,
         });
       } else {
-        updateIssue.mutate(
-          { id: issueId, ...updates },
-          {
-            onSuccess: options?.onSuccess,
-            onError: (err) => {
-              toast.error(
-                errorCode(err) === "revision_conflict"
-                  ? t(($) => $.revision.conflict)
-                  : err instanceof Error && err.message
-                  ? err.message
-                  : t(($) => $.detail.update_failed),
-              );
-              options?.onError?.(err);
+        // Keep UI callbacks observer-scoped; error feedback belongs to the request.
+        void updateIssue
+          .mutateAsync(
+            { id: issueId, ...updates },
+            {
+              onSuccess: (issue) => options?.onSuccess?.(issue),
+              onError: (err) => options?.onError?.(err),
+              onSettled: () => options?.onSettled?.(),
             },
-            onSettled: () => options?.onSettled?.(),
-          },
-        );
+          )
+          .catch((err: unknown) => {
+            toast.error(
+              errorCode(err) === "revision_conflict"
+                ? t(($) => $.revision.conflict)
+                : err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            );
+          });
       }
     },
     [issue, issueId, entryOf, surfaceActions, updateIssue, openModal, t],
@@ -150,6 +157,23 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     );
   }, [issueId, issueIdentifier, navigation, paths]);
 
+  const openInNewWindow = useCallback(() => {
+    if (!issueId) return;
+    navigation.openIssueInNewWindow?.(
+      paths.issueDetail(issueIdentifier || issueId),
+      issueIdentifier ? `${issueIdentifier} ${issueTitle}` : issueTitle,
+    );
+  }, [issueId, issueIdentifier, issueTitle, navigation, paths]);
+
+  const openInDesktop = useCallback(() => {
+    if (!issueId) return;
+    const path = paths.issueDetail(issueIdentifier || issueId);
+    const isCurrentIssue =
+      navigation.pathname === path ||
+      navigation.pathname === paths.issueDetail(issueId);
+    navigation.openInDesktop?.(path + (isCurrentIssue ? navigation.hash : ""));
+  }, [issueId, issueIdentifier, navigation, paths]);
+
   const togglePin = useCallback(() => {
     if (!issueId) return;
     if (isPinned) {
@@ -171,6 +195,20 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       toast.error(t(($) => $.detail.link_copy_failed));
     }
   }, [paths, issueId, issueIdentifier, navigation, t]);
+
+  const copyTitleAsLink = useCallback(async () => {
+    if (!issueId) return;
+    const url = navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId));
+    // Keep the identifier in front of the title, matching how the issue reads
+    // in lists and activity feeds, so the pasted link stays recognizable.
+    const label = [issueIdentifier, issueTitle].filter(Boolean).join(" ");
+    const { text, html } = titleLinkPayload(label, url);
+    if (await copyTextAndHtml(text, html)) {
+      toast.success(t(($) => $.detail.title_link_copied));
+    } else {
+      toast.error(t(($) => $.detail.link_copy_failed));
+    }
+  }, [paths, issueId, issueIdentifier, issueTitle, navigation, t]);
 
   // Built during render so `copyCommentLink` depends on this string alone:
   // `paths` is rebuilt on every render, and the handler is passed to every
@@ -194,21 +232,13 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
-    openModal("create-issue", {
-      parent_issue_id: issueId,
-      parent_issue_identifier: issueIdentifier,
-      ...(issueProjectId ? { project_id: issueProjectId } : {}),
-      // Inherit the parent's assignee (member/agent/squad) so a sub-issue
-      // created from the "Add sub-issue" entry starts with the same owner
-      // (discussion #1728). The modal keys off whether these fields are
-      // present, not their value, so a seed overrides the sticky last-used
-      // assignee it would otherwise fall back to, while omitting both for
-      // an unassigned parent leaves that fallback intact. Seed the two
-      // together — assignee_type is meaningless without assignee_id.
-      ...(issueAssigneeType && issueAssigneeId
-        ? { assignee_type: issueAssigneeType, assignee_id: issueAssigneeId }
-        : {}),
-    });
+    openModal("create-issue", subIssueCreateDefaults({
+      id: issueId,
+      identifier: issueIdentifier,
+      project_id: issueProjectId,
+      assignee_type: issueAssigneeType,
+      assignee_id: issueAssigneeId,
+    }));
   }, [
     openModal,
     issueId,
@@ -306,8 +336,11 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     isPinned,
     updateField,
     openInNewTab,
+    openInDesktop: navigation.openInDesktop ? openInDesktop : undefined,
+    openInNewWindow: navigation.openIssueInNewWindow ? openInNewWindow : undefined,
     togglePin,
     copyLink,
+    copyTitleAsLink,
     copyCommentLink,
     openCreateSubIssue,
     openRename,

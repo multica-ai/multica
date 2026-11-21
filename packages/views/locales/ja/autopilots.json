@@ -21,7 +21,8 @@
     "active": "アクティブ",
     "paused": "一時停止中",
     "paused_runtime_required": "一時停止中 — 担当エージェントのランタイムが必要です",
-    "archived": "アーカイブ済み"
+    "archived": "アーカイブ済み",
+    "paused_project_archived": "一時停止中 — プロジェクトがアーカイブされています"
   },
   "execution_mode": {
     "create_issue": "タスクを作成",
@@ -75,12 +76,11 @@
     "run_blocked_invocation_not_allowed": "実行されませんでした — このオートパイロットのエージェントを使用する権限がありません",
     "run_blocked_runtime_offline": "実行されませんでした — エージェントのランタイムがオフラインです",
     "run_blocked_agent_runtime_required": "実行されませんでした — エージェントにランタイムがありません。実行するにはバインドしてください",
-    "run_blocked_runtime_access_denied": "実行されませんでした — エージェントはプライベートランタイムで実行できません。ランタイムを公開にするか、エージェントを再設定/コピーしてください",
+    "run_blocked_runtime_access_denied": "実行されませんでした — このエージェントのプライベートランタイムにアクセスできません。ランタイムを公開するか、アクセス可能なランタイムをエージェントにバインドしてください。",
     "run_blocked_target_unavailable": "実行されませんでした — エージェントを利用できません",
-    "run_blocked_attribution": "実行されませんでした — 実行の責任者を特定できませんでした",
-    "run_blocked_already_active": "実行されませんでした — 直近の実行が本件をカバーしています",
+    "run_blocked_attribution": "実行されませんでした — このオートパイロットを実行できるアクティブなメンバーがいません。",
+    "run_blocked_already_active": "実行されませんでした — 実行がすでに進行中か、完了したばかりです。",
     "run_blocked_quota_exceeded": "実行されませんでした — この期間の実行上限に達しました",
-    "run_blocked_issue_limit_reached": "実行されませんでした — ワークスペースのタスク数上限に達しました",
     "run_blocked_generic": "実行されませんでした — 実行がブロックされました",
     "section_triggers": "トリガー",
     "section_run_history": "実行履歴",
@@ -90,10 +90,10 @@
     "field_project": "プロジェクト",
     "no_project": "プロジェクトなし",
     "project_unavailable": "プロジェクトを利用できません",
-    "field_prompt": "プロンプト",
+    "field_prompt": "ランブック",
     "field_subscribers": "購読者",
     "field_subscribers_none": "なし",
-    "no_prompt": "プロンプトはまだありません。",
+    "no_prompt": "ランブックはまだありません。",
     "copy_link": "リンクをコピー",
     "link_copied": "リンクをコピーしました",
     "link_copy_failed": "リンクをコピーできませんでした",
@@ -104,7 +104,7 @@
       "with_trigger": "{{trigger}} · {{action}}"
     },
     "add_trigger": "トリガーを追加",
-    "no_triggers": "設定されたトリガーがありません。自動で実行するスケジュールを追加してください。",
+    "no_triggers": "設定されたトリガーがありません。自動実行するにはスケジュールまたは Webhook を追加してください。",
     "no_runs": "まだ実行履歴がありません。手動で実行するには「今すぐ実行」をクリックしてください。",
     "delete_button": "オートパイロットを削除",
     "toast_deleted": "オートパイロットを削除しました",
@@ -115,7 +115,8 @@
       "cancel": "キャンセル",
       "confirm": "削除",
       "deleting": "削除中..."
-    }
+    },
+    "paused_project_archived": "プロジェクトがアーカイブされたため一時停止しました。プロジェクトを復元してから再度有効にしてください。"
   },
   "access": {
     "title": "アクセス管理",
@@ -147,6 +148,8 @@
   "run": {
     "issue_linked": "タスクをリンク済み",
     "view_log": "実行ログを表示",
+    "stop": "実行を停止",
+    "stop_failed": "実行を停止できませんでした。",
     "skipped_group": {
       "label": "スキップ済み",
       "summary": "スキップされた実行 {{count}} 件"
@@ -180,6 +183,9 @@
     "url_copied": "Webhook URL をコピーしました",
     "url_copy_failed": "URL をコピーできませんでした",
     "edit_schedule": "スケジュールを編集",
+    "edit_webhook": "Webhook を編集",
+    "event_filter_summary_all": "すべてのイベントを受け付けます",
+    "event_filter_summary_conditions_other": "条件 {{count}} 件",
     "rotate_url": "URL を再生成",
     "rotate_confirm_title": "Webhook URL を再生成",
     "rotate_confirm_description": "現在の URL は直ちに動作を停止します。この URL を呼び出している外部システムは新しい URL に更新する必要があります。続けますか?",
@@ -192,7 +198,7 @@
     "toast_delete_failed": "トリガーを削除できませんでした",
     "delete_dialog": {
       "title": "トリガーを削除",
-      "description": "このトリガーは削除され、オートパイロットはこのスケジュールでは実行されなくなります。この操作は元に戻せません。",
+      "description": "このトリガーは削除され、このオートパイロットはトリガーされなくなります。この操作は元に戻せません。",
       "cancel": "キャンセル",
       "confirm": "削除",
       "deleting": "削除中..."
@@ -242,7 +248,19 @@
       "toast_failed": "再実行に失敗しました",
       "disabled_invalid_signature": "署名が無効だったため再実行できません",
       "disabled_rejected": "拒否された配信は再実行できません",
-      "disabled_queued": "まだキュー待ちです。処理が落ち着いてから再実行してください"
+      "disabled_queued": "再実行がすでにキューに入っています。完了するまでお待ちください。"
+    },
+    "ignore": {
+      "title": "無視した理由",
+      "payload_filtered": "本文の条件を満たしていません",
+      "event_filtered": "イベントまたはアクションが一致しません",
+      "trigger_disabled": "トリガーは無効です",
+      "autopilot_paused": "自動化は一時停止中です",
+      "autopilot_archived": "自動化はアーカイブ済みです",
+      "quota_exceeded": "実行の上限に達しました",
+      "actual_value": "実際の値",
+      "missing": "フィールドがありません",
+      "truncated": "プレビューは省略されています。完全な値は元の本文で確認できます。"
     }
   },
   "add_trigger_dialog": {
@@ -269,12 +287,18 @@
     "toast_updated": "スケジュールを更新しました",
     "toast_update_failed": "スケジュールの更新に失敗しました"
   },
+  "edit_webhook_dialog": {
+    "title": "Webhook を編集",
+    "label_placeholder": "例: GitHub のプルリクエスト",
+    "toast_updated": "Webhook を更新しました",
+    "toast_update_failed": "Webhook の更新に失敗しました"
+  },
   "dialog": {
     "sr_create": "新規オートパイロット",
     "sr_edit": "オートパイロットを編集",
     "header_create": "新規オートパイロット",
     "header_edit": "オートパイロットを編集",
-    "subtitle": "繰り返し実行される AI 作業",
+    "subtitle": "スケジュールまたは Webhook で起動する AI 作業",
     "expand": "展開",
     "collapse": "折りたたむ",
     "close": "閉じる",
@@ -324,12 +348,40 @@
     "webhook_created_done": "完了",
     "event_filter_label": "イベントフィルター",
     "event_filter_docs_link_label": "イベントフィルターの仕組みを学ぶ",
-    "event_filter_event_placeholder": "例: workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "追加",
-    "event_filter_remove_label": "フィルターを削除",
-    "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
+    "event_filter_event_placeholder": "イベント（例: pull_request）",
+    "event_filter_actions_placeholder": "アクション（任意）",
+    "event_filter_add_rule": "ルールを追加",
+    "event_filter_event_label": "イベント",
+    "event_filter_actions_label": "アクション",
+    "event_filter_new_rule_label": "新しいルール",
+    "event_filter_condition_label": "条件",
+    "event_filter_error_event_required": "イベント名を入力してください。",
+    "event_filter_error_path_required": "Payload のフィールドを入力してください。",
+    "event_filter_error_path_invalid": "フィールド名はドットで区切り、{{path}} 文字以内にしてください。",
+    "event_filter_error_value_required": "値を入力してください。",
+    "event_filter_error_too_many_values": "値は {{values}} 個までです。",
+    "event_filter_remove_label": "ルールを削除",
+    "event_filter_hint": "ルールと本文のすべての条件に一致するイベントのみ処理します。空欄の場合はすべて受け付けます。",
+    "event_filter_condition_remove_label": "条件を削除",
+    "event_filter_condition_add_label": "条件を追加",
+    "event_filter_condition_ops": {
+      "equals": "等しい",
+      "not_equals": "等しくない",
+      "contains": "含む",
+      "in": "いずれか",
+      "exists": "存在する"
+    },
+    "event_filter_condition_path_label": "Payload のフィールド",
+    "event_filter_condition_path_placeholder": "Payload のフィールド（例: pull_request.base.ref）",
+    "event_filter_condition_op_label": "演算子",
+    "event_filter_condition_value_label": "値",
+    "event_filter_condition_value_placeholder": "例: main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "大文字と小文字を区別しない",
     "schedule_multiple_notice": "このオートパイロットにはスケジュールが {{count}} 件あります。このダイアログを閉じて、下の「トリガー」から個別に編集してください。",
+    "webhook_multiple_notice": "このオートパイロットには Webhook が複数あります。このダイアログを閉じて、下の「トリガー」から個別に編集してください。",
+    "webhook_edit_filters": "フィルターを編集",
+    "webhook_filters_saved_separately": "イベントフィルターは即座に保存されます。ここでキャンセルをクリックしても元に戻りません。",
     "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",
     "schedule_add": "スケジュールを追加",
     "error_title_required": "オートパイロット名を入力してください。",
@@ -343,7 +395,8 @@
         "label": "実行のみ",
         "description": "タスクを作成せず、静かに実行します"
       }
-    }
+    },
+    "event_filter_condition_all": "かつ本文がすべての条件を満たす"
   },
   "schedule_editor": {
     "time_label": "時刻",
@@ -460,7 +513,9 @@
       "warning": "この操作は取り消せません。",
       "cancel": "キャンセル",
       "confirm": "完全に削除",
-      "deleting": "削除中…"
+      "deleting": "削除中…",
+      "title_multiple": "{{count}} 件のオートパイロットを削除しますか？",
+      "description_single": "「{{name}}」とその実行履歴を完全に削除します。"
     }
   },
   "wakeups": {
@@ -483,13 +538,13 @@
     "loading": "読み込み中…",
     "disable_selected": "選択項目を無効化",
     "confirm_title": "{{count}} 件を無効にしますか？",
-    "confirm_body": "今後の起動を停止し、エージェントに渡されていない待機中の実行を取り消します。割り当て済みの実行は継続します。実行ログから停止できます。",
+    "confirm_body": "今後のウェイクアップは停止されます。まだ開始されていないキュー待ちの実行はキャンセルされます。すでに進行中の実行は継続されるため、停止する場合は実行ログから停止してください。",
     "cancel": "キャンセル",
     "confirm": "無効にする",
     "disabling": "無効化中…",
     "batch_result": "無効化：{{succeeded}} 件。失敗：{{failed}} 件。",
     "scopes": {
-      "active": "起動待ち・実行中",
+      "active": "待機中・実行中",
       "all": "すべてのウェイクアップ",
       "disabled": "無効",
       "ended": "終了",
@@ -541,7 +596,27 @@
         "reply": "「PR がマージされました。ドキュメントを更新してタスクを閉じます。」",
         "event_examples": "PR のマージ、新しいコメント"
       }
-    }
+    },
+    "defaults": {
+      "title": "サブタスクが終わったとき",
+      "description": "あるステージが終わり、後のステージが待っているときに親タスクの担当者を起こし、すべてのサブタスクが終わったときにもう一度起こします。担当者がメンバーの場合は受信トレイに通知します。",
+      "badge": "ワークスペースの既定値",
+      "enabled": "既定でオン",
+      "instruction": "既定の指示",
+      "instruction_hint": "起こしたエージェントに送られます。空欄のままなら下の組み込みの指示を使います。",
+      "instruction_placeholder": "空欄なら組み込みの指示を使います",
+      "builtin": "組み込みの指示",
+      "instruction_invalid": "指示は 4,000 バイト以内にしてください。",
+      "save": "保存",
+      "saving": "保存中…",
+      "save_error": "既定値を保存できませんでした。",
+      "customized_other": "進行中の {{count}} 件のタスクが個別の設定を使っており、この既定値に従いません。",
+      "admin_only": "既定値を変更できるのはオーナーと管理者だけです。",
+      "load_error": "ウェイクアップの既定値を読み込めませんでした。",
+      "edit_instruction": "既定の指示を編集",
+      "view_instruction": "既定の指示を表示"
+    },
+    "banner_single": "1 件のウェイクアップが自動一時停止されました：{{issue}}「{{condition}}」— {{reason}}"
   },
   "intro": {
     "label": "オートパイロット",

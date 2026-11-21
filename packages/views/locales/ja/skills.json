@@ -90,9 +90,7 @@
     "section_labels": "ラベル",
     "filter_search_placeholder": "フィルター...",
     "no_labels": "まだラベルがありません",
-    "no_results": "結果なし",
-    "manage_labels": "ラベルを管理...",
-    "manage_labels_title": "スキルのラベル"
+    "no_results": "結果なし"
   },
   "detail": {
     "read_only": "読み取り専用",
@@ -182,7 +180,7 @@
       "permissions_owner": "このスキルを編集・削除できます。変更は次回のエージェント実行から反映されます。",
       "permissions_locked_creator": "作成者（{{name}}）またはワークスペース管理者のみがこのスキルを編集できます。",
       "permissions_locked": "作成者またはワークスペース管理者のみがこのスキルを編集できます。",
-      "character_count": "{{count}} 文字"
+      "character_count_other": "{{count}} 文字"
     },
     "files": {
       "list_aria": "スキルのファイル",
@@ -243,15 +241,9 @@
     }
   },
   "create": {
-    "back": "戻る",
-    "back_aria": "方式の選択に戻る",
     "close": "閉じる",
     "close_aria": "閉じる",
     "method": {
-      "chooser": {
-        "title": "新規スキル",
-        "desc": "スキルを追加する方法を選択してください。"
-      },
       "manual": {
         "title": "手動で作成",
         "desc": "空の SKILL.md から作成します。"
@@ -297,7 +289,19 @@
       "cancel": "キャンセル",
       "import": "インポート",
       "importing": "インポート中…",
-      "toast_imported": "スキルをインポートしました"
+      "toast_imported": "スキルをインポートしました",
+      "select_all": "すべて選択",
+      "import_count": "{{count}} 件をインポート",
+      "done": "完了",
+      "stop": "現在の処理後に停止",
+      "unreadable": "skill を読み取れません。フォルダーを再選択してください。",
+      "uncertain": "結果を確認できません。再試行前に一覧を更新して確認してください。同名の項目がある場合はロックされます。",
+      "check_results": "結果を確認",
+      "retry_ready": "更新した一覧に見つかりません。再試行できます。",
+      "uncertain_manual": "結果が不確実で、アーカイブ内のスキル名を確認できません。再インポート前に一覧を手動で確認してください。",
+      "check_failed": "一覧を検証できませんでした。結果が不確実な項目はロックされたままです。再確認するか、一覧を手動で確認してください。",
+      "workspace_changed": "ワークスペースが変わったため、残りのインポートを停止しました。この画面を閉じ、目的のワークスペースで開き直してください。",
+      "summary": "成功: {{success}} · 失敗または未確認: {{failed}}"
     },
     "url": {
       "url_label": "スキル URL",
@@ -338,8 +342,6 @@
     "toast_imported": "スキルをインポートしました",
     "toast_import_failed": "スキルをインポートできませんでした",
     "select_all": "すべて選択（{{count}}）",
-    "bulk_ready": "{{count}} 個のスキルを選択中",
-    "bulk_import_button": "{{count}} 個のスキルをインポート",
     "bulk_progress": "インポート中 {{completed}} / {{total}}…",
     "bulk_cancel_button": "キャンセル",
     "bulk_complete_hint": "インポートが完了しました。",
@@ -351,7 +353,6 @@
     "bulk_summary_skipped": "スキップ",
     "bulk_summary_failed": "失敗",
     "conflict_single_title": "同じ名前のスキルがすでに存在します",
-    "conflict_bulk_title": "{{count}} 個のスキルに判断が必要です",
     "conflict_hint": "既存のワークスペーススキルを上書きするか、新しい名前でインポートするか、スキップするかを選択してください。",
     "conflict_locked_creator": "このスキルは {{creator}} が作成しました。ローカルインポートで上書きできるのは作成者だけです。変更が必要な場合は、スキル詳細ページで編集してください。",
     "conflict_locked": "ローカルインポートでこのスキルを上書きできるのは作成者だけです。変更が必要な場合は、スキル詳細ページで編集してください。",
@@ -362,10 +363,13 @@
     "conflict_overwrite_all": "すべて上書き",
     "conflict_skip_all": "すべてスキップ",
     "conflict_rename_label": "新しいスキル名",
-    "conflict_footer": "{{count}} 件の競合判断が残っています。",
     "conflict_apply_button": "決定を適用",
     "conflict_missing_resolution": "この競合の処理方法を選択してください。",
-    "conflict_name_still_exists": "その名前はすでに存在します。別の名前を選択するか、スキップしてください。"
+    "conflict_name_still_exists": "その名前はすでに存在します。別の名前を選択するか、スキップしてください。",
+    "bulk_ready_other": "{{count}} 個のスキルを選択中",
+    "bulk_import_button_other": "{{count}} 個のスキルをインポート",
+    "conflict_bulk_title_other": "{{count}} 個のスキルに判断が必要です",
+    "conflict_footer_other": "{{count}} 件の競合判断が残っています。"
   },
   "file_tree": {
     "no_files": "ファイルなし",

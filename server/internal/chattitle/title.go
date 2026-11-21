@@ -13,16 +13,27 @@ var (
 	markdownMarks = regexp.MustCompile("[#*`>~_]")
 	markdownLink  = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
 	titleSpace    = regexp.MustCompile(`[[:space:]]+`)
+	// A line of nothing but mention links, such as the page a message was
+	// sent from, which clients put ahead of what the user wrote.
+	mentionsOnly = regexp.MustCompile(`^(?:\[(?:\\.|[^\]\\])*\]\(mention://[^)]*\)\s*)+$`)
 )
 
-// Derive mirrors the existing first-party deterministic title policy for
-// channel-created Chats. Go slices valid Unicode code points rather than UTF-16
-// code units, while preserving the same first-line, Markdown, whitespace, and
-// 30-character single-ellipsis behavior.
+// Derive is the single deterministic title policy for a Chat's first message,
+// shared by first-party clients (which create sessions untitled) and channels:
+// first non-empty line that is not only mentions (or the first non-empty line
+// when every line is), Markdown stripped, whitespace collapsed, capped at 30
+// code points with a single ellipsis.
 func Derive(body string) string {
 	line := ""
 	for _, candidate := range strings.Split(body, "\n") {
-		if strings.TrimSpace(candidate) != "" {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+		if line == "" {
+			line = candidate
+		}
+		if !mentionsOnly.MatchString(trimmed) {
 			line = candidate
 			break
 		}
