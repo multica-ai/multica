@@ -339,10 +339,10 @@ export function formatShortcut(
 
   if (platform === "macos") {
     return [
-      modifiers.primary ? "⌘" : "",
       modifiers.control ? "⌃" : "",
       modifiers.alt ? "⌥" : "",
       modifiers.shift ? "⇧" : "",
+      modifiers.primary ? "⌘" : "",
       modifiers.meta ? "Meta" : "",
       key,
     ].join("");

@@ -327,7 +327,7 @@ function ShortcutRow({
                 {t(($) => $.shortcuts.recording)}
               </span>
             ) : shortcut ? (
-              <ShortcutKeycaps shortcut={shortcut} decorative />
+              <ShortcutKeycaps shortcut={shortcut} layout="split" decorative />
             ) : (
               <span className="font-sans font-normal text-muted-foreground">
                 {t(($) => $.shortcuts.unassigned)}
@@ -372,7 +372,7 @@ function ShortcutRow({
 function FixedShortcutRow({ label, shortcut }: { label: string; shortcut: ShortcutChord }) {
   return (
     <SettingsRow label={label}>
-      <ShortcutKeycaps shortcut={shortcut} size="md" className="justify-end" />
+      <ShortcutKeycaps shortcut={shortcut} size="md" layout="split" className="justify-end" />
     </SettingsRow>
   );
 }

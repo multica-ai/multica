@@ -151,7 +151,7 @@ export function AnnotationComposer({
           <Button size="sm" disabled={!annotation.note.trim() || !canSave || busy} onClick={save}
             aria-label={t(($) => existing ? $.reply.annotations.save : $.reply.annotations.confirm_add)}>
             {t(($) => existing ? $.reply.annotations.save_short : $.reply.annotations.confirm_add_short)}
-            <ShortcutKeycaps shortcut={ENTER} decorative />
+            <ShortcutKeycaps shortcut={ENTER} tone="on-primary" decorative />
           </Button>
         </div>
       </div>}
