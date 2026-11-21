@@ -27,6 +27,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import type { Agent, Issue, MemberWithUser, Squad } from "@multica/core/types";
 import { canAssignAgentToIssue } from "@multica/core/permissions/rules";
+import { isMentionAllEnabled } from "@multica/core/workspace/mention-all";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -38,6 +39,7 @@ import {
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { useT } from "@/lib/i18n";
 import { memberListOptions } from "@/data/queries/members";
+import { workspaceListOptions } from "@/data/queries/workspaces";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
 import { issueDetailOptions } from "@/data/queries/issues";
@@ -83,6 +85,8 @@ export function MentionSuggestionBar({
   mode = "comment",
 }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { data: workspaces } = useQuery(workspaceListOptions());
+  const mentionAllEnabled = isMentionAllEnabled(workspaces?.find((ws) => ws.id === wsId));
   const isChat = mode === "chat";
   // Rows are icon-only, so colour is the only thing that can carry a custom
   // status's identity here. (MUL-6243)
@@ -166,7 +170,7 @@ export function MentionSuggestionBar({
       members.find((m) => m.user_id === userId)?.role ?? null;
     // A guest (MUL-9420) mentions people only — see comment-mention-candidates.
     const guest = isGuestRole(myRole);
-    const showAll = !guest && (!q || "all".startsWith(q));
+    const showAll = !guest && mentionAllEnabled && (!q || "all".startsWith(q));
     const matchedMembers = [...members]
       .filter((m) => !q || m.name.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -220,7 +224,7 @@ export function MentionSuggestionBar({
     }
     if (out.length === 0) out.push({ kind: "empty" });
     return out;
-  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId, t]);
+  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId, t, mentionAllEnabled]);
 
   if (!visible) return null;
 

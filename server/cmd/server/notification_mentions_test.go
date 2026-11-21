@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -95,6 +96,62 @@ func TestNotification_MalformedMemberMentionPreservesValidRecipients(t *testing.
 			item := inboxEvents[0].Payload.(map[string]any)["item"].(map[string]any)
 			if item["recipient_id"] != recipientID || item["type"] != "mentioned" || item["issue_status"] != "todo" {
 				t.Fatalf("unexpected inbox:new item: %+v", item)
+			}
+		})
+	}
+}
+
+func TestNotification_MentionAllSetting(t *testing.T) {
+	for _, tc := range []struct {
+		name, settings string
+		wantOthers     int
+	}{
+		{"disabled", `{"mention_all_enabled":false}`, 0},
+		{"missing", `{}`, 1},
+		{"enabled", `{"mention_all_enabled":true}`, 1},
+		{"unreadable", `{"mention_all_enabled":"false"}`, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := workspaceFixture(t)
+			ctx := context.Background()
+			var original []byte
+			if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&original); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = $1 WHERE id = $2`, tc.settings, testWorkspaceID); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = $1 WHERE id = $2`, original, testWorkspaceID); err != nil {
+					t.Errorf("restore workspace settings: %v", err)
+				}
+			})
+			explicitID := fx.User(t, "Explicit recipient", "explicit-recipient@example.com")
+			otherID := fx.User(t, "Other recipient", "other-recipient@example.com")
+			fx.Member(t, testWorkspaceID, explicitID, "member")
+			fx.Member(t, testWorkspaceID, otherID, "member")
+			issueID := fx.Issue(t, "Mention setting")
+			fx.Cleanup(t, `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
+			content := "[@All](mention://all/all) [@Explicit](mention://member/" + explicitID + ")"
+			commentID := fx.Comment(t, issueID, content)
+			queries := db.New(testPool)
+			bus := newNotificationBus(t, queries)
+			bus.Publish(events.Event{
+				Type: protocol.EventCommentCreated, WorkspaceID: testWorkspaceID,
+				ActorType: "member", ActorID: testUserID,
+				Payload: map[string]any{
+					"comment": handler.CommentResponse{
+						ID: commentID, IssueID: issueID, AuthorType: "member",
+						AuthorID: testUserID, Content: content, Type: "comment",
+					},
+					"issue_title": "Mention setting", "issue_status": "todo",
+				},
+			})
+			if got := fx.Count(t, `SELECT count(*) FROM inbox_item WHERE issue_id = $1 AND recipient_id = $2 AND type = 'mentioned'`, issueID, explicitID); got != 1 {
+				t.Errorf("explicit recipient got %d mentions, want 1", got)
+			}
+			if got := fx.Count(t, `SELECT count(*) FROM inbox_item WHERE issue_id = $1 AND recipient_id = $2 AND type = 'mentioned'`, issueID, otherID); got != tc.wantOthers {
+				t.Errorf("other recipient got %d mentions, want %d", got, tc.wantOthers)
 			}
 		})
 	}

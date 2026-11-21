@@ -16,6 +16,7 @@ import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { issueStatusCategory } from "@multica/core/issues";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { isMentionAllEnabled } from "@multica/core/workspace/mention-all";
 import { projectKeys } from "@multica/core/projects/queries";
 import { configStore, featureFlagEnabled } from "@multica/core/config";
 import { docKeys, docTreeOptions } from "@multica/core/docs";
@@ -37,6 +38,7 @@ import type {
   MemberWithUser,
   Agent,
   Squad,
+  Workspace,
   DocSummary,
   DocTree,
 } from "@multica/core/types";
@@ -879,8 +881,11 @@ export function createMentionSuggestion(
 
     const q = query.toLowerCase();
 
+    const workspace = qc.getQueryData<Workspace[]>(workspaceKeys.list())?.find((ws) => ws.id === wsId);
     const allItem: MentionItem[] =
-      !guest && ("all members".includes(q) || "all".includes(q))
+      !guest &&
+      isMentionAllEnabled(workspace) &&
+      ("all members".includes(q) || "all".includes(q))
         ? [{ id: "all", label: "All members", type: "all" as const }]
         : [];
 
@@ -1001,7 +1006,12 @@ export function createMentionSuggestion(
     items: ({ query }) => {
       if (options.mode === "context") {
         const normalizedQuery = query.trim();
-        const contextItems = (options.getContextItems?.() ?? []).filter((item) => matchesMentionQuery(item, query));
+        const contextItems = (options.getContextItems?.() ?? []).filter((item) =>
+          matchesMentionQuery(item, query) &&
+          (item.type !== "all" || isMentionAllEnabled(
+            qc.getQueryData<Workspace[]>(workspaceKeys.list())?.find((ws) => ws.id === getCurrentWsId()),
+          )),
+        );
         if (!normalizedQuery) return contextItems;
         return mergeMentionItems(contextItems, buildSyncItems(query));
       }
