@@ -7,6 +7,44 @@
  * renderer to preserve its surrounding Markdown structure.
  */
 import { marked, type Tokens } from "marked";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { normalizeUri } from "micromark-util-sanitize-uri";
+
+function imageUrisBySource(input: string): Map<string, string> {
+  // Marked's href has already lost backslash escapes. Read destinations from
+  // the source with the sequence's CommonMark parser instead of decoding href
+  // again: \&amp; must stay literal, while &amp; must decode once.
+  const tree = fromMarkdown(input);
+  type Node = typeof tree | (typeof tree.children)[number];
+  const pending: Node[] = [tree];
+  const nodes: Node[] = [];
+  while (pending.length) {
+    const node = pending.pop()!;
+    nodes.push(node);
+    if ("children" in node) {
+      for (let i = node.children.length - 1; i >= 0; i--) pending.push(node.children[i]!);
+    }
+  }
+  const definitions = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.type === "definition" && !definitions.has(node.identifier)) {
+      definitions.set(node.identifier, node.url);
+    }
+  }
+  const uris = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.type !== "image" && node.type !== "imageReference") continue;
+    const url = node.type === "image" ? node.url : definitions.get(node.identifier);
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (url !== undefined && start !== undefined && end !== undefined) {
+      // Marked normalizes CRLF and bare CR before creating token.raw.
+      const source = input.slice(start, end).replace(/\r\n?/g, "\n");
+      uris.set(source, normalizeUri(url));
+    }
+  }
+  return uris;
+}
 
 export type MarkdownSegment =
   | { type: "prose"; content: string }
@@ -19,6 +57,7 @@ export function splitMarkdown(input: string): MarkdownSegment[] {
   const tokens = marked.lexer(input);
   const out: MarkdownSegment[] = [];
   let proseBuffer = "";
+  let imageUris: Map<string, string> | undefined;
 
   const flushProse = () => {
     const trimmed = proseBuffer.replace(/^\s+|\s+$/g, "");
@@ -70,7 +109,9 @@ export function splitMarkdown(input: string): MarkdownSegment[] {
           const img = t as Tokens.Image;
           out.push({
             type: "image",
-            uri: img.href,
+            // Only parse CommonMark destinations when an interactive image is
+            // present. Marked-only extensions retain their lexer destination.
+            uri: (imageUris ??= imageUrisBySource(input)).get(img.raw) ?? normalizeUri(img.href),
             alt: img.text ?? "",
           });
         } else {

@@ -93,6 +93,14 @@ vi.mock("@multica/views/layout", () => ({
   WorkspacePresencePrefetch: () => null,
 }));
 
+vi.mock("./document-title-sync", () => ({
+  DocumentTitleSync: () => null,
+}));
+
+vi.mock("@multica/views/voice", () => ({
+  VoiceWorkspaceWords: () => null,
+}));
+
 // The point of this whole test: assert the desktop layout mounts the
 // SourceBackfillModal. We stub the real component with a marker that
 // renders only when the layout actually rendered it (and not e.g.

@@ -21,7 +21,7 @@ import {
   looksLikeCommitSha,
   splitGithubUrlRef,
   validateGitRef,
-} from "@multica/core/github";
+} from "@multica/core/github/repo-ref";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { useCreateProjectResource } from "@/data/mutations/projects";
@@ -122,6 +122,7 @@ export default function AddResourceRoute() {
           <TextField
             value={ref}
             onChangeText={setRef}
+            // eslint-disable-next-line no-restricted-syntax -- literal Git default branch name
             placeholder="main"
             autoCapitalize="none"
             autoCorrect={false}
@@ -139,7 +140,7 @@ export default function AddResourceRoute() {
           <TextField
             value={label}
             onChangeText={setLabel}
-            placeholder="e.g. Backend"
+            placeholder={t("resources.label_placeholder")}
           />
         </View>
       </View>

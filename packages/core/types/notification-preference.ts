@@ -1,29 +1,28 @@
-/** A kind of notification whose Inbox section the recipient chooses. */
-export type NotificationRouteKey =
-  | "assigned"
-  | "mentions"
-  | "member_comments"
-  | "agent_failures"
-  | "status_changes"
-  | "assignee_changes"
-  | "updates"
-  | "agent_comments";
-
-/** Where a routable kind lands: an Inbox section, or nowhere. */
-export type NotificationRoute = "action" | "activity" | "muted";
-
-/** Groups from before per-kind routing; only their "muted" still applies. */
-export type NotificationLegacyGroupKey = "assignments" | "comments" | "agent_activity";
-
 export type NotificationGroupKey =
-  | NotificationRouteKey
-  | NotificationLegacyGroupKey
-  | "system_notifications";
+  | "assignments"
+  | "status_changes"
+  | "comments"
+  | "chat_replies"
+  | "mentions"
+  | "reactions"
+  | "updates"
+  | "new_issues"
+  | "agent_activity"
+  | "system_notifications"
+  | "auto_archive_completed";
 
-/** "all" (or an absent key) means the kind's default. */
-export type NotificationGroupValue = "all" | NotificationRoute;
+export type NotificationGroupValue = "all" | "muted";
 
-export type NotificationPreferences = Partial<Record<NotificationGroupKey, NotificationGroupValue>>;
+/**
+ * How much of someone else's issue reaches you when you are only passively
+ * subscribed (you filed it, commented, or were mentioned). Missing means
+ * "key_updates": mentions, replies in your threads and handoffs.
+ */
+export type OthersIssuesValue = "all" | "key_updates";
+
+export type NotificationPreferences = Partial<Record<NotificationGroupKey, NotificationGroupValue>> & {
+  others_issues?: OthersIssuesValue;
+};
 
 export interface NotificationPreferenceResponse {
   workspace_id: string;

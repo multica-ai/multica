@@ -6,7 +6,6 @@ import {
   Clock,
   Code,
   Pause,
-  Plus,
   Webhook,
   Zap,
 } from "@multica/ui/icons";
@@ -56,6 +55,7 @@ import {
 } from "./autopilot-list-actions";
 import { AUTOPILOT_TEMPLATES, type AutopilotTemplate } from "./autopilot-templates";
 import { isWakeupsTab } from "./wakeups-tab";
+import { AutopilotsIntro } from "./autopilots-intro";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
 
 // Cells
@@ -73,7 +73,9 @@ function NameCell({ autopilot }: { autopilot: Autopilot }) {
             title={
               autopilot.pause_reason === "agent_runtime_required"
                 ? t(($) => $.status.paused_runtime_required)
-                : t(($) => $.status.paused)
+                : autopilot.pause_reason === "project_archived"
+                  ? t(($) => $.status.paused_project_archived)
+                  : t(($) => $.status.paused)
             }
             className="flex shrink-0 items-center text-amber-500"
           >
@@ -514,39 +516,7 @@ function AutopilotList() {
           }
         />
       ) : showEmpty ? (
-        <CollectionPageState
-          icon={Zap}
-          title={t(($) => $.page.empty.title)}
-          description={t(($) => $.page.empty.hint)}
-        >
-          <div className="grid w-full max-w-3xl grid-cols-1 gap-3 text-left sm:grid-cols-2 lg:grid-cols-3">
-            {AUTOPILOT_TEMPLATES.map((tpl) => {
-              const Icon = tpl.icon;
-              return (
-                <button
-                  key={tpl.id}
-                  type="button"
-                  className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/40"
-                  onClick={() => openCreate(tpl)}
-                >
-                  <Icon className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <div className="text-body font-medium">
-                      {t(($) => $.templates[tpl.id].title)}
-                    </div>
-                    <div className="mt-0.5 line-clamp-2 text-caption text-muted-foreground">
-                      {t(($) => $.templates[tpl.id].summary)}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <Button size="sm" variant="outline" onClick={() => openCreate()}>
-            <Plus aria-hidden="true" />
-            {t(($) => $.page.start_blank)}
-          </Button>
-        </CollectionPageState>
+        <AutopilotsIntro onCreate={openCreate} />
       ) : (
         <CollectionList
           label={scopeLabels[scope]}

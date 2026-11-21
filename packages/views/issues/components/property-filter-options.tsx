@@ -6,6 +6,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { DropdownMenuCheckboxItem } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { isImeComposing } from "@multica/core/utils";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   formatActorRef,
@@ -25,6 +26,7 @@ import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { useT } from "../../i18n";
 import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
 import { NO_PROPERTY_VALUE } from "../utils/filter";
+import { paletteColor } from "@multica/core/appearance";
 
 /**
  * Names one property filter value the way chips and advanced conditions show
@@ -328,7 +330,7 @@ export function PropertyFilterOptions({
               // focus; Enter commits and still needs stopPropagation so it does
               // not bubble up and activate the highlighted "No value" item.
               if (event.key === "Escape" || event.key === "Tab") return;
-              if (event.key === "Enter") commitValue(draft);
+              if (event.key === "Enter" && !isImeComposing(event)) commitValue(draft);
               event.stopPropagation();
             }}
             disabled={locked}
@@ -384,7 +386,7 @@ export function PropertyFilterOptions({
             {option.color && (
               <span
                 className="size-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: option.color }}
+                style={{ backgroundColor: paletteColor(option.color) }}
               />
             )}
             <span className="truncate">{option.name}</span>

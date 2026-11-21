@@ -594,9 +594,7 @@ func TestClaudeExecuteResumesWithWrapperManagedConfigDir(t *testing.T) {
 	}
 	wrapper := filepath.Join(t.TempDir(), "claude-wrapper.sh")
 	script := fmt.Sprintf("#!/bin/sh\nCLAUDE_CONFIG_DIR=%q exec %q \"$@\"\n", wrapperConfigDir, executable)
-	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeTestExecutable(t, wrapper, []byte(script))
 	// Keep the daemon-side HOME away from any real ~/.claude so the lookup
 	// fails the way it does on a daemon whose env lacks CLAUDE_CONFIG_DIR.
 	isolatedHome := t.TempDir()

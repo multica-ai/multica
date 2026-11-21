@@ -1,10 +1,21 @@
 "use client";
 
 import { useMemo } from "react";
-import { NOTIFICATION_ROUTE_KINDS } from "@multica/core/notification-preferences/routes";
 import { useT } from "../../i18n";
 import type { SettingsSearchEntry } from "./settings-search";
 import { CHANNEL_INTEGRATIONS } from "./settings-navigation";
+import { browserNotificationSettingAvailable } from "./browser-notification-setting";
+
+const NOTIFICATION_GROUPS = [
+  "assignments",
+  "status_changes",
+  "comments",
+  "mentions",
+  "reactions",
+  "updates",
+  "new_issues",
+  "agent_activity",
+] as const;
 
 export interface SettingsSearchPage {
   value: string;
@@ -17,7 +28,8 @@ export type SettingsSearchIndexEntry = SettingsSearchEntry;
  * The searchable settings for the pages currently in the navigation. Anchors
  * here must match the `anchor` props on the corresponding `SettingsSection` /
  * `SettingsRow`; entries for hidden pages (feature flags, desktop-only) are
- * dropped so a result never lands on a page the user cannot open.
+ * dropped so a result never lands on a page the user cannot open, and rows
+ * that only render on some platforms are indexed under the same condition.
  */
 export function useSettingsSearchIndex(
   pages: readonly SettingsSearchPage[],
@@ -42,7 +54,84 @@ export function useSettingsSearchIndex(
         title: t(($) => $.preferences.timezone.title),
         description: t(($) => $.preferences.timezone.hint),
       },
-      { tab: "preferences", anchor: "theme", title: t(($) => $.preferences.theme.title) },
+      { tab: "appearance", anchor: "mode", title: t(($) => $.appearance.mode.title) },
+      {
+        tab: "appearance",
+        anchor: "theme",
+        title: t(($) => $.appearance.theme.title),
+        description: t(($) => $.appearance.theme.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "theme-import",
+        title: t(($) => $.appearance.own.title),
+        description: t(($) => $.appearance.own.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "ui-text",
+        title: t(($) => $.appearance.ui_text.title),
+        description: t(($) => $.appearance.ui_text.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "ui-cjk-font",
+        title: `${t(($) => $.appearance.ui_text.title)} · ${t(($) => $.appearance.cjk_font.title)}`,
+        description: t(($) => $.appearance.cjk_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "font-size",
+        title: t(($) => $.appearance.font_size.title),
+        description: t(($) => $.appearance.font_size.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-text",
+        title: t(($) => $.appearance.content_text.title),
+        description: t(($) => $.appearance.content_text.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-cjk-font",
+        title: `${t(($) => $.appearance.content_text.title)} · ${t(($) => $.appearance.cjk_font.title)}`,
+        description: t(($) => $.appearance.cjk_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "code-font",
+        title: t(($) => $.appearance.code_font.title),
+        description: t(($) => $.appearance.code_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-size",
+        title: `${t(($) => $.appearance.content_text.title)} · ${t(($) => $.appearance.content_size.title)}`,
+        description: t(($) => $.appearance.content_size.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-leading",
+        title: t(($) => $.appearance.content_leading.title),
+      },
+      {
+        tab: "appearance",
+        anchor: "density",
+        title: t(($) => $.appearance.density.title),
+        description: t(($) => $.appearance.density.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "reduce-motion",
+        title: t(($) => $.appearance.reduce_motion.title),
+        description: t(($) => $.appearance.reduce_motion.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "high-contrast",
+        title: t(($) => $.appearance.high_contrast.title),
+        description: t(($) => $.appearance.high_contrast.description),
+      },
       {
         tab: "preferences",
         anchor: "sticky-comment-bar",
@@ -53,6 +142,12 @@ export function useSettingsSearchIndex(
         anchor: "running-agent-reply",
         title: t(($) => $.preferences.running_agent_reply.title),
         description: t(($) => $.preferences.running_agent_reply.hint),
+      },
+      {
+        tab: "preferences",
+        anchor: "comment-images",
+        title: t(($) => $.preferences.comment_images.title),
+        description: t(($) => $.preferences.comment_images.hint),
       },
       {
         tab: "preferences",
@@ -81,28 +176,50 @@ export function useSettingsSearchIndex(
         title: t(($) => $.preferences.issue_fields_title),
         description: t(($) => $.issue.description),
       },
+      ...NOTIFICATION_GROUPS.map((group) => ({
+        tab: "notifications",
+        anchor: group,
+        title: t(($) => $.notifications.groups[group].label),
+        description: t(($) => $.notifications.groups[group].description),
+      })),
       {
         tab: "notifications",
-        anchor: "inbox",
-        title: t(($) => $.notifications.title),
-        description: t(($) => $.notifications.description),
+        anchor: "others_issues",
+        title: t(($) => $.notifications.others_issues.label),
+        description: t(($) => $.notifications.others_issues.description),
       },
-      ...NOTIFICATION_ROUTE_KINDS.map(({ key }) => ({
+      {
         tab: "notifications",
-        anchor: key,
-        title: t(($) => $.notifications.kinds[key].label),
-        description: t(($) => $.notifications.kinds[key].description),
-      })),
+        anchor: "auto_archive_completed",
+        title: t(($) => $.notifications.leaving.done_label),
+        description: t(($) => $.notifications.leaving.done_description),
+      },
+      {
+        tab: "notifications",
+        anchor: "archived",
+        title: t(($) => $.notifications.leaving.archived_label),
+        description: t(($) => $.notifications.leaving.archived_description),
+      },
+      {
+        tab: "notifications",
+        anchor: "chat_replies",
+        title: t(($) => $.notifications.groups.chat_replies.label),
+      },
       {
         tab: "notifications",
         anchor: "system",
         title: t(($) => $.notifications.system.label),
       },
-      {
-        tab: "notifications",
-        anchor: "browser",
-        title: t(($) => $.notifications.browser.label),
-      },
+      // Web-only row: absent on desktop and without the Notification API.
+      ...(browserNotificationSettingAvailable()
+        ? [
+            {
+              tab: "notifications",
+              anchor: "browser",
+              title: t(($) => $.notifications.browser.label),
+            },
+          ]
+        : []),
       {
         tab: "tokens",
         title: t(($) => $.page.tabs.tokens),
@@ -114,9 +231,70 @@ export function useSettingsSearchIndex(
         description: t(($) => $.shortcuts.description),
       },
       {
+        tab: "voice-input",
+        title: t(($) => $.page.tabs.voice_input),
+        description: t(($) => $.voice_input.description),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-enabled",
+        title: t(($) => $.voice_input.enabled.title),
+        description: t(($) => $.voice_input.enabled.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-model",
+        title: t(($) => $.voice_input.model_title),
+        description: t(($) => $.voice_input.model_hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-shortcut",
+        title: t(($) => $.voice_input.shortcut.title),
+        description: t(($) => $.voice_input.shortcut.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-activation",
+        title: t(($) => $.voice_input.activation.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-language",
+        title: t(($) => $.voice_input.language.title),
+        description: t(($) => $.voice_input.language.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-fillers",
+        title: t(($) => $.voice_input.fillers.title),
+        description: t(($) => $.voice_input.fillers.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-vocabulary",
+        title: t(($) => $.voice_input.vocabulary.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-device",
+        title: t(($) => $.voice_input.device.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-test",
+        title: t(($) => $.voice_input.test.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-history",
+        title: t(($) => $.voice_input.history.title),
+        description: t(($) => $.voice_input.history.description),
+      },
+      {
         tab: "apps",
         title: t(($) => $.page.tabs.apps),
-        description: t(($) => $.composio.page_description),
+        description: t(($) => $.connected_apps.description),
       },
       // Workspace
       { tab: "workspace", anchor: "name", title: t(($) => $.workspace.name_label) },
@@ -133,16 +311,15 @@ export function useSettingsSearchIndex(
         anchor: "issue-prefix",
         title: t(($) => $.workspace.issue_prefix_label),
       },
+      {
+        tab: "workspace",
+        anchor: "private-projects",
+        title: t(($) => $.private_projects.title),
+      },
       { tab: "workspace", anchor: "leave", title: t(($) => $.workspace.leave_title) },
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },
       { tab: "members", anchor: "links", title: t(($) => $.members.share_links_label) },
-      {
-        tab: "wakeups",
-        anchor: "child-done",
-        title: t(($) => $.wakeups.child_done_title),
-        description: t(($) => $.wakeups.child_done_description),
-      },
       {
         tab: "labels",
         title: t(($) => $.page.tabs.labels),

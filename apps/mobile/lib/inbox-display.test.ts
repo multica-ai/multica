@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem, TimelineEntry } from "@multica/core/types";
 import {
   deduplicateInboxItems,
   getAutopilotQuotaBody,
   getInboxDisplayTitle,
   getInboxNavigationTarget,
-  groupInboxItemsBySection,
+  getInboxNoticeBody,
+  resolveTimelineHighlight,
 } from "./inbox-display";
 
 function item(overrides: Partial<InboxItem>): InboxItem {
@@ -30,47 +31,53 @@ function item(overrides: Partial<InboxItem>): InboxItem {
   };
 }
 
+// The grouping and anchor rule itself is tested in packages/core/inbox/queries.test.ts.
 describe("deduplicateInboxItems", () => {
-  it("keeps the newest issue row while preserving an older comment anchor", () => {
-    const merged = deduplicateInboxItems([
-      item({
-        id: "comment-notification",
-        created_at: "2026-06-15T08:00:00Z",
-        details: { comment_id: "comment-1" },
-      }),
-      item({
-        id: "status-notification",
-        type: "status_changed",
-        created_at: "2026-06-15T08:01:00Z",
-        details: { from: "in_progress", to: "in_review" },
-      }),
+  it("anchors an app request row like any other row, since mobile renders no requests", () => {
+    const [row] = deduplicateInboxItems([
+      item({ id: "comment", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "app", type: "app_action_requested", created_at: "2026-06-15T08:02:00Z", details: { request_id: "request-1" } }),
     ]);
+    expect(row?.id).toBe("app");
+    expect(getInboxNavigationTarget(row!, "acme", "tap")?.params).toMatchObject({ id: "issue-1", highlight: "comment-1" });
+  });
 
-    expect(merged).toHaveLength(1);
-    expect(merged[0]).toMatchObject({
-      id: "status-notification",
-      type: "status_changed",
-      details: {
-        from: "in_progress",
-        to: "in_review",
-        comment_id: "comment-1",
-      },
-    });
+  it("gives an app request row no target when nothing unread has an entry", () => {
+    const [row] = deduplicateInboxItems([
+      item({ id: "comment", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "app", type: "app_action_requested", created_at: "2026-06-15T08:02:00Z", details: { request_id: "request-1" } }),
+    ]);
+    expect(getInboxNavigationTarget(row!, "acme", "tap")?.params).toMatchObject({ id: "issue-1", highlight: undefined });
+  });
+
+  it("navigates a failed run's notification with its task id", () => {
+    const [row] = deduplicateInboxItems([
+      item({ id: "failed", type: "task_failed", created_at: "2026-06-15T08:02:00Z", details: { task_id: "task-1" } }),
+    ]);
+    expect(getInboxNavigationTarget(row!, "acme", "tap")?.params).toMatchObject({ highlight: "task-1" });
   });
 });
 
-describe("groupInboxItemsBySection", () => {
-  it("splits sections per issue like web, so activity does not move the action row", () => {
-    const { action, activity } = groupInboxItemsBySection([
-      item({ id: "mention", type: "mentioned", section: "action", created_at: "2026-06-15T08:00:00Z" }),
-      item({ id: "legacy", issue_id: "issue-2", type: "issue_assigned", created_at: "2026-06-15T08:01:00Z" }),
-      item({ id: "status", type: "status_changed", section: "activity", created_at: "2026-06-15T08:02:00Z" }),
-      item({ id: "reply", section: "activity", created_at: "2026-06-15T08:03:00Z" }),
-      item({ id: "gone", issue_id: "issue-3", section: "activity", archived: true }),
-    ]);
+describe("resolveTimelineHighlight", () => {
+  const comment = (overrides: Partial<TimelineEntry>): TimelineEntry => ({
+    type: "comment", id: "comment-1", actor_type: "member", actor_id: "user-1", content: "",
+    parent_id: null, created_at: "2026-06-15T08:00:00Z", updated_at: "2026-06-15T08:00:00Z", ...overrides,
+  });
 
-    expect(action.map((i) => i.id)).toEqual(["legacy", "mention"]);
-    expect(activity.map((i) => i.id)).toEqual(["reply"]);
+  it("keeps an id the timeline has", () => {
+    expect(resolveTimelineHighlight([comment({ id: "comment-1" })], "comment-1")).toBe("comment-1");
+  });
+
+  it("lands a task id on the failure notice its run posted", () => {
+    const entries = [
+      comment({ id: "agent-reply", actor_type: "agent", source_task_id: "task-1", comment_type: "comment" }),
+      comment({ id: "notice", actor_type: "agent", source_task_id: "task-1", comment_type: "system" }),
+    ];
+    expect(resolveTimelineHighlight(entries, "task-1")).toBe("notice");
+  });
+
+  it("leaves a task id with nothing posted unmatched", () => {
+    expect(resolveTimelineHighlight([comment({ id: "comment-1" })], "task-1")).toBeNull();
   });
 });
 
@@ -165,5 +172,36 @@ describe("getAutopilotQuotaBody", () => {
         }),
       ),
     ).toBe("Readable server fallback");
+  });
+});
+
+describe("getInboxNoticeBody", () => {
+  const joined = (details: InboxItem["details"]) =>
+    item({
+      issue_id: null,
+      type: "project_owner_joined",
+      title: "Secret Plan",
+      body: "Server fallback",
+      details,
+    });
+
+  it("names the workspace owner who joined a private project", () => {
+    const notice = joined({ project_id: "p1", joined_by: "Grace" });
+
+    expect(getInboxNoticeBody(notice)).toContain("Grace is a workspace owner");
+    expect(getInboxDisplayTitle(notice)).toBe("Secret Plan");
+    expect(getInboxNavigationTarget(notice, "acme", "history-1")).toEqual({
+      pathname: "/[workspace]/inbox/[id]",
+      params: { workspace: "acme", id: "inbox-1" },
+    });
+  });
+
+  it("keeps the server body when the name is missing, and other notices as they were", () => {
+    expect(getInboxNoticeBody(joined(null))).toBe("Server fallback");
+    expect(
+      getInboxNoticeBody(
+        item({ issue_id: null, type: "autopilot_paused", body: "Paused" }),
+      ),
+    ).toBe("Paused");
   });
 });

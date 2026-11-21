@@ -31,12 +31,21 @@ function defineMetrics(el: HTMLElement, metrics: { scrollHeight: number; clientH
   });
 }
 
-function Harness({ metrics }: { metrics: { scrollHeight: number; clientHeight: number } }) {
+function Harness({
+  metrics,
+  nearTopOnly = false,
+  tailPending = false,
+}: {
+  metrics: { scrollHeight: number; clientHeight: number };
+  nearTopOnly?: boolean;
+  tailPending?: boolean;
+}) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
-  const { visible, jump } = useJumpToLatest(el);
+  const { visible, away, jump } = useJumpToLatest(el, { nearTopOnly, tailPending });
   return (
     <div
       data-testid="scroller"
+      data-away={away}
       ref={(node) => {
         if (node && node !== el) {
           defineMetrics(node, metrics);
@@ -48,6 +57,14 @@ function Harness({ metrics }: { metrics: { scrollHeight: number; clientHeight: n
     </div>
   );
 }
+
+function scrollTo(scroller: HTMLElement, top: number) {
+  scroller.scrollTop = top;
+  fireEvent.scroll(scroller);
+  flushFrame();
+}
+
+const latestButton = () => screen.queryByRole("button", { name: "latest" });
 
 beforeEach(() => {
   rafCallbacks = [];
@@ -69,16 +86,70 @@ describe("useJumpToLatest", () => {
   it("shows only when the bottom is more than one viewport away", () => {
     render(<Harness metrics={{ scrollHeight: 2000, clientHeight: 500 }} />);
     const scroller = screen.getByTestId("scroller");
-    expect(screen.getByRole("button", { name: "latest" })).toBeTruthy();
+    expect(latestButton()).toBeTruthy();
 
-    scroller.scrollTop = 1100; // 400px from the bottom
-    fireEvent.scroll(scroller);
-    flushFrame();
-    expect(screen.queryByRole("button", { name: "latest" })).toBeNull();
+    scrollTo(scroller, 1300); // 200px from the bottom
+    expect(latestButton()).toBeNull();
+
+    scrollTo(scroller, 1100); // 400px from the bottom: not yet a screen away
+    expect(latestButton()).toBeNull();
+
+    scrollTo(scroller, 900); // 600px from the bottom
+    expect(latestButton()).toBeTruthy();
   });
 
-  it("hides once the reader has scrolled past the top fifth of the page", () => {
+  it("once shown, stays until the reader is within half a screen of the bottom", () => {
+    render(<Harness metrics={{ scrollHeight: 2000, clientHeight: 500 }} />);
+    const scroller = screen.getByTestId("scroller");
+
+    scrollTo(scroller, 1100); // 400px from the bottom
+    expect(latestButton()).toBeTruthy();
+
+    scrollTo(scroller, 1260); // 240px from the bottom
+    expect(latestButton()).toBeNull();
+  });
+
+  it("stays up while the timeline's last row is unrendered, however close the estimate says the bottom is", () => {
+    const metrics = { scrollHeight: 1600, clientHeight: 500 };
+    const { rerender } = render(<Harness metrics={metrics} tailPending />);
+    const scroller = screen.getByTestId("scroller");
+
+    scrollTo(scroller, 1000); // estimated 100px from the bottom
+    expect(latestButton()).toBeTruthy();
+
+    // The tail renders and measures taller than estimated: 1600px are left.
+    metrics.scrollHeight = 3100;
+    rerender(<Harness metrics={metrics} />);
+    expect(latestButton()).toBeTruthy();
+
+    scrollTo(scroller, 2500);
+    expect(latestButton()).toBeNull();
+  });
+
+  it("near-top-only: stays away while the button hides past the top fifth", () => {
+    render(<Harness metrics={{ scrollHeight: 4000, clientHeight: 500 }} nearTopOnly />);
+    const scroller = screen.getByTestId("scroller");
+
+    scrollTo(scroller, 2000);
+    expect(latestButton()).toBeNull();
+    expect(scroller.dataset.away).toBe("true");
+
+    scrollTo(scroller, 3400); // 100px from the bottom
+    expect(scroller.dataset.away).toBe("false");
+  });
+
+  it("stays up anywhere more than a screen from the bottom", () => {
     render(<Harness metrics={{ scrollHeight: 4000, clientHeight: 500 }} />);
+    const scroller = screen.getByTestId("scroller");
+
+    scroller.scrollTop = 2900; // 600px from the bottom, far past the top fifth
+    fireEvent.scroll(scroller);
+    flushFrame();
+    expect(screen.getByRole("button", { name: "latest" })).toBeTruthy();
+  });
+
+  it("near-top-only: hides once the reader has scrolled past the top fifth of the page", () => {
+    render(<Harness metrics={{ scrollHeight: 4000, clientHeight: 500 }} nearTopOnly />);
     const scroller = screen.getByTestId("scroller");
 
     scroller.scrollTop = 800; // exactly 20% of the page
@@ -92,8 +163,8 @@ describe("useJumpToLatest", () => {
     expect(screen.queryByRole("button", { name: "latest" })).toBeNull();
   });
 
-  it("stays hidden when the view opens restored past the top fifth", () => {
-    render(<Harness metrics={{ scrollHeight: 4000, clientHeight: 500 }} />);
+  it("near-top-only: stays hidden when the view opens restored past the top fifth", () => {
+    render(<Harness metrics={{ scrollHeight: 4000, clientHeight: 500 }} nearTopOnly />);
     const scroller = screen.getByTestId("scroller");
     scroller.scrollTop = 2000;
     fireEvent.scroll(scroller);

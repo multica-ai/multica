@@ -62,13 +62,36 @@ afterEach(() => {
 });
 
 describe("IssueFilterMenu agent status", () => {
+  it("switches between Idle and Running and clears the selection", async () => {
+    const store = renderFilterMenu();
+    const running = await openAgentStatus();
+    const idle = screen.getByRole("menuitemcheckbox", { name: "Idle" });
+    fireEvent.click(idle);
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentIdleFilter: true, agentRunningFilter: false }));
+    expect(agentStatusRow().textContent).toBe("Agent statusisIdle");
+    fireEvent.click(running);
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentIdleFilter: false, agentRunningFilter: true }));
+    fireEvent.click(idle);
+    fireEvent.click(idle);
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentIdleFilter: false, agentRunningFilter: false }));
+  });
+
+  it("keeps both choices fixed when the saved view requires Idle", async () => {
+    const baseline = baselineFromQuery({ agentIdleFilter: true });
+    renderFilterMenu({ agentIdleFilter: true }, baseline);
+    const running = await openAgentStatus();
+    expect(running).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Idle" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Idle" })).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("is a field like the others, right below Status", async () => {
     renderFilterMenu();
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
     await screen.findByRole("menuitem", { name: /^Status/ });
 
     const rows = screen.getAllByRole("menuitem").map((el) => el.textContent?.trim());
-    expect(rows.slice(0, 3)).toEqual(["Status", "Agent status", "Priority"]);
+    expect(rows.slice(0, 4)).toEqual(["Status", "Agent status", "Read state", "Priority"]);
   });
 
   it("filters on Running from its submenu and reads as a sentence", async () => {
@@ -115,5 +138,48 @@ describe("IssueFilterMenu agent status", () => {
     expect(running).toHaveAttribute("aria-checked", "true");
     expect(running).toHaveAttribute("aria-disabled", "true");
     expect(store.getState().agentRunningFilter).toBe(true);
+  });
+});
+
+const readStateRow = () => screen.getByRole("menuitem", { name: /^Read state/ });
+
+async function openReadState() {
+  fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Read state/ }));
+  return screen.findByRole("menuitemcheckbox", { name: "Unread" });
+}
+
+describe("IssueFilterMenu read state", () => {
+  it("filters on Unread from its submenu and reads as a sentence", async () => {
+    const store = renderFilterMenu();
+    const unread = await openReadState();
+
+    fireEvent.click(unread);
+    await waitFor(() => expect(store.getState().unreadFilter).toBe(true));
+    expect(unread).toHaveAttribute("aria-checked", "true");
+    expect(readStateRow().textContent).toBe("Read stateisUnread");
+
+    fireEvent.click(unread);
+    await waitFor(() => expect(store.getState().unreadFilter).toBe(false));
+  });
+
+  it("is listed under Active when on, and Reset turns it off", async () => {
+    const store = renderFilterMenu({ unreadFilter: true });
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    await screen.findByText("Active");
+
+    expect(screen.getAllByRole("menuitem")[0]?.textContent).toBe("Read stateisUnread");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reset all filters" }));
+    await waitFor(() => expect(store.getState().unreadFilter).toBe(false));
+  });
+
+  it("is fixed inside a saved view that filters on it", async () => {
+    const baseline = baselineFromQuery({ unreadFilter: true });
+    const store = renderFilterMenu({ unreadFilter: true }, baseline);
+    const unread = await openReadState();
+
+    expect(unread).toHaveAttribute("aria-checked", "true");
+    expect(unread).toHaveAttribute("aria-disabled", "true");
+    expect(store.getState().unreadFilter).toBe(true);
   });
 });

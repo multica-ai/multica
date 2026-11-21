@@ -16,7 +16,7 @@ Deux types de ressources sont pris en charge aujourd'hui :
 | Ressource | Idéal pour | Où ont lieu les exécutions |
 |---|---|---|
 | **Dépôt GitHub** | Du code partagé par l'équipe, avec des checkouts gérés par le runtime | Un répertoire de travail géré par le runtime |
-| **Répertoire local** | Un checkout existant, un très gros dépôt, ou lorsque vous voulez inspecter directement les modifications locales | Le répertoire d'origine, sur un ordinateur précis |
+| **Répertoire local** | Un checkout existant, un très gros dépôt, ou lorsque vous voulez inspecter directement les modifications locales | Le dossier d'origine ou un worktree isolé, sur un ordinateur précis |
 
 ## Comment les ressources entrent dans une exécution
 
@@ -24,17 +24,23 @@ Lorsqu'un agent traite une tâche du projet, Multica ajoute le nom du projet, sa
 
 La liste des dépôts rattachés à l'espace de travail est toujours incluse dans le contexte de l'exécution. Les dépôts rattachés au projet précisent en plus le code et la ref par défaut qu'utilise cet ensemble de travail.
 
-Un répertoire local ne s'applique qu'au daemon auquel il est lié. Lorsque le daemon chargé d'une exécution dispose d'un répertoire local correspondant, l'agent travaille directement dans ce répertoire ; les autres ordinateurs continuent d'utiliser les dépôts GitHub du projet ou les dépôts de l'espace de travail.
+Un répertoire local ne s'applique qu'au daemon auquel il est lié. Lorsque le daemon chargé d'une exécution dispose d'un répertoire local correspondant, l'agent utilise le répertoire d'origine en mode `in_place`, ou un worktree isolé de celui-ci en mode `worktree` ; les autres ordinateurs continuent d'utiliser les dépôts du projet ou de l'espace de travail.
 
 ## Ajouter un dépôt GitHub
 
-Ouvrez le projet et choisissez « Ajouter une ressource » sous **Ressources**. Sélectionnez un dépôt déjà rattaché à l'espace de travail, ou collez une URL Git. Les dépôts de l'espace de travail se gèrent dans **Paramètres → Code** ; une fois GitHub connecté, la même page propose **Choisir depuis GitHub** pour importer les dépôts auxquels la GitHub App a accès.
+Ouvrez le projet et cliquez sur **Ajouter un dépôt** dans **Ressources → Dépôts**. Recherchez un dépôt rattaché à l'espace de travail ou collez une URL Git. Les dépôts de l'espace de travail se gèrent dans **Paramètres → Code** ; une fois GitHub connecté, la même page propose **Choisir depuis GitHub** pour importer les dépôts auxquels la GitHub App a accès.
+
+Coller une URL de branche GitHub (`https://github.com/owner/repo/tree/branch`) renseigne séparément l’URL du dépôt et la branche de départ. Les noms de branche encodés dans l’URL sont décodés ; les paramètres de requête et les ancres de page sont exclus. Vérifiez la branche de départ avant d’ajouter le dépôt. Modifier l’URL du dépôt efface la branche de départ précédente, sauf si la nouvelle URL en précise une.
 
 Les dépôts ne se limitent pas à GitHub : toute URL Git accessible par le runtime fonctionne comme ressource de dépôt. Une instance Multica auto-hébergée peut aussi connecter des instances Forgejo, Gitea ou GitLab auto-hébergées dans **Paramètres → Code** ; voir [Fournisseurs Git auto-hébergés](/vcs-integration).
 
 Lors de la création d'un projet, vous pouvez aussi choisir des dépôts directement sous **Dépôts**. Un même projet peut rattacher plusieurs dépôts GitHub.
 
 La `ref` d'une ressource définit la branche, le tag ou le commit que les checkouts suivants utilisent par défaut. `default_branch_hint` donne seulement à l'agent une indication sur la branche par défaut et n'impose pas de changement de branche.
+
+Pour un dépôt géré, l'agent démarre dans le dossier de travail de la tâche. En général, `multica repo checkout` crée un sous-dossier pour le dépôt et affiche son chemin. Exécutez depuis ce chemin les commandes qui exigent la racine du dépôt. Si le processus de l'agent doit lui-même démarrer à la racine et que vous contrôlez la machine du runtime, ajoutez un checkout existant comme dossier local. Les modes `in_place` et `worktree` démarrent tous deux l'agent à la racine d'un dépôt ; pour les dépôts git, privilégiez `worktree` pour isoler les exécutions et les lancer en parallèle. Voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire).
+
+Si le sous-dossier prévu contient déjà un autre dépôt ou des fichiers résiduels et que le checkout signale un conflit de chemin, exécutez `multica repo checkout` depuis un autre dossier dans le dossier de travail de la même tâche. Conservez le dossier d’origine jusqu’à ce que vous ayez vérifié si son contenu vous est encore utile.
 
 ## Ajouter un répertoire local
 
@@ -54,17 +60,17 @@ Assurez-vous que le daemon local de l'application de bureau est en ligne.
 </Step>
 <Step>
 
-Ouvrez les **Ressources** du projet, ou l'onglet **Répertoire local** de la boîte de dialogue de création de projet. Le même choix y est disponible avant même que le projet existe.
+Pour un projet existant, ouvrez **Ressources → Dossiers locaux** et suivez les étapes ci-dessous. Lors de la création d'un projet, utilisez plutôt l'onglet **Dossier local** ; le dossier et son mode sont enregistrés avec le projet.
 
 </Step>
 <Step>
 
-Choisissez « Ajouter un répertoire local », puis sélectionnez le dossier à utiliser.
+Sous votre ordinateur, cliquez sur **Choisir un dossier...**, puis sélectionnez le dossier à utiliser.
 
 </Step>
 <Step>
 
-Choisissez comment les exécutions doivent l'utiliser : **Direct** ou **Parallèle**, voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire). L'application de bureau présélectionne **Parallèle** lorsque le dossier est un dépôt git que le runtime de cette machine peut isoler, et **Direct** sinon. Modifiez ce choix sur place, ou plus tard depuis **Ressources** avec le crayon à côté du répertoire.
+Choisissez **Modifier directement** ou **Exécuter en parallèle**, décrits dans [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire), puis cliquez sur **Ajouter le dossier**. L'application de bureau présélectionne **Exécuter en parallèle** si le dossier est un dépôt git que le runtime de cette machine peut isoler, et **Modifier directement** sinon. Pour changer ce choix ensuite, cliquez sur l'étiquette du mode du dossier dans **Ressources** : le nouveau mode est enregistré dès sa sélection.
 
 </Step>
 </Steps>
@@ -83,7 +89,7 @@ En mode `in_place` (par défaut), un répertoire local n'est pas un environnemen
 
 ## Comment les exécutions partagent le répertoire
 
-Un répertoire local dispose de deux modes d'exécution, définis par ressource avec `execution_mode`. L'application de bureau les nomme **Direct** et **Parallèle** ; l'API, le CLI et le reste de cette page utilisent les identifiants.
+Un répertoire local dispose de deux modes d'exécution, définis par ressource avec `execution_mode`. L'application de bureau les nomme **Modifier directement** et **Exécuter en parallèle** lors de l'ajout d'un dossier, puis **Direct** et **Parallèle** sur l'étiquette du mode du dossier ; l'API, le CLI et le reste de cette page utilisent les identifiants.
 
 <LocalDirModeDemo />
 
@@ -92,7 +98,7 @@ Un répertoire local dispose de deux modes d'exécution, définis par ressource 
 
 L'agent travaille directement dans votre répertoire, et les exécutions ont lieu une à la fois. Lorsque deux exécutions utilisent le même répertoire réel, la seconde passe en `waiting_local_directory` et reprend une fois que la première a libéré le répertoire. Deux chemins qui mènent au même répertoire via des liens symboliques différents sont sérialisés de la même manière.
 
-L'attente ne modifie pas le répertoire. Une exécution en attente peut être annulée ; sinon, elle attend que le répertoire devienne disponible.
+L'attente ne modifie pas le répertoire et n'occupe pas de slot d'exécution du daemon. Une exécution en attente peut être annulée ; sinon, elle reprend le démarrage lorsque le répertoire et la capacité d'exécution sont disponibles.
 
 Un simple répertoire non git ne peut utiliser que ce mode : le mode worktree est réservé aux dépôts git.
 
@@ -121,7 +127,7 @@ Une branche par tâche plutôt qu'une par exécution : `agent/<agent>/<issue>` (
 
 `<agent>` vient du nom de l'agent : mis en minuscules, tout ce qui n'est pas a–z ou 0–9 (lettres accentuées comprises) devient `-`, sur 30 caractères au plus. Un nom sans lettre latine ni chiffre devient `agent`. Ainsi, Assistant ops qui traite OPS-21 obtient `agent/assistant-ops/ops-21`, et un agent nommé 运营助手 obtient `agent/agent/ops-21`. `<issue>` est l'identifiant de la tâche en minuscules.
 
-Une exécution qui a échoué en cours de route indique tout de même sa branche, car elle y a déjà commité ce que l'agent avait produit.
+Une exécution qui a échoué en cours de route indique tout de même sa branche : les commits de l'agent s'y trouvent, et ce qu'il a laissé non commité est conservé comme décrit dans [Rien n'est perdu en silence](#nothing-is-silently-lost).
 
 </Accordion>
 <Accordion title="Une suite reprend là où la dernière exécution s'est arrêtée" id="follow-ups-continue-the-branch">
@@ -156,9 +162,18 @@ Une exécution qui n'a pas pu enregistrer sa branche, par exemple parce qu'elle 
 </Accordion>
 <Accordion title="Rien n'est perdu en silence" id="nothing-is-silently-lost">
 
-Tout ce que l'agent laisse non commité est commité sur cette branche avant la suppression du worktree, y compris lorsque l'exécution échoue en cours de route.
+Pendant une exécution en worktree, un fichier d'instructions du runtime suivi par Git, comme `CLAUDE.md` ou `AGENTS.md`, est marqué `skip-worktree` dans l'index privé de la tâche. Le brief injecté reste ainsi hors des commits de l'agent, sans modifier votre checkout. Les modifications intentionnelles de ce fichier restent non commitées jusqu'au rétablissement du suivi lors du nettoyage, puis suivent les règles de livraison ci-dessous. Les fichiers du runtime non suivis et les répertoires de compétences doivent toujours être exclus des commits de l'agent.
 
-Dans le rare cas où ce commit lui-même est impossible, par exemple un dépôt avec `commit.gpgSign` et aucune clé de signature disponible pour le runtime, le worktree est délibérément conservé, l'exécution est signalée comme échouée, et `git worktree list` dans votre dépôt indique le répertoire qui contient le travail.
+Rien de ce que l'agent laisse non commité n'est supprimé avec le worktree, y compris lorsque l'exécution échoue en cours de route. Sa destination dépend de ce que l'agent a fait pendant l'exécution :
+
+- **L'agent n'a fait aucun commit :** tout ce qu'il a laissé et qui n'est pas ignoré par git est commité sur la branche. Les hooks de commit de votre dépôt ne s'exécutent pas pour ce commit.
+- **L'agent a fait ses propres commits :** seuls ces commits sont livrés. Ce qu'il a laissé non commité (fichiers générés, fichiers temporaires, modifications non commitées) est enregistré sous une ref cachée, `refs/multica/leftovers/<branch>/<task>`, et n'atteint pas la branche. Cette règle est indiquée à l'agent au début de chaque exécution : un agent qui commite décide donc de ce qui est livré.
+
+Exception : une exécution qui commence par terminer une fusion avec vos modifications locales (voir [les conflits](#conflicts-are-resolved-by-the-agent)) commite tout ce qu'elle laisse, car ces modifications non commitées contiennent les vôtres.
+
+Pour voir ce qu'une exécution a enregistré, listez les refs avec `git for-each-ref refs/multica/leftovers` et inspectez-en une avec `git show --stat <ref>`. `git restore --source=<ref> -- <path>` remet un fichier dans votre copie de travail.
+
+Dans le rare cas où ce commit ou cet enregistrement lui-même est impossible, par exemple un dépôt avec `commit.gpgSign` et aucune clé de signature disponible pour le runtime, le worktree est délibérément conservé, l'exécution est signalée comme échouée, et `git worktree list` dans votre dépôt indique le répertoire qui contient le travail.
 
 </Accordion>
 <Accordion title="Une exécution qui ne change rien ne laisse aucune trace" id="no-changes-leave-nothing">
@@ -168,7 +183,7 @@ Sa branche est supprimée plutôt que laissée comme entrée vide dans `git bran
 </Accordion>
 <Accordion title="Les branches et refs cachées qui restent dans votre dépôt" id="what-stays-in-your-repo">
 
-Le worktree se trouve dans le répertoire de travail du runtime et il est récupéré selon [le calendrier de nettoyage habituel](/daemon-runtimes#cleanup). Deux éléments persistent dans votre dépôt : la branche, et une ref cachée par branche sous `refs/multica/local-state/`, qui enregistre à qui elle appartient et l'état de votre répertoire lors de sa dernière reprise.
+Le worktree se trouve dans le répertoire de travail du runtime et il est récupéré selon [le calendrier de nettoyage habituel](/daemon-runtimes#cleanup). Ce qui persiste dans votre dépôt : la branche ; une ref cachée par branche sous `refs/multica/local-state/`, qui enregistre à qui elle appartient et l'état de votre répertoire lors de sa dernière reprise ; et une ref cachée sous `refs/multica/leftovers/` pour chaque exécution qui a laissé des modifications non commitées après avoir fait ses propres commits.
 
 Les refs cachées n'apparaissent jamais dans `git branch` ; listez-les avec `git for-each-ref refs/multica`. Multica supprime chacune d'elles avec sa branche, et élimine celles dont vous avez vous-même supprimé la branche la prochaine fois qu'une exécution démarre sur ce dépôt. Vous pouvez aussi toutes les supprimer d'un coup avec `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
 

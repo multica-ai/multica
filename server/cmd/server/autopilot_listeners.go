@@ -11,6 +11,18 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// autopilotIssueSync loads the stored issue and hands it to SyncRunFromIssue.
+// Tests replace it to observe that the listener reached the sync without a
+// database. The payload status is only a pre-filter; this call always re-reads.
+var autopilotIssueSync = func(ctx context.Context, svc *service.AutopilotService, issueID string) {
+	dbIssue, err := svc.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		slog.Debug("autopilot listener: failed to load issue", "issue_id", issueID, "error", err)
+		return
+	}
+	svc.SyncRunFromIssue(ctx, dbIssue)
+}
+
 // registerAutopilotListeners hooks into issue and task events to keep
 // autopilot runs in sync with their linked issues and tasks.
 func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) {
@@ -27,28 +39,25 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 		if !statusChanged {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		// HTTP UpdateIssue sends handler.IssueResponse. Background writers
+		// (broadcastIssueUpdated) send the IssueToMap map. The id and status
+		// are the only fields this gate needs; the stored row decides the run.
+		issueID, status, ok := autopilotIssueIDAndStatus(payload["issue"])
 		if !ok {
 			return
 		}
-		// Only handle statuses that finalize an autopilot run. This gate exists
-		// to skip the issue load for routine forward progress, so it stays a
-		// literal comparison for built-in keys. A custom status carries the
-		// behavior of the canonical status it inherits, but resolving that
-		// needs a catalog read — so let non-built-in keys through and let
-		// SyncRunFromIssue normalize once it has the issue. (MUL-6243)
-		if issuestatus.IsBuiltIn(issue.Status) &&
-			issue.Status != "done" && issue.Status != "in_review" &&
-			issue.Status != "cancelled" {
+		// Skip the issue load for routine forward progress. Built-in keys that
+		// never settle a run stay out. Only done, in_review, and cancelled continue.
+		// A custom status inherits its canonical behavior, but resolving
+		// that needs a catalog read, so non-built-in keys pass and
+		// SyncRunFromIssue normalizes the
+		// stored row. (MUL-6243)
+		if issuestatus.IsBuiltIn(status) &&
+			status != "done" && status != "in_review" &&
+			status != "cancelled" {
 			return
 		}
-		// Load the full issue from DB to check origin_type.
-		dbIssue, err := svc.Queries.GetIssue(ctx, parseUUID(issue.ID))
-		if err != nil {
-			slog.Debug("autopilot listener: failed to load issue", "issue_id", issue.ID, "error", err)
-			return
-		}
-		svc.SyncRunFromIssue(ctx, dbIssue)
+		autopilotIssueSync(ctx, svc, issueID)
 	})
 
 	// When a task completes or fails, check if it's an autopilot run_only task.
@@ -61,6 +70,25 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 	bus.Subscribe(protocol.EventTaskCancelled, func(e events.Event) {
 		syncRunFromTaskEvent(ctx, svc, e)
 	})
+}
+
+// autopilotIssueIDAndStatus reads the issue id and status from either payload
+// shape. A missing id or a non-string status is not an issue update this
+// listener can act on.
+func autopilotIssueIDAndStatus(v any) (string, string, bool) {
+	if issue, ok := v.(handler.IssueResponse); ok {
+		return issue.ID, issue.Status, issue.ID != ""
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return "", "", false
+	}
+	id, _ := m["id"].(string)
+	status, _ := m["status"].(string)
+	if id == "" || status == "" {
+		return "", "", false
+	}
+	return id, status, true
 }
 
 func syncRunFromTaskEvent(ctx context.Context, svc *service.AutopilotService, e events.Event) {

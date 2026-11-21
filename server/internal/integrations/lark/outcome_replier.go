@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -53,7 +54,7 @@ type noopReplier struct {
 
 func (n *noopReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
-	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeChatStarted, OutcomeIssueUsage:
+	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeChatStarted, Outcome(engine.OutcomeHelp), OutcomeIssueUsage:
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
 			"outcome", string(res.Outcome),
 			"installation_id", uuidString(inst.ID),
@@ -191,6 +192,14 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 	case OutcomeChatStarted:
 		if err := r.sendChatNotice(ctx, inst, msg, chatStartedCopy); err != nil {
 			r.log.Warn("lark outcome replier: new-chat confirmation failed", "installation_id", uuidString(inst.ID), "chat_id", string(msg.ChatID), "err", err.Error())
+		}
+	case Outcome(engine.OutcomeHelp):
+		if err := r.sendChatNotice(ctx, inst, msg, engine.HelpTextChinese); err != nil {
+			r.log.Warn("lark outcome replier: help reply failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
 		}
 	case OutcomeIssueUsage:
 		copy := issueUsageCopy

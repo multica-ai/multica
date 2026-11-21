@@ -41,9 +41,6 @@ vi.mock("./tabs/mcp-config-tab", () => ({
 vi.mock("./tabs/agent-mcp-tab", () => ({
   AgentMcpTab: () => <div>agent-mcp-tab</div>,
 }));
-vi.mock("./tabs/integrations-tab", () => ({
-  IntegrationsTab: () => <div>integrations-tab</div>,
-}));
 vi.mock("./tabs/qoder-agent-tab", () => ({
   QoderAgentTab: () => <div>qoder-agent-tab</div>,
 }));
@@ -224,12 +221,12 @@ describe("AgentAdvancedSettings Integrations section visibility", () => {
     // Slack-only deployment was hiding the section (and its bind entry).
     ["Slack", slackListingRef],
     ["Telegram", telegramListingRef],
-  ])("shows Integrations once %s is configured", async (_name, ref) => {
+  ])("keeps channels out of settings when %s is configured", async (_name, ref) => {
     ref.current = { installations: [], configured: true };
     renderDialog([makeRuntime("claude")]);
     expect(
-      await screen.findByRole("tab", { name: /^Integrations$/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole("tab", { name: /^Integrations$/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("hides Integrations when no channel integration is configured", () => {
@@ -286,9 +283,21 @@ describe("AgentAdvancedSettings section lists", () => {
   });
 
   it("drops what the Qoder bridge rejects and names the Qoder Cloud Agents section", () => {
-    larkListingRef.current = { installations: [], configured: true };
     renderDialog([makeRuntime("qoder_cloud")]);
     expect(sectionNames()).toEqual(["General", "Access", "Qoder Cloud Agents"]);
+  });
+
+  it("keeps channel management out of Qoder advanced settings", async () => {
+    larkListingRef.current = { installations: [], configured: true };
+    renderDialog([makeRuntime("qoder_cloud")]);
+    expect(
+      screen.queryByRole("tab", { name: /^Integrations$/i }),
+    ).not.toBeInTheDocument();
+    expect(sectionNames()).toEqual([
+      "General",
+      "Access",
+      "Qoder Cloud Agents",
+    ]);
   });
 
   it("renders nothing while closed", () => {

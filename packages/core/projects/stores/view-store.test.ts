@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { useProjectViewStore } from "./view-store";
+import { migrateProjectViewState, useProjectViewStore } from "./view-store";
 import { setCurrentWorkspace } from "../../platform/workspace-storage";
 
 const flush = () => new Promise((resolve) => queueMicrotask(() => resolve(null)));
@@ -26,7 +26,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   localStorage.clear();
-  useProjectViewStore.setState({ viewMode: "compact" });
+  useProjectViewStore.setState({ layout: "table", groupBy: "none" });
   setCurrentWorkspace(null, null);
 });
 
@@ -39,25 +39,68 @@ describe("useProjectViewStore", () => {
   it("partialize persists view prefs (no actions) under the workspace-namespaced key", async () => {
     setCurrentWorkspace("acme", "ws_a");
     await flush();
-    useProjectViewStore.getState().setViewMode("comfortable");
+    useProjectViewStore.getState().setLayout("board");
+    useProjectViewStore.getState().setGroupBy("priority");
 
     const raw = localStorage.getItem("multica_projects_view:acme");
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string);
+    expect(parsed.version).toBe(1);
     expect(Object.keys(parsed.state).sort()).toEqual([
       "filters",
+      "groupBy",
       "hiddenColumns",
+      "layout",
       "sortDirection",
       "sortField",
-      "viewMode",
     ]);
-    expect(parsed.state.viewMode).toBe("comfortable");
+    expect(parsed.state.layout).toBe("board");
+    expect(parsed.state.groupBy).toBe("priority");
   });
 
-  it("rehydrates a different saved viewMode on workspace switch", async () => {
+  it("rehydrates a different saved layout on workspace switch", async () => {
     localStorage.setItem(
       "multica_projects_view:acme",
-      JSON.stringify({ state: { viewMode: "comfortable" }, version: 0 }),
+      JSON.stringify({ state: { layout: "board" }, version: 1 }),
+    );
+    localStorage.setItem(
+      "multica_projects_view:beta",
+      JSON.stringify({ state: { layout: "table" }, version: 1 }),
+    );
+
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    await flush();
+    expect(useProjectViewStore.getState().layout).toBe("board");
+
+    setCurrentWorkspace("beta", "ws_b");
+    await flush();
+    await flush();
+    expect(useProjectViewStore.getState().layout).toBe("table");
+  });
+
+  it("resets to the table when switching to a workspace with no persisted value", async () => {
+    localStorage.setItem(
+      "multica_projects_view:acme",
+      JSON.stringify({ state: { layout: "board" }, version: 1 }),
+    );
+
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    await flush();
+    expect(useProjectViewStore.getState().layout).toBe("board");
+
+    setCurrentWorkspace("beta", "ws_b");
+    await flush();
+    await flush();
+    expect(useProjectViewStore.getState().layout).toBe("table");
+    expect(localStorage.getItem("multica_projects_view:acme")).not.toBeNull();
+  });
+
+  it("opens a saved card view as the board and keeps a saved table as the table", async () => {
+    localStorage.setItem(
+      "multica_projects_view:acme",
+      JSON.stringify({ state: { viewMode: "comfortable", hiddenColumns: [] }, version: 0 }),
     );
     localStorage.setItem(
       "multica_projects_view:beta",
@@ -67,29 +110,30 @@ describe("useProjectViewStore", () => {
     setCurrentWorkspace("acme", "ws_a");
     await flush();
     await flush();
-    expect(useProjectViewStore.getState().viewMode).toBe("comfortable");
+    const acme = useProjectViewStore.getState();
+    expect(acme.layout).toBe("board");
+    expect(acme.hiddenColumns).toEqual(["start_date"]);
+    expect("viewMode" in acme).toBe(false);
 
     setCurrentWorkspace("beta", "ws_b");
     await flush();
     await flush();
-    expect(useProjectViewStore.getState().viewMode).toBe("compact");
+    expect(useProjectViewStore.getState().layout).toBe("table");
+  });
+});
+
+describe("migrateProjectViewState", () => {
+  it("leaves current-version state alone", () => {
+    const state = { layout: "board", hiddenColumns: [] };
+    expect(migrateProjectViewState(state, 1)).toBe(state);
   });
 
-  it("resets to 'compact' when switching to a workspace with no persisted value", async () => {
-    localStorage.setItem(
-      "multica_projects_view:acme",
-      JSON.stringify({ state: { viewMode: "comfortable" }, version: 0 }),
-    );
-
-    setCurrentWorkspace("acme", "ws_a");
-    await flush();
-    await flush();
-    expect(useProjectViewStore.getState().viewMode).toBe("comfortable");
-
-    setCurrentWorkspace("beta", "ws_b");
-    await flush();
-    await flush();
-    expect(useProjectViewStore.getState().viewMode).toBe("compact");
-    expect(localStorage.getItem("multica_projects_view:acme")).not.toBeNull();
+  it("keeps the other saved prefs while mapping viewMode", () => {
+    expect(
+      migrateProjectViewState(
+        { viewMode: "compact", sortField: "name", hiddenColumns: ["issues", "start_date"] },
+        0,
+      ),
+    ).toEqual({ layout: "table", sortField: "name", hiddenColumns: ["issues", "start_date"] });
   });
 });

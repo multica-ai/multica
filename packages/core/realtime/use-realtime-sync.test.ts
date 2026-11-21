@@ -816,24 +816,6 @@ describe("handleInboxNew", () => {
     });
   });
 
-  it("keeps activity quiet: no banner and no unread summary refresh", async () => {
-    const qc = createQueryClient();
-    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
-    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
-      preferences: { system_notifications: "all" },
-    });
-    qc.setQueryData(inboxKeys.unreadSummary(), []);
-    const showNotification = stubDesktopAPI();
-
-    await handleInboxNew(
-      qc,
-      inboxItem({ type: "status_changed", actor_type: "agent", section: "activity" }),
-    );
-
-    expect(showNotification).not.toHaveBeenCalled();
-    expect(qc.getQueryState(inboxKeys.unreadSummary())?.isInvalidated).toBe(false);
-  });
-
   it("invalidates the ITEM's workspace inbox cache and resolves its slug, not the active workspace's", async () => {
     const qc = createQueryClient();
     qc.setQueryData<Workspace[]>(workspaceKeys.list(), [
@@ -870,6 +852,33 @@ describe("handleInboxNew", () => {
     await handleInboxNew(qc, inboxItem());
 
     expect(showNotification).not.toHaveBeenCalled();
+  });
+
+  it("skips the banner for a move to in_progress but still refreshes the inbox", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
+    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+      preferences: { system_notifications: "all" },
+    });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const showNotification = stubDesktopAPI();
+
+    await handleInboxNew(
+      qc,
+      inboxItem({ type: "status_changed", details: { from: "todo", to: "in_progress" } }),
+    );
+    expect(showNotification).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: inboxKeys.all("ws-a") }),
+      ),
+    );
+
+    await handleInboxNew(
+      qc,
+      inboxItem({ type: "status_changed", details: { from: "in_progress", to: "in_review" } }),
+    );
+    expect(showNotification).toHaveBeenCalledTimes(1);
   });
 
   // The tests below exercise the COLD-cache mute path (source preference not

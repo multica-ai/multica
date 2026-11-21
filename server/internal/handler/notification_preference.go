@@ -17,42 +17,43 @@ import (
 // not an inbox event group — it's a delivery-channel toggle controlling
 // whether native OS notification banners fire — but it shares the same
 // preferences map so a single endpoint covers all user notification
-// preferences.
+// preferences. `auto_archive_completed` is not an event group either: "muted"
+// stops your notifications from being archived when you complete an issue.
 var validNotifGroups = map[string]bool{
-	"assignments":          true,
-	"status_changes":       true,
-	"comments":             true,
-	"mentions":             true,
-	"updates":              true,
-	"agent_activity":       true,
-	"system_notifications": true,
+	"assignments":            true,
+	"status_changes":         true,
+	"comments":               true,
+	"chat_replies":           true,
+	"mentions":               true,
+	"reactions":              true,
+	"updates":                true,
+	"agent_activity":         true,
+	"new_issues":             true,
+	"system_notifications":   true,
+	"auto_archive_completed": true,
+	"others_issues":          true,
 }
 
-// validNotifValues is the set of allowed preference values per group.
+// validNotifValues is the set of allowed preference values for a group not
+// listed in notifValuesByGroup.
 var validNotifValues = map[string]bool{
 	"all":   true,
 	"muted": true,
 }
 
-// validRouteValues is the set of allowed values for a routable kind's key (see
-// inbox.RouteKinds): which Inbox section it lands in, muted, or "all" for the
-// default. mentions, status_changes and updates are both routable kinds and
-// pre-routing groups, so older clients writing "all"/"muted" there stay valid.
-var validRouteValues = map[string]bool{
-	inbox.RouteDefault:  true,
-	inbox.RouteMuted:    true,
-	inbox.RouteAction:   true,
-	inbox.RouteActivity: true,
+// notifValuesByGroup lists the groups whose values are not on/off.
+// `others_issues` is how much of someone else's issue a passive subscriber
+// receives: absent or "key_updates" for mentions, thread replies and handoffs,
+// "all" for every event. Muting it would only hide what still needs you.
+var notifValuesByGroup = map[string]map[string]bool{
+	"others_issues": {"all": true, "key_updates": true},
 }
 
-func validNotifPreference(key, value string) (validKey, validValue bool) {
-	if inbox.IsRouteKey(key) {
-		return true, validRouteValues[value]
+func validNotifValue(group, value string) bool {
+	if values, ok := notifValuesByGroup[group]; ok {
+		return values[value]
 	}
-	if validNotifGroups[key] {
-		return true, validNotifValues[value]
-	}
-	return false, false
+	return validNotifValues[value]
 }
 
 func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +71,7 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"workspace_id": workspaceID,
-				"preferences":  map[string]any{},
+				"preferences":  inbox.WithDefaults(nil),
 			})
 			return
 		}
@@ -78,23 +79,16 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to get notification preferences")
 		return
 	}
-
-	var prefs map[string]string
-	if err := json.Unmarshal(pref.Preferences, &prefs); err != nil {
-		prefs = map[string]string{}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"workspace_id": workspaceID,
-		"preferences":  prefs,
-	})
+	writeNotificationPreferenceResponse(w, workspaceID, pref)
 }
 
 type updateNotifPrefRequest struct {
 	Preferences map[string]string `json:"preferences"`
 }
 
-func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+// decodeNotificationPreferenceRequest reads and validates the preferences in
+// a write request.
+func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {
 	var req updateNotifPrefRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -107,18 +101,21 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	for k, v := range req.Preferences {
-		validKey, validValue := validNotifPreference(k, v)
-		if !validKey {
+		if !validNotifGroups[k] {
 			writeError(w, http.StatusBadRequest, "invalid preference group: "+k)
 			return nil, false
 		}
-		if !validValue {
+		if !validNotifValue(k, v) {
 			writeError(w, http.StatusBadRequest, "invalid preference value: "+v)
 			return nil, false
 		}
 	}
 
-	prefsJSON, err := json.Marshal(req.Preferences)
+	return req.Preferences, true
+}
+
+func marshalNotificationPreferences(w http.ResponseWriter, prefs map[string]string) ([]byte, bool) {
+	prefsJSON, err := json.Marshal(prefs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to marshal preferences")
 		return nil, false
@@ -126,6 +123,9 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 	return prefsJSON, true
 }
 
+// writeNotificationPreferenceResponse answers with the stored preferences plus
+// the groups muted by default (inbox.WithDefaults), so every client renders
+// those switches as off whichever defaults it was built with.
 func writeNotificationPreferenceResponse(
 	w http.ResponseWriter,
 	workspaceID string,
@@ -138,7 +138,7 @@ func writeNotificationPreferenceResponse(
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"workspace_id": workspaceID,
-		"preferences":  prefs,
+		"preferences":  inbox.WithDefaults(prefs),
 	})
 }
 
@@ -150,7 +150,13 @@ func (h *Handler) UpdateNotificationPreferences(w http.ResponseWriter, r *http.R
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
-	prefsJSON, ok := decodeNotificationPreferenceRequest(w, r)
+	prefs, ok := decodeNotificationPreferenceRequest(w, r)
+	if !ok {
+		return
+	}
+	// Only clients built before PATCH existed send this full replacement, and
+	// they leave a group out to mean "on".
+	prefsJSON, ok := marshalNotificationPreferences(w, inbox.WithLegacyDefaults(prefs))
 	if !ok {
 		return
 	}
@@ -176,7 +182,11 @@ func (h *Handler) PatchNotificationPreferences(w http.ResponseWriter, r *http.Re
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
-	prefsJSON, ok := decodeNotificationPreferenceRequest(w, r)
+	prefs, ok := decodeNotificationPreferenceRequest(w, r)
+	if !ok {
+		return
+	}
+	prefsJSON, ok := marshalNotificationPreferences(w, prefs)
 	if !ok {
 		return
 	}

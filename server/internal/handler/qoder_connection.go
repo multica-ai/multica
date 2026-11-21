@@ -510,6 +510,9 @@ func (h *Handler) runQoderSupervisor(ctx context.Context, conn *pgxpool.Conn, se
 				},
 				BeforeStep: func(stepCtx context.Context) (func(), error) {
 					return h.acquireQoderStep(stepCtx, ws, rev)
+				},
+				GitHubAppToken: func(tokenCtx context.Context, owner, repo string) (string, int64, error) {
+					return h.issueQoderRepositoryToken(tokenCtx, ws, owner, repo)
 				}}, nil)
 			if err != nil {
 				_, _ = conn.Exec(ctx, `UPDATE cloud_agent_connection SET status='error',last_error='invalid execution configuration' WHERE provider='qoder_cloud' AND workspace_id=$1`, ws)

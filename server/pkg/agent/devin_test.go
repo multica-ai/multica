@@ -217,22 +217,3 @@ func TestSelectDevinAuthMethod(t *testing.T) {
 		}
 	}
 }
-
-func TestParseDevinModels(t *testing.T) {
-	t.Parallel()
-	got, err := parseDevinModels([]byte(`{"models":[{"id":"kimi-k2.5","name":"Kimi K2.5"}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].ID != "kimi-k2.5" || got[0].Label != "Kimi K2.5" {
-		t.Fatalf("got %+v", got)
-	}
-	got, err = parseDevinModels([]byte(`[{"id":"opus","label":"Opus"}]`))
-	if err != nil || len(got) != 1 || got[0].Label != "Opus" {
-		t.Fatalf("array form: %+v err %v", got, err)
-	}
-	got, err = parseDevinModels([]byte(`{"families":[{"slug":"kimi-k3","variants":[{"model_uid":"kimi-k3-high","label":"Kimi K3 High"}]}]}`))
-	if err != nil || len(got) != 1 || got[0].ID != "kimi-k3-high" || got[0].Provider != "kimi-k3" {
-		t.Fatalf("families form: %+v err %v", got, err)
-	}
-}

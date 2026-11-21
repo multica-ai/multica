@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -51,7 +53,8 @@ func TestIssueUnreadMarkAndClear(t *testing.T) {
 	setIssueUnreadAs(t, testUserID, issueID, true).Want(http.StatusOK)
 	setIssueUnreadAs(t, testUserID, issueID, true).Want(http.StatusOK)
 	items := listIssueUnreadAs(t, testUserID)
-	if len(items) != 1 || items[0].IssueID != issueID || items[0].Outcome != "manual" || items[0].AgentID != nil {
+	if len(items) != 1 || items[0].IssueID != issueID || items[0].Outcome != "manual" || items[0].AgentID != nil ||
+		items[0].TaskID != nil || items[0].CommentID != nil {
 		t.Fatalf("want one manual unread row for the issue, got %+v", items)
 	}
 
@@ -59,6 +62,41 @@ func TestIssueUnreadMarkAndClear(t *testing.T) {
 	setIssueUnreadAs(t, testUserID, issueID, false).Want(http.StatusOK)
 	if items := listIssueUnreadAs(t, testUserID); len(items) != 0 {
 		t.Fatalf("want no unread rows after mark read, got %+v", items)
+	}
+}
+
+func TestIssueUnreadPointsAtTheRunsLastComment(t *testing.T) {
+	userID := dbfx.User(t, "Unread Landing", "issue-unread-landing@multica.ai")
+	dbfx.Member(t, testWorkspaceID, userID, "member")
+	dbfx.Cleanup(t, `DELETE FROM issue_unread WHERE user_id = $1`, userID)
+	withComments := dbfx.Issue(t, "unread run with comments")
+	silent := dbfx.Issue(t, "unread run without comments")
+	elsewhere := dbfx.Issue(t, "issue the run also commented on")
+	runID, silentRunID := uuid.NewString(), uuid.NewString()
+
+	at := func(minutesAgo int) testutil.Raw {
+		return testutil.Raw(fmt.Sprintf("now() - interval '%d minutes'", minutesAgo))
+	}
+	dbfx.Comment(t, withComments, "progress", testutil.Cols{"source_task_id": runID, "created_at": at(5)})
+	result := dbfx.Comment(t, withComments, "result", testutil.Cols{"source_task_id": runID, "created_at": at(4)})
+	dbfx.Comment(t, withComments, "deleted", testutil.Cols{"source_task_id": runID, "created_at": at(3), "deleted_at": at(2)})
+	dbfx.Comment(t, withComments, "someone else", testutil.Cols{"created_at": at(2)})
+	dbfx.Comment(t, elsewhere, "same run, other issue", testutil.Cols{"source_task_id": runID, "created_at": at(1)})
+
+	dbfx.Exec(t, `
+INSERT INTO issue_unread (workspace_id, user_id, issue_id, outcome, task_id)
+VALUES ($1, $2, $3, 'completed', $4), ($1, $2, $5, 'failed', $6)`,
+		testWorkspaceID, userID, withComments, runID, silent, silentRunID)
+
+	byIssue := map[string]IssueUnreadResponse{}
+	for _, item := range listIssueUnreadAs(t, userID) {
+		byIssue[item.IssueID] = item
+	}
+	if got := byIssue[withComments]; got.TaskID == nil || *got.TaskID != runID || got.CommentID == nil || *got.CommentID != result {
+		t.Fatalf("want the run's last live comment on this issue %s, got %+v", result, got)
+	}
+	if got := byIssue[silent]; got.TaskID == nil || *got.TaskID != silentRunID || got.CommentID != nil {
+		t.Fatalf("want the run id and no comment for a run that left none, got %+v", got)
 	}
 }
 

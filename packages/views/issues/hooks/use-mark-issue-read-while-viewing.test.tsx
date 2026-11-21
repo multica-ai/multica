@@ -15,6 +15,8 @@ const completed: IssueUnread = {
   issue_id: "issue-1",
   outcome: "completed",
   agent_id: "agent-1",
+  task_id: "task-1",
+  comment_id: "comment-1",
   created_at: "2026-10-31T10:00:00Z",
 };
 

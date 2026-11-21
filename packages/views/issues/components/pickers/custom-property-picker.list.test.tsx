@@ -50,7 +50,7 @@ describe("list property editing", () => {
   it("explains a missing URL scheme and keeps the draft editable", async () => {
     const user = userEvent.setup();
     renderEditor();
-    const input = await screen.findByPlaceholderText("https://…");
+    const input = await screen.findByPlaceholderText("https://...");
     await user.type(input, "example.com{Enter}");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("http:// or https://");
@@ -67,7 +67,7 @@ describe("list property editing", () => {
     const user = userEvent.setup();
     vi.mocked(api.setIssueProperty).mockRejectedValueOnce(new Error("URL must have a host"));
     renderEditor();
-    const input = await screen.findByPlaceholderText("https://…");
+    const input = await screen.findByPlaceholderText("https://...");
     await user.type(input, "https://{Enter}");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("URL must have a host");
@@ -147,7 +147,7 @@ describe("list property editing", () => {
       finish = () => resolve({ properties: {}, issue_revision: 2 });
     }));
     renderEditor();
-    const input = await screen.findByPlaceholderText("https://…");
+    const input = await screen.findByPlaceholderText("https://...");
     await user.type(input, "https://example.com{Enter}");
     await waitFor(() => expect(api.setIssueProperty).toHaveBeenCalledTimes(1));
 
@@ -171,7 +171,7 @@ describe("list property editing", () => {
         />
       </I18nProvider>,
     );
-    const input = await screen.findByPlaceholderText("Enter value…");
+    const input = await screen.findByPlaceholderText("Enter value...");
     await user.type(input, "Smith, John{Enter}");
     expect(onChange).toHaveBeenCalledWith(["alpha", "Smith, John"]);
     await waitFor(() => expect(input).toHaveValue(""));

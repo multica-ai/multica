@@ -1,6 +1,10 @@
 package engine
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/multica-ai/multica/server/internal/util"
+)
 
 // issueCommandPrefix is the literal command token. We match exactly —
 // `/Issue` or `/ISSUE` do NOT trigger creation. The case sensitivity is
@@ -49,7 +53,7 @@ func ParseIssueCommand(body string) (*IssueCommand, bool) {
 		}
 	}
 
-	title := strings.TrimSpace(rest)
+	title := strings.TrimSpace(util.SanitizeTextForPostgres(rest))
 	description := ""
 	if firstIdx+1 < len(lines) {
 		description = strings.TrimRight(strings.Join(lines[firstIdx+1:], "\n"), " \t\n")

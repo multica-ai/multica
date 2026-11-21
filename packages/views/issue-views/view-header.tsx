@@ -15,6 +15,7 @@ import {
   ListTodo,
   Lock,
   Pencil,
+  Plus,
   SquarePen,
   Star,
   EyeOff,
@@ -44,6 +45,7 @@ import { cn } from "@multica/ui/lib/utils";
 import type { CreateIssueViewRequest, IssueView } from "@multica/core/api/schemas";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
 import type { IssueViewScope } from "@multica/core/issue-views/queries";
 import {
@@ -52,13 +54,16 @@ import {
   type BuiltinViewKey,
 } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
+import { isFilteredBuiltinViewKey } from "@multica/core/issue-views/builtin-issue-views";
 import {
   isIssueViewModified,
+  isIssueViewUndefined,
   issueViewDefinitionFromState,
   issueViewSeedDefinition,
   modifiedFilterDimensions,
 } from "@multica/core/issue-views/definition";
 import { useIssueViewRenameStore } from "@multica/core/issue-views/rename-store";
+import { useIssueViewEditStore } from "@multica/core/issue-views/edit-store";
 import {
   myIssuesViewStore,
   type MyIssuesScope,
@@ -80,12 +85,14 @@ import { RefreshablePageIcon } from "../layout/refreshable-page-icon";
 import { ActionShortcutKeycaps } from "../common/shortcut-keycaps";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { IssueDisplayControls, IssueFilterMenu } from "../issues/components/issues-header";
-import { useFilterChips } from "../issues/components/filter-chips-bar";
+import { ChipSpan, useFilterChips, type FilterChip } from "../issues/components/filter-chips-bar";
+import { useViewBaseline } from "../issues/surface/view-baseline-context";
 import { WorkspaceAgentWorkingChip } from "../issues/components/workspace-agent-working-chip";
 import type { IssueSurfaceController } from "../issues/surface/use-issue-surface-controller";
 import { useT } from "../i18n";
 import { useMyIssuesScope } from "../my-issues/use-my-issues-scope";
 import { DeleteViewDialog } from "./delete-view-dialog";
+import { BUILTIN_VIEW_ICON, useBuiltinViewLabel } from "./builtin-views";
 import { useIssueViewActions } from "./use-view-actions";
 import { ViewNameInput } from "./view-name-input";
 
@@ -121,17 +128,25 @@ export function IssueViewHeader({
   controller,
   base,
   baseMenu,
+  baseBadge,
+  hideCreate = false,
   trailing,
 }: {
   controller: IssueSurfaceController;
   base: IssueViewHeaderBase;
   /** Name-menu items for the page itself, e.g. project actions. */
   baseMenu?: ReactNode;
+  /** Marker after the page's own name, e.g. an archived project's tag. */
+  baseBadge?: ReactNode;
+  /** Drops the new-issue button, e.g. on an archived project. */
+  hideCreate?: boolean;
   /** Layout toggles at the far end, e.g. the project's properties panel. */
   trailing?: ReactNode;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  // A guest (MUL-9420) cannot create issues.
+  const guest = useIsGuest(wsId);
   const paths = useWorkspacePaths();
   const viewScope = viewScopeOf(base);
   const { activeView, setActive, missing } = useActiveIssueView(wsId, viewScope);
@@ -153,6 +168,7 @@ export function IssueViewHeader({
   const setAssigneeTypeForPage = useIssuesScopeStore((s) => s.setScope);
   const setAssigneeType = (next: IssuesScope) => setAssigneeTypeForPage(scopePage, next);
   const myScope = useMyIssuesScope();
+  const builtinLabel = useBuiltinViewLabel();
   const setMyScope = useStore(myIssuesViewStore, (s) => s.setScope);
 
   const storeApi = useViewStoreApi();
@@ -162,19 +178,20 @@ export function IssueViewHeader({
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useViewStore((s) => s.toggleAgentRunningFilter);
 
-  const builtinKey: BuiltinViewKey | null =
-    base.kind === "workspace" ? "all_issues" : base.kind === "my" ? (myScope === "agents" ? "my_agents" : "my_issues") : null;
+  const builtinKey: BuiltinViewKey | null = base.kind === "workspace" ? "all_issues" : null;
   const baseName =
     base.kind === "project"
       ? base.project.title
-      : t(($) => $.views.builtin[builtinKey!]);
+      : base.kind === "my"
+        ? myScope === "agents"
+          ? t(($) => $.views.builtin.my_agents)
+          : t(($) => $.views.builtin.my_issues)
+        : builtinLabel("all_issues");
   const baseIcon =
     base.kind === "project" ? (
       <ProjectIcon project={base.project} size="sm" />
-    ) : builtinKey === "my_agents" ? (
-      <Bot className="size-4" />
-    ) : builtinKey === "my_issues" ? (
-      <CircleUser className="size-4" />
+    ) : base.kind === "my" ? (
+      myScope === "agents" ? <Bot className="size-4" /> : <CircleUser className="size-4" />
     ) : (
       <ListTodo className="size-4" />
     );
@@ -184,7 +201,28 @@ export function IssueViewHeader({
     ? modified!.filters || modified!.display
     : controller.hasActiveFilters;
   const canManage = activeView ? actions.canManage(activeView) : false;
-  const starId = activeView ? savedViewItemId(activeView.id) : builtinKey ? builtinViewItemId(builtinKey) : null;
+  // A view that saves nothing yet gets a setup bar under the header until it
+  // does; its filter menu opens as soon as the view is named.
+  const needsSetup = !!activeView && canManage && isIssueViewUndefined(activeView);
+  const [setupFilterOpen, setSetupFilterOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const editViewId = useIssueViewEditStore((s) => s.viewId);
+  const stopEdit = useIssueViewEditStore((s) => s.stop);
+  useEffect(() => {
+    if (!activeView || editViewId !== activeView.id) return;
+    stopEdit();
+    if (needsSetup) setSetupFilterOpen(true);
+    else setFilterOpen(true);
+  }, [activeView, editViewId, needsSetup, stopEdit]);
+  const activeBuiltin = isFilteredBuiltinViewKey(activeView?.id) ? activeView.id : null;
+  const activeViewName = activeBuiltin ? builtinLabel(activeBuiltin) : activeView?.name;
+  const starId = activeBuiltin
+    ? builtinViewItemId(activeBuiltin)
+    : activeView
+      ? savedViewItemId(activeView.id)
+      : builtinKey
+        ? builtinViewItemId(builtinKey)
+        : null;
   const starred = starId ? actions.sidebar.isStarred(starId) : false;
   const renaming =
     !!activeView && renameTarget?.surface === "header" && renameTarget.viewId === activeView.id;
@@ -281,7 +319,8 @@ export function IssueViewHeader({
 
   // "My issues" is already a relation to me; a second one there is noise.
   const showRelation = base.kind !== "my";
-  const { chips: allFilterChips } = useFilterChips(dateFilter, setDateFilter);
+  const viewBaseline = useViewBaseline() ?? undefined;
+  const { chips: allFilterChips } = useFilterChips(dateFilter, setDateFilter, viewBaseline);
   const filterChips = showRelation
     ? allFilterChips
     : allFilterChips.filter((chip) => chip.key !== "relation");
@@ -311,236 +350,327 @@ export function IssueViewHeader({
     [activeView, modified?.filters, state],
   );
 
+  const filterMenuProps = {
+    viewBaseline,
+    leadingSections: scopeSection,
+    showRelation,
+    hiddenFields: base.kind === "project" ? PROJECT_HIDDEN_FIELDS : undefined,
+    modifiedKeys,
+    summaryTitle: activeViewName ?? baseName,
+    scopedIssues: controller.surfaceIssues,
+    facetCountsExact: controller.facetCountsExact,
+    tableFacetCounts: controller.tableFacetCounts,
+    onTableFacetChange: controller.setActiveTableFacet,
+    dateFilter,
+    onDateFilterChange: setDateFilter,
+  };
+  const saveActive = () => {
+    if (activeView) actions.save(activeView, issueViewDefinitionFromState(storeApi.getState()));
+  };
+
   const title = (
     <>
       <RefreshablePageIcon refreshing={controller.isRefreshing}>
-        {activeView ? <Layers className="size-4" /> : baseIcon}
+        {activeBuiltin ? BUILTIN_VIEW_ICON[activeBuiltin] : activeView ? <Layers className="size-4" /> : baseIcon}
       </RefreshablePageIcon>
-      <span className="min-w-0 truncate">{activeView ? activeView.name : baseName}</span>
+      <span className="min-w-0 truncate">{activeView ? activeViewName : baseName}</span>
+      {!activeView && baseBadge}
     </>
   );
 
   return (
-    <PageHeader className="@container/issue-header">
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-clip">
-        {renaming && activeView ? (
-          <span className="flex min-w-0 shrink-0 items-center gap-2">
-            <Layers className="size-4 shrink-0 text-muted-foreground" />
-            <ViewNameInput
-              initial={activeView.name}
-              onCommit={(name) => actions.rename(activeView, name)}
-              onDone={stopRename}
-              className="w-48"
-            />
-          </span>
-        ) : (
-          <DropdownMenu>
-            <h1 className="flex min-w-20">
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 min-w-0 max-w-64 shrink gap-2 px-2 text-body font-medium text-foreground"
-                  />
-                }
-              >
-                {title}
-                <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-              </DropdownMenuTrigger>
-            </h1>
-            <DropdownMenuContent align="start" className="w-auto min-w-52">
-              {activeView ? (
-                <>
-                  <DropdownMenuGroup>
+    <>
+      <PageHeader className="@container/issue-header">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-clip">
+          {renaming && activeView ? (
+            <span className="flex min-w-0 shrink-0 items-center gap-2">
+              <Layers className="size-4 shrink-0 text-muted-foreground" />
+              <ViewNameInput
+                initial={activeView.name}
+                onCommit={(name) => actions.rename(activeView, name)}
+                onDone={(submitted) => {
+                  stopRename();
+                  if (submitted && needsSetup) setSetupFilterOpen(true);
+                }}
+                className="w-48"
+              />
+            </span>
+          ) : (
+            <DropdownMenu>
+              <h1 className="flex min-w-20">
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 min-w-0 max-w-64 shrink gap-2 px-2 text-body font-medium text-foreground"
+                    />
+                  }
+                >
+                  {title}
+                  <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+                </DropdownMenuTrigger>
+              </h1>
+              <DropdownMenuContent align="start" className="w-auto min-w-52">
+                {activeView ? (
+                  <>
+                    <DropdownMenuGroup>
+                      {canManage && (
+                        <DropdownMenuItem onClick={() => startRename(activeView.id, "header")}>
+                          <Pencil className="size-3.5" />
+                          {t(($) => $.views.rename)}
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        onClick={() => actions.duplicate({ ...activeView, name: activeViewName ?? "" }, "header")}
+                      >
+                        <Copy className="size-3.5" />
+                        {t(($) => $.views.duplicate)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => actions.copyLink(issueViewTarget(wsId, activeView, paths).href)}
+                      >
+                        <Link2 className="size-3.5" />
+                        {t(($) => $.views.copy_link)}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    {canManage && activeView.scope_type !== "my" && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel>{t(($) => $.views.visible_to)}</DropdownMenuLabel>
+                          <DropdownMenuRadioGroup
+                            value={activeView.visibility === "workspace" ? "workspace" : "private"}
+                            onValueChange={(value) =>
+                              actions.setVisibility(activeView, value as "private" | "workspace")
+                            }
+                          >
+                            <DropdownMenuRadioItem value="private">
+                              <Lock className="size-3.5" />
+                              {t(($) => $.views.only_me)}
+                            </DropdownMenuRadioItem>
+                            <DropdownMenuRadioItem value="workspace">
+                              <Globe className="size-3.5" />
+                              {t(($) => $.views.workspace_members)}
+                            </DropdownMenuRadioItem>
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuGroup>
+                      </>
+                    )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      {starId && (
+                        <StarItem starred={starred} onToggle={() => (starred ? actions.sidebar.unstar(starId) : actions.sidebar.star(starId))} />
+                      )}
+                      <DropdownMenuItem onClick={() => setActive(null)}>
+                        <ArrowLeft className="size-3.5" />
+                        {t(($) => $.views.back_to, { name: baseName })}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
                     {canManage && (
-                      <DropdownMenuItem onClick={() => startRename(activeView.id, "header")}>
-                        <Pencil className="size-3.5" />
-                        {t(($) => $.views.rename)}
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem variant="destructive" onClick={() => setDeleteTarget(activeView)}>
+                          <Trash2 className="size-3.5" />
+                          {t(($) => $.views.delete)}
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {baseMenu ?? (
+                      <DropdownMenuItem
+                        onClick={() =>
+                          actions.copyLink(
+                            base.kind === "my" && myScope === "agents"
+                              ? paths.myAgents()
+                              : base.kind === "my"
+                                ? paths.myIssues()
+                                : paths.issues(),
+                          )
+                        }
+                      >
+                        <Link2 className="size-3.5" />
+                        {t(($) => $.views.copy_link)}
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem onClick={() => actions.duplicate(activeView, "header")}>
-                      <Copy className="size-3.5" />
-                      {t(($) => $.views.duplicate)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => actions.copyLink(issueViewTarget(wsId, activeView, paths).href)}
-                    >
-                      <Link2 className="size-3.5" />
-                      {t(($) => $.views.copy_link)}
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                  {canManage && activeView.scope_type !== "my" && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuGroup>
-                        <DropdownMenuLabel>{t(($) => $.views.visible_to)}</DropdownMenuLabel>
-                        <DropdownMenuRadioGroup
-                          value={activeView.visibility === "workspace" ? "workspace" : "private"}
-                          onValueChange={(value) =>
-                            actions.setVisibility(activeView, value as "private" | "workspace")
-                          }
-                        >
-                          <DropdownMenuRadioItem value="private">
-                            <Lock className="size-3.5" />
-                            {t(($) => $.views.only_me)}
-                          </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="workspace">
-                            <Globe className="size-3.5" />
-                            {t(($) => $.views.workspace_members)}
-                          </DropdownMenuRadioItem>
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuGroup>
-                    </>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <StarItem starred={starred} onToggle={() => starId && (starred ? actions.sidebar.unstar(starId) : actions.sidebar.star(starId))} />
-                    <DropdownMenuItem onClick={() => setActive(null)}>
-                      <ArrowLeft className="size-3.5" />
-                      {t(($) => $.views.back_to, { name: baseName })}
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                  {canManage && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem variant="destructive" onClick={() => setDeleteTarget(activeView)}>
-                        <Trash2 className="size-3.5" />
-                        {t(($) => $.views.delete)}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  {baseMenu ?? (
-                    <DropdownMenuItem
-                      onClick={() =>
-                        actions.copyLink(
-                          builtinKey === "my_agents"
-                            ? paths.myAgents()
-                            : base.kind === "my"
-                              ? paths.myIssues()
-                              : paths.issues(),
-                        )
-                      }
-                    >
-                      <Link2 className="size-3.5" />
-                      {t(($) => $.views.copy_link)}
-                    </DropdownMenuItem>
-                  )}
-                  {starId && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <StarItem starred={starred} onToggle={() => (starred ? actions.sidebar.unstar(starId) : actions.sidebar.star(starId))} />
-                    </>
-                  )}
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+                    {starId && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <StarItem starred={starred} onToggle={() => (starred ? actions.sidebar.unstar(starId) : actions.sidebar.star(starId))} />
+                      </>
+                    )}
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
-        <IssueFilterMenu
-          align="start"
-          tooltip={filterTooltip}
-          trigger={
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-7 min-w-7 shrink-0 gap-1.5 px-1.5 text-muted-foreground",
-                filterCount > 0 && "text-foreground",
-              )}
-              aria-label={
-                filterCount > 0 && !advancedMode
-                  ? t(($) => $.views.filter_count, { count: filterCount })
-                  : filterLabel
-              }
-            >
-              {advancedMode ? <ListTree className="size-4" /> : <Filter className="size-4" />}
-              {filterCount > 0 && (
-                <span className="rounded-sm bg-brand/10 px-1 text-caption font-medium tabular-nums text-brand">
-                  {filterCount}
-                </span>
-              )}
-            </Button>
-          }
-          leadingSections={scopeSection}
-          showRelation={showRelation}
-          hiddenFields={base.kind === "project" ? PROJECT_HIDDEN_FIELDS : undefined}
-          modifiedKeys={modifiedKeys}
-          summaryTitle={activeView?.name ?? baseName}
-          scopedIssues={controller.surfaceIssues}
-          facetCountsExact={controller.facetCountsExact}
-          tableFacetCounts={controller.tableFacetCounts}
-          onTableFacetChange={controller.setActiveTableFacet}
-          dateFilter={dateFilter}
-          onDateFilterChange={setDateFilter}
-        />
-
-        {dirty && (
-          <span className="flex shrink-0 items-center gap-1">
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground" onClick={reset}>
-              {t(($) => $.views.reset)}
-            </Button>
-            {activeView && canManage ? (
-              <SaveSplitButton
-                viewName={activeView.name}
-                shared={activeView.visibility === "workspace"}
-                onSave={() => actions.save(activeView, issueViewDefinitionFromState(storeApi.getState()))}
-                onSaveAsNew={saveAsNew}
-              />
-            ) : (
-              <Button size="sm" className="h-7 px-2.5" onClick={saveAsNew}>
-                {activeView ? t(($) => $.views.save_as_new) : t(($) => $.views.save_as_view)}
+          <IssueFilterMenu
+            align="start"
+            open={filterOpen}
+            onOpenChange={setFilterOpen}
+            tooltip={filterTooltip}
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-7 min-w-7 shrink-0 gap-1.5 px-1.5 text-muted-foreground",
+                  filterCount > 0 && "text-foreground",
+                )}
+                aria-label={
+                  filterCount > 0 && !advancedMode
+                    ? t(($) => $.views.filter_count, { count: filterCount })
+                    : filterLabel
+                }
+              >
+                {advancedMode ? <ListTree className="size-4" /> : <Filter className="size-4" />}
+                {filterCount > 0 && (
+                  <span className="rounded-sm bg-brand/10 px-1 text-caption font-medium tabular-nums text-brand">
+                    {filterCount}
+                  </span>
+                )}
               </Button>
-            )}
-          </span>
-        )}
-      </div>
-
-      <div className="flex shrink-0 items-center gap-1">
-        {showAgentsChip && (
-          <WorkspaceAgentWorkingChip
-            value={agentRunningFilter}
-            onToggle={toggleAgentRunningFilter}
-            agents={controller.workingAgents}
-            compact
+            }
+            {...filterMenuProps}
           />
-        )}
-        <IssueDisplayControls
-          hideFilter
-          scopedIssues={controller.surfaceIssues}
-          allowGantt={controller.allowGantt}
-          facetCountsExact={controller.facetCountsExact}
-          tableFacetCounts={controller.tableFacetCounts}
-          onTableFacetChange={controller.setActiveTableFacet}
-          iconOnly
-        />
-        <IconButton
-          label={t(($) => $.views.new_issue)}
-          shortcut={<ActionShortcutKeycaps action="createIssue" />}
-          tooltipSide="bottom"
-          className="text-muted-foreground"
-          onClick={() => controller.openCreateIssue()}
-        >
-          <SquarePen />
-        </IconButton>
-        {trailing && (
-          <>
-            <Separator orientation="vertical" className="ml-1 data-vertical:h-4 data-vertical:self-center" />
-            {trailing}
-          </>
-        )}
-      </div>
 
-      <DeleteViewDialog
-        view={deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        onConfirm={actions.remove}
-      />
-    </PageHeader>
+          {dirty && !needsSetup && (
+            <span className="flex shrink-0 items-center gap-1">
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground" onClick={reset}>
+                {t(($) => $.views.reset)}
+              </Button>
+              {activeView && canManage ? (
+                <SaveSplitButton
+                  viewName={activeView.name}
+                  shared={activeView.visibility === "workspace"}
+                  onSave={saveActive}
+                  onSaveAsNew={saveAsNew}
+                />
+              ) : (
+                <Button size="sm" className="h-7 px-2.5" onClick={saveAsNew}>
+                  {activeView ? t(($) => $.views.save_as_new) : t(($) => $.views.save_as_view)}
+                </Button>
+              )}
+            </span>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {showAgentsChip && (
+            <WorkspaceAgentWorkingChip
+              value={agentRunningFilter}
+              onToggle={toggleAgentRunningFilter}
+              agents={controller.workingAgents}
+              compact
+            />
+          )}
+          <IssueDisplayControls
+            hideFilter
+            scopedIssues={controller.surfaceIssues}
+            allowGantt={controller.allowGantt}
+            facetCountsExact={controller.facetCountsExact}
+            tableFacetCounts={controller.tableFacetCounts}
+            onTableFacetChange={controller.setActiveTableFacet}
+            iconOnly
+          />
+          {!hideCreate && !guest && (
+            <IconButton
+              label={t(($) => $.views.new_issue)}
+              shortcut={<ActionShortcutKeycaps action="createIssue" />}
+              tooltipSide="bottom"
+              className="text-muted-foreground"
+              onClick={() => controller.openCreateIssue()}
+            >
+              <SquarePen />
+            </IconButton>
+          )}
+          {trailing && (
+            <>
+              <Separator orientation="vertical" className="ml-1 data-vertical:h-4 data-vertical:self-center" />
+              {trailing}
+            </>
+          )}
+        </div>
+
+        <DeleteViewDialog
+          view={deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+          onConfirm={actions.remove}
+        />
+      </PageHeader>
+      {needsSetup && (
+        <ViewSetupBar
+          filterMenu={
+            <IssueFilterMenu
+              {...filterMenuProps}
+              summaryTitle={undefined}
+              align="start"
+              open={setupFilterOpen}
+              onOpenChange={setSetupFilterOpen}
+              trigger={
+                <Button variant="outline" size="xs" className="bg-background">
+                  <Plus />
+                  {t(($) => $.views.add_filter)}
+                </Button>
+              }
+            />
+          }
+          chips={filterChips}
+          dirty={dirty}
+          onClear={reset}
+          onSave={saveActive}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Under the header of a view that saves nothing yet: the way to add its
+ * conditions, then the conditions themselves and the save that ends setup.
+ * The add trigger leads the row so chips landing never move its open menu.
+ */
+function ViewSetupBar({
+  filterMenu,
+  chips,
+  dirty,
+  onClear,
+  onSave,
+}: {
+  filterMenu: ReactNode;
+  chips: FilterChip[];
+  dirty: boolean;
+  onClear: () => void;
+  onSave: () => void;
+}) {
+  const { t } = useT("issues");
+  return (
+    <div
+      data-testid="view-setup-bar"
+      className="mx-4 my-2 flex shrink-0 flex-wrap items-center gap-1.5 rounded-lg bg-muted/50 px-2 py-1.5"
+    >
+      {filterMenu}
+      {chips.length > 0 ? (
+        chips.map((chip) => <ChipSpan key={chip.key} chip={chip} />)
+      ) : (
+        <span className="px-1 text-caption text-muted-foreground">{t(($) => $.views.setup_hint)}</span>
+      )}
+      {dirty && (
+        <span className="ml-auto flex items-center gap-1.5">
+          {chips.length > 0 && (
+            <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={onClear}>
+              {t(($) => $.filters.chip_clear)}
+            </Button>
+          )}
+          <Button size="xs" onClick={onSave}>
+            {t(($) => $.views.save_view)}
+          </Button>
+        </span>
+      )}
+    </div>
   );
 }
 

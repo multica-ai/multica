@@ -952,7 +952,7 @@ func TestInboxActorAgent(t *testing.T) {
 
 // agentInboxItem is one issue-comment notification as the listeners publish
 // it: a member recipient, and the agent whose comment it is as the actor —
-// behind pointers, which is how inboxItemToResponse builds the map.
+// behind pointers, which is how inbox.Deliver builds the map.
 func agentInboxItem(notifType, agentID string) map[string]any {
 	return map[string]any{
 		"recipient_type": "member",

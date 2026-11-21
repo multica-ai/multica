@@ -44,7 +44,7 @@ function textProperty(id: string, name: string): IssueProperty {
   };
 }
 
-function renderFilterMenu(props: IssueProperty[], propertyFilters: IssueViewState["propertyFilters"] = {}) {
+function renderFilterMenu(props: IssueProperty[], propertyFilters: IssueViewState["propertyFilters"] = {}, onKeyDown?: React.KeyboardEventHandler) {
   setApiInstance({
     listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     listProperties: async () => ({ properties: props }),
@@ -72,7 +72,9 @@ function renderFilterMenu(props: IssueProperty[], propertyFilters: IssueViewStat
   const view = renderWithI18n(
     <QueryClientProvider client={qc}>
       <ViewStoreProvider store={store}>
-        <IssueFilterMenu trigger={<button type="button">Filter</button>} />
+        <div onKeyDown={onKeyDown}>
+          <IssueFilterMenu trigger={<button type="button">Filter</button>} />
+        </div>
       </ViewStoreProvider>
     </QueryClientProvider>,
   );
@@ -146,6 +148,37 @@ describe("IssueFilterMenu select property filter", () => {
 
 describe("IssueFilterMenu scalar property filter", () => {
   const PROP = "prop-note";
+
+  it.each([
+    ["standard", { key: "Enter", isComposing: true, keyCode: 13 }],
+    ["Safari", { key: "Enter", isComposing: false, keyCode: 229 }],
+  ])("keeps the draft and menu intact on %s IME confirmation", async (_label, event) => {
+    const onKeyDown = vi.fn();
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], {}, onKeyDown);
+    await openPropertySubmenu("Note");
+    const input = valueInput();
+    const noValue = screen.getByRole("menuitemcheckbox", { name: "No value" });
+    // Highlight the menu action before returning to the input: Enter must
+    // neither apply the draft nor reach the menu's selection handlers.
+    fireEvent.pointerMove(noValue, { pointerType: "mouse" });
+    fireEvent.focus(input);
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "zhong" } });
+    // Consume propagation without cancelling the IME default action.
+    expect(fireEvent.keyDown(input, event)).toBe(true);
+    expect(onKeyDown).not.toHaveBeenCalled();
+    expect(store.getState().propertyFilters).toEqual({});
+    expect(input).toHaveValue("zhong");
+    expect(input).toBeInTheDocument();
+    expect(noValue).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.compositionEnd(input, { data: "中" });
+    fireEvent.change(input, { target: { value: "中" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["中"] });
+    expect(noValue).toHaveAttribute("aria-checked", "false");
+    expect(input).toBeInTheDocument();
+  });
 
   it("types into the scalar value input", async () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);

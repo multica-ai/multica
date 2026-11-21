@@ -6,6 +6,7 @@
   "breadcrumb_aria": "現在のメニュー",
   "groups": {
     "pages": "ページ",
+    "views": "ビュー",
     "commands": "コマンド",
     "members": "メンバー",
     "agents": "エージェント",
@@ -15,6 +16,7 @@
     "autopilots": "オートパイロット",
     "chats": "チャット",
     "skills": "スキル",
+    "docs": "ドキュメント",
     "cancelled": "キャンセル済み",
     "recent": "最近の項目",
     "workspaces": "ワークスペース",
@@ -33,6 +35,7 @@
   },
   "commands": {
     "current_theme_aria": "現在のテーマ",
+    "current_mode_aria": "現在のモード",
     "new_issue": "新規タスク",
     "new_project": "新規プロジェクト",
     "new_autopilot": "新規オートパイロット",
@@ -103,7 +106,6 @@
     "project": "プロジェクト",
     "parent": "親タスク",
     "quick_actions": "クイックアクション",
-    "theme": "テーマ",
     "project_status": "プロジェクトのステータス",
     "no_project": "プロジェクトなし",
     "current": "現在"
@@ -122,7 +124,6 @@
     "unsubscribed": "購読を解除しました",
     "label_added": "ラベル {{name}} を追加しました",
     "label_removed": "ラベル {{name}} を削除しました",
-    "label_failed": "一部のタスクにラベル {{name}} を追加できませんでした",
     "update_failed": "更新に失敗しました",
     "assigned": "{{identifier}} を {{name}} に割り当てました"
   },
@@ -133,14 +134,8 @@
     "type_to_find_people": "入力してメンバーとエージェントを検索"
   },
   "delegate": {
-    "heading": "エージェントに依頼",
-    "create_and_assign": "タスクを作成して {{name}} に割り当て",
-    "squad": "スクワッド",
-    "context_aria": "添付するコンテキスト",
-    "parent": "{{identifier}} の配下",
-    "pick_crumb": "選択",
-    "pick_another": "別のエージェントやスクワッドに依頼...",
-    "detected": "指示として認識"
+    "row": "エージェントに依頼：「{{prompt}}」",
+    "hint": "エージェントで作成"
   },
   "best": {
     "assign": "{{subject}} を {{name}} に割り当て",
@@ -159,8 +154,6 @@
     "navigate": "選択",
     "select": "実行",
     "open_in_new_tab": "新しいタブで開く",
-    "delegate": "作成して {{name}} に依頼",
-    "search_instead": "キーワードとして検索",
     "back": "戻る",
     "prefix_commands": "コマンド",
     "prefix_issues": "タスク",
@@ -168,5 +161,6 @@
   },
   "trigger": {
     "label": "検索..."
-  }
+  },
+  "untitled_doc": "無題"
 }

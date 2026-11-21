@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Loader2, Maximize2, Square } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -11,6 +11,8 @@ import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-sto
 import type { AgentTask } from "@multica/core/types";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useTimeAgo } from "../../i18n";
 import {
   Tooltip,
@@ -57,16 +59,15 @@ import { WakeupRunLabel } from "./wakeup-source-chip";
 //      Left text keeps flex-1 so the row never shows a mid-row gap. Do
 //      not use masks/padding gymnastics here.
 //
-// One query (`listTasksByIssue`) drives both buckets — the back-end
-// returns every status, the front-end filters into active vs past on the
-// client. WS task:* events for this issue trigger an invalidate so the
-// list updates without polling.
+// The timeline index supplies every status and usage without provider output.
+// Full run history and charts load only while the Runs dialog is open.
 
 interface ExecutionLogSectionProps {
   issueId: string;
   /** Shown in the Runs dialog's subtitle so it names the issue it lays out. */
   identifier?: string;
   issueTitle?: string;
+  hasChildren?: boolean;
 }
 
 // The sidebar lists this many rows; everything else is in the Runs dialog.
@@ -86,10 +87,18 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId, identifier, issueTitle }: ExecutionLogSectionProps) {
+export function ExecutionLogSection({
+  issueId,
+  identifier,
+  issueTitle,
+  hasChildren = false,
+}: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const [runsOpen, setRunsOpen] = useState(false);
+  const [includeChildren, setIncludeChildren] = useState(false);
+  const scopeLabelId = useId();
+  const includeDescendants = hasChildren && includeChildren;
   const pricings = useCustomPricingStore((s) => s.pricings);
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
@@ -97,7 +106,9 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
   // a `["issues", "tasks"]` prefix-match — no local WS subscriptions
   // needed, and the cache stays fresh even when this component isn't
   // mounted (e.g. user cancels from agent-side, then navigates here).
-  const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
+  const { data: tasks = [], isPending, isError, refetch } = useQuery(
+    issueTasksOptions(issueId, includeDescendants),
+  );
 
   const activeTasks = useMemo(
     () =>
@@ -140,7 +151,7 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
     [tasks, pricings],
   );
 
-  if (activeTasks.length === 0 && pastTasks.length === 0) return null;
+  if (!hasChildren && activeTasks.length === 0 && pastTasks.length === 0) return null;
 
   const queuedTasks = activeTasks.filter((task) => task.status === "queued");
   const startedTasks = activeTasks.filter((task) => task.status !== "queued");
@@ -176,17 +187,44 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
           )}
           {activeTasks.length > 0 && (
             <div className="max-h-48 space-y-0.5 overflow-y-auto overscroll-contain rounded-md focus-visible:outline-2 focus-visible:outline-ring" role="region" aria-label={t(($) => $.runs_timeline.count_active, { count: activeTasks.length })} tabIndex={0}>
-              {startedTasks.map((task) => <ActiveTaskRow key={task.id} task={task} issueId={issueId} />)}
+              {startedTasks.map((task) => <ActiveTaskRow key={task.id} task={task} issueId={task.issue_id || issueId} showIssue={includeDescendants} />)}
               {groupQueued ? (
-                <QueuedTasksGroup tasks={queuedTasks} issueId={issueId} />
+                <QueuedTasksGroup tasks={queuedTasks} issueId={issueId} showIssue={includeDescendants} />
               ) : (
-                queuedTasks.map((task) => <ActiveTaskRow key={task.id} task={task} issueId={issueId} />)
+                queuedTasks.map((task) => <ActiveTaskRow key={task.id} task={task} issueId={task.issue_id || issueId} showIssue={includeDescendants} />)
               )}
             </div>
           )}
-          {latest.length > 0 && <div className="space-y-0.5">
-            {latest.map((task) => <PastRow key={task.id} task={task} issueId={issueId} />)}
-          </div>}
+          {hasChildren && (
+            <div className="flex min-h-7 items-center justify-between gap-2 px-2 text-micro text-muted-foreground">
+              <span>{t(($) => $.execution_log.latest)}</span>
+              <label className="flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap">
+                <Checkbox
+                  aria-labelledby={scopeLabelId}
+                  checked={includeDescendants}
+                  onCheckedChange={setIncludeChildren}
+                  className="size-3 [&_svg]:size-2.5"
+                />
+                <span id={scopeLabelId}>{t(($) => $.execution_log.include_children)}</span>
+              </label>
+            </div>
+          )}
+          {isPending ? (
+            <div role="status" aria-label={t(($) => $.execution_log.loading)} className="space-y-2 px-2 py-1">
+              <Skeleton className="h-6 w-full" />
+              <Skeleton className="h-6 w-3/4" />
+            </div>
+          ) : isError ? (
+            <button type="button" onClick={() => void refetch()} className="px-2 py-1 text-caption text-destructive underline">
+              {t(($) => $.execution_log.load_failed_retry)}
+            </button>
+          ) : tasks.every((task) => task.status === "deferred") ? (
+            <p className="px-2 py-1 text-caption text-muted-foreground">{t(($) => $.execution_log.empty)}</p>
+          ) : latest.length > 0 && (
+            <div className="space-y-0.5">
+              {latest.map((task) => <PastRow key={task.id} task={task} issueId={task.issue_id || issueId} showIssue={includeDescendants} />)}
+            </div>
+          )}
         </div>
       )}
       <IssueRunsDialog
@@ -195,7 +233,8 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
         issueId={issueId}
         identifier={identifier ?? ""}
         issueTitle={issueTitle}
-        tasks={tasks}
+        hasChildren={hasChildren}
+        includeDescendants={includeDescendants}
       />
     </div>
   );
@@ -334,6 +373,7 @@ function RunBarSummary({ run }: { run: TimelineRun }) {
       </RunTriggerLabel>
       <span className="text-micro text-muted-foreground">
         {[
+          run.task.issue_identifier,
           // A run still going has not reported usage yet — that is not "none".
           run.usage
             ? formatSpend(run.usage)
@@ -459,11 +499,13 @@ export function ActiveTaskRow({
   task,
   issueId,
   onTranscriptOpenChange,
+  showIssue = false,
   onJump,
 }: {
   task: AgentTask;
   issueId: string;
   onTranscriptOpenChange?: (open: boolean, fromKeyboard?: boolean) => void;
+  showIssue?: boolean;
   /** Turns the trigger into a button that takes the reader to this run's block. */
   onJump?: () => void;
 }) {
@@ -524,7 +566,7 @@ export function ActiveTaskRow({
     <TriggerText text={trigger} />
   );
   return (
-    <RowShell task={task}>
+    <RowShell task={task} showIssue={showIssue}>
       {onJump ? (
         <button
           type="button"
@@ -600,7 +642,7 @@ export function ActiveTaskRow({
 
 // Several queued runs as one row: who is waiting and how many. Expanding it
 // lists each run in place, with its cancel action.
-function QueuedTasksGroup({ tasks, issueId }: { tasks: AgentTask[]; issueId: string }) {
+function QueuedTasksGroup({ tasks, issueId, showIssue }: { tasks: AgentTask[]; issueId: string; showIssue: boolean }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
   const [expanded, setExpanded] = useState(false);
@@ -627,14 +669,14 @@ function QueuedTasksGroup({ tasks, issueId }: { tasks: AgentTask[]; issueId: str
           <ChevronRight aria-hidden="true" className={cn("size-3 text-faint-foreground transition-transform motion-reduce:transition-none", expanded && "rotate-90")} />
         </span>
       </button>
-      {expanded && tasks.map((task) => <ActiveTaskRow key={task.id} task={task} issueId={issueId} />)}
+      {expanded && tasks.map((task) => <ActiveTaskRow key={task.id} task={task} issueId={task.issue_id || issueId} showIssue={showIssue} />)}
     </>
   );
 }
 
 // ─── Past row ──────────────────────────────────────────────────────────────
 
-function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+function PastRow({ task, issueId, showIssue = false }: { task: AgentTask; issueId: string; showIssue?: boolean }) {
   const { t } = useT("issues");
   const formatSpend = useFormatSpend();
   const { t: tAgents } = useT("agents");
@@ -685,7 +727,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   ].filter(Boolean).join(" · ");
 
   return (
-    <RowShell task={task} title={rowTitle} multiline={Boolean(reason)}>
+    <RowShell task={task} title={rowTitle} multiline={Boolean(reason)} showIssue={showIssue}>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           {task.wakeup_id ? (
@@ -731,6 +773,7 @@ function RowShell({
   title,
   multiline = false,
   children,
+  showIssue = false,
 }: {
   task: AgentTask;
   /** Carries the details the right column no longer has room for (time,
@@ -741,6 +784,7 @@ function RowShell({
   /** Top-aligns the avatar with the first of several lines. */
   multiline?: boolean;
   children: React.ReactNode;
+  showIssue?: boolean;
 }) {
   return (
     <div
@@ -762,6 +806,11 @@ function RowShell({
           <span className="inline-block h-5 w-5 rounded-full bg-muted" />
         )}
       </span>
+      {showIssue && (
+        <span className="max-w-20 shrink-0 truncate font-mono text-micro text-muted-foreground" title={task.issue_title}>
+          {task.issue_identifier || task.issue_id}
+        </span>
+      )}
       {children}
     </div>
   );

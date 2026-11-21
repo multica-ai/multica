@@ -3,12 +3,9 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Bot,
-  CircleUser,
   Copy,
   Layers,
   Link2,
-  ListTodo,
   Plus,
   Star,
   Trash2,
@@ -52,7 +49,7 @@ import {
   type CollectionColumn,
 } from "../layout/collection-list";
 import { useT } from "../i18n";
-import { useBuiltinViewNavigation } from "./builtin-views";
+import { BUILTIN_VIEW_ICON, useBuiltinViewNavigation } from "./builtin-views";
 import { DeleteViewDialog } from "./delete-view-dialog";
 import { useIssueViewActions } from "./use-view-actions";
 
@@ -65,12 +62,6 @@ const WORKSPACE_SCOPE = { scope_type: "workspace" } as const;
 type DirectoryRow =
   | { kind: "builtin"; id: string; key: BuiltinViewKey; name: string }
   | { kind: "view"; id: string; view: IssueView };
-
-const BUILTIN_ICON: Record<BuiltinViewKey, React.ReactNode> = {
-  my_issues: <CircleUser className="size-4 shrink-0 text-muted-foreground" />,
-  my_agents: <Bot className="size-4 shrink-0 text-muted-foreground" />,
-  all_issues: <ListTodo className="size-4 shrink-0 text-muted-foreground" />,
-};
 
 /** Every view the user can open, and the switch that puts it in the sidebar. */
 export function AllViewsPage() {
@@ -153,7 +144,7 @@ export function AllViewsPage() {
         <CollectionNameCell
           icon={
             row.kind === "builtin" ? (
-              BUILTIN_ICON[row.key]
+              <span className="flex text-muted-foreground">{BUILTIN_VIEW_ICON[row.key]}</span>
             ) : (
               <Layers className="size-4 shrink-0 text-muted-foreground" />
             )

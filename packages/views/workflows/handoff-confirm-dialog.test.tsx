@@ -88,10 +88,10 @@ describe("WorkflowHandoffConfirmDialog (MUL-7420)", () => {
     expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: false });
   });
 
-  it("words a run that has not started as queued and cancels it", async () => {
+  it.each(["queued", "deferred"])("words a %s run as waiting and cancels it", async (status) => {
     previewWorkflowHandoff.mockResolvedValue({
       ...handoff,
-      previous_runs: [{ task_id: "t1", agent_id: "forge", status: "queued", started_at: new Date().toISOString() }],
+      previous_runs: [{ task_id: "t1", agent_id: "forge", status, started_at: new Date().toISOString() }],
     });
     const { onConfirm } = renderDialog();
 

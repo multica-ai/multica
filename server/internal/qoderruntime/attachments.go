@@ -11,20 +11,24 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"net/http"
+	"net/url"
 	"path"
 	"strings"
 )
 
-type issueAttachment struct {
+type attachment struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
 	DownloadURL string `json:"download_url"`
+	// Chat claims only carry IDs and names; resolve metadata before transfer.
+	NeedsMetadata bool `json:"-"`
 }
 
 const (
-	// Qoder's file upload accepts about 5 MB of text.
+	// Qoder's file upload accepts about 5 MB per file.
 	maxAttachmentFileBytes = 5 << 20
 	// Qoder echoes the submitted message in the send response and in the event
 	// list, and the bridge reads at most 8 MiB per response. Keep the encoded
@@ -38,27 +42,12 @@ const (
 
 var imageMediaTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true}
 
-var textMediaTypes = map[string]bool{"application/json": true, "application/xml": true, "application/javascript": true, "application/x-yaml": true, "application/x-toml": true}
-
-// Extensions Qoder's file upload accepts when the stored MIME type is generic.
-var textExtensions = map[string]bool{}
-
-func init() {
-	for _, ext := range strings.Fields(".txt .md .csv .json .xml .yaml .yml .toml .ini .conf .cfg .env .log .html .htm .css .scss .less .js .jsx .ts .tsx .vue .svelte .py .go .rs .java .kt .scala .c .cpp .cc .h .hpp .rb .php .swift .r .lua .pl .sh .bash .zsh .fish .ps1 .sql .graphql .gql .proto .dockerfile .makefile .gitignore .editorconfig .eslintrc .prettierrc .tex .rst .adoc .org .svg") {
-		textExtensions[ext] = true
-	}
-}
-
-func isTextAttachment(a issueAttachment) bool {
-	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(a.ContentType, ";")[0]))
-	return strings.HasPrefix(mediaType, "text/") || textMediaTypes[mediaType] || textExtensions[strings.ToLower(path.Ext(a.Filename))]
-}
-
-// attachIssueFiles hands issue attachments to the Qoder session: text files are
-// uploaded through Qoder Files and mounted into the session, and images are
-// sent as image blocks with the task message. Other files are listed in the
-// prompt as unavailable so the agent knows they exist.
-func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments []issueAttachment, r *run, p *strings.Builder) error {
+// attachFiles hands issue or chat attachments to the Qoder session: images are
+// sent as image blocks with the task message, and other files are uploaded
+// through Qoder Files and mounted under mountDir. Files that cannot be handed
+// over are listed in the prompt under heading as unavailable so the agent
+// knows they exist.
+func (b *Bridge) attachFiles(ctx context.Context, taskAPI *api, heading, mountDir string, attachments []attachment, r *run, p *strings.Builder) error {
 	if len(attachments) == 0 {
 		return nil
 	}
@@ -66,6 +55,21 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 	used := map[string]bool{}
 	imageEncoded := 0
 	for _, a := range attachments {
+		if a.NeedsMetadata {
+			// Proxy download URLs expire after 60 seconds. Fetch each URL only
+			// after the preceding attachment's download and upload have finished.
+			var current attachment
+			err := taskAPI.call(ctx, http.MethodGet, "/api/attachments/"+url.PathEscape(a.ID), nil, &current)
+			var missing *apiError
+			if errors.As(err, &missing) && missing.Status == http.StatusNotFound {
+				skipped = append(skipped, attachmentName(a, used)+" (deleted)")
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("read chat attachment %s: %w", a.Filename, err)
+			}
+			a = current
+		}
 		name := attachmentName(a, used)
 		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(a.ContentType, ";")[0]))
 		switch {
@@ -91,7 +95,7 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 			imageEncoded += len(encoded)
 			r.Images = append(r.Images, map[string]string{"type": "base64", "media_type": mediaType, "data": encoded})
 			images = append(images, name)
-		case isTextAttachment(a):
+		default:
 			data, err := b.downloadAttachment(ctx, taskAPI, a, maxAttachmentFileBytes)
 			if errors.Is(err, errTooLarge) {
 				skipped = append(skipped, name+" (file too large)")
@@ -103,7 +107,7 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 			var file struct {
 				ID string `json:"id"`
 			}
-			if err := b.qoder.upload(ctx, "/files", name, data, &file); err != nil {
+			if err := b.qoder.upload(ctx, "/files", name, data, nil, &file); err != nil {
 				var rejected *apiError
 				if errors.As(err, &rejected) && (rejected.Status == 400 || rejected.Status == 413 || rejected.Status == 415) {
 					skipped = append(skipped, name+" (rejected by Qoder Files)")
@@ -114,14 +118,12 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 			if file.ID == "" {
 				return fmt.Errorf("Qoder file upload returned no file ID")
 			}
-			mountPath := attachmentMountDir + name
+			mountPath := mountDir + name
 			r.Files = append(r.Files, map[string]any{"type": "file", "file_id": file.ID, "mount_path": mountPath})
 			mounted = append(mounted, mountPath)
-		default:
-			skipped = append(skipped, name+" (unsupported file type)")
 		}
 	}
-	p.WriteString("\nIssue attachments:\n")
+	fmt.Fprintf(p, "\n%s:\n", heading)
 	for _, m := range mounted {
 		fmt.Fprintf(p, "- %s (mounted file)\n", m)
 	}
@@ -134,7 +136,16 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 	return nil
 }
 
-func (b *Bridge) downloadAttachment(ctx context.Context, taskAPI *api, a issueAttachment, limit int64) ([]byte, error) {
+// chatAttachments defers metadata reads until each attachment is transferred.
+func chatAttachments(claimed []claimedAttachment) []attachment {
+	out := make([]attachment, 0, len(claimed))
+	for _, c := range claimed {
+		out = append(out, attachment{ID: c.ID, Filename: c.Filename, NeedsMetadata: true})
+	}
+	return out
+}
+
+func (b *Bridge) downloadAttachment(ctx context.Context, taskAPI *api, a attachment, limit int64) ([]byte, error) {
 	if a.SizeBytes > limit {
 		return nil, errTooLarge
 	}
@@ -149,7 +160,7 @@ func (b *Bridge) downloadAttachment(ctx context.Context, taskAPI *api, a issueAt
 }
 
 // attachmentName returns a unique, path-free file name for the mount path.
-func attachmentName(a issueAttachment, used map[string]bool) string {
+func attachmentName(a attachment, used map[string]bool) string {
 	name := strings.Map(func(r rune) rune {
 		if r == '/' || r == '\\' || r < 0x20 {
 			return '_'

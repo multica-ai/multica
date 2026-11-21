@@ -1,7 +1,10 @@
 "use client";
 
-import { Download, HardDrive, Pencil } from "@multica/ui/icons";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronRight, Download, HardDrive, History, Pencil } from "@multica/ui/icons";
 import type { AgentRuntime, MemberWithUser, Skill } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { resourceLabelsOptions } from "@multica/core/labels";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -18,9 +21,23 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ObjectPanelSection, ObjectProperty } from "../../layout/object-page";
-import { ResourceLabelPicker } from "../../labels/resource-label-picker";
+import { LabelChip } from "../../labels/label-chip";
+import { LabelPicker } from "../../issues/components/pickers/label-picker";
 import { useT, useTimeAgo } from "../../i18n";
 import { originSourceUrl, totalFileCount, type OriginInfo } from "../lib/origin";
+
+function ReadOnlySkillLabels({ skillId }: { skillId: string }) {
+  const wsId = useWorkspaceId();
+  const { data: labels = [] } = useQuery(resourceLabelsOptions(wsId, "skill", skillId));
+  if (labels.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1 py-1.5">
+      {labels.map((label) => (
+        <LabelChip key={label.id} label={label} />
+      ))}
+    </div>
+  );
+}
 
 function useOriginLabel(origin: OriginInfo, runtime: AgentRuntime | null) {
   const { t } = useT("skills");
@@ -138,8 +155,57 @@ function DescriptionValue({
 }
 
 /**
+ * A panel value that opens the version history, so the row reads as a link.
+ * The accessible name keeps the visible value and says where it leads.
+ */
+function HistoryLinkValue({
+  label,
+  value,
+  muted = false,
+  mono = false,
+  icon,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  mono?: boolean;
+  icon?: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${label}: ${value}`}
+      title={label}
+      className="group/history flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      {icon}
+      <span
+        className={cn(
+          "truncate",
+          muted && "text-muted-foreground",
+          mono && "font-mono tabular-nums",
+        )}
+      >
+        {value}
+      </span>
+      <ChevronRight
+        className="ml-auto size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/history:opacity-100 group-focus-visible/history:opacity-100"
+        aria-hidden="true"
+      />
+    </button>
+  );
+}
+
+/**
  * The skill's properties. Name and description edit the page's draft, so
  * they save with the files through the same Save pill; labels save on pick.
+ *
+ * `latestVersion` is the current version number, `null` when the skill has no
+ * history yet (it predates versioning and has not changed since), and
+ * `undefined` while the history is loading or failed to load.
  */
 export function SkillPropertiesPanel({
   skill,
@@ -149,8 +215,10 @@ export function SkillPropertiesPanel({
   origin,
   originRuntime,
   creator,
+  latestVersion,
   onNameChange,
   onDescriptionChange,
+  onOpenVersions,
 }: {
   skill: Skill;
   name: string;
@@ -159,11 +227,14 @@ export function SkillPropertiesPanel({
   origin: OriginInfo;
   originRuntime: AgentRuntime | null;
   creator: MemberWithUser | null;
+  latestVersion: number | null | undefined;
   onNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
+  onOpenVersions: () => void;
 }) {
   const { t } = useT("skills");
   const timeAgo = useTimeAgo();
+  const historyLabel = t(($) => $.detail.menu.version_history);
 
   return (
     <div className="space-y-5">
@@ -189,13 +260,6 @@ export function SkillPropertiesPanel({
             onChange={onDescriptionChange}
           />
         </ObjectProperty>
-        <ObjectProperty label={t(($) => $.detail.overview.labels)}>
-          <ResourceLabelPicker
-            resourceType="skill"
-            resourceId={skill.id}
-            canEdit={canEdit}
-          />
-        </ObjectProperty>
         <ObjectProperty label={t(($) => $.table.source)}>
           <SourceValue origin={origin} runtime={originRuntime} />
         </ObjectProperty>
@@ -214,14 +278,44 @@ export function SkillPropertiesPanel({
             <span className="text-muted-foreground">—</span>
           )}
         </ObjectProperty>
+        <ObjectProperty label={t(($) => $.detail.panel.version)}>
+          <HistoryLinkValue
+            label={historyLabel}
+            icon={
+              <History className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            }
+            value={
+              latestVersion === undefined
+                ? "—"
+                : latestVersion === null
+                  ? t(($) => $.detail.panel.no_versions)
+                  : t(($) => $.detail.versions.version_label, { version: latestVersion })
+            }
+            muted={latestVersion == null}
+            mono={typeof latestVersion === "number"}
+            onClick={onOpenVersions}
+          />
+        </ObjectProperty>
         <ObjectProperty label={t(($) => $.table.updated)}>
-          {timeAgo(skill.updated_at)}
+          {/* "Who changed what just now" is the usual reason to open history. */}
+          <HistoryLinkValue
+            label={historyLabel}
+            value={timeAgo(skill.updated_at)}
+            onClick={onOpenVersions}
+          />
         </ObjectProperty>
         <ObjectProperty label={t(($) => $.table.created)}>
           {timeAgo(skill.created_at)}
         </ObjectProperty>
         <ObjectProperty label={t(($) => $.detail.sections.files)}>
           {t(($) => $.detail.header.files, { count: totalFileCount(skill) })}
+        </ObjectProperty>
+        <ObjectProperty label={t(($) => $.detail.overview.labels)}>
+          {canEdit ? (
+            <LabelPicker skillId={skill.id} align="start" />
+          ) : (
+            <ReadOnlySkillLabels skillId={skill.id} />
+          )}
         </ObjectProperty>
       </ObjectPanelSection>
 

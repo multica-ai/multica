@@ -28,6 +28,8 @@ package wecom
 import (
 	"strings"
 	"sync/atomic"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // Locale names the language an installation's users are answered in.
@@ -94,6 +96,10 @@ func deploymentLocale() Locale {
 	return DefaultLocale
 }
 
+// DeploymentLocale exposes the room/default notice language to bridges that
+// append their own system copy to a reply before it reaches this adapter.
+func DeploymentLocale() Locale { return deploymentLocale() }
+
 // resolveLocale maps a user's profile language onto a supported Locale. The
 // profile validates to en / zh-Hans / ko / ja (handler/auth.go), and there are
 // two packs: Chinese for zh*, English for everyone who chose anything else —
@@ -125,11 +131,12 @@ type copyPack struct {
 	// new conversation the next message enters. Two commands, two answers:
 	// telling a /clear user their conversation was replaced sends them
 	// looking for a thread that never moved. IssueUsage answers a bare
-	// /issue with the shape it wanted. All three are stated here rather than as
-	// package constants — the lint asserts it, and a Chinese literal in
-	// replier.go is a line no other locale can read.
+	// /issue with the shape it wanted. Help lists the available commands.
+	// Command replies live here rather than as package constants — the lint
+	// asserts it, and a Chinese literal in replier.go cannot answer other locales.
 	FreshPending string
 	ChatStarted  string
+	Help         string
 	IssueUsage   string
 
 	// InvokeDenied answers a member who may not run this agent (a private
@@ -152,6 +159,15 @@ type copyPack struct {
 	// It names no one and carries no token, so it is safe in front of an
 	// audience of unknown size.
 	BindingSentPrivately string
+
+	// MessageMeFirst is what the ROOM sees when WeCom refused a private reply
+	// to a member because they have never written to the bot in their 1:1
+	// (replier.go, errcodeUserMustMessageFirst). Both the binding link and an
+	// invoke refusal end there, so it asks them to open that chat and promises
+	// the reply will be waiting: the next message they send there is handled
+	// like any other. Like BindingSentPrivately it names no one and carries no
+	// token, and it does not say what the reply is about.
+	MessageMeFirst string
 
 	// IssueCreatedPrefix leads the /issue confirmation; IssueTitleSeparator
 	// joins the identifier to the title when there is one.
@@ -380,12 +396,14 @@ var copyPacks = map[Locale]copyPack{
 		AgentArchived:        "⚠️ 该智能体已归档，无法回复。请联系工作区管理员。",
 		FreshPending:         "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。",
 		ChatStarted:          "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。",
+		Help:                 engine.HelpTextChinese,
 		IssueUsage:           "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）",
 		InvokeDenied:         "⚠️ 你没有权限运行该智能体。如需使用，请联系它的所有者。",
 		BindingPromptPrefix:  "👋 请先绑定你的 Multica 账号，才能与我对话：\n",
 		BindingPromptSuffix:  "\n（链接 15 分钟内有效）",
 		BindingPending:       "👋 绑定链接刚才已经发给你了，就在上方，请直接点击完成绑定。",
 		BindingSentPrivately: "👋 已把绑定链接私发给你，请在与我的单聊里点击完成绑定。",
+		MessageMeFirst:       "👋 请先私信我一句，我在那里回复你。",
 
 		IssueCreatedPrefix:   "✅ 已创建 ",
 		IssueTitleSeparator:  " — ",
@@ -437,18 +455,20 @@ var copyPacks = map[Locale]copyPack{
 
 		InboxDetailLink: "查看详情",
 		InboxTypeLabels: map[string]string{
-			"issue_assigned":     "任务指派",
-			"mentioned":          "提及你",
-			"status_changed":     "状态变更",
-			"comment_added":      "新评论",
-			"new_comment":        "新评论",
-			"reaction_added":     "表情反应",
-			"task_failed":        "task 失败",
-			"unassigned":         "取消指派",
-			"assignee_changed":   "指派人变更",
-			"priority_changed":   "优先级变更",
-			"due_date_changed":   "截止日期变更",
-			"start_date_changed": "开始日期变更",
+			"issue_assigned":       "任务指派",
+			"mentioned":            "提及你",
+			"status_changed":       "状态变更",
+			"comment_added":        "新评论",
+			"new_comment":          "新评论",
+			"reaction_added":       "表情反应",
+			"task_failed":          "task 失败",
+			"unassigned":           "取消指派",
+			"assignee_changed":     "指派人变更",
+			"priority_changed":     "优先级变更",
+			"due_date_changed":     "截止日期变更",
+			"start_date_changed":   "开始日期变更",
+			"issue_created":        "新任务",
+			"project_owner_joined": "所有者加入了项目",
 		},
 		InboxTypeFallback: "新消息",
 	},
@@ -457,12 +477,14 @@ var copyPacks = map[Locale]copyPack{
 		AgentArchived:        "⚠️ This agent has been archived and can't reply. Please contact your workspace admin.",
 		FreshPending:         "✅ Fresh start ready. Your next message stays in this chat but runs without the earlier context.",
 		ChatStarted:          "✅ Started a new Multica chat. Your next message will enter it.",
+		Help:                 engine.HelpTextEnglish,
 		IssueUsage:           "Please include an issue title. Use:\n\n`/issue <title>`\n`[description]` (optional)",
 		InvokeDenied:         "⚠️ You don't have permission to run this agent. Ask its owner if you need to use it.",
 		BindingPromptPrefix:  "👋 Link your Multica account before we can talk:\n",
 		BindingPromptSuffix:  "\n(the link is good for 15 minutes)",
 		BindingPending:       "👋 I already sent you a link — it is just above, tap it to finish linking.",
 		BindingSentPrivately: "👋 I've sent the link to your direct chat with me — tap it there to finish linking.",
+		MessageMeFirst:       "👋 Send me a direct message first, and I'll reply there.",
 
 		IssueCreatedPrefix:   "✅ Created ",
 		IssueTitleSeparator:  " — ",
@@ -514,18 +536,20 @@ var copyPacks = map[Locale]copyPack{
 
 		InboxDetailLink: "View details",
 		InboxTypeLabels: map[string]string{
-			"issue_assigned":     "Assigned",
-			"mentioned":          "Mentioned",
-			"status_changed":     "Status changed",
-			"comment_added":      "New comment",
-			"new_comment":        "New comment",
-			"reaction_added":     "Reaction",
-			"task_failed":        "Run failed",
-			"unassigned":         "Unassigned",
-			"assignee_changed":   "Assignee changed",
-			"priority_changed":   "Priority changed",
-			"due_date_changed":   "Due date changed",
-			"start_date_changed": "Start date changed",
+			"issue_assigned":       "Assigned",
+			"mentioned":            "Mentioned",
+			"status_changed":       "Status changed",
+			"comment_added":        "New comment",
+			"new_comment":          "New comment",
+			"reaction_added":       "Reaction",
+			"task_failed":          "Run failed",
+			"unassigned":           "Unassigned",
+			"assignee_changed":     "Assignee changed",
+			"priority_changed":     "Priority changed",
+			"due_date_changed":     "Due date changed",
+			"start_date_changed":   "Start date changed",
+			"issue_created":        "New issue",
+			"project_owner_joined": "Owner joined project",
 		},
 		InboxTypeFallback: "Notification",
 	},
