@@ -37,7 +37,7 @@
     },
     "columns": {
       "name": "Nom",
-      "harness": "Harness",
+      "harness": "CLI",
       "agents": "Agents",
       "workload": "Charge",
       "status": "Statut"
@@ -88,7 +88,7 @@
     "section_local": "Local",
     "section_remote": "Distant",
     "section_cloud": "Cloud",
-    "this_machine": "Cet appareil",
+    "this_machine": "Cette machine",
     "local_badge": "Local · cette machine",
     "pending_custom_runtimes": "Runtimes personnalisés en attente",
     "daemon_title": "Daemon",
@@ -115,14 +115,14 @@
       "workload_idle": "Tous au repos",
       "workload_hint": "{{running}} en cours · {{queued}} en attente",
       "cli": "CLI",
-      "cloud_worker": "Worker cloud",
+      "cloud_worker": "Nœud cloud",
       "local_daemon": "Daemon local"
     },
     "rename": "Renommer la machine",
     "rename_dialog": {
       "title": "Renommer la machine",
       "description": "Utilisé pour cette machine et tous ses runtimes.",
-      "placeholder": "ex. MacBook de Bohan",
+      "placeholder": "MacBook professionnel",
       "hint": "Laissez vide pour utiliser le nom par défaut de l'appareil.",
       "cancel": "Annuler",
       "save": "Enregistrer",
@@ -135,7 +135,7 @@
   "health": {
     "online": {
       "label": "En ligne",
-      "description": "Signal reçu au cours des 45 dernières secondes. Prêt à recevoir des exécutions."
+      "description": "Connecté et prêt à accepter des exécutions."
     },
     "recently_lost": {
       "label": "Perdu récemment",
@@ -143,11 +143,11 @@
     },
     "offline": {
       "label": "Hors ligne",
-      "description": "Aucun battement depuis plus de 5 minutes. Redémarrez le daemon ou examinez l'hôte."
+      "description": "Déconnecté depuis plus de 5 minutes. Redémarrez le daemon sur cette machine ou vérifiez son réseau."
     },
     "long_offline": {
       "label": "Hors ligne depuis longtemps",
-      "description": "Aucun signal depuis au moins 6 jours. Si cette machine doit rester hors ligne, associez ses agents à un autre runtime ou supprimez celui-ci."
+      "description": "Déconnecté depuis plus de 6 jours. Si cette machine ne revient pas en ligne, réassociez ses agents à un autre runtime ou supprimez ce runtime."
     }
   },
   "detail": {
@@ -157,7 +157,7 @@
     "last_seen": "vu pour la dernière fois {{when}}",
     "never_seen": "jamais connecté",
     "fact_owner": "Propriétaire",
-    "fact_device": "Appareil",
+    "fact_device": "Machine",
     "fact_runtime": "Runtime",
     "fact_daemon_cli": "CLI du daemon",
     "fact_daemon_id": "ID du daemon",
@@ -214,7 +214,7 @@
       "self_heal_notice": "Ce runtime est géré par un daemon local en cours d'exécution. Sa suppression aboutira, mais le daemon en réenregistrera un nouveau en quelques secondes — arrêtez d'abord le processus du daemon pour le supprimer définitivement.",
       "profile_backed_notice": "Ce runtime a été enregistré depuis un profil de runtime personnalisé. Sa suppression ne retire que l'instance actuelle ; un daemon en cours d'exécution peut l'enregistrer de nouveau tant que le profil subsiste. Supprimez le profil dans Runtimes personnalisés pour l'éliminer définitivement.",
       "light": {
-        "title": "Supprimer le runtime ?",
+        "title": "Supprimer ce runtime ?",
         "description": "Voulez-vous vraiment supprimer « {{name}} » ? Cette action est irréversible.",
         "cancel": "Annuler",
         "confirm": "Supprimer le runtime",
@@ -296,7 +296,7 @@
     "title": "Cloud Runtime",
     "description": "Créez un runtime cloud.",
     "create_title": "Nouveau nœud",
-    "nodes_title": "Nœuds Fleet",
+    "nodes_title": "Nœuds cloud",
     "refresh": "Actualiser",
     "nodes_empty": "Aucun nœud cloud",
     "nodes_failed": "Cloud Runtime indisponible",
@@ -316,10 +316,10 @@
       "instance_type": "Type d'instance",
       "region": "Région",
       "disk_size": "Taille du disque (Gio)",
-      "image_id": "ID d'AMI",
+      "image_id": "ID d'image (AMI)",
       "subnet_id": "ID de sous-réseau",
-      "key_name": "Paire de clés",
-      "bootstrap_pat": "PAT d'amorçage"
+      "key_name": "Paire de clés SSH",
+      "bootstrap_pat": "Jeton d'amorçage (PAT)"
     },
     "placeholders": {
       "name": "cloud-dev-01",
@@ -343,10 +343,19 @@
     "available": "disponible",
     "action": "Mettre à jour",
     "retry": "Réessayer",
+    "cancel": "Annuler",
+    "cancel_failed": "Impossible de confirmer l’annulation : la mise à jour peut encore s’exécuter. Réessayez.",
+    "cancel_conflict": "Annulation impossible : l’installation a déjà commencé.",
     "unknown_error": "Erreur inconnue",
     "initiate_failed": "Échec du lancement de la mise à jour",
+    "scheduled_tasks": "{{running}} en cours",
+    "note_no_interrupt": "Les tâches en cours ne seront pas interrompues.",
+    "expired_note": "Expirée après 24 heures d'attente sans que la machine soit inactive.",
+    "busy_note": "La machine était occupée, la mise à jour n'a donc pas démarré. Réessayez quand elle sera inactive.",
+    "another_update_note": "Une autre mise à jour est déjà en file d'attente ou en cours d'installation sur cette machine.",
     "status": {
       "pending": "En attente du daemon...",
+      "scheduled": "Mise à jour à l'inactivité",
       "running": "Mise à jour...",
       "completed": "Mise à jour terminée. Le daemon redémarre...",
       "failed": "Échec de la mise à jour",
@@ -388,35 +397,36 @@
     "pending_health_warning": "En attente de synchronisation du daemon",
     "pending_health_error": "Erreur d'enregistrement",
     "pending_health_disabled": "Désactivé",
-    "pending_cli_unknown": "en attente"
+    "pending_cli_unknown": "en attente",
+    "col_rate_limits": "Limites"
   },
   "profiles": {
     "cta": "Ajouter un runtime",
     "add_custom": "Ajouter un runtime personnalisé",
     "this_machine": "cette machine",
     "unassigned_title": "Runtimes personnalisés sans machine",
-    "unassigned_description": "Ces runtimes de l'espace de travail ne sont connectés à aucune machine. Connectez une machine disposant des commandes correspondantes, ou utilisez les actions d'une ligne pour les modifier ou les supprimer.",
+    "unassigned_description": "Reconnectez la machine assignée, ou modifiez un ancien runtime pour lui assigner une machine.",
     "dialog_title": "Runtimes personnalisés",
-    "dialog_description": "Les définitions de runtimes personnalisés valent pour tout l'espace de travail et se synchronisent avec chaque machine connectée. Une machine enregistre le runtime dès que la commande y est disponible.",
-    "create_dialog_description": "Configurez une commande personnalisée depuis {{machine}}. La définition se synchronise dans tout l'espace de travail et ne s'enregistre que sur les machines où cette commande est disponible.",
+    "dialog_description": "Un runtime personnalisé appartient à une seule machine.",
+    "create_dialog_description": "Seule {{machine}} enregistrera cette commande personnalisée.",
     "learn_more": "Voir le guide de configuration",
     "close": "Fermer",
     "add_new": "Nouveau runtime personnalisé",
-    "list_title": "Backends de runtime",
+    "list_title": "Runtimes de base",
     "custom_section_title": "Runtimes personnalisés ({{count}})",
     "custom_section_aria": "Runtimes personnalisés",
-    "builtin_section_title": "Protocoles de base pris en charge ({{count}})",
-    "builtin_section_hint": "Les familles intégrées sont des options de référence en lecture seule.",
+    "builtin_section_title": "Runtimes intégrés ({{count}})",
+    "builtin_section_hint": "Les runtimes intégrés sont des options de référence en lecture seule.",
     "builtin_section_aria": "Familles de protocoles intégrées prises en charge",
     "builtin_reference": "Référence",
     "empty_title": "Créez votre premier runtime personnalisé",
-    "empty_description": "Choisissez une famille de protocoles de base, puis indiquez à Multica la commande à exécuter.",
+    "empty_description": "Choisissez un runtime de base compatible, puis indiquez à Multica la commande à exécuter.",
     "badge_builtin": "Intégré",
     "badge_custom": "Personnalisé",
     "badge_disabled": "Désactivé",
     "builtin_detail": {
-      "title": "Famille de protocoles intégrée",
-      "description": "{{family}} est une famille de protocoles intégrée. Elle ne peut être ni modifiée ni supprimée.",
+      "title": "Runtime intégré",
+      "description": "{{family}} est un runtime intégré. Il ne peut être ni modifié ni supprimé.",
       "read_only": "Lecture seule"
     },
     "detail": {
@@ -436,6 +446,9 @@
       "step_family_hint": "Sélectionnez le CLI compatible avec cette commande.",
       "step_details_label": "Configurez le runtime",
       "step_progress": "Étape {{current}} sur {{total}}",
+      "machine_label": "Machine (facultatif)",
+      "machine_placeholder": "Conserver les machines actuelles",
+      "machine_hint": "Sélectionner une machine supprime les copies inutilisées sur les autres machines.",
       "family_label": "Runtime de base",
       "family_locked_hint": "Le runtime de base ne peut pas être modifié après la création.",
       "display_name_label": "Nom affiché",
@@ -537,7 +550,7 @@
     "title": "Environnement Qoder Cloud Agents",
     "description": "Connectez Qoder Cloud Agents. Multica gère l’exécution et chiffre les identifiants. Les administrateurs de l’espace de travail peuvent modifier cette configuration.",
     "loading": "Chargement…",
-    "unavailable": "Configuration serveur requise : définissez MULTICA_VCS_SECRET_KEY.",
+    "unavailable": "Qoder Cloud Agents n'est pas encore activé sur ce serveur. Un administrateur serveur doit configurer le chiffrement des identifiants (MULTICA_VCS_SECRET_KEY).",
     "online": "En ligne",
     "error": "Erreur de connexion",
     "starting": "Démarrage",
@@ -690,9 +703,42 @@
     },
     "art": {
       "this_computer": "Cet ordinateur · Bureau",
-      "detected": "Harness détectés",
+      "detected": "Runtimes détectés",
       "run_there": "À lancer sur cette machine",
       "connected": "{{name}} connecté à Multica"
     }
+  },
+  "rate_limits": {
+    "title": "Limites",
+    "caption": "Signalées par la CLI pendant l'exécution des tâches",
+    "updated": "Mis à jour {{ago}}",
+    "empty_title": "Aucune donnée de limite pour l'instant",
+    "empty_hint": "Enregistrées la prochaine fois que ce runtime exécute une tâche. Les comptes à clé API n'ont pas de limites de forfait.",
+    "window_session": "Session",
+    "window_session_hours": "Session de {{hours}} h",
+    "window_weekly": "Hebdomadaire",
+    "window_weekly_opus": "Hebdomadaire · Opus",
+    "window_weekly_sonnet": "Hebdomadaire · Sonnet",
+    "window_generic": "Autre limite",
+    "short_session": "Session",
+    "short_weekly": "Semaine",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "Autre",
+    "used": "{{pct}} % utilisé",
+    "limited": "Limite atteinte",
+    "resets_in": "Réinitialisation dans {{duration}}",
+    "resets_at": "Réinitialisation {{time}}",
+    "reset_since": "Réinitialisée depuis le dernier relevé",
+    "verdict_ahead": "{{pct}} % d'avance sur le rythme · épuisée dans environ {{duration}}",
+    "verdict_on_pace": "Au rythme actuel, tient jusqu'à la réinitialisation",
+    "verdict_limited": "Reprend après la réinitialisation",
+    "credits": "Crédits",
+    "credits_balance": "Reste {{balance}}",
+    "credits_unlimited": "Illimités",
+    "credits_none": "Aucun",
+    "duration_minutes": "{{minutes}} min",
+    "duration_hours": "{{hours}} h {{minutes}} min",
+    "duration_days": "{{days}} j {{hours}} h"
   }
 }

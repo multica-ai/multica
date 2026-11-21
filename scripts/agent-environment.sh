@@ -57,23 +57,45 @@ other_component() {
 
 # An atomic mkdir, as in dev-env.sh: flock is not on a stock macOS. A lock
 # whose holder is gone is taken over, so a killed stop cannot wedge the next.
+# mkdir's exit status alone does not decide the holder: uutils mkdir (Ubuntu
+# 26.04) can tell two simultaneous callers that each created the directory.
+# The holder is whoever then creates `held` in it, which bash's noclobber does
+# with O_EXCL. The directory stays the lock, so a stop and a `start` still
+# running an earlier version of this script keep excluding each other.
+try_lock() {
+  mkdir "$LOCK_DIR" 2>/dev/null && (set -C; : > "$LOCK_DIR/held") 2>/dev/null
+}
+
 acquire_lock() {
-  local holder waited=0
+  local holder marker waited=0
   mkdir -p "$STATE_DIR"
-  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-    holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
-      rm -rf "$LOCK_DIR"
-      continue
-    fi
+  while ! try_lock; do
+    # Removing a PID-specific marker is the reaper's atomic claim. Only
+    # its winner may rmdir the old lock; another stale observer cannot
+    # remove a new holder's marker (or its directory).
+    for marker in "$LOCK_DIR"/owner-* "$LOCK_DIR/pid"; do
+      [ -f "$marker" ] || continue
+      case "$marker" in
+        */pid) holder="$(cat "$marker" 2>/dev/null || true)" ;;
+        *) holder="${marker##*/owner-}" ;;
+      esac
+      if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && rm "$marker" 2>/dev/null; then
+        rm -f "$LOCK_DIR/held"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+      fi
+    done
     waited=$((waited + 1))
     [ "$waited" -lt 3000 ] || { echo "Timed out waiting for $LOCK_DIR." >&2; exit 1; }
     sleep 0.1
   done
-  printf '%s\n' "$$" > "$LOCK_DIR/pid"
+  : > "$LOCK_DIR/owner-$$"
 }
 
-release_lock() { rm -rf "$LOCK_DIR"; }
+release_lock() {
+  rm "$LOCK_DIR/owner-$$" "$LOCK_DIR/held"
+  # Once held is gone the next holder may already have taken this directory.
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
 
 claim_file() { printf '%s/%s.claim' "$STATE_DIR" "$1"; }
 
@@ -151,7 +173,7 @@ cmd_start() {
   trap "finish_start $component \$?" EXIT
   [ -f "$BORROWED" ] || flags+=(--ttl "$DEV_ENV_TTL_HOURS")
 
-  bash "$DEV_ENV" up --components "api,$component" ${flags[@]+"${flags[@]}"}
+  bash "$DEV_ENV" up --components "api,collab,$component" ${flags[@]+"${flags[@]}"}
   status="$(bash "$DEV_ENV" status --json)"
 
   node -e '

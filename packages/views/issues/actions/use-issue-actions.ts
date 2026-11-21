@@ -13,9 +13,10 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { errorCode } from "@multica/core/api";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
-import { copyText } from "@multica/ui/lib/clipboard";
+import { copyText, copyTextAndHtml } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { titleLinkPayload } from "../../common/title-link";
 import { runConfirmIntent } from "./run-confirm-gate";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import type { IssueSurfaceMutationOptions } from "../surface/actions-context";
@@ -28,8 +29,10 @@ export interface UseIssueActionsResult {
   ) => void;
   openInNewTab: () => void;
   openInDesktop?: () => void;
+  openInNewWindow?: () => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
+  copyTitleAsLink: () => Promise<void>;
   copyCommentLink: (commentId: string) => Promise<void>;
   openCreateSubIssue: () => void;
   openRename: () => void;
@@ -103,23 +106,25 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
           ...options,
         });
       } else {
-        updateIssue.mutate(
-          { id: issueId, ...updates },
-          {
-            onSuccess: options?.onSuccess,
-            onError: (err) => {
-              toast.error(
-                errorCode(err) === "revision_conflict"
-                  ? t(($) => $.revision.conflict)
-                  : err instanceof Error && err.message
-                  ? err.message
-                  : t(($) => $.detail.update_failed),
-              );
-              options?.onError?.(err);
+        // Keep UI callbacks observer-scoped; error feedback belongs to the request.
+        void updateIssue
+          .mutateAsync(
+            { id: issueId, ...updates },
+            {
+              onSuccess: (issue) => options?.onSuccess?.(issue),
+              onError: (err) => options?.onError?.(err),
+              onSettled: () => options?.onSettled?.(),
             },
-            onSettled: () => options?.onSettled?.(),
-          },
-        );
+          )
+          .catch((err: unknown) => {
+            toast.error(
+              errorCode(err) === "revision_conflict"
+                ? t(($) => $.revision.conflict)
+                : err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            );
+          });
       }
     },
     [issue, issueId, entryOf, surfaceActions, updateIssue, openModal, t],
@@ -152,6 +157,14 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     );
   }, [issueId, issueIdentifier, navigation, paths]);
 
+  const openInNewWindow = useCallback(() => {
+    if (!issueId) return;
+    navigation.openIssueInNewWindow?.(
+      paths.issueDetail(issueIdentifier || issueId),
+      issueIdentifier ? `${issueIdentifier} ${issueTitle}` : issueTitle,
+    );
+  }, [issueId, issueIdentifier, issueTitle, navigation, paths]);
+
   const openInDesktop = useCallback(() => {
     if (!issueId) return;
     const path = paths.issueDetail(issueIdentifier || issueId);
@@ -182,6 +195,20 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       toast.error(t(($) => $.detail.link_copy_failed));
     }
   }, [paths, issueId, issueIdentifier, navigation, t]);
+
+  const copyTitleAsLink = useCallback(async () => {
+    if (!issueId) return;
+    const url = navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId));
+    // Keep the identifier in front of the title, matching how the issue reads
+    // in lists and activity feeds, so the pasted link stays recognizable.
+    const label = [issueIdentifier, issueTitle].filter(Boolean).join(" ");
+    const { text, html } = titleLinkPayload(label, url);
+    if (await copyTextAndHtml(text, html)) {
+      toast.success(t(($) => $.detail.title_link_copied));
+    } else {
+      toast.error(t(($) => $.detail.link_copy_failed));
+    }
+  }, [paths, issueId, issueIdentifier, issueTitle, navigation, t]);
 
   // Built during render so `copyCommentLink` depends on this string alone:
   // `paths` is rebuilt on every render, and the handler is passed to every
@@ -310,8 +337,10 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     updateField,
     openInNewTab,
     openInDesktop: navigation.openInDesktop ? openInDesktop : undefined,
+    openInNewWindow: navigation.openIssueInNewWindow ? openInNewWindow : undefined,
     togglePin,
     copyLink,
+    copyTitleAsLink,
     copyCommentLink,
     openCreateSubIssue,
     openRename,

@@ -155,7 +155,7 @@ describe("AgentPropertiesPanel", () => {
       "Status",
       "Owner",
       "Runtime",
-      "Harness",
+      "CLI",
       "Model",
       "Access",
       "Runs (7d)",

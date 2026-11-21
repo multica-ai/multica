@@ -3,28 +3,26 @@
 import { TriangleAlert } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { TrialStatus } from "../billing/trial-status";
 import { ChatBar } from "../chat/components/chat-bar";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
-import { ActorAvatar } from "../common/actor-avatar";
 import { useT } from "../i18n";
 import { AppLink, useNavigation } from "../navigation";
 import { useAppShell } from "./app-shell-context";
-import { BOTTOM_BAR_ITEM_CLASS } from "./bottom-bar-styles";
 import { useTeamAgentStatus } from "./panels/team-status";
 
-const MAX_WORKING_AVATARS = 3;
-
 /**
- * What the team is doing, at a glance: how many agents are working, and work
- * that cannot start because its runtime is offline. Both lead to Team, which
- * names the agents. Renders nothing while the team is idle.
+ * Work that cannot start because its runtime is offline. Links to Team,
+ * which names the agents. Keeps the left slot occupied when there is no alert
+ * so quick chat stays on the right.
  */
 function TeamStatus({ wsId }: { wsId: string }) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
   const shell = useAppShell();
-  const { working, stuck, byAgent } = useTeamAgentStatus(wsId);
+  const { stuck, byAgent } = useTeamAgentStatus(wsId);
   const teamHref = shell?.spaceHref("team", p.agents()) ?? p.agents();
   const waitingTasks = stuck.reduce(
     (total, agent) => total + (byAgent.get(agent.id)?.queuedCount ?? 0),
@@ -33,25 +31,6 @@ function TeamStatus({ wsId }: { wsId: string }) {
 
   return (
     <div className="flex min-w-0 items-center gap-1">
-      {working.length > 0 && (
-        <AppLink href={teamHref} className={BOTTOM_BAR_ITEM_CLASS}>
-          <span aria-hidden className="flex shrink-0 -space-x-1">
-            {working.slice(0, MAX_WORKING_AVATARS).map((agent) => (
-              <ActorAvatar
-                key={agent.id}
-                actorType="agent"
-                actorId={agent.id}
-                size="xs"
-                profileLink={false}
-                className="ring-[1.5px] ring-app-shell"
-              />
-            ))}
-          </span>
-          <span className="truncate">
-            {t(($) => $.bottom_bar.working, { count: working.length })}
-          </span>
-        </AppLink>
-      )}
       {waitingTasks > 0 && (
         <AppLink
           href={teamHref}
@@ -66,8 +45,8 @@ function TeamStatus({ wsId }: { wsId: string }) {
 }
 
 /**
- * The bar under the content card: workspace status on the left, quick chat on
- * the right. It sits on the app shell, in the strip the card's bottom margin
+ * The bar under the content card: workspace status (the plan trial, then
+ * stuck work) on the left, quick chat on the right. It sits on the app shell, in the strip the card's bottom margin
  * used to take. Below `md` there is no bar and quick chat is the floating
  * launcher.
  */
@@ -78,6 +57,9 @@ export function AppBottomBar() {
   const floatingChatEnabled = useChatStore((s) => s.floatingChatEnabled);
   const { pathname } = useNavigation();
   const chatPath = useWorkspacePaths().chat();
+  // Chat and team status are about agents, and the trial about billing, none
+  // of which a guest (MUL-9420) has access to.
+  const guest = useIsGuest(wsId);
 
   if (!wsId || isMobile) return null;
   // Same gates as the floating window: the Settings preference, and the Chat
@@ -93,8 +75,11 @@ export function AppBottomBar() {
       // column as the page header's trailing action.
       className="hidden h-8 shrink-0 items-center justify-between gap-4 pr-[18px] pl-3 md:flex"
     >
-      <TeamStatus wsId={wsId} />
-      {showChat && <ChatBar />}
+      <div className="flex min-w-0 items-center gap-1">
+        {!guest && <TrialStatus wsId={wsId} />}
+        {!guest && <TeamStatus wsId={wsId} />}
+      </div>
+      {!guest && showChat && <ChatBar />}
     </footer>
   );
 }

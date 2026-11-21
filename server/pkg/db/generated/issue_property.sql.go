@@ -175,6 +175,7 @@ func (q *Queries) DeleteIssuePropertyValue(ctx context.Context, arg DeleteIssueP
 }
 
 const getIssueProperty = `-- name: GetIssueProperty :one
+
 SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon FROM issue_property
 WHERE id = $1 AND workspace_id = $2
 `
@@ -184,6 +185,8 @@ type GetIssuePropertyParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// usage_count is computed in Go (propertyUsageQuery in
+// internal/handler/property.go): it needs one output column per definition.
 func (q *Queries) GetIssueProperty(ctx context.Context, arg GetIssuePropertyParams) (IssueProperty, error) {
 	row := q.db.QueryRow(ctx, getIssueProperty, arg.ID, arg.WorkspaceID)
 	var i IssueProperty
@@ -204,16 +207,10 @@ func (q *Queries) GetIssueProperty(ctx context.Context, arg GetIssuePropertyPara
 }
 
 const listIssueProperties = `-- name: ListIssueProperties :many
-SELECT p.id, p.workspace_id, p.name, p.type, p.description, p.config, p.position, p.archived_at, p.created_at, p.updated_at, p.icon,
-    (
-        SELECT COUNT(*) FROM issue i
-        WHERE i.workspace_id = p.workspace_id
-          AND i.properties ? p.id::text
-    )::bigint AS usage_count
-FROM issue_property p
-WHERE p.workspace_id = $1::uuid
-  AND ($2::bool OR p.archived_at IS NULL)
-ORDER BY p.position ASC, LOWER(p.name) ASC
+SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon FROM issue_property
+WHERE workspace_id = $1::uuid
+  AND ($2::bool OR archived_at IS NULL)
+ORDER BY position ASC, LOWER(name) ASC
 `
 
 type ListIssuePropertiesParams struct {
@@ -221,33 +218,17 @@ type ListIssuePropertiesParams struct {
 	IncludeArchived bool        `json:"include_archived"`
 }
 
-type ListIssuePropertiesRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Type        string             `json:"type"`
-	Description string             `json:"description"`
-	Config      []byte             `json:"config"`
-	Position    float64            `json:"position"`
-	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Icon        string             `json:"icon"`
-	UsageCount  int64              `json:"usage_count"`
-}
-
-// usage_count = number of issues in the workspace that currently carry a
-// value for this property. `properties ? id` is a seq scan today; fine at
-// the 20-definition / small-workspace scale this feature targets.
-func (q *Queries) ListIssueProperties(ctx context.Context, arg ListIssuePropertiesParams) ([]ListIssuePropertiesRow, error) {
+// Definition catalog without usage counts — the hot path every issue surface,
+// the CLI's name resolution, and every realtime refetch hit.
+func (q *Queries) ListIssueProperties(ctx context.Context, arg ListIssuePropertiesParams) ([]IssueProperty, error) {
 	rows, err := q.db.Query(ctx, listIssueProperties, arg.WorkspaceID, arg.IncludeArchived)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListIssuePropertiesRow{}
+	items := []IssueProperty{}
 	for rows.Next() {
-		var i ListIssuePropertiesRow
+		var i IssueProperty
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -260,7 +241,6 @@ func (q *Queries) ListIssueProperties(ctx context.Context, arg ListIssueProperti
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Icon,
-			&i.UsageCount,
 		); err != nil {
 			return nil, err
 		}

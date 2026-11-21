@@ -22,10 +22,6 @@ import { SkillFilterMenu } from "./skill-list-controls";
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
-// The label catalog dialog is mounted closed; it is not what this exercises.
-vi.mock("../../labels/label-manager", () => ({
-  LabelManager: () => null,
-}));
 
 const LABELS = [
   { id: "l-bug", workspace_id: "ws-1", name: "bug", color: "#ef4444" },

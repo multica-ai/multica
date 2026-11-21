@@ -10,6 +10,43 @@ import (
 
 const testRepoURL = "https://example.com/acme/widgets.git"
 
+func TestEvictRepoCachePreservesBothCacheNames(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCRepoTTL = 24 * time.Hour
+	const wsID = "11111111-1111-1111-1111-111111111111"
+	shortPath := newEvictTestRepo(t, d, wsID, testRepoURL)
+	legacyPath := filepath.Join(filepath.Dir(shortPath), "example.com+acme+widgets.git")
+	runGitForGC(t, "", "clone", "--bare", shortPath, legacyPath)
+	for _, path := range []string{shortPath, legacyPath} {
+		writeLastUsed(t, path, time.Now().Add(-48*time.Hour))
+	}
+	for _, taskRepo := range []bool{false, true} {
+		attachRepo(d, wsID, testRepoURL)
+		if taskRepo {
+			d.mu.Lock()
+			d.workspaces[wsID].allowedRepoURLs = nil
+			d.workspaces[wsID].taskRepoURLs = map[string]struct{}{testRepoURL: {}}
+			d.mu.Unlock()
+		}
+		for _, path := range []string{shortPath, legacyPath} {
+			if !d.repoBarePathIsLive(path) {
+				t.Fatalf("attached cache is not live (task repo=%t): %s", taskRepo, path)
+			}
+			foreignRoot := filepath.Join(t.TempDir(), wsID, filepath.Base(path))
+			if d.repoBarePathIsLive(foreignRoot) {
+				t.Fatalf("cache outside this daemon's root is live: %s", foreignRoot)
+			}
+		}
+		runRepoGC(d)
+		for _, path := range []string{shortPath, legacyPath} {
+			if _, err := os.Stat(filepath.Join(path, "HEAD")); err != nil {
+				t.Fatalf("attached cache was evicted: %s: %v", path, err)
+			}
+		}
+	}
+}
+
 // newEvictTestRepo clones a bare repo into the exact cache path the daemon
 // would use for repoURL, so the live-set lookup (which is keyed on that path)
 // lines up with what is on disk.

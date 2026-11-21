@@ -333,6 +333,7 @@
         "readyz",
         "healthz",
         "ws",
+        "collab",
         "metrics",
         "ping"
       ]

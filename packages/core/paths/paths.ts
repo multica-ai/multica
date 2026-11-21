@@ -60,10 +60,9 @@ function workspaceScoped(slug: string) {
     // Step 3: the agent exists; offer its first uses.
     newAgentDone: (agentId: string) =>
       `${ws}/agents/new/done/${encode(agentId)}`,
-    newAgentAi: () => `${ws}/agents/new/ai`,
     // One creation conversation. It is a durable object, not a step of the
-    // route above: it survives leaving the studio and is resumed later, so it
-    // owns an address instead of being a query param on the "start one" screen.
+    // routes above: it survives leaving the studio and is resumed later, so it
+    // owns an address instead of being a query param on the screen that started it.
     newAgentAiSession: (sessionId: string) =>
       `${ws}/agents/new/ai/${encode(sessionId)}`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
@@ -86,6 +85,10 @@ function workspaceScoped(slug: string) {
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
     runtimeSettings: (machineId: string, runtimeId: string) =>
       `${ws}/runtimes/${encode(machineId)}/runtime/${encode(runtimeId)}`,
+    docs: () => `${ws}/docs`,
+    docDetail: (id: string) => `${ws}/docs/${encode(id)}`,
+    docHistory: (id: string) => `${ws}/docs/${encode(id)}/history`,
+    docFolder: (id: string) => `${ws}/docs/folders/${encode(id)}`,
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     settings: () => `${ws}/settings`,

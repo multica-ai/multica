@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -247,6 +248,7 @@ func TestLarkOutcomeReplierCommandOutcomesSendGuidance(t *testing.T) {
 		hadMedia bool
 		want     string
 	}{
+		{"help", Outcome(engine.OutcomeHelp), false, "/help"},
 		{"fresh pending", OutcomeFreshPending, false, "下一条聊天消息"},
 		{"plain issue usage", OutcomeIssueUsage, false, "请填写任务标题"},
 		{"issue usage with media", OutcomeIssueUsage, true, "请添加标题，并与图片或视频一起重新发送"},

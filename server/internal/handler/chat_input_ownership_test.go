@@ -333,6 +333,9 @@ func TestDirectChat_RetryClaimDoesNotMoveOriginalInput(t *testing.T) {
 	if !retry.ChatInputTaskID.Valid || uuidToString(retry.ChatInputTaskID) != rootID {
 		t.Fatalf("retry input owner = %s, want root %s", uuidToString(retry.ChatInputTaskID), rootID)
 	}
+	if got := memberChatSkillMessage(retry.Context, inputBefore); got == nil || *got != "retry me" {
+		t.Fatalf("retry lost the authenticated chat sender: %v", got)
+	}
 	claimed, err := testHandler.TaskService.ClaimTask(ctx, parseUUID(agentID))
 	if err != nil || claimed == nil {
 		t.Fatalf("claim retry task: task=%+v err=%v", claimed, err)

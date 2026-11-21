@@ -16,6 +16,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { STAR_STROKE, starPath } from "@multica/ui/lib/multica-brand";
 import { cn } from "@multica/ui/lib/utils";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
 import { BOTTOM_BAR_ITEM_CLASS } from "../../layout/bottom-bar-styles";
 import { ChatBarHistory } from "./chat-bar-history";
@@ -92,13 +93,12 @@ export function ChatBar() {
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
-  const quickChatAgentId = useChatStore((s) => s.quickChatAgentId);
   const kept = useChatStore((s) => s.chatBarKept);
   const dismissed = useChatStore((s) => s.chatBarDismissed);
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
-  const setSelectedProjectId = useChatStore((s) => s.setSelectedProjectId);
+  const startNewChat = useChatStore((s) => s.startNewChat);
   const keepChatInBar = useChatStore((s) => s.keepChatInBar);
   const dismissChatFromBar = useChatStore((s) => s.dismissChatFromBar);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -149,14 +149,8 @@ export function ChatBar() {
   };
 
   const askMultica = () => {
-    if (askPressed) {
-      setOpen(false);
-      return;
-    }
-    if (quickChatAgentId) setSelectedAgentId(quickChatAgentId);
-    setSelectedProjectId(null);
-    setActiveSession(null);
-    setOpen(true);
+    if (askPressed) setOpen(false);
+    else startNewChat();
   };
 
   const titleOf = (session: ChatSession) => session.title || t(($) => $.window.untitled);
@@ -227,7 +221,10 @@ export function ChatBar() {
       {(visible.length > 0 || overflow.length > 0) && (
         <span aria-hidden className="mx-1.5 h-3.5 w-px shrink-0 bg-surface-border" />
       )}
-      <TooltipHint label={t(($) => $.window.new_chat_tooltip)}>
+      <TooltipHint
+        label={t(($) => $.window.new_chat_tooltip)}
+        shortcut={<ActionShortcutKeycaps action="newChat" />}
+      >
         <button
           type="button"
           data-chat-anchor="new"

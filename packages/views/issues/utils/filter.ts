@@ -53,6 +53,8 @@ export interface IssueFilters {
   // `runningIssueIds`. The surface derives this set from the independent
   // `/api/working-agents` projection so filter.ts stays free of fetching.
   agentRunningFilter?: boolean;
+  agentIdleFilter?: boolean;
+  activeIssueIds?: ReadonlySet<string>;
   runningIssueIds?: ReadonlySet<string>;
   // When `unreadFilter` is true, only keep issues whose id is in
   // `unreadIssueIds` — the viewer's unread list, plus any the surface keeps on
@@ -87,6 +89,7 @@ export interface IssueFilterState {
   negatedFilters?: readonly NegatableFilterDimension[];
   propertyFilters?: Record<string, PropertyFilterValue[]>;
   workingOnly: boolean;
+  idleOnly?: boolean;
   /** Only issues in `IssueFilterContext.unreadIssueIds`. */
   unreadOnly?: boolean;
   /** See IssueFilters.showSubIssues — only an explicit `false` hides. */
@@ -94,6 +97,8 @@ export interface IssueFilterState {
 }
 
 export interface IssueFilterContext {
+  /** Issues with visible running or queued work. Undefined is unresolved. */
+  activeIssueIds?: ReadonlySet<string>;
   activityByIssueId?: ReadonlyMap<string, IssueActivityState>;
   runningIssueIds?: ReadonlySet<string>;
   /** See IssueFilters.unreadIssueIds. A missing set with `unreadOnly` on
@@ -292,6 +297,8 @@ export function applyIssueFilters(
     negated.has(dimension) ? !matched : matched;
 
   return issues.filter((issue) => {
+    if (filters.idleOnly && (!context.activeIssueIds || context.activeIssueIds.has(issue.id)))
+      return false;
     if (applyWorkingOnly && !issueIsWorking(issue.id, context))
       return false;
     if (applyUnreadOnly && context.unreadIssueIds?.has(issue.id) !== true)
@@ -525,11 +532,13 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       negatedFilters: filters.negatedFilters,
       propertyFilters: filters.propertyFilters,
       workingOnly: filters.agentRunningFilter === true,
+      idleOnly: filters.agentIdleFilter === true,
       unreadOnly: filters.unreadFilter === true,
       showSubIssues: filters.showSubIssues,
     },
     {
       runningIssueIds: filters.runningIssueIds,
+      activeIssueIds: filters.activeIssueIds,
       unreadIssueIds: filters.unreadIssueIds,
       projectStatusById: filters.projectStatusById,
       relation: filters.relationContext,
@@ -551,6 +560,8 @@ export function filterAssigneeGroups(
   filters: {
     showSubIssues?: boolean;
     agentRunningFilter?: boolean;
+    agentIdleFilter?: boolean;
+    activeIssueIds?: ReadonlySet<string>;
     runningIssueIds?: ReadonlySet<string>;
     unreadFilter?: boolean;
     unreadIssueIds?: ReadonlySet<string>;
@@ -558,17 +569,20 @@ export function filterAssigneeGroups(
   },
 ): IssueAssigneeGroup[] | undefined {
   const applyRunning = filters.agentRunningFilter === true;
+  const applyIdle = filters.agentIdleFilter === true;
   const applyUnread = filters.unreadFilter === true;
   const hideSubIssues = filters.showSubIssues === false;
   const hasPropertyFilters = Object.values(filters.propertyFilters ?? {}).some(
     (selected) => selected.length > 0,
   );
-  if (!groups || (!applyRunning && !applyUnread && !hideSubIssues && !hasPropertyFilters)) return groups;
+  if (!groups || (!applyRunning && !applyIdle && !applyUnread && !hideSubIssues && !hasPropertyFilters)) return groups;
 
   const { runningIssueIds } = filters;
   return groups
     .map((group) => {
       const issues = group.issues.filter((issue) => {
+        if (applyIdle && (!filters.activeIssueIds || filters.activeIssueIds.has(issue.id)))
+          return false;
         if (applyRunning && !(runningIssueIds?.has(issue.id) ?? false))
           return false;
         if (applyUnread && !(filters.unreadIssueIds?.has(issue.id) ?? false))

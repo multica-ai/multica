@@ -93,7 +93,7 @@
   },
   "profile_card": {
     "unavailable": "Squad no disponible",
-    "detail_link": "Detalle →",
+    "detail_link": "Ver detalles →",
     "archived": "Archivado",
     "member_count_one": "{{count}} miembro",
     "member_count_other": "{{count}} miembros",
@@ -111,7 +111,6 @@
     "mine": "Mis squads",
     "all": "Todos los squads"
   },
-  "toolbar": {},
   "detail": {
     "assign_work": "Asignar trabajo",
     "copy_link": "Copiar enlace",

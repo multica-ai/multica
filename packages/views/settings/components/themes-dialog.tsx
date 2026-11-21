@@ -51,7 +51,7 @@ export function ThemesButton() {
         {t(($) => $.appearance.store.manage)}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[min(44rem,calc(100dvh-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <DialogContent className="flex max-h-[min(44rem,calc(100%-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
           {open ? <Themes /> : null}
         </DialogContent>
       </Dialog>
@@ -121,8 +121,7 @@ function Themes() {
   const [installedOnly, setInstalledOnly] = useState(false);
   const needle = query.trim().toLowerCase();
 
-  // Installed themes, then what the store offers. A theme installed from the
-  // store is shown as the store lists it.
+  // A theme installed from the store is shown as the store lists it.
   const listed = new Map((listing.data ?? []).map((theme) => [theme.id, theme]));
   const local = (theme: Theme): Entry => {
     const store = theme.id in fromStore ? listed.get(theme.id) : undefined;
@@ -132,8 +131,8 @@ function Themes() {
       : { kind: "local", key: theme.id, name: themeLabelFor(theme), author: theme.author ?? "", installed: true, theme };
   };
   const entries = installed.map(local);
-  for (const theme of [...listed.values()].sort((a, b) => b.downloads - a.downloads)) {
-    // A listed theme whose id is taken on this device is shown next to the one that has it.
+  for (const theme of listed.values()) {
+    // A listed theme whose id is taken on this device keeps a separate card.
     const taken = entries.some((entry) => entry.key === theme.id);
     entries.push({
       kind: "store",
@@ -144,11 +143,14 @@ function Themes() {
       theme,
     });
   }
-  // A card keeps its place while the window is open, so installing or
-  // removing a theme does not move it from under the pointer.
+  // Equal download counts keep their order, including after an install or removal.
   const order = useRef(new Map<string, number>()).current;
   for (const entry of entries) if (!order.has(entry.key)) order.set(entry.key, order.size);
-  entries.sort((a, b) => order.get(a.key)! - order.get(b.key)!);
+  entries.sort((a, b) => {
+    const aDownloads = a.kind === "store" ? a.theme.downloads : 0;
+    const bDownloads = b.kind === "store" ? b.theme.downloads : 0;
+    return bDownloads - aDownloads || order.get(a.key)! - order.get(b.key)!;
+  });
 
   const shown = entries.filter(
     (entry) =>

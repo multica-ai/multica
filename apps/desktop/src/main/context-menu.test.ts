@@ -1,61 +1,26 @@
 // @vitest-environment node
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-// Capture every MenuItem the SUT constructs so each test can assert
-// on the menu that would appear at popup time without booting an
-// actual Electron window. State is created via `vi.hoisted` because
-// `vi.mock` factories are hoisted above all top-level statements; a
-// plain `const` would be a TDZ ReferenceError when the factory runs.
-type CapturedMenuItem = {
-  label?: string;
-  role?: string;
-  type?: string;
-  click?: () => void;
-};
+// State is created via `vi.hoisted` because `vi.mock` factories are hoisted
+// above all top-level statements; a plain `const` would be a TDZ
+// ReferenceError when the factory runs.
 const ctx = vi.hoisted(() => ({
-  capturedItems: [] as CapturedMenuItem[][],
-  browserWindowFromWebContents: vi.fn(),
-  popupSpy: vi.fn(),
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   openExternalSpy: vi.fn().mockResolvedValue(undefined),
-  preferredLanguagesRef: { current: ["en-US"] as string[] },
 }));
 
-vi.mock("electron", () => {
-  class MockMenu {
-    items: CapturedMenuItem[] = [];
-    constructor() {
-      ctx.capturedItems.push(this.items);
-    }
-    append(item: CapturedMenuItem) {
-      this.items.push(item);
-    }
-    popup(opts: unknown) {
-      ctx.popupSpy(opts);
-    }
-  }
-  class MockMenuItem {
-    label?: string;
-    role?: string;
-    type?: string;
-    click?: () => void;
-    constructor(opts: CapturedMenuItem) {
-      Object.assign(this, opts);
-    }
-  }
-  return {
-    BrowserWindow: { fromWebContents: ctx.browserWindowFromWebContents },
-    Menu: MockMenu,
-    MenuItem: MockMenuItem,
-    app: {
-      getPreferredSystemLanguages: () => ctx.preferredLanguagesRef.current,
-    },
-    clipboard: { writeText: ctx.clipboardWriteText },
-    shell: { openExternal: ctx.openExternalSpy },
-  };
-});
+vi.mock("electron", () => ({
+  clipboard: { writeText: ctx.clipboardWriteText },
+  shell: { openExternal: ctx.openExternalSpy },
+}));
 
 import { installContextMenu } from "./context-menu";
+import {
+  CONTEXT_MENU_COMMAND_CHANNEL,
+  CONTEXT_MENU_REQUEST_CHANNEL,
+  hasContextMenuItems,
+  type ContextMenuRequest,
+} from "../shared/context-menu";
 
 type ContextMenuParams = {
   selectionText: string;
@@ -75,25 +40,50 @@ type ContextMenuParams = {
   };
 };
 
-type Listener = (event: unknown, params: ContextMenuParams) => void;
-
-// Tiny WebContents stub — we only need the `.on("context-menu", ...)`
-// hook the SUT installs and a way to fire it back at our own listener
-// list. Everything else (clipboard, link opening, label resolution) is
-// mocked above.
+// WebContents stub: the `context-menu` hook and per-contents IPC the SUT
+// installs, the requests it sends, and the edit commands it can run.
 function makeWebContents() {
-  const handlers: Listener[] = [];
+  const contextMenuHandlers: Array<(event: unknown, params: ContextMenuParams) => void> = [];
+  const ipcHandlers = new Map<string, (event: unknown, raw: unknown) => void>();
+  const sent: Array<{ channel: string; request: ContextMenuRequest }> = [];
   return {
+    sent,
+    cut: vi.fn(),
+    copy: vi.fn(),
+    paste: vi.fn(),
+    selectAll: vi.fn(),
     copyImageAt: vi.fn(),
     replaceMisspelling: vi.fn(),
     session: { addWordToSpellCheckerDictionary: vi.fn() },
-    on(event: string, fn: Listener) {
-      if (event === "context-menu") handlers.push(fn);
+    on(event: string, fn: (event: unknown, params: ContextMenuParams) => void) {
+      if (event === "context-menu") contextMenuHandlers.push(fn);
+    },
+    send(channel: string, request: ContextMenuRequest) {
+      sent.push({ channel, request });
+    },
+    ipc: {
+      on(channel: string, fn: (event: unknown, raw: unknown) => void) {
+        ipcHandlers.set(channel, fn);
+      },
     },
     fire(params: ContextMenuParams) {
-      for (const h of handlers) h({}, params);
+      for (const h of contextMenuHandlers) h({}, params);
+    },
+    command(raw: unknown) {
+      ipcHandlers.get(CONTEXT_MENU_COMMAND_CHANNEL)?.({}, raw);
+    },
+    lastRequest(): ContextMenuRequest {
+      const last = sent[sent.length - 1];
+      if (!last) throw new Error("no request was sent");
+      return last.request;
     },
   };
+}
+
+function setup() {
+  const wc = makeWebContents();
+  installContextMenu(wc as never);
+  return wc;
 }
 
 const baseEditFlags = {
@@ -103,204 +93,225 @@ const baseEditFlags = {
   canSelectAll: false,
 };
 
-describe("installContextMenu — spelling", () => {
-  beforeEach(() => {
-    ctx.capturedItems.length = 0;
-    ctx.preferredLanguagesRef.current = ["en-US"];
+beforeEach(() => {
+  ctx.clipboardWriteText.mockClear();
+  ctx.openExternalSpy.mockClear();
+});
+
+describe("installContextMenu — forwarding", () => {
+  it("forwards an unhandled right-click to the renderer instead of popping a native menu", () => {
+    const wc = setup();
+    wc.fire(
+      params({
+        isEditable: true,
+        selectionText: "hello",
+        x: 12,
+        y: 34,
+        editFlags: { canCut: true, canCopy: true, canPaste: true, canSelectAll: true },
+      }),
+    );
+
+    expect(wc.sent).toHaveLength(1);
+    expect(wc.sent[0]!.channel).toBe(CONTEXT_MENU_REQUEST_CHANNEL);
+    expect(wc.lastRequest()).toMatchObject({
+      x: 12,
+      y: 34,
+      isEditable: true,
+      canCut: true,
+      canCopy: true,
+      canPaste: true,
+      canSelectAll: true,
+      hasLink: false,
+      hasImage: false,
+    });
   });
 
-  it("shows suggestions and 'Add to Dictionary' first for a misspelled word in an editable field", () => {
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
+  it("forwards a right-click with nothing of main's to offer, for the page's own items", () => {
+    const wc = setup();
+    wc.fire(params({}));
+    expect(wc.sent).toHaveLength(1);
+    expect(hasContextMenuItems(wc.lastRequest())).toBe(false);
+  });
+
+  it("does not offer copy for a whitespace-only selection", () => {
+    const wc = setup();
+    wc.fire(params({ selectionText: "   ", editFlags: { ...baseEditFlags, canCopy: true } }));
+    expect(wc.lastRequest()).toMatchObject({ canCopy: false });
+  });
+
+  it("does not offer cut or paste outside an editable field", () => {
+    const wc = setup();
     wc.fire(
-      baseSelection({
+      params({
+        selectionText: "hello",
+        editFlags: { canCut: true, canCopy: true, canPaste: true, canSelectAll: true },
+      }),
+    );
+    expect(wc.lastRequest()).toMatchObject({
+      canCut: false,
+      canCopy: true,
+      canPaste: false,
+      canSelectAll: false,
+    });
+  });
+
+  it("never sends the link URL or the misspelled word to the renderer", () => {
+    const wc = setup();
+    wc.fire(
+      params({
+        isEditable: true,
+        linkURL: "https://multica.ai/welcome",
+        misspelledWord: "teh",
+        dictionarySuggestions: ["the"],
+      }),
+    );
+    const serialized = JSON.stringify(wc.lastRequest());
+    expect(serialized).not.toContain("multica.ai");
+    expect(serialized).not.toContain("teh");
+  });
+});
+
+describe("installContextMenu — commands", () => {
+  it("runs the edit command for the latest request", () => {
+    const wc = setup();
+    wc.fire(
+      params({
+        isEditable: true,
+        selectionText: "hi",
+        editFlags: { canCut: true, canCopy: true, canPaste: true, canSelectAll: true },
+      }),
+    );
+    const { id } = wc.lastRequest();
+    wc.command({ id, type: "paste" });
+    expect(wc.paste).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs one command per request", () => {
+    const wc = setup();
+    wc.fire(params({ selectionText: "hi", editFlags: { ...baseEditFlags, canCopy: true } }));
+    const { id } = wc.lastRequest();
+    wc.command({ id, type: "copy" });
+    wc.command({ id, type: "copy" });
+    expect(wc.copy).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a command for an older request", () => {
+    const wc = setup();
+    wc.fire(params({ selectionText: "hi", editFlags: { ...baseEditFlags, canCopy: true } }));
+    const stale = wc.lastRequest().id;
+    wc.fire(params({ selectionText: "hi", editFlags: { ...baseEditFlags, canCopy: true } }));
+    wc.command({ id: stale, type: "copy" });
+    expect(wc.copy).not.toHaveBeenCalled();
+  });
+
+  it("drops a command the request did not offer", () => {
+    const wc = setup();
+    wc.fire(params({ selectionText: "hi", editFlags: { ...baseEditFlags, canCopy: true } }));
+    const { id } = wc.lastRequest();
+    wc.command({ id, type: "openLink" });
+    wc.command({ id, type: "paste" });
+    expect(ctx.openExternalSpy).not.toHaveBeenCalled();
+    expect(wc.paste).not.toHaveBeenCalled();
+  });
+
+  it("ignores malformed commands", () => {
+    const wc = setup();
+    wc.fire(params({ selectionText: "hi", editFlags: { ...baseEditFlags, canCopy: true } }));
+    const { id } = wc.lastRequest();
+    wc.command(null);
+    wc.command({ id: String(id), type: "copy" });
+    wc.command({ id, type: "exec" });
+    expect(wc.copy).not.toHaveBeenCalled();
+    wc.command({ id, type: "copy" });
+    expect(wc.copy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("installContextMenu — spelling", () => {
+  it("offers suggestions and add-to-dictionary for a misspelled word in an editable field", () => {
+    const wc = setup();
+    wc.fire(
+      params({
         isEditable: true,
         misspelledWord: "teh",
         dictionarySuggestions: ["the", "tea"],
-        editFlags: { ...baseEditFlags, canPaste: true },
       }),
     );
+    expect(wc.lastRequest()).toMatchObject({
+      suggestions: ["the", "tea"],
+      canAddToDictionary: true,
+    });
 
-    expect(lastMenuLabelsOrEmpty().slice(0, 3)).toEqual([
-      "the",
-      "tea",
-      "Add to Dictionary",
-    ]);
-    invokeByLabel("the");
-    expect(wc.replaceMisspelling).toHaveBeenCalledWith("the");
-    invokeByLabel("Add to Dictionary");
+    wc.command({ id: wc.lastRequest().id, type: "replaceMisspelling", index: 1 });
+    expect(wc.replaceMisspelling).toHaveBeenCalledWith("tea");
+  });
+
+  it("adds main's copy of the misspelled word to the dictionary", () => {
+    const wc = setup();
+    wc.fire(params({ isEditable: true, misspelledWord: "teh", dictionarySuggestions: [] }));
+    wc.command({ id: wc.lastRequest().id, type: "addToDictionary" });
     expect(wc.session.addWordToSpellCheckerDictionary).toHaveBeenCalledWith("teh");
   });
 
-  it("omits spelling items when the field is not editable", () => {
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
+  it("rejects a suggestion index outside the offered list", () => {
+    const wc = setup();
+    wc.fire(params({ isEditable: true, misspelledWord: "teh", dictionarySuggestions: ["the"] }));
+    wc.command({ id: wc.lastRequest().id, type: "replaceMisspelling", index: 3 });
+    expect(wc.replaceMisspelling).not.toHaveBeenCalled();
+  });
+
+  it("omits spelling outside an editable field", () => {
+    const wc = setup();
     wc.fire(
-      baseSelection({ selectionText: "teh", misspelledWord: "teh", dictionarySuggestions: ["the"] }),
-    );
-    expect(lastMenuLabelsOrEmpty()).not.toContain("Add to Dictionary");
-  });
-});
-
-describe("installContextMenu — link items", () => {
-  beforeEach(() => {
-    ctx.capturedItems.length = 0;
-    ctx.popupSpy.mockClear();
-    ctx.clipboardWriteText.mockClear();
-    ctx.openExternalSpy.mockClear();
-    ctx.browserWindowFromWebContents.mockReset();
-    ctx.preferredLanguagesRef.current = ["en-US"];
-  });
-
-  it("adds 'Open Link in Browser' and 'Copy Link Address' when right-clicking an http(s) link", () => {
-    // The link case is the one this test file is here to cover —
-    // before MUL-3083 follow-up, right-clicking an <a> in the
-    // renderer only surfaced 'copy' (when the user happened to have
-    // text selected) and gave no way to open the URL externally.
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire({
-      ...baseSelection({ linkURL: "https://multica.ai/welcome" }),
-    });
-
-    const labels = lastMenuLabels();
-    expect(labels).toContain("Open Link in Browser");
-    expect(labels).toContain("Copy Link Address");
-
-    // The two click handlers must route to the existing
-    // openExternalSafely allowlist + clipboard.writeText.
-    invokeByLabel("Open Link in Browser");
-    expect(ctx.openExternalSpy).toHaveBeenCalledWith("https://multica.ai/welcome");
-
-    invokeByLabel("Copy Link Address");
-    expect(ctx.clipboardWriteText).toHaveBeenCalledWith(
-      "https://multica.ai/welcome",
-    );
-    expect(ctx.popupSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("does NOT add link items when the cursor is over a non-http(s) URL", () => {
-    // Only http(s) links are surfaced — we don't promise anything for
-    // mailto:, javascript:, custom app schemes, etc. Surfacing them
-    // would shell out via openExternalSafely (which would block the
-    // call anyway) or write a non-URL string to the clipboard, both
-    // of which violate user expectations for a "link" item.
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire(baseSelection({ linkURL: "javascript:alert(1)" }));
-    const labels = lastMenuLabelsOrEmpty();
-    expect(labels).not.toContain("Open Link in Browser");
-    expect(labels).not.toContain("Copy Link Address");
-  });
-
-  it("does NOT add link items when there is no link under the cursor", () => {
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire(
-      baseSelection({
-        selectionText: "hello",
+      params({
+        selectionText: "teh",
+        misspelledWord: "teh",
+        dictionarySuggestions: ["the"],
         editFlags: { ...baseEditFlags, canCopy: true },
       }),
     );
-    const labels = lastMenuLabelsOrEmpty();
-    expect(labels).not.toContain("Open Link in Browser");
-    // Selection-only context still surfaces copy as before — guards
-    // against a regression where adding the link branch broke the
-    // base path.
-    expect(menuItemRoles()).toContain("copy");
-  });
-
-  it("uses zh-Hans labels when the OS preferred language is Chinese", () => {
-    // Locale fallback is intentionally permissive: every zh-* variant
-    // routes to zh-Hans so users on zh-CN / zh-TW / zh-HK still see
-    // Chinese rather than dropping to English. The renderer ships only
-    // zh-Hans translations, so this matches the rest of the app.
-    ctx.preferredLanguagesRef.current = ["zh-CN"];
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire(baseSelection({ linkURL: "https://multica.ai" }));
-    expect(lastMenuLabels()).toContain("在浏览器中打开链接");
-    expect(lastMenuLabels()).toContain("复制链接地址");
-  });
-
-  it("uses Russian labels when the OS preferred language is Russian", () => {
-    ctx.preferredLanguagesRef.current = ["ru-RU"];
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire(baseSelection({ linkURL: "https://multica.ai" }));
-    expect(lastMenuLabels()).toContain("Открыть ссылку в браузере");
-    expect(lastMenuLabels()).toContain("Копировать адрес ссылки");
-  });
-
-  it("falls back to English when the OS preferred language is something we don't ship", () => {
-    ctx.preferredLanguagesRef.current = ["fr-FR"];
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire(baseSelection({ linkURL: "https://multica.ai" }));
-    expect(lastMenuLabels()).toContain("Open Link in Browser");
+    expect(wc.lastRequest()).toMatchObject({ suggestions: [], canAddToDictionary: false });
   });
 });
 
-describe("installContextMenu — image items", () => {
-  beforeEach(() => {
-    ctx.capturedItems.length = 0;
-    ctx.popupSpy.mockClear();
-    ctx.preferredLanguagesRef.current = ["en-US"];
+describe("installContextMenu — links and images", () => {
+  it("opens and copies main's copy of an http(s) link", () => {
+    const wc = setup();
+    wc.fire(params({ linkURL: "https://multica.ai/welcome" }));
+    expect(wc.lastRequest().hasLink).toBe(true);
+
+    wc.command({ id: wc.lastRequest().id, type: "openLink" });
+    expect(ctx.openExternalSpy).toHaveBeenCalledWith("https://multica.ai/welcome");
+
+    wc.fire(params({ linkURL: "https://multica.ai/welcome" }));
+    wc.command({ id: wc.lastRequest().id, type: "copyLink" });
+    expect(ctx.clipboardWriteText).toHaveBeenCalledWith("https://multica.ai/welcome");
   });
 
-  it("adds 'Copy Image' on a loaded image and copies the pixels under the cursor", () => {
-    // MUL-7759: the attachment viewer and inline images had no way to
-    // copy the picture itself — Electron shows no menu at all by default.
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire(
-      baseSelection({ mediaType: "image", hasImageContents: true, x: 120, y: 48 }),
-    );
+  it("does not offer links that are not http(s)", () => {
+    const wc = setup();
+    wc.fire(params({ linkURL: "javascript:alert(1)" }));
+    expect(wc.lastRequest().hasLink).toBe(false);
+    wc.fire(params({ linkURL: "file:///index.html#/acme/issues/1" }));
+    expect(wc.lastRequest().hasLink).toBe(false);
+  });
 
-    expect(lastMenuLabels()).toEqual(["Copy Image"]);
-    invokeByLabel("Copy Image");
+  it("copies the pixels of a loaded image under the cursor", () => {
+    const wc = setup();
+    wc.fire(params({ mediaType: "image", hasImageContents: true, x: 120, y: 48 }));
+    expect(wc.lastRequest().hasImage).toBe(true);
+    wc.command({ id: wc.lastRequest().id, type: "copyImage" });
     expect(wc.copyImageAt).toHaveBeenCalledWith(120, 48);
-    expect(ctx.popupSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT add 'Copy Image' before the image has loaded", () => {
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire(baseSelection({ mediaType: "image", hasImageContents: false }));
-    expect(lastMenuLabelsOrEmpty()).not.toContain("Copy Image");
-    expect(ctx.popupSpy).not.toHaveBeenCalled();
-  });
-
-  it("lists the image items after the link items for an image inside a link", () => {
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire(
-      baseSelection({
-        linkURL: "https://multica.ai",
-        mediaType: "image",
-        hasImageContents: true,
-      }),
-    );
-    expect(lastMenu().map((i) => i.label ?? i.type)).toEqual([
-      "Open Link in Browser",
-      "Copy Link Address",
-      "separator",
-      "Copy Image",
-    ]);
-  });
-
-  it("uses zh-Hans labels when the OS preferred language is Chinese", () => {
-    ctx.preferredLanguagesRef.current = ["zh-CN"];
-    const wc = makeWebContents();
-    installContextMenu(wc as never);
-    wc.fire(baseSelection({ mediaType: "image", hasImageContents: true }));
-    expect(lastMenuLabels()).toContain("复制图片");
+  it("does not offer copy image before the image has loaded", () => {
+    const wc = setup();
+    wc.fire(params({ mediaType: "image", hasImageContents: false }));
+    expect(wc.lastRequest().hasImage).toBe(false);
   });
 });
 
-// --- helpers ---
-
-function baseSelection(over: Partial<ContextMenuParams>): ContextMenuParams {
+function params(over: Partial<ContextMenuParams>): ContextMenuParams {
   return {
     selectionText: "",
     isEditable: false,
@@ -314,29 +325,4 @@ function baseSelection(over: Partial<ContextMenuParams>): ContextMenuParams {
     editFlags: { ...baseEditFlags },
     ...over,
   };
-}
-
-function lastMenu(): CapturedMenuItem[] {
-  const last = ctx.capturedItems[ctx.capturedItems.length - 1];
-  if (!last) throw new Error("no menu was constructed");
-  return last;
-}
-
-function lastMenuLabelsOrEmpty(): string[] {
-  const last = ctx.capturedItems[ctx.capturedItems.length - 1] ?? [];
-  return last.map((i) => i.label ?? "");
-}
-
-function lastMenuLabels(): string[] {
-  return lastMenu().map((i) => i.label ?? "");
-}
-
-function menuItemRoles(): string[] {
-  return lastMenu().map((i) => i.role ?? "");
-}
-
-function invokeByLabel(label: string): void {
-  const item = lastMenu().find((i) => i.label === label);
-  if (!item) throw new Error(`menu item not found: ${label}`);
-  item.click?.();
 }

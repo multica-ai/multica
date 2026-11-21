@@ -23,6 +23,7 @@ export { useLazyEditor, type LazyEditorHandle, type LazyFocusTarget } from "./us
 export { anchorFromPoint, type TextAnchor } from "./text-anchor";
 export { useDownloadAttachment } from "./use-download-attachment";
 export { AttachmentDownloadProvider } from "./attachment-download-context";
+export { ImageThumbnailsProvider } from "./image-thumbnails-context";
 export {
   AttachmentPreviewModal,
   useAttachmentPreview,

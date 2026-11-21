@@ -1,6 +1,15 @@
 "use client";
 
-import { themeModeVariables, type Theme } from "@multica/core/appearance";
+import { useMemo } from "react";
+import {
+  BUILT_IN_THEMES,
+  DEFAULT_THEME_ID,
+  findBuiltInTheme,
+  themeModeVariables,
+  useAppearanceStore,
+  useInstalledThemesStore,
+  type Theme,
+} from "@multica/core/appearance";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { useT } from "../../i18n";
 
@@ -21,6 +30,18 @@ export function useThemeLabel() {
       : theme.id === "pop"
         ? t(($) => $.appearance.theme.pop)
         : theme.name;
+}
+
+/**
+ * The themes a person can pick, built-in ones first, and the one in use:
+ * Default when the chosen theme is no longer installed.
+ */
+export function useColorThemes(): { themes: readonly Theme[]; selected: Theme } {
+  const chosen = useAppearanceStore((s) => s.theme);
+  const installed = useInstalledThemesStore((s) => s.themes);
+  const themes = useMemo(() => [...BUILT_IN_THEMES, ...installed], [installed]);
+  const selected = themes.find((theme) => theme.id === chosen) ?? findBuiltInTheme(DEFAULT_THEME_ID)!;
+  return { themes, selected };
 }
 
 type SwatchToken =

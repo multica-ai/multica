@@ -2,14 +2,16 @@
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import {
+  HTML_BLOCK_EMBED_OPTIONS,
   HTML_BLOCK_MAX_CONTENT_PX,
   HTML_BLOCK_MESSAGE_KEY,
   INITIAL_HTML_BLOCK_HEIGHT,
   __HTML_BLOCK_BRIDGE__,
   buildHtmlBlockDocument,
+  htmlBlockTheme,
   nextHtmlBlockHeight,
   readHtmlBlockMessage,
-  readHtmlBlockTheme,
+  mentionsThemeTokens,
   usesThemeTokens,
 } from "./html-block-document";
 import { __FRAGMENT_NAV_SHIM__ } from "./iframe-fragment-nav";
@@ -84,47 +86,54 @@ describe("buildHtmlBlockDocument", () => {
   });
 });
 
+describe("mentionsThemeTokens", () => {
+  it("finds a token named in CSS or in a script", () => {
+    expect(mentionsThemeTokens("fill: var(--chart-2)")).toBe(true);
+    expect(mentionsThemeTokens("style.getPropertyValue('--foreground')")).toBe(true);
+    expect(mentionsThemeTokens('<input value="initial">')).toBe(false);
+    expect(mentionsThemeTokens("color: var(--chart-20)")).toBe(false);
+  });
+});
+
 describe("usesThemeTokens", () => {
   it("matches whole token names only", () => {
     expect(usesThemeTokens("fill: var(--chart-2)")).toBe(true);
     expect(usesThemeTokens("color: var( --muted-foreground )")).toBe(true);
     expect(usesThemeTokens("font-family: var(--font-sans)")).toBe(true);
+    expect(usesThemeTokens("stroke: var(--status-done)")).toBe(true);
+    expect(usesThemeTokens("color: var(--code-keyword)")).toBe(true);
     expect(usesThemeTokens("border-radius: var(--border-radius)")).toBe(false);
     expect(usesThemeTokens("--foreground: red")).toBe(false);
   });
 });
 
-describe("readHtmlBlockTheme", () => {
-  const styles = (values: Record<string, string>, fontFamily = "Inter, sans-serif", colorScheme = "light") => ({
-    getPropertyValue: (name: string) => values[name] ?? "",
-    fontFamily,
-    colorScheme,
+describe("htmlBlockTheme", () => {
+  const embed = (tokens: Record<string, string>, colorScheme: "light" | "dark" = "light") => ({ tokens, colorScheme });
+
+  it("declares the resolved tokens in contract order", () => {
+    const theme = htmlBlockTheme(embed({ "--chart-1": "blue", "--foreground": " oklch(0.2 0 0) ", "--font-sans": "Inter, sans-serif" }));
+    expect(theme.declarations).toBe("--foreground:oklch(0.2 0 0);--chart-1:blue;--font-sans:Inter, sans-serif");
   });
 
-  it("copies the defined tokens and the font, skipping undefined ones", () => {
-    const theme = readHtmlBlockTheme(styles({ "--foreground": " oklch(0.2 0 0) ", "--chart-1": "blue" }));
-    expect(theme.declarations).toBe(
-      "--foreground:oklch(0.2 0 0);--chart-1:blue;--font-sans:Inter, sans-serif",
+  it("drops a value that could break out of the style rule or reach outside the frame", () => {
+    const theme = htmlBlockTheme(
+      embed({
+        "--foreground": "red}</style><script>",
+        "--muted": "url(https://evil.test/x)",
+        "--border": "var(--secret)",
+        "--brand": "blue",
+        "--not-in-the-contract": "red",
+      }),
     );
+    expect(theme.declarations).toBe("--brand:blue");
   });
 
-  it("gives --background the block's surface color", () => {
-    const theme = readHtmlBlockTheme(styles({ "--background": "gray", "--surface": "white" }));
-    expect(theme.declarations).toContain("--background:white;--surface:white");
-    expect(readHtmlBlockTheme(styles({ "--background": "gray" })).declarations).toContain(
-      "--background:gray",
-    );
+  it("passes the host's scheme through", () => {
+    expect(htmlBlockTheme(embed({}, "dark")).colorScheme).toBe("dark");
   });
 
-  it("drops a value that could break out of the style rule", () => {
-    const theme = readHtmlBlockTheme(styles({ "--foreground": "red}</style><script>" }));
-    expect(theme.declarations).not.toContain("script");
-  });
-
-  it("reads dark only when the host is dark", () => {
-    expect(readHtmlBlockTheme(styles({}, "", "dark")).colorScheme).toBe("dark");
-    expect(readHtmlBlockTheme(styles({}, "", "light dark")).colorScheme).toBe("light");
-    expect(readHtmlBlockTheme(styles({}, "", "normal")).colorScheme).toBe("light");
+  it("reads --background from the block's surface", () => {
+    expect(HTML_BLOCK_EMBED_OPTIONS.background).toBe("--surface");
   });
 });
 

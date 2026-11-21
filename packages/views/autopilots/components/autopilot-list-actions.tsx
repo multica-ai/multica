@@ -72,13 +72,19 @@ export function DeleteAutopilotsDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {t(($) => $.actions.delete_dialog.title)}
+            {rows.length === 1
+              ? t(($) => $.actions.delete_dialog.title)
+              : t(($) => $.actions.delete_dialog.title_multiple, { count: rows.length })}
           </DialogTitle>
           <DialogDescription>
-            {t(($) => $.actions.delete_dialog.description, {
-              count: rows.length,
-              name: rows[0]?.title ?? "",
-            })}
+            {rows.length === 1
+              ? t(($) => $.actions.delete_dialog.description_single, {
+                  name: rows[0]?.title ?? "",
+                })
+              : t(($) => $.actions.delete_dialog.description, {
+                  count: rows.length,
+                  name: rows[0]?.title ?? "",
+                })}
           </DialogDescription>
         </DialogHeader>
         <p className="text-caption text-muted-foreground">

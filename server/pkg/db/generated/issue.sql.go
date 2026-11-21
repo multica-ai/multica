@@ -19,7 +19,7 @@ FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
   -- MUL-8472: private projects the caller cannot see.
-  AND ($3::uuid[] IS NULL OR project_id IS NULL OR NOT (project_id = ANY($3::uuid[])))
+  AND ($3::uuid[] IS NULL OR NOT (COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[])))
 GROUP BY parent_issue_id
 `
 
@@ -185,7 +185,7 @@ WHERE i.workspace_id = $1
   AND ($7::uuid IS NULL OR (i.creator_type = 'member' AND i.creator_id = $7) OR i.requester_user_id = $7)
   AND ($8::uuid IS NULL OR i.project_id = $8)
   -- MUL-8472: private projects the caller cannot see.
-  AND ($9::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($9::uuid[])))
+  AND ($9::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($9::uuid[])))
   AND ($10::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($11::jsonb IS NULL OR i.metadata @> $11::jsonb)
   AND (
@@ -277,31 +277,6 @@ func (q *Queries) CountIssuesInTriage(ctx context.Context, arg CountIssuesInTria
 	var count int64
 	err := row.Scan(&count)
 	return count, err
-}
-
-const countIssuesUpTo = `-- name: CountIssuesUpTo :one
-SELECT COUNT(*)::bigint
-FROM (
-    SELECT 1
-    FROM issue
-    WHERE workspace_id = $1
-    LIMIT $2::bigint
-) bounded_issues
-`
-
-type CountIssuesUpToParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Limit       int64       `json:"limit"`
-}
-
-// Bounded count for issue-limit admission and display. Callers pass only the
-// threshold needed for their decision, avoiding a full scan in an oversized
-// workspace.
-func (q *Queries) CountIssuesUpTo(ctx context.Context, arg CountIssuesUpToParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countIssuesUpTo, arg.WorkspaceID, arg.Limit)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
 }
 
 const createIssue = `-- name: CreateIssue :one
@@ -531,6 +506,9 @@ cleared_environment_commands AS (
 ),
 cleared_environment_configs AS (
     DELETE FROM issue_environment_config WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target)
 `
@@ -556,6 +534,8 @@ type DeleteIssueParams struct {
 // when a caller passes a foreign issue_id with its own workspace_id (the issue
 // itself is correctly untouched, but the links are already gone) — the exact
 // cross-tenant leak the #1661 guard above exists to prevent.
+// task_context_receipt has no FK; the issue's tasks go by the legacy cascade,
+// so their receipts are swept here by the issue_id copied onto each row.
 func (q *Queries) DeleteIssue(ctx context.Context, arg DeleteIssueParams) error {
 	_, err := q.db.Exec(ctx, deleteIssue, arg.ID, arg.WorkspaceID)
 	return err
@@ -1371,7 +1351,7 @@ func (q *Queries) ListIssueGCStatuses(ctx context.Context, arg ListIssueGCStatus
 }
 
 const listIssueRefsInWorkspace = `-- name: ListIssueRefsInWorkspace :many
-SELECT id, number, title, status FROM issue
+SELECT id, number, title, status, project_id FROM issue
 WHERE workspace_id = $1
   AND id = ANY($2::uuid[])
 `
@@ -1382,10 +1362,11 @@ type ListIssueRefsInWorkspaceParams struct {
 }
 
 type ListIssueRefsInWorkspaceRow struct {
-	ID     pgtype.UUID `json:"id"`
-	Number int32       `json:"number"`
-	Title  string      `json:"title"`
-	Status string      `json:"status"`
+	ID        pgtype.UUID `json:"id"`
+	Number    int32       `json:"number"`
+	Title     string      `json:"title"`
+	Status    string      `json:"status"`
+	ProjectID pgtype.UUID `json:"project_id"`
 }
 
 // GetIssueRefInWorkspace for a page: every original the page's duplicates
@@ -1404,6 +1385,7 @@ func (q *Queries) ListIssueRefsInWorkspace(ctx context.Context, arg ListIssueRef
 			&i.Number,
 			&i.Title,
 			&i.Status,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -1430,7 +1412,7 @@ WHERE i.workspace_id = $1
   AND ($9::uuid IS NULL OR (i.creator_type = 'member' AND i.creator_id = $9) OR i.requester_user_id = $9)
   AND ($10::uuid IS NULL OR i.project_id = $10)
   -- MUL-8472: private projects the caller cannot see.
-  AND ($11::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($11::uuid[])))
+  AND ($11::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($11::uuid[])))
   AND ($12::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($13::jsonb IS NULL OR i.metadata @> $13::jsonb)
   AND (
@@ -1605,7 +1587,7 @@ WHERE i.workspace_id = $1
   AND ($7::uuid IS NULL OR (i.creator_type = 'member' AND i.creator_id = $7) OR i.requester_user_id = $7)
   AND ($8::uuid IS NULL OR i.project_id = $8)
   -- MUL-8472: private projects the caller cannot see.
-  AND ($9::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($9::uuid[])))
+  AND ($9::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($9::uuid[])))
   AND ($10::jsonb IS NULL OR i.metadata @> $10::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
   -- patterns (built by parsePropertiesFilterParam): the issue must match at
