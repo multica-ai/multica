@@ -7,6 +7,7 @@ import {
   childIssuesOptions,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useParentIssueRecents } from "@multica/core/issues/use-parent-issue-recents";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
@@ -21,6 +22,7 @@ export function SetParentIssueModal({
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
   const { mutateAsync: updateIssue } = useUpdateIssue();
+  const recentIssues = useParentIssueRecents(wsId, true);
 
   const { data: children = [] } = useQuery({
     ...childIssuesOptions(wsId, issueId),
@@ -41,6 +43,11 @@ export function SetParentIssueModal({
       title={t(($) => $.set_parent.title)}
       description={t(($) => $.set_parent.description)}
       excludeIds={excludeIds}
+      suggestions={[{
+        key: "recent",
+        heading: t(($) => $.issue_picker.suggested_recent),
+        issues: recentIssues,
+      }]}
       onSelect={(selected) => {
         updateIssue({
           id: issueId,

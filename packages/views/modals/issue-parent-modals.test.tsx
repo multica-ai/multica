@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock("@multica/core/issues/use-parent-issue-recents", () => ({
+  useParentIssueRecents: () => [],
+}));
 vi.mock("sonner", () => ({ toast: mocks.toast }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/issues/mutations", () => ({
@@ -56,6 +59,7 @@ vi.mock("../i18n", () => ({
       vars?: Record<string, unknown>,
     ) =>
       selector({
+        issue_picker: { suggested_recent: "Recently viewed" },
         add_child: {
           title: "Add child",
           description: "Choose child",
