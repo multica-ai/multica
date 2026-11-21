@@ -229,6 +229,20 @@ Les exécutions Hermes liées à une tâche ou à un chat utilisent le répertoi
 
 Multica actualise les skills et la configuration dérivée à chaque exécution. L’authentification du fournisseur de modèles est conservée ; les adaptateurs de messagerie et les points d’entrée HTTP sont désactivés pour les exécutions gérées. L’état de la Gateway, les journaux, les sessions et les tâches cron de l’hôte sont isolés. Toute Gateway propre à une exécution est arrêtée à la fin de celle-ci afin que les exécutions suivantes utilisent leur propre environnement.
 
+### Gateway Hermes résidente (optionnelle)
+
+Les runtimes auto-hébergés peuvent garder un seul `hermes gateway run` de longue durée par conteneur, pour conserver les sessions, la mémoire et les skills appris par Hermes d'une exécution à l'autre ; les processus `hermes acp` lancés à chaque exécution servent alors uniquement à s'y connecter. Définissez `MULTICA_HERMES_RESIDENT_GATEWAY=1` dans l'environnement du daemon et `MULTICA_RESIDENT_OWNER=1` dans celui du processus de la Gateway résidente. Démarrez et gérez cette Gateway vous-même ; dans ce mode, le daemon ne démarre ni n'arrête de Gateway par exécution.
+
+Le répertoire isolé reprend, par liens symboliques, les enregistrements de Gateway, les journaux, les sessions et l'état cron de la Gateway résidente au lieu de les isoler. Le répertoire persistant de la conversation n'est plus utilisé comme `HERMES_HOME`, et un répertoire vide n'empêche plus la reprise. Si la Gateway résidente n'a plus la session, le backend réessaie quand même avec une nouvelle session.
+
+Avant de lancer une exécution Hermes, le daemon écrit de façon atomique `.multica_resident_task.json` à la racine de l'environnement de l'exécution, avec le mode `0600`. Ce fichier contient l'exécution, l'agent, l'espace de travail, la session de chat éventuelle et le jeton `mat_` propre à l'exécution ; il est supprimé à la fin de l'exécution. Les outils de la CLI Multica lancés par la Gateway résidente remontent depuis leur répertoire courant jusqu'au fichier de contexte le plus proche, et n'utilisent son jeton et son identité que si leur environnement ne fournit aucune identité d'exécution explicite. Un `MULTICA_TASK_ID` ou un jeton `mat_` explicite reste prioritaire.
+
+Limites connues :
+
+- La Gateway résidente ne lit pas les skills liés préparés dans le répertoire Hermes propre à l'exécution.
+- Le `custom_env` de chaque exécution n'atteint pas les outils de la Gateway résidente.
+- Les outils d'une même Gateway partagent un seul utilisateur système. Un processus du même UID peut lire le fichier de contexte d'une autre exécution en cours malgré le mode `0600`. N'utilisez ce mode que si tous les agents du runtime se font mutuellement confiance.
+
 ### Mémoire native et sous-agents de Codex [#codex-memory]
 
 Dans les exécutions Codex gérées par le daemon, la mémoire native de Codex est désactivée par défaut, pour que les souvenirs de cette machine ou d'une exécution précédente ne passent pas dans un autre espace de travail. Le réglage est écrit uniquement dans le `CODEX_HOME/config.toml` propre à l'exécution (`features.memories`, `memories.generate_memories` et `memories.use_memories` à `false`) ; votre `~/.codex/config.toml` n'est pas modifié. Pour garder la mémoire native, définissez `MULTICA_CODEX_MEMORY=1` dans l'environnement du daemon.

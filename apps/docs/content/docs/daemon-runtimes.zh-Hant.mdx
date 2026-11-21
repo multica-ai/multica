@@ -230,6 +230,20 @@ Hermes 在任務和聊天中的執行會將會話持久目錄作為隔離的 `HE
 
 Multica 每次執行都會重新整理其中的 skill 和派生配置。模型服務認證會保留，託管執行的訊息平臺介面卡和 HTTP 入口會關閉。宿主的 Gateway 狀態、日誌、會話和定時任務各自隔離。執行結束時會停止本次執行的 Gateway，確保後續執行使用自己的執行環境。
 
+### 常駐 Hermes Gateway（可選）
+
+自託管執行環境可以在每個容器內維持一個長期執行的 `hermes gateway run`，讓 Hermes 的會話、記憶和自主學習的 skill 跨執行保留，每次執行啟動的 `hermes acp` 只負責連線和檢視。在守護程序的環境中設定 `MULTICA_HERMES_RESIDENT_GATEWAY=1`，在常駐 Gateway 程序的環境中設定 `MULTICA_RESIDENT_OWNER=1`。Gateway 需要自行啟動和管理；此模式下守護程序不會為單次執行啟動或停止 Gateway。
+
+隔離目錄會透過符號連結保留常駐 Gateway 的狀態記錄、日誌、會話和定時任務，不再隔離這些內容。會話持久目錄不再作為 `HERMES_HOME`，空目錄也不會阻止續接會話。如果常駐 Gateway 已經沒有原會話，後端仍會重試並新建會話。
+
+啟動 Hermes 執行前，守護程序會在本次執行的環境根目錄中以原子方式寫入權限為 `0600` 的 `.multica_resident_task.json`，包含執行、AI 代理、工作區、可選的聊天會話識別碼，以及本次執行專用的 `mat_` 令牌；執行結束時刪除。常駐 Gateway 呼叫的 Multica CLI 工具會從目前目錄向上尋找最近的上下文檔案，僅在自身環境中沒有明確執行身分時使用檔案中的憑證和身分。明確傳入的 `MULTICA_TASK_ID` 或 `mat_` 令牌優先。
+
+已知限制：
+
+- 常駐 Gateway 不會讀取本次執行專用 Hermes 目錄中準備的綁定 skill。
+- 每次執行的 `custom_env` 不會傳遞給常駐 Gateway 的工具。
+- 同一個 Gateway 的工具共用一個作業系統使用者。即使檔案權限為 `0600`，同 UID 的程序仍可讀取其他正在進行的執行的上下文檔案。只有執行環境內所有 AI 代理彼此信任時，才應使用此模式。
+
 ### Codex 原生記憶與子 AI 代理 [#codex-memory]
 
 守護程序管理的 Codex 執行預設關閉 Codex 原生記憶，避免本機或前一次執行留下的記憶帶進別的工作區。設定只寫入這次執行專用的 `CODEX_HOME/config.toml`（`features.memories` 和 `memories.generate_memories`、`memories.use_memories` 均為 `false`），不改你的 `~/.codex/config.toml`。需要保留原生記憶時，在守護程序的環境中設定 `MULTICA_CODEX_MEMORY=1`。
