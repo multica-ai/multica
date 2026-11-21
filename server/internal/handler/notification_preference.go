@@ -20,7 +20,7 @@ import (
 // preferences. `auto_archive_completed` is not an event group either: "muted"
 // stops your notifications from being archived when you complete an issue.
 // `auto_archive_on_action` set to "all" also archives them when you comment on
-// or edit the issue, and `after_auto_archive` is where the client goes when
+// the issue, change its status or reassign it, and `after_auto_archive` is where the client goes when
 // the notification you are reading is archived that way.
 var validNotifGroups = map[string]bool{
 	"assignments":            true,
