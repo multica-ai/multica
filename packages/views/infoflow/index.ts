@@ -1,0 +1,1 @@
+export { InfoFlowBindPage } from "./bind-page";

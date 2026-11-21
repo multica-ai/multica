@@ -332,6 +332,12 @@ export type {
   WecomInstallStatusResponse,
 } from "./wecom";
 export type {
+  InfoFlowInstallation,
+  ListInfoFlowInstallationsResponse,
+  RegisterInfoFlowBYORequest,
+  RedeemInfoFlowBindingTokenResponse,
+} from "./infoflow";
+export type {
   TelegramInstallation,
   ListTelegramInstallationsResponse,
   RegisterTelegramRequest,

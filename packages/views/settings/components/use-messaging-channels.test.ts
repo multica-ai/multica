@@ -18,7 +18,7 @@ describe("channel chat destinations", () => {
   });
 
   it("does not offer a broken link when a bot identity is missing", () => {
-    for (const channel of ["lark", "slack", "telegram", "wecom", "dingtalk"] as const) {
+    for (const channel of ["lark", "slack", "telegram", "wecom", "dingtalk", "infoflow"] as const) {
       expect(channelChatLink({ channel, installation: {} } as ChannelConnection)).toBeUndefined();
     }
   });

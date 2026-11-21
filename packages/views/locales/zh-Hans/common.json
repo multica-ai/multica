@@ -103,6 +103,22 @@
     "error_not_member": "你登录的 Multica 账号不是当前工作区成员。",
     "error_unknown": "出现未知错误。请稍后再试，如反复失败请联系工作区管理员。"
   },
+  "infoflow_bind": {
+    "page_title": "绑定你的如流账号",
+    "redeeming": "正在绑定账号…",
+    "needs_auth_description": "请先登录 Multica 完成绑定。链接中的 token 会把你的如流账号绑定到当前 Multica 用户，因此必须先登录。",
+    "sign_in": "登录",
+    "done_title": "绑定成功。",
+    "done_description": "之后你在如流里发给机器人的消息会直接交给对应的智能体。你可以关闭此页面。",
+    "error_title": "绑定未完成",
+    "error_admin_hint": "如果反复失败，请在如流里重新给机器人发消息以获取新的链接。",
+    "error_missing_token": "链接中缺少 token。请在如流里重新向机器人发送消息获取新的链接。",
+    "error_expired": "该链接无效或已过期（链接有效期为 15 分钟）。请重新向机器人获取新链接。",
+    "error_already_bound": "该如流账号已绑定到其他 Multica 用户。如需转移账号，必须先由原用户解绑。",
+    "error_not_member": "当前登录的 Multica 账号不是该工作区的成员。",
+    "error_not_configured": "该 Multica 部署未启用如流集成，没有可绑定的对象。请联系工作区管理员在服务端设置 MULTICA_INFOFLOW_SECRET_KEY。",
+    "error_unknown": "出了点问题，请重试；若持续失败，请联系工作区管理员。"
+  },
   "telegram_bind": {
     "page_title": "绑定你的 Telegram 账号",
     "redeeming": "正在关联账号...",

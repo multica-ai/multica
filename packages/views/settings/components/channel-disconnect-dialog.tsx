@@ -39,6 +39,7 @@ export function ChannelDisconnectDialog({
         slack: api.deleteSlackInstallation.bind(api),
         dingtalk: api.deleteDingTalkInstallation.bind(api),
         wecom: api.deleteWecomInstallation.bind(api),
+        infoflow: api.deleteInfoFlowInstallation.bind(api),
         telegram: api.deleteTelegramInstallation.bind(api),
         weixin: api.deleteWeixinInstallation.bind(api),
       }[channel];

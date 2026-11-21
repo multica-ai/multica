@@ -96,6 +96,22 @@
     "error_not_member": "Has iniciado sesión en una cuenta de Multica que no es miembro de este espacio de trabajo.",
     "error_unknown": "Algo ha ido mal. Inténtalo de nuevo y, si el problema persiste, contacta con el administrador del espacio de trabajo."
   },
+  "infoflow_bind": {
+    "page_title": "Vincula tu cuenta de InfoFlow",
+    "redeeming": "Vinculando tu cuenta…",
+    "needs_auth_description": "Inicia sesión en Multica para completar la vinculación. El token del enlace vincula tu cuenta de InfoFlow con este usuario de Multica, así que primero debes iniciar sesión.",
+    "sign_in": "Iniciar sesión",
+    "done_title": "Ya está vinculada.",
+    "done_description": "Tu próximo mensaje al bot en InfoFlow irá directo al agente. Puedes cerrar esta pestaña.",
+    "error_title": "No se pudo completar la vinculación",
+    "error_admin_hint": "Si sigue fallando, escribe otra vez al bot en InfoFlow para obtener un enlace nuevo.",
+    "error_missing_token": "Al enlace le falta el token. Escribe otra vez al bot en InfoFlow para obtener uno nuevo.",
+    "error_expired": "Este enlace no es válido o ha caducado (los enlaces duran 15 minutos). Escribe otra vez al bot para obtener uno nuevo.",
+    "error_already_bound": "Esta cuenta de InfoFlow ya está vinculada a otro usuario de Multica. Las transferencias de cuenta requieren desvincularla antes explícitamente.",
+    "error_not_member": "Has iniciado sesión con una cuenta de Multica que no es miembro de este espacio de trabajo.",
+    "error_not_configured": "Este despliegue de Multica no tiene la integración de InfoFlow activada, así que no hay nada que vincular. Pide al administrador del espacio de trabajo que configure MULTICA_INFOFLOW_SECRET_KEY en el servidor.",
+    "error_unknown": "Algo salió mal. Inténtalo de nuevo y, si el problema persiste, contacta al administrador del espacio de trabajo."
+  },
   "telegram_bind": {
     "page_title": "Vincula tu cuenta de Telegram",
     "redeeming": "Vinculando tu cuenta…",

@@ -1395,6 +1395,18 @@
     "scan_error_rate_limited": "Too many attempts. Wait a few minutes and try again.",
     "byo_failed_toast": "Could not connect the WeCom bot"
   },
+  "infoflow": {
+    "section_title": "InfoFlow",
+    "page_description": "Chat with agents in InfoFlow (如流) or create issues with /issue. The bot connects over its own WebSocket, so no public callback URL is needed.",
+    "byo_app_key_label": "App Key",
+    "byo_app_secret_label": "App Secret",
+    "byo_conflict_same_workspace": "This InfoFlow app is already connected to another Agent in this workspace. Disconnect it there first, then connect it here.",
+    "byo_conflict_archived_agent": "This InfoFlow app is connected to an archived Agent in this workspace. Restore that Agent, or disconnect its app, before connecting it here.",
+    "byo_conflict_other_workspace": "This InfoFlow app is already connected to a different Multica workspace. Disconnect it there before connecting it here.",
+    "byo_install_failed": "Couldn't connect the InfoFlow bot. Check the App Key and App Secret from the InfoFlow admin console, then try again.",
+    "byo_install_rejected": "Missing App Key or App Secret — fill in both fields from your InfoFlow admin console.",
+    "byo_not_configured": "The InfoFlow integration is not enabled on this server."
+  },
   "telegram": {
     "section_title": "Telegram",
     "page_description": "Chat with agents in Telegram or use /issue to create an issue.",

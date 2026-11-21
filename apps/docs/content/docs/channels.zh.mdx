@@ -1,6 +1,6 @@
 ---
 title: 聊天集成
-description: 把 Multica 智能体接入飞书、Lark、Slack、钉钉、企业微信、Telegram 或微信，在团队已有的聊天工具中使用。
+description: 把 Multica 智能体接入飞书、Lark、Slack、钉钉、企业微信、Telegram、微信或 InfoFlow，在团队已有的聊天工具中使用。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,7 +8,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 接入聊天工具后，团队不用打开 Multica，就能在私聊里向智能体提问、在群聊中 @ 它，或者直接在聊天窗口创建任务。
 
-目前支持飞书/Lark、Slack、钉钉、企业微信、Telegram 和微信。微信只接收扫码连接账号的私聊消息。它们使用相同的会话、身份和执行机制，但安装方式不同。
+目前支持飞书/Lark、Slack、钉钉、企业微信、Telegram、微信和 InfoFlow。微信只接收扫码连接账号的私聊消息。它们使用相同的会话、身份和执行机制，但安装方式不同。
 
 ## 选择平台
 
@@ -22,6 +22,16 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 | 新建 Chat | `/new [消息]` | 私聊：`/new [消息]`；频道/thread：`@Multica /new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` |
 | 清空当前 Chat 上下文 | `/clear [消息]` | 私聊：`/clear [消息]`；频道/thread：`@Multica /clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` |
 | 连接方式 | 平台长连接 | Socket Mode | Stream 模式 | 平台长连接 | `getUpdates` 长轮询 | iLink 长轮询 |
+
+### InfoFlow
+
+InfoFlow 通过在 InfoFlow 管理后台创建的 AppKey 与 AppSecret 安装，Multica 为每个安装保持一条 WebSocket。私聊消息和群里 @ Bot 都能到达智能体，`/issue`、`/new`、`/clear` 的行为与其他渠道一致。
+
+服务端配置对象存储后，图片、语音和文件会作为附件转交给智能体，智能体生成的文件也会发回同一个聊天。Markdown 回复以动态卡片送达；机器人未获得卡片权限时，同样的内容改为以 Markdown 消息发出。
+
+- 会话按 conversation 区分：每个单聊一段，每个群一段。
+- 账号绑定与其他渠道一致，首次发消息时收到绑定链接，每条消息都会重新检查账号绑定与工作区成员身份。
+- 自托管还需要 `MULTICA_INFOFLOW_SECRET_KEY`；未配置时该渠道保持禁用，相关接口返回 `403 infoflow_not_configured`。
 
 新连接目前只开放中国大陆版飞书；已有的国际版 Lark 连接仍可继续使用和管理。
 
@@ -72,6 +82,7 @@ Telegram 会把图片、文件、视频和音频作为附件转交给智能体�
 - 钉钉按 conversation 区分会话；每个单聊或群聊分别延续自己的会话。
 - 企业微信按聊天区分会话；每个单聊或群聊分别延续自己的会话。
 - Telegram 按聊天区分会话；forum 的每个 topic 分别隔离。
+- InfoFlow 按 conversation 区分会话；每个单聊或群聊分别延续自己的会话。
 - 微信按已连接的 Bot 和扫码账号保存会话。
 
 在频道中继续追问时仍需再次 @ Bot。除了上面提到的近期上下文，智能体不会自动读取整个频道的历史。
@@ -80,7 +91,7 @@ Telegram 会把图片、文件、视频和音频作为附件转交给智能体�
 
 微信在扫码时将微信账号绑定到发起连接的 Multica 用户，消息按该用户的工作区权限执行。请用自己的账号扫码，不要分享二维码；其他账号和群聊消息不会被接收。
 
-对于飞书/Lark、Slack、钉钉、企业微信和 Telegram，成员第一次向 Bot 发消息时，会收到一个账号绑定链接。登录 Multica 后，平台账号与当前工作区成员关联。
+对于飞书/Lark、Slack、钉钉、企业微信、Telegram 和 InfoFlow，成员第一次向 Bot 发消息时，会收到一个账号绑定链接。登录 Multica 后，平台账号与当前工作区成员关联。
 
 绑定完成后，Multica 才会运行智能体。每条消息都会重新检查账号绑定和工作区成员身份；离开工作区后，不能继续通过 Bot 使用它。
 
@@ -105,6 +116,7 @@ MULTICA_DINGTALK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_WECOM_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_TELEGRAM_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_WEIXIN_SECRET_KEY=<base64 编码的 32 字节密钥>
+MULTICA_INFOFLOW_SECRET_KEY=<base64 编码的 32 字节密钥>
 ```
 
 这些密钥用于加密保存 Bot 凭据。生成、保存和轮换方法见[环境变量](/environment-variables)。Multica Cloud 已完成这项配置。

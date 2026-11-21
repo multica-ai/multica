@@ -317,12 +317,13 @@
     },
     {
       "label": "Chat channel account-bind routes",
-      "description": "`/lark/bind`, `/slack/bind`, `/telegram/bind`, and `/wecom/bind` are global pre-workspace routes where a member links their chat identity, the same as `/dingtalk/bind`. Reserve the prefixes so a workspace slug cannot shadow them.",
+      "description": "`/lark/bind`, `/slack/bind`, `/telegram/bind`, `/wecom/bind`, and `/infoflow/bind` are global pre-workspace routes where a member links their chat identity, the same as `/dingtalk/bind`. Reserve the prefixes so a workspace slug cannot shadow them.",
       "slugs": [
         "lark",
         "slack",
         "telegram",
-        "wecom"
+        "wecom",
+        "infoflow"
       ]
     },
     {

@@ -103,6 +103,22 @@
     "error_not_member": "로그인한 Multica 계정이 이 워크스페이스의 멤버가 아니에요.",
     "error_unknown": "문제가 발생했어요. 다시 시도해 보고, 계속되면 워크스페이스 관리자에게 문의하세요."
   },
+  "infoflow_bind": {
+    "page_title": "InfoFlow 계정 연결",
+    "redeeming": "계정을 연결하는 중…",
+    "needs_auth_description": "연결을 완료하려면 Multica에 로그인하세요. 링크의 토큰은 InfoFlow 계정을 이 Multica 사용자에게 연결하므로 먼저 로그인해야 합니다.",
+    "sign_in": "로그인",
+    "done_title": "연결되었습니다.",
+    "done_description": "이제 InfoFlow에서 봇에게 보낸 메시지는 에이전트에게 바로 전달됩니다. 이 탭은 닫아도 됩니다.",
+    "error_title": "연결을 완료할 수 없습니다",
+    "error_admin_hint": "계속 실패하면 InfoFlow에서 봇에게 다시 메시지를 보내 새 링크를 받으세요.",
+    "error_missing_token": "링크에 토큰이 없습니다. InfoFlow에서 봇에게 다시 메시지를 보내 새 링크를 받으세요.",
+    "error_expired": "이 링크가 유효하지 않거나 만료되었습니다(링크는 15분간 유효). 봇에게 다시 메시지를 보내 새 링크를 받으세요.",
+    "error_already_bound": "이 InfoFlow 계정은 이미 다른 Multica 사용자에게 연결되어 있습니다. 계정 이전은 명시적인 연결 해제 후에만 가능합니다.",
+    "error_not_member": "로그인한 Multica 계정이 이 워크스페이스의 멤버가 아닙니다.",
+    "error_not_configured": "이 Multica 배포에서는 InfoFlow 연동이 활성화되어 있지 않아 연결할 대상이 없습니다. 워크스페이스 관리자에게 서버의 MULTICA_INFOFLOW_SECRET_KEY 설정을 요청하세요.",
+    "error_unknown": "문제가 발생했습니다. 다시 시도하고 계속 실패하면 워크스페이스 관리자에게 문의하세요."
+  },
   "telegram_bind": {
     "page_title": "Telegram 계정 연결",
     "redeeming": "계정을 연결하는 중…",

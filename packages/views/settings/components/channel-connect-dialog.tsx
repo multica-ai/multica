@@ -319,6 +319,8 @@ function ChannelCredentials({
     botId: "",
     secret: "",
     botName: "",
+    appKey: "",
+    appSecret: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -368,13 +370,25 @@ function ChannelCredentials({
                 optional: true,
               },
             ]
-          : [
-              {
-                key: "token",
-                label: t(($) => $.telegram.bot_token_label),
-                secret: true,
-              },
-            ];
+          : channel === "infoflow"
+            ? [
+                {
+                  key: "appKey",
+                  label: t(($) => $.infoflow.byo_app_key_label),
+                },
+                {
+                  key: "appSecret",
+                  label: t(($) => $.infoflow.byo_app_secret_label),
+                  secret: true,
+                },
+              ]
+            : [
+                {
+                  key: "token",
+                  label: t(($) => $.telegram.bot_token_label),
+                  secret: true,
+                },
+              ];
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -403,9 +417,14 @@ function ChannelCredentials({
                   secret: v.secret,
                   bot_name: v.botName || undefined,
                 })
-              : await api.registerTelegramBot(wsId, agentId, {
-                  bot_token: v.token,
-                });
+              : channel === "infoflow"
+                ? await api.registerInfoFlowBYO(wsId, agentId, {
+                    app_key: v.appKey,
+                    app_secret: v.appSecret,
+                  })
+                : await api.registerTelegramBot(wsId, agentId, {
+                    bot_token: v.token,
+                  });
       if (!installation.id || installation.status !== "active")
         throw new Error(t(($) => $.channels.connect_failed));
       await qc.invalidateQueries({
@@ -432,8 +451,25 @@ function ChannelCredentials({
         ),
         wecom_install_failed: t(($) => $.wecom.byo_install_failed),
       };
+      const infoflowErrors: Record<string, string> = {
+        infoflow_app_owned_by_same_workspace: t(
+          ($) => $.infoflow.byo_conflict_same_workspace,
+        ),
+        infoflow_app_owned_by_archived_agent: t(
+          ($) => $.infoflow.byo_conflict_archived_agent,
+        ),
+        infoflow_app_owned_by_another_workspace: t(
+          ($) => $.infoflow.byo_conflict_other_workspace,
+        ),
+        infoflow_install_rejected: t(
+          ($) => $.infoflow.byo_install_rejected,
+        ),
+        infoflow_not_configured: t(
+          ($) => $.infoflow.byo_not_configured,
+        ),
+      };
       setError(
-        (code && wecomErrors[code]) ||
+        (code && (infoflowErrors[code] ?? wecomErrors[code])) ||
           (reason instanceof Error
             ? reason.message
             : t(($) => $.channels.connect_failed)),

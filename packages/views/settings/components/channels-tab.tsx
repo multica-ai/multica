@@ -171,7 +171,8 @@ export function ChannelsTab() {
           <div className="flex flex-wrap justify-between gap-2 px-4 py-3 text-caption">
             <span>
               {t(($) => $.lark.section_title)},{" "}
-              {t(($) => $.dingtalk.section_title)}
+              {t(($) => $.dingtalk.section_title)},{" "}
+              {t(($) => $.infoflow.section_title)}
             </span>
             <span className="text-muted-foreground">
               {t(($) => $.channels.owner_or_admin)}
