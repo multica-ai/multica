@@ -41,19 +41,13 @@ The invitee accepts by logging in with that email — no prior signup is needed.
 
 The invitation link appears only in the email; there is no place in the product to view or copy it. If the email fails to send, the invitation record still exists — revoke it and send a new one.
 
-When you need a link you can pass along yourself, generate one under **Share links** in **Settings → Members** by choosing a role and an expiry. Anyone with the link can join with that role until it expires or is revoked, as long as the workspace has a free member slot (see below).
-
-### Member limit
-
-On Multica Cloud, a workspace on the Free plan can have up to 5 members. Members and pending invitations each take a slot; guests take none. While the limit applies, a new invitation, an accepted invitation or a share-link join that would go past it is refused until a slot frees up (an invitation is revoked or a member removed) or the workspace upgrades. Existing members are never removed. When the workspace is full, admins see **Upgrade and invite** in the invite dialog: once the payment goes through, **Settings → Billing** offers to send the held invitation. On Pro and Business each member takes a paid seat. Self-hosted workspaces have no member limit.
+When you need a link you can pass along yourself, generate one under **Share links** in **Settings → Members** by choosing a role and an expiry. Anyone with the link can join with that role until it expires or is revoked.
 
 ## Guests
 
-A guest sees only the projects shared with it. In those projects it can read issues, comment, react, and follow them; it cannot create or edit issues, run or mention agents, or open workspace settings, and it sees no other projects, agents, autopilots, or runtimes. Guests are free: they take no paid seat and no member slot.
+A guest sees only the projects shared with it. In those projects it can read issues, comment, react, and follow them; it cannot create or edit issues, run or mention agents, or open workspace settings, and it sees no other projects, agents, autopilots, or runtimes.
 
-`owner` and `admin` invite a guest by choosing **Guest** in the invite dialog and picking the projects it can see. From a member's actions menu they can make a member a guest, which frees its seat and takes back its agents, autopilots, and runtime access; make a guest a member, which takes a seat; or change a guest's projects with **Manage accessible projects**. Like everything else about a private project, a guest's access to one is shown and changed only by people on that project's member list; changing a guest's projects leaves its access to private projects you are not on as it is.
-
-On Multica Cloud, guests are included in Pro and Business. When a trial ends or a workspace moves to Free, existing guests keep their access and can still be removed, narrowed, or made members, but no new guests can be added. Self-hosted workspaces have guests.
+`owner` and `admin` invite a guest by choosing **Guest** in the invite dialog and picking the projects it can see. From a member's actions menu they can make a member a guest, which takes back its agents, autopilots, and runtime access; make a guest a member; or change a guest's projects with **Manage accessible projects**. Like everything else about a private project, a guest's access to one is shown and changed only by people on that project's member list; changing a guest's projects leaves its access to private projects you are not on as it is.
 
 ## Change roles
 

@@ -104,8 +104,6 @@ multica project member add <project-id> carol@example.com
 
 Switching a private project back to **Entire workspace** makes the project and its issues, comments, and attachments visible to members with the `owner`, `admin`, or `member` role. Guests see the project only if it is shared with them. The app asks for confirmation first; `multica project update --visibility workspace` applies the change immediately.
 
-If your workspace plan restricts private projects, existing private projects keep their visibility and member lists. The restriction blocks creating a private project, making a project private, and adding people to a private project, including by naming a new member as lead. Members with permission can still edit project details, remove members, switch access to **Entire workspace**, and archive or delete the project. The workspace owner can still join through [Workspace owner recovery](#workspace-owner-recovery).
-
 ### Workspace owner recovery
 
 A private project may have no `owner` or `admin` on its list, or no members left at all. The workspace `owner` can step in from **Settings → General → Private projects**, a section only owners see (admins do not). It lists every private project with its name and members, and nothing else: issues, comments, and attachments stay hidden until you join.
