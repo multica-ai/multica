@@ -951,30 +951,45 @@ assert_slot_identity "DATABASE_URL points at database multica" 283 18363 multica
 
 oneline_bin="$tmp_dir/oneline-bin"
 mkdir -p "$oneline_bin"
-printf '#!/usr/bin/env bash\nexit 1\n' > "$oneline_bin/go"
+cat > "$oneline_bin/go" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${GO_ENV_LOG:-}" ] || env > "$GO_ENV_LOG"
+exit 1
+EOF
 chmod +x "$oneline_bin/go"
 
-# Runs `up` in a fresh checkout whose .env holds one flag, with the values
-# `make` exports. The stub `go` fails the migration, which comes right after
-# the environment is registered, so nothing is started.
+# Runs `up` in a fresh checkout whose .env holds one flag (plus ONELINE_ENV),
+# with the values `make` exports. The stub `go` fails the migration, which comes
+# right after the environment is registered, so nothing is started; with
+# GO_ENV_LOG set it records the environment the api would have inherited.
+# ONELINE_WORKTREE=1 makes it a worktree with no env file, so `up` generates
+# .env.worktree the way a fresh worktree does.
 oneline_up() (
   local checkout=$1
   shift
   rm -rf "$checkout"
-  mkdir -p "$checkout/scripts"
+  mkdir -p "$checkout/scripts" "$checkout/server"
   cp "$root_dir/scripts/dev-env.sh" "$root_dir/scripts/local-env.sh" "$checkout/scripts/"
-  printf 'FF_DOCS_V1=true\n' > "$checkout/.env"
+  if [ "${ONELINE_WORKTREE:-0}" = 1 ]; then
+    cp "$root_dir/scripts/init-worktree-env.sh" "$checkout/scripts/"
+    printf 'gitdir: %s/.git-dir\n' "$checkout" > "$checkout/.git"
+    cd "$checkout"
+  else
+    printf 'FF_DOCS_V1=true\n%s' "${ONELINE_ENV:-}" > "$checkout/.env"
+  fi
   export MULTICA_DEV_HOME="$tmp_dir/dev-$(basename "$checkout")" MULTICA_DEV_TMPDIR="$tmp_dir/dev-tmp"
   export PATH="$oneline_bin:$PATH"
-  export PORT=8080 FRONTEND_PORT=3000 POSTGRES_DB=multica MULTICA_PUBLIC_URL=http://localhost:8080
+  export PORT=8080 FRONTEND_PORT=3000 FRONTEND_ORIGIN=http://localhost:3000 POSTGRES_DB=multica
+  export MULTICA_PUBLIC_URL=http://localhost:8080 LOCAL_UPLOAD_BASE_URL=http://localhost:8080 GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
   export DATABASE_URL="$(slot_url multica)"
   for assignment in "$@"; do export "${assignment?}"; done
   bash "$checkout/scripts/dev-env.sh" up --components api --ephemeral
 )
 
 oneline_checkout="$tmp_dir/oneline-checkout"
+oneline_env_log="$tmp_dir/oneline-go.env"
 status=0
-oneline_up "$oneline_checkout" > "$out" 2>&1 || status=$?
+oneline_up "$oneline_checkout" GO_ENV_LOG="$oneline_env_log" > "$out" 2>&1 || status=$?
 [ "$status" -ne 0 ] && grep -Fq "Migrations failed" "$out" \
   || { sed 's/^/  /' "$out" >&2; fail "up with a one-line .env did not register and reach the migration"; }
 (
@@ -984,8 +999,16 @@ oneline_up "$oneline_checkout" > "$out" 2>&1 || status=$?
   [ "$DB_NAME" = "multica_oneline_checkout_$OFFSET" ] || fail "one-line .env registered database $DB_NAME"
   [ "$DATABASE_URL" = "$(slot_url "$DB_NAME")" ] || fail "one-line .env registered DATABASE_URL $DATABASE_URL"
   for line in FF_DOCS_V1=true "PORT=$BACKEND_PORT" "FRONTEND_PORT=$FRONTEND_PORT" "POSTGRES_DB=$DB_NAME" \
-    "DATABASE_URL=$DATABASE_URL" "MULTICA_PUBLIC_URL=http://localhost:$BACKEND_PORT"; do
+    "DATABASE_URL=$DATABASE_URL" "MULTICA_PUBLIC_URL=http://localhost:$BACKEND_PORT" \
+    "LOCAL_UPLOAD_BASE_URL=http://localhost:$BACKEND_PORT" \
+    "GOOGLE_REDIRECT_URI=http://localhost:$FRONTEND_PORT/auth/callback"; do
     grep -Fqx "$line" "$oneline_checkout/.env" || fail "the rewritten .env lacks the line $line"
+  done
+  # `make` exported the :8080 and :3000 values before the slot existed; the run
+  # that allocates the slot must already hand the api the slot's URLs.
+  for line in "PORT=$BACKEND_PORT" "LOCAL_UPLOAD_BASE_URL=http://localhost:$BACKEND_PORT" \
+    "GOOGLE_REDIRECT_URI=http://localhost:$FRONTEND_PORT/auth/callback"; do
+    grep -Fqx "$line" "$oneline_env_log" || fail "the first up launched with $(grep "^${line%%=*}=" "$oneline_env_log"), want $line"
   done
   psql_log="$tmp_dir/psql-oneline.log"
   MULTICA_DEV_HOME="$tmp_dir/dev-oneline-checkout" PSQL_LOG="$psql_log" \
@@ -1003,6 +1026,65 @@ require_contains "$out" "still resolves to: PORT=8080"
 if ls "$tmp_dir"/dev-override-checkout/envs/*/manifest.env >/dev/null 2>&1; then
   fail "up wrote a manifest although the slot did not take effect"
 fi
+
+# A localhost upload or redirect URL follows the slot; one that names another
+# host is what someone configured, and stays as written like a ${...} line that
+# already resolves to the slot.
+assert_local_url() (
+  local label=$1 key=$2 env_lines=$3 shell_value=$4 want=$5 want_line=${6:-}
+  local checkout="$tmp_dir/local-url-$label" log="$tmp_dir/local-url-$label.env" backend frontend
+  local args=("GO_ENV_LOG=$log")
+  [ -z "$shell_value" ] || args+=("$key=$shell_value")
+  ONELINE_ENV="$env_lines" oneline_up "$checkout" "${args[@]}" > "$out" 2>&1 || true
+  grep -Fq "Migrations failed" "$out" || { sed 's/^/  /' "$out" >&2; fail "$label: up did not reach the migration"; }
+  # shellcheck disable=SC1090
+  backend="$(. "$tmp_dir/dev-local-url-$label"/envs/*/manifest.env && printf '%s' "$BACKEND_PORT")"
+  frontend=$((backend - 18080 + 13000))
+  want="${want//@BACKEND@/$backend}"
+  want="${want//@FRONTEND@/$frontend}"
+  grep -Fqx "$key=$want" "$log" || fail "$label: the api got $(grep "^$key=" "$log"), want $key=$want"
+  case "$want_line" in
+    "") ;;
+    -) ! grep -q "^$key=" "$checkout/.env" || fail "$label: up wrote $key into .env" ;;
+    *) grep -Fqx "$want_line" "$checkout/.env" || fail "$label: .env lost the line $want_line" ;;
+  esac
+)
+assert_local_url file-localhost LOCAL_UPLOAD_BASE_URL $'LOCAL_UPLOAD_BASE_URL=http://localhost:8080\n' "" \
+  "http://localhost:@BACKEND@"
+assert_local_url file-quoted-loopback LOCAL_UPLOAD_BASE_URL $'LOCAL_UPLOAD_BASE_URL="http://127.0.0.1:8080/"\n' "" \
+  "http://localhost:@BACKEND@"
+assert_local_url file-remote LOCAL_UPLOAD_BASE_URL $'LOCAL_UPLOAD_BASE_URL=https://files.example.test\n' "" \
+  "https://files.example.test" "LOCAL_UPLOAD_BASE_URL=https://files.example.test"
+assert_local_url file-localhost-path LOCAL_UPLOAD_BASE_URL $'LOCAL_UPLOAD_BASE_URL=http://localhost:9000/files\n' "" \
+  "http://localhost:9000/files" "LOCAL_UPLOAD_BASE_URL=http://localhost:9000/files"
+assert_local_url shell-remote LOCAL_UPLOAD_BASE_URL "" "https://cdn.example.test" "https://cdn.example.test" -
+# shellcheck disable=SC2016
+assert_local_url file-derived GOOGLE_REDIRECT_URI \
+  $'FRONTEND_ORIGIN=http://localhost:${FRONTEND_PORT}\nGOOGLE_REDIRECT_URI=${FRONTEND_ORIGIN}/auth/callback\n' "" \
+  "http://localhost:@FRONTEND@/auth/callback" 'GOOGLE_REDIRECT_URI=${FRONTEND_ORIGIN}/auth/callback'
+# FRONTEND_ORIGIN is appended below this line, so it still expands to make's :3000.
+# shellcheck disable=SC2016
+assert_local_url file-derived-early GOOGLE_REDIRECT_URI $'GOOGLE_REDIRECT_URI=${FRONTEND_ORIGIN}/auth/callback\n' "" \
+  "http://localhost:@FRONTEND@/auth/callback"
+
+# A fresh worktree's generated .env.worktree already names the slot, so `up`
+# adopts it without rewriting anything; make's :8080 upload URL must still go.
+worktree_checkout="$tmp_dir/worktree-checkout"
+worktree_env_log="$tmp_dir/worktree-go.env"
+ONELINE_WORKTREE=1 oneline_up "$worktree_checkout" GO_ENV_LOG="$worktree_env_log" > "$out" 2>&1 || true
+grep -Fq "Migrations failed" "$out" || { sed 's/^/  /' "$out" >&2; fail "worktree up did not reach the migration"; }
+[ -f "$worktree_checkout/.env.worktree" ] || fail "worktree up did not generate .env.worktree"
+(
+  # shellcheck disable=SC1090
+  . "$tmp_dir"/dev-worktree-checkout/envs/*/manifest.env
+  for line in "PORT=$BACKEND_PORT" "LOCAL_UPLOAD_BASE_URL=http://localhost:$BACKEND_PORT" \
+    "GOOGLE_REDIRECT_URI=http://localhost:$FRONTEND_PORT/auth/callback"; do
+    grep -Fqx "$line" "$worktree_env_log" \
+      || fail "the first worktree up launched with $(grep "^${line%%=*}=" "$worktree_env_log"), want $line"
+  done
+  grep -Fqx "LOCAL_UPLOAD_BASE_URL=http://localhost:$BACKEND_PORT" "$worktree_checkout/.env.worktree" \
+    || fail "the worktree .env.worktree does not pin LOCAL_UPLOAD_BASE_URL to the slot"
+)
 
 # A manifest that names the shared backend and database is never acted on:
 # destroy keeps `multica`, Desktop's 8080 profile and its daemon, and the
