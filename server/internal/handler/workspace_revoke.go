@@ -83,6 +83,12 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 		return empty, err
 	}
 
+	// Removing or demoting an owner must leave another one, counted under the
+	// owner row locks so a concurrent change to another owner is seen.
+	if err := lockOtherOwner(ctx, qtx, workspaceID, memberID); err != nil {
+		return empty, err
+	}
+
 	// A demotion re-checks the role under the row lock: a concurrent role
 	// change that committed first wins, and this one is refused.
 	if demote {
