@@ -42,7 +42,7 @@ trap 'rm -f "$tmp_env"; rm -rf "$tmp_dir"' EXIT
 sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
 printf '\nBACKEND_PORT=9100\nSMTP_FROM_EMAIL=multica@example.com\n' >>"$tmp_env"
 printf 'MULTICA_LLM_API_KEY=llm-key-from-env\nMULTICA_LLM_BASE_URL=http://gateway.example/v1\nMULTICA_LLM_DEFAULT_MODEL=model-from-env\nMULTICA_LLM_MAX_RETRIES=3\n' >>"$tmp_env"
-printf 'DATABASE_REPLICA_URL=postgres://reader:secret@replica.example.com:5432/multica?sslmode=require\nDATABASE_REPLICA_MAX_CONNS=12\nDATABASE_REPLICA_MIN_CONNS=1\n' >>"$tmp_env"
+printf 'DATABASE_REPLICA_URL=postgres://reader:secret@replica.example.com:5432/multica?sslmode=require\nDATABASE_REPLICA_MAX_CONNS=12\nDATABASE_REPLICA_MIN_CONNS=1\nDATABASE_MAX_CONNS=50\n' >>"$tmp_env"
 
 config="$(
   docker compose \
@@ -135,26 +135,128 @@ node -e '
 # The backend environment is an explicit allowlist, so a variable documented in
 # .env.example but missing here silently never reaches the container: the
 # operator configures it, the server never sees it, and nothing reports the gap.
-# Assert the values actually land, then assert the allowlist has not drifted
-# behind the documentation the next time an LLM knob is added.
+# Assert some values actually land, then hold the allowlist to one rule: every
+# .env.example variable the server reads is passed to the backend, or is listed
+# in not_passed_to_backend below with the reason it is not.
 require_config "$config" 'MULTICA_LLM_API_KEY: llm-key-from-env'
 require_config "$config" 'MULTICA_LLM_BASE_URL: http://gateway.example/v1'
 require_config "$config" 'MULTICA_LLM_DEFAULT_MODEL: model-from-env'
 require_config "$config" 'MULTICA_LLM_MAX_RETRIES: "3"'
+require_config "$config" 'DATABASE_MAX_CONNS: "50"'
+require_config "$config" 'DATABASE_MIN_CONNS: ""'
 
-while IFS= read -r llm_var; do
-  if ! grep -Eq "^[[:space:]]+${llm_var}: \\\$\{${llm_var}:-" docker-compose.selfhost.yml; then
-    echo "$llm_var is documented in .env.example but not mapped into the backend"
-    echo "service in docker-compose.selfhost.yml, so self-hosted deployments cannot set it."
+# "Undecided" entries are tuning knobs the self-host stack does not offer yet.
+# Whether it should is an open product question, not an oversight; moving one
+# into the backend environment is the whole change once that is settled.
+not_passed_to_backend="$(
+  cat <<'EOF'
+ANALYTICS_DISABLED                   Cloud product analytics (PostHog); self-host ships no key and opts out of telemetry with DO_NOT_TRACK
+ANALYTICS_ENVIRONMENT                Cloud product analytics (PostHog)
+POSTHOG_API_KEY                      Cloud product analytics (PostHog)
+POSTHOG_HOST                         Cloud product analytics (PostHog)
+FF_BILLING_WORKSPACE_SUBSCRIPTIONS   needs multica-cloud billing, which self-host does not run
+CLOUDFRONT_PRIVATE_KEY_SECRET        Cloud reads the key from AWS Secrets Manager; it outranks CLOUDFRONT_PRIVATE_KEY and .env.example ships a default name, so passing it would break the key self-host does pass
+MULTICA_FEATURE_FLAGS_FILE           a path inside the container: set it in a compose override together with the mount; FF_ variables cover single flags
+LOCAL_UPLOAD_DIR                     uploads must stay on the backend_uploads volume mounted at /app/data/uploads
+MULTICA_SERVER_URL                   the server only writes this name into agent setup commands; the daemon sets it
+MULTICA_WORKSPACE_ID                 the server only writes this name into agent setup commands; the daemon sets it
+CHANNEL_WS_LEASE_BACKEND             Redis channel leases are for multi-replica deployments; compose runs one backend on the PostgreSQL lease backend
+CHANNEL_WS_LEASE_ERROR_RETRY_INTERVAL  Redis channel lease timing; see CHANNEL_WS_LEASE_BACKEND
+CHANNEL_WS_LEASE_EXPIRY_SAFETY_MARGIN  Redis channel lease timing; see CHANNEL_WS_LEASE_BACKEND
+CHANNEL_WS_LEASE_NAMESPACE           Redis channel lease namespace; see CHANNEL_WS_LEASE_BACKEND
+CHANNEL_WS_LEASE_POLL_INTERVAL       Redis channel lease timing; see CHANNEL_WS_LEASE_BACKEND
+CHANNEL_WS_LEASE_RENEW_INTERVAL      Redis channel lease timing; see CHANNEL_WS_LEASE_BACKEND
+CHANNEL_WS_LEASE_TTL                 Redis channel lease timing; see CHANNEL_WS_LEASE_BACKEND
+INBOX_READ_CONCURRENCY               undecided: inbox read budget
+INBOX_READ_STATEMENT_TIMEOUT_MS      undecided: inbox read budget
+INBOX_READ_TIMEOUT_MS                undecided: inbox read budget
+RATE_LIMIT_AUTH                      undecided: auth rate limit
+RATE_LIMIT_AUTH_VERIFY               undecided: auth rate limit
+RATE_LIMIT_INVITATION_ACTOR_10M      undecided: invitation rate limit
+RATE_LIMIT_INVITATION_RECIPIENT_24H  undecided: invitation rate limit
+RATE_LIMIT_INVITATION_WORKSPACE_24H  undecided: invitation rate limit
+REALTIME_RELAY_MAINTENANCE_INTERVAL  undecided: realtime relay retention
+REALTIME_RELAY_REPLAY_GRACE          undecided: realtime relay retention
+REALTIME_RELAY_STREAM_MAXLEN         undecided: realtime relay retention
+REALTIME_RELAY_STREAM_TTL            undecided: realtime relay retention
+REALTIME_RELAY_STREAM_TTL_ENABLED    undecided: realtime relay retention
+REALTIME_RELAY_TRIM_HORIZON          undecided: realtime relay retention
+REALTIME_RELAY_TTL_REFRESH_INTERVAL  undecided: realtime relay retention
+EOF
+)"
+
+# "Read by the server" means the name appears as a string literal in non-test Go
+# code outside the daemon and the CLI, which run on operators' machines rather
+# than in the backend container. FF_ flags count too: the server reads them by
+# prefix, never by name.
+documented_vars="$tmp_dir/documented-vars"
+grep -oE '^(# )?[A-Z][A-Z0-9_]*=' .env.example | sed -E 's/^# //;s/=$//' | LC_ALL=C sort -u >"$documented_vars"
+server_literals="$tmp_dir/server-literals"
+grep -roE --include='*.go' --exclude='*_test.go' '"[A-Z][A-Z0-9_]*"' server |
+  grep -vE '^server/(cmd/multica|cmd/qoder-runtime|internal/daemon)/' |
+  sed -E 's/^[^:]*:"//;s/"$//' | LC_ALL=C sort -u >"$server_literals"
+if ! grep -Fq 'EnvOverridePrefix = "FF_"' server/pkg/featureflag/config.go; then
+  echo "server/pkg/featureflag no longer reads FF_ overrides by that prefix; this check"
+  echo "assumes it does and needs updating."
+  exit 1
+fi
+server_read_vars="$tmp_dir/server-read-vars"
+{
+  LC_ALL=C comm -12 "$documented_vars" "$server_literals"
+  grep '^FF_' "$documented_vars" || true
+} | LC_ALL=C sort -u >"$server_read_vars"
+for anchor in DATABASE_URL JWT_SECRET FF_DOCS_V1; do
+  if ! grep -qx "$anchor" "$server_read_vars"; then
+    echo "The server-read scan no longer finds $anchor; this check needs updating."
     exit 1
   fi
-done < <(grep -oE '^MULTICA_LLM_[A-Z_]+' .env.example)
+done
+backend_vars="$tmp_dir/backend-vars"
+docker compose --env-file "$tmp_env" -f docker-compose.selfhost.yml config --format json |
+  node -e '
+let raw = "";
+process.stdin.on("data", (chunk) => (raw += chunk));
+process.stdin.on("end", () => {
+  console.log(Object.keys(JSON.parse(raw).services.backend.environment).join("\n"));
+});
+' | LC_ALL=C sort -u >"$backend_vars"
+excluded_vars="$tmp_dir/excluded-vars"
+awk 'NF { print $1 }' <<<"$not_passed_to_backend" | LC_ALL=C sort >"$excluded_vars"
 
-# The same drift for integration encryption keys, keyed on the server rather
-# than on .env.example: each secretbox.LoadKey() gates an integration that
-# stays silently disabled when its key never reaches the container. Telegram's
-# key was once missing from both files, so a check that trusted the
-# documentation alone would not have caught it.
+duplicated="$(uniq -d "$excluded_vars")"
+if [ -n "$duplicated" ]; then
+  echo "Listed more than once in not_passed_to_backend:"
+  sed 's/^/  /' <<<"$duplicated"
+  exit 1
+fi
+unpassed="$(LC_ALL=C comm -23 "$server_read_vars" "$backend_vars" | LC_ALL=C comm -23 - "$excluded_vars")"
+if [ -n "$unpassed" ]; then
+  echo "Read by the server and documented in .env.example, but docker-compose.selfhost.yml"
+  echo "does not pass them to the backend, so setting them in .env does nothing:"
+  sed 's/^/  /' <<<"$unpassed"
+  echo "Map each one in the backend environment (an FF_ flag as a bare \`FF_X:\`, so an"
+  echo "unset flag is not passed at all), or add it to not_passed_to_backend in"
+  echo "scripts/selfhost-config.test.sh with the reason it must not be passed."
+  exit 1
+fi
+contradicted="$(LC_ALL=C comm -12 "$excluded_vars" "$backend_vars")"
+if [ -n "$contradicted" ]; then
+  echo "Listed in not_passed_to_backend, but passed to the backend anyway:"
+  sed 's/^/  /' <<<"$contradicted"
+  exit 1
+fi
+stale="$(LC_ALL=C comm -23 "$excluded_vars" "$server_read_vars")"
+if [ -n "$stale" ]; then
+  echo "Listed in not_passed_to_backend, but no longer both documented in .env.example"
+  echo "and read by the server; remove them from the list:"
+  sed 's/^/  /' <<<"$stale"
+  exit 1
+fi
+
+# Integration encryption keys are also checked from the server's side: each
+# secretbox.LoadKey() gates an integration that stays silently disabled when its
+# key is missing, and Telegram's key was once missing from .env.example as well
+# as from the compose file, which the check above cannot see.
 secret_keys="$(
   grep -rhoE --include='*.go' --exclude='*_test.go' 'secretbox\.LoadKey\("[A-Z0-9_]+"\)' server |
     sed -E 's/.*"([A-Z0-9_]+)".*/\1/' | sort -u
@@ -165,39 +267,11 @@ if [ -z "$secret_keys" ]; then
   exit 1
 fi
 while IFS= read -r secret_key; do
-  if ! grep -Eq "^[[:space:]]+${secret_key}: \\\$\{${secret_key}:-" docker-compose.selfhost.yml; then
-    echo "$secret_key is loaded by the server but not mapped into the backend service"
-    echo "in docker-compose.selfhost.yml, so self-hosted deployments cannot enable it."
-    exit 1
-  fi
-  if ! grep -Eq "^${secret_key}=" .env.example; then
+  if ! grep -qx "$secret_key" "$documented_vars"; then
     echo "$secret_key is loaded by the server but missing from .env.example."
     exit 1
   fi
 done <<<"$secret_keys"
-
-# The same drift for feature flags: each FF_ variable .env.example tells an
-# operator to set must be mapped into the backend, without a value so it is
-# passed only when set. Flags that only matter to a multica-cloud deployment
-# are left out on purpose.
-cloud_only_flags=(FF_BILLING_WORKSPACE_SUBSCRIPTIONS)
-documented_flags="$(grep -oE '^(# )?FF_[A-Z0-9_]+=' .env.example | sed -E 's/^# //;s/=$//' | sort -u)" || true
-if [ -z "$documented_flags" ]; then
-  echo "Found no FF_ variables in .env.example; this check no longer sees the"
-  echo "documented feature flags and needs updating."
-  exit 1
-fi
-while IFS= read -r flag; do
-  if [[ " ${cloud_only_flags[*]} " == *" $flag "* ]]; then
-    continue
-  fi
-  if ! grep -Eq "^[[:space:]]+${flag}:[[:space:]]*$" docker-compose.selfhost.yml; then
-    echo "$flag is documented in .env.example but not mapped into the backend service"
-    echo "in docker-compose.selfhost.yml as \`$flag:\`, so self-hosted deployments cannot"
-    echo "set it. If it only matters to multica-cloud, add it to cloud_only_flags here."
-    exit 1
-  fi
-done <<<"$documented_flags"
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then
@@ -261,6 +335,9 @@ printf '%s\n' \
   '.PHONY: print-public-url' \
   'print-public-url:' \
   '	@printf "%s\n" "$$MULTICA_PUBLIC_URL"' \
+  '.PHONY: print-upload-base-url' \
+  'print-upload-base-url:' \
+  '	@printf "%s\n" "$$LOCAL_UPLOAD_BASE_URL"' \
   >"$make_env_probe"
 
 resolve_make_public_url() {
@@ -280,6 +357,11 @@ require_env \
   "http://localhost:${worktree_backend_port}"
 require_env \
   "$(resolve_make_public_url "$old_worktree_env")" \
+  "http://localhost:${worktree_backend_port}"
+# Local dev still gets the derived upload base; the self-host recipes below
+# must not (see the run_recipe upload checks).
+require_env \
+  "$(make --no-print-directory -s -f Makefile -f "$make_env_probe" ENV_FILE="$old_worktree_env" print-upload-base-url)" \
   "http://localhost:${worktree_backend_port}"
 
 explicit_worktree_env="$tmp_dir/.env.worktree.explicit"
@@ -346,6 +428,7 @@ process.stdin.on("end", () => {
     console.log(service + "=" + config.services[service].ports[0].published);
   }
   console.log("postgres_password=" + config.services.postgres.environment.POSTGRES_PASSWORD);
+  console.log("local_upload_base_url=" + (config.services.backend.environment.LOCAL_UPLOAD_BASE_URL ?? ""));
 });
 ' >>"$STUB_PUBLISHED_RECORD"
   ;;
@@ -474,6 +557,26 @@ fi
 # selfhost-build resolves the port the same way.
 run_recipe selfhost-build 's/^PORT=8080/PORT=9400/' '' '' >/dev/null
 require_consistent 'selfhost-build with PORT edited' 9400
+
+# The Makefile derives LOCAL_UPLOAD_BASE_URL for local dev. Compose passes it to
+# the backend, so the self-host recipes must leave it unset unless .env sets it:
+# a localhost base would put http://localhost:8080 into every stored upload URL
+# and make the backend report "localhost" as its CDN domain.
+recorded_upload_base() {
+  grep '^local_upload_base_url=' "$record" | tail -n 1 | cut -d= -f2-
+}
+for upload_target in selfhost selfhost-build; do
+  run_recipe "$upload_target" '' '' '' >/dev/null
+  if [ "$(recorded_upload_base)" != "" ]; then
+    echo "[$upload_target] the backend received LOCAL_UPLOAD_BASE_URL=$(recorded_upload_base) that .env never set"
+    exit 1
+  fi
+  run_recipe "$upload_target" 's|^# LOCAL_UPLOAD_BASE_URL=.*|LOCAL_UPLOAD_BASE_URL=https://files.example.com|' '' '' >/dev/null
+  if [ "$(recorded_upload_base)" != "https://files.example.com" ]; then
+    echo "[$upload_target] LOCAL_UPLOAD_BASE_URL set in .env did not reach the backend, got: $(recorded_upload_base)"
+    exit 1
+  fi
+done
 
 # Every alias at once: BACKEND_PORT wins, and the probe follows it.
 run_recipe selfhost \
