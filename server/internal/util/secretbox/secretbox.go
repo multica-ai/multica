@@ -19,9 +19,11 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // KeySize is the required master-key length in bytes (AES-256).
@@ -29,6 +31,11 @@ const KeySize = 32
 
 // ErrInvalidKey is returned by New when the key length is not KeySize.
 var ErrInvalidKey = errors.New("secretbox: key must be 32 bytes")
+
+// ErrKeyNotSet is returned by LoadKey when the requested environment variable
+// is empty or not set. Callers can use errors.Is(err, ErrKeyNotSet) to
+// distinguish an intentionally unconfigured integration from an invalid key.
+var ErrKeyNotSet = errors.New("secretbox: key is not set")
 
 // ErrCiphertextTooShort is returned when the input to Open is smaller
 // than the nonce + GCM tag overhead.
@@ -87,21 +94,51 @@ func (b *Box) Open(sealed []byte) ([]byte, error) {
 	return b.aead.Open(nil, nonce, ciphertext, nil)
 }
 
-// LoadKey reads a base64-encoded 32-byte key from the given env var.
-// Returns ErrInvalidKey if the decoded length is not KeySize. Empty
-// env values are treated as "not configured" and surface as a clear
-// error rather than silently using a zero key.
+// LoadKey reads a 32-byte key from the given env var. It accepts base64 (standard
+// or URL-safe, padded or unpadded), 64-character hex strings, or raw 32-byte
+// strings, with leading/trailing whitespace and optional wrapping quotes
+// stripped. Empty env values return an error wrapping ErrKeyNotSet.
 func LoadKey(envVar string) ([]byte, error) {
-	raw := os.Getenv(envVar)
+	raw := strings.TrimSpace(os.Getenv(envVar))
+	if (strings.HasPrefix(raw, "\"") && strings.HasSuffix(raw, "\"")) ||
+		(strings.HasPrefix(raw, "'") && strings.HasSuffix(raw, "'")) {
+		raw = strings.TrimSpace(raw[1 : len(raw)-1])
+	}
 	if raw == "" {
-		return nil, fmt.Errorf("secretbox: %s is not set", envVar)
+		return nil, fmt.Errorf("secretbox: %s is not set: %w", envVar, ErrKeyNotSet)
 	}
-	key, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return nil, fmt.Errorf("secretbox: %s is not valid base64: %w", envVar, err)
+
+	// 1. Base64 encodings (standard and URL-safe, padded and unpadded)
+	encodings := []*base64.Encoding{
+		base64.StdEncoding,
+		base64.URLEncoding,
+		base64.RawStdEncoding,
+		base64.RawURLEncoding,
 	}
-	if len(key) != KeySize {
-		return nil, fmt.Errorf("secretbox: %s decodes to %d bytes, expected %d", envVar, len(key), KeySize)
+	var lastLen int
+	for _, enc := range encodings {
+		if key, err := enc.DecodeString(raw); err == nil {
+			if len(key) == KeySize {
+				return key, nil
+			}
+			lastLen = len(key)
+		}
 	}
-	return key, nil
+
+	// 2. Hex encoding (e.g. from `openssl rand -hex 32`)
+	if len(raw) == KeySize*2 {
+		if key, err := hex.DecodeString(raw); err == nil && len(key) == KeySize {
+			return key, nil
+		}
+	}
+
+	// 3. Raw 32 ASCII/UTF-8 bytes
+	if len(raw) == KeySize {
+		return []byte(raw), nil
+	}
+
+	if lastLen > 0 {
+		return nil, fmt.Errorf("secretbox: %s decodes to %d bytes, expected %d", envVar, lastLen, KeySize)
+	}
+	return nil, fmt.Errorf("secretbox: %s is not a valid 32-byte key (expected base64, hex, or 32 raw bytes)", envVar)
 }
