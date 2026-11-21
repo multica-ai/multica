@@ -14,6 +14,7 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Tooltip,
@@ -40,6 +41,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWS } from "@multica/core/realtime";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { isImeComposing } from "@multica/core/utils";
 import type { Doc } from "@multica/core/types";
 import { ContentEditor, ReadonlyContent, useEditorUpload } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -126,6 +128,66 @@ function DocPageContent({ docId }: { docId: string }) {
   return <DocEditor key={`${wsId}:${docId}`} doc={query.data} />;
 }
 
+const DOC_TITLE_CLASS = "text-display-sm font-semibold leading-snug wrap-anywhere";
+const BREADCRUMB_FOLDER_CLASS = "min-w-0 max-w-48 truncate";
+
+/**
+ * Single-paragraph title input that wraps and grows with its text instead of
+ * clipping inside a single line. Uses a CSS grid pseudo-element mirror so the
+ * height matches the wrapped text on first paint and across resizes without
+ * extra DOM text nodes.
+ */
+function DocTitleInput({
+  value,
+  placeholder,
+  ariaLabel,
+  autoFocus,
+  onChange,
+  onBlur,
+}: {
+  value: string;
+  placeholder: string;
+  ariaLabel: string;
+  autoFocus?: boolean;
+  onChange: (value: string) => void;
+  onBlur?: () => void;
+}) {
+  return (
+    <div
+      data-replicated-value={value || placeholder}
+      className={cn(
+        "grid whitespace-pre-wrap",
+        DOC_TITLE_CLASS,
+        "after:invisible after:pointer-events-none after:col-start-1 after:row-start-1 after:min-w-0 after:content-[attr(data-replicated-value)]",
+      )}
+    >
+      <textarea
+        aria-label={ariaLabel}
+        rows={1}
+        value={value}
+        autoFocus={autoFocus}
+        maxLength={300}
+        placeholder={placeholder}
+        onKeyDown={(e) => {
+          if (
+            (e.key === "Enter" || e.key === "Escape") &&
+            !isImeComposing(e.nativeEvent)
+          ) {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+        }}
+        onChange={(e) => onChange(e.target.value.replace(/[\r\n]+/g, " "))}
+        onBlur={onBlur}
+        className={cn(
+          "col-start-1 row-start-1 h-full min-w-0 w-full resize-none overflow-hidden border-0 bg-transparent p-0 whitespace-pre-wrap outline-none placeholder:text-muted-foreground",
+          DOC_TITLE_CLASS,
+        )}
+      />
+    </div>
+  );
+}
+
 /**
  * The editor's frame while the doc loads: the header and reading column sit
  * where the loaded page puts them, so nothing moves when the content lands.
@@ -149,11 +211,15 @@ function DocPageSkeleton({
       <BreadcrumbHeader
         segments={[
           { href: p.docs(), label: t(($) => $.kb) },
-          ...ancestors.map((f) => ({ href: p.docFolder(f.id), label: f.title })),
+          ...ancestors.map((f) => ({
+            href: p.docFolder(f.id),
+            label: f.title,
+            className: BREADCRUMB_FOLDER_CLASS,
+          })),
         ]}
         leaf={
           summary ? (
-            <span className="truncate">{summary.title || t(($) => $.untitled)}</span>
+            <span className="min-w-0 truncate">{summary.title || t(($) => $.untitled)}</span>
           ) : (
             <Skeleton className="h-4 w-32" />
           )
@@ -164,7 +230,7 @@ function DocPageSkeleton({
           {children ?? (
             <>
               {summary ? (
-                <div className="text-display-sm font-semibold">
+                <div className={DOC_TITLE_CLASS}>
                   {summary.title || (
                     <span className="text-muted-foreground">{t(($) => $.untitled)}</span>
                   )}
@@ -300,6 +366,8 @@ function DocEditor({ doc }: { doc: Doc }) {
       setCommentsOpen(true);
     }
   };
+  const titleValue = solo ? draft.title : liveTitle.value;
+  const headerTitle = titleValue.trim() || t(($) => $.untitled);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <BreadcrumbHeader
@@ -308,10 +376,13 @@ function DocEditor({ doc }: { doc: Doc }) {
           ...ancestors.map((f) => ({
             href: p.docFolder(f.id),
             label: f.title,
+            className: BREADCRUMB_FOLDER_CLASS,
           })),
         ]}
         leaf={
-          <span className="truncate">{doc.title || t(($) => $.untitled)}</span>
+          <TruncatedTooltip content={headerTitle} side="bottom" focusable>
+            <span className="min-w-0 truncate">{headerTitle}</span>
+          </TruncatedTooltip>
         }
         actions={
           <>
@@ -427,18 +498,16 @@ function DocEditor({ doc }: { doc: Doc }) {
                   />
                 </details>
               )}
-              <input
-                aria-label={t(($) => $.editor.title_label)}
-                value={solo ? draft.title : liveTitle.value}
+              <DocTitleInput
+                ariaLabel={t(($) => $.editor.title_label)}
+                value={titleValue}
                 // A doc just created from the tree is blank: start in its title.
                 autoFocus={!doc.title && !doc.content}
-                maxLength={300}
                 placeholder={t(($) => $.untitled)}
-                onChange={(e) =>
-                  solo ? change({ title: e.target.value }) : liveTitle.change(e.target.value)
+                onChange={(title) =>
+                  solo ? change({ title }) : liveTitle.change(title)
                 }
                 onBlur={solo ? undefined : liveTitle.blur}
-                className="w-full bg-transparent text-display-sm font-semibold outline-none"
               />
               <div className="mt-3 mb-8 flex items-center gap-2 text-caption text-muted-foreground">
                 <ActorAvatar

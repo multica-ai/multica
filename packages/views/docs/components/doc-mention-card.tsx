@@ -40,7 +40,7 @@ export function DocMentionCard({
     <AppLink
       href={p.docDetail(docId)}
       newTabTitle={title}
-      className="doc-mention inline-flex"
+      className="doc-mention inline-flex max-w-full"
     >
       <span className="doc-chip mx-0.5 inline-flex min-w-0 max-w-[min(18rem,100%)] items-center gap-1.5 rounded-md border px-2 py-0.5 text-caption">
         <FileText className="size-3.5 shrink-0 text-muted-foreground" />
