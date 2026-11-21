@@ -7,6 +7,16 @@ import {
   useActiveTabHistory,
 } from "@/stores/tab-store";
 
+import {
+  createShortcutChord,
+  shortcutMatchesEvent,
+  isEditableShortcutTarget,
+  isPortalLayerShortcutTarget,
+} from "@multica/core/shortcuts";
+import { useWindowOverlayStore } from "@/stores/window-overlay-store";
+
+const REOPEN_CLOSED_TAB_SHORTCUT = createShortcutChord("T", { primary: true, shift: true });
+
 export interface BrowsingHistoryEntry {
   url: string;
   title?: string;
@@ -83,6 +93,17 @@ export function useNavigationInputBindings() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (shortcutMatchesEvent(REOPEN_CLOSED_TAB_SHORTCUT, e)) {
+        if (
+          window.desktopAPI.windowContext?.kind === "issue" ||
+          e.repeat || e.isComposing || e.defaultPrevented ||
+          isEditableShortcutTarget(e.target) || isPortalLayerShortcutTarget(e.target) ||
+          useWindowOverlayStore.getState().overlay
+        ) return;
+        e.preventDefault();
+        useTabStore.getState().reopenClosedTab();
+        return;
+      }
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || e.altKey || e.shiftKey) return;
       // Cmd/Ctrl+[ and +] are intentionally NOT handled here: they are

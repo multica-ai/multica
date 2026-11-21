@@ -43,6 +43,8 @@ describe("KeyboardShortcutsTab", () => {
   it("shows the fixed numbered tab shortcuts", () => {
     renderWithI18n(<KeyboardShortcutsTab />);
 
+    expect(screen.getByText("Reopen closed tab")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Ctrl+Shift+T" })).toBeInTheDocument();
     expect(screen.getByText("Select tab 1–8")).toBeInTheDocument();
     expect(screen.getByText("Select last tab")).toBeInTheDocument();
     expect(
