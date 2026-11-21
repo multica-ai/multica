@@ -268,6 +268,9 @@ function WhenChart({
 
   const { dailyCostStack, dailyTokens } = useMemo(
     () => aggregateByDate(filtered),
+    // pricings rides along for estimateCost, which reads the override store
+    // inside the aggregate — without it the memo caches pre-override totals.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [filtered, pricings],
   );
   // Weekly aggregation builds exactly N trailing calendar weeks anchored at
@@ -278,6 +281,8 @@ function WhenChart({
   const weekCount = Math.max(1, Math.ceil(days / 7));
   const { weeklyTokens, weeklyCostStack } = useMemo(
     () => aggregateByWeek(usage, tz, weekCount),
+    // Same estimateCost indirect dependency as dailyCostStack above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [usage, tz, weekCount, pricings],
   );
 
@@ -591,10 +596,14 @@ function CostByBlock({
 
   const byAgent = useMemo(
     () => aggregateCostByAgent(byAgentRows),
+    // estimateCost reads the override store inside the aggregate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [byAgentRows, pricings],
   );
   const byModel = useMemo(
     () => aggregateCostByModel(usage),
+    // Same estimateCost indirect dependency as byAgent above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [usage, pricings],
   );
 

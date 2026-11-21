@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+type HydrationListener = Parameters<
+  typeof useCommentDraftStore.persist.onFinishHydration
+>[0];
 import { act, renderHook } from "@testing-library/react";
 import { useCommentRuntimeOriginator } from "./comment-runtime-originator";
 import { useCommentDraftStore } from "@multica/core/issues/stores/comment-draft-store";
@@ -90,8 +93,8 @@ describe("useCommentRuntimeOriginator reload race", () => {
     const finishers: (() => void)[] = [];
     const onFinish = vi
       .spyOn(useCommentDraftStore.persist, "onFinishHydration")
-      .mockImplementation((cb) => {
-        finishers.push(cb);
+      .mockImplementation((cb: HydrationListener) => {
+        finishers.push(() => cb(useCommentDraftStore.getState()));
         return () => {};
       });
     try {

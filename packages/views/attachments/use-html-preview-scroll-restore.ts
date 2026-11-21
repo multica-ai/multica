@@ -184,7 +184,7 @@ export function useHtmlPreviewScrollRestore(
         sendRestore();
       }
     },
-    [sendRequestSync, sendRestore],
+    [sendRestore],
   );
 
   // Ref callback runs during commit, BEFORE the iframe fires `load` — so the
