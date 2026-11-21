@@ -38,7 +38,9 @@ export function islandLayout(
   const attached = display.internal && inset >= 30;
   const headerHeight = attached ? inset + 2 : 30;
   const compactWidth = attached
-    ? 272
+    ? profile.trailing === "agents"
+      ? 336
+      : 272
     : profile.center !== "none"
       ? 224
       : profile.trailing === "agents"
@@ -280,8 +282,15 @@ export function installRunIsland(
     openPath(owner, path);
   });
   screen.on("display-metrics-changed", refresh);
-  screen.on("display-removed", refresh);
-  screen.on("display-added", refresh);
+  function displaysChanged() {
+    refresh();
+    for (const window of windows.all()) {
+      if (!window.isDestroyed())
+        window.webContents.send("run-island:displays-changed");
+    }
+  }
+  screen.on("display-removed", displaysChanged);
+  screen.on("display-added", displaysChanged);
   return {
     refresh,
     clear(window: BrowserWindow) {

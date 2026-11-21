@@ -87,9 +87,11 @@ export function RunIslandPreference() {
         .catch(() => {});
     };
     refresh();
+    const unsubscribe = window.desktopAPI.onRunIslandDisplaysChanged(refresh);
     window.addEventListener("focus", refresh);
     return () => {
       mounted = false;
+      unsubscribe();
       window.removeEventListener("focus", refresh);
     };
   }, [enabled]);

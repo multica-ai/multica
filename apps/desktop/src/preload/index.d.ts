@@ -42,6 +42,7 @@ import type {
 import type { RunIslandSnapshot, RunIslandAPI, IslandDevices } from "../shared/run-island";
 
 interface DesktopAPI {
+  onRunIslandDisplaysChanged: (listener: () => void) => () => void;
   runIslandDevices: () => Promise<IslandDevices>;
   previewRunIslandSound: (name: string) => void;
   reportRunIslandFinish: (slug: string, id: string) => void;

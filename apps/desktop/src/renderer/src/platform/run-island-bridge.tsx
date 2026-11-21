@@ -30,7 +30,8 @@ function isActiveRun(task: AgentTask) {
     task.status === "running" ||
     task.status === "queued" ||
     task.status === "dispatched" ||
-    task.status === "waiting_local_directory"
+    task.status === "waiting_local_directory" ||
+    (task.status === "deferred" && !!task.wakeup_id)
   );
 }
 
@@ -56,7 +57,9 @@ export function islandRuns(
     let detail =
       task.trigger_summary ||
       (task.autopilot_run_id ? labels.autopilot : labels.agent);
-    if (task.chat_session_id) {
+    if (task.restricted) {
+      detail = labels.agent;
+    } else if (task.chat_session_id) {
       // The workload snapshot also includes runs in other members' private chats.
       // Link only to sessions the signed-in member can see in the chat list.
       detail = labels.chat;
@@ -76,7 +79,9 @@ export function islandRuns(
     runs.push({
       id: task.id,
       agentId: task.agent_id,
-      audible: !task.chat_session_id || chatTitles.has(task.chat_session_id),
+      audible:
+        !task.restricted &&
+        (!task.chat_session_id || chatTitles.has(task.chat_session_id)),
       updated:
         Date.parse(task.started_at || task.dispatched_at || task.created_at) ||
         0,

@@ -6,6 +6,7 @@ vi.mock("@electron-toolkit/utils", () => ({ is: { dev: false } }));
 vi.mock("../preload/run-island.cjs?asset", () => ({
   default: "/preload/run-island.cjs",
 }));
+import { defaultIslandProfile } from "../shared/run-island";
 import { islandLayout } from "./run-island";
 
 describe("Run Island bounds in display coordinates", () => {
@@ -42,5 +43,13 @@ describe("Run Island bounds in display coordinates", () => {
     expect(islandLayout(display, true, 150).bounds).toEqual(
       islandLayout(display, true, 5).bounds,
     );
+  });
+  it("fits three agent initials on the right of a centered MacBook camera cutout", () => {
+    const cap = islandLayout(display, false, 3, {
+      ...defaultIslandProfile,
+      trailing: "agents",
+    });
+    const rightWing = (cap.bounds.width - 200) / 2;
+    expect(rightWing).toBeGreaterThanOrEqual(13 + 3 * 14 + 2 * 2);
   });
 });

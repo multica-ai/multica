@@ -78,7 +78,8 @@
   gap: 2px;
 }
 .island-agents > span {
-  min-width: 12px;
+  width: 14px;
+  overflow: hidden;
   height: 14px;
   padding: 0 2px;
   border-radius: 3px;

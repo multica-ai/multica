@@ -32,6 +32,8 @@ describe("Run Island workspace snapshot", () => {
       task("w", "waiting_local_directory"),
       task("r", "running"),
       task("d", "dispatched"),
+      task("retry", "deferred", { wakeup_id: "wake" }),
+      task("dormant", "deferred"),
       task("old", "completed"),
       task("f", "failed"),
       task("archived", "running", { agent_id: "b" }),
@@ -51,6 +53,7 @@ describe("Run Island workspace snapshot", () => {
       ["q", "Queued"],
       ["w", "Queued"],
       ["d", "Queued"],
+      ["retry", "Queued"],
     ]);
   });
   it("opens the original workspace context for issue, chat and standalone runs", () => {
@@ -139,5 +142,21 @@ describe("Run Island workspace snapshot", () => {
     expect(
       islandRunGroups(runs, { ...profile, group: "status" }).map((g) => g.key),
     ).toEqual(["queued", "running"]);
+  });
+  it("retains restricted workload without disclosing issue context or ringing", () => {
+    const [run] = islandRuns(
+      "studio",
+      [task("hidden", "running", { restricted: true, issue_title: "Private" })],
+      agents,
+      labels,
+      chatTitles,
+      cachedIssueTitle,
+    );
+    expect(run).toMatchObject({
+      id: "hidden",
+      detail: "Agent",
+      path: "/studio/agents/a",
+      audible: false,
+    });
   });
 });
