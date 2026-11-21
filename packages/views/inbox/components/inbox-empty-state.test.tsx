@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
-import { snoozedInboxOptions } from "@multica/core/inbox/queries";
+import { inboxKeys, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import type { SnoozedInboxIssue, WorkspaceWorkingAgent } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -10,7 +10,7 @@ import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { InboxEmptyState } from "./inbox-empty-state";
 
 const spies = vi.hoisted(() => ({
-  restoreInbox: vi.fn(() => Promise.resolve()),
+  restoreInbox: vi.fn((..._args: unknown[]) => Promise.resolve(true)),
   unsnoozeAsync: vi.fn(() => Promise.resolve()),
   undoUnsubscribe: vi.fn((..._args: unknown[]) => Promise.resolve()),
   undoBatch: vi.fn((..._args: unknown[]) => Promise.resolve()),
@@ -85,7 +85,7 @@ function renderEmpty({
       </NavigationProvider>
     </QueryClientProvider>,
   );
-  return { ...view, nav, onClearFiltersAndContinue, onViewArchived };
+  return { ...view, nav, qc, onClearFiltersAndContinue, onViewArchived };
 }
 
 beforeEach(() => {
@@ -148,6 +148,63 @@ describe("InboxEmptyState", () => {
     expect(nav.push).toHaveBeenCalledWith("/acme/issues/MUL-9790");
     expect(useInboxSelectionStore.getState().lastClearedByWorkspace.ws).toBeUndefined();
     expect(useInboxSelectionStore.getState().sidebarIssueByWorkspace.ws).toBe("issue-1");
+  });
+
+  it("opens a restored notification only once it is back in the Inbox list", async () => {
+    useInboxSelectionStore.setState({
+      lastClearedByWorkspace: {
+        ws: {
+          kind: "archived",
+          itemId: "n-2",
+          key: "n-2",
+          label: "Automation paused",
+          href: "/acme/inbox?issue=n-2",
+          clearedAt: Date.now(),
+        },
+      },
+    });
+    let finish!: (ok: boolean) => void;
+    spies.restoreInbox.mockReturnValueOnce(new Promise<boolean>((resolve) => (finish = resolve)));
+    const { nav, qc } = renderEmpty();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(spies.restoreInbox).toHaveBeenCalledTimes(1);
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(useInboxSelectionStore.getState().lastClearedByWorkspace.ws).toBeDefined();
+
+    await act(async () => finish(true));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.list("ws") });
+    expect(nav.push).toHaveBeenCalledWith("/acme/inbox?issue=n-2");
+    expect(invalidate.mock.invocationCallOrder[0]!).toBeLessThan(
+      (nav.push as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+    );
+    expect(useInboxSelectionStore.getState().lastClearedByWorkspace.ws).toBeUndefined();
+  });
+
+  it("keeps the undo when it fails, so it can be tried again", async () => {
+    useInboxSelectionStore.setState({
+      lastClearedByWorkspace: {
+        ws: {
+          kind: "archived",
+          itemId: "n-1",
+          key: "issue-1",
+          label: "MUL-9790",
+          href: "/acme/issues/MUL-9790",
+          clearedAt: Date.now(),
+        },
+      },
+    });
+    spies.restoreInbox.mockResolvedValueOnce(false);
+    const { nav } = renderEmpty();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    });
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(useInboxSelectionStore.getState().lastClearedByWorkspace.ws).toBeDefined();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
   });
 
   it("shows filtered-empty state with remaining count and Clear filters CTA instead of Inbox Zero", () => {

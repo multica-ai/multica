@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -22,7 +22,7 @@ import {
   undoUnsubscribeArchiveInbox,
   useUnsnoozeInbox,
 } from "@multica/core/inbox/mutations";
-import { snoozedInboxOptions } from "@multica/core/inbox/queries";
+import { inboxKeys, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import {
   useInboxSelectionStore,
   type LastInboxCleared,
@@ -106,40 +106,63 @@ export function InboxEmptyState({
 
   const workingCount = workingAgents.length;
 
-  const handleUndoCleared = (entry: LastInboxCleared) => {
+  const [undoing, setUndoing] = useState(false);
+
+  /** Resolves whether the undo went through; a failure is toasted. */
+  const requestUndo = (entry: LastInboxCleared): Promise<boolean> => {
+    const failed = (fallback: string) => (err: unknown) => {
+      toast.error(err instanceof Error && err.message ? err.message : fallback);
+      return false;
+    };
+    switch (entry.kind) {
+      case "archived":
+        return restoreInbox(entry.itemId, { quiet: true });
+      case "snoozed":
+        return unsnoozeAsync({ id: entry.itemId, read: entry.wasRead }).then(
+          () => true,
+          failed(t(($) => $.snooze.unsnooze_failed)),
+        );
+      case "unsubscribed":
+        return undoUnsubscribeArchiveInbox(qc, wsId, { id: entry.itemId, issueId: entry.issueId }).then(
+          () => true,
+          failed(t(($) => $.errors.undo_unsubscribe_failed)),
+        );
+      case "batch_archived":
+        return undoArchiveInboxBatch(qc, wsId, entry.itemIds).then(
+          () => true,
+          failed(t(($) => $.errors.unarchive_failed)),
+        );
+    }
+  };
+
+  // The restored row must be in the Inbox list before its link opens: the
+  // Inbox page drops a `?issue=` selection it cannot find there. The write
+  // refreshes the list without waiting, and that refresh starts first, so this
+  // one (cancel, then refetch) is the last and the one awaited.
+  const refreshInboxList = async () => {
+    await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+    await qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+  };
+
+  const handleUndoCleared = async (entry: LastInboxCleared) => {
+    if (undoing || !canUndoCleared(entry)) return;
+    setUndoing(true);
+    const undone = await requestUndo(entry);
+    if (undone) await refreshInboxList();
+    setUndoing(false);
+    // A failed undo keeps the entry, so it can be tried again.
+    if (!undone) return;
+
     const store = useInboxSelectionStore.getState();
-    clearLastCleared(wsId);
-    if (entry.key) store.returnRow(wsId, entry.key);
-
-    if (entry.kind === "archived") {
-      if (entry.href.includes("/issues/")) store.rememberSidebarIssue(wsId, entry.key);
-      void restoreInbox(entry.itemId, { quiet: true });
-      push?.(entry.href);
+    clearLastCleared(wsId, entry.key ?? undefined);
+    if (entry.kind === "batch_archived") {
+      if (entry.key) store.returnRow(wsId, entry.key);
       return;
     }
-
-    if (entry.kind === "snoozed") {
-      if (entry.href.includes("/issues/")) store.rememberSidebarIssue(wsId, entry.key);
-      unsnoozeAsync({ id: entry.itemId, read: entry.wasRead }).catch((err: unknown) =>
-        toast.error(err instanceof Error && err.message ? err.message : t(($) => $.snooze.unsnooze_failed)),
-      );
-      push?.(entry.href);
-      return;
-    }
-
-    if (entry.kind === "unsubscribed") {
-      if (!entry.undoable) return;
-      store.rememberSidebarIssue(wsId, entry.issueId);
-      undoUnsubscribeArchiveInbox(qc, wsId, { id: entry.itemId, issueId: entry.issueId }).catch((err: unknown) =>
-        toast.error(err instanceof Error && err.message ? err.message : t(($) => $.errors.undo_unsubscribe_failed)),
-      );
-      push?.(entry.href);
-      return;
-    }
-
-    undoArchiveInboxBatch(qc, wsId, entry.itemIds).catch((err: unknown) =>
-      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.errors.unarchive_failed)),
-    );
+    store.returnRow(wsId, entry.key);
+    if (entry.kind === "unsubscribed") store.rememberSidebarIssue(wsId, entry.issueId);
+    else if (entry.href.includes("/issues/")) store.rememberSidebarIssue(wsId, entry.key);
+    push?.(entry.href);
   };
 
   const clearedSummary = (entry: LastInboxCleared): string => {
@@ -194,7 +217,7 @@ export function InboxEmptyState({
               <span className="tabular-nums opacity-75">{totalActiveCount}</span>
             </Button>
             {lastCleared && canUndoCleared(lastCleared) && (
-              <Button size="sm" variant="outline" onClick={() => handleUndoCleared(lastCleared)}>
+              <Button size="sm" variant="outline" disabled={undoing} onClick={() => void handleUndoCleared(lastCleared)}>
                 <Undo2 />
                 {lastCleared.kind === "batch_archived"
                   ? t(($) => $.toasts.undo)
@@ -235,8 +258,9 @@ export function InboxEmptyState({
                 <span aria-hidden className="text-faint-foreground">·</span>
                 <button
                   type="button"
-                  onClick={() => handleUndoCleared(lastCleared)}
-                  className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                  disabled={undoing}
+                  onClick={() => void handleUndoCleared(lastCleared)}
+                  className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Undo2 className="size-3" />
                   {t(($) => $.toasts.undo)}

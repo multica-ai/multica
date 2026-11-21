@@ -870,3 +870,27 @@ describe("WorkPanel and the open issue's project", () => {
     await waitFor(() => expect(useSidebarTreeStore.getState().locate).toBeNull());
   });
 });
+
+describe("KeptRowsRelease Inbox Zero undo", () => {
+  const cleared = () => useInboxSelectionStore.getState().lastClearedByWorkspace["ws-1"];
+  const recordCleared = () =>
+    useInboxSelectionStore.getState().recordLastCleared("ws-1", {
+      kind: "archived",
+      itemId: `inbox-${ISSUE.id}`,
+      key: ISSUE.id,
+      label: ISSUE.identifier,
+      href: `/acme/issues/${ISSUE.identifier}`,
+      clearedAt: 1,
+    });
+
+  beforeEach(() => useInboxSelectionStore.setState({ lastClearedByWorkspace: {} }));
+
+  it("forgets it once the Inbox is left, even for the issue it cleared", () => {
+    recordCleared();
+    renderPanel("/acme/inbox");
+    expect(cleared()).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+    expect(cleared()).toBeUndefined();
+  });
+});

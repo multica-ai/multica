@@ -157,18 +157,24 @@ export function useArchiveInboxBatchWithUndo() {
   );
 }
 
-/** Put an archived notification back in the Inbox. `quiet` skips the toast, for an undo. */
+/**
+ * Put an archived notification back in the Inbox. `quiet` skips the toast, for
+ * an undo. Resolves whether it went back; a failure is already toasted.
+ */
 export function useRestoreInbox() {
   const { t } = useT("inbox");
   const { mutateAsync: unarchiveAsync } = useUnarchiveInbox();
   return useCallback(
-    (id: string, { quiet = false }: { quiet?: boolean } = {}) =>
+    (id: string, { quiet = false }: { quiet?: boolean } = {}): Promise<boolean> =>
       unarchiveAsync(id).then(
         () => {
           if (!quiet) toast.success(t(($) => $.toasts.unarchived));
+          return true;
         },
-        (err: unknown) =>
-          toast.error(errorMessage(err, t(($) => $.errors.unarchive_failed))),
+        (err: unknown) => {
+          toast.error(errorMessage(err, t(($) => $.errors.unarchive_failed)));
+          return false;
+        },
       ),
     [unarchiveAsync, t],
   );
