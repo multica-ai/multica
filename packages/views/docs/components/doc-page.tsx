@@ -28,6 +28,7 @@ import {
   docTreeOptions,
   docCommentsOptions,
   folderAncestry,
+  holdLiveDoc,
   isDocNotFound,
 } from "@multica/core/docs";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -106,6 +107,8 @@ function DocEditor({ doc }: { doc: Doc }) {
     // Once per mode change: the handlers are recreated every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solo, !!live]);
+  const liveSynced = !!live?.synced;
+  useEffect(() => (liveSynced ? holdLiveDoc(doc.id) : undefined), [liveSynced, doc.id]);
   const [moving, setMoving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const canDelete = useCanDeleteDoc()(doc);
