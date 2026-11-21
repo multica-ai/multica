@@ -72,6 +72,26 @@ export const AttachmentSchema: z.ZodType<Attachment> = z.object({
 export const AttachmentListSchema = z.array(AttachmentSchema).default([]);
 export const EMPTY_ATTACHMENT_LIST: Attachment[] = [];
 
+/** Fallback for `GET /api/attachments/:id/download-metadata`. `id: ""` lets the caller detect
+ *  drift instead of handing an empty URL to the system opener. */
+export const EMPTY_ATTACHMENT: Attachment = {
+  id: "",
+  workspace_id: "",
+  issue_id: null,
+  comment_id: null,
+  chat_session_id: null,
+  chat_message_id: null,
+  uploader_type: "",
+  uploader_id: "",
+  filename: "",
+  url: "",
+  download_url: "",
+  markdown_url: "",
+  content_type: "",
+  size_bytes: 0,
+  created_at: "",
+};
+
 /** Comment write endpoints all return a full Comment. Used by createComment /
  *  updateComment / resolveComment / unresolveComment via fetchValidatedWith.
  *  Empty fallback yields `id: ""` so downstream code (the mutations'
