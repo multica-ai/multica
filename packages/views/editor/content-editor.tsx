@@ -201,6 +201,8 @@ interface ContentEditorBaseProps {
   /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
   mentionMode?: "default" | "context";
   mentionContextItems?: MentionItem[];
+  /** Leave guests out of the @ list, for places guests cannot open (docs). */
+  mentionHideGuests?: boolean;
   enableRuntimeAgentMentions?: boolean;
   onMentionSelect?: (item: MentionItem) => void;
   /** Enable the `/` command picker. Defaults false. */
@@ -413,6 +415,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       disableMentions = false,
       mentionMode = "default",
       mentionContextItems,
+      mentionHideGuests = false,
       enableRuntimeAgentMentions = false,
       onMentionSelect,
       enableSlashCommands = false,
@@ -673,6 +676,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         disableMentions,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
+        mentionHideGuests,
         runtimeMentionIssueId: enableRuntimeAgentMentions ? currentIssueId : undefined,
         onMentionSelect: (item) => onMentionSelectRef.current?.(item),
         enableSlashCommands,

@@ -128,6 +128,8 @@ export interface EditorExtensionsOptions {
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
+  /** Leave guests out of the @ list, for places guests cannot open (docs). */
+  mentionHideGuests?: boolean;
   runtimeMentionIssueId?: string;
   onMentionSelect?: (item: MentionItem) => void;
   /** When true, attach the `/` picker. Default false. */
@@ -228,7 +230,7 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, runtimeMentionIssueId: options.runtimeMentionIssueId, onSelect: options.onMentionSelect }) }
+          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, hideGuests: options.mentionHideGuests, runtimeMentionIssueId: options.runtimeMentionIssueId, onSelect: options.onMentionSelect }) }
           : {}),
     }),
     // Linear-style bare identifier → issue mention. Attached only when a
