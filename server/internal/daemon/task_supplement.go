@@ -148,6 +148,7 @@ func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Sessi
 	if session == nil || session.Supplement == nil || session.SupplementReady == nil {
 		return
 	}
+	activated := !session.SupplementRequiresNegotiation
 	for {
 		if ctx.Err() != nil {
 			return
@@ -157,6 +158,20 @@ func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Sessi
 				return
 			}
 			continue
+		}
+
+		if !activated {
+			activationCtx, cancelActivation := context.WithTimeout(ctx, 3*time.Second)
+			err := d.client.ActivateHermesChatSupplement(activationCtx, taskID)
+			cancelActivation()
+			if err != nil {
+				taskLog.Debug("Hermes chat guidance not negotiated", "error", err)
+				if !isTransientError(err) || !waitTaskSupplement(ctx, wakeup, d.effectiveTaskSupplementPollInterval()) {
+					return
+				}
+				continue
+			}
+			activated = true
 		}
 
 		claimCtx, cancelClaim := context.WithTimeout(ctx, 3*time.Second)
