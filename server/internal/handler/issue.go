@@ -4379,6 +4379,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 	resp.RunOutcome = h.resolveIssueRun(r, issue, trigger, runDecided, req.SuppressRun, actorType, actorID, workspaceID, handoffNote)
+	if issueRunTriggeredAgent(resp.RunOutcome) {
+		h.archiveActorInboxOnAgentTrigger(r.Context(), workspaceID, uuidToString(issue.ID), actorType, actorID)
+	}
 
 	// Sub-issue rules on the parent (the child_done system rule and sub-issue
 	// conditions): the write recorded the change; process it now. A failure
@@ -5210,6 +5213,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 			}
 			runOutcome = h.resolveIssueRun(r, issue, trigger, runDecided, req.Updates.SuppressRun, actorType, actorID, workspaceID, batchHandoffNote)
+			if issueRunTriggeredAgent(runOutcome) {
+				h.archiveActorInboxOnAgentTrigger(r.Context(), workspaceID, issueID, actorType, actorID)
+			}
 
 			// No status change — not even → cancelled — cancels active tasks here,
 			// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.

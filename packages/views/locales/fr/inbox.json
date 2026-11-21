@@ -225,7 +225,7 @@
     "title": "Archiver les notifications une fois traitées",
     "description": "La boîte de réception peut désormais archiver les notifications d'une tâche quand vous agissez dessus. Seules vos propres actions comptent, et une nouvelle notification fait revenir la tâche.",
     "options": {
-      "handled": "Les tâches traitées quittent votre boîte de réception",
+      "handled": "Terminer une tâche ou lancer un agent l'archive ; l'organiser ou commenter sans réveiller d'agent la laisse en place",
       "completed": "Seul le fait de terminer ou d'annuler une tâche l'archive",
       "never": "Vous archivez vous-même les notifications"
     },

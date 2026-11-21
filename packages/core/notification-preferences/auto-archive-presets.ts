@@ -3,6 +3,7 @@ import { notificationPreferenceValue } from "./patch";
 
 export const AUTO_ARCHIVE_KEYS = [
   "auto_archive_completed",
+  "auto_archive_on_agent_trigger",
   "auto_archive_on_comment",
   "auto_archive_on_status",
   "auto_archive_on_assignee",
@@ -23,9 +24,7 @@ export const AUTO_ARCHIVE_PRESETS: Record<AutoArchivePreset, readonly AutoArchiv
   completed: ["auto_archive_completed"],
   handled: [
     "auto_archive_completed",
-    "auto_archive_on_comment",
-    "auto_archive_on_status",
-    "auto_archive_on_assignee",
+    "auto_archive_on_agent_trigger",
   ],
 };
 

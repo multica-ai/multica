@@ -118,6 +118,7 @@ describe("Inbox notification settings", () => {
 
   const ALL_ACTIONS_OFF = {
     auto_archive_completed: "muted",
+    auto_archive_on_agent_trigger: "muted",
     auto_archive_on_comment: "muted",
     auto_archive_on_status: "muted",
     auto_archive_on_assignee: "muted",
@@ -126,6 +127,7 @@ describe("Inbox notification settings", () => {
     Object.fromEntries(
       [
         "auto_archive_completed",
+        "auto_archive_on_agent_trigger",
         "auto_archive_on_comment",
         "auto_archive_on_status",
         "auto_archive_on_assignee",
@@ -141,7 +143,7 @@ describe("Inbox notification settings", () => {
     });
 
   it.each<{ preferences: Record<string, string>; shown: string; custom: boolean }>([
-    { preferences: {}, shown: "After you reply, move it forward or reassign", custom: false },
+    { preferences: {}, shown: "When you complete it or trigger an agent", custom: false },
     { preferences: { ...ALL_ACTIONS_OFF, auto_archive_completed: "all" }, shown: "When you complete it", custom: false },
     { preferences: ALL_ACTIONS_OFF, shown: "Never", custom: false },
     { preferences: { auto_archive_on_labels: "all" }, shown: "Custom", custom: true },
@@ -159,7 +161,7 @@ describe("Inbox notification settings", () => {
     expect(options.map((option) => [option.textContent, option.getAttribute("aria-selected")])).toEqual([
       ["Never", "false"],
       ["When you complete it", "false"],
-      ["After you reply, move it forward or reassignRecommended", "true"],
+      ["When you complete it or trigger an agentRecommended", "true"],
       ["Custom...", "false"],
     ]);
   });
@@ -187,9 +189,10 @@ describe("Inbox notification settings", () => {
       .map((box) => [box.closest("label")?.textContent, box.getAttribute("aria-checked")]);
     expect(checked).toEqual([
       ["Complete", "true"],
-      ["Reply", "true"],
-      ["Move it forward", "true"],
-      ["Reassign", "true"],
+      ["Trigger an agent", "true"],
+      ["Reply", "false"],
+      ["Move it forward", "false"],
+      ["Reassign", "false"],
       ["Change priority", "false"],
       ["Change project", "false"],
       ["Change dates", "false"],
@@ -200,9 +203,7 @@ describe("Inbox notification settings", () => {
     expect(mutate).toHaveBeenCalledWith(
       ACTIONS_OFF_BUT([
         "auto_archive_completed",
-        "auto_archive_on_comment",
-        "auto_archive_on_status",
-        "auto_archive_on_assignee",
+        "auto_archive_on_agent_trigger",
         "auto_archive_on_labels",
       ]),
       expect.anything(),

@@ -66,6 +66,7 @@ const AUTO_ARCHIVE_GROUPS = [
     key: "settle",
     actions: [
       { key: "auto_archive_completed", label: "completed" },
+      { key: "auto_archive_on_agent_trigger", label: "agent_trigger" },
       { key: "auto_archive_on_comment", label: "comment" },
       { key: "auto_archive_on_status", label: "status" },
       { key: "auto_archive_on_assignee", label: "assignee" },

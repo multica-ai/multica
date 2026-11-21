@@ -869,7 +869,7 @@
       "auto_presets": {
         "never": "Nunca",
         "completed": "Cuando la completas",
-        "handled": "Al responder, avanzar el estado o reasignar",
+        "handled": "Cuando la completas o activas un agente",
         "custom": "Personalizado",
         "custom_item": "Personalizado..."
       },
@@ -880,6 +880,7 @@
       },
       "auto_actions": {
         "completed": "Completar",
+        "agent_trigger": "Activar un agente",
         "comment": "Responder",
         "status": "Avanzar el estado",
         "assignee": "Reasignar",
