@@ -1367,6 +1367,56 @@ func TestOpenclawProcessOutputDeeplyIndentedFixture(t *testing.T) {
 	}
 }
 
+// TestOpenclawProcessOutputGatewayEnvelope covers gateway-routed runs
+// (runtime_config.mode == "gateway"). `openclaw agent --json` without --local
+// wraps the final result in {"runId", "status", "summary", "result": {...}}.
+// The reply must come from result.payloads, not the raw envelope.
+func TestOpenclawProcessOutputGatewayEnvelope(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/openclaw-2026.10.9-gateway-stdout.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+	close(ch)
+
+	if res.status != "completed" {
+		t.Fatalf("status: got %q (err %q), want completed", res.status, res.errMsg)
+	}
+	if want := "Picked up the issue and set it to in_progress."; res.output != want {
+		t.Errorf("output: got %q, want %q", res.output, want)
+	}
+	if want := "a2f9529f-2734-4aca-b935-98edb75a1aa0"; res.sessionID != want {
+		t.Errorf("sessionID: got %q, want %q", res.sessionID, want)
+	}
+	if res.model != "claude-opus-4-7" {
+		t.Errorf("model: got %q, want claude-opus-4-7", res.model)
+	}
+	if res.usage.OutputTokens != 763 || res.usage.CacheReadTokens != 103355 {
+		t.Errorf("usage: got %+v, want output=763 cacheRead=103355", res.usage)
+	}
+}
+
+// TestOpenclawResultEnvelopeWithoutResultRejected keeps unrelated JSON that
+// merely has a "result" key from being treated as a final result.
+func TestOpenclawResultEnvelopeWithoutResultRejected(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		`{"runId":"r1","status":"ok","result":{}}`,
+		`{"runId":"r1","status":"ok","result":"done"}`,
+		`{"ok":false,"error":{"type":"cli_error","message":"boom"}}`,
+	} {
+		if _, ok := tryParseOpenclawResult(raw); ok {
+			t.Errorf("tryParseOpenclawResult(%s) = ok, want rejected", raw)
+		}
+	}
+}
+
 // TestOpenclawProcessOutputEmptyBufferCanonicalError pins the empty-buffer
 // failure path: the canonical "openclaw returned no parseable output"
 // string is preserved verbatim so existing dashboards and log-grep tooling
