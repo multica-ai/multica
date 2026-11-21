@@ -3,7 +3,7 @@
 import { ChevronDown, UserRound } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { noteInboxBarAction } from "@multica/core/inbox/auto-archive";
+import { noteInboxBarAction, takeInboxBarAction } from "@multica/core/inbox/auto-archive";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
@@ -104,7 +104,10 @@ export function InboxIssueActions({
       />
       <QuickActionsMenu
         issueId={issue.id}
-        onRun={(action) => noteInboxBarAction(issue.id, { type: "quick_action", name: action.name })}
+        onRun={(action, ran) => {
+          noteInboxBarAction(issue.id, { type: "quick_action", name: action.name });
+          void ran.then((posted) => posted || takeInboxBarAction(issue.id));
+        }}
       />
     </>
   );

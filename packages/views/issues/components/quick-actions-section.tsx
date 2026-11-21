@@ -150,7 +150,8 @@ function useQuickActionRun(issueId: string, onBlocked: (action: QuickAction) => 
   const { t } = useT("issues");
   const runMutation = useRunQuickAction(issueId);
 
-  const run = async (action: QuickAction) => {
+  /** Resolves to whether the action's comment was posted. */
+  const run = async (action: QuickAction): Promise<boolean> => {
     const targetName = action.target_name || t(($) => $.detail.quick_action_target_fallback);
     try {
       const comment: Comment = await runMutation.mutateAsync({ quickActionId: action.id });
@@ -158,15 +159,17 @@ function useQuickActionRun(issueId: string, onBlocked: (action: QuickAction) => 
       if (kind === "success") toast.success(message);
       else if (kind === "error") toast.error(message);
       else toast.info(message);
+      return true;
     } catch (error) {
       // A permission refusal is a structured 403 the user needs explained, not
       // a transient failure they should retry — it gets the dialog. Everything
       // else stays a toast.
       if (dispatchReasonCode(error) === "invocation_not_allowed") {
         onBlocked(action);
-        return;
+        return false;
       }
       toast.error(error instanceof Error ? error.message : String(error));
+      return false;
     }
   };
   return { run, running: runMutation.isPending };
@@ -262,7 +265,14 @@ function QuickActionRow({
  * The quick actions behind one button, for the Inbox bar. Nothing configured
  * renders nothing.
  */
-export function QuickActionsMenu({ issueId, onRun }: { issueId: string; onRun?: (action: QuickAction) => void }) {
+export function QuickActionsMenu({
+  issueId,
+  onRun,
+}: {
+  issueId: string;
+  /** Called as an action starts, with whether its comment was posted. */
+  onRun?: (action: QuickAction, ran: Promise<boolean>) => void;
+}) {
   const { t } = useT("issues");
   const wsId = useCurrentWorkspace()?.id ?? "";
   const [blocked, setBlocked] = useState<QuickAction | null>(null);
@@ -292,8 +302,8 @@ export function QuickActionsMenu({ issueId, onRun }: { issueId: string; onRun?: 
             <DropdownMenuItem
               key={action.id}
               onClick={() => {
-                onRun?.(action);
-                void run(action);
+                const ran = run(action);
+                onRun?.(action, ran);
               }}
             >
               <Zap className="h-4 w-4" />
