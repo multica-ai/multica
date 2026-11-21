@@ -103,7 +103,20 @@ function Hero({ download }: { download: HomeDownload }) {
   );
 }
 
-const HERO_AGENTS = ["Claude Code", "Codex", "Hermes", "OpenCode"] as const;
+// Each name must fit the headline's line count on a 375px phone, or the page
+// below jumps as the rotation reaches it — which rules out "DeepSeek Harness".
+const HERO_AGENTS = [
+  "Claude Code",
+  "Codex",
+  "Cursor",
+  "Hermes",
+  "OpenCode",
+  "GitHub Copilot",
+  "Antigravity",
+  "Qwen Code",
+  "Kimi CLI",
+  "Pi",
+] as const;
 const HERO_AGENT_HOLDS = HERO_AGENTS.map(() => 3600);
 
 function HeroHeadline() {
@@ -133,7 +146,7 @@ function HeroHeadline() {
           {headlinePrefix}
           <span className="relative inline-flex rounded-full bg-brand/5 px-[0.36em] [--border-beam-width:1.5px]">
             <span
-              className="inline-grid overflow-hidden transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+              className="relative inline-grid overflow-hidden transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
               style={{ width: widths?.[step] }}
             >
               {HERO_AGENTS.map((name, index) => (
@@ -145,6 +158,8 @@ function HeroHeadline() {
                   className={cn(
                     "col-start-1 row-start-1 inline-flex w-max items-center gap-[0.2em] whitespace-nowrap transition-[opacity,filter] ease-out motion-reduce:transition-none",
                     index === step ? "opacity-100 blur-none delay-150 duration-300" : "opacity-0 blur-[3px] duration-150",
+                    // Until the names are measured the pill sizes to the first one, not the widest.
+                    !widths && index !== step && "absolute top-0 left-0",
                   )}
                 >
                   <ProviderMark name={name} />
