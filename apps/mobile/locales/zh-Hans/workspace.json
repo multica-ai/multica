@@ -14,7 +14,7 @@
   "agent": {
     "title": "智能体",
     "empty": "还没有智能体",
-    "search_placeholder": "搜索智能体...",
+    "search_placeholder": "搜索智能体…",
     "coming_soon": "智能体功能即将上线。"
   },
   "actions": {

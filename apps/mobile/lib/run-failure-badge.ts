@@ -1,5 +1,3 @@
-import { RUNTIME_ACCESS_DENIED_BADGE } from "./runtime-access-copy";
-
 /**
  * Short badge copy for a run's `failure_reason`, shown inline on the agent-runs
  * row next to the status word and a timestamp.
@@ -12,60 +10,55 @@ import { RUNTIME_ACCESS_DENIED_BADGE } from "./runtime-access-copy";
  * reasons it predates. An unrecognised reason returns undefined so the row
  * falls back to a bare status word — a compact badge is the one place where
  * web's raw-wire-value fallback would overflow the row.
- *
- * Lives in lib/ rather than inside run-row.tsx so the lookup is covered by
- * mobile's node-only vitest lane: the map spent from MUL-5370 to #7913 holding
- * copy that no run could reach, because AgentTaskSchema was erasing every
- * refined reason before the row ever looked one up. A map no test can see is
- * how that goes unnoticed.
  */
-const FAILURE_REASON_BADGE: Record<string, string> = {
-  queued_expired: "Queue expired",
-  runtime_offline: "Runtime offline",
-  runtime_access_revoked: "Access revoked",
-  runtime_recovery: "Runtime recovery",
-  timeout: "Timeout",
-  iteration_limit: "Iteration limit",
-  agent_blocked: "Needs input",
-  api_invalid_request: "Request rejected",
-  skill_bundle_unavailable: "Skill download failed",
-  runtime_cli_timeout: "Runtime CLI timeout",
-  environment_prepare_failed: "Environment setup failed",
-  runtime_access_denied: RUNTIME_ACCESS_DENIED_BADGE,
+const FAILURE_REASON_I18N_KEY: Record<string, string> = {
+  queued_expired: "queued_expired",
+  runtime_offline: "runtime_offline",
+  runtime_access_revoked: "runtime_access_revoked",
+  runtime_recovery: "runtime_recovery",
+  timeout: "timeout",
+  iteration_limit: "iteration_limit",
+  agent_blocked: "agent_blocked",
+  api_invalid_request: "api_invalid_request",
+  skill_bundle_unavailable: "skill_bundle_unavailable",
+  runtime_cli_timeout: "runtime_cli_timeout",
+  environment_prepare_failed: "environment_prepare_failed",
+  runtime_access_denied: "runtime_access_denied",
+  local_directory_missing: "local_directory_missing",
 
-  "agent_error.provider_auth_or_access": "Auth failed",
-  "agent_error.provider_quota_limit": "Quota exhausted",
-  "agent_error.provider_capacity_or_rate_limit": "Rate limited",
-  "agent_error.provider_server_error": "Provider error",
-  "agent_error.provider_network": "Network error",
-  "agent_error.process_failure": "Process crashed",
-  "agent_error.empty_or_unparseable_output": "No usable output",
-  "agent_error.agent_timeout": "Agent timeout",
-  "agent_error.context_overflow": "Context overflow",
-  "agent_error.missing_config": "Config missing",
-  "agent_error.model_not_found_or_unavailable": "Model unavailable",
-  "agent_error.runtime_version_unsupported": "CLI unsupported",
-  "agent_error.runtime_missing_executable": "CLI not installed",
-  "agent_error.unknown": "Agent error",
+  "agent_error.provider_auth_or_access": "agent_error_provider_auth_or_access",
+  "agent_error.provider_quota_limit": "agent_error_provider_quota_limit",
+  "agent_error.provider_capacity_or_rate_limit":
+    "agent_error_provider_capacity_or_rate_limit",
+  "agent_error.provider_server_error": "agent_error_provider_server_error",
+  "agent_error.provider_network": "agent_error_provider_network",
+  "agent_error.process_failure": "agent_error_process_failure",
+  "agent_error.empty_or_unparseable_output":
+    "agent_error_empty_or_unparseable_output",
+  "agent_error.agent_timeout": "agent_error_agent_timeout",
+  "agent_error.context_overflow": "agent_error_context_overflow",
+  "agent_error.missing_config": "agent_error_missing_config",
+  "agent_error.model_not_found_or_unavailable":
+    "agent_error_model_not_found_or_unavailable",
+  "agent_error.runtime_version_unsupported":
+    "agent_error_runtime_version_unsupported",
+  "agent_error.runtime_missing_executable":
+    "agent_error_runtime_missing_executable",
+  "agent_error.unknown": "agent_error_unknown",
 
-  agent_error: "Agent error",
-  codex_semantic_inactivity: "Codex inactivity",
-  manual: "Manual",
+  agent_error: "agent_error",
+  codex_semantic_inactivity: "codex_semantic_inactivity",
+  manual: "manual",
 };
 
-/**
- * Reasons whose badge copy lives in the `issues` namespace
- * (`runs.failure_badge.*`) rather than in the English-only map above.
- */
-const LOCALIZED_FAILURE_REASON_BADGE = new Set(["local_directory_missing"]);
+export const KNOWN_FAILURE_REASONS = Object.keys(FAILURE_REASON_I18N_KEY);
 
 export function runFailureBadgeLabel(
   reason: string | null | undefined,
   t: (key: string) => string,
 ): string | undefined {
   if (!reason) return undefined;
-  if (LOCALIZED_FAILURE_REASON_BADGE.has(reason)) {
-    return t(`runs.failure_badge.${reason}`);
-  }
-  return FAILURE_REASON_BADGE[reason];
+  const key = FAILURE_REASON_I18N_KEY[reason];
+  if (!key) return undefined;
+  return t(`runs.failure_badge.${key}`);
 }

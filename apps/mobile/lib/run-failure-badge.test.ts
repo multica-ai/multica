@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { i18n } from "./i18n/singleton";
-import { runFailureBadgeLabel } from "./run-failure-badge";
+import { KNOWN_FAILURE_REASONS, runFailureBadgeLabel } from "./run-failure-badge";
 
 const tEn = i18n.getFixedT("en", "issues");
 
@@ -45,6 +45,19 @@ describe("runFailureBadgeLabel", () => {
   it("keeps the pre-MUL-1949 coarse values readable", () => {
     expect(runFailureBadgeLabel("agent_error", tEn)).toBe("Agent error");
     expect(runFailureBadgeLabel("manual", tEn)).toBe("Manual");
+  });
+
+  it("localizes every known failure badge in zh-Hans and zh-Hant", () => {
+    const tZhHans = i18n.getFixedT("zh-Hans", "issues");
+    const tZhHant = i18n.getFixedT("zh-Hant", "issues");
+    for (const reason of KNOWN_FAILURE_REASONS) {
+      const hans = runFailureBadgeLabel(reason, tZhHans);
+      const hant = runFailureBadgeLabel(reason, tZhHant);
+      expect(hans, `zh-Hans missing ${reason}`).toBeDefined();
+      expect(hant, `zh-Hant missing ${reason}`).toBeDefined();
+      expect(hans, `zh-Hans key leaked for ${reason}`).not.toContain("runs.failure_badge.");
+      expect(hant, `zh-Hant key leaked for ${reason}`).not.toContain("runs.failure_badge.");
+    }
   });
 
   it("degrades to no badge for a reason newer than this build", () => {

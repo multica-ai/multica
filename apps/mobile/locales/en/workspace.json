@@ -15,7 +15,7 @@
     "coming_soon": "Agents coming soon.",
     "title": "Agents",
     "empty": "No agents yet",
-    "search_placeholder": "Search agents..."
+    "search_placeholder": "Search agents…"
   },
   "actions": {
     "retry": "Retry",

@@ -54,8 +54,17 @@ describe("sendFailureMessage", () => {
       apiError({ reason_code: "runtime_access_denied" }),
     );
     expect(message).toMatch(/private runtime/i);
-    expect(message).toMatch(/public|rebind/i);
+    expect(message).toMatch(/public|bind/i);
     expect(message).not.toMatch(/try again/i);
+  });
+
+  it("localizes send failures when given a Chinese translator", async () => {
+    const { i18n } = await import("./i18n/singleton");
+    const tZh = i18n.getFixedT("zh-Hans", "chat");
+    expect(
+      sendFailureMessage(apiError({ reason_code: "runtime_access_denied" }), tZh),
+    ).toContain("私有运行时");
+    expect(sendFailureMessage(new Error("timeout"), tZh)).toContain("重试");
   });
 
   it("falls back to a retryable message for anything else", () => {

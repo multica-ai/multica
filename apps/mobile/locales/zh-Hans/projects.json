@@ -2,7 +2,7 @@
   "list": {
     "title": "项目",
     "empty": "还没有项目",
-    "search_placeholder": "搜索项目..."
+    "search_placeholder": "搜索项目…"
   },
   "status": {
     "planned": "计划中",
@@ -42,8 +42,8 @@
     "load_failed": "项目加载失败：{{message}}"
   },
   "actions": {
-    "creating": "创建中...",
-    "saving": "保存中..."
+    "creating": "创建中…",
+    "saving": "保存中…"
   },
   "menu": {
     "pin": "固定",
@@ -72,7 +72,5 @@
   "runs": {
     "working": "处理中",
     "count": "运行 · {{count}}"
-  },
-  "status.planned": "计划中",
-  "form.description_placeholder": "这个项目是做什么的？"
+  }
 }

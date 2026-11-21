@@ -36,9 +36,9 @@
     "title": "Title"
   },
   "states": {
-    "loading": "Loading...",
-    "saving": "Saving...",
-    "sending": "Sending...",
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "sending": "Sending…",
     "offline": "Offline",
     "empty": "Nothing here yet",
     "error": "Something went wrong"

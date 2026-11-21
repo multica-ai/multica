@@ -1,7 +1,18 @@
-// Shared copy for the persisted and admission-time runtime ownership failure.
-// Keep this in one mobile-owned module because mobile cannot import the web
-// locale bundles.
-export const RUNTIME_ACCESS_DENIED_RECOVERY_COPY =
-  "This agent can't run on its private runtime. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.";
+import { i18n } from "./i18n/singleton";
 
-export const RUNTIME_ACCESS_DENIED_BADGE = "No runtime access";
+/**
+ * Localized copy helpers for runtime ownership rejections on mobile.
+ * Backed by the mobile `chat` and `issues` locale bundles so non-English
+ * builds never fall back to hardcoded English strings.
+ */
+export function runtimeAccessDeniedRecoveryCopy(
+  t: (key: string) => string = i18n.getFixedT(i18n.language, "chat"),
+): string {
+  return t("failure.runtime_access_recovery");
+}
+
+export function runtimeAccessDeniedBadge(
+  t: (key: string) => string = i18n.getFixedT(i18n.language, "issues"),
+): string {
+  return t("runs.failure_badge.runtime_access_denied");
+}

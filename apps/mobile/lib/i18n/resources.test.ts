@@ -71,5 +71,51 @@ describe("mobile i18n resources", () => {
         ).toEqual([]);
       }
     });
+
+    it("contains no stray top-level dotted keys or raw English status enums", () => {
+      const RAW_STATUS_ENUMS = new Set([
+        "backlog",
+        "todo",
+        "in_progress",
+        "in_review",
+        "done",
+        "blocked",
+        "cancelled",
+        "unstarted",
+        "started",
+        "closed",
+      ]);
+      for (const [namespace, value] of readLocale(locale)) {
+        const record = value as Record<string, unknown>;
+        const dotted = Object.keys(record).filter((k) => k.includes("."));
+        expect(dotted, `${locale}/${namespace} has flat dotted keys`).toEqual([]);
+      }
+      const issues = Object.fromEntries(readLocale(locale))["issues.json"] as {
+        status: Record<string, string>;
+        category: Record<string, string>;
+      };
+      for (const [k, v] of Object.entries(issues.status)) {
+        expect(RAW_STATUS_ENUMS.has(v), `${locale}/issues.json status.${k} is raw enum "${v}"`).toBe(false);
+      }
+      for (const [k, v] of Object.entries(issues.category)) {
+        expect(RAW_STATUS_ENUMS.has(v), `${locale}/issues.json category.${k} is raw enum "${v}"`).toBe(false);
+      }
+      const inbox = Object.fromEntries(readLocale(locale))["inbox.json"] as {
+        detail: Record<string, string>;
+      };
+      for (const k of ["status_todo", "status_in_progress", "status_done", "status_blocked"]) {
+        expect(
+          RAW_STATUS_ENUMS.has(inbox.detail[k] ?? ""),
+          `${locale}/inbox.json detail.${k} is raw enum "${inbox.detail[k]}"`,
+        ).toBe(false);
+      }
+    });
+  });
+
+  it("en has no stray top-level dotted keys", () => {
+    for (const [namespace, value] of readLocale("en")) {
+      const dotted = Object.keys(value as Record<string, unknown>).filter((k) => k.includes("."));
+      expect(dotted, `en/${namespace} has flat dotted keys`).toEqual([]);
+    }
   });
 });

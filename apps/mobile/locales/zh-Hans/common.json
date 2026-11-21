@@ -36,9 +36,9 @@
     "title": "标题"
   },
   "states": {
-    "loading": "加载中...",
-    "saving": "保存中...",
-    "sending": "发送中...",
+    "loading": "加载中…",
+    "saving": "保存中…",
+    "sending": "发送中…",
     "offline": "离线",
     "empty": "暂无内容",
     "error": "出现错误"
@@ -49,7 +49,5 @@
     "hours_ago_other": "{{count}} 小时前",
     "days_ago_other": "{{count}} 天前",
     "weeks_ago_other": "{{count}} 周前"
-  },
-  "states.empty": "暂无内容",
-  "states.error": "出现错误"
+  }
 }

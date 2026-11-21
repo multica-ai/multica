@@ -57,9 +57,9 @@
     "comments": "Comments",
     "comment": "Comment",
     "reply": "Reply",
-    "add_comment": "Add comment...",
+    "add_comment": "Add comment…",
     "description": "Description",
-    "add_description": "Add description...",
+    "add_description": "Add description…",
     "runs": "Runs",
     "copy_link": "Copy link",
     "open_on_web": "Open on web",
@@ -71,13 +71,13 @@
     "title": "New issue",
     "title_placeholder": "Issue title",
     "create": "Create issue",
-    "creating": "Creating...",
-    "description_placeholder": "Description... (type @ to mention)"
+    "creating": "Creating…",
+    "description_placeholder": "Description… (type @ to mention)"
   },
   "edit": {
     "title": "Edit issue",
     "save": "Save changes",
-    "saving": "Saving..."
+    "saving": "Saving…"
   },
   "activity": {
     "created": "created the issue",
@@ -152,9 +152,9 @@
     "message": "The agent will stop after the current step.",
     "keep_running": "Keep running",
     "cancel_task": "Cancel run",
-    "waiting_for_connection": "Waiting for connection...",
-    "stopping": "Stopping...",
-    "failed": "Couldn’t stop the run. Try again."
+    "waiting_for_connection": "Waiting for connection…",
+    "stopping": "Stopping…",
+    "failed": "Couldn't stop the run. Try again."
   },
   "form": {
     "discard_title": "Discard changes?",
@@ -170,7 +170,7 @@
     "squad": "Squad",
     "no_matches": "No matches.",
     "no_project": "No project",
-    "no_projects": "No projects in this workspace yet.\nCreate them on web.",
+    "no_projects": "No projects in this workspace yet.",
     "no_labels": "No labels in this workspace yet.",
     "create_label": "Create \"{{name}}\"",
     "no_members_agents": "No members or agents in this workspace yet.",
@@ -190,20 +190,20 @@
   },
   "comments": {
     "reply": "Reply",
-    "react": "React...",
+    "react": "React…",
     "copy": "Copy",
-    "select_text": "Select Text",
-    "copy_link": "Copy Link",
-    "resolve": "Resolve Thread",
-    "unresolve": "Unresolve Thread",
+    "select_text": "Select text",
+    "copy_link": "Copy link",
+    "resolve": "Resolve thread",
+    "unresolve": "Reopen thread",
     "delete": "Delete",
     "delete_title": "Delete comment?",
     "delete_keep_replies": "This comment will be permanently deleted. Any replies to it stay in the thread. This cannot be undone.",
     "delete_with_replies": "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
-    "more_reactions": "More reactions...",
+    "more_reactions": "More reactions…",
     "fallback_actor": "comment",
     "composer_placeholder": "Add a comment…",
-    "composer_pill": "Add a comment, type @ to mention..."
+    "composer_pill": "Add a comment, type @ to mention…"
   },
   "suggestions": {
     "everyone": "Everyone",
@@ -234,7 +234,7 @@
     "branch": "Starting branch (optional)",
     "label": "Label (optional)",
     "attach": "Attach",
-    "attaching": "Attaching...",
+    "attaching": "Attaching…",
     "branch_hint": "Runs start from this branch and open their pull requests against it. Leave empty to use the repository default branch.",
     "commit": "This is a commit ID, not a branch. Runs deliver back to the branch they start from. For a one-off revision, pass --ref to multica repo checkout.",
     "too_long": "Use at most 255 characters.",
@@ -246,11 +246,11 @@
   "runs": {
     "active": "Active",
     "past": "Past",
-    "title": "Agent Runs",
+    "title": "Agent runs",
     "open_transcript": "Open execution record for {{summary}}",
     "transcript": {
       "title": "Execution record",
-      "loading": "Loading execution record...",
+      "loading": "Loading execution record…",
       "load_error": "Couldn't load this execution record.",
       "retry": "Try again",
       "missing": "This run is unavailable or no longer exists.",
@@ -277,7 +277,36 @@
       "cancelled": "Cancelled"
     },
     "failure_badge": {
-      "local_directory_missing": "Folder missing"
+      "queued_expired": "Queue expired",
+      "runtime_offline": "Runtime offline",
+      "runtime_access_revoked": "Access revoked",
+      "runtime_recovery": "Runtime recovery",
+      "timeout": "Timeout",
+      "iteration_limit": "Iteration limit",
+      "agent_blocked": "Needs input",
+      "api_invalid_request": "Request rejected",
+      "skill_bundle_unavailable": "Skill download failed",
+      "runtime_cli_timeout": "Runtime CLI timeout",
+      "environment_prepare_failed": "Environment setup failed",
+      "runtime_access_denied": "No runtime access",
+      "local_directory_missing": "Folder missing",
+      "agent_error_provider_auth_or_access": "Auth failed",
+      "agent_error_provider_quota_limit": "Quota exhausted",
+      "agent_error_provider_capacity_or_rate_limit": "Rate limited",
+      "agent_error_provider_server_error": "Provider error",
+      "agent_error_provider_network": "Network error",
+      "agent_error_process_failure": "Process crashed",
+      "agent_error_empty_or_unparseable_output": "No usable output",
+      "agent_error_agent_timeout": "Agent timeout",
+      "agent_error_context_overflow": "Context overflow",
+      "agent_error_missing_config": "Config missing",
+      "agent_error_model_not_found_or_unavailable": "Model unavailable",
+      "agent_error_runtime_version_unsupported": "CLI unsupported",
+      "agent_error_runtime_missing_executable": "CLI not installed",
+      "agent_error_unknown": "Agent error",
+      "agent_error": "Agent error",
+      "codex_semantic_inactivity": "Codex inactivity",
+      "manual": "Manual"
     }
   },
   "header_filter": "Filter",
@@ -290,10 +319,5 @@
     "retry_upload": "Retry upload of {{name}}",
     "open_file": "Open {{name}}",
     "remove_file": "Remove {{name}}"
-  },
-  "summary.comment": "Comment run",
-  "summary.chat": "Chat run",
-  "summary.direct": "Run",
-  "cancel.title": "Cancel run?",
-  "cancel.cancel_task": "Cancel run"
+  }
 }

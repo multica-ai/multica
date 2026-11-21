@@ -27,11 +27,11 @@ describe("mobile i18n singleton", () => {
     );
   });
 
-  it("renders issue status enums as lowercase English and run statuses translated in Chinese", async () => {
+  it("renders both issue statuses and run statuses translated in Chinese", async () => {
     await i18n.changeLanguage("zh-Hans");
-    expect(i18n.t("issues:status.todo")).toBe("todo");
-    expect(i18n.t("issues:status.in_review")).toBe("in_review");
-    expect(i18n.t("issues:status.cancelled")).toBe("cancelled");
+    expect(i18n.t("issues:status.todo")).toBe("待办");
+    expect(i18n.t("issues:status.in_review")).toBe("审核中");
+    expect(i18n.t("issues:status.cancelled")).toBe("已取消");
     expect(i18n.t("issues:runs.status.queued")).toBe("排队中");
     expect(i18n.t("issues:runs.status.completed")).toBe("运行成功");
   });
