@@ -66,12 +66,12 @@ describe("buildRuntimeChoiceGroups", () => {
       }),
     ]);
 
-    expect(result.local?.harnesses.map((h) => h.runtime.id)).toEqual([
-      "local-claude",
-      "local-codex",
-    ]);
-    expect(result.remotes.map((d) => d.harnesses[0]?.runtime.id)).toEqual([
-      "server-claude",
+    expect(result.devices.map(({ machine, harnesses }) => ({
+      section: machine.section,
+      runtimeIds: harnesses.map((h) => h.runtime.id),
+    }))).toEqual([
+      { section: "local", runtimeIds: ["local-claude", "local-codex"] },
+      { section: "remote", runtimeIds: ["server-claude"] },
     ]);
     expect(result.qoderRuntime?.id).toBe("qoder");
     expect(result.cloud).toEqual([]);
@@ -87,7 +87,7 @@ describe("buildRuntimeChoiceGroups", () => {
         visibility: "private",
       }),
     ]);
-    expect(result.remotes).toEqual([]);
+    expect(result.devices).toEqual([]);
     expect(result.hiddenRemoteCount).toBe(1);
   });
 

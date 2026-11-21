@@ -90,10 +90,9 @@ const unconnectedQoder: QoderConnection = {
 
 function mount(overrides: Partial<RuntimeChoiceListProps> = {}) {
   const props: RuntimeChoiceListProps = {
-    local: groups.local,
+    devices: groups.devices,
     localAvailable: true,
     localStarting: false,
-    remotes: groups.remotes,
     hiddenRemoteCount: 0,
     cloud: [],
     qoder: unconnectedQoder,
@@ -145,6 +144,42 @@ describe("RuntimeChoiceList", () => {
     expect(server).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(screen.getByRole("button", { name: "Claude" }));
     expect(props.onSelect).toHaveBeenCalledWith("server-claude");
+  });
+
+  it("lets the user choose harnesses from Windows and WSL daemons with the same hostname", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "windows-runtime",
+          daemon_id: "windows-daemon",
+          name: "Antigravity (shared-host)",
+          custom_name: "Windows",
+          provider: "antigravity",
+        }),
+        makeRuntime({
+          id: "wsl-runtime",
+          daemon_id: "wsl-daemon",
+          name: "Codex (shared-host)",
+          custom_name: "WSL",
+          provider: "codex",
+        }),
+      ],
+      {
+        now: NOW,
+        localDaemonId: "windows-daemon",
+        localMachineName: "shared-host",
+        currentUserId: "me",
+      },
+    );
+    const choices = buildRuntimeChoiceGroups(machines, "me");
+    const props = mount({ devices: choices.devices });
+
+    expect(screen.getByRole("button", { name: /Windows/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /WSL/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Antigravity/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(props.onSelect).toHaveBeenNthCalledWith(1, "windows-runtime");
+    expect(props.onSelect).toHaveBeenNthCalledWith(2, "wsl-runtime");
   });
 
   it("opens the machine holding the selection and warns about a teammate's account", () => {

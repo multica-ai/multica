@@ -104,7 +104,7 @@ export function ChooseRuntimePage({
 
   const options = useMemo(() => {
     const byId = new Map<string, { option: HarnessOption; where: string }>();
-    for (const device of [...(groups.local ? [groups.local] : []), ...groups.remotes]) {
+    for (const device of groups.devices) {
       for (const option of device.harnesses) {
         byId.set(option.runtime.id, { option, where: device.machine.title });
       }
@@ -240,10 +240,9 @@ export function ChooseRuntimePage({
 
           <div className="mt-5">
             <RuntimeChoiceList
-              local={groups.local}
+              devices={groups.devices}
               localAvailable={hasLocalMachine}
               localStarting={bootstrapping}
-              remotes={groups.remotes}
               hiddenRemoteCount={groups.hiddenRemoteCount}
               cloud={groups.cloud}
               qoder={qoder}
