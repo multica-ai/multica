@@ -38,7 +38,8 @@ func TestAntigravityThinkingCurrentTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := make(chan Message, 8)
-	progress := &antigravityThinkingProgress{logPath: logPath, messages: messages}
+	writer := &antigravityMessages{messages: messages}
+	progress := &antigravityThinkingProgress{logPath: logPath, send: func(msg Message) bool { return writer.send(t.Context(), msg, false) }}
 	progress.poll() // No stdout turn boundary: never replay native history.
 	if len(messages) != 0 {
 		t.Fatal("thinking emitted without a current-turn boundary")
@@ -50,7 +51,7 @@ func TestAntigravityThinkingCurrentTurn(t *testing.T) {
 	if len(messages) != 2 {
 		t.Fatalf("got %d messages, want the two settled thoughts from this turn", len(messages))
 	}
-	for _, want := range []string{"Inspecting the implementation.\n\n", "Checking the tests.\n\n"} {
+	for _, want := range []string{"Inspecting the implementation.", "\n\nChecking the tests."} {
 		msg := <-messages
 		if msg.Type != MessageThinking || msg.Content != want {
 			t.Fatalf("got %#v, want thinking %q", msg, want)
@@ -71,7 +72,8 @@ func TestAntigravityThinkingPartialLineAndBackpressure(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := make(chan Message, 1)
-	progress := &antigravityThinkingProgress{logPath: logPath, messages: messages}
+	writer := &antigravityMessages{messages: messages}
+	progress := &antigravityThinkingProgress{logPath: logPath, send: func(msg Message) bool { return writer.send(t.Context(), msg, false) }}
 	start := 0
 	progress.setScope(cid, &start)
 	progress.poll() // The transcript can appear after init/user_input.
@@ -100,12 +102,38 @@ func TestAntigravityThinkingPartialLineAndBackpressure(t *testing.T) {
 	}
 	<-messages
 	progress.poll()
-	if len(messages) != 1 || (<-messages).Content != "Live progress.\n\n" {
+	if len(messages) != 1 || (<-messages).Content != "Live progress." {
 		t.Fatal("did not retry the completed native record")
 	}
 	progress.poll()
 	if len(messages) != 0 {
 		t.Fatal("replayed an already delivered record")
+	}
+}
+
+func TestAntigravityThinkingWhitespace(t *testing.T) {
+	t.Parallel()
+	ch := make(chan Message, 8)
+	writer := &antigravityMessages{messages: ch}
+	input := []Message{
+		{Type: MessageThinking, Content: "First paragraph.\n\nSecond paragraph.\n\n\n"},
+		{Type: MessageThinking, Content: "\n  "},
+		{Type: MessageThinking, Content: "Next step.\n\n\n"},
+		{Type: MessageToolUse, Tool: "read_file"},
+		{Type: MessageThinking, Content: "After the tool.\n\n\n"},
+	}
+	for _, msg := range input {
+		if !writer.send(t.Context(), msg, false) {
+			t.Fatal("message was not sent")
+		}
+	}
+	first, second, tool, third := <-ch, <-ch, <-ch, <-ch
+	if first.Content != "First paragraph.\n\nSecond paragraph." || second.Content != "\n\nNext step." ||
+		tool.Type != MessageToolUse || third.Content != "After the tool." || len(ch) != 0 {
+		t.Fatalf("unexpected formatting: %#v, %#v, %#v, %#v", first, second, tool, third)
+	}
+	if strings.HasSuffix(first.Content+second.Content, "\n") || strings.HasSuffix(third.Content, "\n") {
+		t.Fatal("thinking block has trailing blank lines")
 	}
 }
 

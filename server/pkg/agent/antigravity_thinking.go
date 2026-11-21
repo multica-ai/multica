@@ -18,14 +18,50 @@ type antigravityThinkingScope struct {
 	valid          bool
 }
 
+// Both stdout and native thinking use this writer, so paragraph separators
+// follow actual message order without padding the end of each thinking block.
+type antigravityMessages struct {
+	mu           sync.Mutex
+	messages     chan<- Message
+	lastThinking bool
+}
+
+func (s *antigravityMessages) send(ctx context.Context, msg Message, reliable bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if msg.Type == MessageThinking {
+		msg.Content = strings.TrimSpace(msg.Content)
+		if msg.Content == "" {
+			return true
+		}
+		if s.lastThinking {
+			msg.Content = "\n\n" + msg.Content
+		}
+	}
+	if reliable {
+		select {
+		case s.messages <- msg:
+		case <-ctx.Done():
+			return false
+		}
+	} else if !trySend(s.messages, msg) {
+		return false
+	}
+	switch msg.Type {
+	case MessageThinking, MessageText, MessageToolUse, MessageToolResult, MessageError:
+		s.lastThinking = msg.Type == MessageThinking
+	}
+	return true
+}
+
 // Headless stdout carries response text, but not the thinking text available
 // in agy's native transcript. Read only settled records after the USER_INPUT
 // index announced by this process; a resumed conversation also holds history.
 type antigravityThinkingProgress struct {
-	logPath  string
-	messages chan<- Message
-	mu       sync.Mutex
-	scope    antigravityThinkingScope
+	logPath string
+	send    func(Message) bool
+	mu      sync.Mutex
+	scope   antigravityThinkingScope
 
 	reading antigravityThinkingScope
 	path    string
@@ -112,7 +148,7 @@ func (p *antigravityThinkingProgress) poll() {
 			index := *record.StepIndex
 			if record.Type == "PLANNER_RESPONSE" && record.Source == "MODEL" && record.Status == "DONE" &&
 				!p.seen[index] && strings.TrimSpace(record.Thinking) != "" {
-				if !trySend(p.messages, Message{Type: MessageThinking, Content: record.Thinking + "\n\n"}) {
+				if !p.send(Message{Type: MessageThinking, Content: record.Thinking}) {
 					return // Retry this record on the next poll if the consumer fell behind.
 				}
 				p.seen[index] = true
