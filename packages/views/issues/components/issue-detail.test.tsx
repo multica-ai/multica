@@ -375,6 +375,7 @@ const mockApiObj = vi.hoisted(() => ({
   getProject: vi.fn(),
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
   listPins: vi.fn().mockResolvedValue([]),
+  createIssueCollabTicket: vi.fn().mockResolvedValue({ enabled: false }),
 }));
 
 vi.mock("@multica/core/api", () => ({

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 
 const { apiMock, providers, sockets } = vi.hoisted(() => ({
-  apiMock: { createDocCollabTicket: vi.fn() },
+  apiMock: { createDocCollabTicket: vi.fn(), createIssueCollabTicket: vi.fn() },
   providers: [] as Array<{
     config: {
       name: string;
@@ -61,6 +61,7 @@ import {
   acquireDocSession,
   findDocSession,
   liveEditingOff,
+  liveOffKey,
   peekDocLive,
   prefetchDocLive,
   releaseDocSession,
@@ -88,6 +89,7 @@ const ticket = (docId: string, extra: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   apiMock.createDocCollabTicket.mockReset();
+  apiMock.createIssueCollabTicket.mockReset();
   providers.length = 0;
   sockets.length = 0;
 });
@@ -127,6 +129,34 @@ describe("prefetchDocLive", () => {
 
     void prefetchDocLive(url, `${docId}-next`, "u1");
     expect(sockets).toHaveLength(2);
+  });
+
+  it("asks for an issue description's ticket apart from a doc with the same id", async () => {
+    const { url, docId: id } = ids();
+    apiMock.createDocCollabTicket.mockResolvedValue(ticket(id));
+    apiMock.createIssueCollabTicket.mockResolvedValue({ ...ticket(id), document: `issue:${id}` });
+    await prefetchDocLive(url, id, "u1", "issue");
+    expect(apiMock.createIssueCollabTicket).toHaveBeenCalledWith(id, { state: true });
+    expect(apiMock.createDocCollabTicket).not.toHaveBeenCalled();
+    expect(peekDocLive(url, id, "u1")).toBeUndefined();
+    expect(peekDocLive(url, id, "u1", "issue")).toMatchObject({ document: `issue:${id}` });
+
+    const session = acquireDocSession(url, id, "u1", `issue:${id}`, "issue");
+    expect(findDocSession(url, id, "u1")).toBeUndefined();
+    expect(findDocSession(url, id, "u1", "issue")).toBe(session);
+    // The seeded ticket is used once; the next join asks the issue endpoint.
+    await providers.at(-1)!.config.token();
+    await providers.at(-1)!.config.token();
+    expect(apiMock.createIssueCollabTicket).toHaveBeenLastCalledWith(id, undefined);
+    releaseDocSession(session, { discard: true });
+  });
+
+  it("remembers live issue descriptions being off without turning docs solo", async () => {
+    const { url, docId: id } = ids();
+    apiMock.createIssueCollabTicket.mockResolvedValue({ enabled: false });
+    await prefetchDocLive(url, id, "u1", "issue");
+    expect(liveEditingOff.has(liveOffKey(url, "issue"))).toBe(true);
+    expect(liveEditingOff.has(url)).toBe(false);
   });
 
   it("keeps answers per user: a ticket is personal", async () => {

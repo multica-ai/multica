@@ -1109,6 +1109,18 @@ export class ApiClient {
       { endpoint: "POST /api/docs/{id}/collab-ticket" },
     );
   }
+  /** Joins the live session of an issue's description; same shape as a doc's. */
+  async createIssueCollabTicket(id: string, options?: { state?: boolean }): Promise<DocCollabTicket> {
+    return parseWithFallback<DocCollabTicket>(
+      await this.fetch<unknown>(`/api/issues/${id}/collab-ticket`, {
+        method: "POST",
+        ...(options?.state ? { body: JSON.stringify({ state: true }) } : {}),
+      }),
+      DocCollabTicketSchema,
+      { enabled: false },
+      { endpoint: "POST /api/issues/{id}/collab-ticket" },
+    );
+  }
   async getDocVersion(id: string, number: number): Promise<DocVersion | null> {
     return parseWithFallback<DocVersion | null>(
       await this.fetch<unknown>(`/api/docs/${id}/versions/${number}`),
