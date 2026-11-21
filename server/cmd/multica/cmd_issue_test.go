@@ -6145,6 +6145,7 @@ func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
 func newIssueSearchTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "search"}
 	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().String("scope", "all", "")
 	cmd.Flags().Bool("include-closed", false, "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("output", "json", "")
@@ -6255,14 +6256,76 @@ func TestRunIssueSearchProjectFilterErrors(t *testing.T) {
 	}
 }
 
+func TestRunIssueSearchScope(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issues": []any{},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	t.Run("default scope all omits scope query param", func(t *testing.T) {
+		cmd := newIssueSearchTestCmd()
+		if _, err := captureStdout(t, func() error {
+			return runIssueSearch(cmd, []string{"auth bug"})
+		}); err != nil {
+			t.Fatalf("runIssueSearch: %v", err)
+		}
+		if got := gotQuery.Get("scope"); got != "" {
+			t.Errorf("scope = %q, want empty for default all", got)
+		}
+	})
+
+	t.Run("scope title_desc forwards scope query param", func(t *testing.T) {
+		cmd := newIssueSearchTestCmd()
+		_ = cmd.Flags().Set("scope", "title_desc")
+		if _, err := captureStdout(t, func() error {
+			return runIssueSearch(cmd, []string{"auth bug"})
+		}); err != nil {
+			t.Fatalf("runIssueSearch: %v", err)
+		}
+		if got := gotQuery.Get("scope"); got != "title_desc" {
+			t.Errorf("scope = %q, want %q", got, "title_desc")
+		}
+	})
+
+	t.Run("invalid scope fails before calling server", func(t *testing.T) {
+		failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Fatalf("unexpected server call for invalid --scope: %s", r.URL.Path)
+		}))
+		defer failSrv.Close()
+		t.Setenv("MULTICA_SERVER_URL", failSrv.URL)
+
+		cmd := newIssueSearchTestCmd()
+		_ = cmd.Flags().Set("scope", "bogus")
+		err := runIssueSearch(cmd, []string{"auth bug"})
+		if err == nil || !strings.Contains(err.Error(), `invalid --scope "bogus"`) {
+			t.Fatalf("error = %v, want invalid --scope message", err)
+		}
+	})
+}
+
 func TestIssueSearchCommandRegistration(t *testing.T) {
-	for _, flagName := range []string{"limit", "include-closed", "project", "output"} {
+	for _, flagName := range []string{"limit", "scope", "include-closed", "project", "output"} {
 		if issueSearchCmd.Flags().Lookup(flagName) == nil {
 			t.Errorf("expected --%s flag on issue search command", flagName)
 		}
 	}
+	if def, _ := issueSearchCmd.Flags().GetString("scope"); def != "all" {
+		t.Errorf("--scope default = %q, want %q", def, "all")
+	}
 	if got := issueSearchCmd.Flags().Lookup("project").Usage; got != "Filter by project ID" {
 		t.Errorf("project flag usage = %q, want %q", got, "Filter by project ID")
+	}
+	if !strings.Contains(issueSearchCmd.Long, `"description" with --scope title_desc`) {
+		t.Errorf("issue search help Long missing scope=title_desc match_source fallback description:\n%s", issueSearchCmd.Long)
 	}
 }
 

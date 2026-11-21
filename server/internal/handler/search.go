@@ -38,6 +38,15 @@ const (
 
 	searchWorkMemEnv       = "DATABASE_SEARCH_WORK_MEM_MB"
 	defaultSearchWorkMemMB = 64
+
+	// searchScopeAll and searchScopeTitleDesc are the only non-empty values
+	// the issue search `scope` parameter accepts. title_desc restricts
+	// matching to issue titles and descriptions, skipping the comment scan
+	// and aggregation pass; all is the default full-field scope. Any other
+	// value is rejected with 400 so a typo cannot silently widen the result
+	// set.
+	searchScopeAll       = "all"
+	searchScopeTitleDesc = "title_desc"
 )
 
 // configuredSearchWorkMemMB removes the candidate-first comment aggregation
