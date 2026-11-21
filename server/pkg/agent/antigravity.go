@@ -492,7 +492,9 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		defer os.Remove(logPath)
 		defer supplements.close()
 
-		thinking := &antigravityThinkingProgress{logPath: logPath, messages: msgCh}
+		messages := &antigravityMessages{messages: msgCh}
+		send := func(msg Message) bool { return messages.send(runCtx, msg, false) }
+		thinking := &antigravityThinkingProgress{logPath: logPath, send: send}
 		thinkingCtx, stopThinking := context.WithCancel(runCtx)
 		thinkingDone := make(chan struct{})
 		go func() {
@@ -522,7 +524,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		scanner := newAgentStreamScanner(stdout)
 
-		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+		send(Message{Type: MessageStatus, Status: "running"})
 		// Announce the conversation id the moment agy names it so the daemon
 		// pins the resume pointer mid-run. A run that is cancelled or killed
 		// never reaches the terminal Result, and without the pin its follow-up
@@ -533,7 +535,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 				return
 			}
 			announcedSessionID = id
-			trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: id})
+			send(Message{Type: MessageStatus, Status: "running", SessionID: id})
 		}
 
 	streamLoop:
@@ -576,15 +578,13 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 						// Tool lifecycle events also drive the daemon's in-flight
 						// counter. Unlike best-effort text, neither half may be
 						// dropped when a transcript consumer temporarily falls behind.
-						select {
-						case msgCh <- message:
-						case <-runCtx.Done():
+						if !messages.send(runCtx, message, true) {
 							break streamLoop
 						}
 					}
 					if event.StepUpdate.StepType == "agent_response" && event.StepUpdate.TextDelta != "" {
 						output.WriteString(event.StepUpdate.TextDelta)
-						trySend(msgCh, Message{Type: MessageText, Content: event.StepUpdate.TextDelta})
+						send(Message{Type: MessageText, Content: event.StepUpdate.TextDelta})
 					}
 					if strings.EqualFold(event.StepUpdate.State, "done") && event.StepUpdate.StepIndex != nil && event.StepUpdate.Usage != nil && event.StepUpdate.Usage.hasTokens() {
 						// A step may be re-emitted as its state changes. Keying by
@@ -625,7 +625,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			}
 			output.WriteString(line)
 			if chunk != "" {
-				trySend(msgCh, Message{Type: MessageText, Content: chunk})
+				send(Message{Type: MessageText, Content: chunk})
 			}
 		}
 		if err := scanner.Err(); err != nil {
@@ -700,7 +700,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// reconstruct it exactly; if none arrived, emit the response now so
 			// the task transcript and final result both receive the answer.
 			if finalOutput == "" {
-				trySend(msgCh, Message{Type: MessageText, Content: streamResponse})
+				send(Message{Type: MessageText, Content: streamResponse})
 			}
 			finalOutput = streamResponse
 		}
@@ -715,7 +715,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// final comment while the execution transcript remains blank.
 			if recovered := readAntigravityTranscriptOutput(logPath, sessionID); recovered != "" {
 				finalOutput = recovered
-				trySend(msgCh, Message{Type: MessageText, Content: recovered})
+				send(Message{Type: MessageText, Content: recovered})
 				b.cfg.Logger.Info("agy recovered empty stdout from transcript", "bytes", len(recovered))
 			}
 		}

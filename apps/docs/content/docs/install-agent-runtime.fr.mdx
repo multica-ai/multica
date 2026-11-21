@@ -86,6 +86,11 @@ En dessous de la version minimale, le daemon n'enregistre pas le runtime corresp
 Quelques outils demandent une configuration en plus de la connexion :
 
 <Accordions type="multiple">
+<Accordion title="Antigravity" id="antigravity">
+
+La trace d’exécution affiche les réflexions des étapes terminées dans la section Thinking lorsque la CLI fournit sa transcription locale. Les mises à jour apparaissent après l’écriture d’une étape sur disque, et non token par token. Seul le tour courant est affiché ; ces réflexions restent séparées du rapport final. Si la transcription locale est indisponible, les événements d’outils et le texte de réponse continuent de suivre le flux habituel.
+
+</Accordion>
 <Accordion title="CodeArts" id="codearts">
 
 Vérifiez le chemin non interactif avec `codearts run --model provider/model "Reply OK"`, et pas seulement la TUI. Le CLI CodeArts actuel peut laisser un fournisseur personnalisé fonctionner dans la TUI alors que `run`, `models` et `serve` exigent toujours [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica peut découvrir des modèles personnalisés depuis `~/.codeartsdoer/codearts_cli.json` ou `.jsonc`, mais les exécutions d'agent utilisent `codearts run` et suivent donc ses exigences d'autorisation.
