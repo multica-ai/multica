@@ -116,6 +116,11 @@ describe("runConfirmIntent — promote", () => {
     });
   });
 
+  it("applies a parked issue's move without starting directly", () => {
+    const updates = { status: "in_progress", suppress_run: true, stop_previous_assignee_runs: true };
+    expect(runConfirmIntent(issue(), updates, CATALOG)).toBeNull();
+  });
+
   it.each([
     ["unresolvable origin", COLD, { status: "later" }, "todo"],
     ["unresolvable target", CATALOG, { status: "backlog" }, "unknown"],

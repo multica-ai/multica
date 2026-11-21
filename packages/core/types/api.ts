@@ -158,6 +158,7 @@ export interface MoveIssueRequest
     | "parent_issue_id"
     | "project_id"
     | "stop_previous_assignee_runs"
+    | "suppress_run"
   > {
   before_id: string | null;
   after_id: string | null;

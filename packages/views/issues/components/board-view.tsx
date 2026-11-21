@@ -952,17 +952,13 @@ function BoardViewImpl({
       issue={pendingHandoff?.issue ?? null}
       toStatus={pendingHandoff?.status ?? ""}
       onCancel={() => setPendingHandoff(null)}
-      onConfirm={({ stopPreviousRuns }) => {
+      onConfirm={(controls) => {
         const pending = pendingHandoff;
         setPendingHandoff(null);
         if (!pending) return;
         onMoveIssue(
           pending.issue.id,
-          {
-            ...pending.updates,
-            ...pending.anchors,
-            ...(stopPreviousRuns ? { stop_previous_assignee_runs: true } : {}),
-          },
+          { ...pending.updates, ...pending.anchors, ...controls },
           beginSettle(),
         );
       }}

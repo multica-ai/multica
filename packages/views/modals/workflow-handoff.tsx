@@ -28,10 +28,10 @@ export function WorkflowHandoffModal({
       issue={{ id: issueId, identifier }}
       toStatus={status}
       onCancel={onClose}
-      onConfirm={({ stopPreviousRuns }) => {
+      onConfirm={(controls) => {
         onClose();
         // Closing unmounts this modal, so the failure follows the promise.
-        updateIssue({ id: issueId, status, ...(stopPreviousRuns ? { stop_previous_assignee_runs: true } : {}) }).catch(
+        updateIssue({ id: issueId, status, ...controls }).catch(
           (err) => toast.error(err instanceof Error && err.message ? err.message : t(($) => $.detail.update_failed)),
         );
       }}

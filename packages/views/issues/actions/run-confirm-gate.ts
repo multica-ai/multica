@@ -68,12 +68,17 @@ const NEVER_STARTS: IssueStatusCategory[] = ["done", "closed"];
  *
  * Unresolvable categories fail toward confirming: a dialog the user dismisses
  * costs a click, a silent start costs an unwanted agent run.
+ *
+ * A write with `suppress_run` starts nothing, so there is nothing to confirm.
+ * It also arrives already confirmed, e.g. from the workflow handoff dialog's
+ * "Move without starting", which a second prompt would discard.
  */
 export function runConfirmIntent(
   issue: GateIssue,
   updates: Partial<UpdateIssueRequest>,
   catalog: Pick<IssueStatusCatalog, "entryOf">,
 ): RunConfirmIntent | null {
+  if (updates.suppress_run) return null;
   const issueCategory = resolveStatusCategory(issue.status, issue.status_category, catalog);
   const parked = issue.status === "backlog";
 

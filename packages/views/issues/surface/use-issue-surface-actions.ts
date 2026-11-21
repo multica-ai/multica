@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type { MoveIssueRequest, UpdateIssueRequest } from "@multica/core/types";
 import {
   useBatchDeleteIssues,
   useBatchUpdateIssues,
@@ -17,19 +17,7 @@ import {
 import type { IssueCreateDefaults } from "./types";
 import { useT } from "../../i18n";
 
-export type MoveIssueUpdates = Pick<
-  UpdateIssueRequest,
-  | "status"
-  | "assignee_type"
-  | "assignee_id"
-  | "position"
-  | "stop_previous_assignee_runs"
-  | "parent_issue_id"
-  | "project_id"
-> & {
-  before_id: string | null;
-  after_id: string | null;
-};
+export type MoveIssueUpdates = MoveIssueRequest & Pick<UpdateIssueRequest, "position">;
 
 export interface IssueSurfaceActionController {
   actions: IssueSurfaceActions;
