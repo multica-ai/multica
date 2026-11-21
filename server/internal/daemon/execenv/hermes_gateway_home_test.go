@@ -34,6 +34,7 @@ func TestHermesConversationHomeOwnsDatabase(t *testing.T) {
 }
 
 func TestHermesTaskDisablesGatewayIngress(t *testing.T) {
+	t.Setenv(hermesGatewayStateEnv, "isolated")
 	shared, home := t.TempDir(), filepath.Join(t.TempDir(), "hermes-home")
 	mustWrite(t, filepath.Join(shared, "config.yaml"), "model: {provider: custom, default: fixture-model}\nplatforms:\n  api_server: {enabled: true, port: 8642}\n  discord: {enabled: true}\n  custom-chat: {enabled: true}\n")
 	for _, name := range []string{"gateway.pid", "gateway.lock", "gateway_state.json", "gateway.sock.path", "gateway.json", "cron/jobs.json", "sessions/sessions.json", "logs/gateway.log"} {
@@ -79,6 +80,58 @@ func TestHermesTaskDisablesGatewayIngress(t *testing.T) {
 		if got, err := os.ReadFile(path); err != nil || string(got) != want {
 			t.Errorf("runtime state %s = %q, %v; want %q", path, got, err, want)
 		}
+	}
+}
+
+func TestHermesTaskSharesContainerGateway(t *testing.T) {
+	requireSymlinks(t)
+	t.Setenv(hermesGatewayStateEnv, "shared")
+	shared, home := t.TempDir(), filepath.Join(t.TempDir(), "hermes-home")
+	for _, name := range []string{"gateway.lock", "gateway_state.json", "cron/jobs.json", "sessions/sessions.json", "logs/gateway.log"} {
+		mustWrite(t, filepath.Join(shared, name), "container gateway")
+	}
+	for range 2 { // Reuse must keep the attachment too.
+		if _, err := prepareHermesHome(home, shared, false, nil, nil, "", "", testLogger()); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"gateway.lock", "gateway_state.json", "cron", "sessions", "logs"} {
+			target, err := os.Readlink(filepath.Join(home, name))
+			if err != nil || target != filepath.Join(shared, name) {
+				t.Errorf("%s = link to %q, %v; want link to the shared home", name, target, err)
+			}
+		}
+		if _, err := os.Lstat(filepath.Join(home, hermesGatewayStateMarker)); !os.IsNotExist(err) {
+			t.Errorf("shared gateway mode wrote the isolation marker (err %v)", err)
+		}
+	}
+}
+
+func TestHermesGatewayStateMode(t *testing.T) {
+	dir := t.TempDir()
+	comm, basedir := filepath.Join(dir, "comm"), filepath.Join(dir, "basedir")
+	mustWrite(t, comm, "s6-svscan\n")
+	if err := os.Mkdir(basedir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(dir, "init"), "systemd\n")
+	for _, tc := range []struct {
+		name, mode, comm, basedir string
+		want                      bool
+	}{
+		{"s6 container", "", comm, basedir, false},
+		{"other init", "", filepath.Join(dir, "init"), basedir, true},
+		{"no s6 basedir", "", comm, filepath.Join(dir, "missing"), true},
+		{"basedir is a file", "", comm, comm, true},
+		{"unreadable init", "", filepath.Join(dir, "missing"), basedir, true},
+		{"forced isolated", "isolated", comm, basedir, true},
+		{"forced shared", "shared", filepath.Join(dir, "missing"), "", false},
+		{"unknown override", "bogus", comm, basedir, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hermesGatewayStateIsolated(tc.mode, tc.comm, tc.basedir); got != tc.want {
+				t.Fatalf("isolated = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -133,5 +186,106 @@ func TestHermesDisablesNestedGatewayPlatforms(t *testing.T) {
 	}
 	if platform, ok := parsed.Platforms["custom-chat"]; !ok || platform.Enabled {
 		t.Fatal("nested custom platform was not explicitly disabled")
+	}
+}
+
+func TestHermesSharedGatewayResumesFromOwnerStore(t *testing.T) {
+	requireSymlinks(t)
+	for _, tc := range []struct {
+		name, mode, ownerDB string
+		want                bool
+	}{
+		{"shared with owner transcript", "shared", "owner transcript", true},
+		{"shared with empty owner database", "shared", "", false},
+		{"shared without owner database", "shared", "-", false},
+		{"isolated ignores owner", "isolated", "owner transcript", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(hermesGatewayStateEnv, tc.mode)
+			shared, owner := t.TempDir(), t.TempDir()
+			store := filepath.Join(t.TempDir(), "conversation")
+			home := filepath.Join(t.TempDir(), "hermes-home")
+			mustWrite(t, filepath.Join(shared, "gateway.lock"), `{"pid":193,"kind":"hermes-gateway","argv":["hermes","gateway","run"],"hermes_home":"`+filepath.ToSlash(owner)+`"}`)
+			if tc.ownerDB != "-" {
+				mustWrite(t, filepath.Join(owner, "state.db"), tc.ownerDB)
+			}
+			prepared, err := prepareHermesHome(home, shared, false, nil, nil, "", store, testLogger())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prepared.HistoryPresent != tc.want {
+				t.Fatalf("HistoryPresent = %v, want %v (mount %+v)", prepared.HistoryPresent, tc.want, prepared)
+			}
+			if _, err := os.Lstat(filepath.Join(store, "state.db")); !os.IsNotExist(err) {
+				t.Errorf("task store gained a database (err %v)", err)
+			}
+			if got, err := os.ReadFile(filepath.Join(owner, "state.db")); tc.ownerDB != "-" && (err != nil || string(got) != tc.ownerDB) {
+				t.Errorf("owner database = %q, %v; want untouched", got, err)
+			}
+		})
+	}
+}
+
+func TestHermesGatewayStateModeSwitch(t *testing.T) {
+	requireSymlinks(t)
+	shared, home := t.TempDir(), filepath.Join(t.TempDir(), "hermes-home")
+	names := []string{"gateway.lock", "gateway_state.json", "cron", "sessions", "logs"}
+	for _, name := range []string{"gateway.lock", "gateway_state.json", "cron/jobs.json", "sessions/sessions.json", "logs/gateway.log"} {
+		mustWrite(t, filepath.Join(shared, name), "container gateway")
+	}
+	prepare := func(mode string) {
+		t.Helper()
+		t.Setenv(hermesGatewayStateEnv, mode)
+		if _, err := prepareHermesHome(home, shared, false, nil, nil, "", "", testLogger()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertDetached := func() {
+		t.Helper()
+		for _, name := range names {
+			if fi, err := os.Lstat(filepath.Join(home, name)); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				t.Errorf("%s is still a link after switching to isolated", name)
+			}
+		}
+		_ = filepath.WalkDir(home, func(path string, d os.DirEntry, err error) error {
+			if err == nil && d.Type()&os.ModeSymlink != 0 {
+				// The shared home holds only gateway state, so no link may reach it.
+				if target, err := filepath.EvalSymlinks(path); err == nil && isPathUnder(resolvePathBestEffort(shared), target) {
+					t.Errorf("%s still points into the shared home (%s)", path, target)
+				}
+			}
+			return nil
+		})
+		if fi, err := os.Lstat(filepath.Join(home, hermesGatewayStateMarker)); err != nil || !fi.Mode().IsRegular() {
+			t.Errorf("isolation marker missing: %v", err)
+		}
+	}
+
+	prepare("isolated") // Leaves the marker behind, as a prior isolated run would.
+	prepare("shared")
+	for _, name := range names {
+		if target, err := os.Readlink(filepath.Join(home, name)); err != nil || target != filepath.Join(shared, name) {
+			t.Fatalf("shared %s = link to %q, %v", name, target, err)
+		}
+	}
+	prepare("isolated")
+	assertDetached()
+	if got, err := os.ReadFile(filepath.Join(shared, "sessions", "sessions.json")); err != nil || string(got) != "container gateway" {
+		t.Errorf("shared sessions damaged: %q, %v", got, err)
+	}
+
+	// The task's own sessions/ survives isolated reuse.
+	mustWrite(t, filepath.Join(home, "sessions", "sessions.json"), "task-owned")
+	prepare("isolated")
+	assertDetached()
+	if got, err := os.ReadFile(filepath.Join(home, "sessions", "sessions.json")); err != nil || string(got) != "task-owned" {
+		t.Errorf("task sessions = %q, %v; want task-owned", got, err)
+	}
+
+	prepare("shared")
+	for _, name := range names {
+		if target, err := os.Readlink(filepath.Join(home, name)); err != nil || target != filepath.Join(shared, name) {
+			t.Errorf("shared again %s = link to %q, %v", name, target, err)
+		}
 	}
 }
