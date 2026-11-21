@@ -1046,7 +1046,7 @@ if (!gotTheLock) {
 
       const payload = parseNativeNotificationPayload(value);
       if (!payload || !Notification.isSupported()) return;
-      const anyWindowFocused = BrowserWindow.getAllWindows().some(windowForeground);
+      const anyWindowFocused = [...mainWindows.all(), ...issueWindows].some(windowForeground);
       if (!notificationGate.shouldShow(payload.itemId, anyWindowFocused)) {
         return;
       }

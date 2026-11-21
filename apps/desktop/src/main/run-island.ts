@@ -46,6 +46,7 @@ export function installRunIsland(
   function createPanel() {
     const win = new BrowserWindow({
       frame: false,
+      acceptFirstMouse: true,
       transparent: true,
       show: false,
       hasShadow: false,
@@ -77,6 +78,9 @@ export function installRunIsland(
         ? new URL("run-island.html", process.env.ELECTRON_RENDERER_URL).href
         : pathToFileURL(join(__dirname, "../renderer/run-island.html")).href;
     installNavigationGuard(win, url);
+    win.webContents.on("render-process-gone", () => {
+      if (!win.isDestroyed()) win.destroy();
+    });
     win.on("closed", () => {
       if (panel === win) {
         panel = null;

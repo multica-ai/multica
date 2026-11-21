@@ -14,15 +14,16 @@ export function RunIslandPreference() {
   const { t } = useT("settings");
   const enabled = useRunIslandEnabled();
   const title = t(($) => $.desktop.island.title);
+  const showLabel = t(($) => $.desktop.island.show);
   return (
     <SettingsSection title={title} scope="device">
       <SettingsCard>
         <SettingsRow
-          label={t(($) => $.desktop.island.show)}
+          label={showLabel}
           description={t(($) => $.desktop.island.description)}
         >
           <Switch
-            aria-label={title}
+            aria-label={showLabel}
             checked={enabled}
             onCheckedChange={setRunIslandEnabled}
           />
