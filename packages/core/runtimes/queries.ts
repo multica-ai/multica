@@ -70,5 +70,7 @@ export function runtimeListOptions(wsId: string, owner?: "me", wsSlug?: string) 
   return queryOptions({
     queryKey: owner === "me" ? runtimeKeys.listMine(wsId) : runtimeKeys.list(wsId),
     queryFn: () => api.listRuntimes({ workspace_id: wsId, owner }, wsSlug),
+    // Recover a cached runtime status when a lifecycle event did not arrive.
+    refetchOnWindowFocus: "always",
   });
 }
