@@ -973,7 +973,6 @@ export function InboxPage() {
   const keptNotice =
     settledRow && detailItem && inboxRowKey(detailItem) === settledRow.key ? (
       <InboxKeptActions
-        layout="strip"
         label={keptText.notice(settledRow)}
         icon={settledRow.reason === "snoozed" ? <AlarmClock /> : undefined}
         onUndo={() =>
@@ -1032,12 +1031,14 @@ export function InboxPage() {
             // longer exists.
             setSelectedKey("");
           }}
-          onDone={() => {
+          onArchive={() => {
             handleArchive(detailItem.id);
           }}
           onUnsubscribeArchive={
             isArchivedView ? undefined : (scope) => handleUnsubscribeArchive(detailItem.id, scope)
           }
+          // The archive lists notifications already dealt with: no bar.
+          inboxItem={isArchivedView ? undefined : detailItem}
         />
       </IssuePeekHost>
     </ErrorBoundary>

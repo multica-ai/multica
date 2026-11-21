@@ -48,7 +48,6 @@
   "list": {
     "loading_selection": "Loading notification...",
     "empty": "No notifications",
-    "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
     "time": {
       "just_now": "just now",
@@ -126,6 +125,7 @@
     "set_due_date_to": "Set due date to {{date}}",
     "removed_due_date": "Removed due date",
     "reacted_to_comment": "Reacted {{emoji}} to your comment",
+    "commented": "Commented",
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}",
     "autopilot_quota_blocked": "Run blocked because the limit was reached",
@@ -158,7 +158,6 @@
     "mark_read_failed": "Failed to mark as read",
     "mark_unread_failed": "Failed to mark as unread",
     "archive_failed": "Failed to archive",
-    "mark_done_failed": "Failed to mark as done",
     "mark_all_read_failed": "Failed to mark all as read",
     "archive_all_failed": "Failed to archive all",
     "archive_all_read_failed": "Failed to archive read items",

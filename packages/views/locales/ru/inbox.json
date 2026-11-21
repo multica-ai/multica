@@ -52,7 +52,6 @@
   "list": {
     "loading_selection": "Загрузка уведомления…",
     "empty": "Нет уведомлений",
-    "mark_done_tooltip": "Отметить как выполненное",
     "archive_tooltip": "Архивировать",
     "time": {
       "just_now": "только что",
@@ -130,6 +129,7 @@
     "set_due_date_to": "Установлен срок {{date}}",
     "removed_due_date": "Срок удалён",
     "reacted_to_comment": "Отреагировал(а) {{emoji}} на ваш комментарий",
+    "commented": "Оставил(а) комментарий",
     "created_with_agent": "Создано с помощью агента: {{identifier}}",
     "failed_with_detail": "Ошибка: {{detail}}",
     "autopilot_quota_blocked": "Запуск заблокирован, так как достигнут лимит",
@@ -164,7 +164,6 @@
     "mark_read_failed": "Не удалось отметить как прочитанное",
     "mark_unread_failed": "Не удалось отметить как непрочитанное",
     "archive_failed": "Не удалось архивировать",
-    "mark_done_failed": "Не удалось отметить как выполненное",
     "mark_all_read_failed": "Не удалось отметить всё как прочитанное",
     "archive_all_failed": "Не удалось архивировать всё",
     "archive_all_read_failed": "Не удалось архивировать прочитанные элементы",

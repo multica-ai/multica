@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "正在加载通知...",
     "empty": "暂无通知",
-    "mark_done_tooltip": "标为已完成",
     "archive_tooltip": "归档",
     "time": {
       "just_now": "刚刚",
@@ -124,6 +123,7 @@
     "set_due_date_to": "截止日期设为 {{date}}",
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
+    "commented": "评论了",
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
     "autopilot_quota_blocked": "执行已被阻止：额度已用完",
@@ -155,7 +155,6 @@
     "mark_read_failed": "标为已读失败",
     "mark_unread_failed": "标为未读失败",
     "archive_failed": "归档失败",
-    "mark_done_failed": "标为已完成失败",
     "mark_all_read_failed": "全部标为已读失败",
     "archive_all_failed": "归档全部失败",
     "archive_all_read_failed": "归档已读失败",

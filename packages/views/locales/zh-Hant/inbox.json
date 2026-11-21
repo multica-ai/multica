@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "正在載入通知…",
     "empty": "暫無通知",
-    "mark_done_tooltip": "標為已完成",
     "archive_tooltip": "歸檔",
     "time": {
       "just_now": "剛剛",
@@ -124,6 +123,7 @@
     "set_due_date_to": "截止日期設為 {{date}}",
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回應了你的評論",
+    "commented": "評論了",
     "created_with_agent": "透過 AI 代理建立：{{identifier}}",
     "failed_with_detail": "失敗：{{detail}}",
     "autopilot_quota_blocked": "執行已被阻止：額度已用完",
@@ -155,7 +155,6 @@
     "mark_read_failed": "標為已讀失敗",
     "mark_unread_failed": "標為未讀失敗",
     "archive_failed": "歸檔失敗",
-    "mark_done_failed": "標為已完成失敗",
     "mark_all_read_failed": "全部標為已讀失敗",
     "archive_all_failed": "歸檔全部失敗",
     "archive_all_read_failed": "歸檔已讀失敗",

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -13,7 +14,7 @@ import { agentListOptions } from "@multica/core/workspace/queries";
 import type { InboxItem, Issue, SnoozedInboxIssue } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
-import { IssueInboxActions } from "../issue-inbox-actions";
+import { IssueInboxBar } from "../issue-inbox-actions";
 
 const state = vi.hoisted(() => ({
   archiveInbox: vi.fn(),
@@ -72,16 +73,16 @@ const ROWS = [
 function setup({
   rows = ROWS,
   issueId = "issue-1",
-  onMarkDone,
   snoozed = [],
   theirs = false,
+  issueActions,
 }: {
   rows?: InboxItem[];
   issueId?: string;
-  onMarkDone?: (onSaved: () => void) => void;
   snoozed?: SnoozedInboxIssue[];
   /** The viewer follows the issue, and someone else owns it. */
   theirs?: boolean;
+  issueActions?: ReactNode;
 } = {}) {
   const nav: NavigationAdapter = {
     push: vi.fn(),
@@ -101,6 +102,8 @@ function setup({
     getAgentTaskSnapshot: async () => [],
     // The child list refetches on mount; the unsubscribe button acts directly once it is known.
     listChildIssues: async () => ({ issues: [] }),
+    // The bar's reason line shows the actor's avatar.
+    getBaseUrl: () => "",
   } as unknown as ApiClient);
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
@@ -123,7 +126,7 @@ function setup({
   const page = (id: string | null) => (
     <QueryClientProvider client={qc}>
       <NavigationProvider value={nav}>
-        {id ? <IssueInboxActions issueId={id} onMarkDone={onMarkDone} /> : <span>Next issue</span>}
+        {id ? <IssueInboxBar issueId={id} issueActions={issueActions} /> : <span>Next issue</span>}
       </NavigationProvider>
     </QueryClientProvider>
   );
@@ -160,7 +163,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("IssueInboxActions", () => {
+describe("IssueInboxBar", () => {
   it("keeps the last row on a later side-effect archive after snooze fails", async () => {
     state.snooze.mockRejectedValueOnce(new Error("snooze failed"));
     const nav = setup({ rows: [ROWS[0]!] });
@@ -234,6 +237,21 @@ describe("IssueInboxActions", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
   });
 
+  it("says why the issue is here, then offers the issue's actions before the notification's", () => {
+    setup({ issueActions: <button type="button">Set status</button> });
+    expect(screen.getByText("Commented")).toBeInTheDocument();
+    const issueAction = screen.getByRole("button", { name: "Set status" });
+    const snooze = screen.getByRole("button", { name: "Snooze" });
+    expect(issueAction.compareDocumentPosition(snooze) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("drops the issue's actions once the notification has left the Inbox", async () => {
+    const nav = setup({ issueActions: <button type="button">Set status</button> });
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Set status" })).toBeNull();
+  });
+
   it("offers snooze in place of a read toggle", () => {
     setup();
     expect(screen.queryByRole("button", { name: "Mark as unread" })).toBeNull();
@@ -256,7 +274,7 @@ describe("IssueInboxActions", () => {
       rows: [ROWS[1]!],
       snoozed: [{ issue_id: "issue-1", item_id: "n-1", snoozed_until: until, snoozed_at: SNOOZED_AT, updates: 0 }],
     });
-    expect(screen.getByTitle(/^Back /)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/^Back /);
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
 
     fireEvent.keyDown(document, { key: "h", code: "KeyH" });
@@ -294,25 +312,6 @@ describe("IssueInboxActions", () => {
     fireEvent.keyDown(document, { key: "e", code: "KeyE" });
     expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
     expect(state.archiveInbox).not.toHaveBeenCalled();
-  });
-
-  it("archives once done is saved, with an undo that restores only the notification, and moves on", async () => {
-    const archive = pendingArchive();
-    const onMarkDone = vi.fn((onSaved: () => void) => onSaved());
-    const nav = setup({ onMarkDone });
-    fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
-    await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
-    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
-    nav.leave();
-    await archive.resolve();
-
-    expect(toast.success).toHaveBeenCalledWith("Notification archived", {
-      action: { label: "Undo", onClick: expect.any(Function) },
-    });
-    const undo = vi.mocked(toast.success).mock.calls.at(-1)?.[1] as unknown as { action: { onClick: () => void } };
-    await act(async () => undo.action.onClick());
-    expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
-    expect(onMarkDone).toHaveBeenCalledTimes(1);
   });
 
   it("returns the row snoozing left once the issue is brought back early", () => {
@@ -384,34 +383,7 @@ describe("IssueInboxActions", () => {
     expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-3");
   });
 
-  it("marks the issue done, then archives and moves on once that is saved", async () => {
-    let saved: (() => void) | undefined;
-    const onMarkDone = vi.fn((onSaved: () => void) => { saved = onSaved; });
-    const nav = setup({ onMarkDone });
-
-    fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
-    expect(onMarkDone).toHaveBeenCalledTimes(1);
-    expect(state.archiveInbox).not.toHaveBeenCalled();
-    expect(nav.push).not.toHaveBeenCalled();
-
-    act(() => saved!());
-    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
-    await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
-  });
-
-  it("still reports a failed archive after marking done moves on", async () => {
-    const archive = pendingArchive();
-    const nav = setup({ onMarkDone: (onSaved) => onSaved() });
-
-    fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
-    await waitFor(() => expect(state.archiveInbox).toHaveBeenCalled());
-    nav.leave();
-    await archive.reject(new Error("Archive rejected"));
-
-    expect(toast.error).toHaveBeenCalledWith("Archive rejected");
-  });
-
-  it("offers no done button when the issue cannot be marked done", () => {
+  it("leaves the issue's status to its own control", () => {
     setup();
     expect(screen.queryByRole("button", { name: "Mark as done" })).toBeNull();
   });
@@ -422,7 +394,7 @@ describe("IssueInboxActions", () => {
     await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
   });
 
-  // Snooze, archive and unsubscribe share the header; each key does only its own.
+  // Snooze, archive and unsubscribe share the bar; each key does only its own.
   async function setupTheirs() {
     const nav = setup({ theirs: true });
     await waitFor(() =>
@@ -461,7 +433,7 @@ describe("IssueInboxActions", () => {
   });
 });
 
-describe("IssueInboxActions once an action is undone or never saved", () => {
+describe("IssueInboxBar once an action is undone", () => {
   it("keeps the row again after archiving the last row and undoing", async () => {
     const original = ROWS[0]!;
     const rows = [original];
@@ -478,15 +450,6 @@ describe("IssueInboxActions once an action is undone or never saved", () => {
     await act(async () => undo.action.onClick());
     await screen.findByRole("button", { name: "Archive" });
     // The user continues reading the same issue; a later status change archives it.
-    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
-    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
-  });
-
-  it("keeps the row after a failed mark-done followed by a status-side-effect archive", async () => {
-    const nav = setup({ rows: [ROWS[0]!], onMarkDone: () => {} });
-    // No success callback: the status write failed and the user stayed here.
-    fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
-    expect(nav.push).not.toHaveBeenCalled();
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
     expect(await screen.findByText("Notification archived")).toBeInTheDocument();
   });
