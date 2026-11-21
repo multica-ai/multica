@@ -165,9 +165,19 @@ func NewSecureHTTPClient(endpoint *url.URL) *http.Client {
 	}
 }
 
+// StatusError is a non-2xx HTTP answer from a remote MCP endpoint.
+type StatusError struct {
+	Code int
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("remote MCP returned HTTP %d", e.Code)
+}
+
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method,omitempty"`
 	Result  json.RawMessage `json:"result"`
 	Error   *struct {
 		Code    int    `json:"code"`
@@ -296,7 +306,7 @@ func notify(ctx context.Context, client *http.Client, endpoint *url.URL, headers
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("remote MCP returned HTTP %d", response.StatusCode)
+		return &StatusError{Code: response.StatusCode}
 	}
 	written, err := io.Copy(io.Discard, io.LimitReader(response.Body, MaxResponseBytes+1))
 	if err != nil {
@@ -333,7 +343,7 @@ func call(ctx context.Context, client *http.Client, endpoint *url.URL, headers h
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return rpcResponse{}, response.Header, fmt.Errorf("remote MCP returned HTTP %d", response.StatusCode)
+		return rpcResponse{}, response.Header, &StatusError{Code: response.StatusCode}
 	}
 	raw, err := readResponse(response)
 	if err != nil {
@@ -358,9 +368,19 @@ func readResponse(response *http.Response) ([]byte, error) {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "data:") {
 				data := bytes.TrimSpace([]byte(strings.TrimPrefix(line, "data:")))
-				if len(data) > 0 {
-					return data, nil
+				if len(data) == 0 {
+					continue
 				}
+				// A server may stream progress notifications or its own
+				// requests before the response; only a message without a
+				// method answers the request.
+				var message struct {
+					Method string `json:"method"`
+				}
+				if json.Unmarshal(data, &message) == nil && message.Method != "" {
+					continue
+				}
+				return data, nil
 			}
 		}
 		if err := scanner.Err(); err != nil {

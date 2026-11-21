@@ -87,6 +87,14 @@ type Config struct {
 	// CallsPerMinute caps the calls one account runs per minute;
 	// DefaultCallsPerMinute when zero.
 	CallsPerMinute int
+	// SecretBox seals remote app tokens at rest and DB runs their refresh.
+	// Remote MCP apps are off unless both are set.
+	SecretBox Sealer
+	DB        TxStarter
+	// RemoteApps overrides BuiltinRemoteApps; RemoteUpstream overrides the
+	// network client. Both are for tests.
+	RemoteApps     []RemoteApp
+	RemoteUpstream RemoteUpstream
 }
 
 // Service is the connected-apps runtime: overlay, gateway, and confirmations.
@@ -99,6 +107,7 @@ type Service struct {
 	now        func() time.Time
 	resumer    Resumer
 	perMinute  int
+	remote     *remoteSupport
 }
 
 // New returns a Service, or an error when a required dependency is missing.
@@ -129,6 +138,7 @@ func New(cfg Config) (*Service, error) {
 		bus:        cfg.Bus,
 		now:        now,
 		perMinute:  perMinute,
+		remote:     newRemoteSupport(cfg, base),
 	}, nil
 }
 
@@ -235,13 +245,26 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 			return runtimeapps.MCPOverlayResult{}, err
 		}
 	}
+	servers := map[string]gatewayServer{GatewayServerName: {Type: "http", URL: s.gatewayURL}}
 	meta := make([]runtimeapps.ConnectedApp, 0, len(apps))
 	for _, app := range apps {
 		if !catalog.Allows(app.ToolkitSlug) {
 			continue
 		}
+		slug := NormalizeSlug(app.ToolkitSlug)
+		provider, serverName, name := Provider, GatewayServerName, runtimeapps.DisplayNameForToolkitSlug(slug)
 		status := "not_connected"
-		if app.AccountScope == ScopeTeam {
+		if remote, ok := s.RemoteApp(slug); ok {
+			// A remote app is mounted as its own MCP server named after
+			// the app, so its tools keep their names and schemas. The
+			// entry replaces a same-named server from the runtime's local
+			// config for this run.
+			provider, serverName, name = RemoteProvider, remote.Slug, remote.Name
+			servers[remote.Slug] = gatewayServer{Type: "http", URL: s.remoteGatewayURL(remote.Slug)}
+			if _, err := s.resolveRemoteAccount(ctx, agent.WorkspaceID, originatorUserID, slug, app.AccountScope); err == nil {
+				status = "connected"
+			}
+		} else if app.AccountScope == ScopeTeam {
 			if _, ok := team[app.ToolkitSlug]; ok {
 				status = "connected"
 			}
@@ -253,10 +276,10 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 			level = LevelWrite
 		}
 		meta = append(meta, runtimeapps.ConnectedApp{
-			Provider:      Provider,
-			ServerName:    GatewayServerName,
+			Provider:      provider,
+			ServerName:    serverName,
 			ToolkitSlug:   app.ToolkitSlug,
-			ToolkitName:   runtimeapps.DisplayNameForToolkitSlug(app.ToolkitSlug),
+			ToolkitName:   name,
 			AccountScope:  app.AccountScope,
 			Level:         level,
 			AccountStatus: status,
@@ -265,17 +288,20 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	if len(meta) == 0 {
 		return runtimeapps.MCPOverlayResult{}, nil
 	}
-	raw, err := json.Marshal(gatewayOverlay{MCPServers: map[string]gatewayServer{
-		GatewayServerName: {Type: "http", URL: s.gatewayURL},
-	}})
+	raw, err := json.Marshal(gatewayOverlay{MCPServers: servers})
 	if err != nil {
 		return runtimeapps.MCPOverlayResult{}, err
 	}
 	return runtimeapps.MCPOverlayResult{MCPOverlay: raw, ConnectedApps: meta}, nil
 }
 
-// AuthorizeOverlay adds a token for taskID to the gateway entry of a stored
-// overlay. Overlays without a gateway entry are returned unchanged.
+func (s *Service) remoteGatewayURL(slug string) string {
+	return s.gatewayURL + "/" + slug
+}
+
+// AuthorizeOverlay adds a token for taskID to every gateway entry of a stored
+// overlay: the meta gateway and each remote app's server. Overlays without a
+// gateway entry are returned unchanged.
 func (s *Service) AuthorizeOverlay(overlay []byte, taskID pgtype.UUID) ([]byte, error) {
 	var parsed struct {
 		MCPServers map[string]json.RawMessage `json:"mcpServers"`
@@ -283,26 +309,30 @@ func (s *Service) AuthorizeOverlay(overlay []byte, taskID pgtype.UUID) ([]byte, 
 	if err := json.Unmarshal(overlay, &parsed); err != nil {
 		return nil, err
 	}
-	entry, ok := parsed.MCPServers[GatewayServerName]
-	if !ok {
+	if _, ok := parsed.MCPServers[GatewayServerName]; !ok {
 		return overlay, nil
-	}
-	var server gatewayServer
-	if err := json.Unmarshal(entry, &server); err != nil {
-		return nil, err
 	}
 	token, err := SignTaskToken(s.secret, util.UUIDToString(taskID), s.now().Add(tokenTTL))
 	if err != nil {
 		return nil, err
 	}
-	server.Type = "http"
-	server.URL = s.gatewayURL
-	server.Headers = map[string]string{"Authorization": "Bearer " + token}
-	raw, err := json.Marshal(server)
-	if err != nil {
-		return nil, err
+	for name, entry := range parsed.MCPServers {
+		url := s.gatewayURL
+		if name != GatewayServerName {
+			var server gatewayServer
+			if err := json.Unmarshal(entry, &server); err != nil || server.URL != s.remoteGatewayURL(name) {
+				continue
+			}
+			url = server.URL
+		}
+		raw, err := json.Marshal(gatewayServer{
+			Type: "http", URL: url, Headers: map[string]string{"Authorization": "Bearer " + token},
+		})
+		if err != nil {
+			return nil, err
+		}
+		parsed.MCPServers[name] = raw
 	}
-	parsed.MCPServers[GatewayServerName] = raw
 	return json.Marshal(map[string]any{"mcpServers": parsed.MCPServers})
 }
 
@@ -347,11 +377,17 @@ type account struct {
 	connectionID       pgtype.UUID
 	// owner is the member whose personal account it is; invalid for team.
 	owner pgtype.UUID
+	// remote marks a remote MCP app account; connectionID is then a
+	// remote_app_connection row.
+	remote bool
 }
 
 // resolveAccount finds the account an app acts as for a run: the workspace's
 // team account, or the personal account of the member who triggered the run.
 func (s *Service) resolveAccount(ctx context.Context, workspaceID, triggeredBy pgtype.UUID, slug, scope string) (account, error) {
+	if _, ok := s.RemoteApp(slug); ok {
+		return s.resolveRemoteAccount(ctx, workspaceID, triggeredBy, NormalizeSlug(slug), scope)
+	}
 	if scope == ScopeTeam {
 		team, err := s.activeTeamAccounts(ctx, workspaceID)
 		if err != nil {
@@ -396,6 +432,10 @@ func (s *Service) accountRule(ctx context.Context, workspaceID pgtype.UUID, slug
 }
 
 func (s *Service) touch(ctx context.Context, workspaceID pgtype.UUID, acct account) {
+	if acct.remote {
+		_ = s.q.TouchRemoteAppConnection(ctx, acct.connectionID)
+		return
+	}
 	if acct.scope == ScopeTeam {
 		_ = s.q.TouchWorkspaceComposioConnection(ctx, db.TouchWorkspaceComposioConnectionParams{ID: acct.connectionID, WorkspaceID: workspaceID})
 		return

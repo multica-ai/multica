@@ -535,6 +535,9 @@ deleted_weixin_account_states AS (
 deleted_workspace_composio_connections AS (
     DELETE FROM workspace_composio_connection WHERE workspace_id = $1
 ),
+deleted_team_remote_app_connections AS (
+    DELETE FROM remote_app_connection WHERE scope = 'team' AND owner_id = $1
+),
 deleted_agent_apps AS (
     DELETE FROM agent_app WHERE workspace_id = $1
 ),

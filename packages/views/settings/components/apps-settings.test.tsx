@@ -10,6 +10,7 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 import enBilling from "../../locales/en/billing.json";
 import { toast } from "sonner";
+import { openExternal } from "../../platform";
 import { AppsSettings } from "./apps-settings";
 
 const nav = vi.hoisted(() => ({
@@ -22,8 +23,12 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
   api: {
     getAppsOverview: vi.fn(), listAppCatalog: vi.fn(), updateAppSettings: vi.fn(), updateAppRules: vi.fn(),
-    getWorkspaceFeatures: vi.fn(),
+    getWorkspaceFeatures: vi.fn(), connectApp: vi.fn(),
   },
+}));
+vi.mock("../../platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../platform")>()),
+  openExternal: vi.fn(),
 }));
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -104,6 +109,22 @@ it("lets a member recover only their personal account and keeps failed confirmat
   ]));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   expect(screen.getAllByText("Previous action restrictions are still limiting this account.")).toHaveLength(1);
+});
+
+it("reconnects an expired account from its row", async () => {
+  overview.personal = [
+    ...overview.personal,
+    { id: "personal-2", toolkit_slug: "mobbin", status: "expired", connected_at: "", last_used_at: null },
+  ];
+  vi.mocked(api.connectApp).mockResolvedValue({ redirect_url: "https://auth.example.com/authorize?state=s" });
+  const user = userEvent.setup();
+  renderSettings();
+  expect(await screen.findByText("Needs reconnecting")).toBeVisible();
+  const buttons = screen.getAllByRole("button", { name: "Reconnect" });
+  expect(buttons).toHaveLength(1);
+  await user.click(buttons[0]!);
+  await waitFor(() => expect(api.connectApp).toHaveBeenCalledWith("personal", "mobbin"));
+  expect(openExternal).toHaveBeenCalledWith("https://auth.example.com/authorize?state=s", { webTarget: "same-tab" });
 });
 
 it("opens a connection dialog for the section that launched it", async () => {

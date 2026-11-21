@@ -223,6 +223,30 @@ func getOAuthJSON(ctx context.Context, endpoint *url.URL, target any) error {
 	return doOAuthJSON(NewSecureHTTPClient(endpoint), request, target)
 }
 
+// OAuthError is a non-2xx answer from an OAuth endpoint. Code is the RFC 6749
+// error code (invalid_grant, invalid_client, ...) when the body carried one.
+type OAuthError struct {
+	Status int
+	Code   string
+}
+
+func (e *OAuthError) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("HTTP %d: %s", e.Status, e.Code)
+	}
+	return fmt.Sprintf("HTTP %d", e.Status)
+}
+
+// Rejected reports whether the server refused the grant or client itself, as
+// opposed to failing for a reason a retry could fix.
+func (e *OAuthError) Rejected() bool {
+	switch e.Code {
+	case "invalid_grant", "invalid_client", "unauthorized_client":
+		return true
+	}
+	return e.Code == "" && (e.Status == http.StatusBadRequest || e.Status == http.StatusUnauthorized)
+}
+
 func doOAuthJSON(client *http.Client, request *http.Request, target any) error {
 	response, err := client.Do(request)
 	if err != nil {
@@ -230,8 +254,16 @@ func doOAuthJSON(client *http.Client, request *http.Request, target any) error {
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxOAuthResponseBytes))
-		return fmt.Errorf("HTTP %d", response.StatusCode)
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, maxOAuthResponseBytes))
+		var body struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &body)
+		code := body.Error
+		if len(code) > 64 {
+			code = code[:64]
+		}
+		return &OAuthError{Status: response.StatusCode, Code: code}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxOAuthResponseBytes+1))
 	if err != nil {

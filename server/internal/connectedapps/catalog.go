@@ -60,6 +60,7 @@ var curatedApps = []CuratedApp{
 	{Slug: "jira"},
 	{Slug: "asana"},
 	{Slug: "figma"},
+	{Slug: "mobbin", Scope: ScopePersonal},
 	{Slug: "sentry", Scope: ScopeTeam},
 	{Slug: "posthog", Scope: ScopeTeam},
 	{Slug: "hubspot", Scope: ScopeTeam},
