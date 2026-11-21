@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -116,4 +117,45 @@ func TestWorkspaceOrder(t *testing.T) {
 	pin(ids[2], true)
 	pin(joined, true)
 	assertOrder(user, []string{ids[2], joined, ids[1], ids[0]})
+}
+
+// A membership with a role this build does not know is not listed, so it
+// must not be required in the submitted order either.
+func TestWorkspaceOrderSkipsUnknownRoleMembership(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `ALTER TABLE member DROP CONSTRAINT IF EXISTS member_role_check,
+		ADD CONSTRAINT member_role_check CHECK (role IN ('owner', 'admin', 'member', 'guest', 'future_role')) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE role = 'future_role'`)
+		testPool.Exec(context.Background(), `ALTER TABLE member DROP CONSTRAINT IF EXISTS member_role_check,
+			ADD CONSTRAINT member_role_check CHECK (role IN ('owner', 'admin', 'member', 'guest')) NOT VALID`)
+	})
+	suffix := uuid.NewString()
+	user := dbfx.User(t, "Future role user", "future-order-"+suffix+"@example.test")
+	listed := []string{
+		dbfx.Workspace(t, "Listed A", "listed-a-"+suffix),
+		dbfx.Workspace(t, "Listed B", "listed-b-"+suffix),
+	}
+	for _, id := range listed {
+		dbfx.Member(t, id, user, "member")
+	}
+	hidden := dbfx.Workspace(t, "Hidden", "hidden-order-"+suffix)
+	dbfx.Member(t, hidden, user, "member")
+	dbfx.Exec(t, `UPDATE member SET role = 'future_role' WHERE workspace_id = $1 AND user_id = $2`, hidden, user)
+
+	order := []string{listed[1], listed[0]}
+	testutil.Call(t, testHandler.SetWorkspaceOrder, newRequestAs(user, http.MethodPut, "/api/workspaces/order", map[string]any{"workspace_ids": order})).Want(http.StatusNoContent)
+	testutil.Call(t, testHandler.SetWorkspaceOrder, newRequestAs(user, http.MethodPut, "/api/workspaces/order", map[string]any{"workspace_ids": []string{listed[0], listed[1], hidden}})).Want(http.StatusBadRequest)
+
+	var got []WorkspaceResponse
+	testutil.Call(t, testHandler.ListWorkspaces, newRequestAs(user, http.MethodGet, "/api/workspaces", nil)).Want(http.StatusOK).JSON(&got)
+	actual := make([]string, len(got))
+	for i, ws := range got {
+		actual[i] = ws.ID
+	}
+	if !reflect.DeepEqual(actual, order) {
+		t.Fatalf("order = %v, want %v", actual, order)
+	}
 }
