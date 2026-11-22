@@ -54,18 +54,20 @@ function WindowOverlayInner() {
   const restartDaemon = async () => {
     await window.daemonAPI?.restart?.();
   };
+  const codingTools = window.desktopAPI?.codingTools;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-auto bg-background">
       {/* Creating a workspace is the onboarding flow entered at the
-          workspace step: a second workspace still needs its own runtime and
-          its own Mika, so running one flow keeps the two from drifting. */}
+          workspace step: a second workspace still needs its own agent, so
+          running one flow keeps the two from drifting. */}
       {overlay.type === "new-workspace" && (
         <OnboardingFlow
           mode="new_workspace"
           onCancel={onBack}
           onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
+          codingTools={codingTools}
           onComplete={(ws, destination) => {
             close();
             if (ws && destination?.kind === "chat") {
@@ -82,6 +84,9 @@ function WindowOverlayInner() {
         <InvitationsPage
           invitationId={overlay.invitationId}
           onBack={onBack}
+          codingTools={codingTools}
+          onRuntimeRefresh={restartDaemon}
+          runtimesPending={runtimesPending}
         />
       )}
       {overlay.type === "onboarding" && (
@@ -102,9 +107,10 @@ function WindowOverlayInner() {
               push(paths.root());
             }
           }}
-          // Restart the bundled daemon when the user hits Refresh on
+          // Restart the bundled daemon so a newly installed tool registers.
           onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
+          codingTools={codingTools}
         />
       )}
     </div>

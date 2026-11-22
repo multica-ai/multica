@@ -41,6 +41,18 @@ import {
   type ThemeFolderSnapshot,
   type ThemeFolderWriteResult,
 } from "../shared/theme-folder";
+import {
+  CODING_TOOLS_CANCEL_CHANNEL,
+  CODING_TOOLS_EVENT_CHANNEL,
+  CODING_TOOLS_PROBE_CHANNEL,
+  CODING_TOOLS_START_CHANNEL,
+  CODING_TOOLS_SUBMIT_CODE_CHANNEL,
+  type CodingToolId,
+  type CodingToolProbe,
+  type CodingToolRunEvent,
+  type CodingToolRunKind,
+  type CodingToolStartResult,
+} from "../shared/coding-tools";
 import type {
   DaemonStatus,
   LocalRuntimeProbe,
@@ -308,6 +320,22 @@ const desktopAPI = {
   /** Create a theme folder from files; never replaces an existing one. */
   writeThemeFolder: (name: string, files: ThemeFolderFile[]): Promise<ThemeFolderWriteResult> =>
     ipcRenderer.invoke(THEME_FOLDER_WRITE_CHANNEL, name, files),
+  /** Install and sign in to AI coding tools from onboarding. */
+  codingTools: {
+    probe: (): Promise<CodingToolProbe[]> => ipcRenderer.invoke(CODING_TOOLS_PROBE_CHANNEL),
+    start: (toolId: CodingToolId, kind: CodingToolRunKind): Promise<CodingToolStartResult> =>
+      ipcRenderer.invoke(CODING_TOOLS_START_CHANNEL, toolId, kind),
+    submitCode: (runId: string, code: string): Promise<boolean> =>
+      ipcRenderer.invoke(CODING_TOOLS_SUBMIT_CODE_CHANNEL, runId, code),
+    cancel: (runId: string): Promise<void> => ipcRenderer.invoke(CODING_TOOLS_CANCEL_CHANNEL, runId),
+    onEvent: (callback: (event: CodingToolRunEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: CodingToolRunEvent) => callback(payload);
+      ipcRenderer.on(CODING_TOOLS_EVENT_CHANNEL, handler);
+      return () => {
+        ipcRenderer.removeListener(CODING_TOOLS_EVENT_CHANNEL, handler);
+      };
+    },
+  },
   /** On-device voice input: speech models and transcription in main. */
   voice: {
     listModels: (): Promise<VoiceModelsSnapshot> => ipcRenderer.invoke(VOICE_MODELS_LIST_CHANNEL),
