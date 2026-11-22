@@ -201,8 +201,7 @@
     "toast_ref_update_failed": "分支更新失败",
     "ref_error_commit": "这是 commit，不是分支。需要指定某个版本时，请用 multica repo checkout --ref。",
     "ref_default_label": "默认分支",
-    "ref_running_note": "进行中的运行不受影响。",
-    "document_hint": "智能体在这个项目里运行时使用的仓库和文件夹。"
+    "ref_running_note": "进行中的运行不受影响。"
   },
   "delete_dialog": {
     "offline_error": "当前处于离线状态，请联网后重试删除。",

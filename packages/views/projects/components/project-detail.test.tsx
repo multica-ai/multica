@@ -332,20 +332,24 @@ describe("ProjectDetail tabs", () => {
     expect(within(screen.getByRole("complementary")).queryByText("Description")).not.toBeInTheDocument();
   });
 
-  it("puts the properties on the Overview and keeps the sidebar for insights", () => {
+  it("opens the panel with the properties, above the insights", () => {
     renderProjectDetail();
-    const properties = screen.getByTestId("project-properties");
-    expect(within(properties).getByRole("button", { name: "No lead" })).toBeInTheDocument();
     const sidebar = screen.getByRole("complementary");
+    const properties = within(sidebar).getByTestId("project-properties");
+    expect(within(properties).getByRole("button", { name: "No lead" })).toBeInTheDocument();
     expect(within(sidebar).getByTestId("project-insights")).toBeInTheDocument();
-    expect(within(sidebar).queryByText("Properties")).not.toBeInTheDocument();
+    expect(
+      properties.compareDocumentPosition(within(sidebar).getByTestId("project-insights")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("shows the activity feed for ?tab=activity", async () => {
     renderProjectDetail("tab=activity");
     expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("project-activity-page")).toBeInTheDocument();
-    expect(screen.queryByTestId("project-properties")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Description" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).getByTestId("project-properties")).toBeInTheDocument();
   });
 
   it("opens the Activity tab from the sidebar digest", async () => {

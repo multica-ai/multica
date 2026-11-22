@@ -1,8 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight } from "@multica/ui/icons";
 import type { Project } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueRouteRef, useWorkspacePaths } from "@multica/core/paths";
@@ -10,6 +8,7 @@ import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ObjectPanelSection } from "../../layout/object-page";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
 import { ProjectActivityFeed } from "./project-activity";
@@ -18,44 +17,10 @@ import { ProjectBreakdown, ProjectProgressSection, type BreakdownFilter } from "
 const ACTIVITY_DIGEST = 5;
 const ISSUES_PER_AGENT = 3;
 
-function InsightSection({
-  title,
-  count,
-  action,
-  children,
-}: {
-  title: string;
-  count?: number;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(true);
-  return (
-    <section>
-      <div className="mb-2 flex items-center gap-1">
-        <button
-          type="button"
-          aria-expanded={open}
-          className={`flex min-w-0 items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setOpen(!open)}
-        >
-          {title}
-          {count !== undefined && <span className="tabular-nums text-muted-foreground">{count}</span>}
-          <ChevronRight
-            className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
-          />
-        </button>
-        {open && action && <div className="ml-auto">{action}</div>}
-      </div>
-      {open && <div className="pl-2">{children}</div>}
-    </section>
-  );
-}
-
 /**
- * The project sidebar, the same on every tab: how far along it is, where the
- * work sits, which agents are on it now, and what just changed. Properties
- * live on the Overview, so nothing here duplicates them.
+ * The panel sections under Properties, the same on every tab: how far along
+ * the project is, where the work sits, which agents are on it now, and what
+ * just changed.
  */
 export function ProjectInsights({
   project,
@@ -74,17 +39,26 @@ export function ProjectInsights({
 
   return (
     <div className="space-y-5" data-testid="project-insights">
-      <InsightSection title={t(($) => $.detail.section_progress)}>
+      <ObjectPanelSection title={t(($) => $.detail.section_progress)}>
         <ProjectProgressSection project={project} />
-      </InsightSection>
+      </ObjectPanelSection>
 
       {project.issue_count > 0 && (
-        <InsightSection title={t(($) => $.detail.section_breakdown)}>
+        <ObjectPanelSection title={t(($) => $.detail.section_breakdown)}>
           <ProjectBreakdown project={project} onFilter={onFilter} />
-        </InsightSection>
+        </ObjectPanelSection>
       )}
 
-      <InsightSection title={t(($) => $.detail.section_working)} count={workingAgents?.length}>
+      <ObjectPanelSection
+        title={
+          <>
+            {t(($) => $.detail.section_working)}
+            {workingAgents && workingAgents.length > 0 && (
+              <span className="tabular-nums text-muted-foreground">{workingAgents.length}</span>
+            )}
+          </>
+        }
+      >
         {workingAgents && workingAgents.length > 0 ? (
           <ul className="space-y-3">
             {workingAgents.map((agent) => (
@@ -94,9 +68,9 @@ export function ProjectInsights({
         ) : (
           <p className="text-caption text-muted-foreground">{t(($) => $.detail.working_empty)}</p>
         )}
-      </InsightSection>
+      </ObjectPanelSection>
 
-      <InsightSection
+      <ObjectPanelSection
         title={t(($) => $.detail.section_activity)}
         action={
           <button
@@ -109,7 +83,7 @@ export function ProjectInsights({
         }
       >
         <ProjectActivityFeed projectId={project.id} limit={ACTIVITY_DIGEST} dense />
-      </InsightSection>
+      </ObjectPanelSection>
     </div>
   );
 }

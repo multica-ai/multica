@@ -124,51 +124,20 @@ function AccessFields({ visibility, onVisibilityChange, members, selected, leadI
   );
 }
 
-export function ProjectAccessControl({ project, variant = "row" }: { project: Project; variant?: "row" | "pill" }) {
+export function ProjectAccessControl({ project }: { project: Project }) {
   const { t } = useT("projects");
   const [open, setOpen] = useState(false);
   const wsId = useWorkspaceId();
   const changeAccess = useProjectAccessMutation(wsId, project.id);
   const Icon = project.visibility === "private" ? Lock : Globe;
-  const label = project.visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace);
-  const trigger = variant === "pill" ? (
-    <PillButton aria-label={t(($) => $.access.label)}>
-      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="truncate">{label}</span>
-      {project.visibility === "private" ? <ProjectMemberStack project={project} /> : null}
-    </PillButton>
-  ) : (
-    <Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full justify-start px-0" aria-label={t(($) => $.access.label)}><Icon /><span className="truncate">{label}</span></Button>
-  );
   return (
     <Dialog open={open} onOpenChange={(value) => { if (!changeAccess.isPending) setOpen(value); }}>
-      <DialogTrigger render={trigger} />
+      <DialogTrigger render={<Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full justify-start gap-1.5 px-0 text-caption font-normal hover:bg-transparent dark:hover:bg-transparent" aria-label={t(($) => $.access.label)}><Icon className="size-3.5 text-muted-foreground" /><span className="truncate">{project.visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</span></Button>} />
       <DialogContent className="flex max-h-[90%] flex-col sm:max-w-lg">
         <DialogHeader><DialogTitle>{t(($) => $.access.title, { title: project.title })}</DialogTitle><DialogDescription>{t(($) => $.access.description)}</DialogDescription></DialogHeader>
         {open ? <ProjectAccessEditor project={project} onClose={() => setOpen(false)} changeAccess={changeAccess} /> : null}
       </DialogContent>
     </Dialog>
-  );
-}
-
-const STACK_LIMIT = 3;
-
-/** Who is in a private project, as overlapping avatars inside the access pill. */
-function ProjectMemberStack({ project }: { project: Project }) {
-  const wsId = useWorkspaceId();
-  const { data } = useQuery(projectMembersOptions(wsId, project.id));
-  const members = data?.members ?? [];
-  if (members.length === 0) return null;
-  const extra = members.length - STACK_LIMIT;
-  return (
-    <span className="flex shrink-0 items-center -space-x-1">
-      {members.slice(0, STACK_LIMIT).map((member) => (
-        <span key={member.user_id} className="rounded-full ring-2 ring-background">
-          <ActorAvatar actorType="member" actorId={member.user_id} size="sm" />
-        </span>
-      ))}
-      {extra > 0 ? <span className="pl-1.5 tabular-nums text-muted-foreground">+{extra}</span> : null}
-    </span>
   );
 }
 

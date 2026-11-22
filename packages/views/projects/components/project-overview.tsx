@@ -5,6 +5,7 @@ import { Bot, ChevronDown } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { cn } from "@multica/ui/lib/utils";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import {
@@ -12,13 +13,13 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import type { Project, ProjectStatus, UpdateProjectRequest } from "@multica/core/types";
+import type { Project, UpdateProjectRequest } from "@multica/core/types";
 import type { ProjectTab } from "@multica/core/projects/tab-store";
 import { PageHeader } from "../../layout/page-header";
+import { OBJECT_PAGE_BODY, ObjectSection } from "../../layout/object-page";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { useT } from "../../i18n";
 import { ProjectIcon } from "./project-icon";
-import { ProjectPropertyPills } from "./project-properties";
 import { ProjectResourcesSection } from "./project-resources-section";
 
 const TAB_TRIGGER_CLASS = "h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0";
@@ -102,76 +103,68 @@ export function ProjectOverviewHeader({
 }
 
 /**
- * The project as a document: icon, title and properties, then what agents
+ * The project as an object page body: its mark and name, then what agents
  * receive as project context — the description and the resources.
  */
 export function ProjectOverviewBody({
   project,
   onUpdate,
-  onStatusChange,
-  onOpenWorkflow,
 }: {
   project: Project;
   onUpdate: (data: UpdateProjectRequest) => void;
-  onStatusChange: (status: ProjectStatus) => void;
-  onOpenWorkflow: () => void;
 }) {
   const { t } = useT("projects");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-3xl px-8 pb-16 pt-10">
-        <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-          <TooltipHint label={t(($) => $.detail.icon_tooltip)}>
-            <PopoverTrigger
-              render={
-                <button
-                  type="button"
-                  className="text-display-sm -ml-1 cursor-pointer rounded-lg p-1 transition-colors hover:bg-accent/60"
-                  aria-label={t(($) => $.detail.icon_tooltip)}
-                >
-                  {project.icon || "📁"}
-                </button>
-              }
-            />
-          </TooltipHint>
-          <PopoverContent align="start" className="w-auto p-0">
-            <EmojiPicker
-              onSelect={(emoji) => {
-                onUpdate({ icon: emoji });
-                setIconPickerOpen(false);
-              }}
-            />
-          </PopoverContent>
-        </Popover>
-        <TitleEditor
-          key={`title-${project.id}`}
-          defaultValue={project.title}
-          placeholder={t(($) => $.detail.title_placeholder)}
-          className="mt-2 w-full text-title font-semibold leading-snug tracking-tight"
-          onBlur={(value) => {
-            const trimmed = value.trim();
-            if (trimmed && trimmed !== project.title) onUpdate({ title: trimmed });
-          }}
-        />
-
-        <div className="mt-4">
-          <ProjectPropertyPills
-            project={project}
-            onUpdate={onUpdate}
-            onStatusChange={onStatusChange}
-            onOpenWorkflow={onOpenWorkflow}
+      <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+        <div className="flex items-center gap-3">
+          <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+            <TooltipHint label={t(($) => $.detail.icon_tooltip)}>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    className="flex size-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border bg-muted/50 text-2xl transition-colors hover:bg-accent"
+                    aria-label={t(($) => $.detail.icon_tooltip)}
+                  >
+                    {project.icon || "📁"}
+                  </button>
+                }
+              />
+            </TooltipHint>
+            <PopoverContent align="start" className="w-auto p-0">
+              <EmojiPicker
+                onSelect={(emoji) => {
+                  onUpdate({ icon: emoji });
+                  setIconPickerOpen(false);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+          <TitleEditor
+            key={`title-${project.id}`}
+            defaultValue={project.title}
+            placeholder={t(($) => $.detail.title_placeholder)}
+            className="min-w-0 flex-1 text-title font-semibold"
+            onBlur={(value) => {
+              const trimmed = value.trim();
+              if (trimmed && trimmed !== project.title) onUpdate({ title: trimmed });
+            }}
           />
         </div>
 
-        <section className="mt-10">
-          <div className="mb-2 flex items-center gap-2">
-            <h2 className="text-label font-medium">{t(($) => $.detail.section_description)}</h2>
-            <span className="inline-flex items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
-              <Bot className="size-3" aria-hidden="true" />
-              {t(($) => $.detail.agent_context_badge)}
-            </span>
-          </div>
+        <ObjectSection
+          title={t(($) => $.detail.section_description)}
+          action={
+            <TooltipHint label={t(($) => $.detail.description_hint)}>
+              <span className="inline-flex cursor-default items-center gap-1 px-2 text-caption text-muted-foreground">
+                <Bot className="size-3.5" aria-hidden="true" />
+                {t(($) => $.detail.agent_context_badge)}
+              </span>
+            </TooltipHint>
+          }
+        >
           <ContentEditor
             key={project.id}
             value={project.description || ""}
@@ -179,14 +172,9 @@ export function ProjectOverviewBody({
             onUpdate={(md) => onUpdate({ description: md || null })}
             debounceMs={1500}
           />
-          <p className="mt-2 text-caption text-muted-foreground">
-            {t(($) => $.detail.description_hint)}
-          </p>
-        </section>
+        </ObjectSection>
 
-        <div className="mt-10">
-          <ProjectResourcesSection projectId={project.id} variant="document" />
-        </div>
+        <ProjectResourcesSection projectId={project.id} />
       </div>
     </div>
   );

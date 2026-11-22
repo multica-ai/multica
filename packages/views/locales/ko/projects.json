@@ -201,8 +201,7 @@
     "toast_ref_update_failed": "브랜치를 업데이트하지 못했습니다",
     "ref_error_commit": "이것은 브랜치가 아니라 커밋입니다. 특정 리비전이 필요하면 multica repo checkout --ref를 사용하세요.",
     "ref_default_label": "기본 브랜치",
-    "ref_running_note": "이미 진행 중인 실행에는 영향을 주지 않습니다.",
-    "document_hint": "이 프로젝트에서 에이전트가 실행될 때 사용하는 저장소와 폴더입니다."
+    "ref_running_note": "이미 진행 중인 실행에는 영향을 주지 않습니다."
   },
   "delete_dialog": {
     "offline_error": "오프라인 상태입니다. 다시 연결한 후 삭제를 재시도하세요.",

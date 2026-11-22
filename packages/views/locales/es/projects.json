@@ -205,8 +205,7 @@
     "toast_ref_update_failed": "No se ha podido actualizar la rama",
     "ref_error_commit": "Eso es un commit, no una rama. Para una revisión concreta, usa --ref con multica repo checkout.",
     "ref_default_label": "Rama por defecto",
-    "ref_running_note": "Las ejecuciones ya en curso no se ven afectadas.",
-    "document_hint": "Repositorios y carpetas en los que trabajan los agentes cuando se ejecutan en este proyecto."
+    "ref_running_note": "Las ejecuciones ya en curso no se ven afectadas."
   },
   "delete_dialog": {
     "offline_error": "Estás sin conexión. Vuelve a conectarte e intenta eliminar de nuevo.",

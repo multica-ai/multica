@@ -201,8 +201,8 @@ function ProgressTrend({
         )}
         {due && (
           <line
-            x1={x(due)} y1={0} x2={x(due)} y2={CHART_H}
-            stroke="var(--destructive)" strokeWidth={1.5} vectorEffect="non-scaling-stroke"
+            x1={x(due)} y1={CHART_TOP} x2={x(due)} y2={CHART_H}
+            stroke="var(--destructive)" strokeOpacity={0.7} strokeDasharray="2 2" vectorEffect="non-scaling-stroke"
           />
         )}
       </svg>
@@ -259,9 +259,11 @@ function ForecastNote({
     else if (slack < 0) text = t(($) => $.detail.progress_panel.forecast_behind, { date, count: -slack });
     else text = t(($) => $.detail.progress_panel.forecast_on_due, { date });
   }
+  const slips = !!dueDate && daysBetween(forecast.completion_date, dueDate) < 0;
   return (
-    <p className={cn("text-caption", dueDate && daysBetween(forecast.completion_date, dueDate) < 0 ? "text-destructive" : "text-muted-foreground")}>
-      {text}
+    <p className="flex gap-1.5 text-caption text-muted-foreground">
+      {slips && <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-destructive" aria-hidden="true" />}
+      <span>{text}</span>
     </p>
   );
 }
