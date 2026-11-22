@@ -148,7 +148,7 @@ Claude Code と Codex のランタイムのページには**利用上限**も表
 | Claude Code | `~/.claude.json` の `mcpServers` と、有効なプラグインの MCP サーバー |
 | Codex | `$CODEX_HOME/config.toml`（既定は `~/.codex/config.toml`）の `mcp_servers` |
 | Cursor Agent | `~/.cursor/mcp.json` の `mcpServers` |
-| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json`（既定は `~/.config/opencode/opencode.json`）の `mcp` |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json` と、同じディレクトリの `opencode.jsonc` の `mcp`（既定は `~/.config/opencode/`）。JSONC ファイルが優先されます。 |
 | OpenClaw | `$CLAWDBOT_CONFIG_PATH`、または `$OPENCLAW_STATE_DIR/openclaw.json`（既定は `~/.openclaw/openclaw.json`）の `mcp.servers` |
 | CodeArts | `~/.codeartsdoer/codearts_cli.json` または `codearts_cli.jsonc` の `mcp` |
 

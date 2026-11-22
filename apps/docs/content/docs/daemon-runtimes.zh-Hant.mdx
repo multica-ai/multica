@@ -149,7 +149,7 @@ AI 代理有 MCP 配置後（哪怕是空配置），Multica 會為每次執行�
 | Claude Code | `~/.claude.json` 的 `mcpServers`，以及已啟用外掛的 MCP 伺服器 |
 | Codex | `$CODEX_HOME/config.toml`（預設 `~/.codex/config.toml`）的 `mcp_servers` |
 | Cursor Agent | `~/.cursor/mcp.json` 的 `mcpServers` |
-| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json`（預設 `~/.config/opencode/opencode.json`）的 `mcp` |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json` 和同目錄下 `opencode.jsonc` 的 `mcp`（預設目錄為 `~/.config/opencode/`）。JSONC 檔案優先。 |
 | OpenClaw | `$CLAWDBOT_CONFIG_PATH`，或 `$OPENCLAW_STATE_DIR/openclaw.json`（預設 `~/.openclaw/openclaw.json`）的 `mcp.servers` |
 | CodeArts | `~/.codeartsdoer/codearts_cli.json` 或 `codearts_cli.jsonc` 的 `mcp` |
 

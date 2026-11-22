@@ -149,7 +149,7 @@ Claude Code 和 Codex 运行时的页面上还有**额度**：CLI 账号在套�
 | Claude Code | `~/.claude.json` 的 `mcpServers`，以及已启用插件的 MCP 服务器 |
 | Codex | `$CODEX_HOME/config.toml`（默认 `~/.codex/config.toml`）的 `mcp_servers` |
 | Cursor Agent | `~/.cursor/mcp.json` 的 `mcpServers` |
-| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json`（默认 `~/.config/opencode/opencode.json`）的 `mcp` |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json` 和同目录下 `opencode.jsonc` 的 `mcp`（默认目录为 `~/.config/opencode/`）。JSONC 文件优先。 |
 | OpenClaw | `$CLAWDBOT_CONFIG_PATH`，或 `$OPENCLAW_STATE_DIR/openclaw.json`（默认 `~/.openclaw/openclaw.json`）的 `mcp.servers` |
 | CodeArts | `~/.codeartsdoer/codearts_cli.json` 或 `codearts_cli.jsonc` 的 `mcp` |
 

@@ -308,25 +308,18 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		return map[string]any{}, false, nil
 	}
 
-	servers := map[string]any{}
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		cfg, err := unmarshalRuntimeMcpConfig(raw, format)
-		if err != nil {
-			return nil, true, err
+	configured, err := readRuntimeMcpServers(provider, path, key, format)
+	if err != nil {
+		return nil, true, err
+	}
+	servers := make(map[string]any, len(configured))
+	for name, entry := range configured {
+		// OpenCode 2.x uses disabled, but the task adapters only read
+		// enabled. Keep disabled entries in inventory, not in task config.
+		if server, ok := entry.(map[string]any); provider == "opencode" && ok && server["disabled"] == true {
+			continue
 		}
-		if configured, ok := runtimeMcpServersForProvider(provider, key, cfg); ok {
-			for name, entry := range configured {
-				// OpenCode 2.x uses disabled, but the task adapters only read
-				// enabled. Keep disabled entries in inventory, not in task config.
-				if server, ok := entry.(map[string]any); provider == "opencode" && ok && server["disabled"] == true {
-					continue
-				}
-				servers[name] = normalizeRuntimeMcpEntry(provider, entry)
-			}
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
+		servers[name] = normalizeRuntimeMcpEntry(provider, entry)
 	}
 
 	if provider == "claude" {
@@ -462,19 +455,11 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		return []runtimeLocalMcpServerSummary{}, false, nil
 	}
 
-	out := make([]runtimeLocalMcpServerSummary, 0)
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		cfg, err := unmarshalRuntimeMcpConfig(raw, format)
-		if err != nil {
-			return nil, true, err
-		}
-		if servers, ok := runtimeMcpServersForProvider(provider, key, cfg); ok {
-			out = append(out, runtimeMcpSummaries(servers, source)...)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
+	servers, err := readRuntimeMcpServers(provider, path, key, format)
+	if err != nil {
+		return nil, true, err
 	}
+	out := runtimeMcpSummaries(servers, source)
 
 	if provider == "claude" {
 		out = append(out, listClaudePluginMcpServers(home)...)
@@ -550,22 +535,67 @@ func listClaudePluginMcpServers(home string) []runtimeLocalMcpServerSummary {
 	return out
 }
 
-// runtimeMcpServersForProvider resolves the user-scope MCP server map for a
-// provider. OpenCode is the only provider that stores the same field under two
-// shapes depending on which version wrote the config file, so it gets a
-// dedicated resolver; every other provider uses the dotted-key lookup.
-func runtimeMcpServersForProvider(provider, key string, cfg map[string]any) (map[string]any, bool) {
-	if provider == "opencode" {
-		return opencodeNativeMcpServers(cfg, key)
+func readRuntimeMcpDocument(path, format string) (map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
 	}
-	return nestedRuntimeMcpMap(cfg, key)
+	if err != nil {
+		return nil, fmt.Errorf("read runtime MCP config: %w", err)
+	}
+	cfg, err := unmarshalRuntimeMcpConfig(raw, format)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	return cfg, nil
 }
 
-// opencodeNativeMcpServers returns the OpenCode user MCP server map. OpenCode
-// 1.x stores servers directly under "mcp" while 2.x nests them under
-// "mcp.servers"; the shape is decided by whichever version the user runs, so it
-// is detected from the content rather than a fixed key.
-func opencodeNativeMcpServers(cfg map[string]any, key string) (map[string]any, bool) {
+func readRuntimeMcpServers(provider, path, key, format string) (map[string]any, error) {
+	cfg, err := readRuntimeMcpDocument(path, format)
+	if err != nil {
+		return nil, err
+	}
+	if provider != "opencode" {
+		servers, _ := nestedRuntimeMcpMap(cfg, key)
+		return servers, nil
+	}
+
+	overlay, err := readRuntimeMcpDocument(filepath.Join(filepath.Dir(path), "opencode.jsonc"), "jsonc")
+	if err != nil {
+		return nil, err
+	}
+	baseServers, baseNative := opencodeMcpServersByLayout(cfg, key)
+	overlayServers, overlayNative := opencodeMcpServersByLayout(overlay, key)
+	if baseServers == nil {
+		return overlayServers, nil
+	}
+	// OpenCode 1.x deep-merges global config objects. Native 2.x
+	// configurations replace whole server entries by name in load order.
+	if !baseNative && !overlayNative {
+		mergeOpenCodeMcpObjects(baseServers, overlayServers)
+	} else {
+		for name, entry := range overlayServers {
+			baseServers[name] = entry
+		}
+	}
+	return baseServers, nil
+}
+
+func mergeOpenCodeMcpObjects(base, overlay map[string]any) {
+	for name, entry := range overlay {
+		oldObject, oldOK := base[name].(map[string]any)
+		newObject, newOK := entry.(map[string]any)
+		if oldOK && newOK {
+			mergeOpenCodeMcpObjects(oldObject, newObject)
+			continue
+		}
+		base[name] = entry
+	}
+}
+
+// opencodeMcpServersByLayout returns the server map and whether it uses
+// OpenCode 2.x's nested layout. OpenCode 1.x stores servers directly under mcp.
+func opencodeMcpServersByLayout(cfg map[string]any, key string) (map[string]any, bool) {
 	mcp, ok := cfg[key].(map[string]any)
 	if !ok {
 		return nil, false
@@ -576,12 +606,12 @@ func opencodeNativeMcpServers(cfg map[string]any, key string) (map[string]any, b
 		for _, field := range []string{"type", "url", "command", "enabled", "disabled"} {
 			switch servers[field].(type) {
 			case string, bool, []any:
-				return mcp, true
+				return mcp, false
 			}
 		}
 		return servers, true
 	}
-	return mcp, true
+	return mcp, false
 }
 
 func nestedRuntimeMcpMap(cfg map[string]any, path string) (map[string]any, bool) {

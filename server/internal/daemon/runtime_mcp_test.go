@@ -680,7 +680,8 @@ func TestOpencodeNativeMcpServers(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.cfgJSON), &cfg); err != nil {
 				t.Fatalf("unmarshal fixture: %v", err)
 			}
-			got, ok := opencodeNativeMcpServers(cfg, "mcp")
+			got, _ := opencodeMcpServersByLayout(cfg, "mcp")
+			ok := got != nil
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v (got=%#v)", ok, tc.wantOK, got)
 			}
@@ -899,5 +900,91 @@ func TestMergeRuntimeAndAgentMcpConfigKimiIsPassthrough(t *testing.T) {
 	}
 	if string(merged) != string(agentConfig) {
 		t.Fatalf("kimi merge must be a passthrough, got %s", merged)
+	}
+}
+
+func TestOpenCodeGlobalMCPReadsJSONC(t *testing.T) {
+	tests := []struct {
+		name          string
+		base          string
+		overlay       string
+		wantURL       string
+		wantKey       string
+		wantOffInTask bool
+	}{
+		{
+			name: "v1 keeps fields from the JSON base",
+			base: `{"mcp":{"keep":{"type":"remote","url":"https://base.example/mcp","headers":{"Test-Key":"fixture"}},"off":{"type":"local","command":["fixture"]}}}`,
+			overlay: `{"mcp":{
+				// Override the URL and keep the other fields from the base.
+				"keep":{"url":"https://overlay.example/mcp"},
+				"off":{"enabled":false},
+				"added":{"type":"local","command":["fixture"]},
+			}}`,
+			wantURL: "https://overlay.example/mcp", wantKey: "fixture", wantOffInTask: true,
+		},
+		{
+			name: "v2 replaces named servers",
+			base: `{"mcp":{"servers":{"keep":{"type":"remote","url":"https://base.example/mcp","headers":{"Test-Key":"fixture"}},"off":{"type":"local","command":["fixture"]}}}}`,
+			overlay: `{"mcp":{"servers":{
+				// Replace this server without inheriting the old headers.
+				"keep":{"type":"remote","url":"https://overlay.example/mcp"},
+				"off":{"type":"local","command":["fixture"],"disabled":true},
+				"added":{"type":"local","command":["fixture"]},
+			}}}`,
+			wantURL: "https://overlay.example/mcp",
+		},
+		{
+			name: "jsonc alone",
+			overlay: `{"mcp":{
+				// A standalone global JSONC file.
+				"keep":{"type":"remote","url":"https://overlay.example/mcp"},
+				"off":{"type":"local","command":["fixture"],"enabled":false},
+				"added":{"type":"local","command":["fixture"]},
+			}}`,
+			wantURL: "https://overlay.example/mcp", wantOffInTask: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			configHome := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", configHome)
+			dir := filepath.Join(configHome, "opencode")
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for filename, body := range map[string]string{"opencode.json": tc.base, "opencode.jsonc": tc.overlay} {
+				if body != "" {
+					if err := os.WriteFile(filepath.Join(dir, filename), []byte(body), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			inventory, supported, err := listRuntimeLocalMcpServers("opencode")
+			if err != nil || !supported {
+				t.Fatalf("list MCP inventory: supported=%v, err=%v", supported, err)
+			}
+			if len(inventory) != 3 || inventory[0].Name != "added" || inventory[1].Name != "keep" || inventory[2].Name != "off" || inventory[2].Enabled {
+				t.Fatalf("inventory did not reflect the JSONC layer: %+v", inventory)
+			}
+
+			servers, supported, err := loadRuntimeMcpServerConfigs("opencode")
+			if err != nil || !supported {
+				t.Fatalf("load task MCP config: supported=%v, err=%v", supported, err)
+			}
+			if _, hasOff := servers["off"]; hasOff != tc.wantOffInTask {
+				t.Fatalf("task config contains disabled server: %v, want %v", hasOff, tc.wantOffInTask)
+			}
+			keep, ok := servers["keep"].(map[string]any)
+			if !ok || keep["url"] != tc.wantURL {
+				t.Fatalf("unexpected merged server: %+v", keep)
+			}
+			headers, _ := keep["headers"].(map[string]any)
+			gotKey, _ := headers["Test-Key"].(string)
+			if gotKey != tc.wantKey {
+				t.Fatalf("header = %q, want %q", gotKey, tc.wantKey)
+			}
+		})
 	}
 }
