@@ -182,5 +182,23 @@
     ".github/ci-paths.json",
     "scripts/ci-scope.mjs",
     "scripts/ci-scope.test.mjs"
+  ],
+  "e2e": [
+    "e2e/**",
+    "playwright.config.ts",
+    "scripts/dev-fixtures.mjs",
+    "apps/web/**",
+    "packages/**",
+    "server/**",
+    "package.json",
+    ".npmrc",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "patches/**",
+    "turbo.json",
+    ".github/workflows/ci.yml",
+    ".github/ci-paths.json",
+    "scripts/ci-scope.mjs",
+    "scripts/ci-scope.test.mjs"
   ]
 }
