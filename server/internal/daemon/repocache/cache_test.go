@@ -793,6 +793,13 @@ func TestCreateWorktree(t *testing.T) {
 	if got := strings.TrimSpace(string(out)); got != result.BranchName {
 		t.Errorf("expected branch %q, got %q", result.BranchName, got)
 	}
+
+	paths := []string{"CLAUDE.md", "AGENTS.md", ".claude/settings.local.json"}
+	args := []string{"-C", result.Path, "-c", "core.excludesFile=" + filepath.Join(t.TempDir(), "global-excludes"), "check-ignore", "--"}
+	out, err = exec.Command("git", append(args, paths...)...).CombinedOutput()
+	if err != nil || strings.Join(strings.Fields(string(out)), "\n") != strings.Join(paths, "\n") {
+		t.Fatalf("git check-ignore = %q, %v, want all runtime files ignored", out, err)
+	}
 }
 
 func TestCreateWorktreeReportsFailedFetch(t *testing.T) {
@@ -1405,18 +1412,18 @@ func TestCreateWorktreeDoesNotExcludeReasonixProjectConfig(t *testing.T) {
 
 func gitInfoExclude(t *testing.T, worktreePath string) string {
 	t.Helper()
-	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-dir")
+	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-path", "info/exclude")
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("git rev-parse --git-dir failed in %s: %v", worktreePath, err)
+		t.Fatalf("resolve Git exclude path in %s: %v", worktreePath, err)
 	}
-	gitDir := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktreePath, gitDir)
+	excludePath := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(excludePath) {
+		excludePath = filepath.Join(worktreePath, excludePath)
 	}
-	data, err := os.ReadFile(filepath.Join(gitDir, "info", "exclude"))
+	data, err := os.ReadFile(excludePath)
 	if err != nil {
-		t.Fatalf("read .git/info/exclude failed: %v", err)
+		t.Fatalf("read Git exclude file: %v", err)
 	}
 	return string(data)
 }

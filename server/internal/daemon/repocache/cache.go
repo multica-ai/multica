@@ -2431,17 +2431,15 @@ func removeCoAuthoredByHookContext(ctx context.Context, worktreePath string) err
 }
 
 func excludeFromGitContext(ctx context.Context, worktreePath, pattern string) error {
-	out, err := runGitOutputContext(ctx, "-C", worktreePath, "rev-parse", "--git-dir")
+	out, err := runGitOutputContext(ctx, "-C", worktreePath, "rev-parse", "--git-path", "info/exclude")
 	if err != nil {
-		return fmt.Errorf("resolve git dir: %w", err)
+		return fmt.Errorf("resolve git exclude path: %w", err)
 	}
 
-	gitDir := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktreePath, gitDir)
+	excludePath := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(excludePath) {
+		excludePath = filepath.Join(worktreePath, excludePath)
 	}
-
-	excludePath := filepath.Join(gitDir, "info", "exclude")
 
 	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
 		return fmt.Errorf("create info dir: %w", err)
