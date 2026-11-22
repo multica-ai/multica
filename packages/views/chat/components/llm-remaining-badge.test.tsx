@@ -132,11 +132,12 @@ describe("reset countdown", () => {
     expect(formatResetCountdown("invalid", now)).toBe("--:--:--");
   });
 
-  it("updates every second without refetching and gives an exact KST tooltip", async () => {
+  it("shows one limiting reset per provider and falls back when its timestamp is missing", async () => {
     const now = Date.parse("2026-11-04T00:00:00Z");
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({
       five_hour_pct: 25, five_hour_resets_at: "2026-11-04T02:00:00Z",
-      seven_day_resets_at: "2026-11-04T01:00:00Z",
+      seven_day_pct: 85, seven_day_resets_at: "2026-11-04T01:00:00Z",
+      gpt_five_hour_pct: 95, gpt_seven_day_pct: 25,
       gpt_seven_resets_at: "2026-11-04T03:00:00Z",
     }) })));
     vi.spyOn(Date, "now").mockReturnValue(now);
@@ -146,11 +147,11 @@ describe("reset countdown", () => {
     vi.mocked(Date.now).mockReturnValue(now + 1000);
     act(() => { vi.advanceTimersByTime(1000); });
     const countdown = screen.getByTestId("chat-reset-countdown");
-    expect(countdown).toHaveTextContent(/C 5h 리셋 .*11:00 KST 01:59:59/);
-    expect(countdown).toHaveTextContent(/C 7d 리셋 .*10:00 KST 00:59:59/);
-    expect(countdown).toHaveTextContent("G 5h 리셋 --:--:--");
-    expect(countdown).toHaveTextContent(/G 7d 리셋 .*12:00 KST 02:59:59/);
-    expect(countdown.querySelectorAll("time")).toHaveLength(3);
+    expect(countdown.children).toHaveLength(2);
+    expect(countdown.children[0]).toHaveTextContent(/C 리셋 .*10:00 KST · 00:59:59/);
+    expect(countdown.children[1]).toHaveTextContent(/G 리셋 .*12:00 KST · 02:59:59/);
+    expect(countdown.querySelectorAll("time")).toHaveLength(2);
+    expect(countdown).not.toHaveTextContent("11:00");
     expect(screen.getAllByTitle(/KST/).some(({ title }) => title.includes("10시 0분 0초"))).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     view.unmount();
@@ -182,7 +183,7 @@ describe("last known quota during failures", () => {
     renderBadge();
     await waitFor(() => expect(screen.getByTestId("chat-llm-gauge-compact")).toHaveTextContent("C*: 5h 91%/7d 18%"));
     expect(screen.getByTestId("chat-token-gauge").title).toContain("마지막 확인값");
-    expect(screen.getByTestId("chat-reset-countdown")).toHaveTextContent("C 7d 리셋 --:--:--");
+    expect(screen.getByTestId("chat-reset-countdown")).toHaveTextContent("C 리셋 --:--:--");
     vi.unstubAllGlobals();
   });
 
