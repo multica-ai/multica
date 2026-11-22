@@ -28,6 +28,7 @@
     "actions": {
       "retry": "重試",
       "retry_autopilots": "重試載入自動化用量",
+      "retry_storage": "重試附件儲存空間用量",
       "upgrade_to": "升級到 {{plan}}",
       "switch_to": "切換到 {{plan}}",
       "manage": "管理帳單",
@@ -41,7 +42,7 @@
       "temporarily_unavailable": "帳單服務暫時不可用，請稍後重試。",
       "not_enabled": "此部署未啟用工作區訂閱，請聯絡管理員。",
       "permission_changed": "你的工作區角色已不允許執行此操作。重新整理頁面可檢視當前權限。",
-      "checkout_response": "服務端響應無法讀取，無法開啟 Checkout。請保留當前週期並重試。",
+      "checkout_response": "收到非預期的回應，無法開啟結帳頁面，請重試。",
       "already_subscribed": "這個工作區已經有訂閱，當前套餐已重新整理。",
       "checkout_failed": "無法建立 Checkout，請稍後重試。",
       "portal_response": "服務端響應無法讀取，無法開啟 Billing Portal。",
@@ -81,7 +82,7 @@
       "title": "當前套餐",
       "plan": "工作區套餐",
       "members": "成員席位",
-      "members_description": "AI 代理和待接受的邀請不計入席位。",
+      "members_description": "此工作區中的活躍成員數。AI 代理不計入席位。",
       "member_count_other": "{{count}} 位成員",
       "billing_interval": "付款週期",
       "period_end": "當前週期結束時間",
@@ -102,13 +103,13 @@
       "unit_price_month": "每個成員席位每月 {{price}}",
       "unit_price_year_monthly": "每個成員席位每月 {{price}}，按年付費",
       "unit_price_year": "每個成員席位每年 {{price}}",
-      "price_at_checkout": "購買前，服務端會重新統計成員。付款前，Stripe Checkout 會顯示權威的單席位價格和總額。",
+      "price_at_checkout": "結帳時會計算活躍的人類成員數。付款前，Stripe 會顯示最終的單席位價格與總額。",
       "recommended": "推薦",
       "features": {
         "pro_members": "成員不限",
         "pro_autopilots": "自動化每人每月 1,000 次",
         "pro_storage": "每人 10 GB 附件儲存",
-        "pro_dashboard": "統計查看最近 90 天",
+        "pro_dashboard": "90 天分析歷史記錄",
         "business_everything": "Pro 的全部功能",
         "business_access": "私有專案和按成員授權",
         "business_apps": "團隊應用帳號和審批規則",
@@ -137,7 +138,19 @@
       "usage_unavailable": "用量暫時不可用",
       "members": "成員",
       "members_pending": "待接受的邀請：{{pending}}",
-      "metering": "時間表、Webhook 和 AI 代理發起的執行計入額度，成員點擊\"立即執行\"不計入。"
+      "metering": "時間表、Webhook 和 AI 代理發起的執行計入額度，成員點擊\"立即執行\"不計入。",
+      "storage": "附件儲存空間",
+      "storage_description": "任務、留言和聊天中的附件。",
+      "storage_label": "附件儲存空間用量",
+      "addon": "加購執行次數",
+      "addon_description": "額度用完後自動化會暫停，直到下月重置或加購。",
+      "addon_included": "其中加購 {{runs}} 次",
+      "addon_none": "本月未加購",
+      "addon_purchased": "本月已加購 {{runs}} 次",
+      "addon_buy": "加購 · {{price}} / {{runs}} 次",
+      "addon_buy_fallback": "加購執行次數",
+      "dashboard_history": "統計查看範圍",
+      "dashboard_history_days": "最近 {{days}} 天"
     },
     "seats": {
       "title": "席位",
@@ -173,9 +186,9 @@
       "preview_unreadable": "無法讀取估算結果。請修改席位數或重試。",
       "preview_failed": "暫時無法獲取估算金額，請稍後重試。",
       "capacity_out_of_sync": "Stripe 席位數與計費記錄不一致。再次購買前，請聯絡支援人員。",
-      "in_progress": "另一筆席位購買正在處理中。請等待其完成；若長時間未完成，請聯絡支援人員。",
+      "in_progress": "另一筆席位購買正在處理中。請稍候其完成，若長時間卡住請聯絡支援團隊。",
       "plan_change_in_progress": "套餐變更還在處理中，請幾分鐘後再試。",
-      "purchase_unreadable": "無法讀取購買響應。請重試當前報價；系統會複用同一購買請求。",
+      "purchase_unreadable": "無法確認購買回應。請放心重試，系統不會重複扣款。",
       "purchase_failed": "無法新增席位。可使用同一報價重試；報價過期時請重新整理。",
       "payment_failed": "付款未能完成。請在 Stripe 更新付款方式，然後重新獲取報價。",
       "quote_changed": "席位數或估算金額已變化，請檢視重新整理後的報價再確認。",
@@ -215,7 +228,9 @@
       "success_title": "套餐已更換",
       "success_description": "這個工作區現在使用 {{plan}}。",
       "unresolved": "上一次套餐變更的結果沒有確認。請先聯絡支援，再更換套餐。",
-      "check_failed": "無法檢查套餐變更，請重試。"
+      "check_failed": "無法檢查套餐變更，請重試。",
+      "addon_downgrade_notice": "切換後本月上限變為 {{limit}} 次（含已加購的次數），本月已用 {{used}} 次。",
+      "addon_downgrade_notice_limit_only": "切換後本月上限變為 {{limit}} 次（含已加購的次數）。"
     },
     "confirm": {
       "title": "前往 Stripe Checkout？",
@@ -244,7 +259,22 @@
     "read_only": "唯讀，升級後可編輯",
     "unavailable": "目前工作區的套餐不包含此功能。",
     "view_plans": "查看套餐",
-    "locked_error": "目前工作區的套餐不包含此功能。既有設定繼續生效，升級後可以新增。"
+    "locked_error": "目前工作區的套餐不包含此功能。既有設定繼續生效，升級後可以新增。",
+    "upgrade_to_add": "升級套餐",
+    "business": "Business",
+    "badge_label": "Business 功能，查看詳情",
+    "upgrade_to_business": "升級到 Business",
+    "ask_admin": "請聯絡工作區管理員升級到 Business。",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "允許指定成員執行 AI 代理是 Business 功能",
+        "description": "\"僅自己\"和\"整個工作區\"在所有套餐中都可以使用。"
+      },
+      "runtime_member_sharing": {
+        "title": "與指定成員共用執行時是 Business 功能",
+        "description": "\"私有\"和\"公開\"在所有套餐中都可以使用。"
+      }
+    }
   },
   "trial": {
     "status": {
@@ -298,7 +328,7 @@
     },
     "features": {
       "title": "試用中的 Business 功能",
-      "description": "試用結束後不會被刪除或關閉，只是不能新增和修改。",
+      "description": "試用結束後，任何項目都不會被刪除或關閉——現有設定會以唯讀模式維持啟用，但無法新增。",
       "private_projects": {
         "name": "私有專案",
         "after": "到期後保持私有，存取名單唯讀。"
@@ -308,5 +338,35 @@
         "after": "到期後既有訪客保留存取權限，邀請新訪客需要 Pro 或 Business。"
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} 沒有上傳",
+    "copy_title": "子任務沒有建立：無法複製來源附件",
+    "admin_body": "附件儲存空間已滿（{{used}} / {{limit}}），既有附件不受影響。",
+    "admin_body_no_figures": "附件儲存空間已滿，既有附件不受影響。",
+    "member_body": "附件儲存空間已滿。請聯絡管理員升級套餐，或刪除不需要的附件。",
+    "dismiss": "關閉"
+  },
+  "autopilot_addon": {
+    "title": "加購自動化執行",
+    "description": "加購的次數在本月有效，所有成員共用，先用方案額度再用加購。",
+    "options_label": "加購次數",
+    "option": "{{runs}} 次",
+    "usage_summary": "本月已用 {{used}} / {{limit}} 次，{{date}} 重置。",
+    "pay": "前往支付 {{amount}}",
+    "pay_fallback": "前往付款",
+    "cancel": "取消",
+    "loading": "正在載入加購價格…",
+    "unavailable": "該工作區現在無法加購。",
+    "conflict": "現在無法加購，或價格已變化。請查看選項後重試。",
+    "error": "無法開啟付款頁面。請重試。",
+    "success_title": "已加購",
+    "success_description": "本月已增加 {{runs}} 次，自動化會在下一次執行時恢復。",
+    "confirming_title": "正在確認付款",
+    "confirming_description": "Stripe 確認付款後會立即加上次數。請稍後查看下方的用量。",
+    "not_paid_title": "付款未完成",
+    "not_paid_description": "沒有扣款，也沒有加上次數。",
+    "cancel_title": "已取消付款",
+    "cancel_description": "沒有扣款。"
   }
 }

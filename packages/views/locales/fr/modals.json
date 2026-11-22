@@ -11,7 +11,7 @@
     "description": "Les espaces de travail sont des environnements partagés où les équipes travaillent sur des projets et des tâches."
   },
   "delete_issue": {
-    "title": "Supprimer la tâche",
+    "title": "Supprimer la tâche ?",
     "description": "Cette tâche et tous ses commentaires seront définitivement supprimés. Cette action est irréversible.",
     "cancel": "Annuler",
     "confirm": "Supprimer",
@@ -170,7 +170,7 @@
   },
   "create_issue": {
     "sr_manual": "Nouvelle tâche",
-    "sr_agent": "Création rapide de tâche",
+    "sr_agent": "Créer une tâche avec un agent",
     "manual_breadcrumb": "Créer manuellement",
     "agent_breadcrumb": "Créer avec un agent",
     "title_placeholder": "Titre de la tâche",
@@ -187,15 +187,20 @@
     "autopilot_quota_limit": {
       "title": "Cet espace de travail a atteint sa limite d'exécutions d'automatisation",
       "checking_description": "Vérification des actions de facturation disponibles pour cet espace de travail…",
-      "upgrade_description": "Passez à Pro pour rétablir les exécutions d'automatisation.",
+      "upgrade_description": "Passez à Pro pour augmenter la limite mensuelle et reprendre les exécutions d'autopilot, ou attendez la réinitialisation de l'allocation.",
       "portal_description": "Ouvrez le portail de facturation pour gérer l'abonnement de cet espace de travail et rétablir les exécutions d'automatisation.",
-      "contact_description": "Demandez à un propriétaire ou administrateur de l'espace de travail de passer à Pro.",
+      "contact_description": "Demandez à un propriétaire ou administrateur de l'espace de travail de changer de forfait, ou attendez la réinitialisation de l'allocation.",
       "billing_description": "Ouvrez Facturation pour voir les options de mise à niveau disponibles pour cet espace de travail.",
       "billing_unavailable_description": "Impossible de charger les actions de facturation. Ouvrez Facturation pour réessayer.",
       "billing_disabled_description": "Attendez la réinitialisation du quota actuel ou contactez l'administrateur de votre espace de travail.",
       "upgrade_action": "Passer à Pro",
       "portal_action": "Ouvrir le portail de facturation",
-      "billing_action": "Voir la facturation"
+      "billing_action": "Voir la facturation",
+      "addon_description": "Achetez des exécutions pour reprendre les exécutions d'autopilot ce mois-ci, ou attendez la réinitialisation de l'allocation.",
+      "contact_addon_description": "Demandez à un propriétaire ou administrateur de l'espace de travail d'acheter des exécutions, ou attendez la réinitialisation de l'allocation.",
+      "contact_addon_or_upgrade_description": "Demandez à un propriétaire ou administrateur de l'espace de travail d'acheter des exécutions ou de changer de forfait, ou attendez la réinitialisation de l'allocation.",
+      "addon_action": "Acheter des exécutions",
+      "upgrade_business_action": "Passer à Business"
     },
     "toast_link_subissues_all_failed": "Échec de la liaison des sous-tâches",
     "toast_link_subissues_partial": "Échec de la liaison de {{failed}} sous-tâches sur {{total}}",
@@ -240,9 +245,9 @@
       "search_placeholder": "Rechercher des agents et des squads…",
       "agents_group": "Agents",
       "squads_group": "Squads",
-      "version_missing": "Le daemon de cet agent ne communique pas de version du CLI. La création avec un agent exige le CLI multica ≥ {{min}}. Mettez le daemon à jour et reconnectez-vous, ou passez à la création manuelle.",
+      "version_missing": "Le daemon de cet agent ne signale pas de version du CLI. La création avec un agent nécessite multica CLI ≥ {{min}}. Mettez à jour le daemon et reconnectez-le, ou passez à la création manuelle.",
       "version_below": "Le CLI du daemon de cet agent est en {{current}} — la création avec un agent exige ≥ {{min}}. Mettez le daemon à jour, ou passez à la création manuelle.",
-      "prompt_placeholder": "Dites à l'agent quoi faire, par exemple « confier à Bohan la lenteur de chargement de la boîte de réception dans le projet Web »",
+      "prompt_placeholder": "Dites à l'agent quoi faire, par exemple « confier à Mika la lenteur de chargement de la boîte de réception dans le projet Web »",
       "source_context_prompt_placeholder": "Indiquez à l'agent quoi faire de ce contexte, par exemple « poursuivez l'enquête et corrigez le problème décrit ici »",
       "more_fields_aria": "Plus de champs",
       "set_project": "Définir le projet...",
@@ -275,8 +280,9 @@
     "trigger": "Copier les champs du parent",
     "title": "Copier les champs du parent",
     "description": "Depuis {{identifier}}. Remplace une fois les valeurs sélectionnées ; les modifications ultérieures ne sont pas synchronisées.",
-    "apply": "Copier {{count}} champs",
     "no_labels": "Aucune étiquette",
-    "manual_only": "Les étiquettes, la date de début et les propriétés personnalisées ne concernent que la création manuelle."
+    "manual_only": "Les étiquettes, la date de début et les propriétés personnalisées ne concernent que la création manuelle.",
+    "apply_one": "Copier {{count}} champ",
+    "apply_other": "Copier {{count}} champs"
   }
 }

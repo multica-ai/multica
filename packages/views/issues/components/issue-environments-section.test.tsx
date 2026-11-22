@@ -469,7 +469,7 @@ describe("IssueEnvironmentsSection", () => {
     const menu = await openRowMenu(await screen.findByTestId("environment-row"));
     expect(within(menu).getByText("Detected service · vite")).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: "View logs" })).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "Stop…" }));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Stop..." }));
 
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Stop localhost:5173?")).toBeVisible();

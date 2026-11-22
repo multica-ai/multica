@@ -39,10 +39,15 @@ import type {
   WorkspaceFeatureState,
   WorkspaceFeatures,
   MemberLimit,
+  StorageUsage,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
+  WorkspacePlanLimits,
+  CreateWorkspaceAutopilotAddonCheckoutResponse,
+  WorkspaceAutopilotAddonCheckout,
+  WorkspaceAutopilotAddonPrice,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspacePlanChangePreview,
   ChangeWorkspacePlanResponse,
@@ -75,6 +80,8 @@ import type {
   IssueUnread,
   Label,
   Project,
+  ProjectProgressDetail,
+  ProjectActivityPage,
   ListProjectsResponse,
   MemberWithUser,
   IssueProperty,
@@ -1471,6 +1478,7 @@ export const EMPTY_STORE_THEME_LIST: { themes: StoreTheme[] } = { themes: [] };
 export const NotificationPreferenceResponseSchema = z.object({
   workspace_id: z.string(),
   preferences: z.record(z.string(), z.string()).default({}),
+  auto_archive_prompt: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_NOTIFICATION_PREFERENCE_RESPONSE: NotificationPreferenceResponse = {
@@ -1750,6 +1758,7 @@ export const IssueSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   revision: z.number().int().positive().optional(),
+  description_revision: z.number().int().nonnegative().optional(),
   // Optional for compatibility with older self-hosted backends; a current
   // backend emits null until its historical backfill reaches the issue.
   last_activity_at: z.string().nullable().optional(),
@@ -1803,6 +1812,16 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
 };
 
+const ProjectProgressSchema = z.object({
+  unit: z.literal("issues").catch("issues"),
+  scope: z.number().default(0),
+  completed: z.number().default(0),
+  started: z.number().default(0),
+  unstarted: z.number().default(0),
+  cancelled: z.number().default(0),
+  percent: z.number().default(0),
+}).loose();
+
 export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -1826,6 +1845,8 @@ export const ProjectSchema = z.object({
   last_activity_at: z.string().optional().catch(undefined),
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
+  // Older servers omit it; consumers fall back to issue_count / done_count.
+  progress: ProjectProgressSchema.optional().catch(undefined),
   resource_count: z.number().default(0),
   workflow_id: z.string().nullable().default(null),
   archived_at: z.string().nullable().default(null).catch(null),
@@ -1848,6 +1869,60 @@ export const ListProjectsResponseSchema = z.object({
   projects: z.array(ProjectSchema).default([]),
   total: z.number().default(0),
 }).loose();
+
+export const ProjectProgressDetailSchema = z.object({
+  progress: ProjectProgressSchema,
+  by_assignee: z.array(z.object({
+    assignee_type: z.enum(["member", "agent", "squad"]).nullable().catch(null),
+    assignee_id: z.string().nullable().default(null),
+    scope: z.number().default(0),
+    completed: z.number().default(0),
+    started: z.number().default(0),
+  }).loose()).default([]),
+  // Older servers omit it; the label breakdown then has nothing to show.
+  by_label: z.array(z.object({
+    label_id: z.string().nullable().default(null),
+    scope: z.number().default(0),
+    completed: z.number().default(0),
+    started: z.number().default(0),
+  }).loose()).default([]).catch([]),
+  history: z.array(z.object({
+    date: z.string(),
+    scope: z.number().default(0),
+    started: z.number().default(0),
+    completed: z.number().default(0),
+  }).loose()).default([]),
+  forecast: z.object({
+    completion_date: z.string(),
+    weekly_velocity: z.number(),
+  }).loose().nullable().default(null).catch(null),
+}).loose();
+
+export const EMPTY_PROJECT_PROGRESS_DETAIL: ProjectProgressDetail = {
+  progress: { unit: "issues", scope: 0, completed: 0, started: 0, unstarted: 0, cancelled: 0, percent: 0 },
+  by_assignee: [],
+  by_label: [],
+  history: [],
+  forecast: null,
+};
+
+export const ProjectActivityPageSchema = z.object({
+  entries: z.array(z.object({
+    id: z.string(),
+    issue_id: z.string(),
+    issue_identifier: z.string().default(""),
+    issue_title: z.string().default(""),
+    issue_status: z.string().default(""),
+    actor_type: z.string().default(""),
+    actor_id: z.string().default(""),
+    action: z.string(),
+    details: z.record(z.string(), z.unknown()).default({}).catch({}),
+    created_at: z.string(),
+  }).loose()).default([]),
+  next_cursor: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_PROJECT_ACTIVITY_PAGE: ProjectActivityPage = { entries: [], next_cursor: null };
 
 export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = { projects: [], total: 0 };
 
@@ -2362,6 +2437,26 @@ const RuntimeRateLimitsSchema = z.object({
 
 export const RuntimeRateLimitsResponseSchema = z.object({
   rate_limits: RuntimeRateLimitsSchema.nullable().catch(null),
+}).loose();
+
+export const RuntimeUpdateSchema = z.object({
+  id: z.string(),
+  runtime_id: z.string().default(""),
+  // An unknown future status keeps the card neutral and polling.
+  status: z
+    .enum(["pending", "scheduled", "running", "completed", "failed", "timeout", "cancelled", "expired"])
+    .catch("pending"),
+  target_version: z.string().default(""),
+  output: z.string().optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+  active_tasks: z.number().optional().catch(undefined),
+  cancellable: z.boolean().default(false).catch(false),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ActiveRuntimeUpdateResponseSchema = z.object({
+  update: RuntimeUpdateSchema.nullable().catch(null),
 }).loose();
 
 // Agent task responses. The base object stays loose so daemon/runtime fields
@@ -3355,6 +3450,8 @@ export const SnoozedInboxListSchema = z.array(
   z
     .object({
       issue_id: z.string(),
+      // Older servers omit it; the row then links by issue_id.
+      issue_identifier: z.string().min(1).nullish().catch(null),
       item_id: z.string(),
       snoozed_until: z.string(),
       snoozed_at: z.string(),
@@ -3617,6 +3714,12 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
     limits: z
       .object({
         autopilot_runs: WorkspaceEntitlementLimitSchema,
+        // Optional: a Cloud without the storage limit omits it, and a
+        // malformed one must not fail the whole snapshot.
+        storage_bytes: WorkspaceEntitlementLimitSchema.nullable().optional().catch(null),
+        // Newer than autopilot_runs: an older Cloud omits it, and a malformed
+        // one only hides its own row.
+        dashboard_history_days: WorkspaceEntitlementLimitSchema.nullable().catch(null).default(null),
       })
       .loose(),
     current_period_end: z.string().nullable().optional(),
@@ -3632,6 +3735,8 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
       seats: value.seats,
       limits: {
         autopilotRuns: value.limits.autopilot_runs,
+        storageBytes: value.limits.storage_bytes ?? null,
+        dashboardHistoryDays: value.limits.dashboard_history_days,
       },
       currentPeriodEnd: value.current_period_end ?? null,
       snapshotExpiresAt: value.snapshot_expires_at ?? null,
@@ -3675,7 +3780,21 @@ export const WorkspaceSubscriptionSummarySchema = z
       // Absent on a cloud that predates plan switching: no switch is offered.
       change_plan: z.boolean().optional(),
       check_plan_change: z.boolean().optional(),
+      // Absent on a cloud that predates add-ons; a malformed value offers none.
+      purchase_autopilot_runs: z.boolean().optional().catch(undefined),
     }).loose(),
+    // Absent on an older cloud, and a malformed value reads as no add-ons:
+    // the limit in the entitlement already includes them.
+    autopilot_addon: z
+      .object({
+        purchased_runs: z.number().int().nonnegative(),
+        period_start: z.string().min(1),
+        period_end: z.string().min(1),
+      })
+      .loose()
+      .nullable()
+      .optional()
+      .catch(null),
     // Absent on an older cloud, and a malformed value reads as no hold: the
     // server still refuses the operations a hold blocks.
     plan_change: z
@@ -3746,7 +3865,16 @@ export const WorkspaceSubscriptionSummarySchema = z
         purchaseSeats: value.available_actions.purchase_seats,
         changePlan: value.available_actions.change_plan ?? false,
         checkPlanChange: value.available_actions.check_plan_change ?? false,
+        purchaseAutopilotRuns:
+          value.available_actions.purchase_autopilot_runs ?? false,
       },
+      autopilotAddon: value.autopilot_addon
+        ? {
+            purchasedRuns: value.autopilot_addon.purchased_runs,
+            periodStart: value.autopilot_addon.period_start,
+            periodEnd: value.autopilot_addon.period_end,
+          }
+        : null,
       planChange: value.plan_change
         ? {
             targetPlan: value.plan_change.target_plan,
@@ -3854,18 +3982,107 @@ const WorkspaceSubscriptionPlanPricesSchema = z
     }),
   );
 
+// The add-on pack is optional and read on its own: a missing or malformed
+// pack price hides the add-on without taking the plan prices down with it.
+const WorkspaceAutopilotAddonPriceSchema = z
+  .object({
+    currency: z.string().regex(/^[a-z]{3}$/),
+    unit_amount: z.number().int().positive(),
+    runs_per_pack: z.number().int().positive(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceAutopilotAddonPrice => ({
+      currency: value.currency,
+      unitAmount: value.unit_amount,
+      runsPerPack: value.runs_per_pack,
+    }),
+  );
+
 // Every paid plan must be priced: a response missing one plan reads as "prices
 // unavailable" as a whole rather than offering one plan without the other.
+// A day count from a newer or malformed Cloud reads as unknown, never as a
+// number: the plan labels it feeds are hints, and a wrong one would point a
+// user at the wrong plan.
+const PlanDaysSchema = z.number().int().positive().nullable().catch(null).default(null);
+
+const WorkspacePlanLimitSchema = z
+  .object({ dashboard_history_days: PlanDaysSchema })
+  .loose()
+  .transform((value) => ({ dashboardHistoryDays: value.dashboard_history_days }));
+
+// Plan limits are optional: an older Cloud does not send them, and a malformed
+// block reads as absent rather than failing the prices themselves.
+const WorkspacePlanLimitsSchema = z
+  .object({
+    free: WorkspacePlanLimitSchema,
+    pro: WorkspacePlanLimitSchema,
+    business: WorkspacePlanLimitSchema,
+  })
+  .loose()
+  .transform(
+    (value): WorkspacePlanLimits => ({
+      free: value.free,
+      pro: value.pro,
+      business: value.business,
+    }),
+  )
+  .nullable()
+  .catch(null)
+  .default(null);
+
 export const WorkspaceSubscriptionPricesSchema = z
   .object({
     pro: WorkspaceSubscriptionPlanPricesSchema,
     business: WorkspaceSubscriptionPlanPricesSchema,
+    autopilot_addon: WorkspaceAutopilotAddonPriceSchema.nullable()
+      .optional()
+      .catch(null),
+    plan_limits: WorkspacePlanLimitsSchema,
   })
   .loose()
   .transform(
     (value): WorkspaceSubscriptionPrices => ({
       pro: value.pro,
       business: value.business,
+      autopilotAddon: value.autopilot_addon ?? null,
+      planLimits: value.plan_limits,
+    }),
+  );
+
+export const CreateWorkspaceAutopilotAddonCheckoutResponseSchema = z
+  .object({
+    session_id: z.string().min(1),
+    url: StripeHostedURLSchema,
+  })
+  .loose()
+  .transform(
+    (value): CreateWorkspaceAutopilotAddonCheckoutResponse => ({
+      sessionId: value.session_id,
+      url: value.url,
+    }),
+  );
+
+// A session status this client does not know reads as open: the page keeps
+// waiting for Stripe instead of claiming success or failure.
+export const WorkspaceAutopilotAddonCheckoutSchema = z
+  .object({
+    session_id: z.string().min(1),
+    status: z.enum(["paid", "open", "unpaid", "expired"]).catch("open"),
+    packs: z.number().int().positive(),
+    runs: z.number().int().positive(),
+    currency: z.string().regex(/^[a-z]{3}$/),
+    amount: z.number().int().nonnegative(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceAutopilotAddonCheckout => ({
+      sessionId: value.session_id,
+      status: value.status,
+      packs: value.packs,
+      runs: value.runs,
+      currency: value.currency,
+      amount: value.amount,
     }),
   );
 
@@ -3878,14 +4095,25 @@ const WorkspaceFeatureStateSchema = z
   .transform((value): WorkspaceFeatureState => value.state)
   .catch("available" as const);
 
+// A limit that is missing (an older server) or malformed reads as none: the
+// server still cuts every dashboard response to the enforced range.
+const WorkspaceFeatureLimitsSchema = z
+  .object({ dashboard_history_days: PlanDaysSchema })
+  .loose()
+  .transform((value) => ({ dashboardHistoryDays: value.dashboard_history_days }))
+  .catch({ dashboardHistoryDays: null })
+  .default({ dashboardHistoryDays: null });
+
 export const WorkspaceFeaturesSchema = z
   .object({
     features: z.record(z.string(), WorkspaceFeatureStateSchema).catch({}),
+    limits: WorkspaceFeatureLimitsSchema,
   })
   .loose()
   .transform(
     (value): WorkspaceFeatures => ({
       features: value.features as WorkspaceFeatures["features"],
+      limits: value.limits,
     }),
   );
 
@@ -3909,6 +4137,30 @@ export const MemberLimitSchema = z
             limit: value.limit,
             members: value.members ?? 0,
             pendingInvitations: value.pending_invitations ?? 0,
+          },
+  );
+
+// Storage usage that cannot be read, or an action from a newer server, reads
+// as off: the server still checks every upload.
+export const StorageUsageSchema = z
+  .object({
+    action: z.enum(["off", "observe", "enforce"]).catch("off"),
+    used_bytes: z.number().int().nonnegative().nullable().catch(null).default(null),
+    limit_bytes: z.number().int().nonnegative().nullable().catch(null).default(null),
+    reached: z.boolean().nullable().catch(null).default(null),
+  })
+  .loose()
+  .transform(
+    (value): StorageUsage =>
+      value.action === "off" || value.limit_bytes === null
+        ? { action: "off", usedBytes: null, limitBytes: null, reached: null }
+        : {
+            action: value.action,
+            // Missing when the server could not read usage in time.
+            usedBytes: value.used_bytes,
+            limitBytes: value.limit_bytes,
+            reached:
+              value.action === "enforce" && value.used_bytes !== null ? (value.reached ?? false) : null,
           },
   );
 
@@ -4005,6 +4257,14 @@ export const WorkspacePlanChangePreviewSchema = z
     next_invoice_amount: z.number().int().nonnegative(),
     invoice_now: z.boolean(),
     quoted_at: z.string().min(1),
+    // Absent on a cloud that predates add-ons.
+    autopilot_runs_limit_after: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .refine((value) => value.current_plan !== value.target_plan, {
@@ -4022,6 +4282,7 @@ export const WorkspacePlanChangePreviewSchema = z
       nextInvoiceAmount: value.next_invoice_amount,
       invoiceNow: value.invoice_now,
       quotedAt: value.quoted_at,
+      autopilotRunsLimitAfter: value.autopilot_runs_limit_after ?? null,
     }),
   );
 
@@ -4793,6 +5054,23 @@ export const AppsOverviewSchema = z.object({
   team: z.array(AppConnectionSchema).default([]),
   personal: z.array(AppConnectionSchema).default([]),
   agent_apps: z.array(AgentAppSchema).default([]),
+  team_requests: z.array(z.object({
+    toolkit_slug: z.string(),
+    requested_by: z.array(z.string()).default([]).catch([]),
+    asked_by: z.array(z.string()).optional().catch(undefined),
+    agent_ids: z.array(z.string()).default([]).catch([]),
+    last_requested_at: z.string().default(""),
+  }).loose()).default([]).catch([]),
+}).loose();
+
+export const PersonalAppImpactSchema = z.object({
+  agents: z.array(z.object({
+    id: z.string(),
+    name: z.string().default(""),
+    workspace_id: z.string().default(""),
+    workspace_name: z.string().default(""),
+    running: z.boolean().default(false).catch(false),
+  }).loose()).default([]),
 }).loose();
 
 const AppCatalogEntrySchema = z.object({
@@ -4870,6 +5148,8 @@ export const AppRequestSchema = z.object({
   reason: appNullableString,
   // Withhold the details unless the server said otherwise.
   redacted: z.boolean().default(true).catch(true),
+  adds_app: z.boolean().default(false).catch(false),
+  can_decide: z.boolean().optional().catch(undefined),
   expires_at: z.string(),
   decided_by: appNullableString,
   decided_at: appNullableString,
@@ -4918,6 +5198,7 @@ export const EMPTY_APPS_OVERVIEW: AppsOverview = {
   team: [],
   personal: [],
   agent_apps: [],
+  team_requests: [],
 };
 
 export const EMPTY_APP_CATALOG: AppCatalogResponse = { catalog_mode: "curated", apps: [] };

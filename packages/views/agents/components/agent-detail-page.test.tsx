@@ -11,9 +11,12 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
+import { configStore } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { RESOURCES } from "../../locales";
+import enBilling from "../../locales/en/billing.json";
 import {
   NavigationProvider,
   type NavigationAdapter,
@@ -39,7 +42,9 @@ vi.mock("./agent-properties-panel", () => ({
       <span>model:{agent.model}</span>
       <button
         type="button"
-        onClick={() => void onUpdate(agent.id, { model: "new-model" })}
+        // The page rethrows a failed update for the caller; the real panel
+        // handles it, so the stub swallows it.
+        onClick={() => void onUpdate(agent.id, { model: "new-model" }).catch(() => {})}
       >
         update model
       </button>
@@ -65,6 +70,13 @@ vi.mock("./agent-instructions-section", () => ({
 vi.mock("./agent-channels-section", () => ({
   AgentChannelLinks: () => <div>channel-links</div>,
   AgentChannelsSection: () => <div id="messaging-channels">channels-section</div>,
+}));
+vi.mock("./agent-apps-section", () => ({
+  AgentAppsSection: ({ onManage }: { onManage: () => void }) => (
+    <button type="button" onClick={onManage}>
+      manage apps
+    </button>
+  ),
 }));
 vi.mock("./agent-skills-section", () => ({
   AgentSkillsSection: ({ onManage }: { onManage: () => void }) => (
@@ -226,9 +238,11 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("@multica/core/api", () => {
   class ApiError extends Error {
     status: number;
-    constructor(message: string, status: number) {
+    body: unknown;
+    constructor(message: string, status: number, _statusText?: string, body?: unknown) {
       super(message);
       this.status = status;
+      this.body = body;
     }
   }
   return {
@@ -321,6 +335,7 @@ beforeEach(() => {
   mockArchiveAgent.mockResolvedValue(undefined);
   mockCancelAgentTasks.mockResolvedValue({ cancelled: 2 });
   mockCopyText.mockResolvedValue(true);
+  configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: false });
 });
 
 describe("AgentDetailPage direct-detail fallback", () => {
@@ -481,6 +496,23 @@ describe("AgentDetailPage direct-detail fallback", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("rolls back and explains a feature_locked refusal, refetching the plan", async () => {
+    mockUpdateAgent.mockRejectedValue(
+      new ApiError("locked", 403, "Forbidden", { code: "feature_locked", feature: "agent_invocation_members" }),
+    );
+    const { queryClient } = renderPage();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await screen.findByRole("button", { name: "Assign work" });
+
+    fireEvent.click(screen.getByRole("button", { name: "update model" }));
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(enBilling.paid_feature.locked_error),
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["workspace-features", "ws-1"] });
+    expect(await screen.findByText("model:")).toBeInTheDocument();
+  });
+
   it("optimistically updates a detail-only cache entry", async () => {
     agentsRef.current = [];
     mockGetAgent.mockResolvedValue(baseAgent);
@@ -538,6 +570,31 @@ describe("AgentDetailPage layout", () => {
       ).not.toBeInTheDocument(),
     );
     expect(screen.getByText("instructions-section")).toBeInTheDocument();
+  });
+
+  it("shows Apps between Instructions and Skills only while Connected Apps is on", async () => {
+    const { unmount } = renderPage();
+    await screen.findByRole("button", { name: "manage skills" });
+    expect(screen.queryByRole("button", { name: "manage apps" })).not.toBeInTheDocument();
+    unmount();
+
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    renderPage();
+    const apps = await screen.findByRole("button", { name: "manage apps" });
+    const instructions = screen.getByText("instructions-section");
+    const skills = screen.getByRole("button", { name: "manage skills" });
+    expect(instructions.compareDocumentPosition(apps) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(apps.compareDocumentPosition(skills) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("hides Apps on a Qoder Cloud Agents runtime", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    runtimesRef.current = [{ id: "runtime-1", provider: "qoder_cloud" }];
+    renderPage();
+    await screen.findByRole("button", { name: "Assign work" });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "manage apps" })).not.toBeInTheDocument(),
+    );
   });
 
   it("assigns work through the quick-create modal", async () => {
@@ -606,6 +663,16 @@ describe("AgentDetailPage deep links", () => {
     fireEvent.click(screen.getByRole("button", { name: "close advanced" }));
     expect(screen.queryByTestId("advanced-settings")).not.toBeInTheDocument();
     expect(replace).toHaveBeenLastCalledWith("/acme/agents/agent-1");
+  });
+
+  it("opens the Apps settings from the Apps section", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const { replace } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "manage apps" }));
+    expect(screen.getByTestId("advanced-settings")).toHaveTextContent(
+      "advanced:composio_mcp",
+    );
+    expect(replace).toHaveBeenLastCalledWith("/acme/agents/agent-1?view=composio_mcp");
   });
 
   it("opens Access settings from the properties panel", async () => {
@@ -732,7 +799,7 @@ describe("AgentDetailPage more actions", () => {
       within(menu).getByRole("menuitem", { name: "Copy link" }),
     ).toBeInTheDocument();
     expect(
-      within(menu).queryByRole("menuitem", { name: "Archive Agent" }),
+      within(menu).queryByRole("menuitem", { name: "Archive agent" }),
     ).not.toBeInTheDocument();
   });
 
@@ -742,7 +809,7 @@ describe("AgentDetailPage more actions", () => {
 
     await screen.findByRole("button", { name: "Assign work" });
     fireEvent.click(
-      within(openMoreActions()).getByRole("menuitem", { name: "Archive Agent" }),
+      within(openMoreActions()).getByRole("menuitem", { name: "Archive agent" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
 

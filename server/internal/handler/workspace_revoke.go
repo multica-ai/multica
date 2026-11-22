@@ -299,10 +299,15 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 
 	// No FK cascade (repo rule): a departing member leaves every private
 	// project in the workspace and stops watching every project. A new guest
-	// keeps exactly its guest projects.
+	// keeps its guest projects and the private projects hidden from the
+	// operator (guestProjectsToKeep).
 	if demote {
+		keep, err := guestProjectsToKeep(ctx, qtx, workspaceID, archivedBy, guestProjects)
+		if err != nil {
+			return empty, err
+		}
 		if _, err := qtx.RemoveUserFromProjectsExcept(ctx, db.RemoveUserFromProjectsExceptParams{
-			WorkspaceID: workspaceID, UserID: userID, KeepProjectIds: guestProjects,
+			WorkspaceID: workspaceID, UserID: userID, KeepProjectIds: keep,
 		}); err != nil {
 			return empty, err
 		}

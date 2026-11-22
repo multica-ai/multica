@@ -18,14 +18,14 @@
     "headline_line2": "在",
     "headline_emphasis": "同一個工作區。",
     "lede": "像給同事派活一樣把任務交給它們——它們會接手、更新狀態，做完還會留下評論。",
-    "lede_web": "桌面端自帶執行時，無需安裝。在 web 端繼續可以連線你自己的 CLI。",
+    "lede_web": "桌面版內建本機執行時，無需設定 CLI。在網頁版繼續即可連線你自己的 CLI。",
     "download_desktop": "下載桌面端",
     "continue_on_web": "在 web 端繼續",
     "start_exploring": "開始探索",
     "skip_existing": "我已經用過了",
     "illustration": {
       "card1_actor_name": "你",
-      "card1_actor_initial": "N",
+      "card1_actor_initial": "你",
       "card1_body_prefix": " 能不能起草一篇簡短的釋出文？參考 ",
       "card1_body_suffix": " 的訪談結論。",
       "card1_mention_content": "@內容 AI 代理",
@@ -222,7 +222,7 @@
   },
   "errors": {
     "skip_failed": "完成上手引導失敗",
-    "guide_failed": "執行時引導任務沒有建立成功，請重試。",
+    "guide_failed": "無法建立設定指南，請重試。",
     "mika_setup_failed": "無法啟動 Mika 工作區"
   },
   "mika_intro": {

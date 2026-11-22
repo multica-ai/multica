@@ -53,7 +53,7 @@ func issueMutationError(cmd *cobra.Command, action string, err error) error {
 			return errSilent
 		}
 	}
-	return fmt.Errorf("%s: %w", action, err)
+	return issueDescriptionWriteError(action, err)
 }
 
 func registerIssueExpectedRevisionFlag(cmd *cobra.Command) {

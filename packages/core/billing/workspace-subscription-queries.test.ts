@@ -23,6 +23,7 @@ const planPrices = (monthAmount: number, yearAmount: number) =>
 const validPrices = {
   pro: planPrices(1_500, 14_400),
   business: planPrices(3_000, 28_800),
+  autopilotAddon: null,
 };
 
 describe("workspace subscription price query", () => {

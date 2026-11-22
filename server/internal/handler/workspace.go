@@ -141,6 +141,37 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	}
 }
 
+// guestWorkspaceSettings are the settings a guest's issue page reads to decide
+// what to show; everything else in settings configures the workspace.
+var guestWorkspaceSettings = []string{
+	"github_enabled",
+	"github_pr_sidebar_enabled",
+	"github_auto_link_prs_enabled",
+}
+
+// workspaceResponseFor is workspaceToResponse narrowed to the viewer's role.
+// A guest (MUL-9420) gets what identifies and displays the workspace, not the
+// agent instructions (context), repositories, or settings that configure it.
+// The fields stay present, empty, so every client parses the same shape.
+func (h *Handler) workspaceResponseFor(w db.Workspace, role string) WorkspaceResponse {
+	resp := h.workspaceToResponse(w)
+	if !projectaccess.IsGuestRole(role) {
+		return resp
+	}
+	settings := map[string]any{}
+	if all, ok := resp.Settings.(map[string]any); ok {
+		for _, key := range guestWorkspaceSettings {
+			if v, ok := all[key]; ok {
+				settings[key] = v
+			}
+		}
+	}
+	resp.Context = nil
+	resp.Settings = settings
+	resp.Repos = []any{}
+	return resp
+}
+
 type MemberResponse struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
@@ -184,13 +215,13 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		if boundWorkspaceID != "" && uuidToString(ws.ID) != boundWorkspaceID {
 			continue
 		}
-		item := h.workspaceToResponse(db.Workspace{
+		item := h.workspaceResponseFor(db.Workspace{
 			ID: ws.ID, Name: ws.Name, Slug: ws.Slug, Description: ws.Description,
 			Settings: ws.Settings, CreatedAt: ws.CreatedAt, UpdatedAt: ws.UpdatedAt,
 			Context: ws.Context, Repos: ws.Repos, IssuePrefix: ws.IssuePrefix,
 			IssueCounter: ws.IssueCounter, AvatarUrl: ws.AvatarUrl,
 			AttributionFailClosed: ws.AttributionFailClosed,
-		})
+		}, ws.Role)
 		if ws.PinnedAt.Valid {
 			pinnedAt := timestampToString(ws.PinnedAt)
 			item.PinnedAt = &pinnedAt
@@ -243,12 +274,17 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	member, ok := h.workspaceMember(w, r, id)
+	if !ok {
+		return
+	}
+
 	ws, err := h.Queries.GetWorkspace(r.Context(), idUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, h.workspaceResponseFor(ws, member.Role))
 }
 
 type CreateWorkspaceRequest struct {
@@ -619,6 +655,16 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 	// each other. Nobody's projects are listed to a guest.
 	requester, _ := ctxMember(r.Context())
 	requesterIsGuest := projectaccess.IsGuestRole(requester.Role)
+	includeGuests := clientRendersGuestRole(r)
+	// Everyone else sees a guest's grants only on projects they can see
+	// themselves: a private project's id is not shown outside its members,
+	// owners and admins included (MUL-9284).
+	var requesterHidden projectaccess.Hidden
+	if !requesterIsGuest {
+		if requesterHidden, ok = h.requestHiddenProjects(w, r, uuidToString(wsUUID)); !ok {
+			return
+		}
+	}
 	visibleGuests := map[[16]byte]bool{requester.UserID.Bytes: true}
 	if requesterIsGuest {
 		mine := map[string]bool{}
@@ -637,6 +683,9 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 	resp := make([]MemberWithUserResponse, 0, len(members))
 	for _, m := range members {
 		guest := projectaccess.IsGuestRole(m.Role)
+		if guest && !includeGuests {
+			continue
+		}
 		if requesterIsGuest && guest && !visibleGuests[m.UserID.Bytes] {
 			continue
 		}
@@ -651,7 +700,7 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 			AvatarURL:   h.resolveAvatarURLPtr(textToPtr(m.UserAvatarUrl)),
 		}
 		if guest && !requesterIsGuest {
-			item.ProjectIDs = guestProjects[m.UserID.Bytes]
+			item.ProjectIDs = visibleProjectIDs(requesterHidden, guestProjects[m.UserID.Bytes])
 		}
 		resp = append(resp, item)
 	}
@@ -677,6 +726,13 @@ func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberW
 		Email:       user.Email,
 		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(user.AvatarUrl)),
 	}
+}
+
+// clientRendersGuestRole reports whether the caller declared it can render
+// guest rows. Member and invitation lists hide guests from older clients,
+// whose role tables have no guest entry and crash on one.
+func clientRendersGuestRole(r *http.Request) bool {
+	return requestHasClientCapability(r, protocol.AppCapabilityWorkspaceGuestsV1)
 }
 
 func normalizeMemberRole(role string) (string, bool) {
@@ -789,13 +845,15 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := h.memberWithUserResponse(updatedMember, user)
-	if toGuest {
-		resp.ProjectIDs = uuidsToStrings(guestProjects)
-	}
 	userID := requestUserID(r)
+	// The event reaches every member, so it carries no projects: a guest's
+	// projects are shown per viewer (ListMembersWithUser).
 	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
 		"member": resp,
 	})
+	if toGuest {
+		resp.ProjectIDs = uuidsToStrings(guestProjects)
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1451,6 +1509,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete entitlement feature attempts",
 			run:  func() error { return qtx.DeleteWorkspaceEntitlementFeatureAttempts(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete dashboard range views",
+			run:  func() error { return qtx.DeleteWorkspaceDashboardRangeViews(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete chat messages",

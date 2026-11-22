@@ -105,6 +105,28 @@ it("saves after the debounce while the editor stays mounted", async () => {
   });
 });
 
+it("saves after the last edit even when the editor rerenders", async () => {
+  const view = mount();
+  act(() => view.result.current.change({ content: "Edited" }));
+
+  for (let elapsed = 500; elapsed < 1500; elapsed += 500) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    view.rerender();
+    expect(api.updateDoc).not.toHaveBeenCalled();
+  }
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(api.updateDoc).toHaveBeenCalledExactlyOnceWith(doc.id, {
+    title: doc.title,
+    content: "Edited",
+    baseRevision: 1,
+  });
+});
+
 it("saves the last edit when navigating away during the debounce", async () => {
   const view = mount();
   act(() => view.result.current.change({ content: "Edited" }));
@@ -409,4 +431,43 @@ it("keeps a space typed at the end of the title after the server saves it trimme
     baseRevision: 3,
   });
   expect(view.result.current.draft.title).toBe("Release notes");
+});
+
+it("sends nothing while the doc is edited live, not even on exit", async () => {
+  const client = new QueryClient();
+  setDocDraft("ws-review:doc-review", {
+    title: doc.title,
+    content: "Left over from an earlier solo session",
+    baseTitle: doc.title,
+    baseContent: doc.content,
+    baseRevision: 1,
+  });
+  const view = renderHook(() => useDocDraft(doc, false), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  view.unmount();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.updateDoc).not.toHaveBeenCalled();
+});
+
+it("sets unsaved edits aside as a backup instead of saving them", async () => {
+  const view = mount();
+  act(() => view.result.current.change({ content: "Stale edit" }));
+  act(() => view.result.current.setAside());
+  expect(view.result.current.dirty).toBe(false);
+  expect(useDocDraftStore.getState().draft.entries["ws-review:doc-review"]).toMatchObject({
+    content: doc.content,
+    backup: { title: doc.title, content: "Stale edit" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.updateDoc).not.toHaveBeenCalled();
 });

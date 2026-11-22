@@ -1,0 +1,114 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index c0c4c65b0e1f3a6b4e44e021ccbd81bce0f9ab7d..a3aad29288f17d848ff708201279edfe77c68f1c 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -576,7 +576,7 @@ const findAbsolutePositionAfterStructuralChange = (oldDoc, newDoc, absPos) => {
+ //#endregion
+ //#region src/lib/utils/positions/isMisresolvedAfterStructuralChange.ts
+ /** Detects a position that moved into a different block. */
+-const isMisresolvedAfterStructuralChange = (oldDoc, newDoc, oldAbs, resolvedAbs) => {
++const isMisresolvedAfterStructuralChange = (oldDoc, newDoc, oldAbs, resolvedAbs, inLiveBlock = false) => {
+ 	if (resolvedAbs === null) return false;
+ 	const $old = oldDoc.resolve(oldAbs);
+ 	const $new = newDoc.resolve(resolvedAbs);
+@@ -586,6 +586,11 @@ const isMisresolvedAfterStructuralChange = (oldDoc, newDoc, oldAbs, resolvedAbs)
+ 	if ($old.parentOffset !== 0 && $new.parentOffset === 0) return true;
+ 	const bothAtStart = $old.parentOffset === 0 && $new.parentOffset === 0;
+ 	const suspicious = $old.parentOffset !== $new.parentOffset || $old.parent.type !== $new.parent.type || !attrsEqual($old.parent.attrs, $new.parent.attrs);
++	// multica patch: a block with the same text, landed on through a block Yjs still
++	// has, is where the selection is. Matching "the Nth block with this text" instead
++	// moves a caret in a fresh empty paragraph into whichever empty paragraph a
++	// collaborator opened above it.
++	if (bothAtStart && !suspicious && inLiveBlock) return false;
+ 	if (bothAtStart || suspicious) {
+ 		const expected = findAbsolutePositionAfterStructuralChange(oldDoc, newDoc, oldAbs);
+ 		return expected !== null && expected !== resolvedAbs;
+@@ -594,9 +599,18 @@ const isMisresolvedAfterStructuralChange = (oldDoc, newDoc, oldAbs, resolvedAbs)
+ };
+ //#endregion
+ //#region src/lib/utils/positions/restoreRelativeSelection.ts
+-const recoverSelectionEndpoint = (newDoc, oldDoc, oldAbs, resolved) => {
++const isInLiveBlock = (y, documentType, relPos) => {
++	const decoded = yjs.createAbsolutePositionFromRelativePosition(relPos, y);
++	if (decoded === null || decoded.type === documentType) return false;
++	for (let type = decoded.type; type !== documentType;) {
++		if (type === null || type._item === null || type._item.deleted) return false;
++		type = getYParent(type._item);
++	}
++	return true;
++};
++const recoverSelectionEndpoint = (newDoc, oldDoc, oldAbs, resolved, inLiveBlock) => {
+ 	if (oldAbs == null || oldAbs < 0 || oldAbs > oldDoc.content.size) return resolved;
+-	if (!(resolved === null || oldAbs > 1 && resolved <= 1 || isMisresolvedAfterStructuralChange(oldDoc, newDoc, oldAbs, resolved))) return resolved;
++	if (!(resolved === null || oldAbs > 1 && resolved <= 1 || isMisresolvedAfterStructuralChange(oldDoc, newDoc, oldAbs, resolved, inLiveBlock))) return resolved;
+ 	const recovered = findAbsolutePositionAfterStructuralChange(oldDoc, newDoc, oldAbs);
+ 	return recovered !== null ? recovered : resolved;
+ };
+@@ -615,8 +629,8 @@ const restoreRelativeSelection = (tr, relSel, binding, oldDoc) => {
+ 			let anchor = relativePositionToAbsolutePosition(binding.doc, binding.type, relSel.anchor, binding.mapping);
+ 			let head = relativePositionToAbsolutePosition(binding.doc, binding.type, relSel.head, binding.mapping);
+ 			if (oldDoc != null) {
+-				anchor = recoverSelectionEndpoint(tr.doc, oldDoc, relSel.absAnchor, anchor);
+-				head = recoverSelectionEndpoint(tr.doc, oldDoc, relSel.absHead, head);
++				anchor = recoverSelectionEndpoint(tr.doc, oldDoc, relSel.absAnchor, anchor, isInLiveBlock(binding.doc, binding.type, relSel.anchor));
++				head = recoverSelectionEndpoint(tr.doc, oldDoc, relSel.absHead, head, isInLiveBlock(binding.doc, binding.type, relSel.head));
+ 			}
+ 			if (anchor === null) anchor = head;
+ 			if (head === null) head = anchor;
+diff --git a/dist/index.js b/dist/index.js
+index 186b363b7d87eb2e935882ca3b72919378df1041..b36ca1c31b3803b09e30dade374943d99b380432 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -543,7 +543,7 @@ const findAbsolutePositionAfterStructuralChange = (oldDoc, newDoc, absPos) => {
+ //#endregion
+ //#region src/lib/utils/positions/isMisresolvedAfterStructuralChange.ts
+ /** Detects a position that moved into a different block. */
+-const isMisresolvedAfterStructuralChange = (oldDoc, newDoc, oldAbs, resolvedAbs) => {
++const isMisresolvedAfterStructuralChange = (oldDoc, newDoc, oldAbs, resolvedAbs, inLiveBlock = false) => {
+ 	if (resolvedAbs === null) return false;
+ 	const $old = oldDoc.resolve(oldAbs);
+ 	const $new = newDoc.resolve(resolvedAbs);
+@@ -553,6 +553,11 @@ const isMisresolvedAfterStructuralChange = (oldDoc, newDoc, oldAbs, resolvedAbs)
+ 	if ($old.parentOffset !== 0 && $new.parentOffset === 0) return true;
+ 	const bothAtStart = $old.parentOffset === 0 && $new.parentOffset === 0;
+ 	const suspicious = $old.parentOffset !== $new.parentOffset || $old.parent.type !== $new.parent.type || !attrsEqual($old.parent.attrs, $new.parent.attrs);
++	// multica patch: a block with the same text, landed on through a block Yjs still
++	// has, is where the selection is. Matching "the Nth block with this text" instead
++	// moves a caret in a fresh empty paragraph into whichever empty paragraph a
++	// collaborator opened above it.
++	if (bothAtStart && !suspicious && inLiveBlock) return false;
+ 	if (bothAtStart || suspicious) {
+ 		const expected = findAbsolutePositionAfterStructuralChange(oldDoc, newDoc, oldAbs);
+ 		return expected !== null && expected !== resolvedAbs;
+@@ -561,9 +566,18 @@ const isMisresolvedAfterStructuralChange = (oldDoc, newDoc, oldAbs, resolvedAbs)
+ };
+ //#endregion
+ //#region src/lib/utils/positions/restoreRelativeSelection.ts
+-const recoverSelectionEndpoint = (newDoc, oldDoc, oldAbs, resolved) => {
++const isInLiveBlock = (y, documentType, relPos) => {
++	const decoded = Y.createAbsolutePositionFromRelativePosition(relPos, y);
++	if (decoded === null || decoded.type === documentType) return false;
++	for (let type = decoded.type; type !== documentType;) {
++		if (type === null || type._item === null || type._item.deleted) return false;
++		type = getYParent(type._item);
++	}
++	return true;
++};
++const recoverSelectionEndpoint = (newDoc, oldDoc, oldAbs, resolved, inLiveBlock) => {
+ 	if (oldAbs == null || oldAbs < 0 || oldAbs > oldDoc.content.size) return resolved;
+-	if (!(resolved === null || oldAbs > 1 && resolved <= 1 || isMisresolvedAfterStructuralChange(oldDoc, newDoc, oldAbs, resolved))) return resolved;
++	if (!(resolved === null || oldAbs > 1 && resolved <= 1 || isMisresolvedAfterStructuralChange(oldDoc, newDoc, oldAbs, resolved, inLiveBlock))) return resolved;
+ 	const recovered = findAbsolutePositionAfterStructuralChange(oldDoc, newDoc, oldAbs);
+ 	return recovered !== null ? recovered : resolved;
+ };
+@@ -582,8 +596,8 @@ const restoreRelativeSelection = (tr, relSel, binding, oldDoc) => {
+ 			let anchor = relativePositionToAbsolutePosition(binding.doc, binding.type, relSel.anchor, binding.mapping);
+ 			let head = relativePositionToAbsolutePosition(binding.doc, binding.type, relSel.head, binding.mapping);
+ 			if (oldDoc != null) {
+-				anchor = recoverSelectionEndpoint(tr.doc, oldDoc, relSel.absAnchor, anchor);
+-				head = recoverSelectionEndpoint(tr.doc, oldDoc, relSel.absHead, head);
++				anchor = recoverSelectionEndpoint(tr.doc, oldDoc, relSel.absAnchor, anchor, isInLiveBlock(binding.doc, binding.type, relSel.anchor));
++				head = recoverSelectionEndpoint(tr.doc, oldDoc, relSel.absHead, head, isInLiveBlock(binding.doc, binding.type, relSel.head));
+ 			}
+ 			if (anchor === null) anchor = head;
+ 			if (head === null) head = anchor;

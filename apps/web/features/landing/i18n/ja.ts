@@ -13,11 +13,11 @@ export function createJaDict(): LandingDict {
       label: "FAQ",
       headline: "よくある質問。",
       items: [
-      { question: "WeChat からエージェントとチャットできますか？", answer: "はい。ワークスペース管理者がエージェントの「連携」タブで自分の WeChat アカウントを使って QR コードを読み取ると接続できます。そのアカウントからの個別メッセージは管理者の権限で実行され、返信と対応する添付ファイルが同じ会話に届きます。グループチャットは非対応です。セルフホストでは WeChat 連携を有効にする必要があります。" },
+      { question: "WeChat からエージェントとチャットできますか？", answer: "はい。自分が所有するエージェントを開き、「メッセージング」の「メッセージチャネルを追加」から WeChat を選び、ご自身の WeChat で QR コードを読み取って接続できます。読み取ったアカウントからの個別メッセージはあなたのワークスペース権限で実行され、返信と対応する添付ファイルが同じ会話に届きます。グループチャットは非対応です。セルフホストでは WeChat 連携を有効にする必要があります。" },
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw, ZCode の29種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、Qoder PAT と Qoder Cloud Agents の既存エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agents を設定できます。",
+            "Multica は、Amp、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Factory Droid、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw、ZCode の 31 種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、Qoder PAT と Qoder Cloud Agents の既存エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agents を設定できます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",

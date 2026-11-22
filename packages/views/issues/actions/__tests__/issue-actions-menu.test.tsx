@@ -6,6 +6,7 @@ import type { AgentTask, Issue, QuickAction } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
+import { useAssigneePicksStore } from "@multica/core/issues/stores/assignee-picks-store";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
@@ -13,9 +14,9 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mocks — same pattern as the issue-detail test suite.
 // ---------------------------------------------------------------------------
 
-const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true, offered: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: deletionPolicy.offered }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -56,10 +57,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
   squadListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "squads"],
-    queryFn: () => Promise.resolve([]),
-  }),
-  assigneeFrequencyOptions: () => ({
-    queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
   }),
 }));
@@ -212,8 +209,11 @@ function wrap(ui: React.ReactNode) {
 }
 
 beforeEach(() => {
+  // Picks persist in a real store; keep one test's picks out of the next's Recent.
+  useAssigneePicksStore.setState({ byScope: {} });
   platform.desktop = false;
   deletionPolicy.allowed = true;
+  deletionPolicy.offered = true;
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
   openInDesktopMock.mockReset();
@@ -392,6 +392,15 @@ describe("IssueActionsDropdown", () => {
     expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
+  it("leaves Delete issue out for a viewer who can delete nothing (a guest)", async () => {
+    deletionPolicy.allowed = false;
+    deletionPolicy.offered = false;
+    render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
+    fireEvent.click(screen.getByTestId("trigger"));
+    expect(await screen.findByText("Copy link")).toBeInTheDocument();
+    expect(screen.queryByText("Delete issue")).not.toBeInTheDocument();
+  });
+
   it("clicking Delete issue opens the delete-confirm modal", async () => {
     render(
       wrap(
@@ -510,7 +519,7 @@ describe("IssueActionsDropdown", () => {
     await waitFor(() => {
       expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1", false, { view: "timeline" });
     });
-    fireEvent.click(await screen.findByText("Copy local workdir path"));
+    fireEvent.click(await screen.findByText("Copy local working directory path"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
@@ -830,7 +839,7 @@ describe("Sidebar variant (MUL-8425)", () => {
       "Mark as unread",
       "Copy link",
       "Copy link with title",
-      "Copy identifier",
+      "Copy issue ID",
     ]);
     expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");
     // No workdir entry, so the menu has no reason to fetch the task list.
@@ -861,7 +870,7 @@ describe("Sidebar variant (MUL-8425)", () => {
 
   it("copies the identifier", async () => {
     openSidebarMenu();
-    fireEvent.click(await screen.findByText("Copy identifier"));
+    fireEvent.click(await screen.findByText("Copy issue ID"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("TES-1");

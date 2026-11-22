@@ -88,7 +88,7 @@
     "toast_failed": "操作失败",
     "create_will_start": "创建后 {{name}} 会立即开始工作。",
     "create_will_start_squad": "创建后 {{name}} 的队长会评估并开始安排任务。",
-    "create_parked": "已指派——在 backlog 中不会开始工作。"
+    "create_parked": "已指派——在\"待规划\"状态下不会开始工作。"
   },
   "create_squad": {
     "title": "创建小队",
@@ -104,7 +104,7 @@
     "members_optional": "（可选）",
     "members_hint": "队长可向这些成员委派子任务。",
     "members_placeholder": "添加智能体或工作区成员",
-    "members_selected_count_other": "已选 {{count}} 人",
+    "members_selected_count_other": "已选 {{count}} 项",
     "members_more_count": "+{{count}}",
     "members_remove_aria": "移除 {{name}}",
     "picker_search_placeholder": "搜索智能体或成员...",
@@ -162,13 +162,13 @@
     "local_clear": "清除",
     "local_pick_failed": "无法打开文件夹选择器。",
     "local_invalid_dir": "这个文件夹不可用，请重新选择。",
-    "local_hint": "其他电脑上的智能体访问不到这个文件夹，会启动失败。需要协作请用仓库。",
+    "local_hint": "其他电脑上的智能体无法访问此文件夹，因此不会启动。需要跨设备或团队协作时，请使用代码仓库。",
     "repos_ref_default": "默认分支",
     "repos_remove_aria": "移除 {{repo}}"
   },
   "create_issue": {
     "sr_manual": "新建任务",
-    "sr_agent": "快速创建任务",
+    "sr_agent": "通过智能体创建任务",
     "manual_breadcrumb": "手动创建",
     "agent_breadcrumb": "通过智能体创建",
     "title_placeholder": "任务标题",
@@ -184,16 +184,21 @@
     "toast_duplicate_view": "查看已有任务",
     "autopilot_quota_limit": {
       "title": "该工作区的自动化执行次数已达到上限",
-      "checking_description": "正在查询该工作区可用的账单操作…",
-      "upgrade_description": "升级到 Pro 后可恢复自动化执行。",
+      "checking_description": "正在查询该工作区可用的账单操作...",
+      "upgrade_description": "升级到 Pro 可提高每月上限并恢复自动化执行，也可以等待额度重置。",
       "portal_description": "打开账单门户管理该工作区的订阅，以恢复自动化执行。",
-      "contact_description": "请联系工作区所有者或管理员升级到 Pro。",
+      "contact_description": "请联系工作区所有者或管理员升级套餐，或等待额度重置。",
       "billing_description": "请前往账单设置查看该工作区可用的升级选项。",
       "billing_unavailable_description": "暂时无法加载账单操作，请前往账单设置重试。",
       "billing_disabled_description": "请等待当前额度重置，或联系工作区管理员。",
       "upgrade_action": "升级到 Pro",
       "portal_action": "打开账单门户",
-      "billing_action": "查看账单"
+      "billing_action": "查看账单",
+      "addon_description": "加购执行次数可在本月恢复自动化执行，也可以等待额度重置。",
+      "contact_addon_description": "请联系工作区所有者或管理员加购执行次数，或等待额度重置。",
+      "contact_addon_or_upgrade_description": "请联系工作区所有者或管理员加购执行次数或升级套餐，或等待额度重置。",
+      "addon_action": "加购执行次数",
+      "upgrade_business_action": "升级到 Business"
     },
     "toast_link_subissues_all_failed": "关联子任务失败",
     "toast_link_subissues_partial": "{{total}} 个子任务中有 {{failed}} 个关联失败",
@@ -201,15 +206,15 @@
     "toast_set_properties_failed": "有 {{count}} 个自定义属性设置失败",
     "unavailable_property_removed": "一个已不可用的自定义属性已从草稿移除，请确认后重新提交。",
     "switch_to_agent": "切换到智能体",
-    "switch_to_agent_tooltip": "切换到通过智能体创建——一句话描述，让它替你建",
+    "switch_to_agent_tooltip": "切换到通过智能体创建，用一句话描述即可自动创建任务",
     "switch_to_manual": "切换到手动",
-    "switch_to_manual_tooltip": "切换到手动创建——自己填字段",
+    "switch_to_manual_tooltip": "切换到手动创建，自行填写任务字段",
     "create_another": "继续创建",
     "remove_parent_aria": "移除父级",
     "remove_subissue_aria": "移除子任务 {{identifier}}",
     "subissue_of": "{{identifier}} 的子任务",
     "subissue_chip": "子任务：{{identifier}}",
-    "parent_with_id": "父：{{identifier}}",
+    "parent_with_id": "父任务：{{identifier}}",
     "set_due_date": "设置截止日期...",
     "set_start_date": "设置开始日期...",
     "set_parent": "设置父任务...",
@@ -240,7 +245,7 @@
       "squads_group": "小队",
       "version_missing": "该智能体的守护进程没有报告 CLI 版本。通过智能体创建需要 multica CLI ≥ {{min}}。请升级守护进程并重连，或切换到手动创建。",
       "version_below": "该智能体的守护进程 CLI 是 {{current}}——通过智能体创建需要 ≥ {{min}}。请升级守护进程，或切换到手动创建。",
-      "prompt_placeholder": "告诉智能体要做什么，例如：\"让 Bohan 修一下 Web 项目里收件箱加载慢的问题\"",
+      "prompt_placeholder": "告诉智能体要做什么，例如：\"修复 Web 项目中收件箱加载慢的问题\"",
       "source_context_prompt_placeholder": "告诉智能体要基于这段上下文完成什么，例如：\"继续排查并修复这里提到的问题\"",
       "more_fields_aria": "更多字段",
       "set_project": "设置项目...",
@@ -273,8 +278,8 @@
     "trigger": "复制父任务字段",
     "title": "复制父任务字段",
     "description": "从 {{identifier}} 复制所选字段，覆盖当前值；后续不联动。",
-    "apply": "复制所选 {{count}} 项",
     "no_labels": "无标签",
-    "manual_only": "标签、开始日期和自定义属性仅用于手动创建。"
+    "manual_only": "标签、开始日期和自定义属性仅用于手动创建。",
+    "apply_other": "复制所选 {{count}} 项"
   }
 }

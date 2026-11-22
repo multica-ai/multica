@@ -192,7 +192,7 @@ describe("Wakeups sidebar", () => {
     wakeup.event_types = ["task.completed"];
     renderWithI18n(<WakeupsSection issueId="issue" />);
     expect(screen.queryByText(/Wakeup history/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel this execution" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel this run" }));
     expect(mutate).toHaveBeenCalled();
   });
   it("keeps an already claimed single run visible without offering withdrawal", () => {
@@ -330,7 +330,7 @@ it("shows a disabled rule independently from its last successful execution", () 
   fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   const row = screen.getByRole("button", { name: /Wake Emacs/ });
   expect(row).toHaveTextContent("Turned off");
-  expect(row).toHaveTextContent("Last execution: Run succeeded");
+  expect(row).toHaveTextContent("Last run: Run succeeded");
 });
 
 it("keeps a failed one-shot triggered without calling the rule completed", () => {
@@ -343,7 +343,7 @@ it("keeps a failed one-shot triggered without calling the rule completed", () =>
   fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   const row = screen.getByRole("button", { name: /Wake Emacs/ });
   expect(row).toHaveTextContent("Triggered");
-  expect(row).toHaveTextContent("This execution: Run failed");
+  expect(row).toHaveTextContent("Current run: Run failed");
   expect(row).not.toHaveTextContent("Completed");
 });
 

@@ -592,3 +592,29 @@ func TestEnumerateDiskUsageRootsUsesAndDeduplicatesProfileConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestPrintDiskUsageTaskTableMarksInPlaceRun(t *testing.T) {
+	var output bytes.Buffer
+	printDiskUsageTaskTable(&output, daemon.DiskUsageReport{
+		TotalTaskCount: 2,
+		Tasks: []daemon.TaskDiskUsage{
+			{WorkspaceShort: "ws", TaskShort: "local", LocalDirectory: true},
+			{WorkspaceShort: "ws", TaskShort: "unknown"},
+		},
+	})
+	var localRow, unknownRow string
+	for _, line := range strings.Split(output.String(), "\n") {
+		if strings.Contains(line, "ws/local") {
+			localRow = line
+		}
+		if strings.Contains(line, "ws/unknown") {
+			unknownRow = line
+		}
+	}
+	if !strings.Contains(localRow, "in place") {
+		t.Fatalf("local run is missing its mode: %q", localRow)
+	}
+	if unknownRow == "" || strings.Contains(unknownRow, "in place") {
+		t.Fatalf("expected an unmarked row for the unknown run, got %q", unknownRow)
+	}
+}

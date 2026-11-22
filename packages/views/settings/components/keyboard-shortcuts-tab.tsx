@@ -273,7 +273,7 @@ function ShortcutRow({
   const { t } = useT("settings");
   const label = t(($) => $.shortcuts.actions[action.id].label);
   // Keep descriptions in the search index, but only show non-obvious behavior.
-  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "unsubscribeArchiveInboxItem", "snoozeInboxItem", "send"].includes(action.id)
+  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "unsubscribeArchiveInboxItem", "snoozeInboxItem", "undoInboxAction", "send"].includes(action.id)
     ? t(($) => $.shortcuts.actions[action.id].description)
     : undefined;
   const errorText = error?.kind === "reserved"
@@ -327,7 +327,7 @@ function ShortcutRow({
                 {t(($) => $.shortcuts.recording)}
               </span>
             ) : shortcut ? (
-              <ShortcutKeycaps shortcut={shortcut} decorative />
+              <ShortcutKeycaps shortcut={shortcut} layout="split" decorative />
             ) : (
               <span className="font-sans font-normal text-muted-foreground">
                 {t(($) => $.shortcuts.unassigned)}
@@ -372,7 +372,7 @@ function ShortcutRow({
 function FixedShortcutRow({ label, shortcut }: { label: string; shortcut: ShortcutChord }) {
   return (
     <SettingsRow label={label}>
-      <ShortcutKeycaps shortcut={shortcut} size="md" className="justify-end" />
+      <ShortcutKeycaps shortcut={shortcut} size="md" layout="split" className="justify-end" />
     </SettingsRow>
   );
 }

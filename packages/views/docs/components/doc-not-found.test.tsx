@@ -29,7 +29,7 @@ const { apiMock, ApiError } = vi.hoisted(() => {
     ApiError,
     apiMock: {
       getDoc: vi.fn(), updateDoc: vi.fn(), listDocTree: vi.fn(),
-      listDocVersions: vi.fn(), getDocVersion: vi.fn(),
+      listDocVersions: vi.fn(), getDocVersion: vi.fn(), listDocComments: vi.fn(),
       listMembers: vi.fn(), listAgents: vi.fn(),
     },
   };
@@ -55,7 +55,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Reviewer" }),
 }));
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ pathname: "/review/docs/runbook", push: vi.fn(), getShareableUrl: (path: string) => path }),
+  useNavigation: () => ({ pathname: "/review/docs/runbook", push: vi.fn(), getShareableUrl: (path: string) => path, searchParams: new URLSearchParams() }),
   AppLink: ({ children, href, className }: { children: React.ReactNode; href: string; className?: string }) => (
     <a href={href} className={className}>{children}</a>
   ),
@@ -66,6 +66,14 @@ vi.mock("../../editor", () => ({
   ),
   ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div>,
   useEditorUpload: () => ({ uploadWithToast: vi.fn() }),
+}));
+vi.mock("./use-doc-collab", () => ({ useDocCollab: () => ({ mode: "solo" }) }));
+vi.mock("@multica/core/realtime", () => ({ useWS: () => ({ collabUrl: "ws://collab.test/collab" }) }));
+vi.mock("./doc-live-session", () => ({
+  liveEditingOff: new Set(["ws://collab.test/collab"]),
+  peekDocLive: () => undefined,
+  findDocSession: () => undefined,
+  prefetchDocLive: () => Promise.resolve({ enabled: false }),
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../layout/breadcrumb-header", () => ({
@@ -95,6 +103,7 @@ beforeEach(() => {
   useDocDraftStore.getState().clearDraft();
   qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   apiMock.listDocTree.mockResolvedValue({ folders: [], docs: [] });
+  apiMock.listDocComments.mockResolvedValue([]);
   apiMock.listMembers.mockResolvedValue([]);
   apiMock.listAgents.mockResolvedValue([]);
 });
@@ -117,6 +126,15 @@ it("control: a load that failed for another reason still offers Retry", async ()
   mount(<DocPage docId="runbook" />);
   expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
   expect(screen.queryByText("Doc not found")).toBeNull();
+});
+
+it("while the doc loads, shows its title from the tree in the page frame instead of a Loading line", async () => {
+  apiMock.getDoc.mockReturnValue(new Promise(() => {}));
+  apiMock.listDocTree.mockResolvedValue({ folders: [], docs: [doc] });
+  mount(<DocPage docId="runbook" />);
+  expect(await screen.findByText("Release runbook")).toBeTruthy();
+  expect(screen.queryByText("Loading...")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
 });
 
 it("replaces the open editor when the doc is deleted elsewhere and keeps the unsaved text readable", async () => {

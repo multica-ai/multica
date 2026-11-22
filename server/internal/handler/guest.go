@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,9 +29,34 @@ import (
 // is better served as a member.
 const maxGuestProjects = 100
 
-// guestsEnabled writes a 403 when new guests are switched off.
+// WorkspaceGuestsConfigKey is the client config key that tells Web, Desktop
+// and mobile whether this deployment offers adding guests (guestsReleased).
+// It is derived, not a flag of its own.
+const WorkspaceGuestsConfigKey = "workspace_guests"
+
+// guestsReleased reports whether this deployment offers adding guests. The
+// deployment mode comes from configuration, not from whether the Cloud plan
+// client came up:
+//
+//   - No Cloud URL (self-host): always. There are no Cloud plans.
+//   - A Cloud URL: guests are part of the commercial launch. They are offered
+//     once billing_workspace_subscriptions is on, and the workspace's plan
+//     then decides through the guests paid feature (requireGuestAddition).
+//     When the plan client is unavailable (a malformed Cloud URL), nothing
+//     could apply the plan, so adding guests is refused rather than allowed.
+func (h *Handler) guestsReleased(ctx context.Context) bool {
+	if strings.TrimSpace(h.cfg.CloudURL) == "" {
+		return true
+	}
+	if h.Features == nil {
+		return false
+	}
+	return featureflags.BillingWorkspaceSubscriptionsEnabled(ctx, h.FeatureFlags)
+}
+
+// guestsEnabled writes a 403 when this deployment does not offer guests yet.
 func (h *Handler) guestsEnabled(w http.ResponseWriter, r *http.Request) bool {
-	if featureflags.WorkspaceGuestsEnabled(r.Context(), h.FeatureFlags) {
+	if h.guestsReleased(r.Context()) {
 		return true
 	}
 	writeFeatureDisabled(w, "workspace_guests_disabled", "guests are not enabled")
@@ -37,10 +64,10 @@ func (h *Handler) guestsEnabled(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // requireGuestAddition admits a write that adds a guest or widens one:
-// guests must be switched on for this deployment (the rollout flag) and
-// included in the workspace's plan (the guests paid feature). Removing a
-// guest, narrowing its projects and promoting it are never restricted, and
-// existing guests keep their access after a downgrade.
+// guests must be released on this deployment (guestsReleased) and included in
+// the workspace's plan (the guests paid feature). Removing a guest, narrowing
+// its projects and promoting it are never restricted, and existing guests
+// keep their access after a downgrade or while guests are not released.
 func (h *Handler) requireGuestAddition(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, operation string) (featureAdmission, bool) {
 	if !h.guestsEnabled(w, r) {
 		return featureAdmission{}, false
@@ -169,6 +196,8 @@ func writeMemberUpdateError(w http.ResponseWriter, err error) {
 		writeMemberRoleChanged(w)
 	case errors.Is(err, pgx.ErrNoRows):
 		writeError(w, http.StatusNotFound, "member not found")
+	case errors.Is(err, errGuestProjectNotVisible):
+		writeError(w, http.StatusBadRequest, "project not found")
 	default:
 		writeError(w, http.StatusInternalServerError, "failed to update member")
 	}
@@ -242,13 +271,33 @@ func (h *Handler) parseGuestProjectIDs(w http.ResponseWriter, r *http.Request, w
 	return ids, true
 }
 
-// setGuestProjects makes ids exactly the projects userID is a member of. When
-// that adds or takes away a project, the guest's local search copy is made to
-// rebuild: nothing in those projects changed, so sync alone would neither
-// drop what it lost nor deliver what it gained.
+// visibleProjectIDs is the part of a guest's projects a viewer with hidden
+// may be shown.
+func visibleProjectIDs(hidden projectaccess.Hidden, ids []string) []string {
+	if hidden.Empty() {
+		return ids
+	}
+	visible := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if parsed, err := util.ParseUUID(id); err == nil && hidden.CanSeeProject(parsed) {
+			visible = append(visible, id)
+		}
+	}
+	return visible
+}
+
+// setGuestProjects makes ids the projects userID is a member of among those
+// addedBy can see (guestProjectsToKeep). When that adds or takes away a
+// project, the guest's local search copy is made to rebuild: nothing in those
+// projects changed, so sync alone would neither drop what it lost nor deliver
+// what it gained.
 func setGuestProjects(r *http.Request, q *db.Queries, workspaceID, userID, addedBy pgtype.UUID, ids []pgtype.UUID) error {
+	keep, err := guestProjectsToKeep(r.Context(), q, workspaceID, addedBy, ids)
+	if err != nil {
+		return err
+	}
 	removed, err := q.RemoveUserFromProjectsExcept(r.Context(), db.RemoveUserFromProjectsExceptParams{
-		WorkspaceID: workspaceID, UserID: userID, KeepProjectIds: ids,
+		WorkspaceID: workspaceID, UserID: userID, KeepProjectIds: keep,
 	})
 	if err != nil {
 		return err
@@ -263,6 +312,28 @@ func setGuestProjects(r *http.Request, q *db.Queries, workspaceID, userID, added
 		return nil
 	}
 	return markSearchAccessChanged(r.Context(), q, workspaceID, userID)
+}
+
+// errGuestProjectNotVisible reports a guest project the operator cannot see.
+var errGuestProjectNotVisible = errors.New("guest project not visible to the operator")
+
+// guestProjectsToKeep is what an operator setting a guest's projects to ids
+// leaves the guest a member of. An operator manages a guest's grants only on
+// the projects it can see itself, owners and admins included (MUL-9284): a
+// project in ids it cannot see is refused, and the guest keeps its grants on
+// every private project hidden from the operator. Run it in the transaction
+// that writes the grants, so both read the same project memberships.
+func guestProjectsToKeep(ctx context.Context, q *db.Queries, workspaceID, operator pgtype.UUID, ids []pgtype.UUID) ([]pgtype.UUID, error) {
+	hidden, err := projectaccess.ForPrincipals(ctx, q, workspaceID, operator)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		if !hidden.CanSeeProject(id) {
+			return nil, errGuestProjectNotVisible
+		}
+	}
+	return append(slices.Clone(ids), hidden.IDs()...), nil
 }
 
 // markSearchAccessChanged records, in the caller's transaction, that what
@@ -468,7 +539,10 @@ func (h *Handler) SetMemberProjects(w http.ResponseWriter, r *http.Request) {
 		writeMemberUpdateError(w, err)
 		return
 	}
-	if err := setGuestProjects(r, qtx, target.WorkspaceID, target.UserID, requester.UserID, ids); err != nil {
+	if err := setGuestProjects(r, qtx, target.WorkspaceID, target.UserID, requester.UserID, ids); errors.Is(err, errGuestProjectNotVisible) {
+		writeError(w, http.StatusBadRequest, "project not found")
+		return
+	} else if err != nil {
 		slog.Warn("set guest projects failed", append(logger.RequestAttrs(r), "error", err, "member_id", uuidToString(target.ID))...)
 		writeError(w, http.StatusInternalServerError, "failed to update projects")
 		return
@@ -485,9 +559,10 @@ func (h *Handler) SetMemberProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := h.memberWithUserResponse(target, user)
-	resp.ProjectIDs = uuidsToStrings(ids)
+	// The event reaches every member, so it carries no projects; see UpdateMember.
 	h.publish(protocol.EventMemberUpdated, uuidToString(target.WorkspaceID), "member", requestUserID(r), map[string]any{
 		"member": resp,
 	})
+	resp.ProjectIDs = uuidsToStrings(ids)
 	writeJSON(w, http.StatusOK, resp)
 }

@@ -34,6 +34,10 @@ data:
   CLOUDFRONT_KEY_PAIR_ID: {{ .Values.backend.config.cloudfrontKeyPairId | quote }}
   MULTICA_MAX_PREVIEW_SIZE: {{ .Values.backend.config.maxPreviewSize | quote }}
   LOCAL_UPLOAD_BASE_URL: {{ .Values.backend.config.localUploadBaseUrl | quote }}
+  {{- /* Same key -> env mapping as flagKeyToEnv in server/pkg/featureflag. */}}
+  {{- range $key, $value := .Values.backend.config.featureFlags }}
+  {{ printf "FF_%s" (regexReplaceAll "[^A-Za-z0-9]+" $key "_" | trimAll "_" | upper) }}: {{ $value | toString | quote }}
+  {{- end }}
 
   {{- if not .Values.postgres.external.enabled }}
   # --- PostgreSQL (consumed by the backend to build DATABASE_URL) ---

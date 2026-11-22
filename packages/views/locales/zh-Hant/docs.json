@@ -15,9 +15,9 @@
     "copy_link": "複製連結"
   },
   "errors": {
-    "move": "移動失敗",
-    "delete": "刪除失敗",
-    "save": "儲存失敗"
+    "move": "無法移動項目",
+    "delete": "無法刪除項目",
+    "save": "無法儲存變更"
   },
   "move": {
     "title": "移動\"{{title}}\"",
@@ -31,7 +31,7 @@
     "description": "\"{{title}}\"及其全部歷史都會被刪除，無法復原。",
     "confirm": "刪除",
     "folder_title": "刪除資料夾？",
-    "folder_description": "只能刪除空資料夾。"
+    "folder_description": "要刪除「{{title}}」嗎？僅能刪除空資料夾，此操作無法復原。"
   },
   "tree": {
     "more": "{{title}} 的更多操作",
@@ -48,7 +48,12 @@
     "conflict": "{{name}} 已更新文件。草稿已保留，重新載入後繼續編輯。",
     "reload": "載入最新版本",
     "draft": "保留的草稿",
-    "unsaved_changes": "未儲存的修改"
+    "unsaved_changes": "未儲存的修改",
+    "live": "即時協作",
+    "reconnecting": "正在重新連線...",
+    "connecting": "正在連線...",
+    "title_save_failed": "標題未儲存",
+    "editing_now": "正在編輯"
   },
   "history": {
     "title": "歷史",
@@ -61,10 +66,36 @@
     "description": "它可能已被刪除。"
   },
   "edited": "{{time}}編輯",
+  "view_history": "查看歷史",
   "outline": "大綱",
   "link_copied": "連結已複製",
   "unavailable": {
-    "title": "知識庫暫未開放",
+    "title": "此工作區尚未啟用知識庫",
     "description": "目前工作區尚未開啟知識庫。"
+  },
+  "comments": {
+    "title": "評論",
+    "add": "評論",
+    "open": "未解決 {{count}}",
+    "resolved": "已解決 {{count}}",
+    "close": "關閉評論",
+    "quote_missing": "原文已修改，找不到劃線位置",
+    "reply_placeholder": "回覆，或 @ 某人…",
+    "new_placeholder": "新增評論，或 @ 提及某人...",
+    "submit": "評論",
+    "reply": "回覆",
+    "cancel": "取消",
+    "resolve": "解決",
+    "reopen": "重新開啟",
+    "delete": "刪除評論",
+    "resolved_by": "{{name}} 已解決",
+    "replies_other": "{{count}} 則回覆",
+    "empty_open": "沒有未解決的評論。選取文字後點「評論」即可發起。",
+    "empty_resolved": "沒有已解決的評論。",
+    "errors": {
+      "save": "評論送出失敗",
+      "delete": "評論刪除失敗",
+      "resolve": "無法更新評論"
+    }
   }
 }

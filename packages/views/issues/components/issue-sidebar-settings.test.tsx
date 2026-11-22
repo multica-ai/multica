@@ -18,10 +18,10 @@ const sections = Object.fromEntries(
 ) as Record<IssueSidebarSection, React.ReactNode>;
 const available = ISSUE_SIDEBAR_SECTIONS.filter((id) => id !== "plugins");
 
-function renderSections(revealed?: IssueSidebarSection[]) {
+function renderSections() {
   return render(
     <I18nProvider resources={TEST_RESOURCES} locale="en">
-      <IssueSidebarSections sections={sections} available={available} revealed={revealed} />
+      <IssueSidebarSections sections={sections} available={available} />
     </I18nProvider>,
   );
 }
@@ -52,13 +52,6 @@ describe("IssueSidebarSections", () => {
     expect(renderedOrder().slice(0, 2)).toEqual(["execution_log", "properties"]);
     expect(screen.queryByText("body:details")).toBeNull();
     expect(screen.getByRole("button", { name: /2 sections hidden/ })).toBeInTheDocument();
-  });
-
-  it("shows a hidden section the reader jumped to", () => {
-    act(() => useIssueSidebarSectionsStore.getState().setHidden("wakeups", true));
-    renderSections(["wakeups"]);
-    expect(screen.getByText("body:wakeups")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /hidden/ })).toBeNull();
   });
 
   it("lists the available sections, marks the empty and locked ones, and hides on toggle", async () => {

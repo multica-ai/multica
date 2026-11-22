@@ -186,10 +186,10 @@ describe("RuntimeProfilesDialog", () => {
     expect(
       screen.getByText("Create your first custom runtime"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Pick a base protocol family/)).toBeInTheDocument();
+    expect(screen.getByText(/Pick a compatible base runtime/)).toBeInTheDocument();
 
     const builtinsToggle = screen.getByRole("button", {
-      name: /Supported base protocols/,
+      name: /Built-in runtimes/,
     });
     expect(builtinsToggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("claude")).not.toBeInTheDocument();
@@ -206,7 +206,7 @@ describe("RuntimeProfilesDialog", () => {
     const customTitle = screen.getByText("Custom runtimes (1)");
     const customRow = screen.getByText("Team Codex");
     const builtinsToggle = screen.getByRole("button", {
-      name: /Supported base protocols/,
+      name: /Built-in runtimes/,
     });
 
     expect(customRow).toBeInTheDocument();
@@ -229,20 +229,20 @@ describe("RuntimeProfilesDialog", () => {
     renderDialog();
 
     const builtinsToggle = screen.getByRole("button", {
-      name: /Supported base protocols/,
+      name: /Built-in runtimes/,
     });
     fireEvent.click(builtinsToggle);
     fireEvent.click(screen.getByRole("option", { name: /claude/i }));
 
     expect(
-      screen.getByText(/claude is a built-in protocol family/),
+      screen.getByText(/claude is a built-in runtime/),
     ).toBeInTheDocument();
 
     fireEvent.click(builtinsToggle);
 
     expect(screen.getByText("Select a runtime")).toBeInTheDocument();
     expect(
-      screen.queryByText(/claude is a built-in protocol family/),
+      screen.queryByText(/claude is a built-in runtime/),
     ).not.toBeInTheDocument();
   });
 

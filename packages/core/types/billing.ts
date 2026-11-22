@@ -217,6 +217,10 @@ export interface WorkspaceSubscriptionEntitlements {
   seats: number;
   limits: {
     autopilotRuns: WorkspaceEntitlementLimit;
+    /** Attachment storage in bytes (MUL-9489); absent from older Cloud. */
+    storageBytes?: WorkspaceEntitlementLimit | null;
+    /** Dashboard history range in days. Null when Cloud did not send it. */
+    dashboardHistoryDays?: WorkspaceEntitlementLimit | null;
   };
   currentPeriodEnd: string | null;
   snapshotExpiresAt: string | null;
@@ -248,7 +252,18 @@ export interface WorkspaceSubscriptionSummary {
     changePlan: boolean;
     /** Ask Cloud to settle a plan change that is still confirming. */
     checkPlanChange: boolean;
+    /**
+     * Buy autopilot run add-on packs for the current month. False on a cloud
+     * that predates add-ons.
+     */
+    purchaseAutopilotRuns: boolean;
   };
+  /**
+   * This month's autopilot add-ons. Null on Free, without a subscription, and
+   * on a cloud that predates add-ons. `entitlement.limits.autopilotRuns`
+   * already includes `purchasedRuns`.
+   */
+  autopilotAddon: WorkspaceAutopilotAddonSummary | null;
   /**
    * A plan change that still holds the subscription. While present, seat
    * purchases and other plan changes are unavailable.
@@ -321,10 +336,78 @@ export interface WorkspaceSubscriptionPlanPrices {
   year: WorkspaceSubscriptionPrice;
 }
 
-export type WorkspaceSubscriptionPrices = Record<
-  WorkspaceSubscriptionPaidPlan,
-  WorkspaceSubscriptionPlanPrices
->;
+export interface WorkspaceSubscriptionPrices {
+  pro: WorkspaceSubscriptionPlanPrices;
+  business: WorkspaceSubscriptionPlanPrices;
+  /**
+   * The one-time autopilot add-on pack. Null when Cloud does not sell one, or
+   * on a cloud that predates add-ons.
+   */
+  autopilotAddon: WorkspaceAutopilotAddonPrice | null;
+  /**
+   * Each plan's limits, from the same configuration Cloud enforces. Null when
+   * Cloud did not send them (an older Cloud) or they could not be read.
+   */
+  planLimits?: WorkspacePlanLimits | null;
+}
+
+export type WorkspacePlanLimitPlan = "free" | WorkspaceSubscriptionPaidPlan;
+
+export interface WorkspacePlanLimit {
+  /** Calendar days the dashboard can read on this plan; null when unknown. */
+  dashboardHistoryDays: number | null;
+}
+
+export type WorkspacePlanLimits = Record<WorkspacePlanLimitPlan, WorkspacePlanLimit>;
+
+/** Autopilot runs bought this month, valid until the month ends. */
+export interface WorkspaceAutopilotAddonSummary {
+  purchasedRuns: number;
+  periodStart: string;
+  periodEnd: string;
+}
+
+/** The price of one autopilot add-on pack. */
+export interface WorkspaceAutopilotAddonPrice {
+  currency: string;
+  /** Minor currency units per pack, e.g. 1000 for $10.00. */
+  unitAmount: number;
+  runsPerPack: number;
+}
+
+export interface CreateWorkspaceAutopilotAddonCheckoutRequest {
+  packs: number;
+  /** The pack price the payer saw; Cloud refuses a checkout at another price. */
+  expectedUnitAmount: number;
+  currency: string;
+  idempotencyKey: string;
+}
+
+export interface CreateWorkspaceAutopilotAddonCheckoutResponse {
+  sessionId: string;
+  /** Stripe Checkout page the payer completes the payment on. */
+  url: string;
+}
+
+/**
+ * paid: the runs are in this month's limit. open: Stripe has not finished the
+ * payment yet. unpaid: the session completed without a payment. expired: the
+ * payer left and nothing was charged.
+ */
+export type WorkspaceAutopilotAddonCheckoutStatus =
+  | "paid"
+  | "open"
+  | "unpaid"
+  | "expired";
+
+export interface WorkspaceAutopilotAddonCheckout {
+  sessionId: string;
+  status: WorkspaceAutopilotAddonCheckoutStatus;
+  packs: number;
+  runs: number;
+  currency: string;
+  amount: number;
+}
 
 export interface CreateWorkspaceSubscriptionCheckoutRequest {
   plan: WorkspaceSubscriptionPaidPlan;
@@ -405,6 +488,11 @@ export interface WorkspacePlanChangePreview {
   /** True when the proration is invoiced immediately (upgrades). */
   invoiceNow: boolean;
   quotedAt: string;
+  /**
+   * The monthly autopilot run limit right after the change, including this
+   * month's add-ons. Null on a cloud that predates add-ons.
+   */
+  autopilotRunsLimitAfter: number | null;
 }
 
 export interface ChangeWorkspacePlanRequest {
@@ -443,12 +531,30 @@ export interface CreateWorkspaceSubscriptionPortalResponse {
  * can be reduced, but nothing can be added. The server enforces on every
  * write; this is only for rendering.
  */
-export type PaidFeature = "private_projects" | "guests";
+export type PaidFeature =
+  | "private_projects"
+  | "guests"
+  | "agent_invocation_members"
+  | "runtime_member_sharing"
+  | "team_app_accounts";
 
 export type WorkspaceFeatureState = "available" | "locked";
 
 export interface WorkspaceFeatures {
   features: Partial<Record<PaidFeature, WorkspaceFeatureState>>;
+  /**
+   * Numeric plan limits the server applies. The API client always fills it;
+   * optional so hand-built values (tests, older caches) need not.
+   */
+  limits?: WorkspaceFeatureLimits;
+}
+
+export interface WorkspaceFeatureLimits {
+  /**
+   * How many calendar days back the dashboard can read (MUL-9490). Null when
+   * nothing is enforced: off, observed, or self-hosted.
+   */
+  dashboardHistoryDays: number | null;
 }
 
 /**
@@ -456,6 +562,20 @@ export interface WorkspaceFeatures {
  * also every self-hosted workspace; the counts are null then. Members and
  * pending invitations both take a slot; guests take none.
  */
+/**
+ * The plan's attachment storage limit (MUL-9489). `off` means no limit
+ * applies, which is also every self-hosted workspace; the figures are null
+ * then. Bytes are counted across every attachment in the workspace.
+ */
+export interface StorageUsage {
+  action: "off" | "observe" | "enforce";
+  /** Null also while a limit applies, when the server could not read usage in time. */
+  usedBytes: number | null;
+  limitBytes: number | null;
+  /** Set only under enforce: observe never refuses an upload. */
+  reached: boolean | null;
+}
+
 export interface MemberLimit {
   action: "off" | "observe" | "enforce";
   limit: number | null;

@@ -37,7 +37,7 @@
     },
     "columns": {
       "name": "Nombre",
-      "harness": "Harness",
+      "harness": "CLI",
       "agents": "Agentes",
       "workload": "Carga",
       "status": "Estado"
@@ -88,7 +88,7 @@
     "section_local": "Local",
     "section_remote": "Remoto",
     "section_cloud": "Nube",
-    "this_machine": "Este dispositivo",
+    "this_machine": "Esta máquina",
     "local_badge": "Local: esta máquina",
     "pending_custom_runtimes": "Runtimes personalizados pendientes",
     "busy_count_one": "{{count}} ocupado",
@@ -114,14 +114,14 @@
       "workload_idle": "Todos inactivos",
       "workload_hint": "{{running}} en ejecución · {{queued}} en cola",
       "cli": "CLI",
-      "cloud_worker": "Worker en la nube",
+      "cloud_worker": "Nodo en la nube",
       "local_daemon": "Daemon local"
     },
     "rename": "Renombrar máquina",
     "rename_dialog": {
       "title": "Renombrar máquina",
       "description": "Se usa para esta máquina y todos sus runtimes.",
-      "placeholder": "p. ej., MacBook de Bohan",
+      "placeholder": "MacBook de trabajo",
       "hint": "Déjalo vacío para usar el nombre predeterminado del dispositivo.",
       "cancel": "Cancelar",
       "save": "Guardar",
@@ -135,7 +135,7 @@
   "health": {
     "online": {
       "label": "En línea",
-      "description": "Latido recibido en los últimos 45s. Lista para enviar ejecuciones."
+      "description": "Conectado y listo para aceptar ejecuciones."
     },
     "recently_lost": {
       "label": "Perdida recientemente",
@@ -143,11 +143,11 @@
     },
     "offline": {
       "label": "Desconectada",
-      "description": "Sin latido desde hace más de 5 minutos. Reinicia el daemon o investiga el host."
+      "description": "Desconectado durante más de 5 minutos. Reinicia el daemon en esta máquina o comprueba su red."
     },
     "long_offline": {
       "label": "Desconectada desde hace tiempo",
-      "description": "Sin latido desde hace más de 6 días. Si este host va a seguir desconectado, reenlaza sus agentes a otro runtime o elimina este runtime."
+      "description": "Desconectado durante más de 6 días. Si esta máquina no volverá a conectarse, reasigna sus agentes a otro runtime o elimina este runtime."
     }
   },
   "detail": {
@@ -157,7 +157,7 @@
     "last_seen": "visto por última vez {{when}}",
     "never_seen": "nunca se conectó",
     "fact_owner": "Propietario",
-    "fact_device": "Dispositivo",
+    "fact_device": "Máquina",
     "fact_runtime": "Runtime",
     "fact_daemon_cli": "CLI del daemon",
     "fact_daemon_id": "ID del daemon",
@@ -185,7 +185,7 @@
       "self_heal_notice": "Este runtime lo gestiona un daemon local en ejecución. Eliminarlo tendrá éxito, pero el daemon volverá a registrar un runtime nuevo en cuestión de segundos: detén primero el proceso del daemon para eliminarlo permanentemente.",
       "profile_backed_notice": "Este runtime se registró desde un perfil de runtime personalizado. Eliminarlo solo quita la instancia actual del runtime; un daemon en ejecución puede volver a registrarlo mientras el perfil exista. Elimina el perfil de runtime personalizado desde Runtimes personalizados para quitarlo permanentemente.",
       "light": {
-        "title": "¿Eliminar runtime?",
+        "title": "¿Eliminar este runtime?",
         "description": "¿Seguro que quieres eliminar \"{{name}}\"? Esta acción no se puede deshacer.",
         "cancel": "Cancelar",
         "confirm": "Eliminar runtime",
@@ -296,7 +296,7 @@
     "title": "Runtime en la nube",
     "description": "Crea un runtime en la nube.",
     "create_title": "Nodo nuevo",
-    "nodes_title": "Nodos de la flota",
+    "nodes_title": "Nodos en la nube",
     "refresh": "Actualizar",
     "nodes_empty": "Sin nodos en la nube",
     "nodes_failed": "Runtime en la nube no disponible",
@@ -315,11 +315,11 @@
       "name": "Nombre",
       "instance_type": "Tipo de instancia",
       "region": "Región",
-      "disk_size": "Tamaño de disco GiB",
-      "image_id": "ID de AMI",
+      "disk_size": "Tamaño del disco (GiB)",
+      "image_id": "ID de imagen (AMI)",
       "subnet_id": "ID de subred",
-      "key_name": "Par de claves",
-      "bootstrap_pat": "PAT de arranque"
+      "key_name": "Par de claves SSH",
+      "bootstrap_pat": "Token de arranque (PAT)"
     },
     "placeholders": {
       "name": "cloud-dev-01",
@@ -343,10 +343,19 @@
     "available": "disponible",
     "action": "Actualizar",
     "retry": "Reintentar",
+    "cancel": "Cancelar",
+    "cancel_failed": "No se pudo confirmar la cancelación, así que la actualización aún podría ejecutarse. Inténtalo de nuevo.",
+    "cancel_conflict": "No se puede cancelar: la instalación ya ha comenzado.",
     "unknown_error": "Error desconocido",
     "initiate_failed": "No se ha podido iniciar la actualización",
+    "scheduled_tasks": "{{running}} en curso",
+    "note_no_interrupt": "Las tareas en curso no se interrumpirán.",
+    "expired_note": "Caducó tras esperar 24 horas a que la máquina quedara inactiva.",
+    "busy_note": "La máquina estaba ocupada, así que la actualización no empezó. Vuelve a intentarlo cuando esté inactiva.",
+    "another_update_note": "Ya hay otra actualización en cola o instalándose en esta máquina.",
     "status": {
       "pending": "Esperando al daemon...",
+      "scheduled": "Se actualizará en reposo",
       "running": "Actualizando...",
       "completed": "Actualización completa. El daemon se está reiniciando...",
       "failed": "La actualización falló",
@@ -403,21 +412,21 @@
     "learn_more": "Ver guía de configuración",
     "close": "Cerrar",
     "add_new": "Runtime personalizado nuevo",
-    "list_title": "Backends de runtime",
+    "list_title": "Runtimes base",
     "custom_section_title": "Runtimes personalizados ({{count}})",
     "custom_section_aria": "Runtimes personalizados",
-    "builtin_section_title": "Protocolos base compatibles ({{count}})",
-    "builtin_section_hint": "Las familias integradas son opciones de referencia de solo lectura.",
+    "builtin_section_title": "Runtimes integrados ({{count}})",
+    "builtin_section_hint": "Los runtimes integrados son opciones de referencia de solo lectura.",
     "builtin_section_aria": "Familias de protocolos integrados compatibles",
     "builtin_reference": "Referencia",
     "empty_title": "Crea tu primer runtime personalizado",
-    "empty_description": "Elige una familia de protocolos base y luego indica a Multica el comando que debe ejecutar.",
+    "empty_description": "Elige un runtime base compatible y luego indica a Multica el comando que debe ejecutar.",
     "badge_builtin": "Integrado",
     "badge_custom": "Personalizado",
     "badge_disabled": "Desactivado",
     "builtin_detail": {
-      "title": "Familia de protocolos integrada",
-      "description": "{{family}} es una familia de protocolos integrada. No se puede editar ni quitar.",
+      "title": "Runtime integrado",
+      "description": "{{family}} es un runtime integrado. No se puede editar ni eliminar.",
       "read_only": "Solo lectura"
     },
     "detail": {
@@ -541,7 +550,7 @@
     "title": "Runtime de Qoder Cloud Agents",
     "description": "Conecta Qoder Cloud Agents. Multica gestiona la ejecución y guarda las credenciales cifradas. Los administradores del espacio de trabajo pueden cambiar esta configuración.",
     "loading": "Cargando…",
-    "unavailable": "Hace falta configurar el servidor: define MULTICA_VCS_SECRET_KEY.",
+    "unavailable": "Qoder Cloud Agents aún no está activado en este servidor. Un administrador del servidor debe configurar el cifrado de credenciales (MULTICA_VCS_SECRET_KEY).",
     "online": "En línea",
     "error": "Error de conexión",
     "starting": "Iniciando",
@@ -694,7 +703,7 @@
     },
     "art": {
       "this_computer": "Este ordenador · App de escritorio",
-      "detected": "Herramientas detectadas",
+      "detected": "Runtimes detectados",
       "run_there": "Ejecutar en esa máquina",
       "connected": "{{name}} conectado a Multica"
     }

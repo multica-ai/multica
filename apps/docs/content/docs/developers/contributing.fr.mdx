@@ -11,7 +11,7 @@ Multica est composé d'un backend Go et d'un monorepo pnpm. Le moyen le plus sim
 
 - Node.js 22
 - pnpm 10.28.2
-- Go 1.26.6
+- Go 1.26.9
 - Docker Engine ou Docker Desktop
 - Git et Make
 
@@ -70,7 +70,7 @@ Les différents worktrees partagent le conteneur PostgreSQL, pas la base de donn
 ### Workflow complet
 
 ```bash
-make up               # Démarre l'environnement de ce checkout (C=api,web,daemon,desktop)
+make up               # Démarre l'environnement de ce checkout (C=api,collab,web,daemon,desktop)
 make status           # Affiche ce qui tourne et prouve qu'il s'agit de cet environnement
 make list             # Liste tous les environnements de cette machine
 make down             # Arrête les processus, conserve la base de données

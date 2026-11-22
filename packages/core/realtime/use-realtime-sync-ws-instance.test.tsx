@@ -151,15 +151,15 @@ describe("useRealtimeSync — ws instance change", () => {
 
     // Should have called invalidateQueries for all workspace-scoped keys
     // (20 workspace-scoped [incl. property definitions, workflows, saved views
-    // view preferences, and docs] + 6 per-issue prefixes + the workspace
+    // view preferences, and docs] + 5 per-issue prefixes + the workspace
     // working-agents projection + 6 per-chat prefixes + 1 workspaceKeys.list()
     // + 1 cross-workspace inbox unread summary + 1 issue unread marks + 1
-    // subscribed issue ids + 1 account invitation list = 39 calls).
+    // subscribed issue ids + 1 account invitation list = 38 calls).
     //
     // Awaited rather than counted synchronously: the inbox unread summary
     // refresh cancels any in-flight request before invalidating (see
     // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(39));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(38));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -321,11 +321,50 @@ describe("useRealtimeSync — ws instance change", () => {
 
     const calls = invalidateSpy.mock.calls.map((call: [{ queryKey?: unknown }, ...unknown[]]) => call[0].queryKey);
     expect(calls).toContainEqual(["issues", "timeline"]);
-    expect(calls).toContainEqual(["issues", "reactions"]);
     expect(calls).toContainEqual(["issues", "subscribers"]);
     expect(calls).toContainEqual(["issues", "usage"]);
     expect(calls).toContainEqual(["issues", "attachments"]);
     expect(calls).toContainEqual(["issues", "tasks"]);
+  });
+
+  it.each([false, true])("refreshes chat history once on task completion (chat:done delivered: %s)", async (doneDelivered) => {
+    const ws = createMockWs();
+    const sessionId = "chat-1";
+    const taskId = "task-1";
+    const pendingKey = chatKeys.pendingTask(sessionId);
+    const messagesKey = chatKeys.messages(sessionId);
+    const reply = { id: "reply-1", task_id: taskId, role: "assistant", content: "Done" };
+    qc.setQueryData(pendingKey, { task_id: taskId, status: "running" });
+    qc.setQueryData(messagesKey, []);
+    const loadMessages = vi.fn(async () => [reply]);
+    const observer = new QueryObserver(qc, {
+      queryKey: messagesKey,
+      queryFn: loadMessages,
+      staleTime: Infinity,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    try {
+      renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+      if (doneDelivered) {
+        const done = vi.mocked(ws.on).mock.calls.find(([event]) => event === "chat:done")?.[1];
+        expect(done).toBeDefined();
+        await act(async () => {
+          done!({
+            task_id: taskId, chat_session_id: sessionId, message_id: reply.id,
+            content: reply.content, created_at: "2026-11-19T12:00:00Z",
+          });
+        });
+        await waitFor(() => expect(observer.getCurrentResult().fetchStatus).toBe("idle"));
+      }
+      const handler = vi.mocked(ws.on).mock.calls.find(([event]) => event === "task:completed")?.[1];
+      expect(handler).toBeDefined();
+      await act(async () => { handler!({ task_id: taskId, chat_session_id: sessionId }); });
+      expect(qc.getQueryData(pendingKey)).toEqual({});
+      await waitFor(() => expect(observer.getCurrentResult().data).toEqual([reply]));
+      expect(loadMessages).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("invalidates per-chat-session caches (no wsId in key) on ws instance change", () => {

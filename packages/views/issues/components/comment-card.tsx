@@ -33,6 +33,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLocale, useTimeAgo } from "../../i18n";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useComposerSubmit } from "../../editor";
 import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -387,7 +388,7 @@ function useEditAttachmentState(
   const draftKey = `edit:${issueId}:${entry.id}` as const;
   // `gate` widens the editor gate with coordinator-owned placeholders — see
   // CommentInput.
-  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate } =
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate, storageRefusal, dismissStorageRefusal } =
     useCommentUploads(draftKey, { issueId }, uploadGate, editorRef);
   const [retainedStandaloneIds, setRetainedStandaloneIds] = useState<Set<string> | null>(null);
   const triggerPreview = useCommentTriggerPreview({
@@ -558,6 +559,8 @@ function useEditAttachmentState(
     handleUpload,
     uploads,
     removeUpload,
+    storageRefusal,
+    dismissStorageRefusal,
     isDragOver,
     dropZoneProps,
     triggerPreview,
@@ -958,6 +961,9 @@ function CommentRow({
               attachments={edit.editorAttachments}
             />
           </div>
+          {edit.storageRefusal && (
+            <StorageLimitNotice refusal={edit.storageRefusal} onDismiss={edit.dismissStorageRefusal} className="mt-2" />
+          )}
           {edit.revisionConflict ? (
             <CommentRevisionConflict
               serverContent={entry.content ?? ""}
@@ -1359,10 +1365,14 @@ function CommentCardImpl({
     const anchorId = "run" in row
       ? (row.reply && !isDeletedComment(row.reply) ? row.reply.id : row.run.task.id)
       : row.id;
+    const rowCommentId = "run" in row
+      ? (row.reply && !isDeletedComment(row.reply) ? row.reply.id : undefined)
+      : row.id;
+    const rowEngaged = !!rowCommentId && annotation.activeSourceCommentId === rowCommentId;
     // Keyed like the inline rows: a run slot keeps its task key when its reply
     // arrives, so the slot (and its open activity panel) stays mounted.
     return <VirtualThreadRow key={"run" in row ? row.run.task.id : row.id} id={`comment-${anchorId}`} virtualize={virtualizeRows}
-      taskId={"run" in row ? row.run.task.id : undefined} scrollParent={replyScrollParent}>
+      engaged={rowEngaged} taskId={"run" in row ? row.run.task.id : undefined} scrollParent={replyScrollParent}>
       {() => renderThreadRow(row, virtualizeRows)}
     </VirtualThreadRow>;
   });
@@ -1568,6 +1578,9 @@ function CommentCardImpl({
                     attachments={edit.editorAttachments}
                   />
                 </div>
+                {edit.storageRefusal && (
+                  <StorageLimitNotice refusal={edit.storageRefusal} onDismiss={edit.dismissStorageRefusal} className="mt-2" />
+                )}
                 {edit.revisionConflict ? (
                   <CommentRevisionConflict
                     serverContent={entry.content ?? ""}

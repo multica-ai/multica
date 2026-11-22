@@ -199,6 +199,9 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "target user is not a member of this workspace")
 		return
 	}
+	if h.refuseGuestForOthers(w, r, workspaceID, callerActorType, callerActorID, targetUserType, targetUserID) {
+		return
+	}
 
 	// Explicit action, so this CLEARS any earlier opt-out tombstone — the user
 	// is overriding their own unsubscribe. Rule-driven subscribes deliberately
@@ -222,6 +225,22 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]bool{"subscribed": true})
+}
+
+// refuseGuestForOthers writes a 403 when a guest targets a subscription other
+// than its own. Subscribing a member notifies them and unsubscribing one hides
+// replies and mentions from them, and a subtree may reach past the guest's
+// projects: none of that is a guest's to decide for someone else. Both ids
+// must already have passed isWorkspaceEntity, as parseUUID panics otherwise.
+func (h *Handler) refuseGuestForOthers(w http.ResponseWriter, r *http.Request, workspaceID, callerType, callerID, targetType, targetID string) bool {
+	if targetType == callerType && uuidToString(parseUUID(targetID)) == uuidToString(parseUUID(callerID)) {
+		return false
+	}
+	if !h.isGuest(r, workspaceID, requestUserID(r)) {
+		return false
+	}
+	writeError(w, http.StatusForbidden, "guests can only change their own subscription")
+	return true
 }
 
 // UnsubscribeFromIssue removes a user's subscription from an issue.
@@ -284,6 +303,10 @@ func (h *Handler) unsubscribeFromIssue(w http.ResponseWriter, r *http.Request, s
 	// differently from the delegated rule's canonical form
 	// (MUL-5483 review round 8).
 	targetUserID = uuidToString(parseUUID(targetUserID))
+
+	if h.refuseGuestForOthers(w, r, workspaceID, callerActorType, callerActorID, targetUserType, targetUserID) {
+		return
+	}
 
 	// Every issue this call actually left. The subtree variant reports the whole
 	// set so each one gets its own broadcast: a client with a CHILD issue open

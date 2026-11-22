@@ -98,7 +98,7 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 </p>
 
 - **[Execution log](https://multica.ai/docs/tasks) →** Replay every tool call, command, and error, timestamped.
-- **Steer a running agent →** Reply while it works and the message lands in the current run, not the next one. Claude Code, Codex, Grok, and Kiro today.
+- **Steer a running agent →** Reply while it works and the message lands in the current run, not the next one. Claude Code, Codex, Cursor Agent, Grok, Kiro, and Pi today.
 - **Usage analytics →** See what each run cost, per agent and per issue.
 - **[Review gates](https://multica.ai/docs/issues) →** Work lands in review, not in main. You decide what ships.
 - **[Inbox](https://multica.ai/docs/inbox) →** Get pinged when an agent needs a call, not for every step.
@@ -111,7 +111,7 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 - **[Self-host everything](SELF_HOSTING.md) →** Docker Compose or Helm, on your own infrastructure.
 - **[Your Git host](https://multica.ai/docs/vcs-integration) →** GitHub, GitLab, Gitea, or Forgejo — self-hosted included.
 - **[Workspaces](https://multica.ai/docs/workspaces) →** Separate agents, issues, and settings per team.
-- **[Roles](https://multica.ai/docs/members-roles) and [access scopes](https://multica.ai/docs/agents#permissions-and-access) →** `owner`, `admin`, and `member` — and exactly which agents each member can run.
+- **[Roles](https://multica.ai/docs/members-roles) and [access scopes](https://multica.ai/docs/agents#permissions-and-access) →** Give guests access to selected projects, manage workspace roles, and choose who can run each agent.
 - **[Security model](https://multica.ai/docs/security-model) →** What an agent can reach, and what it can't.
 - **[Slack, Feishu/Lark, DingTalk, WeCom, Telegram, and WeChat](https://multica.ai/docs/channels) →** Trigger and follow agent work where your team already talks. WeChat accepts private messages only from the account that scans its connection QR code. New Feishu/Lark connections are open to mainland-China Feishu only for now; DingTalk, WeCom, and Telegram are [community-maintained](https://multica.ai/docs/community-maintained).
 - **Web, [desktop](https://multica.ai/docs/desktop-app), and [mobile](https://multica.ai/docs/mobile-app) →** The same workspace on macOS, Windows, Linux, iPhone, and iPad — the iOS app builds from source today, not yet on the App Store.
@@ -216,8 +216,8 @@ Installing and authenticating them: [Install an agent runtime](https://multica.a
 | Drive Multica from Codex, Claude Code, or Cursor | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
 | Work out why an agent is stuck | [Runs](https://multica.ai/docs/tasks) · [Troubleshooting](https://multica.ai/docs/troubleshooting) |
 
-The docs are also available in [简体中文](https://multica.ai/docs/zh), [日本語](https://multica.ai/docs/ja),
-[한국어](https://multica.ai/docs/ko), and [Français](https://multica.ai/docs/fr).
+The docs are also available in [简体中文](https://multica.ai/docs/zh), [繁體中文](https://multica.ai/docs/zh-Hant),
+[日本語](https://multica.ai/docs/ja), [한국어](https://multica.ai/docs/ko), and [Français](https://multica.ai/docs/fr).
 
 ---
 

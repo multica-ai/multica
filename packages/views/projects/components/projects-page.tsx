@@ -100,6 +100,7 @@ import {
   type ProjectGroupField,
 } from "./project-groups";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { getProjectProgress } from "./project-issue-metrics";
 import { cn } from "@multica/ui/lib/utils";
 
 // Sort order maps for the enum columns (header sort needs a total order).
@@ -118,8 +119,10 @@ const STATUS_ORDER: Record<ProjectStatus, number> = {
   cancelled: 4,
 };
 
-const progressOf = (p: Project) =>
-  p.issue_count > 0 ? p.done_count / p.issue_count : -1;
+const progressOf = (p: Project) => {
+  const progress = getProjectProgress(p);
+  return progress.scope > 0 ? progress.completed / progress.scope : -1;
+};
 
 // Composite "type:id" lead value so the string[] filter holds member/agent
 // refs alike.
@@ -128,15 +131,16 @@ function leadFilterValue(p: Project): string | null {
 }
 
 function ProgressRing({ project }: { project: Project }) {
-  if (project.issue_count === 0) return <CollectionEmptyValue />;
-  const pct = Math.round((project.done_count / project.issue_count) * 100);
+  const progress = getProjectProgress(project);
+  if (progress.scope === 0) return <CollectionEmptyValue />;
+  const pct = progress.percent;
   return (
     <span className="flex items-center gap-1.5">
       <span className="relative h-3.5 w-3.5">
         <svg className="h-3.5 w-3.5 -rotate-90" viewBox="0 0 16 16">
           <circle className="text-muted" strokeWidth="2" stroke="currentColor" fill="none" r="6" cx="8" cy="8" />
           <circle
-            className="text-emerald-500"
+            className="text-info"
             strokeWidth="2"
             stroke="currentColor"
             fill="none"
@@ -149,7 +153,7 @@ function ProgressRing({ project }: { project: Project }) {
         </svg>
       </span>
       <span className="tabular-nums">
-        {project.done_count}/{project.issue_count}
+        {progress.completed}/{progress.scope}
       </span>
     </span>
   );
@@ -605,6 +609,7 @@ export function ProjectsPage() {
           <CollectionNameCell
             icon={<ProjectIcon project={project} size="sm" />}
             title={project.title}
+            titleTooltip={project.title}
             muted={isProjectArchived(project)}
           />
         ),

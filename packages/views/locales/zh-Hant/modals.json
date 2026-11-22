@@ -11,7 +11,7 @@
     "description": "工作區是團隊協作處理專案和任務的共享空間。"
   },
   "delete_issue": {
-    "title": "刪除任務",
+    "title": "刪除任務？",
     "description": "將永久刪除該任務及其所有評論。此操作不可撤銷。",
     "cancel": "取消",
     "confirm": "刪除",
@@ -88,7 +88,7 @@
     "toast_failed": "操作失敗",
     "create_will_start": "建立後 {{name}} 會立即開始工作。",
     "create_will_start_squad": "建立後 {{name}} 的隊長會評估並開始安排任務。",
-    "create_parked": "已指派——在 backlog 中不會開始工作。"
+    "create_parked": "已指派——在待規劃中不會開始工作。"
   },
   "create_squad": {
     "title": "建立小隊",
@@ -168,7 +168,7 @@
   },
   "create_issue": {
     "sr_manual": "新建任務",
-    "sr_agent": "快速建立任務",
+    "sr_agent": "透過 AI 代理建立任務",
     "manual_breadcrumb": "手動建立",
     "agent_breadcrumb": "透過 AI 代理建立",
     "title_placeholder": "任務標題",
@@ -185,15 +185,20 @@
     "autopilot_quota_limit": {
       "title": "該工作區的自動化執行次數已達到上限",
       "checking_description": "正在查詢該工作區可用的帳單操作…",
-      "upgrade_description": "升級到 Pro 後可恢復自動化執行。",
+      "upgrade_description": "升級到 Pro 可提高每月上限並恢復自動化執行，也可以等待額度重置。",
       "portal_description": "開啟帳單門戶管理該工作區的訂閱，以恢復自動化執行。",
-      "contact_description": "請聯絡工作區所有者或管理員升級到 Pro。",
+      "contact_description": "請聯絡工作區所有者或管理員升級方案，或等待額度重置。",
       "billing_description": "請前往帳單設定檢視該工作區可用的升級選項。",
       "billing_unavailable_description": "暫時無法載入帳單操作，請前往帳單設定重試。",
       "billing_disabled_description": "請等待當前額度重置，或聯絡工作區管理員。",
       "upgrade_action": "升級到 Pro",
       "portal_action": "開啟帳單門戶",
-      "billing_action": "檢視帳單"
+      "billing_action": "檢視帳單",
+      "addon_description": "加購執行次數可在本月恢復自動化執行，也可以等待額度重置。",
+      "contact_addon_description": "請聯絡工作區所有者或管理員加購執行次數，或等待額度重置。",
+      "contact_addon_or_upgrade_description": "請聯絡工作區所有者或管理員加購執行次數或升級方案，或等待額度重置。",
+      "addon_action": "加購執行次數",
+      "upgrade_business_action": "升級到 Business"
     },
     "toast_link_subissues_all_failed": "關聯子任務失敗",
     "toast_link_subissues_partial": "{{total}} 個子任務中有 {{failed}} 個關聯失敗",
@@ -238,9 +243,9 @@
       "search_placeholder": "搜尋 AI 代理或小隊...",
       "agents_group": "AI 代理",
       "squads_group": "小隊",
-      "version_missing": "該 AI 代理的守護程序沒有報告 CLI 版本。透過 AI 代理建立需要 multica CLI ≥ {{min}}。請升級守護程序並重連，或切換到手動建立。",
+      "version_missing": "此 AI 代理的守護程序未回報 CLI 版本。透過 AI 代理建立需要 multica CLI ≥ {{min}}。請升級守護程序並重新連線，或切換為手動建立。",
       "version_below": "該 AI 代理的守護程序 CLI 是 {{current}}——透過 AI 代理建立需要 ≥ {{min}}。請升級守護程序，或切換到手動建立。",
-      "prompt_placeholder": "告訴 AI 代理要做什麼，例如：\"讓 Bohan 修一下 Web 專案裡收件箱載入慢的問題\"",
+      "prompt_placeholder": "告訴 AI 代理要做什麼，例如：\"修復 Web 專案裡收件箱載入慢的問題\"",
       "source_context_prompt_placeholder": "告訴 AI 代理要基於這段上下文完成什麼，例如：\"繼續排查並修復這裡提到的問題\"",
       "more_fields_aria": "更多欄位",
       "set_project": "設定專案...",
@@ -273,8 +278,8 @@
     "trigger": "複製父任務欄位",
     "title": "複製父任務欄位",
     "description": "從 {{identifier}} 複製所選欄位，覆蓋目前值；後續不連動。",
-    "apply": "複製所選 {{count}} 項",
     "no_labels": "無標籤",
-    "manual_only": "標籤、開始日期和自訂屬性僅用於手動建立。"
+    "manual_only": "標籤、開始日期和自訂屬性僅用於手動建立。",
+    "apply_other": "複製所選 {{count}} 項"
   }
 }

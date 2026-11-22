@@ -92,22 +92,49 @@
 }
 
 .image-toolbar {
+  /* Keep the resting controls near their image so tabbing to them scrolls it into view. */
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: 0;
+  inset-inline-end: 0;
   display: flex;
+  width: max-content;
   gap: 1px;
   padding: 0.25rem;
   background: color-mix(in srgb, black 75%, transparent);
   backdrop-filter: blur(8px);
   border-radius: var(--radius);
   opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 1;
+  pointer-events: none;
+  z-index: 30;
 }
 
-.image-figure:hover .image-toolbar {
+.image-toolbar[data-placement] {
+  position: fixed;
+  inset-inline-end: auto;
+  top: var(--image-toolbar-y, 0);
+  left: var(--image-toolbar-x, 0);
+}
+
+.image-toolbar:is([data-placement="top"], [data-placement="bottom"]) {
   opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.15s;
+}
+
+/* Keep the gap between the image and its toolbar hoverable. */
+.image-toolbar::after {
+  position: absolute;
+  inset-inline: 0;
+  height: 4px;
+  content: "";
+}
+
+.image-toolbar[data-placement="top"]::after {
+  top: 100%;
+}
+
+.image-toolbar[data-placement="bottom"]::after {
+  bottom: 100%;
 }
 
 .image-toolbar button {
@@ -170,15 +197,6 @@
   width: auto;
   max-width: min(100%, 35rem);
   max-height: 25rem;
-}
-
-/* A thumbnail can be narrower than its toolbar, so the toolbar grows from
-   the left edge into the open space instead of past the column's edge. */
-[data-comment-images="thumbnails"] [data-comment-image-list] .image-toolbar,
-[data-comment-images] .ProseMirror .image-toolbar {
-  top: 0.25rem;
-  left: 0.25rem;
-  right: auto;
 }
 
 /* Comment composers, whatever the preference: an image keeps its place in

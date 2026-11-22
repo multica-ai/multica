@@ -21,6 +21,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/imagemetadata"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/thumbnail"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -468,7 +470,8 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	// If workspace context is available, validate membership before uploading.
 	if workspaceID != "" {
-		if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+		member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+		if err != nil {
 			writeError(w, http.StatusForbidden, "not a member of this workspace")
 			return
 		}
@@ -597,6 +600,17 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// Bind the session too so reads (groupChatMessageAttachments) and
 			// GC classify the row consistently before it gains a message id.
 			params.ChatSessionID = task.ChatSessionID
+		}
+
+		// Every field is validated; check the storage limit before writing
+		// the object, so a refused upload stores nothing.
+		if err := h.storageQuota().Admit(r.Context(), params.WorkspaceID, params.SizeBytes, service.StorageSourceUpload); err != nil {
+			// The role read with membership above decides, so a failed
+			// second lookup cannot show a guest the workspace's usage.
+			if !writeStorageLimitReached(w, err, !projectaccess.IsGuestRole(member.Role)) {
+				writeError(w, http.StatusInternalServerError, "upload failed")
+			}
+			return
 		}
 
 		if dimensions, ok := imagemetadata.Dimensions(data); ok {
@@ -939,11 +953,12 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 		}
 		return att, true
 	}
-	if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	h.cacheMembership(r.Context(), member)
 	if !h.requireAttachmentVisible(w, r, workspaceID, att) {
 		return db.Attachment{}, false
 	}

@@ -17,6 +17,8 @@ func createDocForTest(t *testing.T) DocResponse {
 	testutil.Call(t, testHandler.CreateDoc, newRequest("POST", "/api/docs", map[string]any{"title": "Runbook", "content": "# First\n\nOriginal"})).Want(http.StatusCreated).JSON(&doc)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), "DELETE FROM doc_version WHERE doc_id = $1", doc.ID)
+		testPool.Exec(context.Background(), "DELETE FROM doc_revision WHERE doc_id = $1", doc.ID)
+		testPool.Exec(context.Background(), "DELETE FROM doc_collab_state WHERE doc_id = $1", doc.ID)
 		testPool.Exec(context.Background(), "DELETE FROM doc WHERE id = $1", doc.ID)
 	})
 	return doc
@@ -159,6 +161,8 @@ func TestDocTextDropsNULBytes(t *testing.T) {
 	})).Want(http.StatusCreated).JSON(&doc)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), "DELETE FROM doc_version WHERE doc_id = $1", doc.ID)
+		testPool.Exec(context.Background(), "DELETE FROM doc_revision WHERE doc_id = $1", doc.ID)
+		testPool.Exec(context.Background(), "DELETE FROM doc_collab_state WHERE doc_id = $1", doc.ID)
 		testPool.Exec(context.Background(), "DELETE FROM doc WHERE id = $1", doc.ID)
 	})
 	if doc.Title != "Runbook" || doc.Content != "Step one" {

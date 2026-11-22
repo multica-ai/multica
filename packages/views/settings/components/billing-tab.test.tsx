@@ -7,6 +7,7 @@ import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flag
 import type {
   AutopilotQuotaUsage,
   MemberLimit,
+  StorageUsage,
   WorkspaceSubscriptionEntitlements,
   WorkspaceSubscriptionPrices,
   WorkspaceSubscriptionSummary,
@@ -36,6 +37,8 @@ const mocks = vi.hoisted(() => ({
   workspaceId: "workspace-1",
   invalidateQueries: vi.fn(() => Promise.resolve()),
   memberLimit: { action: "off", limit: null, members: null, pendingInvitations: null } as MemberLimit,
+  storageUsage: { action: "off", usedBytes: null, limitBytes: null, reached: null } as StorageUsage,
+  refetchStorage: vi.fn(),
   prices: null as WorkspaceSubscriptionPrices | null,
   pricesLoading: false,
   pricesFetching: false,
@@ -89,7 +92,9 @@ const mocks = vi.hoisted(() => ({
       purchaseSeats: false,
       changePlan: false,
       checkPlanChange: false,
+      purchaseAutopilotRuns: false,
     },
+    autopilotAddon: null,
     planChange: null as WorkspaceSubscriptionSummary["planChange"],
     trial: null as WorkspaceSubscriptionSummary["trial"],
   } as WorkspaceSubscriptionSummary,
@@ -184,6 +189,17 @@ vi.mock("../../navigation", () => ({
 
 vi.mock("../../platform", () => ({ openExternal: mocks.openExternal }));
 
+vi.mock("../../billing/autopilot-addon-dialog", () => ({
+  AutopilotAddonDialog: ({ open }: { open: boolean }) =>
+    open ? <div role="dialog" aria-label="Buy more autopilot runs" /> : null,
+}));
+
+vi.mock("../../billing/autopilot-addon-return-notice", () => ({
+  AutopilotAddonReturnNotice: ({ sessionId }: { sessionId: string | null }) => (
+    <div role="status" aria-label="Add-on return">{sessionId}</div>
+  ),
+}));
+
 import { BillingTab, formatStripeMinorAmount } from "./billing-tab";
 
 // The component formats dates in the viewer's own time zone, so a midnight-UTC
@@ -271,6 +287,7 @@ describe("BillingTab", () => {
           intervalCount: 1,
         },
       },
+      autopilotAddon: null,
     };
     mocks.changePlanPending = false;
     mocks.pricesLoading = false;
@@ -311,7 +328,9 @@ describe("BillingTab", () => {
         purchaseSeats: false,
         changePlan: false,
         checkPlanChange: false,
+        purchaseAutopilotRuns: false,
       },
+      autopilotAddon: null,
       planChange: null,
       trial: null,
     });
@@ -329,8 +348,12 @@ describe("BillingTab", () => {
     });
     localStorage.clear();
     mocks.memberLimit = { action: "off", limit: null, members: null, pendingInvitations: null };
+    mocks.storageUsage = { action: "off", usedBytes: null, limitBytes: null, reached: null };
     mocks.useQuery.mockImplementation((options: unknown) => {
       const queryKey = (options as { queryKey?: readonly unknown[] }).queryKey;
+      if (queryKey?.[0] === "workspace-storage-usage") {
+        return { data: mocks.storageUsage, isPending: false, isError: false, refetch: mocks.refetchStorage };
+      }
       if (queryKey?.[queryKey.length - 1] === "limit") {
         return { data: mocks.memberLimit, isPending: false, isError: false };
       }
@@ -438,6 +461,20 @@ describe("BillingTab", () => {
     expect(mocks.useQuery).not.toHaveBeenCalled();
   });
 
+  it("shows the plan's analytics history range only when Cloud reports it", () => {
+    const { unmount } = renderWithI18n(<BillingTab />);
+    expect(screen.queryByText("Analytics history")).toBeNull();
+    unmount();
+
+    mocks.entitlements.limits = {
+      ...mocks.entitlements.limits,
+      dashboardHistoryDays: { mode: "limited", limit: 30 },
+    };
+    renderWithI18n(<BillingTab />);
+    expect(screen.getByText("Analytics history")).toBeInTheDocument();
+    expect(screen.getByText("Last 30 days")).toBeInTheDocument();
+  });
+
   it("shows server prices and keeps the selected interval in sync", async () => {
     const user = userEvent.setup();
     renderWithI18n(<BillingTab />);
@@ -527,7 +564,7 @@ describe("BillingTab", () => {
 
       expect(
         screen.getByText(
-          /Stripe Checkout shows the authoritative per-seat price/,
+          /Stripe shows the final per-seat price/,
         ),
       ).toBeInTheDocument();
       expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
@@ -850,6 +887,56 @@ describe("BillingTab", () => {
       }
     });
 
+    it("shows attachment storage against the plan's limit (MUL-9489)", () => {
+      mocks.storageUsage = { action: "observe", usedBytes: 23_400_000_000, limitBytes: 120_000_000_000, reached: null };
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Attachment storage")).toBeInTheDocument();
+      expect(screen.getByText("Attachments in issues, comments, and chat.")).toBeInTheDocument();
+      expect(screen.getByText("23.4 GB / 120 GB")).toBeInTheDocument();
+    });
+
+    it("reports enforced full storage as reached, and hides storage without a limit", () => {
+      mocks.storageUsage = { action: "enforce", usedBytes: 1_000_000_000, limitBytes: 1_000_000_000, reached: true };
+      const { unmount } = renderWithI18n(<BillingTab />);
+      expect(screen.getByText("1 GB / 1 GB")).toBeInTheDocument();
+      expect(screen.getAllByText("Limit reached").length).toBeGreaterThan(0);
+      unmount();
+
+      mocks.storageUsage = { action: "off", usedBytes: null, limitBytes: null, reached: null };
+      renderWithI18n(<BillingTab />);
+      expect(screen.queryByText("Attachment storage")).not.toBeInTheDocument();
+    });
+
+    it("shows storage usage it could not read as unavailable, with a retry", async () => {
+      const user = userEvent.setup();
+      mocks.refetchStorage.mockReset();
+      mocks.storageUsage = { action: "observe", usedBytes: null, limitBytes: 1_000_000_000, reached: null };
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Attachment storage")).toBeInTheDocument();
+      expect(screen.getByText("1 GB")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Retry attachment storage usage" }));
+      expect(mocks.refetchStorage).toHaveBeenCalledOnce();
+    });
+
+    // After Pro moves to Business (or seats are added) the summary carries
+    // the new limit at once, while the usage read can still hold the old one.
+    it("shows the plan's new storage limit as soon as the subscription changes", () => {
+      mocks.storageUsage = { action: "observe", usedBytes: 12_000_000_000, limitBytes: 30_000_000_000, reached: null };
+      mocks.entitlements.limits = { ...mocks.entitlements.limits, storageBytes: { mode: "limited", limit: 30_000_000_000 } };
+      const { rerender } = renderWithI18n(<BillingTab />);
+      expect(screen.getByText("12 GB / 30 GB")).toBeInTheDocument();
+      mocks.invalidateQueries.mockClear();
+
+      mocks.entitlements.limits = { ...mocks.entitlements.limits, storageBytes: { mode: "limited", limit: 300_000_000_000 } };
+      mocks.entitlements.version = 1;
+      rerender(<BillingTab />);
+
+      expect(screen.getByText("12 GB / 300 GB")).toBeInTheDocument();
+      expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["workspace-storage-usage", expect.any(String)] });
+    });
+
     it("shows members and pending invitations against the plan's limit", () => {
       mocks.memberLimit = { action: "observe", limit: 5, members: 4, pendingInvitations: 2 };
       renderWithI18n(<BillingTab />);
@@ -954,11 +1041,29 @@ describe("BillingTab", () => {
 
     renderWithI18n(<BillingTab />);
 
-    expect(screen.getByText("Checkout canceled")).toBeInTheDocument();
+    expect(screen.getByText("Checkout cancelled")).toBeInTheDocument();
     expect(navigationState.replace).toHaveBeenCalledOnce();
     expect(navigationState.replace).toHaveBeenCalledWith(
       "/acme/settings?tab=billing&source=email",
     );
+  });
+
+  it("hands an add-on return's Checkout Session to the return notice after clearing the URL", () => {
+    navigationState.search = "tab=billing&result=autopilot_addon&session_id=cs_test_7";
+
+    renderWithI18n(<BillingTab />);
+
+    expect(screen.getByRole("status", { name: "Add-on return" })).toHaveTextContent("cs_test_7");
+    expect(navigationState.replace).toHaveBeenCalledWith("/acme/settings?tab=billing");
+  });
+
+  it("says nothing was charged when an add-on Checkout is canceled", () => {
+    navigationState.search = "tab=billing&result=autopilot_addon_cancel";
+
+    renderWithI18n(<BillingTab />);
+
+    expect(screen.getByText("Payment cancelled")).toBeInTheDocument();
+    expect(screen.getByText("Nothing was charged.")).toBeInTheDocument();
   });
 
   it("polls after a success callback and surfaces a bounded sync timeout", () => {
@@ -1050,6 +1155,10 @@ describe("BillingTab", () => {
       expect(screen.getByText("Unlimited")).toBeInTheDocument();
       expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
       expect(screen.queryByText(/Runs a member starts with Run now/)).not.toBeInTheDocument();
+      // The paid plan is recorded: paid features and plan limits are re-read.
+      expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ["workspace-features", "workspace-1"],
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -1393,7 +1502,7 @@ describe("BillingTab", () => {
     ],
     [
       "seat_purchase_in_progress",
-      "Another seat purchase is being processed. Wait for it to finish; contact support if it remains here.",
+      "Another seat purchase is being processed. Wait a moment for it to finish, or contact support if it stays stuck.",
     ],
     [
       "plan_change_in_progress",
@@ -1467,7 +1576,7 @@ describe("BillingTab", () => {
     await user.click(screen.getByRole("button", { name: "Add 1 seat" }));
     expect(
       await screen.findByText(
-        "The purchase response could not be read. Retry this quote; the same purchase request will be reused.",
+        "We couldn't confirm the purchase response. Retry safely — you won't be charged twice.",
       ),
     ).toBeInTheDocument();
     const firstKey = mocks.purchaseSeats.mock.calls[0]?.[0].idempotencyKey;
@@ -1600,6 +1709,65 @@ describe("BillingTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows this month's add-on runs and lets a manager buy more", async () => {
+    Object.assign(mocks.entitlements, { plan: "pro", status: "active" });
+    Object.assign(mocks.summary, {
+      autopilotAddon: {
+        purchasedRuns: 2000,
+        periodStart: "2030-01-01T00:00:00Z",
+        periodEnd: "2030-02-01T00:00:00Z",
+      },
+    });
+    Object.assign(mocks.summary.availableActions, {
+      checkout: false,
+      purchaseAutopilotRuns: true,
+    });
+    mocks.prices = {
+      ...mocks.prices!,
+      autopilotAddon: { currency: "usd", unitAmount: 1000, runsPerPack: 1000 },
+    };
+
+    const user = userEvent.setup();
+    renderWithI18n(<BillingTab />);
+
+    expect(screen.getByText("Includes 2,000 add-on runs")).toBeInTheDocument();
+    expect(screen.getByText("2,000 bought this month")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Buy · $10.00 / 1,000 runs" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Buy more autopilot runs" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows add-on runs without a purchase button to a member", () => {
+    Object.assign(mocks.entitlements, { plan: "business", status: "active" });
+    Object.assign(mocks.summary, {
+      autopilotAddon: {
+        purchasedRuns: 0,
+        periodStart: "2030-01-01T00:00:00Z",
+        periodEnd: "2030-02-01T00:00:00Z",
+      },
+    });
+    Object.assign(mocks.summary.availableActions, {
+      checkout: false,
+      purchaseAutopilotRuns: false,
+    });
+
+    renderWithI18n(<BillingTab />);
+
+    expect(screen.getByText("None this month")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Buy/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides add-on runs on a cloud that predates them", () => {
+    renderWithI18n(<BillingTab />);
+
+    expect(screen.queryByText("Add-on runs")).not.toBeInTheDocument();
+  });
+
   it("shows observed usage over the limit without reporting it reached", () => {
     Object.assign(mocks.usage, {
       action: "observe",
@@ -1640,7 +1808,7 @@ describe("BillingTab", () => {
     expect(screen.queryByText(/0 \/ 7/)).not.toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", { name: "Retry automation usage" }),
+      screen.getByRole("button", { name: "Retry autopilot usage" }),
     );
     expect(mocks.refetchUsage).toHaveBeenCalledOnce();
   });
@@ -1667,7 +1835,7 @@ describe("BillingTab", () => {
     ["incomplete_expired", "Subscription setup expired"],
     ["paused", "Subscription is paused"],
     ["unpaid", "Subscription is unpaid"],
-    ["canceled", "Subscription is canceled"],
+    ["canceled", "Subscription is cancelled"],
   ])("renders a recovery notice for %s", (status, title) => {
     mocks.entitlements.status = status;
 
@@ -2125,6 +2293,43 @@ describe("BillingTab", () => {
       });
       expect(
         await screen.findByText("This workspace is now on Pro."),
+      ).toBeInTheDocument();
+    });
+
+    it("tells a downgrading manager this month's limit when add-ons were bought", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("business");
+      mocks.entitlements.limits = {
+        autopilotRuns: { mode: "limited", limit: 4000 },
+      };
+      Object.assign(mocks.summary, {
+        autopilotAddon: {
+          purchasedRuns: 1000,
+          periodStart: "2030-01-01T00:00:00Z",
+          periodEnd: "2030-02-01T00:00:00Z",
+        },
+      });
+      mocks.previewPlanChange.mockResolvedValue({
+        currentPlan: "business",
+        targetPlan: "pro",
+        interval: "month",
+        seats: 1,
+        subscriptionVersion: 8,
+        currency: "usd",
+        prorationAmount: -1200,
+        nextInvoiceAmount: 1500,
+        invoiceNow: false,
+        quotedAt: "2030-01-15T00:00:00Z",
+        autopilotRunsLimitAfter: 2000,
+      });
+      renderWithI18n(<BillingTab />);
+
+      await user.click(screen.getByRole("button", { name: "Switch to Pro" }));
+      const dialog = await screen.findByRole("dialog");
+      expect(
+        await within(dialog).findByText(
+          "This month's limit becomes 2,000 runs after the switch, including runs you bought. 5 runs are used this month.",
+        ),
       ).toBeInTheDocument();
     });
 

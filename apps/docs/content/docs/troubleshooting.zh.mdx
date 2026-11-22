@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+如果 CLI 无法验证令牌，请先检查提示中的错误，再决定是否重新登录。
+
 常见原因包括：
 
 - CLI 尚未登录，或本机保存的令牌已经失效；
@@ -65,6 +67,8 @@ multica daemon restart
 ```bash
 multica config show
 ```
+
+在 macOS 上，如果守护进程日志显示 `connect: no route to host`，但同一台 Mac 的终端可以成功运行 `curl -fsS <server-url>/health`，请记录同一时段内的两项结果。附上守护进程的启动方式（Desktop、登录服务或终端），以及 macOS 和守护进程的版本。终端的结果只说明该 shell 进程能连通。
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> 报告服务器不可达</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">

@@ -122,6 +122,7 @@ export default function AddResourceRoute() {
           <TextField
             value={ref}
             onChangeText={setRef}
+            // eslint-disable-next-line no-restricted-syntax -- literal Git default branch name
             placeholder="main"
             autoCapitalize="none"
             autoCorrect={false}
@@ -139,7 +140,7 @@ export default function AddResourceRoute() {
           <TextField
             value={label}
             onChangeText={setLabel}
-            placeholder="e.g. Backend"
+            placeholder={t("resources.label_placeholder")}
           />
         </View>
       </View>

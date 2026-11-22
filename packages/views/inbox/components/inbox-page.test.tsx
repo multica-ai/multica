@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
@@ -27,7 +28,7 @@ const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
 // The active list as a read that failed before anything loaded, and is
 // possibly being tried again.
 const activeFailure = { failed: false, retrying: false, refetch: vi.fn() };
-const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn() }));
+const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn(), getQueryData: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
   useQueryClient: () => queryClient,
@@ -37,6 +38,7 @@ vi.mock("@tanstack/react-query", () => ({
     data: options.queryKey.includes("archived")
       ? { items: listData.lookup ?? listData.archived, hasMore: false, nextCursor: null }
       : options.queryKey.includes("agent-task-snapshot") ? listData.tasks
+      : options.queryKey.includes("working-agents") ? []
       : options.queryKey.includes("snoozed") ? NO_SNOOZED : listData.active,
     isLoading: false,
     isError: false,
@@ -62,9 +64,15 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
+vi.mock("@multica/core/permissions", () => ({
+  useIsGuest: () => false,
+}));
+
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
+    issues: () => "/acme/issues",
     issueDetail: (id: string) => `/acme/issues/${id}`,
   }),
 }));
@@ -145,10 +153,11 @@ vi.mock("../../issues/components/issue-detail", () => ({
 }));
 
 const replace = vi.fn();
+const push = vi.fn();
 let searchParams = new URLSearchParams();
 
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ searchParams, replace }),
+  useNavigation: () => ({ searchParams, replace, push }),
   // Real hook: reports the detail-pane swap to the shell's progress bar.
   // Nothing here renders that bar, and the page reads nothing back from it.
   useReportNavigating: () => {},
@@ -266,7 +275,12 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 }
 
 function reset() {
-  useInboxSelectionStore.setState({ lastResolvedKeyByWorkspace: {}, heldRows: {}, leftRowKeyByWorkspace: {} });
+  useInboxSelectionStore.setState({
+    lastResolvedKeyByWorkspace: {},
+    heldRows: {},
+    leftRowKeyByWorkspace: {},
+    lastClearedByWorkspace: {},
+  });
   listData.active = [];
   listData.archived = [];
   listData.lookup = undefined;
@@ -778,6 +792,25 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("list").dataset.view).toBe("archived");
   });
 
+  it("switches to the archive from the page header title menu on desktop", async () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [];
+    listData.archived = [item({ id: "archived-1", archived: true })];
+    const { container } = render(<InboxPage />);
+
+    expect(screen.queryByTestId("list")).toBeNull();
+    const titleMenu = container.querySelector("h1 [aria-haspopup='menu']") as HTMLElement;
+    expect(titleMenu).not.toBeNull();
+    fireEvent.click(titleMenu);
+    const [inboxOption, archivedOption] = await screen.findAllByRole("menuitemradio");
+    expect(inboxOption).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(archivedOption!);
+
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived");
+    expect(screen.getByTestId("list").dataset.view).toBe("archived");
+  });
+
   it("hides the batch-actions menu in the archived view", () => {
     // Every batch action archives from the MAIN inbox; offering them over the
     // archived list would read as "archive all of these" and do the opposite.
@@ -989,14 +1022,15 @@ describe("InboxPage", () => {
       item({ id: "inbox-a", issue_id: "issue-a" }),
       item({ id: "inbox-b", issue_id: "issue-b" }),
     ];
+    const notice = () => (issueDetailProps.at(-1)?.notice as ((issueActions: ReactNode) => ReactNode) | undefined)?.(null);
     const { rerender } = render(<InboxPage />);
-    expect(issueDetailProps.at(-1)?.notice).toBeFalsy();
+    expect(notice()).toBeFalsy();
 
     listData.active = [item({ id: "inbox-b", issue_id: "issue-b" })];
     rerender(<InboxPage />);
 
     expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
-    expect(issueDetailProps.at(-1)?.notice).toBeTruthy();
+    expect(notice()).toBeTruthy();
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
@@ -1238,7 +1272,10 @@ describe("InboxPage", () => {
       renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
       await settle(archiveMutate, "success");
-      expect(toast.success).toHaveBeenCalledWith("Inbox", { action: { label: "Inbox", onClick: expect.any(Function) } });
+      expect(toast.success).toHaveBeenCalledWith(
+        "Inbox",
+        expect.objectContaining({ duration: 10_000, action: { label: "Inbox", onClick: expect.any(Function) } }),
+      );
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });

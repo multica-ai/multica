@@ -3,7 +3,8 @@
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { StatusIcon, PriorityIcon } from "../../issues/components";
+import { StatusIcon } from "../../issues/components/status-icon";
+import { PriorityIcon } from "../../issues/components/priority-icon";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
 import { getQuickCreateOutcomeDetail } from "./inbox-display";
 import { useLocale, useT } from "../../i18n";
@@ -27,6 +28,8 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     due_date_changed: t(($) => $.types.due_date_changed),
     new_comment: t(($) => $.types.new_comment),
     mentioned: t(($) => $.types.mentioned),
+    doc_comment: t(($) => $.types.doc_comment),
+    doc_mentioned: t(($) => $.types.doc_mentioned),
     review_requested: t(($) => $.types.review_requested),
     task_completed: t(($) => $.types.task_completed),
     task_failed: t(($) => $.types.task_failed),

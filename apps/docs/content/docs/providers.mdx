@@ -53,6 +53,8 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+For Claude Code, Multica lists and imports user and plugin skills from an absolute `CLAUDE_CONFIG_DIR` set in the daemon environment. Paths set only inside a launch wrapper are not visible to the scanner.
+
 For Amp, the model field selects an Amp **mode**, such as `high`, rather than an underlying model ID. Leave it empty to use Amp’s default.
 
 Amp also requires `AMP_API_KEY` in the daemon or agent environment; a saved interactive login alone is not enough.

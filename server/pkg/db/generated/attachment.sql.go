@@ -1476,3 +1476,19 @@ func (q *Queries) ReplaceCommentAttachments(ctx context.Context, arg ReplaceComm
 	}
 	return result.RowsAffected(), nil
 }
+
+const sumWorkspaceAttachmentBytes = `-- name: SumWorkspaceAttachmentBytes :one
+SELECT COALESCE(SUM(size_bytes), 0)::bigint AS used_bytes
+FROM attachment
+WHERE workspace_id = $1
+`
+
+// Attachment bytes a workspace holds, for its storage limit (MUL-9489). Every
+// row counts, whatever owns it; thumbnails are not attachment rows. An
+// index-only scan on idx_attachment_workspace_size.
+func (q *Queries) SumWorkspaceAttachmentBytes(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, sumWorkspaceAttachmentBytes, workspaceID)
+	var used_bytes int64
+	err := row.Scan(&used_bytes)
+	return used_bytes, err
+}

@@ -108,7 +108,8 @@ export function PanelSection({
   collapsed,
   onCollapsedChange,
   children,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"section">, "children" | "className"> & {
   label: string;
   /** Rendered at the end of the label row (e.g. a create button). */
   action?: React.ReactNode;
@@ -121,7 +122,7 @@ export function PanelSection({
   const contentId = useId();
   const collapsible = !!onCollapsedChange;
   return (
-    <section data-mc="panel-section" aria-labelledby={id} className="mt-5">
+    <section {...props} data-mc="panel-section" aria-labelledby={id} className="mt-5">
       <div className="group/section flex h-7 items-center gap-1 pl-3 pr-1">
         <h3 id={id} className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">
           {collapsible ? (

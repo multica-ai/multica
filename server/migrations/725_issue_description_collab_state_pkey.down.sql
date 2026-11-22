@@ -1,0 +1,1 @@
+ALTER TABLE issue_description_collab_state DROP CONSTRAINT IF EXISTS issue_description_collab_state_pkey;
