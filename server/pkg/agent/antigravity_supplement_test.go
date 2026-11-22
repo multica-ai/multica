@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -72,9 +73,23 @@ func injectedUserMessages(t *testing.T, reply map[string]any) []string {
 		if !ok {
 			t.Fatalf("inject step %#v is not a userMessage", raw)
 		}
-		messages = append(messages, message)
+		marker, body, ok := strings.Cut(message, "\n")
+		if !ok || !strings.HasPrefix(marker, cursorGuidanceTagPrefix) {
+			t.Fatalf("injected message %.80q does not open with a guidance marker", message)
+		}
+		messages = append(messages, body)
 	}
 	return messages
+}
+
+// onlyInflightMarker returns the marker of the single guidance a hook injected.
+func onlyInflightMarker(t *testing.T, s *antigravitySupplementSession) string {
+	t.Helper()
+	markers := s.inflightMarkers()
+	if len(markers) != 1 {
+		t.Fatalf("in-flight markers = %q, want one", markers)
+	}
+	return markers[0]
 }
 
 // antigravitySupplementAsync starts Supplement and waits until the input is
@@ -154,7 +169,7 @@ func TestAntigravitySupplementDeliversThroughHookRelay(t *testing.T) {
 		t.Fatalf("second hook replayed claimed guidance: %#v", reply)
 	}
 
-	s.receipt("Also update the changelog.")
+	s.receipt(onlyInflightMarker(t, s))
 	if err := <-done; err != nil {
 		t.Fatalf("supplement = %v, want delivered", err)
 	}
@@ -171,7 +186,7 @@ func TestAntigravitySupplementIgnoresForeignUserInput(t *testing.T) {
 	done := antigravitySupplementAsync(t, s, t.Context(), "Prefer the smaller fix.")
 	relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))
 
-	s.receipt("lint: 3 warnings in main.go")
+	s.receipt(cursorGuidanceTagPrefix + "0000000000000000]")
 	assertAntigravitySupplementWaiting(t, done)
 	s.end()
 	if err := <-done; !errors.Is(err, context.Canceled) {
@@ -191,7 +206,7 @@ func TestAntigravitySupplementIgnoresOtherConversations(t *testing.T) {
 	if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); len(got) != 1 {
 		t.Fatalf("main conversation injected %q", got)
 	}
-	s.receipt("Use the smaller fix.")
+	s.receipt(onlyInflightMarker(t, s))
 	if err := <-done; err != nil {
 		t.Fatalf("supplement = %v", err)
 	}
@@ -207,12 +222,16 @@ func TestAntigravitySupplementInjectsOneMessagePerHookInOrder(t *testing.T) {
 			t.Fatalf("injected = %q, want %q", got, want)
 		}
 	}
-	s.receipt("second")
+	markers := s.inflightMarkers()
+	if len(markers) != 2 || markers[0] == markers[1] {
+		t.Fatalf("in-flight markers = %q, want one per message", markers)
+	}
+	s.receipt(markers[1])
 	if err := <-second; err != nil {
 		t.Fatalf("second = %v", err)
 	}
 	assertAntigravitySupplementWaiting(t, first)
-	s.receipt("first")
+	s.receipt(markers[0])
 	if err := <-first; err != nil {
 		t.Fatalf("first = %v", err)
 	}
@@ -268,7 +287,7 @@ func TestAntigravitySupplementUnsentReplyReturnsGuidanceToQueue(t *testing.T) {
 		if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); len(got) != 1 || got[0] != want {
 			t.Fatalf("injected = %q, want the unsent guidance first", got)
 		}
-		s.receipt(want)
+		s.receipt(onlyInflightMarker(t, s))
 	}
 	for _, done := range []<-chan error{first, second} {
 		if err := <-done; err != nil {
@@ -288,7 +307,7 @@ func TestAntigravitySupplementCarriesLargestCommentThroughRelay(t *testing.T) {
 	if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); len(got) != 1 || got[0] != big {
 		t.Fatalf("relay injected %d messages, want the full comment", len(got))
 	}
-	s.receipt(big)
+	s.receipt(onlyInflightMarker(t, s))
 	if err := <-done; err != nil {
 		t.Fatalf("supplement = %v", err)
 	}
@@ -424,12 +443,8 @@ func TestAntigravityTurnAcceptsOnlyInjectedUserInputs(t *testing.T) {
 	done := antigravitySupplementAsync(t, s, t.Context(), "steer")
 	relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))
 
-	appDataDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "agy.log")
-	if err := os.WriteFile(logPath, []byte("I0630 1 common.go:156] CLI app data directory: "+appDataDir+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	transcript := &antigravityTranscriptInputs{logPath: logPath}
+	marker := onlyInflightMarker(t, s)
+	transcript, appDataDir := newTestAntigravityTranscript(t)
 
 	turn := antigravityTurn{steps: map[int]antigravityStepSummary{}}
 	turn.observeUserInput(0, s)
@@ -441,8 +456,8 @@ func TestAntigravityTurnAcceptsOnlyInjectedUserInputs(t *testing.T) {
 		t.Fatalf("turn = %+v, want start 0 with steps 2 and 3 injected", turn)
 	}
 
-	// Until the transcript shows the step's text, nothing is delivered; the
-	// foreign step settles nothing once it does.
+	// Until the transcript shows the marker, nothing is delivered; the foreign
+	// input settles nothing.
 	turn.confirmInjected(s, transcript, "conv-main")
 	seedAntigravityTranscript(t, appDataDir, "conv-main", []string{
 		`{"type":"USER_INPUT","step_index":0,"content":"goal"}`,
@@ -450,13 +465,16 @@ func TestAntigravityTurnAcceptsOnlyInjectedUserInputs(t *testing.T) {
 	})
 	turn.confirmInjected(s, transcript, "conv-main")
 	assertAntigravitySupplementWaiting(t, done)
-	if len(turn.unconfirmed) != 1 || turn.unconfirmed[0] != 3 {
-		t.Fatalf("unconfirmed = %v, want [3]", turn.unconfirmed)
+	if !turn.checkTranscript {
+		t.Fatal("stopped checking the transcript with guidance still in flight")
 	}
-	appendAntigravityTranscript(t, appDataDir, "conv-main", `{"type":"USER_INPUT","step_index":3,"content":"steer"}`)
+	appendAntigravityTranscript(t, appDataDir, "conv-main", antigravityUserInputRecord(t, 3, marker+"\nsteer"))
 	turn.confirmInjected(s, transcript, "conv-main")
 	if err := <-done; err != nil {
 		t.Fatalf("supplement = %v", err)
+	}
+	if turn.checkTranscript {
+		t.Fatal("still checking the transcript with nothing in flight")
 	}
 	turn.observeUserInput(5, s)
 	if !turn.invalid {
@@ -481,5 +499,81 @@ func appendAntigravityTranscript(t *testing.T, appDataDir, conversationID, recor
 	defer f.Close()
 	if _, err := f.WriteString(record + "\n"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func newTestAntigravityTranscript(t *testing.T) (*antigravityTranscript, string) {
+	t.Helper()
+	appDataDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "agy.log")
+	if err := os.WriteFile(logPath, []byte("I0630 1 common.go:156] CLI app data directory: "+appDataDir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return &antigravityTranscript{logPath: logPath}, appDataDir
+}
+
+func antigravityUserInputRecord(t *testing.T, step int, content string, extra ...string) string {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{"type": "USER_INPUT", "source": "USER_EXPLICIT", "step_index": step, "content": content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(extra) > 0 {
+		return strings.TrimSuffix(string(data), "}") + "," + strings.Join(extra, ",") + "}"
+	}
+	return string(data)
+}
+
+// agy rewrites the transcript when it compacts the conversation. A receipt
+// written after that must still be found.
+func TestAntigravityTranscriptFollowsCompactionRewrite(t *testing.T) {
+	transcript, appDataDir := newTestAntigravityTranscript(t)
+	const first, second = "[MULTICA-GUIDANCE nonce=1111111111111111]", "[MULTICA-GUIDANCE nonce=2222222222222222]"
+	history := []string{antigravityUserInputRecord(t, 0, "goal")}
+	for i := 1; i < 200; i++ {
+		history = append(history, `{"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","step_index":`+strconv.Itoa(i)+`,"content":"`+strings.Repeat("work ", 30)+`"}`)
+	}
+	history = append(history, antigravityUserInputRecord(t, 200, first+"\nfirst"))
+	seedAntigravityTranscript(t, appDataDir, "conv-main", history)
+
+	var found []string
+	collect := func(marker string) { found = append(found, marker) }
+	transcript.scan("conv-main", []string{first}, collect)
+	if len(found) != 1 || found[0] != first {
+		t.Fatalf("found = %q, want the first receipt", found)
+	}
+
+	seedAntigravityTranscript(t, appDataDir, "conv-main", []string{
+		`{"type":"CONVERSATION_HISTORY","content":"summary"}`,
+		antigravityUserInputRecord(t, 4, second+"\nsecond"),
+	})
+	found = nil
+	transcript.scan("conv-main", []string{second}, collect)
+	if len(found) != 1 || found[0] != second {
+		t.Fatalf("found = %q, want the receipt in the rewritten transcript", found)
+	}
+}
+
+// The compact transcript keeps only a prefix of long content. The marker
+// leads the message, so the receipt survives the truncation.
+func TestAntigravityTranscriptMatchesTruncatedContent(t *testing.T) {
+	s, _ := startTestAntigravitySupplements(t, t.Context())
+	s.activate("conv-main")
+	long := strings.Repeat("x", 64<<10)
+	done := antigravitySupplementAsync(t, s, t.Context(), long)
+	relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))
+	marker := onlyInflightMarker(t, s)
+
+	transcript, appDataDir := newTestAntigravityTranscript(t)
+	seedAntigravityTranscript(t, appDataDir, "conv-main", []string{
+		antigravityUserInputRecord(t, 0, "goal"),
+		antigravityUserInputRecord(t, 3, (marker + "\n" + long)[:4096], `"truncated_fields":["content"]`),
+	})
+	turn := antigravityTurn{steps: map[int]antigravityStepSummary{}}
+	turn.observeUserInput(0, s)
+	turn.observeUserInput(3, s)
+	turn.confirmInjected(s, transcript, "conv-main")
+	if err := <-done; err != nil {
+		t.Fatalf("supplement = %v, want delivered", err)
 	}
 }

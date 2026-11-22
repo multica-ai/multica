@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 )
@@ -200,12 +201,12 @@ type antigravityStepSummary struct {
 type antigravityTurn struct {
 	start *int
 	// injected holds the user_input steps that appeared while steering
-	// guidance was in flight; unconfirmed lists those whose transcript text
-	// has not been checked against that guidance yet.
-	injected    map[int]bool
-	unconfirmed []int
-	steps       map[int]antigravityStepSummary
-	invalid     bool
+	// guidance was in flight; checkTranscript is set until the transcript
+	// shows which guidance they carried.
+	injected        map[int]bool
+	checkTranscript bool
+	steps           map[int]antigravityStepSummary
+	invalid         bool
 }
 
 // observeUserInput classifies a user_input step. The first one opens the turn;
@@ -220,27 +221,22 @@ func (t *antigravityTurn) observeUserInput(index int, supplements *antigravitySu
 			t.injected = make(map[int]bool)
 		}
 		t.injected[index] = true
-		t.unconfirmed = append(t.unconfirmed, index)
+		t.checkTranscript = true
 	default:
 		t.invalid = true
 	}
 }
 
-// confirmInjected settles guidance whose text the transcript shows in an
-// injected user_input step. A step another hook injected settles nothing, so
-// the guidance it displaced fails at the end of the turn and falls back.
-func (t *antigravityTurn) confirmInjected(supplements *antigravitySupplementSession, transcript *antigravityTranscriptInputs, conversationID string) {
-	if len(t.unconfirmed) == 0 {
+// confirmInjected settles guidance whose marker the transcript shows in a
+// USER_INPUT record. A step another hook injected carries no marker and
+// settles nothing, so the guidance it displaced fails at the end of the turn
+// and falls back.
+func (t *antigravityTurn) confirmInjected(supplements *antigravitySupplementSession, transcript *antigravityTranscript, conversationID string) {
+	if !t.checkTranscript {
 		return
 	}
-	inputs := transcript.read(conversationID)
-	t.unconfirmed = slices.DeleteFunc(t.unconfirmed, func(index int) bool {
-		content, ok := inputs[index]
-		if ok {
-			supplements.receipt(content)
-		}
-		return ok
-	})
+	transcript.scan(conversationID, supplements.inflightMarkers(), supplements.receipt)
+	t.checkTranscript = supplements.awaitingReceipt()
 }
 
 func (t *antigravityTurn) settledResponse() int {
@@ -499,7 +495,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		streamStepUsage := make(map[int]TokenUsage)
 		streamTools := make(map[int]antigravityToolState)
 		turn := antigravityTurn{steps: make(map[int]antigravityStepSummary)}
-		transcript := &antigravityTranscriptInputs{logPath: logPath}
+		transcript := &antigravityTranscript{logPath: logPath}
 		finalStatus := "completed"
 		var finalError string
 
@@ -900,58 +896,96 @@ func readAntigravityTranscriptOutput(logPath, conversationID string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// antigravityTranscriptInputs follows the USER_INPUT records agy appends to
-// the conversation transcript during the turn, keyed by step index. Each read
-// parses only the complete lines added since the previous one.
-type antigravityTranscriptInputs struct {
+// antigravityTranscriptLineLimit bounds the transcript line the receipt scan
+// decodes. Longer lines are skipped: the record of the largest guidance, even
+// with every byte JSON-escaped, stays well below it.
+const antigravityTranscriptLineLimit = 1 << 20
+
+// antigravityTranscript scans the conversation transcript agy writes during
+// the turn for the USER_INPUT records injected guidance became. Each scan
+// reads only what was added since the previous one, through one bounded
+// buffer, and decodes only lines that carry an in-flight marker. agy rewrites
+// the file when it compacts the conversation, so a replaced or shrunken file
+// is read again from the start.
+type antigravityTranscript struct {
 	logPath string
 	path    string
+	file    os.FileInfo
 	offset  int64
-	inputs  map[int]string
+	reader  *bufio.Reader
 }
 
-func (r *antigravityTranscriptInputs) read(conversationID string) map[int]string {
+func (r *antigravityTranscript) scan(conversationID string, markers []string, found func(marker string)) {
+	if len(markers) == 0 {
+		return
+	}
 	if r.path == "" {
 		if conversationID == "" {
-			return nil
+			return
 		}
 		// agy logs its data dir at startup, before any step; without it there
 		// is no transcript to follow, so do not rescan the log on every event.
 		appDataDir := readAntigravityAppDataDir(r.logPath)
 		r.logPath = ""
 		if appDataDir == "" {
-			return nil
+			return
 		}
 		r.path = filepath.Join(appDataDir, "brain", conversationID, ".system_generated", "logs", "transcript.jsonl")
 	}
 	f, err := os.Open(r.path)
 	if err != nil {
-		return r.inputs
+		return
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.NewSectionReader(f, r.offset, 1<<62))
+	info, err := f.Stat()
 	if err != nil {
-		return r.inputs
+		return
 	}
-	data = data[:bytes.LastIndexByte(data, '\n')+1]
-	r.offset += int64(len(data))
-	for line := range bytes.Lines(data) {
-		var rec struct {
-			Type      string          `json:"type"`
-			StepIndex *int            `json:"step_index"`
-			Content   json.RawMessage `json:"content"`
-		}
-		var text string
-		if json.Unmarshal(line, &rec) != nil || rec.Type != "USER_INPUT" || rec.StepIndex == nil ||
-			json.Unmarshal(rec.Content, &text) != nil {
+	if r.file == nil || !os.SameFile(r.file, info) || info.Size() < r.offset {
+		r.offset = 0
+	}
+	r.file = info
+	if _, err := f.Seek(r.offset, io.SeekStart); err != nil {
+		return
+	}
+	if r.reader == nil {
+		r.reader = bufio.NewReaderSize(f, antigravityTranscriptLineLimit)
+	} else {
+		r.reader.Reset(f)
+	}
+	pos, long := r.offset, false
+	for {
+		line, err := r.reader.ReadSlice('\n')
+		pos += int64(len(line))
+		if errors.Is(err, bufio.ErrBufferFull) {
+			long = true
 			continue
 		}
-		if r.inputs == nil {
-			r.inputs = make(map[int]string)
+		if err != nil {
+			// A partial last line is read again once agy completes it.
+			return
 		}
-		r.inputs[*rec.StepIndex] = text
+		if !long {
+			for _, marker := range markers {
+				if antigravityTranscriptCarries(line, marker) {
+					found(marker)
+				}
+			}
+		}
+		long = false
+		r.offset = pos
 	}
-	return r.inputs
+}
+
+func antigravityTranscriptCarries(line []byte, marker string) bool {
+	if !bytes.Contains(line, []byte(marker)) {
+		return false
+	}
+	var rec struct {
+		Type    string `json:"type"`
+		Content string `json:"content"`
+	}
+	return json.Unmarshal(line, &rec) == nil && rec.Type == "USER_INPUT" && strings.Contains(rec.Content, marker)
 }
 
 // readAntigravityAppDataDir extracts agy's CLI app data directory from the

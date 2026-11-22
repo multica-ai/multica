@@ -15,23 +15,18 @@ import (
 
 func TestAntigravityExecuteSteersRunningTurnThroughHooks(t *testing.T) {
 	t.Parallel()
-	for name, tc := range map[string]struct {
-		injectedContent string
-		wantDelivered   bool
-	}{
-		// agy records the injected guidance as the step's user input.
-		"delivered": {injectedContent: "Prefer the smaller fix.", wantDelivered: true},
-		// Multica's reply was not applied; another hook injected its own input.
-		"foreign hook input": {injectedContent: "lint: 3 warnings", wantDelivered: false},
-	} {
+	// "delivered": agy records the injected guidance as the step's user input.
+	// "foreign hook input": Multica's reply was not applied; another hook
+	// injected its own input, which carries no marker.
+	for name, wantDelivered := range map[string]bool{"delivered": true, "foreign hook input": false} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			testAntigravityExecuteSteering(t, tc.injectedContent, tc.wantDelivered)
+			testAntigravityExecuteSteering(t, wantDelivered)
 		})
 	}
 }
 
-func testAntigravityExecuteSteering(t *testing.T, injectedContent string, wantDelivered bool) {
+func testAntigravityExecuteSteering(t *testing.T, wantDelivered bool) {
 	cwd := t.TempDir()
 	appDataDir := t.TempDir()
 	transcript := filepath.Join(appDataDir, "brain", "conv-steer", ".system_generated", "logs", "transcript.jsonl")
@@ -52,7 +47,6 @@ printf '%s\n' '{"event":"init","conversation_id":"conv-steer","init":{}}'
 printf '%s\n' '{"type":"USER_INPUT","step_index":0,"content":"original goal"}' >> '` + transcript + `'
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"conv-steer","step_index":0,"state":"DONE","step_type":"user_input"}}'
 while [ ! -f injected ]; do sleep 0.02; done
-printf '%s\n' '{"type":"USER_INPUT","step_index":3,"content":"` + injectedContent + `"}' >> '` + transcript + `'
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"conv-steer","step_index":3,"state":"DONE","step_type":"user_input"}}'
 while [ ! -f answer ]; do sleep 0.02; done
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"conv-steer","step_index":4,"state":"DONE","step_type":"agent_response","text_delta":"Done, with the smaller fix."}}'
@@ -113,14 +107,29 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"conv-steer","statu
 	done := make(chan error, 1)
 	go func() { done <- session.Supplement(t.Context(), "Prefer the smaller fix.") }()
 	var injected []string
+	var reply map[string]any
 	for len(injected) == 0 && time.Now().Before(deadline) {
-		injected = injectedUserMessages(t, relayAntigravityHook(t, getenv, preInvocation("conv-steer")))
+		reply = relayAntigravityHook(t, getenv, preInvocation("conv-steer"))
+		injected = injectedUserMessages(t, reply)
 		time.Sleep(10 * time.Millisecond)
 	}
 	if len(injected) != 1 || injected[0] != "Prefer the smaller fix." {
 		t.Fatalf("injected = %q", injected)
 	}
 	assertAntigravitySupplementWaiting(t, done)
+	// agy appends the step's transcript record before it streams the step.
+	content := "lint: 3 warnings"
+	if wantDelivered {
+		content = reply["injectSteps"].([]any)[0].(map[string]any)["userMessage"].(string)
+	}
+	record := antigravityUserInputRecord(t, 3, content) + "\n"
+	if f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o644); err != nil {
+		t.Fatal(err)
+	} else if _, err := f.WriteString(record); err != nil {
+		t.Fatal(err)
+	} else {
+		f.Close()
+	}
 	if err := os.WriteFile(filepath.Join(cwd, "injected"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}

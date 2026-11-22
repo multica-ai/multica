@@ -59,10 +59,12 @@ type antigravityHookRequest struct {
 // model reads it as a message from the user.
 //
 // A hook response is not delivery: the relay can fail after it, and other
-// hooks (global, plugin) can inject user input of their own. Guidance counts as
-// delivered only when a user_input step of the turn carries its text in agy's
-// conversation transcript; the daemon delivers one message at a time, so each
-// hook reply carries at most one.
+// hooks (global, plugin) can inject user input of their own. Each message
+// opens with its own random marker, and counts as delivered only when agy's
+// conversation transcript shows a USER_INPUT record carrying that marker. The
+// marker leads the text so it survives the transcript's truncated content. The
+// daemon delivers one message at a time, so each hook reply carries at most
+// one.
 type antigravitySupplementSession struct {
 	ctx       context.Context
 	logger    *slog.Logger
@@ -82,9 +84,10 @@ type antigravitySupplementSession struct {
 }
 
 type antigravitySupplementInput struct {
-	ctx  context.Context
-	text string
-	done chan error
+	ctx    context.Context
+	marker string
+	text   string
+	done   chan error
 	// claimed is set while a hook response carries the input; only the stream
 	// receipt or the end of the turn settles it then.
 	claimed bool
@@ -216,10 +219,16 @@ func (s *antigravitySupplementSession) ready() bool {
 }
 
 func (s *antigravitySupplementSession) supplement(ctx context.Context, text string) error {
+	nonce, err := randomHex(8)
+	if err != nil {
+		return err
+	}
+	marker := cursorGuidanceTagPrefix + nonce + "]"
+	text = marker + "\n" + text
 	if len(text) > antigravityHookGuidanceLimit {
 		return fmt.Errorf("antigravity guidance is %d bytes, limit %d", len(text), antigravityHookGuidanceLimit)
 	}
-	input := &antigravitySupplementInput{ctx: ctx, text: text, done: make(chan error, 1)}
+	input := &antigravitySupplementInput{ctx: ctx, marker: marker, text: text, done: make(chan error, 1)}
 	s.mu.Lock()
 	if err := ctx.Err(); err != nil {
 		s.mu.Unlock()
@@ -321,18 +330,29 @@ func (s *antigravitySupplementSession) awaitingReceipt() bool {
 	return len(s.inflight) > 0
 }
 
-// receipt settles the injected guidance that a user_input step of the turn
-// carries. content is that step's text from agy's transcript; a step another
-// hook injected matches nothing and settles nothing.
-func (s *antigravitySupplementSession) receipt(content string) {
+// inflightMarkers lists the markers of guidance a hook has injected.
+func (s *antigravitySupplementSession) inflightMarkers() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	markers := make([]string, len(s.inflight))
+	for i, input := range s.inflight {
+		markers[i] = input.marker
+	}
+	return markers
+}
+
+// receipt settles the injected guidance a transcript USER_INPUT record
+// carries the marker of.
+func (s *antigravitySupplementSession) receipt(marker string) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	i := slices.IndexFunc(s.inflight, func(input *antigravitySupplementInput) bool {
-		return strings.Contains(content, strings.TrimSpace(input.text))
-	})
+	i := slices.IndexFunc(s.inflight, func(input *antigravitySupplementInput) bool { return input.marker == marker })
 	if i < 0 {
 		return
 	}
