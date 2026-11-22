@@ -34,7 +34,11 @@ func TestInterruptedRunRecoveryPreservesEvidenceAndStops(t *testing.T) {
 			}
 			f.Cleanup(t, "DELETE FROM agent_task_queue WHERE parent_task_id=$1", parentID)
 			svc := f.svc.TaskSvc
-			failed, err := svc.FailTask(ctx, parent.ID, raw, parent.SessionID.String, parent.WorkDir.String, "", "agent_error.unknown", false, "", "")
+			reportedReason := "timeout" // Current adapter confirmed cleanup.
+			if raw == "workspace routing discovery timed out" {
+				reportedReason = "agent_error.unknown"
+			}
+			failed, err := svc.FailTask(ctx, parent.ID, raw, parent.SessionID.String, parent.WorkDir.String, "", reportedReason, false, "", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +57,7 @@ func TestInterruptedRunRecoveryPreservesEvidenceAndStops(t *testing.T) {
 				t.Fatalf("retry lost continuity/budget: %+v", child)
 			}
 			f.Exec(t, "UPDATE agent_task_queue SET status='running' WHERE id=$1", child.ID)
-			if _, err := svc.FailTask(ctx, child.ID, raw, child.SessionID.String, child.WorkDir.String, "", "agent_error.unknown", false, "", ""); err != nil {
+			if _, err := svc.FailTask(ctx, child.ID, raw, child.SessionID.String, child.WorkDir.String, "", reportedReason, false, "", ""); err != nil {
 				t.Fatal(err)
 			}
 			if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE parent_task_id=$1", child.ID); n != 0 {
@@ -90,6 +94,40 @@ func TestInterruptedRunDisabledRecoveryBudget(t *testing.T) {
 	}
 	if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE parent_task_id=$1", parent); n != 0 {
 		t.Fatalf("disabled recovery produced %d children", n)
+	}
+}
+
+func TestInterruptedRunUncertainCleanupNeverRetries(t *testing.T) {
+	for _, method := range []string{"thread/start", "thread/resume"} {
+		for _, reason := range []string{"agent_error.unknown", "cleanup_unconfirmed"} {
+			t.Run(method+"/"+reason, func(t *testing.T) {
+				f, _, issue, agent := wakeFixture(t)
+				ctx := context.Background()
+				agentRow, err := f.q.GetAgent(ctx, parseTestUUID(t, agent))
+				if err != nil {
+					t.Fatal(err)
+				}
+				work := t.TempDir()
+				raw := "codex " + method + " failed: codex app-server handshake timeout: " + method + " did not respond after 1m0s"
+				if reason == "cleanup_unconfirmed" {
+					raw += "; retry suppressed: process cleanup/reap not confirmed"
+				}
+				parent := f.Task(t, agent, testutil.Cols{"issue_id": issue, "runtime_id": agentRow.RuntimeID, "status": "running", "attempt": 1, "max_attempts": 2, "work_dir": work, "session_id": "retained-session"})
+				failed, err := f.svc.TaskSvc.FailTask(ctx, parseTestUUID(t, parent), raw, "", "", "", reason, false, "", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if failed.FailureReason.String != "cleanup_unconfirmed" || failed.Error.String != raw || failed.WorkDir.String != work || failed.SessionID.String != "retained-session" {
+					t.Fatalf("cleanup/evidence lost: %+v", failed)
+				}
+				if retry, err := f.svc.TaskSvc.MaybeRetryFailedTask(ctx, *failed); err != nil || retry != nil {
+					t.Fatalf("uncertain cleanup retried: %+v %v", retry, err)
+				}
+				if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE parent_task_id=$1", parent); n != 0 {
+					t.Fatalf("unsafe retry children: %d", n)
+				}
+			})
+		}
 	}
 }
 

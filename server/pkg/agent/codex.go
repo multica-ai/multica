@@ -1570,6 +1570,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			finalStatus = "failed"
 			stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
 			finalError = err.Error()
+			if !cleanupConfirmed {
+				finalStatus = "cleanup_unconfirmed"
+				finalError += "; retry suppressed: process cleanup/reap not confirmed"
+			} else if timedOut {
+				// Only a reaped process tree authorizes the daemon's timeout retry
+				// path. A bare legacy handshake error carries no such evidence.
+				finalStatus = "timeout"
+			}
 			if c.threadSetupMethod != "" {
 				classification := classifyCodexStartupStderr(stderrTail, timedOut)
 				b.cfg.Logger.Warn("codex lifecycle",

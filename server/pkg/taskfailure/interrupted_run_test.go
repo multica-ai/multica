@@ -10,15 +10,34 @@ func TestInterruptedRunTimeoutRecoveryClassification(t *testing.T) {
 	}
 	for _, raw := range errors {
 		t.Run(raw, func(t *testing.T) {
-			if got := Classify(raw); got != ReasonTimeout {
-				t.Errorf("Classify = %s, want %s", got, ReasonTimeout)
+			want := ReasonProcessCleanupUnconfirmed
+			if raw == "workspace routing discovery timed out" {
+				want = ReasonTimeout
+			}
+			if got := Classify(raw); got != want {
+				t.Errorf("Classify = %s, want %s", got, want)
 			}
 			for _, legacy := range []string{"agent_error", ReasonAgentUnknown.String()} {
-				if got := NormalizeDaemonReason(legacy, raw); got != ReasonTimeout {
-					t.Errorf("NormalizeDaemonReason(%s) = %s, want %s", legacy, got, ReasonTimeout)
+				if got := NormalizeDaemonReason(legacy, raw); got != want {
+					t.Errorf("NormalizeDaemonReason(%s) = %s, want %s", legacy, got, want)
 				}
 			}
+			if got := NormalizeDaemonReason(ReasonTimeout.String(), raw); got != ReasonTimeout {
+				t.Errorf("explicit confirmed timeout reason overwritten: %s", got)
+			}
 		})
+	}
+}
+
+func TestInterruptedRunUnconfirmedCleanupSuffix(t *testing.T) {
+	for _, method := range []string{"thread/start", "thread/resume"} {
+		raw := "codex " + method + " failed: codex app-server handshake timeout: " + method + " did not respond after 1m0s; retry suppressed: process cleanup/reap not confirmed"
+		if got := Classify(raw); got != ReasonProcessCleanupUnconfirmed {
+			t.Errorf("Classify(%q) = %s", raw, got)
+		}
+		if got := NormalizeDaemonReason("agent_error.unknown", raw); got != ReasonProcessCleanupUnconfirmed {
+			t.Errorf("NormalizeDaemonReason(%q) = %s", raw, got)
+		}
 	}
 }
 

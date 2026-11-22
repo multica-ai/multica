@@ -5668,7 +5668,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	// both sides of a cross-issue handoff.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
 		comment := errMsg
-		if taskfailure.IsInterruptedRunTimeout(errMsg) && task.Attempt >= task.MaxAttempts {
+		if failureReason == taskfailure.ReasonTimeout.String() && taskfailure.IsInterruptedRunTimeout(errMsg) && task.Attempt >= task.MaxAttempts {
 			comment += fmt.Sprintf("\n\nAutomatic recovery stopped after %d of %d attempts. The original error and working directory remain on the failed run.", task.Attempt, task.MaxAttempts)
 		}
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(comment), "system", task.TriggerCommentID, task.ID)

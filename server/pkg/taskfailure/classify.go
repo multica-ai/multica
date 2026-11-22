@@ -97,12 +97,11 @@ func explicitContextOverflow(lower string) bool {
 	) || containsAny(lower, contextWindowExceededWitnesses...)
 }
 
-// Classify maps a free-form error string from the agent runtime / CLI
-// to one of the 14 agent_error.* sub-reasons. Always returns a valid
-// Reason; falls back to ReasonAgentUnknown when no rule matches and for
-// empty input.
+// Classify maps a free-form runtime / CLI error to a canonical failure reason.
+// Known platform lifecycle witnesses precede the agent_error.* rules. It falls
+// back to ReasonAgentUnknown when no rule matches and for empty input.
 //
-// The rule order mirrors the SQL CASE expression in MUL-1949
+// The agent-error rule order mirrors the SQL CASE expression in MUL-1949
 // (db-boy's offline backfill query). The SQL is the source of truth:
 // when the two diverge, this Go classifier is wrong and should be
 // updated to match. Keeping them in lock-step is required so that
@@ -124,7 +123,10 @@ func explicitContextOverflow(lower string) bool {
 func Classify(rawError string) Reason {
 	trimmed := strings.TrimSpace(WithoutCodebuddyProtocolSummary(rawError))
 	if IsInterruptedRunTimeout(trimmed) {
-		return ReasonTimeout
+		if trimmed == "workspace routing discovery timed out" {
+			return ReasonTimeout
+		}
+		return ReasonProcessCleanupUnconfirmed
 	}
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
@@ -727,10 +729,11 @@ var legacyTokenRateLimitReasons = map[string]bool{
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
 	rawError = WithoutCodebuddyProtocolSummary(rawError)
-	// Installed daemons report these startup deadlines as unknown. Normalize
-	// before the service evaluates the existing bounded timeout retry policy.
+	// Legacy handshake strings have no positive cleanup evidence. Current
+	// daemons report an explicit timeout only after the adapter confirms reap;
+	// preserve that structured reason instead of promoting unknown reports.
 	if (reason == "agent_error" || reason == ReasonAgentUnknown.String() || reason == "") && IsInterruptedRunTimeout(rawError) {
-		return ReasonTimeout
+		return Classify(rawError)
 	}
 	// Older daemons treated the billing rejection as a rate limit because
 	// they only recognized the numeric status and the structured balance code.
