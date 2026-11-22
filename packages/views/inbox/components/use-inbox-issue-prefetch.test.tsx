@@ -8,7 +8,9 @@ import type { InboxItem } from "@multica/core/types";
 import { useInboxIssuePrefetch } from "./use-inbox-issue-prefetch";
 
 const prefetchRoute = vi.fn();
+const viewer = vi.hoisted(() => ({ guest: false }));
 vi.mock("../../navigation", () => ({ useNavigation: () => ({ prefetch: prefetchRoute }) }));
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => viewer.guest }));
 vi.mock("@multica/core/api", () => ({
   api: {
     getIssue: vi.fn(async (ref: string) => {
@@ -40,6 +42,7 @@ describe("useInboxIssuePrefetch", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    viewer.guest = false;
   });
 
   it("warms the first unread notifications' issues once the list is idle", async () => {
@@ -68,6 +71,17 @@ describe("useInboxIssuePrefetch", () => {
 
     expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual(["MUL-a", "MUL-e"]);
     expect(vi.mocked(api.listTimeline).mock.calls.map(([id]) => id)).toEqual(["a", "e"]);
+  });
+
+  it("leaves out the runs for a guest, whose issue page has none", async () => {
+    viewer.guest = true;
+    const { hook } = setup([row("a")]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await hook.result.current(row("e", true)); });
+
+    expect(vi.mocked(api.listTimeline).mock.calls.map(([id]) => id)).toEqual(["a", "e"]);
+    expect(vi.mocked(api.listChildIssues).mock.calls.map(([id]) => id)).toEqual(["a", "e"]);
+    expect(api.listTasksByIssue).not.toHaveBeenCalled();
   });
 
   it("does not restart when realtime replaces the same rows", async () => {

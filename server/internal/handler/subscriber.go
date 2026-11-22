@@ -285,6 +285,14 @@ func (h *Handler) unsubscribeFromIssue(w http.ResponseWriter, r *http.Request, s
 	// (MUL-5483 review round 8).
 	targetUserID = uuidToString(parseUUID(targetUserID))
 
+	// A guest leaves a tree for itself only: the tree may reach past its
+	// projects, and other people's subscriptions there are not its to change.
+	if subtree && (targetUserType != callerActorType || targetUserID != uuidToString(parseUUID(callerActorID))) &&
+		h.isGuest(r, workspaceID, requestUserID(r)) {
+		writeError(w, http.StatusForbidden, "guests can only unsubscribe themselves")
+		return
+	}
+
 	// Every issue this call actually left. The subtree variant reports the whole
 	// set so each one gets its own broadcast: a client with a CHILD issue open
 	// never sees the root's event, and would otherwise keep showing a
