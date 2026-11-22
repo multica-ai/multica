@@ -80,6 +80,8 @@
     "copy_link": "Copiar enlace",
     "copy_title_as_link": "Copiar enlace con título",
     "delete_action": "Eliminar proyecto",
+    "tab_overview": "Resumen",
+    "tab_issues": "Tareas",
     "section_properties": "Propiedades",
     "section_progress": "Progreso",
     "section_description": "Descripción",
@@ -123,7 +125,22 @@
       "forecast_none": "Hay muy pocas tareas completadas recientemente para prever una fecha de fin.",
       "by_assignee": "Por responsable",
       "agent_tag": "Agente",
-      "unassigned": "Sin asignar"
+      "unassigned": "Sin asignar",
+      "axis_assignee": "Responsable",
+      "axis_label": "Etiqueta",
+      "by_label": "Por etiqueta",
+      "no_labels": "Aún no hay incidencias.",
+      "unlabeled": "Sin etiqueta"
+    },
+    "tab_activity": "Actividad",
+    "agent_context_badge": "Contexto del agente",
+    "section_breakdown": "Desglose",
+    "section_activity": "Actividad reciente",
+    "activity": {
+      "empty": "Las incidencias de este proyecto aún no tienen actividad.",
+      "load_more": "Cargar más",
+      "view_all": "Ver todo",
+      "hint": "Cambios de estado, responsable, prioridad y fechas en las incidencias de este proyecto."
     }
   },
   "resources": {

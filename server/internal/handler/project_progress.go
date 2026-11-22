@@ -34,6 +34,16 @@ type ProjectProgressAssignee struct {
 	Started      int64   `json:"started"`
 }
 
+// ProjectProgressLabel counts the issues carrying one label. An issue with
+// several labels counts under each, so rows can add up to more than the scope.
+type ProjectProgressLabel struct {
+	// LabelID is null for the issues with no label.
+	LabelID   *string `json:"label_id"`
+	Scope     int64   `json:"scope"`
+	Completed int64   `json:"completed"`
+	Started   int64   `json:"started"`
+}
+
 // ProjectProgressPoint is the project's progress at the end of Date (UTC).
 type ProjectProgressPoint struct {
 	Date      string `json:"date"`
@@ -52,6 +62,7 @@ type ProjectProgressForecast struct {
 type ProjectProgressResponse struct {
 	Progress   ProjectProgress           `json:"progress"`
 	ByAssignee []ProjectProgressAssignee `json:"by_assignee"`
+	ByLabel    []ProjectProgressLabel    `json:"by_label"`
 	// History has one point a week from the project's start (at most a year
 	// back) and a final point for today. Scope counts the issues in the
 	// project now, from when each was created: moves between projects are
@@ -71,6 +82,7 @@ type progressIssue struct {
 	status       string
 	assigneeType string
 	assigneeID   string
+	labelIDs     []string
 	createdAt    time.Time
 	// changes are the issue's status changes after the history window
 	// opens, oldest first.
@@ -234,8 +246,65 @@ func summarizeProjectProgress(issues []progressIssue, categoryOf func(string) st
 	return newProjectProgress(total, terminal, completed, started), rows
 }
 
+// summarizeProjectProgressByLabel breaks the scope down by label, largest
+// first, with the unlabelled issues last.
+func summarizeProjectProgressByLabel(issues []progressIssue, categoryOf func(string) string) []ProjectProgressLabel {
+	byLabel := map[string]*ProjectProgressLabel{}
+	var order []string
+	add := func(labelID string, category string) {
+		row, ok := byLabel[labelID]
+		if !ok {
+			row = &ProjectProgressLabel{}
+			if labelID != "" {
+				id := labelID
+				row.LabelID = &id
+			}
+			byLabel[labelID] = row
+			order = append(order, labelID)
+		}
+		row.Scope++
+		switch category {
+		case issuestatus.CategoryDone:
+			row.Completed++
+		case issuestatus.CategoryStarted:
+			row.Started++
+		}
+	}
+	for _, issue := range issues {
+		category := categoryOf(issue.status)
+		if category == issuestatus.CategoryClosed {
+			continue
+		}
+		if len(issue.labelIDs) == 0 {
+			add("", category)
+			continue
+		}
+		for _, id := range issue.labelIDs {
+			add(id, category)
+		}
+	}
+	rows := make([]ProjectProgressLabel, 0, len(order))
+	for _, id := range order {
+		rows = append(rows, *byLabel[id])
+	}
+	sort.SliceStable(rows, func(a, b int) bool {
+		na, nb := rows[a].LabelID == nil, rows[b].LabelID == nil
+		if na != nb {
+			return nb
+		}
+		if rows[a].Scope != rows[b].Scope {
+			return rows[a].Scope > rows[b].Scope
+		}
+		if na {
+			return false
+		}
+		return *rows[a].LabelID < *rows[b].LabelID
+	})
+	return rows
+}
+
 // GetProjectProgress returns a project's progress with its breakdown by
-// assignee, weekly history and forecast completion date. (MUL-8879)
+// assignee and label, weekly history and forecast completion date. (MUL-8879)
 func (h *Handler) GetProjectProgress(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := h.resolveWorkspaceID(r)
@@ -288,6 +357,9 @@ func (h *Handler) GetProjectProgress(w http.ResponseWriter, r *http.Request) {
 		} else {
 			issues[i].assigneeType = ""
 		}
+		for _, labelID := range row.LabelIds {
+			issues[i].labelIDs = append(issues[i].labelIDs, uuidToString(labelID))
+		}
 		ids[i] = row.ID
 		index[uuidToString(row.ID)] = i
 	}
@@ -323,6 +395,7 @@ func (h *Handler) GetProjectProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ProjectProgressResponse{
 		Progress:   progress,
 		ByAssignee: byAssignee,
+		ByLabel:    summarizeProjectProgressByLabel(issues, categoryOf),
 		History:    history,
 		Forecast:   forecastProjectCompletion(history, now),
 	})

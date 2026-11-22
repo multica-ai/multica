@@ -147,6 +147,7 @@ import type {
   Project,
   ArchiveProjectResponse,
   ProjectProgressDetail,
+  ProjectActivityPage,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -430,6 +431,8 @@ import {
   ArchiveProjectResponseSchema,
   ProjectProgressDetailSchema,
   EMPTY_PROJECT_PROGRESS_DETAIL,
+  ProjectActivityPageSchema,
+  EMPTY_PROJECT_ACTIVITY_PAGE,
   ListProjectMembersResponseSchema,
   ListPrivateProjectsResponseSchema,
   ProjectSubscriptionSchema,
@@ -4979,6 +4982,20 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/projects/${id}/progress`);
     return parseWithFallback(raw, ProjectProgressDetailSchema, EMPTY_PROJECT_PROGRESS_DETAIL, {
       endpoint: "GET /api/projects/:id/progress",
+    });
+  }
+
+  async listProjectActivity(
+    id: string,
+    params: { before?: string; limit?: number } = {},
+  ): Promise<ProjectActivityPage> {
+    const search = new URLSearchParams();
+    if (params.before) search.set("before", params.before);
+    if (params.limit) search.set("limit", String(params.limit));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/activity${query ? `?${query}` : ""}`);
+    return parseWithFallback(raw, ProjectActivityPageSchema, EMPTY_PROJECT_ACTIVITY_PAGE, {
+      endpoint: "GET /api/projects/:id/activity",
     });
   }
 

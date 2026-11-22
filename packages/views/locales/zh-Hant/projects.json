@@ -82,6 +82,8 @@
     "copy_link": "複製連結",
     "copy_title_as_link": "複製帶標題的連結",
     "delete_action": "刪除專案",
+    "tab_overview": "概覽",
+    "tab_issues": "任務",
     "section_properties": "屬性",
     "section_progress": "進度",
     "section_description": "描述",
@@ -119,7 +121,22 @@
       "forecast_none": "近期完成的任務太少，暫時無法預測完成日期。",
       "by_assignee": "按負責人",
       "agent_tag": "AI 代理",
-      "unassigned": "未指派"
+      "unassigned": "未指派",
+      "axis_assignee": "負責人",
+      "axis_label": "標籤",
+      "by_label": "按標籤",
+      "no_labels": "還沒有任務。",
+      "unlabeled": "無標籤"
+    },
+    "tab_activity": "活動",
+    "agent_context_badge": "智慧體上下文",
+    "section_breakdown": "分佈",
+    "section_activity": "動態",
+    "activity": {
+      "empty": "這個專案的任務還沒有動態。",
+      "load_more": "載入更多",
+      "view_all": "查看全部",
+      "hint": "專案內所有任務的狀態、負責人、優先級和日期變化。"
     }
   },
   "resources": {

@@ -2643,6 +2643,8 @@ WHERE a.workspace_id = $1;
 -- (NULL = workspace); when set it narrows issue work to the direct children
 -- of that issue, so an issue detail's sub-issue header reads the same
 -- projection as the Issues list header instead of deriving its own count.
+-- project_id is optional (NULL = workspace); when set it narrows issue work to
+-- that project's issues, for the project page's working-agents section.
 SELECT
   a.id,
   a.name,
@@ -2730,6 +2732,16 @@ WHERE a.workspace_id = $1
       WHERE child.id = atq.issue_id
         AND child.workspace_id = a.workspace_id
         AND child.parent_issue_id = @parent_issue_id::uuid
+    )
+  )
+  AND (
+    sqlc.narg('project_id')::uuid IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM issue pi
+      WHERE pi.id = atq.issue_id
+        AND pi.workspace_id = a.workspace_id
+        AND pi.project_id = sqlc.narg('project_id')::uuid
     )
   )
 GROUP BY a.id, a.name, a.avatar_url, a.created_at

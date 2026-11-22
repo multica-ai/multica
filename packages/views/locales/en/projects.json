@@ -82,6 +82,8 @@
     "copy_link": "Copy link",
     "copy_title_as_link": "Copy link with title",
     "delete_action": "Delete project",
+    "tab_overview": "Overview",
+    "tab_issues": "Issues",
     "section_properties": "Properties",
     "section_progress": "Progress",
     "section_description": "Description",
@@ -123,7 +125,22 @@
       "forecast_none": "Too few recent completions to forecast a finish date.",
       "by_assignee": "By assignee",
       "agent_tag": "Agent",
-      "unassigned": "Unassigned"
+      "unassigned": "Unassigned",
+      "axis_assignee": "Assignee",
+      "axis_label": "Label",
+      "by_label": "By label",
+      "no_labels": "No issues yet.",
+      "unlabeled": "No label"
+    },
+    "tab_activity": "Activity",
+    "agent_context_badge": "Agent context",
+    "section_breakdown": "Breakdown",
+    "section_activity": "Recent activity",
+    "activity": {
+      "empty": "No activity on this project's issues yet.",
+      "load_more": "Load more",
+      "view_all": "View all",
+      "hint": "Status, assignee, priority and date changes across this project's issues."
     }
   },
   "resources": {

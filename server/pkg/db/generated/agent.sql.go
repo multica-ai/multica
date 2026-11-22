@@ -6843,6 +6843,16 @@ WHERE a.workspace_id = $1
         AND child.parent_issue_id = $5::uuid
     )
   )
+  AND (
+    $6::uuid IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM issue pi
+      WHERE pi.id = atq.issue_id
+        AND pi.workspace_id = a.workspace_id
+        AND pi.project_id = $6::uuid
+    )
+  )
 GROUP BY a.id, a.name, a.avatar_url, a.created_at
 ORDER BY a.created_at ASC
 `
@@ -6853,6 +6863,7 @@ type ListWorkspaceWorkingAgentsParams struct {
 	MineRelation  string      `json:"mine_relation"`
 	MemberID      pgtype.UUID `json:"member_id"`
 	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	ProjectID     pgtype.UUID `json:"project_id"`
 }
 
 type ListWorkspaceWorkingAgentsRow struct {
@@ -6875,6 +6886,8 @@ type ListWorkspaceWorkingAgentsRow struct {
 // (NULL = workspace); when set it narrows issue work to the direct children
 // of that issue, so an issue detail's sub-issue header reads the same
 // projection as the Issues list header instead of deriving its own count.
+// project_id is optional (NULL = workspace); when set it narrows issue work to
+// that project's issues, for the project page's working-agents section.
 func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, arg ListWorkspaceWorkingAgentsParams) ([]ListWorkspaceWorkingAgentsRow, error) {
 	rows, err := q.db.Query(ctx, listWorkspaceWorkingAgents,
 		arg.WorkspaceID,
@@ -6882,6 +6895,7 @@ func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, arg ListWorksp
 		arg.MineRelation,
 		arg.MemberID,
 		arg.ParentIssueID,
+		arg.ProjectID,
 	)
 	if err != nil {
 		return nil, err

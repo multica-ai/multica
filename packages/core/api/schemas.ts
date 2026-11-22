@@ -81,6 +81,7 @@ import type {
   Label,
   Project,
   ProjectProgressDetail,
+  ProjectActivityPage,
   ListProjectsResponse,
   MemberWithUser,
   IssueProperty,
@@ -1878,6 +1879,13 @@ export const ProjectProgressDetailSchema = z.object({
     completed: z.number().default(0),
     started: z.number().default(0),
   }).loose()).default([]),
+  // Older servers omit it; the label breakdown then has nothing to show.
+  by_label: z.array(z.object({
+    label_id: z.string().nullable().default(null),
+    scope: z.number().default(0),
+    completed: z.number().default(0),
+    started: z.number().default(0),
+  }).loose()).default([]).catch([]),
   history: z.array(z.object({
     date: z.string(),
     scope: z.number().default(0),
@@ -1893,9 +1901,28 @@ export const ProjectProgressDetailSchema = z.object({
 export const EMPTY_PROJECT_PROGRESS_DETAIL: ProjectProgressDetail = {
   progress: { unit: "issues", scope: 0, completed: 0, started: 0, unstarted: 0, cancelled: 0, percent: 0 },
   by_assignee: [],
+  by_label: [],
   history: [],
   forecast: null,
 };
+
+export const ProjectActivityPageSchema = z.object({
+  entries: z.array(z.object({
+    id: z.string(),
+    issue_id: z.string(),
+    issue_identifier: z.string().default(""),
+    issue_title: z.string().default(""),
+    issue_status: z.string().default(""),
+    actor_type: z.string().default(""),
+    actor_id: z.string().default(""),
+    action: z.string(),
+    details: z.record(z.string(), z.unknown()).default({}).catch({}),
+    created_at: z.string(),
+  }).loose()).default([]),
+  next_cursor: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_PROJECT_ACTIVITY_PAGE: ProjectActivityPage = { entries: [], next_cursor: null };
 
 export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = { projects: [], total: 0 };
 

@@ -2445,6 +2445,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
 					r.Get("/progress", h.GetProjectProgress)
+					r.Get("/activity", h.ListProjectActivity)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
 					r.With(handler.RequireHumanActor).Post("/join", h.JoinPrivateProject)

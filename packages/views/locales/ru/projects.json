@@ -80,6 +80,8 @@
     "copy_link": "Скопировать ссылку",
     "copy_title_as_link": "Копировать ссылку с заголовком",
     "delete_action": "Удалить проект",
+    "tab_overview": "Обзор",
+    "tab_issues": "Задачи",
     "section_properties": "Свойства",
     "section_progress": "Прогресс",
     "section_description": "Описание",
@@ -131,7 +133,22 @@
       "forecast_none": "Недавно завершённых задач слишком мало, чтобы спрогнозировать дату окончания.",
       "by_assignee": "По исполнителям",
       "agent_tag": "Агент",
-      "unassigned": "Не назначено"
+      "unassigned": "Не назначено",
+      "axis_assignee": "Исполнитель",
+      "axis_label": "Метка",
+      "by_label": "По меткам",
+      "no_labels": "Задач пока нет.",
+      "unlabeled": "Без метки"
+    },
+    "tab_activity": "Активность",
+    "agent_context_badge": "Контекст для агентов",
+    "section_breakdown": "Распределение",
+    "section_activity": "Последние события",
+    "activity": {
+      "empty": "По задачам этого проекта пока нет событий.",
+      "load_more": "Загрузить ещё",
+      "view_all": "Показать все",
+      "hint": "Изменения статуса, исполнителя, приоритета и дат в задачах этого проекта."
     }
   },
   "resources": {

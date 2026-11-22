@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ChevronRight,
   FolderGit,
   FolderOpen,
   GitBranch,
@@ -70,8 +69,9 @@ import { localDirectoryLabel } from "./local-directory-label";
 import { buildRuntimeMachines } from "../../runtimes/components/runtime-machines";
 import { useT } from "../../i18n";
 import { githubShortLabel } from "../../common/github-url";
+import { ObjectSection, ObjectSectionCard } from "../../layout/object-page";
 
-// Project Resources sidebar section.
+// Project Resources section of the project page.
 //
 // Grouped by what a resource applies to: repositories apply to every run on
 // every machine, while a local folder only applies to runs on the one machine
@@ -133,7 +133,6 @@ const chipClassName =
 export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
-  const [open, setOpen] = useState(true);
   const { data: resources = [] } = useQuery(
     projectResourcesOptions(wsId, projectId),
   );
@@ -149,34 +148,30 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const desktopMode = isDesktopShell();
 
   return (
-    <div>
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
-        onClick={() => setOpen(!open)}
-      >
-        {t(($) => $.resources.section_header)}
-        <ChevronRight
-          className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
-        />
-      </button>
-      {open && (
-        <div className="space-y-4 pl-2">
+    <ObjectSection collapsible title={t(($) => $.resources.section_header)}>
+      <ObjectSectionCard>
+        <div className="px-3 py-2.5">
           <RepositoryGroup wsId={wsId} projectId={projectId} repos={repos} />
-          {(desktopMode || folders.length > 0) && (
+        </div>
+        {(desktopMode || folders.length > 0) && (
+          <div className="px-3 py-2.5">
             <LocalFolderGroup
               wsId={wsId}
               projectId={projectId}
               folders={folders}
               desktopMode={desktopMode}
             />
-          )}
-          {others.map((resource) => (
-            <UnknownResourceRow key={resource.id} resource={resource} />
-          ))}
-        </div>
-      )}
-    </div>
+          </div>
+        )}
+        {others.length > 0 && (
+          <div className="space-y-1.5 px-3 py-2.5">
+            {others.map((resource) => (
+              <UnknownResourceRow key={resource.id} resource={resource} />
+            ))}
+          </div>
+        )}
+      </ObjectSectionCard>
+    </ObjectSection>
   );
 }
 

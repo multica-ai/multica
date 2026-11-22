@@ -133,6 +133,28 @@ func TestSummarizeProjectProgressGroupsByAssignee(t *testing.T) {
 	}
 }
 
+func TestSummarizeProjectProgressByLabel(t *testing.T) {
+	issues := []progressIssue{
+		{status: "done", labelIDs: []string{"bug", "ios"}},
+		{status: "in_progress", labelIDs: []string{"ios"}},
+		{status: "todo"},
+		{status: "cancelled", labelIDs: []string{"bug"}},
+	}
+	rows := summarizeProjectProgressByLabel(issues, builtInCategory)
+	if len(rows) != 3 {
+		t.Fatalf("rows = %+v, want ios, bug, unlabelled", rows)
+	}
+	if rows[0].LabelID == nil || *rows[0].LabelID != "ios" || rows[0].Scope != 2 || rows[0].Completed != 1 || rows[0].Started != 1 {
+		t.Errorf("first row = %+v, want ios 1/2 with 1 started", rows[0])
+	}
+	if rows[1].LabelID == nil || *rows[1].LabelID != "bug" || rows[1].Scope != 1 || rows[1].Completed != 1 {
+		t.Errorf("second row = %+v, want bug 1/1 without the cancelled issue", rows[1])
+	}
+	if rows[2].LabelID != nil || rows[2].Scope != 1 {
+		t.Errorf("last row = %+v, want the unlabelled issue", rows[2])
+	}
+}
+
 func TestGetProjectProgressEndpoint(t *testing.T) {
 	ctx := context.Background()
 	w := httptest.NewRecorder()
@@ -181,6 +203,18 @@ func TestGetProjectProgressEndpoint(t *testing.T) {
 		t.Fatalf("insert activity: %v", err)
 	}
 
+	var labelID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue_label (workspace_id, name, color) VALUES ($1, 'progress-label', '#000000')
+		RETURNING id
+	`, testWorkspaceID).Scan(&labelID); err != nil {
+		t.Fatalf("insert label: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue_label WHERE id = $1`, labelID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO issue_to_label (issue_id, label_id) VALUES ($1, $2)`, doneID, labelID); err != nil {
+		t.Fatalf("label issue: %v", err)
+	}
+
 	w = httptest.NewRecorder()
 	req = withURLParam(newRequest("GET", "/api/projects/"+project.ID+"/progress", nil), "id", project.ID)
 	testHandler.GetProjectProgress(w, req)
@@ -196,6 +230,10 @@ func TestGetProjectProgressEndpoint(t *testing.T) {
 	}
 	if len(resp.ByAssignee) != 1 || resp.ByAssignee[0].Scope != 3 || resp.ByAssignee[0].Completed != 1 {
 		t.Errorf("by_assignee = %+v, want one member row 1/3", resp.ByAssignee)
+	}
+	if len(resp.ByLabel) != 2 || resp.ByLabel[0].LabelID == nil || *resp.ByLabel[0].LabelID != labelID ||
+		resp.ByLabel[0].Completed != 1 || resp.ByLabel[1].LabelID != nil || resp.ByLabel[1].Scope != 2 {
+		t.Errorf("by_label = %+v, want the label 1/1 then 2 unlabelled", resp.ByLabel)
 	}
 	if len(resp.History) != 1 {
 		t.Fatalf("history = %+v, want today only for a new project", resp.History)

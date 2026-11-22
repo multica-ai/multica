@@ -267,23 +267,54 @@ export function ObjectSection({
   action,
   children,
   className,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   title: ReactNode;
   count?: ReactNode;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** The title folds the section away, like a panel section; the action hides with it. */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
+  const [stateOpen, setOpen] = useState(defaultOpen);
+  const open = !collapsible || stateOpen;
   return (
     <section className={cn("space-y-2", className)}>
       <div className="flex h-7 items-center gap-2">
-        <h2 className="text-body font-medium">{title}</h2>
+        <h2 className="text-body font-medium">
+          {collapsible ? (
+            <button
+              type="button"
+              aria-expanded={open}
+              className={cn(
+                "-ml-1.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-accent/70",
+                !open && "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setOpen(!open)}
+            >
+              {title}
+              <ChevronRight
+                aria-hidden="true"
+                className={cn(
+                  "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform motion-reduce:transition-none",
+                  open && "rotate-90",
+                )}
+              />
+            </button>
+          ) : (
+            title
+          )}
+        </h2>
         {count !== undefined && count !== null ? (
           <span className="text-caption tabular-nums text-muted-foreground">{count}</span>
         ) : null}
-        {action ? <div className="ml-auto flex items-center gap-1">{action}</div> : null}
+        {open && action ? <div className="ml-auto flex items-center gap-1">{action}</div> : null}
       </div>
-      {children}
+      {/* Folded content stays mounted, so an editor's unsaved draft survives. */}
+      {collapsible ? <div hidden={!open}>{children}</div> : children}
     </section>
   );
 }
@@ -357,33 +388,39 @@ export function ObjectSectionEmpty({
 /** A titled group in the properties panel, collapsible like the issue page's. */
 export function ObjectPanelSection({
   title,
+  action,
   children,
   defaultOpen = true,
 }: {
   title: ReactNode;
+  /** A quiet action at the right of the title (View all), shown while open. */
+  action?: ReactNode;
   children: ReactNode;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div>
-      <button
-        type="button"
-        aria-expanded={open}
-        className={cn(
-          "mb-2 flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70",
-          !open && "text-muted-foreground hover:text-foreground",
-        )}
-        onClick={() => setOpen(!open)}
-      >
-        {title}
-        <ChevronRight
+      <div className="mb-2 flex items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={open}
           className={cn(
-            "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform",
-            open && "rotate-90",
+            "flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70",
+            !open && "text-muted-foreground hover:text-foreground",
           )}
-        />
-      </button>
+          onClick={() => setOpen(!open)}
+        >
+          {title}
+          <ChevronRight
+            className={cn(
+              "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform",
+              open && "rotate-90",
+            )}
+          />
+        </button>
+        {open && action ? <div className="flex shrink-0 items-center">{action}</div> : null}
+      </div>
       {open ? <div className="space-y-0.5 pl-2">{children}</div> : null}
     </div>
   );
