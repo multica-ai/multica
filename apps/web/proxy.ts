@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { buildAiVisitRecord, logAiVisit, type AiVisitFormat } from "@multica/core/ai-traffic";
 import { LOCALE_COOKIE, type SupportedLocale } from "@multica/core/i18n";
 import {
   isSupportedLocale,
@@ -10,6 +11,7 @@ import {
   landingPathLocale,
   localizeHref,
   splitLandingLocale,
+  stripLandingLocale,
 } from "./lib/landing-locale-path";
 import { runtimeRewriteDestination } from "./config/runtime-urls";
 import { isOfficialMarketingHost } from "./lib/public-host";
@@ -85,6 +87,34 @@ function routeLandingLocale(
   return nextWithLocale(req, landingPathLocale(resolved) === "en" ? resolved : "en");
 }
 
+/** Root files AI crawlers read; they pass through untouched and are only observed. */
+const CRAWLER_FILES: Readonly<Record<string, AiVisitFormat>> = {
+  "/llms.txt": "markdown",
+  "/robots.txt": "text",
+};
+
+// AI visits to the public site, logged on the official host only so
+// self-hosted instances stay quiet. `/docs` is logged by the docs app.
+// `next start` reports its own bind address as `nextUrl.hostname`, so the
+// Host header decides; a spoofed one can only add a log line.
+function recordAiVisit(req: NextRequest, response: NextResponse) {
+  const { pathname } = req.nextUrl;
+  const host = req.headers.get("host")?.replace(/:\d+$/, "") ?? req.nextUrl.hostname;
+  if (!isOfficialMarketingHost(host)) return;
+  const format = CRAWLER_FILES[pathname] ?? (isLandingPath(stripLandingLocale(pathname)) ? "html" : null);
+  if (!format) return;
+  logAiVisit(
+    buildAiVisitRecord({
+      app: "web",
+      method: req.method,
+      pathname,
+      headers: req.headers,
+      format,
+      status: response.headers.has("location") ? response.status : null,
+    }),
+  );
+}
+
 // Next.js 16 renamed `middleware` → `proxy`. API surface (NextRequest /
 // NextResponse / cookies / matcher) is identical; the only behavioral
 // change is the runtime — proxy is forced to nodejs and cannot opt into
@@ -98,6 +128,13 @@ export function proxy(req: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
+  const response = CRAWLER_FILES[pathname] ? NextResponse.next() : routeRequest(req);
+  recordAiVisit(req, response);
+  return response;
+}
+
+function routeRequest(req: NextRequest): NextResponse {
+  const { pathname } = req.nextUrl;
   const hasSession = req.cookies.has("multica_logged_in");
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;
 
@@ -171,6 +208,8 @@ export const config = {
     "/docs/:path*",
     "/ws",
     "/collab",
+    "/llms.txt",
+    "/robots.txt",
     "/((?!api|v1|_next/static|_next/image|favicon.ico|.*\\.).*)",
   ],
 };
