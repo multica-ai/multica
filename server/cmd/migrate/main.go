@@ -151,6 +151,8 @@ var concurrentIndexCleanups = map[string]string{
 	"733_comment_idempotency_receipt_key":                       "uq_comment_idempotency_receipt_key",
 	"734_comment_idempotency_receipt_created":                   "idx_comment_idempotency_receipt_created",
 	"729_remote_app_connection_workspace_idx":                   "uq_remote_app_connection_owner_ws",
+	"762_agent_user_runtime_config_user_idx":                    "idx_agent_user_runtime_config_user",
+	"766_recent_agent_selection_key_index":                      "idx_recent_agent_selection_workspace_user",
 	"720_remote_app_oauth_client_idx":                           "uq_remote_app_oauth_client_app_redirect",
 	"721_remote_app_connection_owner_idx":                       "uq_remote_app_connection_owner",
 	"676_chat_wakeup_due_idx":                                   "idx_chat_wakeup_due",
