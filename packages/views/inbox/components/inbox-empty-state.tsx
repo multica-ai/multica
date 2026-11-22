@@ -7,16 +7,12 @@ import {
   AlarmClock,
   Archive,
   Check,
-  CircleUser,
   Filter,
-  History,
   Inbox,
   Undo2,
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { MulticaBleedMark } from "@multica/ui/components/common/multica-graphics";
-import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
-import { useSearchStore } from "@multica/core/command-bar";
 import {
   undoArchiveInboxBatch,
   undoUnsubscribeArchiveInbox,
@@ -27,9 +23,7 @@ import {
   useInboxSelectionStore,
   type LastInboxCleared,
 } from "@multica/core/inbox/selection-store";
-import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
-import { useIsGuest } from "@multica/core/permissions";
-import type { SnoozedInboxIssue, WorkspaceWorkingAgent } from "@multica/core/types";
+import type { SnoozedInboxIssue } from "@multica/core/types";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useLocale, useT } from "../../i18n";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
@@ -39,7 +33,6 @@ import { useInboxUndoShortcut } from "./use-inbox-shortcut";
 import { useRestoreInbox } from "./use-leave-inbox-row";
 
 const NO_SNOOZED: SnoozedInboxIssue[] = [];
-const NO_AGENTS: WorkspaceWorkingAgent[] = [];
 
 /**
  * The empty detail canvas of `/inbox`:
@@ -48,8 +41,8 @@ const NO_AGENTS: WorkspaceWorkingAgent[] = [];
  * - Filtered-empty state when active filters hid remaining notifications
  *   (never confused with true Inbox Zero).
  * - Calm Inbox Zero state with MulticaBleedMark, persistent inline undo for
- *   the action that just cleared the Inbox, snoozed summary, and quiet next
- *   steps (My work, working agents, Archived, keyboard hints).
+ *   the action that just cleared the Inbox, and snoozed summary when any
+ *   issues are waiting to return.
  */
 export function InboxEmptyState({
   wsId,
@@ -60,7 +53,6 @@ export function InboxEmptyState({
   inboxZeroRises,
   isCompact = false,
   onClearFiltersAndContinue,
-  onViewArchived,
 }: {
   wsId: string;
   isArchivedView: boolean;
@@ -71,15 +63,12 @@ export function InboxEmptyState({
   inboxZeroRises: boolean;
   isCompact?: boolean;
   onClearFiltersAndContinue: () => void;
-  onViewArchived: () => void;
 }) {
   const { t } = useT("inbox");
-  const { t: tLayout } = useT("layout");
   const locale = useLocale();
   const qc = useQueryClient();
   const { push } = useNavigation();
   const builtinNav = useBuiltinViewNavigation();
-  const guest = useIsGuest(wsId);
   const restoreInbox = useRestoreInbox();
   const { mutateAsync: unsnoozeAsync } = useUnsnoozeInbox();
 
@@ -93,10 +82,6 @@ export function InboxEmptyState({
     ...snoozedInboxOptions(wsId),
     enabled: isInboxZero && !!wsId,
   });
-  const { data: workingAgents = NO_AGENTS } = useQuery({
-    ...workspaceWorkingAgentsOptions(wsId, "issue"),
-    enabled: isInboxZero && !guest && !!wsId,
-  });
 
   const activeSnoozed = useMemo(() => {
     const now = Date.now();
@@ -104,8 +89,6 @@ export function InboxEmptyState({
       .filter((entry) => new Date(entry.snoozed_until).getTime() > now)
       .sort((a, b) => new Date(a.snoozed_until).getTime() - new Date(b.snoozed_until).getTime());
   }, [snoozed]);
-
-  const workingCount = workingAgents.length;
 
   const [undoing, setUndoing] = useState(false);
 
@@ -257,7 +240,7 @@ export function InboxEmptyState({
           <Check className="size-5" />
         </div>
         <h2 className="text-title font-semibold text-foreground">{t(($) => $.zero.cleared_title)}</h2>
-        {lastCleared ? (
+        {lastCleared && (
           <p className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-label text-muted-foreground">
             <span>{clearedSummary(lastCleared)}</span>
             {canUndoCleared(lastCleared) && (
@@ -267,7 +250,7 @@ export function InboxEmptyState({
                   type="button"
                   disabled={undoing}
                   onClick={() => void handleUndoCleared(lastCleared)}
-                  className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+                  className="-mx-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Undo2 className="size-3" />
                   {t(($) => $.toasts.undo)}
@@ -276,8 +259,6 @@ export function InboxEmptyState({
               </>
             )}
           </p>
-        ) : (
-          <p className="mt-1.5 text-label text-muted-foreground">{t(($) => $.detail.empty)}</p>
         )}
 
         {activeSnoozed.length > 0 && earliestSnooze && (
@@ -297,67 +278,6 @@ export function InboxEmptyState({
               })}
             </span>
           </button>
-        )}
-
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-          {!guest && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                builtinNav.prepare("my_work");
-                push?.(builtinNav.hrefFor("my_work"));
-              }}
-            >
-              <CircleUser />
-              <span>{t(($) => $.zero.my_work)}</span>
-            </Button>
-          )}
-          {!guest && workingCount > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                builtinNav.prepare("working");
-                push?.(builtinNav.hrefFor("working"));
-              }}
-            >
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand ring-3 ring-brand/20" />
-              <span>{t(($) => $.zero.agents_working, { count: workingCount })}</span>
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-muted-foreground"
-            onClick={onViewArchived}
-          >
-            <History />
-            <span>{t(($) => $.zero.view_archived)}</span>
-          </Button>
-        </div>
-
-        {!isCompact && (
-          <div className="mt-5 flex items-center justify-center gap-4 text-caption text-faint-foreground">
-            {!guest && (
-              <button
-                type="button"
-                onClick={() => openCreateIssueWithPreference()}
-                className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
-              >
-                <ActionShortcutKeycaps action="createIssue" />
-                <span>{tLayout(($) => $.sidebar.new_issue)}</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => useSearchStore.getState().setOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            >
-              <ActionShortcutKeycaps action="openSearch" />
-              <span>{t(($) => $.zero.quick_jump)}</span>
-            </button>
-          </div>
         )}
       </div>
     </div>

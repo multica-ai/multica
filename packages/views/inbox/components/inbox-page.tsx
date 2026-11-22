@@ -1307,7 +1307,6 @@ export function InboxPage() {
           inboxZeroRises={inboxZeroRises}
           isCompact={isCompact}
           onClearFiltersAndContinue={handleClearFiltersAndContinue}
-          onViewArchived={() => setView("archived")}
         />
       )}
     </>
