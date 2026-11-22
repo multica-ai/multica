@@ -310,7 +310,17 @@ const CostUSDTicksPerUSD = 10_000_000_000
 
 // Result is the final outcome after an agent session completes.
 type Result struct {
-	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
+	// Status is "completed", "failed", "aborted", "timeout", "cancelled" or
+	// "cleanup_unconfirmed".
+	//
+	// "cleanup_unconfirmed" is NOT a stronger "failed" or a "don't retry"
+	// flag. Report it only when a process from this run may still be running
+	// and starting another run would risk two copies working concurrently.
+	// The daemon maps it to taskfailure.ReasonProcessCleanupUnconfirmed, which
+	// fences this agent on this runtime: its queued and future automated tasks
+	// fail as cleanup_blocked until a manual rerun completes, and delegated
+	// failure recovery is skipped. Use "failed" for every other failure.
+	Status     string
 	Output     string // final user-facing output selected by the backend
 	Error      string // error message if failed
 	DurationMs int64

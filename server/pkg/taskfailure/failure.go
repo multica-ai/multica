@@ -94,11 +94,25 @@ const (
 	// agent timeout path.
 	ReasonTimeout Reason = "timeout"
 
-	// Process cleanup is a separate, non-retryable failure even when the
-	// provider succeeded or the user cancelled. Blocked successors do not
-	// create a new cleanup obligation of their own.
+	// ReasonProcessCleanupUnconfirmed: a process from this run may still be
+	// running, so starting another run could execute concurrently with it.
+	// A separate, non-retryable failure even when the provider succeeded or
+	// the user cancelled.
+	//
+	// Its cost goes well beyond this one task: it fences the whole
+	// (agent_id, runtime_id) pair. TaskBlockedByProcessCleanup
+	// (db/queries/task_cleanup.sql) fails every queued and future automated
+	// task of this agent on this runtime with ReasonProcessCleanupBlocked
+	// until a new manual rerun completes successfully. Delegated failure
+	// recovery is also skipped, so the delegating task is not notified.
+	// Only use it when concurrent execution is a real risk. A failure where
+	// the process is known to have exited, or never started, is not this
+	// reason, even if it should not be retried.
 	ReasonProcessCleanupUnconfirmed Reason = "cleanup_unconfirmed"
-	ReasonProcessCleanupBlocked     Reason = "cleanup_blocked"
+	// ReasonProcessCleanupBlocked: the task was refused at start by the fence
+	// above. Blocked successors do not create a new cleanup obligation of
+	// their own.
+	ReasonProcessCleanupBlocked Reason = "cleanup_blocked"
 
 	// ReasonIterationLimit: the agent reached its per-run iteration
 	// cap and emitted a fallback "I reached the iteration limit"
