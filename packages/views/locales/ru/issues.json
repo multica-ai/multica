@@ -878,7 +878,10 @@
       "edit": "Изменить аннотацию {{number}}",
       "note_placeholder": "Добавить комментарий…",
       "count_few": "{{count}} аннотации",
-      "count_many": "{{count}} аннотаций"
+      "count_many": "{{count}} аннотаций",
+      "view_published_comment": "Показать комментарий {{number}}",
+      "back_to_description": "Вернуться к описанию",
+      "published_outdated": "Устарело: исходный фрагмент удалён или его нельзя определить однозначно."
     }
   },
   "agent_activity": {

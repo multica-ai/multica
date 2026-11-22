@@ -15,8 +15,9 @@ import (
 // TimelineEntry represents a single entry in the issue timeline, which can be
 // either an activity log record or a comment.
 type TimelineEntry struct {
-	Type string `json:"type"` // "activity" or "comment"
-	ID   string `json:"id"`
+	DescriptionAnchors []DescriptionAnchor `json:"description_anchors,omitempty"`
+	Type               string              `json:"type"` // "activity" or "comment"
+	ID                 string              `json:"id"`
 
 	ActorType string `json:"actor_type"`
 	ActorID   string `json:"actor_id"`
@@ -299,24 +300,25 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 		updatedAt := timestampToString(c.UpdatedAt)
 		cid := uuidToString(c.ID)
 		out[i] = TimelineEntry{
-			Type:           "comment",
-			ID:             cid,
-			ActorType:      c.AuthorType,
-			ActorID:        uuidToString(c.AuthorID),
-			Content:        &content,
-			CommentType:    &commentType,
-			QuickActionID:  uuidToPtr(c.QuickActionID),
-			ParentID:       uuidToPtr(c.ParentID),
-			CreatedAt:      timestampToString(c.CreatedAt),
-			UpdatedAt:      &updatedAt,
-			Revision:       c.Revision,
-			Reactions:      reactions[cid],
-			Attachments:    attachments[cid],
-			ResolvedAt:     timestampToPtr(c.ResolvedAt),
-			ResolvedByType: textToPtr(c.ResolvedByType),
-			ResolvedByID:   uuidToPtr(c.ResolvedByID),
-			SourceTaskID:   uuidToPtr(c.SourceTaskID),
-			DeletedAt:      timestampToPtr(c.DeletedAt),
+			DescriptionAnchors: descriptionAnchorsFromJSON(c.DescriptionAnchors, c.DeletedAt.Valid),
+			Type:               "comment",
+			ID:                 cid,
+			ActorType:          c.AuthorType,
+			ActorID:            uuidToString(c.AuthorID),
+			Content:            &content,
+			CommentType:        &commentType,
+			QuickActionID:      uuidToPtr(c.QuickActionID),
+			ParentID:           uuidToPtr(c.ParentID),
+			CreatedAt:          timestampToString(c.CreatedAt),
+			UpdatedAt:          &updatedAt,
+			Revision:           c.Revision,
+			Reactions:          reactions[cid],
+			Attachments:        attachments[cid],
+			ResolvedAt:         timestampToPtr(c.ResolvedAt),
+			ResolvedByType:     textToPtr(c.ResolvedByType),
+			ResolvedByID:       uuidToPtr(c.ResolvedByID),
+			SourceTaskID:       uuidToPtr(c.SourceTaskID),
+			DeletedAt:          timestampToPtr(c.DeletedAt),
 		}
 		if receipts := supplements[cid]; len(receipts) > 0 {
 			out[i].Supplements = receipts

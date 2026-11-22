@@ -7,14 +7,14 @@ import { isImeComposing } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
-import { MAX_ANNOTATION_QUOTE_LENGTH, MAX_REPLY_ANNOTATIONS, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
+import { MAX_ANNOTATION_QUOTE_LENGTH, MAX_REPLY_ANNOTATIONS, locateReplyAnnotation, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
 import { useT } from "../../i18n";
-import { annotationRange, captureCommentSelection, findAnnotationSource } from "./comment-annotation-selection";
+import { annotationRange, captureCommentSelection, findAnnotationSource, indexCommentText } from "./comment-annotation-selection";
 import { CommentSelectionBubble } from "./comment-selection-bubble";
 import { AnnotationComposer, type AnnotationSendControls } from "./annotation-composer";
 import type { ContentEditorRef } from "../../editor/content-editor";
 
-type CapturedSelection = NonNullable<ReturnType<typeof captureCommentSelection>>;
+type CapturedSelection = Omit<NonNullable<ReturnType<typeof captureCommentSelection>>, "sourceText"> & { sourceText?: string };
 type SourceAnchor = { id: string; range: Range; root: HTMLElement };
 
 export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onAdded, onOpen, editable = false, markerZIndex }: {
@@ -188,6 +188,13 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
       const next = annotationsRef.current.flatMap((a) => {
         const root = findAnnotationSource(card, a.sourceCommentId);
         const range = root && annotationRange(root, a, editable);
+        // Upgrade an older persisted description draft only when its original
+        // context still identifies a unique passage. Never guess another copy.
+        if (root && range && a.sourceText === undefined && a.sourceCommentId.startsWith("description:")) {
+          const { text } = indexCommentText(root, editable);
+          const start = locateReplyAnnotation(text, a);
+          if (start !== null) useCommentDraftStore.getState().hydrateAnnotationSource(draftKey, a.id, text, start);
+        }
         return root && range ? [{ id: a.id, range, root }] : [];
       });
       setAnchors((current) => !current.length && !next.length ? current : next);
@@ -278,7 +285,7 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
       toast.error(t(($) => $.reply.annotations.selection_failed));
       return false;
     }
-    const { quote, start, prefix, suffix, sourceCommentId } = captured;
+    const { quote, start, prefix, suffix, sourceCommentId, sourceText } = captured;
     const duplicate = annotationsRef.current.find((a) => a.sourceCommentId === sourceCommentId &&
       a.start === start && a.quote === quote && a.prefix === prefix && a.suffix === suffix);
     if (quote.length > MAX_ANNOTATION_QUOTE_LENGTH) {
@@ -292,7 +299,7 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
     setSelection(captured);
     const next = duplicate ?? {
       id: crypto.randomUUID(), sourceCommentId, sourceActorName: source.name,
-      sourceRevision: source.revision, quote, start, prefix, suffix, note: "",
+      sourceRevision: source.revision, sourceText, quote, start, prefix, suffix, note: "",
     };
     pendingFocusId.current = next.id;
     setEditor({ annotation: next, existing: !!duplicate });

@@ -806,7 +806,10 @@
       "selection_failed": "No se ha podido capturar la selección. Selecciona texto dentro de un comentario o descripción e inténtalo de nuevo.",
       "source_label": "Comentario de {{name}}",
       "edit": "Editar anotación {{number}}",
-      "note_placeholder": "Añadir un comentario…"
+      "note_placeholder": "Añadir un comentario…",
+      "view_published_comment": "Ver comentario {{number}}",
+      "back_to_description": "Volver a la descripción",
+      "published_outdated": "Referencia desactualizada: el pasaje se eliminó o no se puede identificar de forma única."
     }
   },
   "agent_activity": {

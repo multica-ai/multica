@@ -795,7 +795,10 @@
       "selection_failed": "未能獲取選中文字。請在同一條評論或任務描述內重新選擇後再試。",
       "source_label": "{{name}} 的評論",
       "edit": "編輯批註 {{number}}",
-      "note_placeholder": "新增意見..."
+      "note_placeholder": "新增意見...",
+      "view_published_comment": "查看評論 {{number}}",
+      "back_to_description": "返回描述原文",
+      "published_outdated": "已過時：原文已刪除，或無法唯一定位。"
     }
   },
   "agent_activity": {

@@ -895,6 +895,7 @@ export function useCreateComment(issueId: string) {
       attachmentIds,
       suppressAgentIds,
       steerTaskIds,
+      descriptionAnchors,
     }: {
       content: string;
       type?: string;
@@ -903,7 +904,8 @@ export function useCreateComment(issueId: string) {
       suppressAgentIds?: string[];
       /** Running turns this comment goes into instead of a follow-up run. */
       steerTaskIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds),
+      descriptionAnchors?: import("../drafts/description-anchor").DescriptionAnchor[];
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds, descriptionAnchors),
     onSuccess: (comment) => {
       if (comment.issue_revision) {
         onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
@@ -917,6 +919,7 @@ export function useCreateComment(issueId: string) {
         actor_type: comment.author_type,
         actor_id: comment.author_id,
         content: comment.content,
+        description_anchors: comment.description_anchors,
         parent_id: comment.parent_id,
         comment_type: comment.type,
         reactions: comment.reactions ?? [],

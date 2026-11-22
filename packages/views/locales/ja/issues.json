@@ -795,7 +795,10 @@
       "selection_failed": "選択範囲を取得できませんでした。同じコメントまたは説明の中で文字を選び直してください。",
       "source_label": "{{name}} のコメント",
       "edit": "注釈 {{number}} を編集",
-      "note_placeholder": "コメントを追加…"
+      "note_placeholder": "コメントを追加…",
+      "view_published_comment": "コメント {{number}} を表示",
+      "back_to_description": "説明の原文に戻る",
+      "published_outdated": "古い参照：原文が削除されたか、一意に特定できません。"
     }
   },
   "agent_activity": {

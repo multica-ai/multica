@@ -1270,7 +1270,15 @@ const CommentSupplementReceiptsSchema = z.array(z.unknown()).optional().catch(un
     return parsed.success ? [parsed.data] : [];
   }));
 
+// Malformed additive anchor data cannot hide an otherwise readable comment.
+export const DescriptionAnchorSchema = z.object({
+  version: z.literal(1), id: z.string(), issue_id: z.string(), quote: z.string().min(1).max(4000),
+  start: z.number().int().nonnegative(), prefix: z.string().max(32), suffix: z.string().max(32), source_text: z.string(),
+});
+const DescriptionAnchorsSchema = z.array(DescriptionAnchorSchema).max(20).optional().catch(undefined);
+
 const TimelineEntrySchema = z.object({
+  description_anchors: DescriptionAnchorsSchema,
   type: z.string(),
   id: z.string(),
   actor_type: z.string(),
@@ -1495,6 +1503,7 @@ export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
 };
 
 export const CommentSchema = z.object({
+  description_anchors: DescriptionAnchorsSchema,
   id: z.string(),
   issue_id: z.string(),
   author_type: z.string(),

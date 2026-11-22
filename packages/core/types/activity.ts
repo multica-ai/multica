@@ -2,6 +2,7 @@ import type { CommentAuthorType, CommentSupplementReceipt, Reaction } from "./co
 import type { Attachment } from "./attachment";
 
 export interface TimelineEntry {
+  description_anchors?: import("../drafts/description-anchor").DescriptionAnchor[];
   type: "activity" | "comment";
   id: string;
   actor_type: string;

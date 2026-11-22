@@ -2129,11 +2129,13 @@ export class ApiClient {
     attachmentIds?: string[],
     suppressAgentIds?: string[],
     steerTaskIds?: string[],
+    descriptionAnchors?: import("../drafts/description-anchor").DescriptionAnchor[],
   ): Promise<Comment> {
-    return this.fetch(`/api/issues/${issueId}/comments`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments`, {
       method: "POST",
       body: JSON.stringify({
         content,
+        ...(descriptionAnchors?.length ? { description_anchors: descriptionAnchors } : {}),
         type: type ?? "comment",
         ...(parentId ? { parent_id: parentId } : {}),
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
@@ -2141,6 +2143,7 @@ export class ApiClient {
         ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
       }),
     });
+    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, { endpoint: "POST /api/issues/:id/comments" });
   }
 
   async previewCommentTriggers(issueId: string, content: string, parentId?: string, editingCommentId?: string): Promise<CommentTriggerPreview> {

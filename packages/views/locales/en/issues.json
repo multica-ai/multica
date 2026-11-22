@@ -823,7 +823,10 @@
       "selection_failed": "Could not capture the selection. Select text within one comment or description and try again.",
       "source_label": "Comment by {{name}}",
       "edit": "Edit annotation {{number}}",
-      "note_placeholder": "Add a comment..."
+      "note_placeholder": "Add a comment...",
+      "view_published_comment": "View comment {{number}}",
+      "back_to_description": "Back to description",
+      "published_outdated": "Outdated — the original passage was removed or cannot be identified uniquely."
     }
   },
   "agent_activity": {

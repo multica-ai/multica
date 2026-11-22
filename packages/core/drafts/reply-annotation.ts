@@ -1,10 +1,13 @@
-/** Private, workspace-scoped reply metadata. Published replies remain Markdown. */
+/** Private draft metadata. Description selections also publish durable anchors;
+ * all replies retain their readable Markdown quote. */
 export interface ReplyAnnotation {
   id: string;
   /** Local source key. Descriptions use description:<issueId>, never a reply target. */
   sourceCommentId: string;
   sourceActorName: string;
   sourceRevision?: number;
+  /** Rendered text captured with a description selection; plain text, never HTML. */
+  sourceText?: string;
   quote: string;
   note: string;
   /** Offsets refer to normalized rendered text, never Markdown or a live Range. */
@@ -26,6 +29,7 @@ export function normalizeReplyAnnotations(value: unknown): ReplyAnnotation[] {
     a.quote.trim().length > 0 && a.quote.length <= MAX_ANNOTATION_QUOTE_LENGTH &&
     typeof a.note === "string" && a.note.trim().length > 0 && Number.isInteger(a.start) && a.start >= 0 &&
     typeof a.prefix === "string" && typeof a.suffix === "string" &&
+    (a.sourceText === undefined || typeof a.sourceText === "string") &&
     (a.sourceRevision === undefined || Number.isInteger(a.sourceRevision)),
   ).slice(0, MAX_REPLY_ANNOTATIONS);
   return valid.length ? valid : EMPTY_REPLY_ANNOTATIONS;
