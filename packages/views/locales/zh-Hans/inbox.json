@@ -63,7 +63,6 @@
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
-    "empty": "收件箱为空",
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",

@@ -63,7 +63,6 @@
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
-    "empty": "インボックスは空です",
     "original_input": "元の入力",
     "retry_with_context": "コンテキストを保持して再試行",
     "edit_advanced": "詳細フォームを開く",

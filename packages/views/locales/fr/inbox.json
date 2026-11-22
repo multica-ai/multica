@@ -65,7 +65,6 @@
   },
   "detail": {
     "select_prompt": "Sélectionnez une notification pour afficher les détails",
-    "empty": "Votre boîte de réception est vide",
     "original_input": "Saisie d'origine",
     "retry_with_context": "Réessayer avec le contexte",
     "edit_advanced": "Ouvrir le formulaire complet",

@@ -792,6 +792,25 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("list").dataset.view).toBe("archived");
   });
 
+  it("switches to the archive from the page header title menu on desktop", async () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [];
+    listData.archived = [item({ id: "archived-1", archived: true })];
+    const { container } = render(<InboxPage />);
+
+    expect(screen.queryByTestId("list")).toBeNull();
+    const titleMenu = container.querySelector("h1 [aria-haspopup='menu']") as HTMLElement;
+    expect(titleMenu).not.toBeNull();
+    fireEvent.click(titleMenu);
+    const [inboxOption, archivedOption] = await screen.findAllByRole("menuitemradio");
+    expect(inboxOption).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(archivedOption!);
+
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived");
+    expect(screen.getByTestId("list").dataset.view).toBe("archived");
+  });
+
   it("hides the batch-actions menu in the archived view", () => {
     // Every batch action archives from the MAIN inbox; offering them over the
     // archived list would read as "archive all of these" and do the opposite.

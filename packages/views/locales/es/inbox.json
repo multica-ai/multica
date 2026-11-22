@@ -65,7 +65,6 @@
   },
   "detail": {
     "select_prompt": "Selecciona una notificación para ver los detalles",
-    "empty": "Tu bandeja de entrada está vacía",
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Abrir formulario completo",

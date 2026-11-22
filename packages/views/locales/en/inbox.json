@@ -65,7 +65,6 @@
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
-    "empty": "Your inbox is empty",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Open full form",
