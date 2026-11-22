@@ -155,6 +155,7 @@ export function ProjectOverviewBody({
         </div>
 
         <ObjectSection
+          collapsible
           title={t(($) => $.detail.section_description)}
           action={
             <TooltipHint label={t(($) => $.detail.description_hint)}>

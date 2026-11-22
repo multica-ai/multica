@@ -148,7 +148,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const desktopMode = isDesktopShell();
 
   return (
-    <ObjectSection title={t(($) => $.resources.section_header)}>
+    <ObjectSection collapsible title={t(($) => $.resources.section_header)}>
       <ObjectSectionCard>
         <div className="px-3 py-2.5">
           <RepositoryGroup wsId={wsId} projectId={projectId} repos={repos} />
