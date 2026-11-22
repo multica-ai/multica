@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { appRail, currentWorkspaceTile, loginAsDefault, waitForPageText } from "./helpers";
+import { currentWorkspaceTile, loginAsDefault, waitForPageText } from "./helpers";
 
 test.describe("Settings", () => {
   test("updating workspace name reflects in the rail immediately", async ({
@@ -7,36 +7,45 @@ test.describe("Settings", () => {
   }) => {
     const workspaceSlug = await loginAsDefault(page);
 
-    // Read the current workspace name from its rail tile
     const tile = currentWorkspaceTile(page);
     await expect(tile).toBeVisible({ timeout: 15000 });
-    const originalName = (await tile.getAttribute("aria-label")) ?? "E2E Workspace";
+
+    // Read the current workspace name from the rail's workspace switcher menu
+    await tile.click();
+    const currentItem = page.getByRole("menu").locator('[role="menuitem"][aria-current="page"]');
+    await expect(currentItem).toBeVisible();
+    const originalName = (await currentItem.locator("span.truncate").innerText()).trim() || "E2E Workspace";
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toBeHidden();
 
     await page.goto(`/${workspaceSlug}/settings?tab=workspace`, { waitUntil: "domcontentloaded" });
-    await waitForPageText(page, "General");
+    await waitForPageText(page, "Workspace details");
 
-    // Change workspace name
-    const nameInput = page
-      .locator('input[type="text"]')
-      .first();
-    await nameInput.clear();
+    // Change workspace name (General settings auto-save)
+    const nameInput = page.getByRole("textbox", { name: "Name" });
+    await expect(nameInput).toBeVisible();
     const newName = "Renamed WS " + Date.now();
     await nameInput.fill(newName);
+    await nameInput.blur();
 
-    // Save
-    await page.locator("button", { hasText: "Save" }).click();
-
-    await expect(page.getByText("Workspace settings saved").first()).toBeVisible({ timeout: 5000 });
-
-    // The rail should reflect the new name WITHOUT page refresh
-    await expect(appRail(page).getByRole("link", { name: newName })).toBeVisible();
+    // The rail should reflect the new name WITHOUT page refresh (avatar initial + switcher menu)
+    await expect(tile).toHaveText("R", { timeout: 10000 });
+    await tile.click();
+    await expect(
+      page.getByRole("menu").locator('[role="menuitem"][aria-current="page"]'),
+    ).toContainText(newName);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toBeHidden();
 
     // Restore original name so other tests aren't affected
-    await nameInput.clear();
-    await nameInput.fill(originalName.trim());
-    await page.locator("button", { hasText: "Save" }).click();
-    await expect(page.getByText("Workspace settings saved").first()).toBeVisible({ timeout: 5000 });
-    await expect(appRail(page).getByRole("link", { name: originalName })).toBeVisible();
+    await nameInput.fill(originalName);
+    await nameInput.blur();
+    await expect(tile).toHaveText(originalName.charAt(0).toUpperCase(), { timeout: 10000 });
+    await tile.click();
+    await expect(
+      page.getByRole("menu").locator('[role="menuitem"][aria-current="page"]'),
+    ).toContainText(originalName);
+    await page.keyboard.press("Escape");
   });
 
   // Connected apps are mocked at the network boundary so the flow runs without
