@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
-import { NextRequest } from "next/server";
+import { NextRequest, type NextFetchEvent } from "next/server";
 import { MULTICA_LOCALE_HEADER } from "./lib/locale-routing";
 import { config, proxy } from "./proxy";
 
@@ -396,6 +396,21 @@ describe("proxy AI visit log", () => {
     visit("/llms.txt", { "user-agent": CLAUDE_BOT, host: "multica.ai" }, "localhost:3000");
     visit("/llms.txt", { "user-agent": CLAUDE_BOT, host: "localhost:3000" }, "localhost:3000");
     expect(loggedLines(info)).toEqual([expect.objectContaining({ path: "/llms.txt", agent: "ClaudeBot" })]);
+  });
+
+  it("retains visits in PostHog after the response when a key is configured", () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubEnv("POSTHOG_API_KEY", "phc_test");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    const waitUntil = vi.fn();
+    try {
+      const req = new NextRequest("https://www.multica.ai/llms.txt", { headers: { "user-agent": CLAUDE_BOT } });
+      proxy(req, { waitUntil } as unknown as NextFetchEvent);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+    expect(fetchMock).toHaveBeenCalledWith("https://us.i.posthog.com/batch/", expect.anything());
   });
 
   it("records the redirect status the proxy answers with", () => {

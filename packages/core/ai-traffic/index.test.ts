@@ -1,11 +1,15 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  aiVisitPostHogConfig,
+  aiVisitPostHogEvent,
   buildAiVisitRecord,
   classifyAiTraffic,
   identifyAiAgent,
   logAiVisit,
   prefersMarkdown,
+  reportAiVisit,
+  sendAiVisitToPostHog,
 } from "./index";
 
 const CHROME_2026 =
@@ -215,5 +219,94 @@ describe("logAiVisit", () => {
         throw new Error("stdout closed");
       }),
     ).not.toThrow();
+  });
+});
+
+describe("PostHog retention", () => {
+  const record = buildAiVisitRecord({
+    app: "docs",
+    method: "GET",
+    pathname: "/docs/agents.md",
+    headers: headers({ "user-agent": "ClaudeBot/1.0", cookie: "session=secret" }),
+    format: "markdown",
+    status: null,
+    now: new Date("2026-11-23T00:00:00.000Z"),
+  })!;
+  const config = { apiKey: "phc_test", host: "https://eu.i.posthog.com", environment: "production" } as const;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads the same variables as the Go server", () => {
+    expect(aiVisitPostHogConfig({})).toBeNull();
+    expect(aiVisitPostHogConfig({ POSTHOG_API_KEY: "phc_test", ANALYTICS_DISABLED: "TRUE" })).toBeNull();
+    expect(aiVisitPostHogConfig({ POSTHOG_API_KEY: " phc_test " })).toEqual({
+      apiKey: "phc_test",
+      host: "https://us.i.posthog.com",
+      environment: "dev",
+    });
+    expect(
+      aiVisitPostHogConfig({ POSTHOG_API_KEY: "phc_test", POSTHOG_HOST: "https://eu.i.posthog.com/", APP_ENV: "prod" }),
+    ).toEqual(config);
+    expect(
+      aiVisitPostHogConfig({ POSTHOG_API_KEY: "phc_test", ANALYTICS_ENVIRONMENT: "staging", APP_ENV: "production" })
+        ?.environment,
+    ).toBe("staging");
+  });
+
+  it("captures bots without person profiles or GeoIP", () => {
+    expect(aiVisitPostHogEvent(record, "production")).toEqual({
+      event: "ai_visit",
+      distinct_id: "ai-visit:ClaudeBot",
+      timestamp: "2026-11-23T00:00:00.000Z",
+      properties: {
+        app: "docs",
+        method: "GET",
+        path: "/docs/agents.md",
+        signal: "ai-agent",
+        agent: "ClaudeBot",
+        operator: "Anthropic",
+        kind: "training",
+        format: "markdown",
+        status: null,
+        legacyBrowser: false,
+        userAgent: "ClaudeBot/1.0",
+        environment: "production",
+        $process_person_profile: false,
+        $geoip_disable: true,
+      },
+    });
+  });
+
+  it("posts to the batch endpoint and never rejects", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}"));
+    await sendAiVisitToPostHog(record, config, fetchMock);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://eu.i.posthog.com/batch/");
+    const body = JSON.parse(String(init?.body));
+    expect(body.api_key).toBe("phc_test");
+    expect(body.batch).toEqual([aiVisitPostHogEvent(record, "production")]);
+    expect(String(init?.body)).not.toContain("secret");
+
+    await expect(
+      sendAiVisitToPostHog(record, config, vi.fn<typeof fetch>().mockRejectedValue(new Error("offline"))),
+    ).resolves.toBeUndefined();
+  });
+
+  it("hands the send to waitUntil only when PostHog is configured", () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}"));
+    const waitUntil = vi.fn();
+
+    reportAiVisit(record, { env: {}, waitUntil, fetch: fetchMock });
+    reportAiVisit(null, { env: { POSTHOG_API_KEY: "phc_test" }, waitUntil, fetch: fetchMock });
+    expect(waitUntil).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    reportAiVisit(record, { env: { POSTHOG_API_KEY: "phc_test" }, waitUntil, fetch: fetchMock });
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(console.info).toHaveBeenCalledTimes(2);
   });
 });

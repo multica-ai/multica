@@ -1,8 +1,8 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import {
   buildAiVisitRecord,
-  logAiVisit,
   prefersMarkdown,
+  reportAiVisit,
   type AiVisitFormat,
 } from "@multica/core/ai-traffic";
 import { i18n } from "@/lib/i18n";
@@ -69,7 +69,7 @@ function routeLocale(request: NextRequest): NextResponse {
   return NextResponse.next();
 }
 
-export function proxy(request: NextRequest) {
+export function proxy(request: NextRequest, event?: NextFetchEvent) {
   const pathname = request.nextUrl.pathname;
   const markdownPath = markdownRewritePath(pathname, prefersMarkdown(request.headers.get("accept")));
   const response = markdownPath
@@ -78,7 +78,7 @@ export function proxy(request: NextRequest) {
 
   const format: AiVisitFormat =
     markdownPath || MARKDOWN_FILES.has(pathname.split("/").at(-1) ?? "") ? "markdown" : "html";
-  logAiVisit(
+  reportAiVisit(
     buildAiVisitRecord({
       app: "docs",
       method: request.method,
@@ -87,6 +87,7 @@ export function proxy(request: NextRequest) {
       format,
       status: response.headers.has("location") ? response.status : null,
     }),
+    { env: process.env, waitUntil: event && ((promise) => event.waitUntil(promise)) },
   );
   return response;
 }

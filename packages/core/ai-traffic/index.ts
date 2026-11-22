@@ -210,3 +210,106 @@ export function logAiVisit(record: AiVisitRecord | null, sink: (line: string) =>
     // Observability must not affect the response.
   }
 }
+
+export type AiVisitPostHogConfig = {
+  apiKey: string;
+  host: string;
+  environment: "production" | "staging" | "dev";
+};
+
+type Env = Readonly<Record<string, string | undefined>>;
+
+function analyticsEnvironment(value: string | undefined): AiVisitPostHogConfig["environment"] | null {
+  switch (value?.trim().toLowerCase()) {
+    case "production":
+    case "prod":
+      return "production";
+    case "staging":
+    case "stage":
+      return "staging";
+    case "development":
+    case "dev":
+    case "test":
+    case "local":
+      return "dev";
+    default:
+      return null;
+  }
+}
+
+/**
+ * PostHog settings from the same variables the Go server reads
+ * (`server/internal/analytics`): no `POSTHOG_API_KEY`, or
+ * `ANALYTICS_DISABLED`, means nothing is sent.
+ */
+export function aiVisitPostHogConfig(env: Env): AiVisitPostHogConfig | null {
+  const apiKey = env.POSTHOG_API_KEY?.trim();
+  const disabled = env.ANALYTICS_DISABLED?.trim().toLowerCase();
+  if (!apiKey || disabled === "1" || disabled === "true") return null;
+  return {
+    apiKey,
+    host: (env.POSTHOG_HOST?.trim() || "https://us.i.posthog.com").replace(/\/+$/, ""),
+    environment: analyticsEnvironment(env.ANALYTICS_ENVIRONMENT) ?? analyticsEnvironment(env.APP_ENV) ?? "dev",
+  };
+}
+
+/**
+ * The PostHog capture for one visit. Bots are not people: one distinct id per
+ * agent (or signal), no person profile, and no GeoIP, since the request
+ * reaching PostHog comes from our server rather than the visitor.
+ */
+export function aiVisitPostHogEvent(record: AiVisitRecord, environment: AiVisitPostHogConfig["environment"]) {
+  const { event, time, ...properties } = record;
+  return {
+    event,
+    distinct_id: `ai-visit:${record.agent ?? record.signal}`,
+    timestamp: time,
+    properties: {
+      ...properties,
+      environment,
+      $process_person_profile: false,
+      $geoip_disable: true,
+    },
+  };
+}
+
+const POSTHOG_TIMEOUT_MS = 3000;
+
+/** Sends one visit to PostHog's batch endpoint. Resolves on failure too. */
+export async function sendAiVisitToPostHog(
+  record: AiVisitRecord,
+  config: AiVisitPostHogConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  try {
+    await fetchImpl(`${config.host}/batch/`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ api_key: config.apiKey, batch: [aiVisitPostHogEvent(record, config.environment)] }),
+      signal: AbortSignal.timeout(POSTHOG_TIMEOUT_MS),
+    });
+  } catch {
+    // Observability must not affect the response.
+  }
+}
+
+/**
+ * Logs the visit and, when PostHog is configured, sends it for retention.
+ * The send runs after the response through `waitUntil`, so it never adds
+ * latency to the request.
+ */
+export function reportAiVisit(
+  record: AiVisitRecord | null,
+  options: { env: Env; waitUntil?: (promise: Promise<unknown>) => void; fetch?: typeof fetch },
+): void {
+  if (!record) return;
+  logAiVisit(record);
+  const config = aiVisitPostHogConfig(options.env);
+  if (!config) return;
+  const sent = sendAiVisitToPostHog(record, config, options.fetch);
+  try {
+    options.waitUntil?.(sent);
+  } catch {
+    // Observability must not affect the response.
+  }
+}

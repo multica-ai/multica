@@ -2,7 +2,7 @@
 
 import "next/dist/server/node-environment-baseline";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
-import { NextRequest } from "next/server";
+import { NextRequest, type NextFetchEvent } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import nextConfig from "./next.config.mjs";
 import { config, markdownRewritePath, proxy } from "./proxy";
@@ -116,5 +116,20 @@ describe("docs proxy", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     proxy(request("/en/agents", { "user-agent": "GPTBot/1.1" }));
     expect(JSON.parse(String(info.mock.calls[0]?.[0]))).toMatchObject({ status: 307, format: "html" });
+  });
+
+  it("retains visits in PostHog after the response when a key is configured", () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubEnv("POSTHOG_API_KEY", "phc_test");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    const waitUntil = vi.fn();
+    try {
+      proxy(request("/agents.md", { "user-agent": "Claude-User/1.0" }), { waitUntil } as unknown as NextFetchEvent);
+      proxy(request("/agents", BROWSER), { waitUntil } as unknown as NextFetchEvent);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
