@@ -109,8 +109,12 @@ export function formatWakeupActivity(
       if (details.rule === "child_done") {
         const count = details.total ?? 1;
         const closed = details.stage
-          ? t(($) => $.activity.wakeup_child_done_stage, { stage: details.stage, count })
-          : t(($) => $.activity.wakeup_child_done_all, { count });
+          ? count === 1
+            ? t(($) => $.activity.wakeup_child_done_stage_single, { stage: details.stage })
+            : t(($) => $.activity.wakeup_child_done_stage, { stage: details.stage, count })
+          : count === 1
+            ? t(($) => $.activity.wakeup_child_done_all_single)
+            : t(($) => $.activity.wakeup_child_done_all, { count });
         // The squad's leader ran, but the entry names the assignee people see.
         const name =
           details.target_type && details.target_id

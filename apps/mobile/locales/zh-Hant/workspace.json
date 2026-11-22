@@ -14,7 +14,7 @@
   "agent": {
     "title": "AI 代理",
     "empty": "還沒有 AI 代理",
-    "search_placeholder": "搜尋 AI 代理...",
+    "search_placeholder": "搜尋 AI 代理…",
     "coming_soon": "AI 代理功能即將上線。"
   },
   "actions": {

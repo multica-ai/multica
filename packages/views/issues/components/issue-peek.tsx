@@ -15,6 +15,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueRouteRef } from "@multica/core/issues/canonical-id";
 import {
   createShortcutChord,
   isEditableShortcutTarget,
@@ -359,6 +361,7 @@ function IssuePeekTrailingActions({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
   const actions = useIssuePeekActions()!;
   const paths = useWorkspacePaths();
+  const issueRef = useIssueRouteRef(useWorkspaceId(), issueId);
 
   return (
     <>
@@ -366,7 +369,7 @@ function IssuePeekTrailingActions({ issueId }: { issueId: string }) {
         <TooltipTrigger
           render={
             <AppLink
-              href={paths.issueDetail(issueId)}
+              href={paths.issueDetail(issueRef)}
               aria-label={t(($) => $.peek.open_full_page)}
               className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground")}
             />

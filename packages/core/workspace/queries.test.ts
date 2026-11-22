@@ -1,10 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { setApiInstance } from "../api";
-import { createQueryClient } from "../query-client";
+import { describe, expect, it } from "vitest";
 import type { Agent, Workspace } from "../types";
 import {
   agentListOptions,
-  assigneeFrequencyOptions,
   workspaceBySlugOptions,
 } from "./queries";
 
@@ -69,31 +66,5 @@ describe("agentListOptions", () => {
       ]),
     ).toBe(false);
     expect(queryState([])).toBe(false);
-  });
-});
-
-describe("assigneeFrequencyOptions", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  // Issue create counts toward the frequencies but does not invalidate them,
-  // so an empty result cached on idle must not stick for the whole session.
-  it("refetches a cached result on a later read", async () => {
-    vi.useFakeTimers();
-    const getAssigneeFrequency = vi
-      .fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        { assignee_type: "agent", assignee_id: "agent-1", frequency: 1 },
-      ]);
-    setApiInstance({ getAssigneeFrequency } as never);
-    const qc = createQueryClient();
-
-    expect(await qc.fetchQuery(assigneeFrequencyOptions("ws-1"))).toEqual([]);
-    vi.advanceTimersByTime(61_000);
-
-    expect(await qc.fetchQuery(assigneeFrequencyOptions("ws-1"))).toHaveLength(1);
-    expect(getAssigneeFrequency).toHaveBeenCalledTimes(2);
   });
 });

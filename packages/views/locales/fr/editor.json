@@ -17,7 +17,7 @@
     },
     "heading_dropdown": {
       "text": "Texte",
-      "normal_text": "Texte normal",
+      "normal_text": "Texte",
       "heading_1": "Titre 1",
       "heading_2": "Titre 2",
       "heading_3": "Titre 3"
@@ -44,7 +44,7 @@
     "image_copied": "Image copiée",
     "copy_image_failed": "Impossible de copier l'image",
     "canvas_label": "Zone d'image. Faites glisser pour déplacer, faites défiler pour zoomer, double-cliquez pour basculer en taille réelle.",
-    "unavailable": "Cette image n'est plus disponible — elle a été ignorée."
+    "unavailable": "Cette image n'est plus disponible et a été ignorée."
   },
   "canvas": {
     "zoom_in": "Zoom avant",
@@ -104,7 +104,7 @@
     "copy_failed": "Échec de la copie"
   },
   "mention": {
-    "group_users": "Utilisateurs",
+    "group_users": "Membres",
     "group_issues": "Tâches",
     "group_projects": "Projets",
     "group_docs": "Documents",
@@ -129,8 +129,6 @@
     "html_preview": "Aperçu HTML",
     "close_preview": "Fermer",
     "copy_code": "Copier le code",
-    "show_preview": "Afficher l'aperçu",
-    "show_source": "Afficher la source",
     "fullscreen": "Plein écran"
   },
   "dynamic_block": {
@@ -144,7 +142,10 @@
     "error_mermaid": "Impossible de dessiner ce diagramme",
     "error_at_line": "{{message}} (ligne {{line}})",
     "view_source": "Voir la source",
-    "copy_error": "Copier l’erreur"
+    "copy_error": "Copier l’erreur",
+    "title": "Titre",
+    "rename": "Renommer",
+    "add_title": "Ajouter un titre"
   },
   "file_card": {
     "uploading": "Envoi de {{filename}}"

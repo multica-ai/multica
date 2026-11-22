@@ -172,6 +172,9 @@ vi.mock("@multica/core/auth", async (importOriginal) => {
   };
 });
 
+const composio = vi.hoisted(() => ({ available: true }));
+vi.mock("../common/use-composio-available", () => ({ useComposioAvailable: () => composio.available }));
+
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
   useWorkspaceId: () => "ws-test",
@@ -368,6 +371,7 @@ const rowText = (text: string) =>
 
 describe("SearchCommand", () => {
   beforeEach(() => {
+    composio.available = true;
     queryData.clear();
     apiFns.clear();
     apiFns.set("getBaseUrl", vi.fn(() => "http://127.0.0.1:8080"));
@@ -445,14 +449,15 @@ describe("SearchCommand", () => {
       expect(renderedValues()).not.toContain("hand-to-agent");
     });
 
-    it("drops New issue from a project's context commands", () => {
+    it("drops Change status and New issue from a project's context commands", () => {
       registerContext({
         kind: "project",
         project: { id: "proj-1", title: "Shared project", archived_at: null },
       } as CommandBarContext);
       renderSearch();
 
-      expect(renderedValues()).toContain("command:context-project:project-status");
+      expect(renderedValues()).toContain("command:context-project:project-copy-link");
+      expect(renderedValues()).not.toContain("command:context-project:project-status");
       expect(renderedValues()).not.toContain("command:context-project:project-new-issue");
     });
   });
@@ -477,6 +482,17 @@ describe("SearchCommand", () => {
         await user.type(input(), enLayout.nav[page.navKey]);
         await waitFor(() => expect(renderedValues()).toContain(`page:${key}`));
       }
+    });
+
+    it("leaves Apps out when the server has no connected apps", async () => {
+      composio.available = false;
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), enLayout.nav.apps);
+      await waitFor(() => expect(renderedValues()).not.toContain("page:apps"));
+      await user.clear(input());
+      await user.type(input(), enLayout.nav.skills);
+      await waitFor(() => expect(renderedValues()).toContain("page:skills"));
     });
 
     it("does not surface a page on an incidental substring of a hidden keyword", async () => {
@@ -1153,6 +1169,34 @@ describe("SearchCommand", () => {
       );
     });
 
+    it("offers Delete issue on an issue the viewer created", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+      await waitFor(() => expect(renderedValues()).toContain("command:context-issue:issue-delete"));
+    });
+
+    it("drops Delete issue on someone else's issue", async () => {
+      act(() => {
+        for (const token of registered.splice(0)) useCommandBarContextStore.getState().unregister(token);
+      });
+      registerContext({ kind: "issue", issue: { ...issue, creator_id: "user-other" } });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+
+      expect(renderedValues()).not.toContain("command:context-issue:issue-delete");
+    });
+
+    it("drops Delete issue for a guest, even on an issue it created (MUL-9877)", async () => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+
+      expect(renderedValues()).not.toContain("command:context-issue:issue-delete");
+    });
+
     it("hides issue commands once the page unregisters", () => {
       act(() => {
         for (const token of registered.splice(0)) useCommandBarContextStore.getState().unregister(token);
@@ -1270,7 +1314,7 @@ describe("SearchCommand", () => {
       expect(handRow()).toHaveTextContent(`Hand to agent: “${prompt}”`);
       fireEvent.keyDown(input(), { key: "Enter" });
 
-      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-812");
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/MUL-812");
       expect(mockOpenModal).not.toHaveBeenCalled();
       expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });
@@ -1355,7 +1399,7 @@ describe("SearchCommand", () => {
       await user.type(input(), "localized");
 
       await waitFor(() => expect(screen.getByText("进行中")).toBeInTheDocument(), { timeout: 2000 });
-      expect(screen.queryByText("In Progress")).toBeNull();
+      expect(screen.queryByText("In progress")).toBeNull();
     });
 
     it("keeps live rows of both types above every cancelled row", async () => {

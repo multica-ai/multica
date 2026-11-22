@@ -192,6 +192,23 @@ describe("ProjectResourcesSection — local folders", () => {
     expect(screen.getByRole("button", { name: strings.remove_tooltip })).toBeInTheDocument();
   });
 
+  it("lists folders read-only, with no slot on this computer and nothing to change", () => {
+    state.resources = [folder("game-client", "daemon-1"), folder("server-checkout", "daemon-2")];
+    renderWithI18n(<ProjectResourcesSection projectId="p1" readOnly />);
+
+    expect(screen.getByText("game-client")).toBeInTheDocument();
+    expect(screen.getByText("server-checkout")).toBeInTheDocument();
+    expect(screen.getAllByText(strings.mode_badge_worktree)).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: strings.mode_badge_worktree })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: strings.remove_tooltip })).not.toBeInTheDocument();
+  });
+
+  it("shows no local folders read-only when there are none, even on desktop", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" readOnly />);
+    expect(screen.queryByText(strings.local_group)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: strings.local_pick })).not.toBeInTheDocument();
+  });
+
   it("asks to start the daemon before a folder can be chosen", () => {
     state.daemon = { daemonId: null, deviceName: "MacBook", running: false };
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);

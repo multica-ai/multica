@@ -148,7 +148,7 @@ function Everything() {
               "Search issues and projects",
               "Pin the issues you keep coming back to",
               "Create projects and attach repositories",
-              "Light or dark, in English or Simplified Chinese",
+              "Light or dark, in English, Simplified Chinese, or Traditional Chinese",
             ]}
           />
         </div>

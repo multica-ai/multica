@@ -3863,6 +3863,7 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().Int64("description-base-revision", 0, "")
 	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().StringArray("attachment", nil, "")
 	cmd.Flags().String("status", "", "")
@@ -4056,6 +4057,125 @@ func TestRunIssueUpdateSendsPosition(t *testing.T) {
 	}
 	if got := body["position"]; got != float64(7.5) {
 		t.Fatalf("position = %#v, want 7.5 in request body", got)
+	}
+}
+
+func TestRunIssueUpdateSendsDescriptionBaseRevision(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"code": "issue_description_merge_conflict", "conflicts": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("description", "new text")
+	_ = cmd.Flags().Set("description-base-revision", "4")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if got := body["description_base_revision"]; got != float64(4) {
+		t.Fatalf("description_base_revision = %#v, want 4", got)
+	}
+	if err == nil || !strings.Contains(err.Error(), "issue edit-description") {
+		t.Fatalf("err = %v, want a merge conflict pointing at issue edit-description", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsDescriptionBaseRevisionWithoutDescription(t *testing.T) {
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("description-base-revision", "4")
+	_ = cmd.Flags().Set("title", "x")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:1")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	if err := runIssueUpdate(cmd, []string{"MUL-1"}); err == nil || !strings.Contains(err.Error(), "needs a new description") {
+		t.Fatalf("err = %v, want a refusal before any request", err)
+	}
+}
+
+func newIssueEditDescriptionTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "edit-description"}
+	cmd.Flags().String("old", "", "")
+	cmd.Flags().String("old-file", "", "")
+	cmd.Flags().String("new", "", "")
+	cmd.Flags().String("new-file", "", "")
+	cmd.Flags().Bool("replace-all", false, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueEditDescriptionPostsEdit(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/description/edits":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "description_revision": 3})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueEditDescriptionTestCmd()
+	_ = cmd.Flags().Set("old", "Status: draft")
+	_ = cmd.Flags().Set("new", "Status: ready")
+	_ = cmd.Flags().Set("replace-all", "true")
+	if err := runIssueEditDescription(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueEditDescription: %v", err)
+	}
+	edits, _ := body["edits"].([]any)
+	if len(edits) != 1 {
+		t.Fatalf("edits = %#v, want one edit", body["edits"])
+	}
+	edit := edits[0].(map[string]any)
+	if edit["old_text"] != "Status: draft" || edit["new_text"] != "Status: ready" || edit["replace_all"] != true {
+		t.Fatalf("edit = %#v", edit)
+	}
+}
+
+func TestRunIssueEditDescriptionExplainsAMissingQuote(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"code": "issue_description_edit_failed", "failure": map[string]any{"reason": "not_found"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueEditDescriptionTestCmd()
+	_ = cmd.Flags().Set("old", "gone")
+	_ = cmd.Flags().Set("new", "x")
+	err := runIssueEditDescription(cmd, []string{"MUL-1"})
+	if err == nil || !strings.Contains(err.Error(), "does not match the description exactly once") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

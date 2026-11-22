@@ -15,8 +15,10 @@ import (
 
 // SnoozedInboxResponse is one snoozed issue in the caller's inbox.
 type SnoozedInboxResponse struct {
-	IssueID      string `json:"issue_id"`
-	ItemID       string `json:"item_id"`
+	IssueID string `json:"issue_id"`
+	// The identifier (MUL-123) the row links to; see InboxItemResponse.
+	IssueIdentifier *string `json:"issue_identifier"`
+	ItemID          string  `json:"item_id"`
 	SnoozedUntil string `json:"snoozed_until"`
 	SnoozedAt    string `json:"snoozed_at"`
 	// Rows that arrived on the issue while it was snoozed.
@@ -56,14 +58,16 @@ func (h *Handler) ListSnoozedInbox(w http.ResponseWriter, r *http.Request) {
 		writeInboxReadError(w, err, "failed to list snoozed inbox")
 		return
 	}
+	issuePrefix := h.getIssuePrefix(r.Context(), wsUUID)
 	resp := make([]SnoozedInboxResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = SnoozedInboxResponse{
-			IssueID:      uuidToString(row.IssueID),
-			ItemID:       uuidToString(row.ItemID),
-			SnoozedUntil: timestampToString(row.SnoozedUntil),
-			SnoozedAt:    timestampToString(row.SnoozedAt),
-			Updates:      row.Updates,
+			IssueID:         uuidToString(row.IssueID),
+			IssueIdentifier: inboxIssueIdentifier(issuePrefix, row.IssueNumber),
+			ItemID:          uuidToString(row.ItemID),
+			SnoozedUntil:    timestampToString(row.SnoozedUntil),
+			SnoozedAt:       timestampToString(row.SnoozedAt),
+			Updates:         row.Updates,
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

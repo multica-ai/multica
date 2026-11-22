@@ -2021,6 +2021,9 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	for agentID, result := range steered {
 		enqueued[agentID] = result
 	}
+	if commentResultsTriggeredAgent(enqueued) {
+		h.archiveActorInboxOnAgentTrigger(ctx, uuidToString(issue.WorkspaceID), uuidToString(issue.ID), actorType, actorID)
+	}
 	outcomes := commentTriggerOutcomes(targets, enqueued)
 	h.noteCommentInvocationDenied(ctx, issue, comment, outcomes)
 	return outcomes

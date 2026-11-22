@@ -137,7 +137,7 @@ describe("WeChat QR connection", () => {
       }),
     );
     const { unmount } = renderAuthorization();
-    expect(await screen.findByRole("status")).toHaveTextContent("Connecting…");
+    expect(await screen.findByRole("status")).toHaveTextContent("Connecting...");
     unmount();
     resolve(login);
     await waitFor(() =>

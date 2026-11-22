@@ -22,7 +22,9 @@ describe("daemon quit dialog copy", () => {
     ["zh-MO", "結束 Multica"],
     ["ja-JP", "Multica を終了"],
     ["ko-KR", "Multica 종료"],
-    ["fr-FR", "Quit Multica"],
+    ["fr-FR", "Quitter Multica"],
+    ["es-ES", "Salir de Multica"],
+    ["ru-RU", "Выйти из Multica"],
     ["", "Quit Multica"],
   ])("resolves OS language %s using the native menu locale policy", (language, title) => {
     const options = quitConfirmationOptions(language, 3);
@@ -31,7 +33,7 @@ describe("daemon quit dialog copy", () => {
     expect(options.message).not.toContain("Agent tasks");
   });
 
-  it.each(["en", "zh-Hans", "zh-Hant", "ja", "ko"])("distinguishes stopped and unconfirmed daemon states in %s", (language) => {
+  it.each(["en", "zh-Hans", "zh-Hant", "ja", "ko", "fr", "es", "ru"])("distinguishes stopped and unconfirmed daemon states in %s", (language) => {
     const stopped = quitFailureOptions(language, true);
     const unknown = quitFailureOptions(language, false);
     expect(stopped.message).not.toEqual(unknown.message);

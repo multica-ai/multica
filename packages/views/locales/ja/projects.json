@@ -79,9 +79,12 @@
     "toast_subscription_failed": "購読を更新できませんでした",
     "sidebar_tooltip": "右サイドバーの開閉",
     "rename_action": "プロジェクト名を変更",
+    "guest_readonly_note": "ゲストはこのプロジェクトを閲覧できますが、プロパティは変更できません。",
     "copy_link": "リンクをコピー",
     "copy_title_as_link": "タイトル付きリンクをコピー",
     "delete_action": "プロジェクトを削除",
+    "tab_overview": "概要",
+    "tab_issues": "タスク",
     "section_properties": "プロパティ",
     "section_progress": "進捗",
     "section_description": "説明",
@@ -102,7 +105,40 @@
     "toast_project_deleted": "プロジェクトを削除しました",
     "toast_move_issue_failed": "タスクを移動できませんでした",
     "archive_action": "プロジェクトをアーカイブ",
-    "restore_action": "プロジェクトを復元"
+    "restore_action": "プロジェクトを復元",
+    "progress_panel": {
+      "summary_other": "{{count}} 件のタスク中 {{completed}} 件が完了",
+      "legend_completed": "完了",
+      "legend_started": "進行中",
+      "legend_unstarted": "未着手",
+      "cancelled_note_other": "キャンセル済みの {{count}} 件は進捗に含めません",
+      "empty_hint": "タスクを追加すると進捗と推移の計算が始まります。",
+      "chart_label": "週ごとの進捗",
+      "chart_today": "今日",
+      "forecast_no_due": "最近のペースでは {{date}} に完了見込み",
+      "forecast_ahead_other": "最近のペースでは {{date}} に完了見込み（期日の {{count}} 日前）",
+      "forecast_behind_other": "最近のペースでは {{date}} に完了見込み（期日の {{count}} 日後）",
+      "forecast_on_due": "最近のペースでは {{date}} に完了見込み（期日どおり）",
+      "forecast_none": "最近の完了が少ないため、完了日を予測できません。",
+      "by_assignee": "担当者別",
+      "agent_tag": "エージェント",
+      "unassigned": "未割り当て",
+      "axis_assignee": "担当者",
+      "axis_label": "ラベル",
+      "by_label": "ラベル別",
+      "no_labels": "まだ課題がありません。",
+      "unlabeled": "ラベルなし"
+    },
+    "tab_activity": "アクティビティ",
+    "agent_context_badge": "エージェントのコンテキスト",
+    "section_breakdown": "内訳",
+    "section_activity": "最近のアクティビティ",
+    "activity": {
+      "empty": "このプロジェクトの課題にはまだアクティビティがありません。",
+      "load_more": "さらに読み込む",
+      "view_all": "すべて表示",
+      "hint": "このプロジェクトの課題のステータス、担当者、優先度、日付の変更。"
+    }
   },
   "resources": {
     "section_header": "リソース",
@@ -152,7 +188,7 @@
     "mode_badge_in_place": "直接",
     "ref_label": "起点ブランチ",
     "ref_placeholder": "main",
-    "ref_hint": "タスクはこのブランチから開始し、プルリクエストもここへ作成します。空欄ならデフォルトブランチを使います。",
+    "ref_hint": "エージェントの実行はこのブランチから分岐し、このブランチ宛てにプルリクエストを作成します。空欄にするとデフォルトブランチが使用されます。",
     "ref_error_too_long": "255 文字以内で入力してください。",
     "ref_error_characters": "ブランチ名にスペースや ~ ^ : ? * [ \\ は使えません",
     "ref_error_format": "有効なブランチ名ではありません。",
@@ -164,7 +200,7 @@
     "toast_ref_update_failed": "ブランチを更新できませんでした",
     "ref_error_commit": "これはコミットで、ブランチではありません。特定のリビジョンが必要なら multica repo checkout --ref を使ってください。",
     "ref_default_label": "デフォルトブランチ",
-    "ref_running_note": "進行中のタスクには影響しません。"
+    "ref_running_note": "すでに進行中の実行には影響しません。"
   },
   "delete_dialog": {
     "offline_error": "オフラインです。接続を回復してから、もう一度削除してください。",
@@ -173,7 +209,7 @@
     "confirm": "削除",
     "cancel": "キャンセル",
     "archive_instead": "代わりにアーカイブ",
-    "archive_hint": "アーカイブするとプロジェクトは非表示になりますが、タスク・履歴・設定は残り、いつでも復元できます。"
+    "archive_hint": "アーカイブしても、すべてのタスク・履歴・設定はそのまま保持されます。"
   },
   "picker": {
     "no_project": "プロジェクトなし",
@@ -196,7 +232,7 @@
     "slides": {
       "progress": {
         "title": "進捗がひと目でわかる",
-        "description": "ステータス、リード、期日、完了率が一枚のカードにまとまり、タスクを一つずつ開く必要はありません。"
+        "description": "ステータス・リード・期限・完了率が 1 枚のカードにまとまっているため、タスクを 1 つずつ開く必要はありません。"
       },
       "context": {
         "title": "コンテキストは毎回自動で渡る",

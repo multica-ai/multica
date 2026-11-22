@@ -353,7 +353,7 @@ describe("AutopilotDialog webhook section", () => {
 
     expect(screen.getByTitle("pull_request")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Event" })).not.toBeInTheDocument();
-    expect(screen.getByText("Saved on their own: Cancel here won't undo them.")).toBeInTheDocument();
+    expect(screen.getByText("Event filters save immediately — clicking Cancel here won't undo them.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Edit filters" }));
     const filters = await screen.findByRole("dialog", { name: "Edit webhook" });

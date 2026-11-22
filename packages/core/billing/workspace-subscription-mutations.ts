@@ -8,6 +8,7 @@ import type {
   PreviewWorkspaceSeatPurchaseRequest,
   PurchaseWorkspaceSeatsRequest,
 } from "../types";
+import { workspaceFeatureKeys } from "./paid-features";
 import { workspaceSubscriptionKeys } from "./workspace-subscription-queries";
 import { autopilotKeys } from "../autopilots/queries";
 
@@ -66,7 +67,8 @@ export function usePreviewWorkspacePlanChange() {
 /**
  * Cloud persists the new plan before answering, so refreshing the whole
  * workspace subscription scope (summary and anything keyed under it) shows the
- * switched plan without waiting for Stripe's webhook.
+ * switched plan without waiting for Stripe's webhook. The paid features and
+ * plan limits change with it.
  */
 export function useChangeWorkspacePlan(wsId: string) {
   const queryClient = useQueryClient();
@@ -76,6 +78,9 @@ export function useChangeWorkspacePlan(wsId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: workspaceSubscriptionKeys.all(wsId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: workspaceFeatureKeys.all(wsId),
       });
     },
   });

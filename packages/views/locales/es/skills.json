@@ -188,7 +188,8 @@
       "permissions_owner": "Puedes editar y eliminar esta skill. Los cambios surten efecto en la próxima ejecución del agente.",
       "permissions_locked_creator": "Solo el creador ({{name}}) o un administrador del espacio de trabajo pueden editar esta skill.",
       "permissions_locked": "Solo el creador o un administrador del espacio de trabajo pueden editar esta skill.",
-      "character_count": "{{count}} caracteres"
+      "character_count_one": "{{count}} carácter",
+      "character_count_other": "{{count}} caracteres"
     },
     "files": {
       "list_aria": "Archivos de la skill",
@@ -355,8 +356,6 @@
     "toast_imported": "Skill importada",
     "toast_import_failed": "No se ha podido importar la skill",
     "select_all": "Seleccionar todas ({{count}})",
-    "bulk_ready": "{{count}} skills seleccionadas",
-    "bulk_import_button": "Importar {{count}} skills",
     "bulk_progress": "Importando {{completed}} / {{total}}…",
     "bulk_cancel_button": "Cancelar",
     "bulk_complete_hint": "Importación completa.",
@@ -368,7 +367,6 @@
     "bulk_summary_skipped": "Omitidas",
     "bulk_summary_failed": "Fallidas",
     "conflict_single_title": "Ya existe una skill con este nombre",
-    "conflict_bulk_title": "{{count}} skills necesitan una decisión",
     "conflict_hint": "Elige si sobreescribir la skill existente del espacio de trabajo, importarla con un nombre nuevo, u omitirla.",
     "conflict_locked_creator": "Esta skill la creó {{creator}}. Solo el creador puede sobreescribirla desde la importación local; edítala desde la página de detalle de la skill si necesitas cambiarla.",
     "conflict_locked": "Solo el creador puede sobreescribir esta skill desde la importación local; edítala desde la página de detalle de la skill si necesitas cambiarla.",
@@ -379,10 +377,17 @@
     "conflict_overwrite_all": "Sobreescribir todas",
     "conflict_skip_all": "Omitir todas",
     "conflict_rename_label": "Nombre nuevo de la skill",
-    "conflict_footer": "{{count}} decisiones de conflicto pendientes.",
     "conflict_apply_button": "Aplicar decisiones",
     "conflict_missing_resolution": "Elige cómo resolver este conflicto.",
-    "conflict_name_still_exists": "Ese nombre ya existe. Elige otro nombre u omítela."
+    "conflict_name_still_exists": "Ese nombre ya existe. Elige otro nombre u omítela.",
+    "bulk_ready_one": "{{count}} skill seleccionada",
+    "bulk_ready_other": "{{count}} skills seleccionadas",
+    "bulk_import_button_one": "Importar {{count}} skill",
+    "bulk_import_button_other": "Importar {{count}} skills",
+    "conflict_bulk_title_one": "{{count}} skill necesita una decisión",
+    "conflict_bulk_title_other": "{{count}} skills necesitan una decisión",
+    "conflict_footer_one": "{{count}} decisión de conflicto pendiente.",
+    "conflict_footer_other": "{{count}} decisiones de conflicto pendientes."
   },
   "file_tree": {
     "no_files": "Sin archivos",

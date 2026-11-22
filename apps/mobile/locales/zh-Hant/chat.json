@@ -15,13 +15,13 @@
     "upload_file": "上傳檔案",
     "send": "傳送",
     "queue": "排隊傳送",
-    "default_placeholder": "輸入訊息...",
+    "default_placeholder": "輸入訊息…",
     "unavailable": "聊天不可用",
     "stop_agent": "停止 AI 代理",
     "file_too_large_title": "檔案過大",
     "file_too_large_message": "檔案必須小於 100 MB。",
-    "working": "AI 代理正在處理...",
-    "message": "訊息..."
+    "working": "AI 代理正在處理…",
+    "message": "訊息…"
   },
   "empty": {
     "greeting": "你好，我是 {{name}}",
@@ -36,7 +36,7 @@
   },
   "picker": {
     "title": "選擇 AI 代理",
-    "placeholder": "搜尋 AI 代理...",
+    "placeholder": "搜尋 AI 代理…",
     "empty": "沒有可用 AI 代理。",
     "needs_runtime": "需要執行時"
   },
@@ -46,7 +46,7 @@
     "offline": "{{name}} 已離線。訊息會等待其執行時恢復後傳送。",
     "no_agent_action": "在 \"更多 → AI 代理\" 中新增或啟用 AI 代理即可開始聊天。",
     "offline_unstable": "{{name}} 可能剛斷開連線，你的訊息會先排隊。",
-    "runtime_required_name": "{{name}} 需要先配置執行時才能執行。請在網頁端或桌面端繫結。"
+    "runtime_required_name": "{{name}} 需要先設定執行時才能執行。請在網頁端或桌面端綁定。"
   },
   "status": {
     "offline": "離線",
@@ -67,17 +67,17 @@
     "no_permission_title": "無權執行該 AI 代理",
     "no_permission_message": "你已無權執行該 AI 代理，訊息未傳送。請聯絡該 AI 代理的所有者申請權限。",
     "runtime_title": "需要執行時",
-    "runtime_message": "傳送訊息前，請先在網頁端或桌面端為該 AI 代理繫結執行時。",
+    "runtime_message": "傳送訊息前，請先在網頁端或桌面端為該 AI 代理綁定執行時。",
     "not_sent": "訊息未傳送",
     "delete_title": "刪除這個聊天？",
     "delete_confirm": "刪除"
   },
   "failure": {
     "invocation_not_allowed": "你已無權執行該 AI 代理，訊息未傳送。",
-    "agent_runtime_required": "傳送訊息前，請先為該 AI 代理繫結執行時。",
+    "agent_runtime_required": "傳送訊息前，請先為該 AI 代理綁定執行時。",
     "runtime_access_denied": "訊息未傳送：{{detail}}",
     "default": "訊息無法傳送，請重試。",
-    "runtime_access_recovery": "該 AI 代理無法在其私有執行時上執行。請將該執行時設為公開，或將 AI 代理重新繫結/複製到其所有者可用的執行時。"
+    "runtime_access_recovery": "無法存取該 AI 代理的私有執行時。請將該執行時設為公開，或將 AI 代理綁定到可用的執行時。"
   },
   "a11y": {
     "suggested_followups": "建議的後續操作",
@@ -105,7 +105,6 @@
     "archived": "已歸檔",
     "new_chat": "新建聊天"
   },
-  "picker.title": "選擇 AI 代理",
   "no_response": "本輪已結束，AI 代理沒有返回文字回覆。",
   "failure_reason": {
     "default": "執行失敗",
@@ -113,15 +112,15 @@
     "runtime_offline": "守護程序離線",
     "runtime_reconnect_timeout": "守護程序未及時重新連線",
     "runtime_recovery": "守護程序已重啟",
-    "timeout": "執行超時",
+    "timeout": "執行逾時",
     "iteration_limit": "達到迭代次數上限",
     "agent_blocked": "等待人工輸入",
     "api_invalid_request": "模型 API 拒絕了請求",
     "skill_bundle_unavailable": "無法下載 AI 代理的 skill",
-    "runtime_cli_timeout": "本地執行時 CLI 超時",
+    "runtime_cli_timeout": "本機執行時 CLI 逾時",
     "environment_prepare_failed": "無法準備執行環境",
-    "runtime_access_denied": "該 AI 代理無法在其私有執行時上執行，暫時無法回覆。請將該執行時設為公開，或將 AI 代理重新繫結/複製到其所有者可用的執行時。",
-    "runtime_access_revoked": "執行時訪問權限已被撤銷。再次執行前，請為 AI 代理繫結可用的執行時。",
+    "runtime_access_denied": "無法存取該 AI 代理的私有執行時，暫時無法回覆。請將該執行時設為公開，或將 AI 代理綁定到可用的執行時。",
+    "runtime_access_revoked": "執行時存取權限已被撤銷。再次執行前，請為 AI 代理綁定可用的執行時。",
     "invalid_task_identity": "執行身份不匹配",
     "agent_error_provider_auth_or_access": "提供商認證失敗",
     "agent_error_provider_quota_limit": "提供商配額已用盡",
@@ -130,7 +129,7 @@
     "agent_error_provider_network": "連線提供商時網路出錯",
     "agent_error_process_failure": "AI 代理程序崩潰",
     "agent_error_empty_or_unparseable_output": "AI 代理未返回可用輸出",
-    "agent_error_agent_timeout": "AI 代理執行超時",
+    "agent_error_agent_timeout": "AI 代理執行逾時",
     "agent_error_context_overflow": "上下文視窗已超限",
     "agent_error_missing_config": "缺少 API 金鑰或配置",
     "agent_error_model_not_found_or_unavailable": "模型不可用",
@@ -155,18 +154,5 @@
     "tool_result_unnamed": "結果：",
     "truncated": "…（已截斷）",
     "error": "錯誤"
-  },
-  "empty.starter_help_prompt": "你最擅長幫我做什麼？請簡要概述。",
-  "status.reconnecting": "重新連線中",
-  "status.running_command": "正在執行命令",
-  "status.reading_files": "正在讀取檔案",
-  "status.searching_code": "正在搜尋程式碼",
-  "status.making_edits": "正在修改",
-  "status.searching_web": "正在搜尋網頁",
-  "elapsed.replied": "用時 {{time}} 回覆",
-  "elapsed.finished": "用時 {{time}} 完成",
-  "elapsed.failed": "執行 {{time}} 後失敗",
-  "alerts.no_permission_message": "你已無權執行該 AI 代理，訊息未傳送。請聯絡該 AI 代理的所有者申請權限。",
-  "failure.runtime_access_denied": "訊息未傳送：{{detail}}",
-  "banners.no_agent_action": "在 \"更多 → AI 代理\" 中新增或啟用 AI 代理即可開始聊天。"
+  }
 }

@@ -116,6 +116,25 @@ describe("annotation draft submission through the real composer", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
   });
 
+  it.each([false, true])("clears the draft when Ctrl+Enter sends within the 100ms editor debounce (description: %s)", async (description) => {
+    const draftKey = description ? "new:issue" as const : key;
+    const onSubmit = vi.fn<Submit>(() => new Promise((resolve) => {
+      window.setTimeout(() => resolve("published"), 200);
+    }));
+    const view = renderWithI18n(<Fixture onSubmit={onSubmit} description={description} />);
+    selectText(view.container);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
+    const input = await screen.findByRole("textbox", { name: "Comment" });
+    // Type and send immediately before the 100ms ContentEditor debounce fires.
+    await act(async () => {
+      (input as HTMLElement & { editor: Editor }).editor.commands.setContent("Fast send", { contentType: "markdown" });
+    });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("> Child text\n\nFast send", undefined, undefined, undefined));
+    await waitFor(() => expect(useCommentDraftStore.getState().drafts[draftKey]).toBeUndefined());
+    expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument();
+  });
+
   it("keeps the popover compact: icon send, short confirm label with a descriptive name", async () => {
     const view = renderWithI18n(<Fixture onSubmit={vi.fn<Submit>(async () => "published")} />);
     const input = await open(view.container, "Compact note");

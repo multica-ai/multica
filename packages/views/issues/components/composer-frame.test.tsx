@@ -36,7 +36,7 @@ describe("ComposerToolbar", () => {
       />,
     );
     expect(screen.getByText("Lambda · Will start when sent")).toBeVisible();
-    expect(screen.getAllByText("Transcribing…").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Transcribing...").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 

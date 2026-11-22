@@ -128,6 +128,16 @@ const (
 
 type WorkspaceFeaturesResponse struct {
 	Features map[string]WorkspaceFeatureState `json:"features"`
+	Limits   WorkspaceFeatureLimits           `json:"limits"`
+}
+
+// WorkspaceFeatureLimits are numeric plan limits clients render ahead of the
+// server applying them. Each is null unless enforced, so an observed rollout
+// stays invisible to users.
+type WorkspaceFeatureLimits struct {
+	// DashboardHistoryDays is how many calendar days back the dashboard can
+	// read (dashboard_history.go).
+	DashboardHistoryDays *int `json:"dashboard_history_days"`
 }
 
 // GetWorkspaceFeatures — GET /api/workspaces/{id}/features
@@ -154,5 +164,6 @@ func (h *Handler) GetWorkspaceFeatures(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Features[string(feature)] = WorkspaceFeatureState{State: state}
 	}
+	resp.Limits.DashboardHistoryDays = h.dashboardHistoryLimitForClient(r.Context(), wsID)
 	writeJSON(w, http.StatusOK, resp)
 }

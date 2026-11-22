@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { continuous, NumberFlow } from "@multica/ui/components/ui/number-flow";
 import { WORDMARK, WORDMARK_STAR, WORDMARK_STROKE } from "@multica/ui/lib/multica-brand";
 import { cn } from "@multica/ui/lib/utils";
 import { Container } from "./primitives";
@@ -101,6 +102,8 @@ const MAX_REPORT = 30;
 /** Spin (rad/s) a turn blown elsewhere adds here, capped so a busy moment still reads as a nudge. */
 const REMOTE_PUSH = Math.PI;
 const MAX_REMOTE_SPIN = 18;
+const STAR_COUNT_FORMAT = { maximumFractionDigits: 0 } as const;
+const STAR_COUNT_PLUGINS = [continuous];
 
 /** 8×8 Bayer thresholds in (0, 1): a cell shows when its density exceeds its threshold. */
 const BAYER = (() => {
@@ -668,6 +671,7 @@ export function FooterWordmark({ className, label, locale }: { className?: strin
   }, []);
 
   const [before, after = ""] = label.split("{count}");
+  const formattedTotal = total !== null ? new Intl.NumberFormat(locale, STAR_COUNT_FORMAT).format(total) : null;
 
   return (
     <div ref={box} className={cn("relative text-site-ink", className)}>
@@ -680,9 +684,21 @@ export function FooterWordmark({ className, label, locale }: { className?: strin
             )}
             aria-live="off"
           >
-            {before}
-            <span className="tabular-nums text-site-ink">{new Intl.NumberFormat(locale).format(total ?? 0)}</span>
-            {after}
+            {total !== null ? (
+              <>
+                {before}
+                <NumberFlow
+                  value={total}
+                  locales={locale}
+                  format={STAR_COUNT_FORMAT}
+                  plugins={STAR_COUNT_PLUGINS}
+                  willChange
+                  aria-label={formattedTotal ?? undefined}
+                  className="text-site-ink"
+                />
+                {after}
+              </>
+            ) : null}
           </p>
         </div>
       </Container>

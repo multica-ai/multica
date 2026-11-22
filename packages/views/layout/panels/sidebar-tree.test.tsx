@@ -47,6 +47,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
 }));
 vi.mock("../../navigation", () => ({
+  useWarmRoute: () => undefined,
   AppLink: ({
     children,
     href,
@@ -79,7 +80,7 @@ const PARAMS: SidebarIssuesRequest = {
   },
 };
 const issues = (count: number): Issue[] =>
-  Array.from({ length: count }, (_, i) => ({ id: `issue-${i + 1}`, title: `Issue ${i + 1}`, status: "todo" }) as Issue);
+  Array.from({ length: count }, (_, i) => ({ id: `issue-${i + 1}`, identifier: `MUL-${i + 1}`, title: `Issue ${i + 1}`, status: "todo" }) as Issue);
 
 function renderList({
   total = 18,
@@ -131,11 +132,11 @@ describe("SidebarIssueList", () => {
       ],
     });
     expect(rows().map((row) => row.getAttribute("href"))).toEqual([
-      "/acme/issues/issue-1#comment-comment-1",
-      "/acme/issues/issue-2",
-      "/acme/issues/issue-3#comment-task-3",
-      "/acme/issues/issue-4",
-      "/acme/issues/issue-5",
+      "/acme/issues/MUL-1#comment-comment-1",
+      "/acme/issues/MUL-2",
+      "/acme/issues/MUL-3#comment-task-3",
+      "/acme/issues/MUL-4",
+      "/acme/issues/MUL-5",
     ]);
   });
 
@@ -246,6 +247,6 @@ describe("sidebar title disclosure", () => {
       vi.useRealTimers();
     }
     expect(document.querySelector("[data-slot=tooltip-content]")).toBeNull();
-    expect(link).toHaveAttribute("href", "/acme/issues/issue-1");
+    expect(link).toHaveAttribute("href", "/acme/issues/MUL-1");
   });
 });

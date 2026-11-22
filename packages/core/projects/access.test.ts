@@ -33,6 +33,12 @@ describe("project access rules", () => {
     expect(canManageProjectAccess(unled, "creator", "member", undefined)).toBe(false);
   });
 
+  it("gives a guest no access management, even as the named manager or lead", () => {
+    expect(canManageProjectAccess(led, "lead", "guest", "lead")).toBe(false);
+    expect(canManageProjectAccess(led, "lead", "guest", undefined)).toBe(false);
+    expect(canChangeProjectLead(led, "lead", "guest", "lead")).toBe(false);
+  });
+
   it("gives a member nothing for leading a workspace-visible project", () => {
     expect(canManageProjectAccess(open, "lead", "member", "lead")).toBe(false);
   });

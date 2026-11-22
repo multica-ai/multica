@@ -16,7 +16,7 @@ const selection = vi.hoisted(() => ({
 }));
 const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: true }),
 }));
 
 vi.mock("@multica/core/issues/stores/selection-store", () => ({

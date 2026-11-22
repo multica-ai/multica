@@ -1,14 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlarmClock, Undo2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { issueRouteRef, useWorkspacePaths } from "@multica/core/paths";
 import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { issueDetailOptions } from "@multica/core/issues/queries";
+import { cachedIssueRouteRef } from "@multica/core/issues/canonical-id";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { SnoozedInboxIssue } from "@multica/core/types";
 import { CollectionPageHeader, CollectionPageState } from "../../layout/collection-page";
@@ -55,6 +56,7 @@ export function SnoozedInboxPage() {
   const { t } = useT("inbox");
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
+  const qc = useQueryClient();
   const locale = useLocale();
   const title = useBuiltinViewLabel()("snoozed");
   const { data: snoozed, isLoading } = useQuery(snoozedInboxOptions(wsId));
@@ -136,7 +138,15 @@ export function SnoozedInboxPage() {
           columns={columns}
           groups={groups}
           getRowId={(row) => row.issue_id}
-          getRowHref={(row) => p.issueDetail(row.issue_id)}
+          // Older servers send no identifier. The cache supplies it when the
+          // issue was loaded before this list last rendered; else the UUID.
+          getRowHref={(row) =>
+            p.issueDetail(
+              row.issue_identifier
+                ? issueRouteRef({ id: row.issue_id, identifier: row.issue_identifier })
+                : cachedIssueRouteRef(qc, wsId, row.issue_id),
+            )
+          }
           empty={
             <CollectionPageState
               icon={AlarmClock}

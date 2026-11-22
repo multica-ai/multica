@@ -20,10 +20,10 @@
   },
   "archive_dialog": {
     "title": "归档这个小队？",
-    "description": "“{{name}}” 将被归档，该小队当前承接的任务会转交给小队负责人。此操作无法撤销，如需恢复路由请新建小队。",
+    "description": "\"{{name}}\" 将被归档，该小队当前负责的任务会转交给队长。此操作无法撤销，如需恢复路由请新建小队。",
     "cancel": "取消",
     "confirm": "归档",
-    "archiving": "归档中…",
+    "archiving": "归档中...",
     "success": "已归档小队"
   },
   "name_editor": {
@@ -44,7 +44,7 @@
     "add": "添加"
   },
   "role_editor": {
-    "empty": "添加角色…",
+    "empty": "添加角色...",
     "placeholder": "角色（例如：审查者）"
   },
   "description_editor": {
@@ -59,9 +59,9 @@
     "create_agent_button": "创建智能体",
     "leader_chip": "队长",
     "view_agent_tooltip": "打开智能体详情",
-    "make_leader_tooltip": "设为小队负责人",
+    "make_leader_tooltip": "设为队长",
     "remove_member_tooltip": "从小队移除",
-    "status_working": "工作中",
+    "status_working": "运行中",
     "status_idle": "空闲",
     "status_offline": "离线",
     "status_unstable": "不稳定",
@@ -76,7 +76,7 @@
     "not_found": "未找到该小队",
     "not_found_description": "它可能已被删除，或你没有访问权限。",
     "back_to_list": "全部小队",
-    "instructions": "指引",
+    "instructions": "指令",
     "edit": "编辑",
     "cancel": "取消",
     "recent_work": "近期工作",
@@ -103,7 +103,7 @@
     "leader_updated": "队长已更新",
     "leader_update_failed": "更新队长失败",
     "archive_failed": "归档小队失败",
-    "instructions_saved": "指引已保存",
+    "instructions_saved": "指令已保存",
     "update_failed": "保存失败"
   },
   "profile_card": {
@@ -115,7 +115,7 @@
     "more_members_other": "还有 {{count}} 人"
   },
   "instructions_tab": {
-    "description": "队长每次处理分配给此小队的任务时，都会读取这些指引。",
+    "description": "队长每次处理指派给此小队的任务时，都会读取这些指令。",
     "unsaved_changes": "有未保存的修改",
     "save_button": "保存",
     "placeholder": "例如：始终先编写失败测试。提交应保持小而独立。"
@@ -124,7 +124,6 @@
     "mine": "我的小队",
     "all": "全部小队"
   },
-  "toolbar": {},
   "intro": {
     "title": "让智能体组队，像团队一样干活",
     "description": "把任务交给小队，队长智能体会读懂需求，按成员的角色分派下一步，并跟进到目标完成。你只需要对接一个入口。",
