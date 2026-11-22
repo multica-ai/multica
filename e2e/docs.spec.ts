@@ -369,6 +369,43 @@ test("docs link from issues, show up in Cmd+K, and reorganize from the tree", as
   await page.screenshot({ path: info.outputPath("docs-tree.png"), animations: "disabled", style: "nextjs-portal { display: none; }" });
 });
 
+test("a doc or project mention's link is no wider than its truncated chip", async ({ page }) => {
+  // A flex link around the chip drops the chip's min(18rem, 100%) cap while
+  // sizing itself, so a long title leaves a blank gap after the truncated
+  // chip and pushes the following text away (MUL-9859).
+  const doc = await api.createDoc(
+    "GEO baseline report: share of voice across buyer prompts and competitor citations",
+    "Baseline.",
+  );
+  const project = await api.createProject(
+    "GEO observability: daily buyer prompt tracking and citation share dashboard",
+  );
+  const body = [
+    "1. Fix existing pages first",
+    `   - The [baseline](mention://doc/${doc.id}) confirms it, and [the project](mention://project/${project.id}) tracks it.`,
+    "",
+    `In a paragraph: [baseline](mention://doc/${doc.id}) and [the project](mention://project/${project.id}).`,
+  ].join("\n");
+  const issue = await api.createIssue("Mention chips in a list", { description: body });
+  await api.createComment(issue.id, body);
+
+  // The description renders through the editor, the comment through the
+  // readonly renderer: two of each chip on both.
+  await page.goto(`/${slug}/issues/${issue.id}`);
+  await expect(page.locator(".doc-chip").filter({ hasText: "GEO baseline report" })).toHaveCount(4);
+  await expect(page.locator(".project-chip").filter({ hasText: "GEO observability" })).toHaveCount(4);
+
+  const gaps = await page.locator("a.doc-mention, a.project-mention").evaluateAll((links) =>
+    links.map((link) => {
+      const chip = link.querySelector(".doc-chip, .project-chip")!;
+      const { marginLeft, marginRight } = getComputedStyle(chip);
+      const hug = chip.getBoundingClientRect().width + parseFloat(marginLeft) + parseFloat(marginRight);
+      return Math.round(Math.abs(link.getBoundingClientRect().width - hug));
+    }),
+  );
+  expect(gaps).toEqual(Array(8).fill(0));
+});
+
 test("Cmd+K finds a doc by words that only appear in its content", async ({ page }) => {
   const doc = await api.createDoc(
     "Release runbook",
