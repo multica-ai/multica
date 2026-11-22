@@ -61,6 +61,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 });
 
 import { ChatThreadList } from "./chat-thread-list";
+import { SESSION_LIST_VIRTUALIZE_AFTER } from "./session-history-list";
 
 const TEST_RESOURCES = { en: { chat: enChat, issues: enIssues } };
 
@@ -447,5 +448,24 @@ describe("ChatThreadList prefetch and smooth exit", () => {
     const exiting = document.querySelector("[data-chat-row-exiting]");
     expect(exiting).toBeInTheDocument();
     expect(exiting).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("keeps the same scroll container element when crossing the virtualization threshold", () => {
+    const overThreshold = Array.from(
+      { length: SESSION_LIST_VIRTUALIZE_AFTER + 1 },
+      (_, i) => makeSession({ id: `s-${i}` }),
+    );
+    const { rerenderList } = renderList("s-0", {
+      renderedSessions: overThreshold,
+    });
+
+    const scrollerBefore = document.querySelector("[data-chat-session-scroller]");
+    expect(scrollerBefore).toBeInTheDocument();
+
+    // Archiving one row drops the active count from 61 to 60 (virtualized -> animated list).
+    rerenderList(overThreshold.slice(1), "s-1");
+
+    const scrollerAfter = document.querySelector("[data-chat-session-scroller]");
+    expect(scrollerAfter).toBe(scrollerBefore);
   });
 });

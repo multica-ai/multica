@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { Virtuoso, type Components } from "react-virtuoso";
 import { useReducedMotion } from "@multica/core/appearance";
@@ -11,10 +11,12 @@ import type { ChatSession } from "@multica/core/types";
 type ListContext = { footer?: ReactNode };
 
 /**
- * Up to this many rows, `animateExit` renders a plain scrollable list inside
+ * Up to this many rows, `animateExit` renders rows directly inside
  * `AnimatePresence` so archiving/deleting a row collapses its height smoothly
- * instead of snapping the rows below upward. Longer lists stay virtualized so
- * mount cost remains bounded (mirrors `InboxSection`'s virtualization boundary).
+ * instead of snapping the rows below upward. Longer lists switch to
+ * `<Virtuoso>` over the same outer scroll container (via `customScrollParent`,
+ * like `InboxSection` does past its 50-row boundary) so crossing the threshold
+ * never swaps the scroller element or resets scroll position.
  */
 export const SESSION_LIST_VIRTUALIZE_AFTER = 60;
 
@@ -65,22 +67,46 @@ export function SessionHistoryList({
   /** Smoothly collapse rows as they leave the list (for small/medium lists). */
   animateExit?: boolean;
 }) {
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const height =
     maxHeight == null
       ? "100%"
       : Math.min(maxHeight, sessions.length * estimatedRowHeight);
 
-  if (animateExit && sessions.length <= SESSION_LIST_VIRTUALIZE_AFTER) {
+  if (animateExit) {
+    const virtualize = sessions.length > SESSION_LIST_VIRTUALIZE_AFTER;
     return (
-      <div className="overflow-y-auto" style={{ height }}>
-        <AnimatePresence initial={false}>
-          {sessions.map((session) => (
-            <SessionExitRow key={session.id}>
-              {renderRow(session)}
-            </SessionExitRow>
-          ))}
-        </AnimatePresence>
-        {footer}
+      <div
+        ref={setScrollEl}
+        data-chat-session-scroller=""
+        className="overflow-y-auto"
+        style={{ height }}
+      >
+        {virtualize ? (
+          scrollEl ? (
+            <Virtuoso
+              customScrollParent={scrollEl}
+              data={sessions}
+              defaultItemHeight={estimatedRowHeight}
+              increaseViewportBy={200}
+              computeItemKey={(_, session) => session.id}
+              itemContent={(_, session) => renderRow(session)}
+              components={COMPONENTS}
+              context={{ footer }}
+            />
+          ) : null
+        ) : (
+          <>
+            <AnimatePresence initial={false}>
+              {sessions.map((session) => (
+                <SessionExitRow key={session.id}>
+                  {renderRow(session)}
+                </SessionExitRow>
+              ))}
+            </AnimatePresence>
+            {footer}
+          </>
+        )}
       </div>
     );
   }

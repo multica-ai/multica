@@ -452,7 +452,8 @@ export function ChatPage() {
       ) : !isCompact && !listCollapsed && c.activeSessionId ? (
         // Keep the 48px header band reserved while the active session row
         // resolves from the sessions query so the message area never drops
-        // down when metadata lands.
+        // down when metadata lands. When `listCollapsed` is true, the desktop
+        // wrapper below already renders a 48px `<PageHeader>` above `conversation`.
         <PageHeader leading={false} className="bg-background">
           {null}
         </PageHeader>
