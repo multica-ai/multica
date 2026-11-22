@@ -155,6 +155,15 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     }
   });
 
+  it("lists the repositories read-only, with nothing to add, remove or change", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" readOnly />);
+    expect(screen.getByText("Release line")).toBeTruthy();
+    expect(screen.getByText("release/2026-09")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /add repository/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /remove/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /release\/2026-09/ })).toBeNull();
+  });
+
   it("shows the ref beside a repo that has a custom label", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
     expect(screen.getByText("Release line")).toBeTruthy();

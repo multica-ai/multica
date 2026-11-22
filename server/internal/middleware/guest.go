@@ -70,6 +70,8 @@ var guestRoutes = compileGuestRoutes([]string{
 	"GET /api/projects",
 	"GET /api/projects/search",
 	"GET /api/projects/*",
+	"GET /api/projects/*/progress",
+	"GET /api/projects/*/activity",
 	"GET /api/projects/*/resources",
 	"GET /api/projects/*/subscription",
 	"PUT /api/projects/*/subscription",

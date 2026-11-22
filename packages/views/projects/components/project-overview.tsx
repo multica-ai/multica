@@ -17,7 +17,7 @@ import type { Project, UpdateProjectRequest } from "@multica/core/types";
 import type { ProjectTab } from "@multica/core/projects/tab-store";
 import { PageHeader } from "../../layout/page-header";
 import { OBJECT_PAGE_BODY, ObjectSection } from "../../layout/object-page";
-import { TitleEditor, ContentEditor } from "../../editor";
+import { TitleEditor, ContentEditor, ReadonlyContent } from "../../editor";
 import { useT } from "../../i18n";
 import { ProjectIcon } from "./project-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
@@ -109,12 +109,39 @@ export function ProjectOverviewHeader({
 export function ProjectOverviewBody({
   project,
   onUpdate,
+  readOnly = false,
 }: {
   project: Project;
   onUpdate: (data: UpdateProjectRequest) => void;
+  /** A guest's view: the project as written, with nothing to edit. */
+  readOnly?: boolean;
 }) {
   const { t } = useT("projects");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+
+  if (readOnly) {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+          <div className="flex items-center gap-3">
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-xl border bg-muted/50 text-2xl">
+              {project.icon || "📁"}
+            </div>
+            <h2 className="min-w-0 flex-1 text-title font-semibold">{project.title}</h2>
+          </div>
+
+          {project.description?.trim() && (
+            <ObjectSection collapsible title={t(($) => $.detail.section_description)}>
+              <ReadonlyContent content={project.description} />
+            </ObjectSection>
+          )}
+
+          <ProjectResourcesSection projectId={project.id} readOnly />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>

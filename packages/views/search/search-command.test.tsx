@@ -449,14 +449,15 @@ describe("SearchCommand", () => {
       expect(renderedValues()).not.toContain("hand-to-agent");
     });
 
-    it("drops New issue from a project's context commands", () => {
+    it("drops Change status and New issue from a project's context commands", () => {
       registerContext({
         kind: "project",
         project: { id: "proj-1", title: "Shared project", archived_at: null },
       } as CommandBarContext);
       renderSearch();
 
-      expect(renderedValues()).toContain("command:context-project:project-status");
+      expect(renderedValues()).toContain("command:context-project:project-copy-link");
+      expect(renderedValues()).not.toContain("command:context-project:project-status");
       expect(renderedValues()).not.toContain("command:context-project:project-new-issue");
     });
   });

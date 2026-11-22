@@ -79,6 +79,7 @@
     "toast_subscription_failed": "購読を更新できませんでした",
     "sidebar_tooltip": "右サイドバーの開閉",
     "rename_action": "プロジェクト名を変更",
+    "guest_readonly_note": "ゲストはこのプロジェクトを閲覧できますが、プロパティは変更できません。",
     "copy_link": "リンクをコピー",
     "copy_title_as_link": "タイトル付きリンクをコピー",
     "delete_action": "プロジェクトを削除",

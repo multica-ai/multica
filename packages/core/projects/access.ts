@@ -22,7 +22,7 @@ export function canManageProjectAccess(
   role: string | null | undefined,
   managerId: string | null | undefined,
 ): boolean {
-  if (!userId) return false;
+  if (!userId || role === "guest") return false;
   if (role === "owner" || role === "admin") return true;
   if (project.visibility !== "private") return false;
   // No manager named means the answer has not loaded, or the server predates
@@ -45,14 +45,15 @@ export function canChangeProjectLead(
 // The manager of a private project, for a caller whose role does not already
 // settle whether they manage it. Owners, admins and workspace-visible
 // projects cost no request, and neither does a caller whose role is not
-// known yet.
+// known yet. A guest manages nothing and may not list project members.
 export function useProjectAccessManagerId(
   wsId: string,
   project: Pick<Project, "id" | "visibility">,
   userId: string | null | undefined,
   role: string | null | undefined,
 ): string | null {
-  const needed = project.visibility === "private" && !!userId && !!role && role !== "owner" && role !== "admin";
+  const needed =
+    project.visibility === "private" && !!userId && !!role && role !== "owner" && role !== "admin" && role !== "guest";
   const { data } = useQuery({ ...projectMembersOptions(wsId, project.id), enabled: needed });
   return needed ? data?.manager_id ?? null : null;
 }

@@ -79,6 +79,7 @@
     "toast_subscription_failed": "更新訂閱失敗",
     "sidebar_tooltip": "切換右側邊欄",
     "rename_action": "重新命名專案",
+    "guest_readonly_note": "訪客可以查看這個專案，不能修改專案屬性。",
     "copy_link": "複製連結",
     "copy_title_as_link": "複製帶標題的連結",
     "delete_action": "刪除專案",
