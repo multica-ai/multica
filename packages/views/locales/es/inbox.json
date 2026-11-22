@@ -153,9 +153,7 @@
     "unassigned": "Desasignada",
     "ran_quick_action": "Se ejecutó {{name}}",
     "next": "Siguiente",
-    "next_tooltip": "Abrir la siguiente: {{title}}",
-    "opening_next": "Abriendo la siguiente",
-    "stay_here": "Quedarme aquí"
+    "next_tooltip": "Abrir la siguiente: {{title}}"
   },
   "errors": {
     "archived_lookup_failed": "No se ha podido cargar la notificación enlazada",

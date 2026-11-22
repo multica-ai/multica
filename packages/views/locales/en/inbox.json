@@ -153,9 +153,7 @@
     "unassigned": "Unassigned",
     "ran_quick_action": "Ran {{name}}",
     "next": "Next",
-    "next_tooltip": "Open next: {{title}}",
-    "opening_next": "Opening next",
-    "stay_here": "Stay here"
+    "next_tooltip": "Open next: {{title}}"
   },
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",

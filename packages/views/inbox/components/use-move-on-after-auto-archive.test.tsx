@@ -13,7 +13,7 @@ import { notificationPreferenceKeys } from "@multica/core/notification-preferenc
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import type { InboxItem, Issue } from "@multica/core/types";
 import { getTestResources } from "../../test/i18n";
-import { AUTO_ARCHIVE_ADVANCE_DELAY_MS, useMoveOnAfterAutoArchive } from "./use-move-on-after-auto-archive";
+import { useMoveOnAfterAutoArchive } from "./use-move-on-after-auto-archive";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
@@ -66,120 +66,28 @@ function setup(
   return {
     onNext,
     settle: (row: KeptInboxRow | null) => view.rerender({ settled: row }),
-    cause: () => view.result.current.cause,
-    autoAdvance: () => view.result.current.autoAdvance,
+    cause: () => view.result.current,
     qc,
   };
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
   vi.clearAllMocks();
   setApiInstance(api as unknown as ApiClient);
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
 });
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("useMoveOnAfterAutoArchive", () => {
-  it("buffers then opens the next notification when your action archived the open one", () => {
-    const { onNext, settle, autoAdvance } = setup({ after_auto_archive: "next" });
+  it("opens the next notification right away when your action archived the open one", () => {
+    const { onNext, settle } = setup({ after_auto_archive: "next" });
     noteInboxAutoArchive({ issue_id: "issue-a", reason: "actor_acted" });
     settle(archived("issue-a"));
-
-    expect(onNext).not.toHaveBeenCalled();
-    expect(autoAdvance()).toMatchObject({ durationMs: AUTO_ARCHIVE_ADVANCE_DELAY_MS });
-
-    act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS); });
     expect(onNext).toHaveBeenCalledTimes(1);
     expect(toast.success).toHaveBeenCalledWith("Notification archived", expect.anything());
-    expect(autoAdvance()).toBeNull();
-  });
-
-  it("cancels the auto-advance buffer on explicit cancel, Escape, wheel, outside pointerdown, or editable focus", () => {
-    // Explicit cancel
-    {
-      const { onNext, settle, autoAdvance } = setup({ after_auto_archive: "next" });
-      noteInboxAutoArchive({ issue_id: "issue-c1", reason: "actor_acted" });
-      settle(archived("issue-c1"));
-      act(() => autoAdvance()?.cancel());
-      expect(autoAdvance()).toBeNull();
-      act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS * 2); });
-      expect(onNext).not.toHaveBeenCalled();
-      cleanup();
-    }
-
-    // Escape key
-    {
-      const { onNext, settle, autoAdvance } = setup({ after_auto_archive: "next" });
-      noteInboxAutoArchive({ issue_id: "issue-c2", reason: "actor_acted" });
-      settle(archived("issue-c2"));
-      act(() => {
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      });
-      expect(autoAdvance()).toBeNull();
-      act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS * 2); });
-      expect(onNext).not.toHaveBeenCalled();
-      cleanup();
-    }
-
-    // Wheel scroll
-    {
-      const { onNext, settle, autoAdvance } = setup({ after_auto_archive: "next" });
-      noteInboxAutoArchive({ issue_id: "issue-c3", reason: "actor_acted" });
-      settle(archived("issue-c3"));
-      act(() => {
-        window.dispatchEvent(new Event("wheel"));
-      });
-      expect(autoAdvance()).toBeNull();
-      act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS * 2); });
-      expect(onNext).not.toHaveBeenCalled();
-      cleanup();
-    }
-
-    // Outside pointerdown cancels; pointerdown inside [data-inbox-bar] does not
-    {
-      const { onNext, settle, autoAdvance } = setup({ after_auto_archive: "next" });
-      const bar = document.createElement("div");
-      bar.setAttribute("data-inbox-bar", "settled");
-      document.body.appendChild(bar);
-      noteInboxAutoArchive({ issue_id: "issue-c4", reason: "actor_acted" });
-      settle(archived("issue-c4"));
-
-      act(() => {
-        bar.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
-      });
-      expect(autoAdvance()).not.toBeNull();
-
-      act(() => {
-        document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
-      });
-      expect(autoAdvance()).toBeNull();
-      act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS * 2); });
-      expect(onNext).not.toHaveBeenCalled();
-      bar.remove();
-      cleanup();
-    }
-
-    // Focusing an editable target cancels
-    {
-      const { onNext, settle, autoAdvance } = setup({ after_auto_archive: "next" });
-      const input = document.createElement("textarea");
-      document.body.appendChild(input);
-      noteInboxAutoArchive({ issue_id: "issue-c5", reason: "actor_acted" });
-      settle(archived("issue-c5"));
-
-      act(() => {
-        input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
-      });
-      expect(autoAdvance()).toBeNull();
-      act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS * 2); });
-      expect(onNext).not.toHaveBeenCalled();
-      input.remove();
-    }
   });
 
   it("undoes by restoring the notification and returning its row", async () => {
@@ -187,7 +95,6 @@ describe("useMoveOnAfterAutoArchive", () => {
     const { settle } = setup({ after_auto_archive: "next" });
     noteInboxAutoArchive({ issue_id: "issue-b", reason: "issue_status_terminal" });
     settle(archived("issue-b"));
-    act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS); });
     const action = (vi.mocked(toast.success).mock.calls.at(-1)?.[1] as unknown as { action: { onClick: () => void } }).action;
     await act(async () => action.onClick());
     expect(returnRow).toHaveBeenCalledWith("ws", "issue-b");
@@ -195,19 +102,15 @@ describe("useMoveOnAfterAutoArchive", () => {
   });
 
   it("stays by default", () => {
-    const { onNext, settle, autoAdvance } = setup({});
+    const { onNext, settle } = setup({});
     noteInboxAutoArchive({ issue_id: "issue-c", reason: "actor_acted" });
     settle(archived("issue-c"));
-    expect(autoAdvance()).toBeNull();
-    act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS * 2); });
     expect(onNext).not.toHaveBeenCalled();
   });
 
   it("stays when something other than your action archived it", () => {
-    const { onNext, settle, autoAdvance } = setup({ after_auto_archive: "next" });
+    const { onNext, settle } = setup({ after_auto_archive: "next" });
     settle(archived("issue-d"));
-    expect(autoAdvance()).toBeNull();
-    act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS * 2); });
     expect(onNext).not.toHaveBeenCalled();
   });
 
@@ -215,18 +118,15 @@ describe("useMoveOnAfterAutoArchive", () => {
     const { onNext, settle } = setup({ after_auto_archive: "next" }, null, null);
     noteInboxAutoArchive({ issue_id: "issue-last", reason: "actor_acted" });
     settle(archived("issue-last"));
-    act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS); });
     expect(onNext).toHaveBeenCalledTimes(1);
     expect(toast.success).toHaveBeenCalledWith("Notification archived", expect.anything());
   });
 
   it("stays when the action happened in another window", () => {
     vi.mocked(document.hasFocus).mockReturnValue(false);
-    const { onNext, settle, autoAdvance } = setup({ after_auto_archive: "next" });
+    const { onNext, settle } = setup({ after_auto_archive: "next" });
     noteInboxAutoArchive({ issue_id: "issue-e", reason: "actor_acted" });
     settle(archived("issue-e"));
-    expect(autoAdvance()).toBeNull();
-    act(() => { vi.advanceTimersByTime(AUTO_ARCHIVE_ADVANCE_DELAY_MS * 2); });
     expect(onNext).not.toHaveBeenCalled();
   });
 

@@ -151,7 +151,7 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
       : undefined;
     leave(issueId, next, cleared);
   };
-  const { cause, autoAdvance } = useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
+  const cause = useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
 
   // Archived already, E moves on (to the next notification or Inbox Zero).
   useInboxShortcut("archiveInboxItem", item ? archiveItem : settled ? moveOn : null);
@@ -192,7 +192,6 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
         onUndo={() => restore(settled.item.id, { quiet: true })}
         next={next}
         onNext={moveOn}
-        autoAdvance={autoAdvance}
         inboxCleared={inboxCleared}
         snoozedCount={inboxCleared ? activeSnoozedCount : 0}
         onSnoozedClick={

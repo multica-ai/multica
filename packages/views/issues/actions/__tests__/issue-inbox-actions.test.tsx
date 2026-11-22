@@ -584,7 +584,7 @@ describe("IssueInboxBar once an action is undone", () => {
     expect(document.querySelector("[data-inbox-bar]")).not.toBeNull();
   });
 
-  it("shows a cancellable auto-advance buffer with Stay here when after_auto_archive=next", async () => {
+  it("opens the next notification immediately without a countdown when after_auto_archive=next", async () => {
     const focusSpy = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     try {
       const nav = setup();
@@ -598,14 +598,9 @@ describe("IssueInboxBar once an action is undone", () => {
       noteInboxAutoArchive({ issue_id: "issue-1", reason: "actor_acted" });
       act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
-      expect(await screen.findByRole("button", { name: "Stay here" })).toBeInTheDocument();
-      expect(document.querySelector("[data-inbox-auto-advance-bar]")).not.toBeNull();
-      expect(nav.push).not.toHaveBeenCalled();
-
-      fireEvent.click(screen.getByRole("button", { name: "Stay here" }));
-      expect(screen.queryByRole("button", { name: "Stay here" })).toBeNull();
+      await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9"));
+      expect(toast.success).toHaveBeenCalledWith("Notification archived", expect.anything());
       expect(document.querySelector("[data-inbox-auto-advance-bar]")).toBeNull();
-      expect(nav.push).not.toHaveBeenCalled();
     } finally {
       focusSpy.mockRestore();
     }

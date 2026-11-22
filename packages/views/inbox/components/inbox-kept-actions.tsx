@@ -1,25 +1,21 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
-import { Archive, ArrowDown, ArrowRight, CheckCircle2, Undo2, X } from "@multica/ui/icons";
+import type { ReactNode } from "react";
+import { Archive, ArrowDown, ArrowRight, CheckCircle2, Undo2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { InboxBarAction } from "@multica/core/inbox/auto-archive";
 import type { KeptInboxRow } from "@multica/core/inbox/open-row";
-import { createShortcutChord } from "@multica/core/shortcuts";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxItem } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
-import { ActionShortcutKeycaps, ShortcutKeycaps } from "../../common/shortcut-keycaps";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { formatSnoozeTime } from "./inbox-snooze-time";
 import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "./inbox-display";
 import { InboxBar, InboxBarSeparator, InboxBarStatus } from "./inbox-bar";
 import { useInboxUndoShortcut } from "./use-inbox-shortcut";
-import type { AutoAdvanceBuffer } from "./use-move-on-after-auto-archive";
-
-const ESCAPE_SHORTCUT = createShortcutChord("Escape");
 
 /**
  * How a kept row (`keepOpenInboxRow`) says why it is settled: `line` in its
@@ -84,7 +80,6 @@ export function InboxKeptActions({
   onUndo,
   next,
   onNext,
-  autoAdvance = null,
   inboxCleared = false,
   snoozedCount = 0,
   onSnoozedClick,
@@ -98,8 +93,6 @@ export function InboxKeptActions({
   /** The notification `onNext` opens; without one there is nothing to move on to. */
   next: InboxItem | null;
   onNext: () => void;
-  /** Active auto-advance buffer after an auto-archive (`after_auto_archive = "next"`). */
-  autoAdvance?: AutoAdvanceBuffer | null;
   /** True when archiving this row emptied the entire unfiltered Inbox (stay-in-place mode). */
   inboxCleared?: boolean;
   snoozedCount?: number;
@@ -128,14 +121,6 @@ export function InboxKeptActions({
         </>
       )}
     </span>
-  ) : autoAdvance ? (
-    <span className="flex min-w-0 items-center gap-1.5 truncate">
-      <span className="truncate">{label}</span>
-      <span aria-hidden className="text-faint-foreground @max-[38rem]/inbox-bar:hidden">·</span>
-      <span className="shrink-0 text-faint-foreground @max-[38rem]/inbox-bar:hidden">
-        {t(($) => $.kept.opening_next)}
-      </span>
-    </span>
   ) : (
     label
   );
@@ -144,16 +129,7 @@ export function InboxKeptActions({
     <InboxBar settled>
       <InboxBarStatus icon={statusIcon} label={statusLabel} />
       {issueActions}
-      {issueActions && (autoAdvance || onUndo || next || (inboxCleared && onGoToMyWork)) && <InboxBarSeparator />}
-      {autoAdvance && (
-        <Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground" onClick={autoAdvance.cancel}>
-          <X />
-          {t(($) => $.kept.stay_here)}
-          <span aria-hidden className="flex @max-[34rem]/inbox-bar:hidden">
-            <ShortcutKeycaps shortcut={ESCAPE_SHORTCUT} />
-          </span>
-        </Button>
-      )}
+      {issueActions && (onUndo || next || (inboxCleared && onGoToMyWork)) && <InboxBarSeparator />}
       {onUndo && (
         <Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground" onClick={onUndo}>
           <Undo2 />
@@ -171,14 +147,6 @@ export function InboxKeptActions({
           <ArrowRight />
         </Button>
       ) : null}
-      {autoAdvance && (
-        <span
-          aria-hidden
-          data-inbox-auto-advance-bar=""
-          style={{ ["--inbox-advance-duration" as string]: `${autoAdvance.durationMs}ms` } as CSSProperties}
-          className="animate-inbox-auto-advance-bar pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-brand"
-        />
-      )}
     </InboxBar>
   );
 }

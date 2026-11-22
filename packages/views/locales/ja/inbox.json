@@ -150,9 +150,7 @@
     "unassigned": "割り当て解除",
     "ran_quick_action": "{{name}} を実行",
     "next": "次へ",
-    "next_tooltip": "次を開く：{{title}}",
-    "opening_next": "次を開きます",
-    "stay_here": "ここに留まる"
+    "next_tooltip": "次を開く：{{title}}"
   },
   "errors": {
     "archived_lookup_failed": "リンク先の通知を読み込めませんでした",
