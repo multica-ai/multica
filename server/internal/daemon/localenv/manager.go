@@ -97,8 +97,11 @@ type Environment struct {
 	Excerpt string `json:"excerpt,omitempty"`
 	// Dir is the directory the environment runs from, kept local so GC can
 	// leave it in place; it is never reported.
-	Dir  string `json:"-"`
-	pgid int
+	Dir string `json:"-"`
+	// RetainedWorktree protects pending checkout cleanup from GC even after
+	// its environment stops. Like Dir, this path never leaves this machine.
+	RetainedWorktree string `json:"-"`
+	pgid             int
 	// pid names a detected environment's process, for Stop and Focus; bundle
 	// names a detected app for Focus. Like Dir they never leave this machine.
 	pid    int
@@ -607,6 +610,9 @@ func (m *Manager) viewLocked(e *entry) Environment {
 		Source: SourceConfig, Kind: KindServer, Repo: filepath.Base(rec.RepoRoot), Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
 		State: rec.State, Detail: rec.Detail, Excerpt: rec.Excerpt, StartedAt: rec.StartedAt,
 		LogPath: filepath.Join(m.dir, rec.ID, outputFile), Dir: rec.RepoRoot, pgid: rec.PID,
+	}
+	if rec.Worktree != nil {
+		view.RetainedWorktree = rec.Worktree.Path
 	}
 	if e.live() {
 		expires := rec.ExpiresAt

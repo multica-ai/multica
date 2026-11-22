@@ -137,8 +137,8 @@ func (s *environmentService) finalizeWorktree(w *execenv.LocalWorktree, logger *
 	return s.manager.FinalizeWorktree(w)
 }
 
-// servesFrom reports whether a live environment runs from inside dir, so GC
-// leaves the directory alone until it stops.
+// servesFrom keeps GC off live environments and retained checkouts whose
+// deferred cleanup has not yet safely completed.
 func (s *environmentService) servesFrom(dir string) bool {
 	if s == nil {
 		return false
@@ -147,6 +147,9 @@ func (s *environmentService) servesFrom(dir string) bool {
 		dir = resolved
 	}
 	for _, env := range s.manager.Snapshot() {
+		if env.RetainedWorktree != "" && pathWithin(env.RetainedWorktree, dir) {
+			return true
+		}
 		if (env.State == localenv.StateStarting || env.State == localenv.StateRunning) && pathWithin(env.Dir, dir) {
 			return true
 		}

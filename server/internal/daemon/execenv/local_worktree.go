@@ -764,7 +764,12 @@ func (w *LocalWorktree) finalize(logger *slog.Logger, retain bool) (LocalWorktre
 	}
 
 	if retain {
-		outcome.RetainedWorktree = &FinalizedLocalWorktree{GitRoot: w.GitRoot, Path: w.Path, Branch: w.Branch, Tip: tip}
+		retained, retainErr := w.retainedForEnvironment(tip, outcome.LeftoverRef)
+		if retainErr != nil {
+			outcome.PreservedPath = w.Path
+			return outcome, fmt.Errorf("could not record environment worktree cleanup; preserving %s: %w", w.Path, retainErr)
+		}
+		outcome.RetainedWorktree = retained
 		if dropped {
 			outcome.RetainedWorktree.EmptyBranch = w.Branch
 			outcome.RetainedWorktree.EmptyTip = tip
