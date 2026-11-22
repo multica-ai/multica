@@ -4228,7 +4228,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
               if (!descriptionEditingRef.current) {
                 descriptionEditingRef.current = true;
               }
-              if (descLive && !showLiveDesc) setDescSoloHeld(true);
+              if (!showLiveDesc) setDescSoloHeld(true);
             }}
             onBlurCapture={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget)) {

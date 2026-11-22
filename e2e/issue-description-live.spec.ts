@@ -110,6 +110,45 @@ test("two people and an API edit share one live description", async ({ browser }
   await b.page.context().close();
 });
 
+test("typing before the live session is ready keeps the solo editor until it loses focus", async ({ browser }) => {
+  const issue = await alice.createIssue("Launch plan", { description: "Draft notes." });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  await page.addInitScript((t) => {
+    localStorage.setItem("multica_token", t);
+    localStorage.setItem("multica:chat:isOpen", "false");
+  }, alice.getToken()!);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(`**/api/issues/${issue.id}/collab-ticket`, async (route) => {
+    await held;
+    await route.continue();
+  });
+  const ticket = page.waitForResponse((response) => response.url().endsWith(`/api/issues/${issue.id}/collab-ticket`));
+  await page.goto(`/${slug}/issues/${issue.id}`);
+  await expect(page.getByText("created this issue")).toBeVisible();
+
+  await typeAt(page, "Draft notes.", "End", " First half.");
+  await description(page).evaluate((element) => element.setAttribute("data-e2e-solo", ""));
+  release();
+  const live = ((await (await ticket).json()) as { enabled?: boolean }).enabled === true;
+  test.skip(!live, "Live issue descriptions are off; start collab with FF_ISSUE_DESCRIPTION_LIVE=true.");
+  // The live editor mounts hidden once it is ready.
+  await expect(page.locator('[data-comment-content^="description:"] .ProseMirror')).toHaveCount(2, { timeout: 15_000 });
+
+  await page.keyboard.type(" Second half.", { delay: 20 });
+  await expect(page.locator("[data-e2e-solo]")).toBeFocused();
+  await expect(page.locator("[data-e2e-solo]")).toHaveText("Draft notes. First half. Second half.");
+
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect(page.locator("[data-e2e-solo]")).toHaveCount(0);
+  await expect.poll(() => descriptionText(page), { timeout: 20_000 }).toBe("Draft notes. First half. Second half.");
+  await expect
+    .poll(async () => (await alice.getIssue(issue.id)).description, { timeout: 20_000 })
+    .toBe("Draft notes. First half. Second half.");
+  await context.close();
+});
+
 test("the header shows who else is on the issue and where they are editing", async ({ browser }) => {
   const issue = await alice.createIssue("Launch plan", {
     description: "## Goals\n\nShip on Friday.\n\n## Risks\n\nThe import API may slip.",
