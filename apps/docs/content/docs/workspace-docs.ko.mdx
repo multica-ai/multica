@@ -30,3 +30,5 @@ Docs는 배포 환경에서 기능이 활성화된 경우에만 워크스페이�
 ## 에이전트와 문서 작업
 
 에이전트에게 링크한 문서를 읽거나 업데이트하도록 요청하고, 유지해야 할 내용을 알려 줍니다. [CLI](/cli)에서는 `multica doc search "<query>"`로 문서를 찾고 `multica doc get`으로 Markdown과 리비전을 확인합니다. `multica doc update`에 `--base-revision`으로 해당 리비전을 전달합니다. 그사이에 다른 사람이 저장했다면 최신 내용을 가져와 변경 사항을 합친 뒤 다시 시도합니다.
+
+`multica doc folder list`로 폴더 ID를 확인하고 `multica doc folder create --title "<title>"`로 폴더를 만듭니다. 다른 폴더 안에 만들려면 `--parent <folder-id>`를 추가합니다. 문서를 이동하려면 `multica doc move <doc-id> --folder <folder-id>`를 사용하고, 최상위로 이동하려면 `--folder root`를 지정합니다. 폴더 이름 변경 및 이동 명령은 `multica doc folder --help`에서 확인할 수 있습니다.

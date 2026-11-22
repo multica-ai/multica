@@ -30,3 +30,5 @@ Web またはデスクトップアプリで、ワークスペースのサイド�
 ## エージェントとドキュメントを扱う
 
 リンクしたドキュメントの読み取りや更新をエージェントに依頼できます。更新時には残すべき内容も伝えてください。[CLI](/cli) では `multica doc search "<query>"` でドキュメントを探し、`multica doc get` で Markdown とリビジョンを取得します。更新するには `multica doc update` に `--base-revision` でその値を渡します。別の変更が先に保存された場合は、最新版を取得して変更を反映してからやり直します。
+
+`multica doc folder list` でフォルダー ID を確認し、`multica doc folder create --title "<title>"` でフォルダーを作成できます。別のフォルダー内に作成するには `--parent <folder-id>` を指定します。ドキュメントの移動には `multica doc move <doc-id> --folder <folder-id>` を使います。最上位に移動する場合は `--folder root` を指定します。フォルダーの名前変更と移動のコマンドは `multica doc folder --help` で確認できます。

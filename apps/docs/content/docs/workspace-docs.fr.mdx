@@ -30,3 +30,5 @@ Ouvrez **Historique** pour consulter une version précédente. Choisissez **Rest
 ## Travailler sur les documents avec un agent
 
 Demandez à un agent de lire ou de mettre à jour un document lié et précisez ce qu'il doit conserver. Dans le [CLI](/cli), utilisez `multica doc search "<query>"` pour trouver un document et `multica doc get` pour lire son contenu Markdown et sa révision. Transmettez cette révision à `multica doc update` avec `--base-revision`. Si quelqu'un a enregistré une modification entre-temps, récupérez la version actuelle et fusionnez vos modifications avant de réessayer.
+
+Utilisez `multica doc folder list` pour trouver les identifiants de dossiers et `multica doc folder create --title "<title>"` pour créer un dossier. Ajoutez `--parent <folder-id>` pour le créer dans un autre dossier. Déplacez un document avec `multica doc move <doc-id> --folder <folder-id>`, ou indiquez `--folder root` pour le déplacer à la racine. Consultez `multica doc folder --help` pour les commandes de renommage et de déplacement des dossiers.

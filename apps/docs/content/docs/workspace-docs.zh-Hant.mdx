@@ -30,3 +30,5 @@ description: 集中保存團隊筆記、決策和參考資料，並找回先前�
 ## 讓 AI 代理處理文件
 
 可請 AI 代理閱讀或更新已連結的文件，並說明要保留哪些內容。在 [CLI](/cli) 中，用 `multica doc search "<query>"` 尋找文件，再用 `multica doc get` 取得 Markdown 內容和修訂編號。更新時透過 `--base-revision` 將修訂編號傳給 `multica doc update`。如果期間有人儲存了變更，先讀取最新版本並合併你的變更，再重試。
+
+用 `multica doc folder list` 查詢資料夾 ID，用 `multica doc folder create --title "<title>"` 新增資料夾。要在另一個資料夾下新增，請加上 `--parent <folder-id>`。用 `multica doc move <doc-id> --folder <folder-id>` 移動文件，或用 `--folder root` 將文件移到最上層。用 `multica doc folder --help` 查看資料夾重新命名和移動指令。
