@@ -263,7 +263,7 @@
   },
   "header": {
     "fork": "创建聊天分支",
-    "fork_pending": "正在创建分支…",
+    "fork_pending": "正在创建分支...",
     "fork_failed": "无法创建聊天分支。请确认聊天没有正在运行的任务，且 Codex 运行环境可用。",
     "fork_ready": "聊天分支已就绪",
     "open_fork": "打开分支",
