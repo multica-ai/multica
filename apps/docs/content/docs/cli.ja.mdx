@@ -294,6 +294,12 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args` は JSON 配列で、起動引数の最後に置かれます。モデルは `--model` で選んでください。カスタム引数の中の `--model` を受け付けないツールもあります。
 - エージェントを呼び出せる人は `--permission-mode` で決めます。`private` は所有者だけ、`public_to` は `--public-to-workspace` または `--public-to-member <user-id>` と組み合わせます。`--visibility private|workspace` は古い書き方で、`--permission-mode` に対応付けられます。両方を指定した場合は `--permission-mode` が優先されます。
 
+### エージェントの実行履歴
+
+`multica agent tasks <agent-id> --limit 200` は最新の実行ページを返します。既定および最大のページサイズは 200 です。さらに実行がある場合は stderr にカーソルが出力されるため、そのまま `--before '<cursor>'` に渡して次のページを取得します。`--output json` は配列出力を維持し、そのページ分の使用量のみを含みます。
+
+対応する `GET /api/agents/{id}/tasks` エンドポイントは `limit` と `before` を受け取り、JSON 配列のレスポンスを維持します。レスポンスヘッダー `X-Agent-Tasks-Next-Cursor` が次のカーソルを返し、ヘッダーが無ければ最終ページです。カーソルはタイムスタンプ精度を含めて `(created_at, id)` 順を保ちます。無効な limit やカーソルは HTTP 400 を返し、200 を超える limit は 200 に切り詰められます。カーソルをたどらないクライアントが受け取るのは最新の 200 件のみです。
+
 ## デーモンとランタイム
 
 ```bash
@@ -462,6 +468,12 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 ## コマンドリファレンス
 
 以下の表は、現在のすべてのトップレベルコマンドを CLI 自身のグループ分けに沿って掲載しています。すべてのコマンドがグローバルフラグ `--server-url`、`--workspace-id`、`--profile`、`--debug` を受け付けます。`--output` はコマンドごとに登録されるフラグで、デフォルトの形式はコマンドによって異なります: `list` 系は表、`get` や `create` 系は多くが JSON です。完全なフラグは `multica <command> --help` が正です。
+
+### タスクの添付ファイル
+
+`issue create`、`issue update`、`issue comment add` の各 `--attachment` は 1 つのリテラルファイルパスを受け取り、ファイル名に含まれるカンマや二重引用符もそのまま扱います。複数ファイルを添付するときは `--attachment 'report,final.csv' --attachment notes.txt` のようにフラグを繰り返します。フラグを省略すると添付なしになり、空のパスを明示するとエラーになります。ローカルパスはすべて検証してからアップロードを開始します。
+
+CSV 形式からの移行: 2 つのファイルを添付する場合は `--attachment a,b` を `--attachment a --attachment b` に書き換えてください。前者は現在 `a,b` という名前の単一ファイルを指します。従来の回避策だった `--attachment '"report,final.csv"'` の余分な CSV 引用符は取り除き、ファイル名自体に二重引用符が含まれる場合を除いて `--attachment 'report,final.csv'` と指定してください。
 
 ### Core
 

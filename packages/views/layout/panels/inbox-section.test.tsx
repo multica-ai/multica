@@ -44,6 +44,10 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
 });
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/inbox/queries")>()),
   useInboxUnreadCount: () => state.unread,
@@ -560,13 +564,18 @@ describe("InboxSection", () => {
     expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-c");
   });
 
-  it("keeps the issue open with nothing lit once a bulk archive takes every row", async () => {
+  it("moves to Inbox Zero once a bulk archive takes every row", async () => {
     const { nav } = renderSection([item({ id: "n1", issue_id: "issue-a", title: "Open one" })], "issue-a");
     fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
     fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all" }));
     expect(state.archiveAll).toHaveBeenCalledTimes(1);
-    expect(nav.push).not.toHaveBeenCalled();
+    expect(nav.push).toHaveBeenCalledWith("/acme/inbox");
     expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBe("issue-a");
+    expect(useInboxSelectionStore.getState().lastClearedByWorkspace["ws-1"]).toMatchObject({
+      kind: "batch_archived",
+      count: 1,
+      itemIds: ["n1"],
+    });
   });
 
   it("keeps a bulk archive that spares the open row from moving it", async () => {

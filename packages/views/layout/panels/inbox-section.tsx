@@ -1,11 +1,14 @@
 "use client";
 
 import { memo, type ReactNode, type Ref, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useReducedMotion } from "@multica/core/appearance";
 import { AlarmClock, Archive, BellOff, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -33,18 +36,17 @@ import { inboxRowTime, inboxSnoozeReturnedAt } from "@multica/core/inbox/snooze"
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { useInboxSelectionStore, type LastInboxCleared } from "@multica/core/inbox/selection-store";
 import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
-import { useActorName } from "@multica/core/workspace/hooks";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
 import { getInboxDisplayTitle, inboxRowHref, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
 import { ARCHIVED_VIEW_PARAM } from "../../inbox/components/inbox-view";
-import { ActorAvatar } from "../../common/actor-avatar";
-import { InboxDetailLabel, useTypeLabels } from "../../inbox/components/inbox-detail-label";
+import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
+import { InboxActorAvatar, InboxActorLine } from "../../inbox/components/inbox-actor";
 import { InboxFilterMenu } from "../../inbox/components/inbox-filter-menu";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
@@ -54,6 +56,8 @@ import { useInboxIssuePrefetch } from "../../inbox/components/use-inbox-issue-pr
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { useInboxUnsubscribable, useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import {
+  clearedLabelForItem,
+  collectBatchArchiveIds,
   useArchiveInboxBatchWithUndo,
   useArchiveInboxWithUndo,
   useLeaveInboxRow,
@@ -165,11 +169,11 @@ export function InboxSection({
   const openKey = pathname === p.inbox() ? searchParams.get("issue") : null;
   // The open notification, wherever it is open; acting on its row moves on.
   const openRowKey = activeIssueId ?? openKey;
-  const leaveIfOpen = (item: InboxItem) => {
+  const leaveIfOpen = (item: InboxItem, cleared: LastInboxCleared) => {
     const key = inboxRowKey(item);
-    if (key === openRowKey) leave(key, nextInboxRow(all, key));
+    if (key === openRowKey) leave(key, nextInboxRow(all, key), cleared);
   };
-  const prefetchRow = useInboxIssuePrefetch(wsId, collapsed ? [] : displayed, (item) => inboxRowHref(p, item));
+  const prefetchRow = useInboxIssuePrefetch(wsId, collapsed ? [] : all, (item) => inboxRowHref(p, item), openRowKey);
   // What arrived on each issue while it was snoozed, for the rows back from one.
   const updatesWhileSnoozed = useMemo(() => {
     const counts = new Map<string, number>();
@@ -188,16 +192,44 @@ export function InboxSection({
   const latest = {
     prefetch: (item: InboxItem) => void prefetchRow(item),
     archive: (item: InboxItem) => {
-      archive(item.id, inboxRowKey(item));
-      leaveIfOpen(item);
+      const key = inboxRowKey(item);
+      archive(item.id, key);
+      leaveIfOpen(item, {
+        kind: "archived",
+        itemId: item.id,
+        key,
+        label: clearedLabelForItem(item),
+        href: inboxRowHref(p, item),
+        clearedAt: Date.now(),
+      });
     },
     unsubscribe: (item: InboxItem) => {
+      const key = inboxRowKey(item);
       unsubscribeArchive({ id: item.id, issueId: item.issue_id! });
-      leaveIfOpen(item);
+      leaveIfOpen(item, {
+        kind: "unsubscribed",
+        itemId: item.id,
+        issueId: item.issue_id!,
+        key,
+        label: clearedLabelForItem(item),
+        href: inboxRowHref(p, item),
+        undoable: true,
+        clearedAt: Date.now(),
+      });
     },
     snooze: (item: InboxItem, until: Date) => {
+      const key = inboxRowKey(item);
       snooze(item, until);
-      leaveIfOpen(item);
+      leaveIfOpen(item, {
+        kind: "snoozed",
+        itemId: item.id,
+        key,
+        label: clearedLabelForItem(item),
+        href: inboxRowHref(p, item),
+        until: until.toISOString(),
+        wasRead: item.read === true,
+        clearedAt: Date.now(),
+      });
     },
   };
   const latestRef = useRef(latest);
@@ -267,7 +299,9 @@ export function InboxSection({
           <VirtualInboxList items={displayed} compact={compact} renderRow={renderRow} />
         ) : (
           <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
-            {displayed.map((item) => renderRow(item))}
+            <AnimatePresence initial={false}>
+              {displayed.map((item) => renderRow(item))}
+            </AnimatePresence>
           </PanelList>
         )
       ) : list.load === "failed" ? (
@@ -432,6 +466,7 @@ function InboxSectionActions({
 }) {
   const { t } = useT("layout");
   const { t: tInbox } = useT("inbox");
+  const qc = useQueryClient();
   const leave = useLeaveInboxRow();
   const archiveWithUndo = useArchiveInboxBatchWithUndo();
   const { categoryOf } = useIssueStatuses(wsId);
@@ -444,8 +479,23 @@ function InboxSectionActions({
   ) => {
     const open = openRowKey ? rows.find((item) => inboxRowKey(item) === openRowKey) : undefined;
     const takesOpen = !!open && archives(open);
+    const takenIds = takesOpen ? collectBatchArchiveIds(qc, wsId, archives) : [];
     void archiveWithUndo(archive, archives, failed, takesOpen ? openRowKey : null);
-    if (takesOpen) leave(openRowKey!, nextInboxRow(rows, openRowKey!, archives));
+    if (takesOpen) {
+      leave(
+        openRowKey!,
+        nextInboxRow(rows, openRowKey!, archives),
+        takenIds.length > 0
+          ? {
+              kind: "batch_archived",
+              count: takenIds.length,
+              itemIds: takenIds,
+              key: openRowKey,
+              clearedAt: Date.now(),
+            }
+          : undefined,
+      );
+    }
   };
   const isRead = (item: InboxItem) => item.read === true;
   const isFinished = (item: InboxItem) => {
@@ -672,16 +722,10 @@ const InboxRow = memo(function InboxRow({
     </ShimmerText>
   );
 
-  return (
-    <li
-      ref={measureRef}
-      data-index={measureIndex}
-      data-inbox-row
-      data-read={unread ? "false" : "true"}
-      className="group/inbox relative"
-      onPointerEnter={onPrefetch}
-      onFocus={onPrefetch}
-    >
+  const isPresent = useIsPresent();
+  const reduceMotion = useReducedMotion();
+  const rowChildren = (
+    <>
       <HoverCard
         open={cardOpen && !snoozeOpen}
         onOpenChange={(open) => {
@@ -845,7 +889,45 @@ const InboxRow = memo(function InboxRow({
           </button>
         </TooltipHint>
       )}
-    </li>
+    </>
+  );
+
+  if (measureRef) {
+    return (
+      <li
+        ref={measureRef}
+        data-index={measureIndex}
+        data-inbox-row
+        data-read={unread ? "false" : "true"}
+        className="group/inbox relative"
+        onPointerEnter={onPrefetch}
+        onFocus={onPrefetch}
+      >
+        {rowChildren}
+      </li>
+    );
+  }
+
+  return (
+    <motion.li
+      data-inbox-row={isPresent ? "" : undefined}
+      data-read={unread ? "false" : "true"}
+      aria-hidden={!isPresent || undefined}
+      initial={false}
+      exit={{
+        opacity: 0,
+        height: 0,
+        marginTop: 0,
+        marginBottom: 0,
+        overflow: "hidden",
+        transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      className={cn("group/inbox relative", !isPresent && "pointer-events-none")}
+      onPointerEnter={onPrefetch}
+      onFocus={onPrefetch}
+    >
+      {rowChildren}
+    </motion.li>
   );
 });
 
@@ -874,31 +956,6 @@ function InboxReturnedLine({ updates }: { updates: number }) {
 
 function inboxRowTitle(item: InboxItem, typeLabels: ReturnType<typeof useTypeLabels>) {
   return isAutopilotQuotaNotice(item.type) ? typeLabels[item.type] : getInboxDisplayTitle(item);
-}
-
-function InboxActorAvatar({ item, size }: { item: InboxItem; size: "xs" | "sm" }) {
-  return (
-    <ActorAvatar
-      actorType={item.actor_type ?? item.recipient_type}
-      actorId={item.actor_id ?? item.recipient_id}
-      size={size}
-    />
-  );
-}
-
-/** Who did what: the actor's name, then what the notification says happened. */
-function InboxActorLine({ item, detail }: { item: InboxItem; detail?: ReactNode }) {
-  const { getActorName } = useActorName();
-  const name =
-    item.actor_type && item.actor_type !== "system" && item.actor_id
-      ? getActorName(item.actor_type, item.actor_id)
-      : null;
-  return (
-    <>
-      {name && <span className="font-medium">{name} </span>}
-      {detail ?? <InboxDetailLabel item={item} />}
-    </>
-  );
 }
 
 /** The whole notification, shown while a row is hovered. */

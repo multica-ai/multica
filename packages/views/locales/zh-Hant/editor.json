@@ -125,8 +125,6 @@
     "html_preview": "HTML 預覽",
     "close_preview": "關閉",
     "copy_code": "複製程式碼",
-    "show_preview": "顯示預覽",
-    "show_source": "檢視原始碼",
     "fullscreen": "放大"
   },
   "dynamic_block": {
@@ -140,7 +138,10 @@
     "error_mermaid": "無法繪製這張圖",
     "error_at_line": "{{message}}（第 {{line}} 行）",
     "view_source": "檢視原始碼",
-    "copy_error": "複製錯誤"
+    "copy_error": "複製錯誤",
+    "title": "標題",
+    "rename": "重新命名",
+    "add_title": "新增標題"
   },
   "file_card": {
     "uploading": "正在上傳 {{filename}}"

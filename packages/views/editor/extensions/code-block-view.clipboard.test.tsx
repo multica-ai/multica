@@ -15,7 +15,10 @@ import { CodeBlockView } from "./code-block-view";
 
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 
-vi.mock("../mermaid-diagram", () => ({ MermaidDiagram: () => null }));
+vi.mock("../mermaid-diagram", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../mermaid-diagram")>()),
+  MermaidDiagram: () => null,
+}));
 vi.mock("../../i18n", () => ({
   useT: () => ({
     t: (select: (value: unknown) => string) =>

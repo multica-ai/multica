@@ -578,10 +578,7 @@
     "change_subscribers_placeholder": "Modifier les abonnés...",
     "members_group": "Membres",
     "agents_group": "Agents",
-    "mark_done_tooltip": "Marquer comme terminé",
     "archive_tooltip": "Archiver",
-    "pin_tooltip": "Épingler à la barre latérale",
-    "unpin_tooltip": "Détacher de la barre latérale",
     "quick_jump_label": "Navigation rapide",
     "description_nav_label": "Description de la tâche",
     "sub_issues_nav_progress": "{{done}}/{{total}} terminées",
@@ -856,6 +853,17 @@
     "title": "Aucune tâche ne correspond à ces filtres",
     "unread_title": "Aucune tâche non lue",
     "clear_button": "Effacer les filtres"
+  },
+  "presence": {
+    "viewing_one": "{{count}} présent",
+    "viewing_other": "{{count}} présents",
+    "editing": "En train de modifier",
+    "watching": "Consultent la page",
+    "where": "Dans « {{section}} »",
+    "more_one": "{{count}} de plus : {{names}}",
+    "more_other": "{{count}} de plus : {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Cliquez sur un nom pour aller à son curseur"
   },
   "agent_live": {
     "is_working": "{{name}} travaille",

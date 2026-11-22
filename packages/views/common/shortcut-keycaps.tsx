@@ -1,20 +1,6 @@
 "use client";
 
 import {
-  ArrowBigUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowRightToLine,
-  ArrowUp,
-  Command,
-  CornerDownLeft,
-  Delete,
-  Option,
-  Space,
-  type IconComponent,
-} from "@multica/ui/icons";
-import {
   formatShortcut,
   getShortcutPlatform,
   useShortcut,
@@ -22,33 +8,42 @@ import {
   type ShortcutChord,
   type ShortcutPlatform,
 } from "@multica/core/shortcuts";
-import { Kbd } from "@multica/ui/components/ui/kbd";
+import {
+  Kbd,
+  KbdGlyph,
+  type KbdGlyphName,
+  type KbdSize,
+} from "@multica/ui/components/ui/kbd";
 import { cn } from "@multica/ui/lib/utils";
 
 type ShortcutToken = {
   id: string;
   label: string;
   text?: string;
-  icon?: IconComponent;
+  glyph?: KbdGlyphName;
 };
 
 const KEY_TOKENS: Record<string, Omit<ShortcutToken, "id">> = {
-  Enter: { label: "Enter", icon: CornerDownLeft },
-  Backspace: { label: "Backspace", icon: Delete },
-  Delete: { label: "Delete", icon: Delete },
-  Up: { label: "Up Arrow", icon: ArrowUp },
-  Down: { label: "Down Arrow", icon: ArrowDown },
-  Left: { label: "Left Arrow", icon: ArrowLeft },
-  Right: { label: "Right Arrow", icon: ArrowRight },
-  Space: { label: "Space", icon: Space },
-  Tab: { label: "Tab", icon: ArrowRightToLine },
-  Escape: { label: "Esc" },
-  Plus: { label: "+" },
-  Minus: { label: "−" },
-  Equals: { label: "=" },
-  Underscore: { label: "_" },
+  Enter: { label: "Enter", glyph: "enter" },
+  Backspace: { label: "Backspace", glyph: "backspace" },
+  Delete: { label: "Delete", glyph: "forwardDelete" },
+  Up: { label: "Up Arrow", glyph: "arrowUp" },
+  Down: { label: "Down Arrow", glyph: "arrowDown" },
+  Left: { label: "Left Arrow", glyph: "arrowLeft" },
+  Right: { label: "Right Arrow", glyph: "arrowRight" },
+  Space: { label: "Space", text: "Space" },
+  Tab: { label: "Tab", glyph: "tab" },
+  Escape: { label: "Esc", text: "Esc" },
+  Plus: { label: "+", text: "+" },
+  Minus: { label: "−", text: "−" },
+  Equals: { label: "=", text: "=" },
+  Underscore: { label: "_", text: "_" },
 };
 
+/**
+ * Resolve display tokens for a chord. macOS follows Apple HIG canonical
+ * modifier order: Control → Option → Shift → Command → Key.
+ */
 function shortcutTokens(
   shortcut: ShortcutChord,
   platform: ShortcutPlatform,
@@ -57,46 +52,100 @@ function shortcutTokens(
   const tokens: ShortcutToken[] = [];
 
   if (platform === "macos") {
-    if (modifiers.primary) tokens.push({ id: "primary", label: "Command", icon: Command });
-    if (modifiers.control) tokens.push({ id: "control", label: "Control", text: "⌃" });
-    if (modifiers.alt) tokens.push({ id: "alt", label: "Option", icon: Option });
-    if (modifiers.shift) tokens.push({ id: "shift", label: "Shift", icon: ArrowBigUp });
-    if (modifiers.meta) tokens.push({ id: "meta", label: "Meta" });
+    if (modifiers.control) tokens.push({ id: "control", label: "Control", glyph: "control" });
+    if (modifiers.alt) tokens.push({ id: "alt", label: "Option", glyph: "option" });
+    if (modifiers.shift) tokens.push({ id: "shift", label: "Shift", glyph: "shift" });
+    if (modifiers.primary) tokens.push({ id: "primary", label: "Command", glyph: "command" });
+    if (modifiers.meta) tokens.push({ id: "meta", label: "Meta", text: "Meta" });
   } else {
-    if (modifiers.primary) tokens.push({ id: "primary", label: "Ctrl" });
-    if (modifiers.control) tokens.push({ id: "control", label: "Control" });
+    if (modifiers.primary) tokens.push({ id: "primary", label: "Ctrl", text: "Ctrl" });
+    if (modifiers.control) tokens.push({ id: "control", label: "Control", text: "Control" });
     if (modifiers.meta) {
-      tokens.push({
-        id: "meta",
-        label: platform === "windows" ? "Win" : "Super",
-      });
+      const text = platform === "windows" ? "Win" : "Super";
+      tokens.push({ id: "meta", label: text, text });
     }
-    if (modifiers.alt) tokens.push({ id: "alt", label: "Alt" });
-    if (modifiers.shift) tokens.push({ id: "shift", label: "Shift", icon: ArrowBigUp });
+    if (modifiers.alt) tokens.push({ id: "alt", label: "Alt", text: "Alt" });
+    if (modifiers.shift) tokens.push({ id: "shift", label: "Shift", glyph: "shift" });
   }
 
-  const keyToken = KEY_TOKENS[shortcut.key] ?? { label: shortcut.key };
+  const keyToken = KEY_TOKENS[shortcut.key] ?? { label: shortcut.key, text: shortcut.key };
   tokens.push({ id: `key-${shortcut.key}`, ...keyToken });
   return tokens;
 }
+
+function renderTokenContent({ label, text, glyph }: ShortcutToken) {
+  if (glyph) return <KbdGlyph name={glyph} />;
+  const display = text ?? label;
+  if (display === ",") {
+    return <span className="inline-block -translate-y-[0.04em]">{display}</span>;
+  }
+  return display;
+}
+
+function isSingleCompactToken(token: ShortcutToken): boolean {
+  if (token.glyph) return true;
+  return (token.text ?? token.label).length <= 1;
+}
+
+export type ShortcutKeycapsLayout = "pill" | "split";
 
 export function ShortcutKeycaps({
   shortcut,
   platform = getShortcutPlatform(),
   size = "sm",
+  layout = "pill",
   decorative = false,
   className,
   keyClassName,
 }: {
   shortcut: ShortcutChord;
   platform?: ShortcutPlatform;
-  size?: "sm" | "md";
+  size?: KbdSize;
+  /**
+   * `pill` (default) groups a chord into one quiet keycap for dense chrome
+   * (palettes, tooltips, buttons). `split` separates each key for Settings and
+   * shortcut recording where individual physical keys are the subject.
+   */
+  layout?: ShortcutKeycapsLayout;
   /** Hide a redundant hint when its parent already names the action. */
   decorative?: boolean;
   className?: string;
   keyClassName?: string;
 }) {
   const accessibleLabel = formatShortcut(shortcut, platform);
+  const tokens = shortcutTokens(shortcut, platform);
+
+  if (layout === "pill") {
+    const compact = tokens.length === 1 && isSingleCompactToken(tokens[0]!);
+    return (
+      <span
+        className={cn("inline-flex items-center", className)}
+        role={decorative ? undefined : "img"}
+        aria-label={decorative ? undefined : accessibleLabel}
+        aria-hidden={decorative || undefined}
+        data-slot="shortcut-keycaps"
+        data-layout="pill"
+      >
+        <Kbd
+          aria-hidden="true"
+          size={size}
+          compact={compact}
+          className={keyClassName}
+        >
+          {tokens.map((token) => (
+            <span
+              key={token.id}
+              title={token.label}
+              data-shortcut-key={token.id}
+              className="inline-flex items-center justify-center"
+            >
+              {renderTokenContent(token)}
+            </span>
+          ))}
+        </Kbd>
+      </span>
+    );
+  }
 
   return (
     <span
@@ -105,22 +154,19 @@ export function ShortcutKeycaps({
       aria-label={decorative ? undefined : accessibleLabel}
       aria-hidden={decorative || undefined}
       data-slot="shortcut-keycaps"
+      data-layout="split"
     >
-      {shortcutTokens(shortcut, platform).map(({ id, label, text, icon: Icon }) => (
+      {tokens.map((token) => (
         <Kbd
-          key={id}
+          key={token.id}
           aria-hidden="true"
-          title={label}
-          data-shortcut-key={id}
-          className={cn(
-            "border border-border/70 bg-muted/80 shadow-[0_1px_0_0_color-mix(in_oklab,var(--border)_70%,transparent)]",
-            size === "md"
-              ? "h-7 min-w-7 rounded-md px-1.5 text-caption [&_svg]:size-3.5"
-              : "h-5 min-w-5 px-1 text-micro [&_svg]:size-3",
-            keyClassName,
-          )}
+          title={token.label}
+          data-shortcut-key={token.id}
+          size={size}
+          compact={isSingleCompactToken(token)}
+          className={keyClassName}
         >
-          {Icon ? <Icon aria-hidden="true" strokeWidth={1.8} /> : (text ?? label)}
+          {renderTokenContent(token)}
         </Kbd>
       ))}
     </span>

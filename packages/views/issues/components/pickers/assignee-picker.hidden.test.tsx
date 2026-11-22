@@ -1,13 +1,14 @@
 // The assignee picker lists only actors the current user can actually pick:
 // agents they may invoke that have a runtime, and squads whose leader is one.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enIssues from "../../../locales/en/issues.json";
 import { useAssigneePicksStore } from "@multica/core/issues/stores/assignee-picks-store";
-import { AssigneePicker } from "./assignee-picker";
+import { AssigneePicker, canAssignAgent } from "./assignee-picker";
 
 const MEMBERS = [{ user_id: "user-1", name: "Ada Lovelace", role: "member" }];
+const MEMBER_GRANT = [{ target_type: "member", target_id: "user-1" }];
 const WORKSPACE_GRANT = [{ target_type: "workspace", target_id: "workspace-1" }];
 const AGENTS = [
   // Workspace-shared, has a runtime: pickable.
@@ -16,6 +17,8 @@ const AGENTS = [
   { id: "agent-mine", name: "Mine", owner_id: "user-1", permission_mode: "private", invocation_targets: [], runtime_id: "rt-1", archived_at: null, visibility: "private" },
   // Someone else's private agent: hidden.
   { id: "agent-theirs", name: "Theirs", owner_id: "user-2", permission_mode: "private", invocation_targets: [], runtime_id: "rt-1", archived_at: null, visibility: "private" },
+  // Granted to this user alone: pickable.
+  { id: "agent-granted", name: "Granted", owner_id: "user-2", permission_mode: "public_to", invocation_targets: MEMBER_GRANT, runtime_id: "rt-1", archived_at: null, visibility: "private" },
   // Shared but no runtime: hidden.
   { id: "agent-unbound", name: "Unbound", owner_id: "user-2", permission_mode: "public_to", invocation_targets: WORKSPACE_GRANT, runtime_id: null, archived_at: null, visibility: "workspace" },
 ];
@@ -76,28 +79,51 @@ function rowsIn(label: string): string[] {
   );
 }
 
+function renderPicker() {
+  render(
+    <I18nProvider locale="en" resources={{ en: { issues: enIssues } }}>
+      <AssigneePicker
+        assigneeType={null}
+        assigneeId={null}
+        onUpdate={() => {}}
+        open
+        onOpenChange={() => {}}
+      />
+    </I18nProvider>,
+  );
+}
+
 describe("AssigneePicker unpickable actors", () => {
+  afterEach(() => {
+    MEMBERS[0]!.role = "member";
+  });
+
   it("hides agents and squads the user cannot assign, including from Recent", async () => {
     useAssigneePicksStore.setState({ byScope: { "user-1:workspace-1": PICKS } });
-    render(
-      <I18nProvider locale="en" resources={{ en: { issues: enIssues } }}>
-        <AssigneePicker
-          assigneeType={null}
-          assigneeId={null}
-          onUpdate={() => {}}
-          open
-          onOpenChange={() => {}}
-        />
-      </I18nProvider>,
-    );
+    renderPicker();
 
     await screen.findByText("Agents");
-    expect(rowsIn("Agents")).toEqual(["Shared", "Mine"]);
+    expect(rowsIn("Agents")).toEqual(["Shared", "Mine", "Granted"]);
     expect(rowsIn("Squads")).toEqual(["Runnable Squad"]);
     expect(rowsIn("Recent")).toEqual(["Shared"]);
     expect(screen.queryByText("Theirs")).toBeNull();
     expect(screen.queryByText("Unbound")).toBeNull();
     expect(screen.queryByText("Stuck Squad")).toBeNull();
     expect(screen.queryByText("Private Squad")).toBeNull();
+  });
+
+  it("offers a guest no agent or squad, not even one it owns or was granted (MUL-9877)", async () => {
+    MEMBERS[0]!.role = "guest";
+    useAssigneePicksStore.setState({ byScope: { "user-1:workspace-1": PICKS } });
+    renderPicker();
+
+    await screen.findByText("Ada Lovelace");
+    for (const name of ["Shared", "Mine", "Granted", "Runnable Squad"]) {
+      expect(screen.queryByText(name)).toBeNull();
+    }
+    for (const agent of AGENTS) {
+      expect(canAssignAgent(agent as never, "user-1", "guest")).toBe(false);
+    }
+    expect(canAssignAgent(AGENTS[1] as never, "user-1", "member")).toBe(true);
   });
 });

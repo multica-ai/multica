@@ -211,7 +211,12 @@
     "status": "狀態",
     "runs_7d": "執行（7 天）",
     "edit_access_aria": "訪問權限：{{value}}。變更訪問權限",
-    "all_settings": "全部設定"
+    "all_settings": "全部設定",
+    "apps": "應用程式",
+    "apps_needs_account_other": "{{count}} 個需要你的帳號",
+    "apps_count_other": "{{count}} 個應用",
+    "apps_none": "無",
+    "apps_aria": "應用程式：{{value}}。查看應用程式"
   },
   "pickers": {
     "concurrency_range": "最大並行執行數（{{min}}–{{max}}）",
@@ -786,13 +791,9 @@
       "load_failed": "無法載入此 AI 代理的應用。",
       "empty": "尚無已連線的應用程式。",
       "level": "帳號範圍",
-      "team_connected": "團隊帳號已連線",
-      "team_missing": "團隊帳號未連線",
-      "personal_connected": "你的帳號已連線",
-      "personal_missing": "你還沒有連線這個應用",
       "team_admin_only": "只有工作區管理員可以給 AI 代理團隊帳號。",
       "team_shared_warning": "能執行這個 AI 代理的人，都能透過它使用該團隊帳號。",
-      "manage_link": "在 設定 → 已連線應用 中管理帳號",
+      "manage_link": "在 應用程式 → 帳號 中管理帳號",
       "save_failed_toast": "儲存失敗，請重試",
       "team_help": "工作區共用的帳號，由管理員連線。",
       "personal_help": "每次執行使用觸發者自己已連線的帳號；尚未連線時須先連線。",
@@ -1071,5 +1072,35 @@
       "comment": "修好了：價格卡片在 375px 下改為單欄。已開 PR，測試通過。",
       "step_read": "讀取 {{file}}"
     }
+  },
+  "apps_section": {
+    "title": "應用程式",
+    "empty": "這個 AI 代理還沒有使用任何應用。",
+    "connect_yours": "連線我的帳號",
+    "reconnect": "重新連線",
+    "connect_team": "連線團隊帳號",
+    "acts_as_team": "以團隊帳號行動",
+    "acts_as_starter": "以發起執行的人的帳號行動"
+  },
+  "add_app_dialog": {
+    "title": "為 {{agent}} 新增應用",
+    "description": "使用個人帳號的應用會用發起執行者的帳號，所以即使你自己沒有帳號也可以新增。",
+    "search_other": "搜尋 {{count}} 個應用",
+    "search_label": "搜尋應用",
+    "curated": "精選",
+    "recommended_team": "通常用團隊帳號",
+    "recommended_personal": "通常用個人帳號",
+    "team_connected": "團隊帳號已連線",
+    "add": "新增",
+    "add_aria": "新增 {{app}}",
+    "empty": "沒有符合的應用。",
+    "load_failed": "無法載入應用。",
+    "added_toast": "已將 {{app}} 新增至 {{agent}}。"
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} 想使用 {{app}}",
+    "new_app": "此 AI 代理的新應用",
+    "adds_app_note": "回應後，{{agent}} 之後的執行都可以使用 {{app}}。",
+    "add_to_agent": "將 {{app}} 新增至 {{agent}}"
   }
 }

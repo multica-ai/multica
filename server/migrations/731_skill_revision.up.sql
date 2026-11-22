@@ -1,0 +1,12 @@
+-- Optimistic-concurrency counter for workspace skills (MUL-9874).
+--
+-- Every write to a skill's name, description, content, config or supporting
+-- files bumps it in the same statement that takes the row lock (UpdateSkill /
+-- TouchSkill). A writer that names the revision it read (`base_revision`) is
+-- refused with 409 when the counter has moved, so two clients editing the same
+-- skill can no longer silently overwrite each other. Writers that omit
+-- base_revision keep the old last-write-wins behaviour.
+--
+-- A constant default makes this a catalog-only change: no table rewrite and no
+-- backfill. Existing rows start at 1, the same starting point as doc.revision.
+ALTER TABLE skill ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1;

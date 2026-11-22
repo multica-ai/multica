@@ -10,7 +10,7 @@ import { issueStatusCategory } from "@multica/core/issues";
 import { issueDuplicatesOptions } from "@multica/core/issues/queries";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, resolveClickIntent, rowLinkInteractiveProps, useIntentNavigate } from "../../navigation";
@@ -52,7 +52,7 @@ export function IssueDuplicateBanner({
   return (
     <div className="mb-4 flex items-center gap-1 rounded-md border bg-muted/40 py-1 pl-3 pr-1 text-body">
       <AppLink
-        href={paths.issueDetail(original.id)}
+        href={paths.issueDetail(issueRouteRef(original))}
         newTabTitle={original.identifier}
         className="group flex min-w-0 flex-1 items-center gap-2 py-1"
       >
@@ -107,7 +107,7 @@ export function IssueDuplicatesSection({ issueId }: { issueId: string }) {
           {duplicates.map((duplicate) => (
             <AppLink
               key={duplicate.id}
-              href={paths.issueDetail(duplicate.id)}
+              href={paths.issueDetail(issueRouteRef(duplicate))}
               className="group flex items-center gap-1.5 rounded-md px-2 py-2 text-caption hover:bg-accent/50 transition-colors"
             >
               <ActorAvatar
@@ -177,7 +177,7 @@ function DuplicateOfAnchor({
   const tooltip = useMarkerTooltip(original);
   return (
     <AppLink
-      href={paths.issueDetail(original.id)}
+      href={paths.issueDetail(issueRouteRef(original))}
       newTabTitle={original.identifier}
       title={tooltip}
       {...rowLinkInteractiveProps}
@@ -201,7 +201,7 @@ function DuplicateOfControl({
   const paths = useWorkspacePaths();
   const navigate = useIntentNavigate();
   const tooltip = useMarkerTooltip(original);
-  const href = paths.issueDetail(original.id);
+  const href = paths.issueDetail(issueRouteRef(original));
   const stop = (e: React.SyntheticEvent) => {
     e.preventDefault();
     e.stopPropagation();

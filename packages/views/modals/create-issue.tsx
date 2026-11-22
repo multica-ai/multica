@@ -62,7 +62,7 @@ import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useProjectWithWorkflow, useProjectWorkflow, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
@@ -707,7 +707,7 @@ export function ManualCreatePanel({
               type="button"
               className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
               onClick={() => {
-                router.push(p.issueDetail(issue.id));
+                router.push(p.issueDetail(issueRouteRef(issue)));
                 toast.dismiss(toastId);
               }}
             >
@@ -818,7 +818,7 @@ export function ManualCreatePanel({
                   type="button"
                   className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
                   onClick={() => {
-                    router.push(p.issueDetail(dup.issue.id));
+                    router.push(p.issueDetail(issueRouteRef(dup.issue)));
                     toast.dismiss(toastId);
                   }}
                 >
@@ -985,7 +985,6 @@ export function ManualCreatePanel({
               shortcut={sendShortcut}
               decorative
               className="ml-1 max-sm:hidden"
-              keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
         </>

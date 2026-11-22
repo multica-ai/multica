@@ -566,10 +566,7 @@
     "change_subscribers_placeholder": "更改訂閱者...",
     "members_group": "成員",
     "agents_group": "AI 代理",
-    "mark_done_tooltip": "標記為已完成",
     "archive_tooltip": "歸檔",
-    "pin_tooltip": "固定到側邊欄",
-    "unpin_tooltip": "從側邊欄取消固定",
     "quick_jump_label": "快捷跳轉",
     "description_nav_label": "任務描述",
     "sub_issues_nav_progress": "已完成 {{done}}/{{total}}",
@@ -822,6 +819,15 @@
     "title": "沒有符合篩選條件的任務",
     "unread_title": "沒有未讀任務",
     "clear_button": "清除篩選"
+  },
+  "presence": {
+    "viewing_other": "{{count}} 人在看",
+    "editing": "正在編輯",
+    "watching": "在看",
+    "where": "在改「{{section}}」",
+    "more_other": "還有 {{count}} 人：{{names}}",
+    "name_separator": "、",
+    "jump_hint": "點名字跳到對方的游標"
   },
   "agent_live": {
     "is_working": "{{name}} 在工作",

@@ -47,6 +47,7 @@ vi.mock("@multica/core/auth", () => ({
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme" }),
   useWorkspacePaths: () => ({
     squads: () => "/acme/squads",
@@ -260,13 +261,13 @@ describe("SquadDetailPage", () => {
     expect(within(members).getByText("Lambda")).toBeInTheDocument();
     expect(within(members).getByText("Leader")).toBeInTheDocument();
     expect(within(members).getByText("Working on")).toBeInTheDocument();
-    expect(within(members).getByRole("link", { name: "ARIE-2" })).toHaveAttribute("href", "/acme/issues/i-1");
+    expect(within(members).getByRole("link", { name: "ARIE-2" })).toHaveAttribute("href", "/acme/issues/ARIE-2");
 
     expect(within(section("Instructions")).getByText("Start with a failing test.")).toBeInTheDocument();
     expect(within(section("Instructions")).getByRole("button", { name: "Edit" })).toBeInTheDocument();
 
     const recent = section("Recent work");
-    expect(within(recent).getByRole("link", { name: /Fix login/ })).toHaveAttribute("href", "/acme/issues/i-1");
+    expect(within(recent).getByRole("link", { name: /Fix login/ })).toHaveAttribute("href", "/acme/issues/ARIE-2");
   });
 
   it("keeps per-member actions in the row menu", async () => {

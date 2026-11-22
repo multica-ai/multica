@@ -433,6 +433,10 @@
         "label": "延后通知",
         "description": "延后从收件箱打开的任务；已延后时让它现在回来。"
       },
+      "undoInboxAction": {
+        "label": "撤销收件箱操作",
+        "description": "提示还在时，撤销上一次归档、延后或取消订阅；提示消失后，打开的通知已归档时把它放回收件箱，在\"收件箱已清空\"页撤销页面上写明的操作。"
+      },
       "send": {
         "label": "发送",
         "description": "也用于提交新任务。"
@@ -591,7 +595,6 @@
       "billing": "账单与套餐",
       "code": "代码",
       "channels": "消息渠道",
-      "apps": "已连接应用",
       "workflows": "工作流",
       "voice_input": "语音输入"
     },
@@ -850,8 +853,35 @@
       "manual_label": "手动归档",
       "manual_description": "在侧边栏行上或通知详情顶部点归档",
       "manual_value": "随时",
-      "done_label": "自动归档我完成的任务",
-      "done_description": "你把任务改为\"已完成\"或\"已取消\"类状态时，它的通知自动归档。别人完成的任务会留在收件箱。",
+      "auto_label": "自动归档我处理过的任务",
+      "auto_description": "只算你自己的操作。归档后有新动态，会重新进收件箱。",
+      "auto_presets": {
+        "never": "从不",
+        "completed": "完成任务时",
+        "handled": "完成或触发智能体时",
+        "custom": "自定义",
+        "custom_item": "自定义..."
+      },
+      "auto_recommended": "推荐",
+      "auto_groups": {
+        "settle": "处理",
+        "tidy": "整理"
+      },
+      "auto_actions": {
+        "completed": "完成",
+        "agent_trigger": "触发智能体",
+        "comment": "回复",
+        "status": "推进状态",
+        "assignee": "转交",
+        "priority": "改优先级",
+        "project": "改项目",
+        "dates": "改日期",
+        "labels": "改标签"
+      },
+      "after_label": "归档后",
+      "after_description": "正在看的通知被自动归档时。手动归档（E）照旧打开下一条。",
+      "after_stay": "停在当前任务",
+      "after_next": "打开下一条",
       "archived_label": "已归档的通知",
       "archived_description": "可以在这里找回并取消归档",
       "archived_action": "查看已归档"
@@ -1712,6 +1742,7 @@
   "layout": {
     "scope": {
       "account": "账号 · 所有设备同步",
+      "all_workspaces": "你的所有工作区",
       "device": "仅本设备",
       "device_workspace": "仅本设备 · {{name}}",
       "workspace": "{{name}} 工作区",
@@ -1801,21 +1832,8 @@
     "authorization_expired": "微信授权已过期，请重新扫码连接。"
   },
   "connected_apps": {
-    "description": "智能体通过这些账号操作外部应用，允许的操作会直接执行。",
     "loading": "正在加载应用...",
     "load_failed": "无法加载应用。",
-    "team_title": "团队账号",
-    "team_description": "工作区共有的账号，例如客服邮箱或公司 GitHub。由管理员连接；被授予团队账号的智能体以该账号身份操作。",
-    "team_empty": "还没有团队账号。",
-    "team_empty_member": "还没有团队账号。请联系工作区管理员连接。",
-    "personal_title": "我的账号",
-    "personal_description": "你自己的账号。由你触发的运行中，设为\"触发者账号\"的应用会使用这些账号。",
-    "personal_empty": "你还没有连接任何账号。",
-    "connected_by": "由 {{name}} 连接",
-    "last_used": "最近使用 {{when}}",
-    "last_used_never": "尚未使用",
-    "used_by_other": "{{count}} 个智能体在用",
-    "expired": "需要重新连接",
     "reconnect": "重新连接",
     "rules": "规则",
     "activity": "调用记录",
@@ -1831,35 +1849,7 @@
     "toast_disconnected": "已断开",
     "toast_failed": "操作失败，请重试。",
     "add": {
-      "search": "搜索应用...",
-      "empty": "没有匹配的应用。",
-      "curated": "精选",
-      "recommended_team": "通常用团队账号",
-      "recommended_personal": "通常用个人账号",
-      "connect_team": "连接团队账号",
-      "connect_personal": "连接我的账号",
-      "connecting": "正在连接...",
-      "connected": "已连接",
-      "connect": "连接",
-      "team_description": "连接工作区共用的账号。哪些智能体可以使用，在各智能体的\"应用\"页设置。",
-      "personal_description": "连接你自己的账号。应用设为\"触发者账号\"时，由你触发的运行会使用它。"
-    },
-    "disconnect_team": {
-      "title": "断开团队的 {{app}} 账号？",
-      "description": "使用团队账号的智能体会立即失去访问权限。",
-      "agents": "正在使用的智能体",
-      "no_agents": "没有智能体在用。",
-      "active_tasks": "进行中的运行：{{count}}",
-      "active_autopilots": "启用中的自动化：{{count}}",
-      "pending": "将被取消的待确认请求：{{count}}",
-      "cancel": "取消",
-      "confirm": "断开"
-    },
-    "disconnect_personal": {
-      "title": "断开你的 {{app}} 账号？",
-      "description": "你触发的运行将无法再使用它。之后可以重新连接。",
-      "cancel": "取消",
-      "confirm": "断开"
+      "empty": "没有匹配的应用。"
     },
     "detail": {
       "team_title": "{{app}} · 团队账号",
@@ -1945,7 +1935,13 @@
       "connected_resumed": "{{app}} 已连接，智能体会从中断处继续。",
       "rate_limited": "这个账号已达到每分钟调用上限，请一分钟后再批准。",
       "rate_limited_some_other": "有 {{count}} 个请求触发了每分钟上限，请一分钟后再批准。",
-      "withdrawn": "你已无法使用这个智能体，请求已撤回。"
+      "withdrawn": "你已无法使用这个智能体，请求已撤回。",
+      "title_connect_team": "{{agent}} 需要 {{app}} 账号",
+      "title_member_ask": "{{name}} 申请了 {{app}} 团队账号",
+      "waiting_for_admin": "等待管理员",
+      "team_note": "所有以团队账号行动的智能体都可以使用它。",
+      "admins_notified": "已在收件箱通知工作区管理员。",
+      "connect_team": "为团队连接"
     },
     "tools": {
       "tab": "工具",
@@ -1979,6 +1975,122 @@
       "cancel": "取消",
       "admin_required": "请工作区管理员解除限制。",
       "account_link": "此账号仍有旧操作限制。请在已连接应用中解除。"
+    },
+    "status": {
+      "connected": "已连接",
+      "not_connected": "未连接",
+      "needs_reconnecting": "需要重新连接",
+      "requested": "已请求"
+    },
+    "owner": {
+      "team": "团队账号",
+      "personal": "你的账号"
+    },
+    "account_row": {
+      "admins_notified": "已通知管理员",
+      "withdraw": "撤回",
+      "decline": "拒绝",
+      "toast_declined": "已拒绝请求，等待中的智能体会在没有该账号的情况下继续。",
+      "toast_withdrawn": "已撤回请求"
+    },
+    "disclosure": {
+      "title": "连接 {{app}}",
+      "personal_subtitle": "你自己的账号。下一步会跳转到该应用登录。",
+      "team_subtitle": "整个工作区共用的团队账号。下一步会跳转到该应用登录。",
+      "without_asking": "智能体无需每次征得同意即可执行",
+      "logged": "智能体的每次调用都会记录在对应的任务或聊天中。",
+      "used_by": "{{agents}} 在用 {{app}}，将以这个账号的身份操作。",
+      "used_by_none": "还没有智能体使用这个应用。可在智能体页面把它添加给智能体。",
+      "visibility_personal": "只有你发起的运行会使用它。它在你的其他工作区中同样可用。",
+      "visibility_team": "被分配团队账号的智能体都以它的身份操作，无论谁发起运行。",
+      "cancel": "取消",
+      "continue": "继续"
+    },
+    "hub": {
+      "description": "{{workspace}} 中智能体可以使用的所有应用，以及它们使用谁的账号。",
+      "tabs": {
+        "in_use": "使用中",
+        "attention": "需要处理",
+        "accounts": "账号",
+        "all": "全部应用"
+      },
+      "search": "搜索应用",
+      "popular": "{{workspace}} 中常用",
+      "scope_team": "团队账号",
+      "scope_personal": "个人账号",
+      "scope_both": "团队和个人账号",
+      "used_by": "{{agents}} 在用",
+      "wanted_by": "{{agents}} 想用",
+      "members_asked_other": "{{count}} 位成员发起了请求",
+      "connect": "连接",
+      "reconnect": "重新连接",
+      "ask_admin": "请管理员连接",
+      "toast_requested": "已请工作区管理员连接 {{app}}。",
+      "empty_in_use": "还没有使用中的应用。设置一个，让智能体可以使用它。",
+      "empty_attention": "没有需要你处理的事项。",
+      "no_matches": "没有匹配的应用。",
+      "unavailable": "此服务器未提供应用功能。",
+      "retry": "重试"
+    },
+    "app_page": {
+      "agents_title": "智能体",
+      "agents_empty": "此工作区还没有智能体。",
+      "source_label": "{{agent}} 使用 {{app}} 时用的账号",
+      "source_team": "团队账号",
+      "source_personal": "发起运行的人",
+      "not_using": "不使用 {{app}}",
+      "enable": "允许 {{agent}} 使用 {{app}}",
+      "team_admin_only": "只有工作区管理员可以修改团队账号的使用权限。",
+      "save_failed": "无法更新智能体。",
+      "activity_title": "最近调用",
+      "activity_empty": "还没有智能体使用过 {{app}}。",
+      "as_team": "以团队账号",
+      "as_you": "以你的身份",
+      "in_chat": "聊天",
+      "accounts_title": "账号",
+      "account_actions": "{{account}}操作",
+      "capabilities_title": "智能体可以做什么",
+      "capabilities_note": "无需每次征得同意。",
+      "accounts_description": "{{workspace}} 中智能体可以使用的 {{app}} 账号。",
+      "team_account_hint": "{{workspace}} 所有人共享 · 由管理员连接",
+      "your_account_hint": "只在你发起的运行中使用",
+      "agents_description": "每个智能体选择以谁的账号行动。",
+      "ready_team": "团队账号已就绪",
+      "needs_team": "需要团队账号",
+      "ready_yours": "你的账号已就绪",
+      "needs_yours": "需要你的账号"
+    },
+    "accounts_page": {
+      "empty": "你还没有在这个工作区连接任何账号。",
+      "used_by": "{{agents}} 在用",
+      "team_title": "团队账号",
+      "team_description_admin": "整个工作区共享，只有管理员可以连接。",
+      "team_description_member": "由管理员连接。你可以查看，也可以申请。",
+      "team_empty": "还没有团队账号。",
+      "yours_title": "你的账号",
+      "yours_description": "只有你能使用；智能体会在你发起的运行中使用它们。",
+      "needed_by": "{{agents}} 需要它"
+    },
+    "disconnect_dialog": {
+      "title": "断开 {{app}}？",
+      "team_body": "这些智能体以这个账号行动。下次用到 {{app}} 时，它们会向管理员发起请求，而不是继续工作。",
+      "personal_body": "这些智能体会在你发起的运行中使用它。你下次发起运行时，会被要求重新连接。",
+      "agents": "使用它的智能体",
+      "no_agents": "没有智能体在用。",
+      "running": "运行中 — 将会停止",
+      "active_runs_other": "{{count}} 个进行中的运行会立即停止。",
+      "impact_failed": "无法确认哪些智能体在用它。",
+      "cancel": "取消",
+      "confirm": "断开"
+    },
+    "team_requests": {
+      "title": "需要 {{app}} 团队账号",
+      "run_waiting": "运行等待中",
+      "asked": "已申请",
+      "summary": " · \"{{summary}}\"",
+      "resumes": "连接一次即可回应这里的所有请求，等待中的运行会从中断处继续。",
+      "decline_all": "全部拒绝",
+      "open_app": "打开应用"
     }
   },
   "voice_input": {

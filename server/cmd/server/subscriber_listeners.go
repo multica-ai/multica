@@ -89,12 +89,7 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 		if descriptionChanged, _ := payload["description_changed"].(bool); descriptionChanged && issue.Description != nil {
 			newMentions := parseMentions(*issue.Description)
 			if len(newMentions) > 0 {
-				prevMentioned := map[string]bool{}
-				if prevDescription, _ := payload["prev_description"].(*string); prevDescription != nil {
-					for _, m := range parseMentions(*prevDescription) {
-						prevMentioned[m.Type+":"+m.ID] = true
-					}
-				}
+				prevMentioned := previousDescriptionMentions(payload)
 				for _, m := range newMentions {
 					if !prevMentioned[m.Type+":"+m.ID] {
 						addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")

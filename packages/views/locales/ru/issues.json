@@ -592,10 +592,7 @@
     "change_subscribers_placeholder": "Изменить подписчиков...",
     "members_group": "Участники",
     "agents_group": "Агенты",
-    "mark_done_tooltip": "Отметить как готово",
     "archive_tooltip": "Архивировать",
-    "pin_tooltip": "Закрепить в боковой панели",
-    "unpin_tooltip": "Открепить от боковой панели",
     "quick_jump_label": "Быстрая навигация",
     "description_nav_label": "Описание задачи",
     "sub_issues_nav_progress": "Завершено: {{done}}/{{total}}",
@@ -923,6 +920,21 @@
     "title": "Нет задач, соответствующих этим фильтрам",
     "clear_button": "Очистить фильтры",
     "unread_title": "Нет непрочитанных задач"
+  },
+  "presence": {
+    "viewing_one": "{{count}} смотрит",
+    "viewing_few": "{{count}} смотрят",
+    "viewing_many": "{{count}} смотрят",
+    "viewing_other": "{{count}} смотрят",
+    "editing": "Редактируют",
+    "watching": "Смотрят",
+    "where": "В «{{section}}»",
+    "more_one": "Ещё {{count}}: {{names}}",
+    "more_few": "Ещё {{count}}: {{names}}",
+    "more_many": "Ещё {{count}}: {{names}}",
+    "more_other": "Ещё {{count}}: {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Нажмите на имя, чтобы перейти к курсору"
   },
   "agent_live": {
     "is_working": "{{name}} работает",

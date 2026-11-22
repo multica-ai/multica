@@ -81,7 +81,16 @@ func compactUUID(id string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(id), "-", ""))
 }
 
+const defaultListHint = "run the list command with --full-id"
+
 func resolveIDByPrefix(ctx context.Context, client *cli.APIClient, kind, input string, fetch func(context.Context, *cli.APIClient) ([]idCandidate, error)) (resolvedID, error) {
+	return resolveIDByPrefixWithListHint(ctx, client, kind, input, defaultListHint, fetch)
+}
+
+// resolveIDByPrefixWithListHint is resolveIDByPrefix for resources whose list
+// command needs a different hint, e.g. one that always prints full UUIDs and
+// has no --full-id flag. listHint completes "Use more characters or ...".
+func resolveIDByPrefixWithListHint(ctx context.Context, client *cli.APIClient, kind, input, listHint string, fetch func(context.Context, *cli.APIClient) ([]idCandidate, error)) (resolvedID, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
 		return resolvedID{}, fmt.Errorf("%s id is required", kind)
@@ -122,7 +131,7 @@ func resolveIDByPrefix(ctx context.Context, client *cli.APIClient, kind, input s
 
 	switch len(matches) {
 	case 0:
-		return resolvedID{}, fmt.Errorf("no %s found matching id prefix %q; run the list command with --full-id to copy the full UUID", kind, input)
+		return resolvedID{}, fmt.Errorf("no %s found matching id prefix %q; %s to copy the full UUID", kind, input, listHint)
 	case 1:
 		display := matches[0].Display
 		if display == "" {
@@ -130,11 +139,15 @@ func resolveIDByPrefix(ctx context.Context, client *cli.APIClient, kind, input s
 		}
 		return resolvedID{ID: matches[0].ID, Display: display, Archived: matches[0].Archived}, nil
 	default:
-		return resolvedID{}, ambiguousIDPrefixError(kind, input, matches)
+		return resolvedID{}, ambiguousIDPrefixErrorWithListHint(kind, input, listHint, matches)
 	}
 }
 
 func ambiguousIDPrefixError(kind, input string, matches []idCandidate) error {
+	return ambiguousIDPrefixErrorWithListHint(kind, input, defaultListHint, matches)
+}
+
+func ambiguousIDPrefixErrorWithListHint(kind, input, listHint string, matches []idCandidate) error {
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].ID < matches[j].ID
 	})
@@ -142,7 +155,7 @@ func ambiguousIDPrefixError(kind, input string, matches []idCandidate) error {
 	for _, m := range matches {
 		parts = append(parts, "  "+m.ID)
 	}
-	return fmt.Errorf("ambiguous %s id prefix %q; matches:\n%s\nUse more characters or run the list command with --full-id", kind, input, strings.Join(parts, "\n"))
+	return fmt.Errorf("ambiguous %s id prefix %q; matches:\n%s\nUse more characters or %s", kind, input, strings.Join(parts, "\n"), listHint)
 }
 
 // resolveIssueRef accepts only the two canonical issue references:

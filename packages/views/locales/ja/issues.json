@@ -568,10 +568,7 @@
     "change_subscribers_placeholder": "購読者を変更...",
     "members_group": "メンバー",
     "agents_group": "エージェント",
-    "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
-    "pin_tooltip": "サイドバーにピン留め",
-    "unpin_tooltip": "サイドバーのピン留めを解除",
     "quick_jump_label": "クイックナビゲーション",
     "description_nav_label": "タスクの説明",
     "sub_issues_nav_progress": "{{done}}/{{total}} 完了",
@@ -822,6 +819,15 @@
     "title": "フィルター条件に一致するタスクがありません",
     "unread_title": "未読のタスクはありません",
     "clear_button": "フィルターを解除"
+  },
+  "presence": {
+    "viewing_other": "{{count}} 人が閲覧中",
+    "editing": "編集中",
+    "watching": "閲覧中",
+    "where": "「{{section}}」を編集中",
+    "more_other": "ほか {{count}} 人：{{names}}",
+    "name_separator": "、",
+    "jump_hint": "名前をクリックすると、その人のカーソルへ移動します"
   },
   "agent_live": {
     "is_working": "{{name}} が作業中",

@@ -48,7 +48,6 @@
   "list": {
     "loading_selection": "Loading notification...",
     "empty": "No notifications",
-    "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
     "time": {
       "just_now": "just now",
@@ -66,13 +65,13 @@
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
-    "empty": "Your inbox is empty",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Open full form",
     "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}, or until the workspace upgrades or buys more runs.",
     "project_owner_joined_body": "{{name}} is a workspace owner and added themselves to this private project. They can now see its issues, comments, and attachments.",
     "open_project": "Open project",
+    "open_app": "Open app",
     "autopilot_quota_upgrade": "View options",
     "archive": "Archive",
     "unarchive": "Unarchive",
@@ -126,6 +125,7 @@
     "set_due_date_to": "Set due date to {{date}}",
     "removed_due_date": "Removed due date",
     "reacted_to_comment": "Reacted {{emoji}} to your comment",
+    "commented": "Commented",
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}",
     "autopilot_quota_blocked": "Run blocked because the limit was reached",
@@ -148,6 +148,10 @@
     "leaves": "Leaves the Inbox when you move on",
     "filtered": "No longer matches your filters",
     "notification_archived": "Notification archived",
+    "changed_status": "Changed to {{status}}",
+    "reassigned": "Reassigned to {{name}}",
+    "unassigned": "Unassigned",
+    "ran_quick_action": "Ran {{name}}",
     "next": "Next",
     "next_tooltip": "Open next: {{title}}"
   },
@@ -158,7 +162,6 @@
     "mark_read_failed": "Failed to mark as read",
     "mark_unread_failed": "Failed to mark as unread",
     "archive_failed": "Failed to archive",
-    "mark_done_failed": "Failed to mark as done",
     "mark_all_read_failed": "Failed to mark all as read",
     "archive_all_failed": "Failed to archive all",
     "archive_all_read_failed": "Failed to archive read items",
@@ -217,5 +220,34 @@
     "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back.",
     "col_updates": "While snoozed",
     "col_back": "Back"
+  },
+  "auto_archive_prompt": {
+    "title": "Archive notifications once you've handled them",
+    "description": "The Inbox can now archive an issue's notifications when you act on it. Only your own actions count, and a later notification brings the issue back.",
+    "options": {
+      "handled": "Completing an issue or starting an agent archives it; organizing or commenting without waking an agent leaves it in place",
+      "completed": "Only completing or cancelling an issue archives it",
+      "never": "You archive notifications yourself"
+    },
+    "hint": "You can change this in Settings › Notifications",
+    "confirm": "Done"
+  },
+  "zero": {
+    "cleared_title": "Inbox cleared",
+    "just_archived": "Just archived {{label}}",
+    "just_snoozed": "Snoozed {{label}} until {{time}}",
+    "just_unsubscribed": "Unsubscribed from {{label}}",
+    "just_archived_many_one": "Archived {{count}} notification",
+    "just_archived_many_other": "Archived {{count}} notifications",
+    "snoozed_summary_one": "{{count}} snoozed · returns {{time}}",
+    "snoozed_summary_other": "{{count}} snoozed · next returns {{time}}",
+    "bar_snoozed_one": "{{count}} snoozed",
+    "bar_snoozed_other": "{{count}} snoozed",
+    "go_to_my_work": "Go to My work",
+    "filtered_title": "All caught up for this filter",
+    "filtered_remaining_one": "{{count}} other notification in your inbox",
+    "filtered_remaining_other": "{{count}} other notifications in your inbox",
+    "clear_and_continue": "Clear filters and continue",
+    "undo_item": "Undo {{label}}"
   }
 }

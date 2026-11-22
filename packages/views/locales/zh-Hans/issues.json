@@ -566,10 +566,7 @@
     "change_subscribers_placeholder": "更改订阅者...",
     "members_group": "成员",
     "agents_group": "智能体",
-    "mark_done_tooltip": "标记为已完成",
     "archive_tooltip": "归档",
-    "pin_tooltip": "固定到侧边栏",
-    "unpin_tooltip": "从侧边栏取消固定",
     "quick_jump_label": "快捷跳转",
     "description_nav_label": "任务描述",
     "sub_issues_nav_progress": "已完成 {{done}}/{{total}}",
@@ -822,6 +819,15 @@
     "title": "没有符合筛选条件的任务",
     "unread_title": "没有未读任务",
     "clear_button": "清除筛选"
+  },
+  "presence": {
+    "viewing_other": "{{count}} 人在看",
+    "editing": "正在编辑",
+    "watching": "在看",
+    "where": "在改\"{{section}}\"",
+    "more_other": "还有 {{count}} 人：{{names}}",
+    "name_separator": "、",
+    "jump_hint": "点名字跳到对方的光标"
   },
   "agent_live": {
     "is_working": "{{name}} 在工作",

@@ -17,12 +17,15 @@ import { configStore } from "@multica/core/config";
 import { docTreeOptions } from "@multica/core/docs";
 import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, issueTasksOptions, issueTimelineOptions } from "@multica/core/issues/queries";
+import { autopilotListOptions } from "@multica/core/autopilots/queries";
+import { quickActionListOptions } from "@multica/core/quick-actions";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
 import type { Issue } from "@multica/core/types";
 import {
   agentListOptions,
   memberListOptions,
+  skillListOptions,
   squadListOptions,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
@@ -30,6 +33,7 @@ import { RESOURCES } from "../locales";
 import enLayout from "../locales/en/layout.json";
 import zhHansProjects from "../locales/zh-Hans/projects.json";
 import { SearchCommand } from "./search-command";
+import { DOC_SEARCH_DEBOUNCE_MS } from "./use-doc-search";
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
@@ -37,6 +41,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
 
 const {
   queryData,
+  requestedKeys,
   apiFns,
   mockApi,
   mockPush,
@@ -62,6 +67,8 @@ const {
   });
   return {
     queryData: new Map<string, unknown>(),
+    // Every query key a mounted useQuery would fetch (enabled), as JSON.
+    requestedKeys: new Set<string>(),
     apiFns,
     // Any API method resolves to an empty object unless a test sets it.
     mockApi: new Proxy(
@@ -98,6 +105,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
   };
   const read = (opts: Opts) => {
     if (opts.enabled === false) return undefined;
+    requestedKeys.add(JSON.stringify(opts.queryKey));
     const data = queryData.get(JSON.stringify(opts.queryKey));
     return data !== undefined && opts.select ? opts.select(data) : data;
   };
@@ -171,6 +179,9 @@ vi.mock("@multica/core/auth", async (importOriginal) => {
     }),
   };
 });
+
+const composio = vi.hoisted(() => ({ available: true }));
+vi.mock("../common/use-composio-available", () => ({ useComposioAvailable: () => composio.available }));
 
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
@@ -368,7 +379,9 @@ const rowText = (text: string) =>
 
 describe("SearchCommand", () => {
   beforeEach(() => {
+    composio.available = true;
     queryData.clear();
+    requestedKeys.clear();
     apiFns.clear();
     apiFns.set("getBaseUrl", vi.fn(() => "http://127.0.0.1:8080"));
     apiFns.set("searchIssues", vi.fn(() => Promise.resolve({ issues: [], total: 0 })));
@@ -433,6 +446,7 @@ describe("SearchCommand", () => {
       renderSearch();
 
       expect(renderedValues()).not.toContain("command:new-issue");
+      expect(renderedHeadings()).not.toContain("New");
     });
 
     it("finds no New issue command and no hand-to-agent row while typing", async () => {
@@ -440,19 +454,48 @@ describe("SearchCommand", () => {
       renderSearch();
       await user.type(input(), "new");
 
-      expect(await rowText("New project")).toBeInTheDocument();
+      await waitFor(() => expect(input().value).toBe("new"));
       expect(screen.queryByText((_, el) => el?.textContent === "New issue" && el?.tagName === "SPAN")).toBeNull();
       expect(renderedValues()).not.toContain("hand-to-agent");
     });
 
-    it("drops New issue from a project's context commands", () => {
+    it("keeps only the global commands the server allows it (MUL-9883)", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), ">");
+
+      expect(renderedValues().filter((v) => v.startsWith("command:"))).toEqual([
+        "command:inbox-mark-all-read",
+        "command:inbox-archive-all-read",
+        "command:theme",
+        "command:feedback",
+      ]);
+    });
+
+    it("does not ask for the autopilot, skill or doc lists the server refuses it (MUL-9883)", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "a");
+
+      // Past the doc search debounce, so a request would have gone out.
+      await act(() => new Promise((resolve) => setTimeout(resolve, DOC_SEARCH_DEBOUNCE_MS + 100)));
+      expect(api("searchDocs")).not.toHaveBeenCalled();
+
+      expect(requestedKeys).toContain(JSON.stringify(agentListOptions("ws-test").queryKey));
+      expect(requestedKeys).not.toContain(JSON.stringify(autopilotListOptions("ws-test").queryKey));
+      expect(requestedKeys).not.toContain(JSON.stringify(skillListOptions("ws-test").queryKey));
+      expect(requestedKeys).not.toContain(JSON.stringify(docTreeOptions("ws-test").queryKey));
+    });
+
+    it("drops Change status and New issue from a project's context commands", () => {
       registerContext({
         kind: "project",
         project: { id: "proj-1", title: "Shared project", archived_at: null },
       } as CommandBarContext);
       renderSearch();
 
-      expect(renderedValues()).toContain("command:context-project:project-status");
+      expect(renderedValues()).toContain("command:context-project:project-copy-link");
+      expect(renderedValues()).not.toContain("command:context-project:project-status");
       expect(renderedValues()).not.toContain("command:context-project:project-new-issue");
     });
   });
@@ -477,6 +520,17 @@ describe("SearchCommand", () => {
         await user.type(input(), enLayout.nav[page.navKey]);
         await waitFor(() => expect(renderedValues()).toContain(`page:${key}`));
       }
+    });
+
+    it("leaves Apps out when the server has no connected apps", async () => {
+      composio.available = false;
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), enLayout.nav.apps);
+      await waitFor(() => expect(renderedValues()).not.toContain("page:apps"));
+      await user.clear(input());
+      await user.type(input(), enLayout.nav.skills);
+      await waitFor(() => expect(renderedValues()).toContain("page:skills"));
     });
 
     it("does not surface a page on an incidental substring of a hidden keyword", async () => {
@@ -1153,6 +1207,65 @@ describe("SearchCommand", () => {
       );
     });
 
+    it("offers Delete issue on an issue the viewer created", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+      await waitFor(() => expect(renderedValues()).toContain("command:context-issue:issue-delete"));
+    });
+
+    it("drops Delete issue on someone else's issue", async () => {
+      act(() => {
+        for (const token of registered.splice(0)) useCommandBarContextStore.getState().unregister(token);
+      });
+      registerContext({ kind: "issue", issue: { ...issue, creator_id: "user-other" } });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+
+      expect(renderedValues()).not.toContain("command:context-issue:issue-delete");
+    });
+
+    it("drops Delete issue for a guest, even on an issue it created (MUL-9877)", async () => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+
+      expect(renderedValues()).not.toContain("command:context-issue:issue-delete");
+    });
+
+    it("leaves a guest only the commands the server allows, without loading runs or quick actions (MUL-9883)", async () => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), ">");
+
+      expect(renderedValues().filter((v) => v.startsWith("command:context-issue:"))).toEqual([
+        "command:context-issue:issue-copy-link",
+        "command:context-issue:issue-subscribe",
+        "command:context-issue:issue-pin",
+        "command:context-issue:issue-copy-identifier",
+        "command:context-issue:issue-fold-comments",
+        "command:context-issue:issue-unfold-comments",
+      ]);
+      expect(requestedKeys).not.toContain(JSON.stringify(quickActionListOptions("ws-test").queryKey));
+      expect(requestedKeys).not.toContain(JSON.stringify(issueTasksOptions("issue-1").queryKey));
+    });
+
+    it("offers a guest no Assign action on a person's best match (MUL-9883)", async () => {
+      seed(memberListOptions("ws-test"), [
+        { ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" },
+        makeMember("user-1", "Alice Zhang", "alice@example.com"),
+      ]);
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "alice");
+
+      await waitFor(() => expect(renderedValues()[0]).toBe("best:member:user-1"));
+      expect(renderedValues()).not.toContain("best-action:assign");
+    });
+
     it("hides issue commands once the page unregisters", () => {
       act(() => {
         for (const token of registered.splice(0)) useCommandBarContextStore.getState().unregister(token);
@@ -1206,6 +1319,16 @@ describe("SearchCommand", () => {
         assigneeId: "agent-lambda",
       });
       expect(api("batchUpdateIssues")).not.toHaveBeenCalled();
+    });
+
+    it("offers a guest no batch commands (MUL-9883)", async () => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), ">");
+
+      expect(renderedValues().some((v) => v.startsWith("command:context-issues:"))).toBe(false);
+      expect(renderedHeadings()).not.toContain("3 selected issues");
     });
   });
 
@@ -1270,7 +1393,7 @@ describe("SearchCommand", () => {
       expect(handRow()).toHaveTextContent(`Hand to agent: “${prompt}”`);
       fireEvent.keyDown(input(), { key: "Enter" });
 
-      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-812");
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/MUL-812");
       expect(mockOpenModal).not.toHaveBeenCalled();
       expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });

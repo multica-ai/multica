@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "正在載入通知…",
     "empty": "暫無通知",
-    "mark_done_tooltip": "標為已完成",
     "archive_tooltip": "歸檔",
     "time": {
       "just_now": "剛剛",
@@ -64,13 +63,13 @@
   },
   "detail": {
     "select_prompt": "選擇一條通知檢視詳情",
-    "empty": "收件箱為空",
     "original_input": "原始輸入",
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "開啟完整表單",
     "autopilot_quota_exceeded_body": "目前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置、升級方案或加購之前，後續自動化執行將不會啟動。",
     "project_owner_joined_body": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。",
     "open_project": "開啟專案",
+    "open_app": "開啟應用程式",
     "autopilot_quota_upgrade": "查看選項",
     "archive": "歸檔",
     "unarchive": "取消歸檔",
@@ -124,6 +123,7 @@
     "set_due_date_to": "截止日期設為 {{date}}",
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回應了你的評論",
+    "commented": "評論了",
     "created_with_agent": "透過 AI 代理建立：{{identifier}}",
     "failed_with_detail": "失敗：{{detail}}",
     "autopilot_quota_blocked": "執行已被阻止：額度已用完",
@@ -145,6 +145,10 @@
     "leaves": "離開後移出收件箱",
     "filtered": "不再符合篩選",
     "notification_archived": "通知已歸檔",
+    "changed_status": "已改為{{status}}",
+    "reassigned": "已改派給 {{name}}",
+    "unassigned": "已取消分配",
+    "ran_quick_action": "已執行 {{name}}",
     "next": "下一條",
     "next_tooltip": "開啟下一條：{{title}}"
   },
@@ -155,7 +159,6 @@
     "mark_read_failed": "標為已讀失敗",
     "mark_unread_failed": "標為未讀失敗",
     "archive_failed": "歸檔失敗",
-    "mark_done_failed": "標為已完成失敗",
     "mark_all_read_failed": "全部標為已讀失敗",
     "archive_all_failed": "歸檔全部失敗",
     "archive_all_read_failed": "歸檔已讀失敗",
@@ -212,5 +215,30 @@
     "view_empty_description": "在收件箱裡延後一個任務，它會在這裡等到時間再回來。",
     "col_updates": "延後期間",
     "col_back": "回來時間"
+  },
+  "auto_archive_prompt": {
+    "title": "處理完的通知，可以自動歸檔",
+    "description": "收件箱新增了自動歸檔：你處理完一個任務，它的通知就會移出收件箱。只算你自己的操作，有新動態會重新進收件箱。",
+    "options": {
+      "handled": "完成任務或觸發 AI 代理執行時自動歸檔；只整理欄位或不觸發 AI 代理的留言留在原地",
+      "completed": "只有完成或取消任務才歸檔",
+      "never": "自己手動歸檔"
+    },
+    "hint": "之後可以在 設定 › 通知 裡修改",
+    "confirm": "確定"
+  },
+  "zero": {
+    "cleared_title": "收件箱已清空",
+    "just_archived": "剛歸檔了 {{label}}",
+    "just_snoozed": "已將 {{label}} 延後至 {{time}}",
+    "just_unsubscribed": "已取消訂閱並歸檔 {{label}}",
+    "just_archived_many_other": "已歸檔 {{count}} 則通知",
+    "snoozed_summary_other": "{{count}} 則延後通知 · 最早 {{time}} 回來",
+    "bar_snoozed_other": "{{count}} 則已延後",
+    "go_to_my_work": "前往我的工作",
+    "filtered_title": "目前篩選下的通知已處理完",
+    "filtered_remaining_other": "收件箱裡還有 {{count}} 則其他通知待處理",
+    "clear_and_continue": "清除篩選，繼續處理",
+    "undo_item": "復原 {{label}}"
   }
 }

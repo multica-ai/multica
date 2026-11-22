@@ -9,7 +9,7 @@ import {
 import { IssueFlowCard } from "../../workflows/issue-flow-card";
 import { IssueAppRequests } from "../../common/app-requests";
 import { useStatusLabel } from "../utils/status-label";
-import { priorityLabel } from "../utils/priority-label";
+import { formatActivity, type ActivityT } from "./activity-text";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, useId, Fragment, type ComponentProps, type ReactNode } from "react";
 import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
@@ -18,22 +18,18 @@ import { AppLink, useBackOrReplace } from "../../navigation";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   AlertTriangle,
-  Archive,
   Calendar,
   CalendarClock,
   CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CircleCheck,
   FileQuestion,
   Loader2,
   Lock,
   Milestone,
   MoreHorizontal,
   PanelRight,
-  Pin,
-  PinOff,
   Plus,
   SlidersHorizontal,
   Tag,
@@ -49,6 +45,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { StorageLimitNotice } from "../../billing/storage-limit-notice";
+import { useDocCollab, type DocCollaborator } from "../../docs/components/use-doc-collab";
 import { ContentEditor, ReadonlyContent, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence, ImageThumbnailsProvider } from "../../editor";
 import {
   WAKEUP_ACTIVITY_ACTIONS,
@@ -80,14 +77,17 @@ import { MemberProfileCard } from "../../members/member-profile-card";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
+import { InboxArchiveButton, InboxBarSkeleton, InboxOpenBar } from "../../inbox/components/inbox-bar";
+import { InboxIssueActions } from "./inbox-issue-actions";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
+import { useInboxSelectionStore, type InboxTransitionDirection } from "@multica/core/inbox/selection-store";
+import { useReducedMotion } from "@multica/core/appearance";
 import { PropRow } from "../../common/prop-row";
 import { useIsGuest } from "@multica/core/permissions";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
-import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { Attachment, InboxItem, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, IssueSubscriber, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
-import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
 import { commentLandingTarget, isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -104,7 +104,7 @@ import { AssigneePicker } from "./pickers/assignee-picker";
 import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider, IssueInboxActions } from "../actions";
+import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider, IssueInboxBar } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
@@ -124,7 +124,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
 import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
-import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
+import { IssuePresenceHeaderChip } from "./issue-presence-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
@@ -152,8 +152,9 @@ import {
 } from "./deliverables/deliverable-link";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueReadState } from "@multica/core/issues/read-state";
+import { useIssueRouteRef } from "@multica/core/issues/canonical-id";
 import { useAuthStore } from "@multica/core/auth";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -249,6 +250,25 @@ export function issueHighlightMementoKey(issueId: string): string {
 // what a click does.
 const SUBSCRIPTION_ACTION_CLASS =
   "text-label text-muted-foreground hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50";
+
+function SubscriberAvatars({ subscribers }: { subscribers: IssueSubscriber[] }) {
+  return (
+    <AvatarGroup>
+      {subscribers.slice(0, 4).map((sub) => (
+        <ActorAvatar
+          key={`${sub.user_type}-${sub.user_id}`}
+          actorType={sub.user_type}
+          actorId={sub.user_id}
+          size="md"
+          enableHoverCard
+        />
+      ))}
+      {subscribers.length > 4 && (
+        <AvatarGroupCount>+{subscribers.length - 4}</AvatarGroupCount>
+      )}
+    </AvatarGroup>
+  );
+}
 
 function SubscriberPopoverContent({
   members,
@@ -350,164 +370,6 @@ function shortDate(date: string | null, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
 
-type ActivityT = ReturnType<typeof useT<"issues">>["t"];
-
-/**
- * Labels a status key from the activity feed. `resolveLabel` is the workspace
- * catalog resolver, which names custom statuses; without it — or for a status
- * since deleted — a built-in still gets its i18n name and anything else falls
- * back to the raw key. (MUL-6243)
- */
-function statusLabel(
-  status: string,
-  t: ActivityT,
-  resolveLabel?: (statusKey: string) => string,
-): string {
-  if (resolveLabel) return resolveLabel(status);
-  if (isBuiltInIssueStatus(status)) {
-    return t(($) => $.status[status]);
-  }
-  return status;
-}
-
-function formatActivity(
-  entry: TimelineEntry,
-  t: ActivityT,
-  locale: string,
-  resolveActorName?: (type: string, id: string) => string,
-  resolveStatusLabel?: (statusKey: string) => string,
-  requesterName?: string,
-): string {
-  const details = (entry.details ?? {}) as Record<string, string>;
-  switch (entry.action) {
-    case "created":
-      if (requesterName && entry.actor_type === "agent") {
-        return t(($) => $.activity.created_on_behalf_of, { name: requesterName });
-      }
-      return t(($) => $.activity.created);
-    case "status_changed":
-      // PR auto-complete (MUL-7429) says why the status moved.
-      if (details.source === "pr_automation") {
-        return t(($) => $.activity.status_changed_pr, {
-          from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
-          to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
-          prs: details.pull_requests ?? "",
-        });
-      }
-      return t(($) => $.activity.status_changed, {
-        from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
-        to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
-      });
-    case "pr_auto_complete_changed":
-      return (entry.details as { disabled?: unknown } | undefined)?.disabled === true
-        ? t(($) => $.activity.pr_auto_complete_disabled)
-        : t(($) => $.activity.pr_auto_complete_enabled);
-    case "priority_changed":
-      return t(($) => $.activity.priority_changed, {
-        from: priorityLabel(details.from ?? "?", t),
-        to: priorityLabel(details.to ?? "?", t),
-      });
-    case "assignee_changed": {
-      const isSelfAssign = details.to_type === entry.actor_type && details.to_id === entry.actor_id;
-      if (isSelfAssign) return t(($) => $.activity.self_assigned);
-      const toName = details.to_id && details.to_type && resolveActorName
-        ? resolveActorName(details.to_type, details.to_id)
-        : null;
-      if (toName) return t(($) => $.activity.assigned_to, { name: toName });
-      if (details.from_id && !details.to_id) return t(($) => $.activity.removed_assignee);
-      return t(($) => $.activity.changed_assignee);
-    }
-    case "start_date_changed": {
-      if (!details.to) return t(($) => $.activity.start_date_removed);
-      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, locale);
-      return t(($) => $.activity.start_date_set, { date: formatted });
-    }
-    case "due_date_changed": {
-      if (!details.to) return t(($) => $.activity.due_date_removed);
-      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, locale);
-      return t(($) => $.activity.due_date_set, { date: formatted });
-    }
-    case "title_changed":
-      return t(($) => $.activity.title_renamed, {
-        from: details.from ?? "?",
-        to: details.to ?? "?",
-      });
-    case "description_updated":
-      return t(($) => $.activity.description_updated);
-    case "duplicate_marked":
-      return t(($) => $.activity.duplicate_marked, {
-        identifier: details.original_identifier || "?",
-      });
-    case "duplicate_unmarked": {
-      const identifier = details.original_identifier || "?";
-      if (details.reason === "original_deleted") {
-        return t(($) => $.activity.duplicate_unmarked_original_deleted, { identifier });
-      }
-      // The row stands in for the status row of the reopen, so it says where
-      // the status went.
-      if (details.to) {
-        return t(($) => $.activity.duplicate_unmarked_to, {
-          identifier,
-          status: statusLabel(details.to, t, resolveStatusLabel),
-        });
-      }
-      return t(($) => $.activity.duplicate_unmarked, { identifier });
-    }
-    case "duplicate_added":
-      return t(($) => $.activity.duplicate_added, {
-        identifier: details.duplicate_identifier || "?",
-      });
-    case "duplicate_removed":
-      return t(($) => $.activity.duplicate_removed, {
-        identifier: details.duplicate_identifier || "?",
-      });
-    case "task_completed": {
-      const count = entry.coalesced_count ?? 1;
-      return count === 1
-        ? t(($) => $.activity.task_completed_single)
-        : t(($) => $.activity.task_completed, { count });
-    }
-    case "task_failed": {
-      const count = entry.coalesced_count ?? 1;
-      return count === 1
-        ? t(($) => $.activity.task_failed_single)
-        : t(($) => $.activity.task_failed, { count });
-    }
-    case "squad_leader_evaluated": {
-      const reason = details.reason?.trim();
-      switch (details.outcome) {
-        case "action":
-          return reason
-            ? t(($) => $.activity.squad_leader_action_reason, { reason })
-            : t(($) => $.activity.squad_leader_action);
-        case "no_action":
-          return reason
-            ? t(($) => $.activity.squad_leader_no_action_reason, { reason })
-            : t(($) => $.activity.squad_leader_no_action);
-        case "failed":
-          return reason
-            ? t(($) => $.activity.squad_leader_failed_reason, { reason })
-            : t(($) => $.activity.squad_leader_failed);
-        default:
-          return t(($) => $.activity.squad_leader_evaluated);
-      }
-    }
-    case "environment_controlled": {
-      const name = details.label || details.name || "?";
-      switch (details.action) {
-        case "stop":
-          return t(($) => $.activity.environment_stopped, { name });
-        case "restart":
-          return t(($) => $.activity.environment_restarted, { name });
-        default:
-          return t(($) => $.activity.environment_started, { name });
-      }
-    }
-    default:
-      return entry.action ?? "";
-  }
-}
-
 /**
  * The issue a duplicate-mark activity (MUL-7349) names, when it can still be
  * opened. A mark removed because its original was deleted has nowhere to
@@ -536,13 +398,15 @@ function duplicateActivityLink(entry: TimelineEntry): { id: string; identifier: 
 function ActivityText({ entry, text }: { entry: TimelineEntry; text: string }) {
   const paths = useWorkspacePaths();
   const link = duplicateActivityLink(entry);
+  // The identifier in the activity is a snapshot; the cache knows the current one.
+  const linkRef = useIssueRouteRef(useWorkspaceId(), link?.id ?? "");
   const at = link ? text.indexOf(link.identifier) : -1;
   if (!link || at < 0) return <>{text}</>;
   return (
     <>
       {text.slice(0, at)}
       <AppLink
-        href={paths.issueDetail(link.id)}
+        href={paths.issueDetail(linkRef)}
         newTabTitle={link.identifier}
         className="font-medium text-foreground underline-offset-4 hover:underline"
       >
@@ -1051,7 +915,7 @@ function SubIssueRow({
           }
         />
         <AppLink
-          href={paths.issueDetail(child.id)}
+          href={paths.issueDetail(issueRouteRef(child))}
           className="flex min-w-0 flex-1 items-center gap-2.5"
         >
           <span className="text-caption text-muted-foreground tabular-nums shrink-0">
@@ -1251,13 +1115,18 @@ function SubIssueDisplayPopover({
 interface IssueDetailProps {
   issueId: string;
   onDelete?: () => void;
-  /** Called after the issue is marked as done via the toolbar button. */
-  onDone?: () => void;
   /**
-   * The Inbox's "unsubscribe & archive", shown next to Done on issues that
-   * are not the viewer's own. Only read alongside `onDone`.
+   * The Inbox page's Archive in its bar: archives the open notification. The
+   * Inbox page owns the bar then; without it, the Work panel's Inbox does.
+   */
+  onArchive?: () => void;
+  /**
+   * The Inbox's "unsubscribe & archive", shown next to Archive on issues that
+   * are not the viewer's own. Only read alongside `onArchive`.
    */
   onUnsubscribeArchive?: (scope: InboxUnsubscribeScope) => void;
+  /** The Inbox page's open notification, whose bar says why it is here. Only read alongside `onArchive`. */
+  inboxItem?: InboxItem;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
@@ -1296,8 +1165,12 @@ interface IssueDetailProps {
   variant?: "page" | "peek";
   /** Peek only: host controls at the end of the header (open full page, close). */
   trailingActions?: ReactNode;
-  /** A bar the host shows under the header, above the scrolling body. */
-  notice?: ReactNode;
+  /**
+   * A bar the host shows under the header in place of the Inbox bar, above the
+   * scrolling body, given the issue's own actions to keep in it. Returning
+   * nothing shows the Inbox bar.
+   */
+  notice?: (issueActions: ReactNode) => ReactNode;
   /**
    * Read the viewer's inbox notifications on this issue while it is on screen
    * (MUL-8588). The inbox turns this off for the issue it has open: it reads
@@ -1436,19 +1309,47 @@ export function IssueLoadError({
 // Loading skeleton
 
 const ISSUE_DETAIL_LAYOUT_ID = "multica_issue_detail_layout";
-const REVEALED_WAKEUPS: readonly IssueSidebarSection[] = ["wakeups"];
-
+const ISSUE_PAGE_TITLE_CLASS = "text-display-sm font-semibold";
 /**
  * Exported so `IssueDetailRoute` can show the identical frame while it resolves
  * an identifier URL to its issue — the two waits are indistinguishable to the
  * user, and rendering the same skeleton keeps them that way.
  */
+function IssueSidebarSkeletonRows({ className }: { className?: string }) {
+  return (
+    <div className={cn("space-y-5", className)}>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Skeleton className="h-3 w-16 shrink-0" />
+          <Skeleton className="h-5 w-24" />
+        </div>
+      ))}
+      <Skeleton className="h-px w-full" />
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Skeleton className="h-3 w-16 shrink-0" />
+          <Skeleton className="h-4 w-28" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function IssueDetailSkeleton({
   leading,
   trailing,
   sidebar = true,
   layoutId = ISSUE_DETAIL_LAYOUT_ID,
-}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean; layoutId?: string } = {}) {
+  showInboxBar = false,
+  inboxItem,
+}: {
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  sidebar?: boolean;
+  layoutId?: string;
+  showInboxBar?: boolean;
+  inboxItem?: InboxItem | null;
+} = {}) {
   const { defaultLayout } = useDefaultLayout({ id: layoutId });
   const sidebarOpen = sidebar && getAnimatedRightSidebarInitialOpen(true, defaultLayout);
 
@@ -1459,13 +1360,20 @@ export function IssueDetailSkeleton({
           to offer while this skeleton owns the screen. */}
       <DetailStateBar trailing={trailing}>
         {leading ?? (
-          <>
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-4 w-4" />
-            <Skeleton className="h-4 w-24" />
-          </>
+          inboxItem?.issue_identifier ? (
+            <span className="text-caption font-medium text-muted-foreground">
+              {inboxItem.issue_identifier}
+            </span>
+          ) : (
+            <>
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-4 w-4" />
+              <Skeleton className="h-4 w-24" />
+            </>
+          )
         )}
       </DetailStateBar>
+      {(showInboxBar || inboxItem) && <InboxBarSkeleton item={inboxItem} />}
       <div className="flex flex-1 min-h-0">
         {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
             column doesn't shift sideways when real content mounts. */}
@@ -1474,7 +1382,13 @@ export function IssueDetailSkeleton({
               comment), so the skeleton doesn't reflow sideways when real
               content mounts. */}
           <div className={cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] space-y-6 md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]")}>
-            <Skeleton className="h-8 w-3/4" />
+            {inboxItem?.title ? (
+              <div className={cn("w-full leading-snug text-foreground", ISSUE_PAGE_TITLE_CLASS)}>
+                {inboxItem.title}
+              </div>
+            ) : (
+              <Skeleton className="h-8 w-3/4" />
+            )}
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-4 w-5/6" />
@@ -1494,20 +1408,8 @@ export function IssueDetailSkeleton({
           </div>
         </div>
         {sidebarOpen && (
-          <div className="hidden md:block w-80 border-l p-4 space-y-5">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-5 w-24" />
-              </div>
-            ))}
-            <Skeleton className="h-px w-full" />
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-4 w-28" />
-              </div>
-            ))}
+          <div className="hidden md:block w-80 border-l p-4">
+            <IssueSidebarSkeletonRows />
           </div>
         )}
       </div>
@@ -1517,7 +1419,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightRequestPending = false, onHighlightLanded, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive, inboxItem, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightRequestPending = false, onHighlightLanded, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -1654,7 +1556,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // must neither restore the full page's offset nor leave one behind for it.
   const scrollContainerKey = `${isPeek ? "peek" : "main"}:${id}`;
   const restoredScrollTop = useRestoredScrollOffset(scrollContainerKey);
-  const restoreScrollRef = useRestoredScrollRef(scrollContainerKey);
   // Whether this issue's comment-highlight deep link already landed here
   // (survives the tab's unmount, unlike didHighlightRef below): a remount
   // that restores the view must not re-run the jump.
@@ -1689,12 +1590,32 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     () => (landingAtMount ? 0 : null),
   );
   const [landingSettled, setLandingSettled] = useState(false);
+  const [landingAligned, setLandingAligned] = useState(() => !landingAtMount);
   const releaseLandingOverscan = useCallback(() => setLandingSettled(true), []);
   // The landing frame also leaves out what is off the reading path: the
   // properties sidebar, the composer and the thread rail. They mount once the
   // target has painted, a frame or two after it.
   const [landingChromeHeld, setLandingChromeHeld] = useState(() => landingAtMount);
   const releaseLandingChrome = useCallback(() => setLandingChromeHeld(false), []);
+  const reduceMotion = useReducedMotion();
+  const fromSidebarInbox = useInboxSelectionStore(
+    (s) => !!wsId && s.sidebarIssueByWorkspace[wsId] === id,
+  );
+  const pendingInboxTransition = useInboxSelectionStore((s) =>
+    wsId ? s.transitionByWorkspace[wsId] : undefined,
+  );
+  const [inboxTransition, setInboxTransition] = useState<{
+    issueId: string;
+    direction: InboxTransitionDirection;
+  } | null>(null);
+  const activeInboxTransition: InboxTransitionDirection | null = isPeek
+    ? null
+    : inboxTransition?.issueId === id
+      ? inboxTransition.direction
+      : pendingInboxTransition?.targetKey === id
+        ? pendingInboxTransition.direction
+        : null;
+  const hideUnalignedLanding = landingAtMount && !landingAligned && landingChromeHeld;
   // A landing request whose link names no comment has nothing to land on.
   // The fragment is in by the next frame, so a hold still without a target
   // then is let go.
@@ -1702,6 +1623,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   useEffect(() => {
     if (!holdingWithoutTarget) return;
     const frame = requestAnimationFrame(() => {
+      setLandingAligned(true);
       releaseLandingChrome();
       releaseLandingOverscan();
     });
@@ -1735,16 +1657,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   onHighlightLandedRef.current = onHighlightLanded;
   const writeViewState = useViewStateWriter();
   const rightSidebarShortcutTargetRef = useRef<HTMLDivElement | null>(null);
-  const attachScrollContainer = useCallback(
-    (el: HTMLDivElement | null) => {
-      // The peek has no sidebar, so it must not claim the toggle shortcut.
-      rightSidebarShortcutTargetRef.current = isPeek ? null : el;
-      setScrollContainerEl(el);
-      setScrollContainerWidth(el?.clientWidth ?? 0);
-      restoreScrollRef(el);
-    },
-    [isPeek, restoreScrollRef],
-  );
   const [pendingPostedCommentId, setPendingPostedCommentId] = useState<string | null>(null);
   const scrollToTimelineBottom = useCallback((commentId: string) => {
     setPendingPostedCommentId(commentId);
@@ -1947,24 +1859,49 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     previousCommentRuns.current = next.runs;
     return next;
   }, [commentTasks, timeline]);
+  // Scope entering run IDs per thread and reuse unchanged Sets so a new run in
+  // one thread never busts React.memo on sibling CommentCards.
+  const prevThreadEnteringRef = useRef(new Map<string, ReadonlySet<string>>());
+  const enteringRunIdsByThread = useMemo(() => {
+    const next = new Map<string, ReadonlySet<string>>();
+    if (enteringRunIds.size > 0) {
+      const prev = prevThreadEnteringRef.current;
+      for (const [rootId, runs] of commentRuns) {
+        const matched = runs.filter((run) => enteringRunIds.has(run.task.id)).map((run) => run.task.id);
+        if (matched.length === 0) continue;
+        const prior = prev.get(rootId);
+        if (prior && prior.size === matched.length && matched.every((taskId) => prior.has(taskId))) {
+          next.set(rootId, prior);
+        } else {
+          next.set(rootId, new Set(matched));
+        }
+      }
+    }
+    prevThreadEnteringRef.current = next;
+    return next;
+  }, [commentRuns, enteringRunIds]);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
   // expand Set is keyed only on commentId, not on resolution state). Without
   // this wrapper, an expand → unresolve → resolve sequence keeps the thread
-  // visually expanded after the second resolve.
+  // visually expanded after the second resolve. Read displayTimeline via ref
+  // so every timeline mutation does not mint a new callback and bust React.memo
+  // on every mounted CommentCard.
+  const displayTimelineRef = useRef(displayTimeline);
+  displayTimelineRef.current = displayTimeline;
   const handleResolveToggle = useCallback(
     (commentId: string, resolved: boolean) => {
       // Fold the thread back on any resolve change: clear the thread ROOT's
       // expand entry (expand state is keyed on root id, but a resolve target
       // can be a reply). Walk parent_id up to the root.
-      const byId = new Map(displayTimeline.map((e) => [e.id, e]));
+      const byId = new Map(displayTimelineRef.current.map((e) => [e.id, e]));
       let cur = byId.get(commentId);
       while (cur?.parent_id && byId.get(cur.parent_id)) cur = byId.get(cur.parent_id)!;
       clearResolvedExpand(cur?.id ?? commentId);
       toggleResolveComment(commentId, resolved);
     },
-    [displayTimeline, clearResolvedExpand, toggleResolveComment],
+    [clearResolvedExpand, toggleResolveComment],
   );
 
   // Memoized timeline grouping. Each render rebuilds the per-parent map from
@@ -2291,6 +2228,23 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     ready: timelineReady,
     skipRestore: isPeek || pendingHighlight,
   });
+  // When a deep-link landing or semantic reading anchor owns scroll, disable
+  // pixel scroll restoration so its settle-window hold cannot yank the scroll
+  // container back to a stale pixel offset while virtualized rows measure.
+  const ownsTimelineScroll = isPeek || landingAtMount || pendingHighlight || !!readingAnchor;
+  const restoreScrollRef = useRestoredScrollRef(scrollContainerKey, {
+    disabled: ownsTimelineScroll,
+  });
+  const attachScrollContainer = useCallback(
+    (el: HTMLDivElement | null) => {
+      // The peek has no sidebar, so it must not claim the toggle shortcut.
+      rightSidebarShortcutTargetRef.current = isPeek ? null : el;
+      setScrollContainerEl(el);
+      setScrollContainerWidth(el?.clientWidth ?? 0);
+      restoreScrollRef(el);
+    },
+    [isPeek, restoreScrollRef],
+  );
   useEffect(() => {
     const container = scrollContainerEl;
     if (!readingAnchor || !container || issueLoading || timelineLoading || commentTasksLoading) return;
@@ -2318,16 +2272,29 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // The extra `offset` lifts the row's bottom clear of the sticky composer.
   // `scrollContainerEl` stays out of the deps: a container re-measure would
   // cancel the scroll mid-flight.
+  const scrollContainerElRef = useRef<HTMLDivElement | null>(null);
+  scrollContainerElRef.current = scrollContainerEl;
   useEffect(() => {
     if (!pendingPostedCommentId) return;
     const rootId = replyToRoot.get(pendingPostedCommentId) ?? pendingPostedCommentId;
     const index = items.findIndex((item) => item.id === rootId);
     if (index < 0) return;
     let timer: number | undefined;
+    let cancelled = false;
     const scrollEnd = () => {
+      if (cancelled) return;
       const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 0;
       virtuosoRef.current?.scrollToIndex({ index, align: "end", offset: composerHeight });
     };
+    const container = scrollContainerElRef.current;
+    const stopOnUserInput = () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      if (timer !== undefined) window.clearTimeout(timer);
+      setPendingPostedCommentId(null);
+    };
+    const userEvents = ["wheel", "touchstart", "pointerdown"] as const;
+    for (const type of userEvents) container?.addEventListener(type, stopOnUserInput, { passive: true });
     const frame = requestAnimationFrame(() => {
       scrollEnd();
       timer = window.setTimeout(() => {
@@ -2336,8 +2303,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
       }, 100);
     });
     return () => {
+      cancelled = true;
       cancelAnimationFrame(frame);
       if (timer !== undefined) window.clearTimeout(timer);
+      for (const type of userEvents) container?.removeEventListener(type, stopOnUserInput);
     };
   }, [pendingPostedCommentId, items, replyToRoot]);
   const jumpFlashTimerRef = useRef<number | null>(null);
@@ -2691,6 +2660,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
 
   const loading = issueLoading;
+  useEffect(() => {
+    if (loading || isPeek || !wsId) return;
+    const direction = useInboxSelectionStore.getState().consumeTransition(wsId, id);
+    if (direction) setInboxTransition({ issueId: id, direction });
+  }, [loading, isPeek, wsId, id]);
 
   // Deep links keep the timeline virtualized. Mount the enclosing row by
   // index, then center and highlight the exact comment once its anchor exists.
@@ -2762,19 +2736,30 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     const container = scrollContainerEl;
     if (!container) return;
     if (targetIdx < 0) return;
+    const markUserCancelled = () => {
+      completed = true;
+      interruptedLandingRef.current = null;
+      didHighlightRef.current = highlightCommentId;
+      writeViewState(issueHighlightMementoKey(id), highlightCommentId);
+      onHighlightLandedRef.current?.();
+      setLandingAligned(true);
+      releaseLandingChrome();
+      releaseLandingOverscan();
+    };
+    let completed = false;
     if (!timelineSized) {
       // Virtuoso measures nothing while the list is below the viewport, and
       // without height estimates it cannot place the target until it does.
       const list = virtualTimelineRef.current;
-      return list ? revealTimelineList(container, list) : undefined;
+      return list ? revealTimelineList(container, list, markUserCancelled) : undefined;
     }
 
     interruptedLandingRef.current = null;
-    let completed = false;
     const cancel = scrollToTimelineComment({
       container, virtualizer: virtuosoRef.current,
       index: targetIdx, commentId: landingId,
       onMounted: () => {
+        setLandingAligned(true);
         // After the frame that paints the target, not inside it.
         requestAnimationFrame(() => window.setTimeout(releaseLandingChrome, 0));
         didHighlightRef.current = highlightCommentId;
@@ -2789,6 +2774,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         // After the aligned frame paints, not inside it.
         window.setTimeout(releaseLandingOverscan, 0);
       },
+      onUserCancel: markUserCancelled,
     });
     return () => {
       cancel();
@@ -2942,7 +2928,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
 
   // Identifier form, like the issue's own copy link: a pasted link should say
   // which issue it points at.
-  const copyDeliverableLink = useCopyDeliverableLink(issue?.identifier ?? id);
+  const copyDeliverableLink = useCopyDeliverableLink(issueRouteRef({ id, identifier: issue?.identifier }));
   const describeDeliverable = useDeliverableDetails({
     files: deliverableFiles,
     commentById,
@@ -3001,12 +2987,53 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     setDescPendingAttachments([]);
   }, [id]);
 
+  // With live editing on, the description is a shared document that the
+  // collaboration service saves. The solo editor still shows first, so the
+  // page never waits on that answer and works as before when live editing is
+  // off; the live editor takes over once it is ready, though not while
+  // someone is in the solo one. Unmounting the solo editor flushes its
+  // pending save, which the server merges into the live document.
+  const descCollab = useDocCollab(id, issue?.description ?? "", "issue", !guest);
+  const descLive = descCollab.mode === "live" ? descCollab : null;
+  const [descLiveReadyFor, setDescLiveReadyFor] = useState<number | null>(null);
+  const [descSoloHeld, setDescSoloHeld] = useState(false);
+  useEffect(() => setDescSoloHeld(false), [id]);
+  const showLiveDesc = !!descLive?.ready && descLiveReadyFor === descLive.generation && !descSoloHeld;
+  const descContentRef = useRef<HTMLDivElement>(null);
+  const descPresence = useMemo(
+    () => descLive?.collaborators.filter((c) => !(c.kind === "member" && c.id === user?.id)) ?? [],
+    [descLive?.collaborators, user?.id],
+  );
+  const jumpToCollaborator = useCallback((c: DocCollaborator) => {
+    const caret = descContentRef.current?.querySelector<HTMLElement>(
+      `.collaboration-carets__caret[data-collaborator="${CSS.escape(`${c.kind}:${c.id}`)}"]`,
+    );
+    caret?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, []);
+  const descCarried = descCollab.mode === "solo" ? (descCollab.carried ?? null) : null;
+  const queueDescriptionSaveRef = useRef<
+    ((draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] }) => void) | null
+  >(null);
+  useEffect(() => {
+    // Typed into a live session that never connected: save it as a solo edit.
+    if (descCarried === null) return;
+    queueDescriptionSaveRef.current?.({
+      markdown: descCarried,
+      baseMarkdown: issue?.description ?? "",
+      attachmentIds: descPendingAttachmentsRef.current
+        .filter((a) => contentReferencesAttachment(descCarried, a))
+        .map((a) => a.id),
+    });
+    // Once per carried draft; the issue is read as it is then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [descCarried]);
+
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
-  // The inbox passes `onDone` and owns archive and restore there.
-  const archivedInboxItemId = useArchivedInboxItemId(id, !onDone);
+  // The inbox passes `onArchive` and owns archive and restore there.
+  const archivedInboxItemId = useArchivedInboxItemId(id, !onArchive);
   const pageMenu = useIssuePageMenu();
 
   // Labels live in their own query (not on the issue body) — fetch the count
@@ -3132,22 +3159,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     });
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
-  // The header's wakeup chip opens the sidebar and brings the Wakeups section
-  // into view with focus on its heading, showing it on this issue even when
-  // the reader hid it from the sidebar. The reveal lasts until the reader
-  // switches the section in settings or moves to another issue.
-  const [revealedWakeupsFor, setRevealedWakeupsFor] = useState<string | null>(null);
-  if (revealedWakeupsFor !== null && revealedWakeupsFor !== id) setRevealedWakeupsFor(null);
-  const openWakeups = useCallback(() => {
-    setRevealedWakeupsFor(id);
-    if (!sidebarOpen) handleToggleSidebar();
-    window.requestAnimationFrame(() => {
-      const heading = document.getElementById(`issue-wakeups-${id}`);
-      heading?.scrollIntoView({ block: "nearest" });
-      heading?.focus({ preventScroll: true });
-    });
-  }, [handleToggleSidebar, id, sidebarOpen]);
-
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
   useIssueDetailScrollRestore({
@@ -3191,7 +3202,16 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   if (loading) {
     // The host's trailing controls hold the peek's only close button, so the
     // waiting and missing states carry them too.
-    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek && desktopSidebarOpen} layoutId={layoutId} />;
+    return (
+      <IssueDetailSkeleton
+        leading={leadingAction}
+        trailing={trailingActions}
+        sidebar={!isPeek && desktopSidebarOpen}
+        layoutId={layoutId}
+        showInboxBar={!isPeek && (!!inboxItem || fromSidebarInbox)}
+        inboxItem={isPeek ? undefined : inboxItem}
+      />
+    );
   }
 
   if (!issue) {
@@ -3249,6 +3269,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     }
     persistDescriptionSave(draft);
   };
+  queueDescriptionSaveRef.current = queueDescriptionSave;
 
   const canAddProperty = OPTIONAL_PROP_KEYS.some(
     (key) => !visibleOptionalProps.has(key) && (key !== "stage" || issue.parent_issue_id != null),
@@ -3515,7 +3536,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
           {parentIssueOpen && <div className="px-2">
             <div className="flex items-center gap-0.5 rounded-md px-2 hover:bg-accent/50 transition-colors group">
               <AppLink
-                href={paths.issueDetail(parentIssue.id)}
+                href={paths.issueDetail(issueRouteRef(parentIssue))}
                 className="flex flex-1 min-w-0 items-center gap-1.5 py-2 text-label"
               >
                 <StatusIcon
@@ -3559,7 +3580,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             {sidebarChildIssues.map((child) => (
               <li key={child.id}>
                 <AppLink
-                  href={paths.issueDetail(child.id)}
+                  href={paths.issueDetail(issueRouteRef(child))}
                   title={`${child.identifier} ${child.title}`}
                   aria-label={`${child.identifier} ${child.title}, ${resolveStatusLabel(child.status)}`}
                   className="group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-2 text-label transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -3672,7 +3693,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     metadata: <MetadataSection metadata={issue.metadata ?? {}} />,
   };
 
-  const sidebarContent = landingChromeHeld ? null : (
+  const sidebarContent = landingChromeHeld ? (
+    <IssueSidebarSkeletonRows className="p-2" />
+  ) : (
     <IssueSidebarSections
       sections={sidebarSections}
       available={ISSUE_SIDEBAR_SECTIONS.filter(
@@ -3681,8 +3704,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             ? GUEST_SIDEBAR_SECTIONS.has(section)
             : (section !== "pull_requests" || githubSettings.prSidebar) && (section !== "plugins" || pluginsEnabled),
       )}
-      revealed={revealedWakeupsFor === id ? REVEALED_WAKEUPS : undefined}
-      onRevealEnd={() => setRevealedWakeupsFor(null)}
     />
   );
 
@@ -3708,7 +3729,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
             expandedResolvedIds: expandedResolved, onResolvedExpandChange: toggleResolvedExpand,
             highlightedCommentId: highlightedId,
-            runs: commentRuns.get(reply.id) ?? EMPTY_COMMENT_RUNS, enteringRunIds,
+            runs: commentRuns.get(reply.id) ?? EMPTY_COMMENT_RUNS,
+            enteringRunIds: enteringRunIdsByThread.get(reply.id),
           } : undefined} />}
       </div>;
     }
@@ -3731,7 +3753,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             issueId={id}
             replyScrollParent={scrollContainerEl}
             runs={commentRuns.get(item.id) ?? EMPTY_COMMENT_RUNS}
-            enteringRunIds={enteringRunIds}
+            enteringRunIds={enteringRunIdsByThread.get(item.id)}
             entry={item.entry}
             replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
             currentUserId={user?.id}
@@ -3789,7 +3811,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // panel. The workspace name is intentionally absent — "all issues" is a view,
   // not a container.
   const breadcrumbSegments: BreadcrumbSegment[] = parentIssue
-    ? [{ href: paths.issueDetail(parentIssue.id), label: parentIssue.identifier }]
+    ? [{ href: paths.issueDetail(issueRouteRef(parentIssue)), label: parentIssue.identifier }]
     : breadcrumbProject
       ? [
           {
@@ -3805,11 +3827,19 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         ]
       : [];
 
-  const titleSizeClass = isPeek ? "text-title-lg font-semibold" : "text-display-sm font-semibold";
+  const titleSizeClass = isPeek ? "text-title-lg font-semibold" : ISSUE_PAGE_TITLE_CLASS;
 
   // What the header names the issue: the identifier only in a peek, where the
   // title is right below it; identifier and title on the page.
   const headerLeafLabel = isPeek ? issue.identifier : `${issue.identifier} ${issue.title}`;
+  const inboxIssueActions = guest ? undefined : (
+    <InboxIssueActions
+      issue={issue}
+      onUpdate={handleUpdateField}
+      onMarkDuplicate={actions.openMarkDuplicate}
+      isDuplicate={isDuplicateIssue(issue)}
+    />
+  );
 
   const detailContent = (
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
@@ -3836,6 +3866,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
           />
         )}
         <BreadcrumbHeader
+          className="@container/issue-header"
           leading={leadingAction}
           segments={breadcrumbSegments}
           leaf={
@@ -3844,7 +3875,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             // Below the trigger, since the header sits at the top of the page.
             <TruncatedTooltip content={headerLeafLabel} side="bottom">
               <AppLink
-                href={paths.issueDetail(issue.id)}
+                href={paths.issueDetail(issueRouteRef(issue))}
                 className="flex min-w-0 transition-opacity hover:opacity-80"
               >
                 <span className="truncate font-medium text-foreground">
@@ -3855,52 +3886,23 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
           }
           actions={
             <>
-            {/* Live "agent is working" chip, leftmost in the right cluster so
-                it never overlaps the title (which truncates to make room).
-                It self-hides when no agent is active. */}
-            {!guest && <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />}
-            {!guest && <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />}
-            {!onDone && !isPeek && (
-              <IssueInboxActions
-                issueId={id}
-                onMarkDone={
-                  issueBehavesAsAny(issue, ["done", "closed"])
-                    ? undefined
-                    : (onSaved) => handleUpdateField({ status: "done" }, { onSuccess: onSaved })
-                }
-              />
+            {/* What is happening on the issue right now, left of the actions:
+                who else has it open, then which agent is working. Each chip
+                hides itself when there is nothing to say; the hairline before
+                the actions shows only while one of them does. */}
+            {!guest && (
+              <div className="flex items-center gap-1 empty:hidden after:ml-1 after:h-4 after:w-px after:bg-border">
+                {descLive && (
+                  <IssuePresenceHeaderChip
+                    collaborators={descPresence}
+                    locate={descLive.locate}
+                    watchCarets={descLive.watchCarets}
+                    onJump={jumpToCollaborator}
+                  />
+                )}
+                <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
+              </div>
             )}
-            {onDone && onUnsubscribeArchive && (
-              <UnsubscribeArchiveButton issueId={id} userId={user?.id} onConfirm={onUnsubscribeArchive} />
-            )}
-            {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
-              <IconButton
-                label={t(($) => $.detail.mark_done_tooltip)}
-                tooltipSide="bottom"
-                className="text-muted-foreground"
-                onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
-              >
-                <CircleCheck />
-              </IconButton>
-            )}
-            {onDone && issueBehavesAs(issue, "done") && (
-              <IconButton
-                label={t(($) => $.detail.archive_tooltip)}
-                tooltipSide="bottom"
-                className="text-muted-foreground"
-                onClick={() => { onDone(); }}
-              >
-                <Archive />
-              </IconButton>
-            )}
-            <IconButton
-              label={actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
-              tooltipSide="bottom"
-              className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
-              onClick={actions.togglePin}
-            >
-              {actions.isPinned ? <PinOff /> : <Pin />}
-            </IconButton>
             {!guest && <IssueDetailActionsDropdown
               issue={issue}
               locateInSidebar={!isPeek}
@@ -3938,7 +3940,19 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             </>
           }
         />
-        {notice}
+        {notice?.(inboxIssueActions) ??
+          (onArchive ? (
+            inboxItem && (
+              <InboxOpenBar item={inboxItem} issueActions={inboxIssueActions}>
+                {onUnsubscribeArchive && (
+                  <UnsubscribeArchiveButton issueId={id} userId={user?.id} onConfirm={onUnsubscribeArchive} />
+                )}
+                <InboxArchiveButton onClick={onArchive} />
+              </InboxOpenBar>
+            )
+          ) : (
+            !isPeek && <IssueInboxBar issueId={id} issueActions={inboxIssueActions} />
+          ))}
 
         {/* scrollbar-gutter both-edges: with classic (space-taking) scrollbars —
             macOS with a mouse or "always show", Windows, Linux — the global
@@ -3965,6 +3979,14 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             isPeek
               ? "mx-auto w-full px-6 py-5"
               : cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] max-md:pb-chat-launcher md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]"),
+            hideUnalignedLanding && "opacity-0",
+            !hideUnalignedLanding &&
+              activeInboxTransition &&
+              (reduceMotion
+                ? "animate-inbox-enter-fade"
+                : activeInboxTransition === "next"
+                  ? "animate-inbox-enter-next"
+                  : "animate-inbox-enter-prev"),
           )}
         >
           <IssueDuplicateBanner
@@ -4086,7 +4108,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
 
           {parentIssue && !issue.source_context && (
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(issueRouteRef(parentIssue))}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
               <span className="shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
@@ -4152,18 +4174,37 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
               if (!descriptionEditingRef.current) {
                 descriptionEditingRef.current = true;
               }
+              if (!showLiveDesc) setDescSoloHeld(true);
             }}
             onBlurCapture={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget)) {
                 descriptionEditingRef.current = false;
+                setDescSoloHeld(false);
               }
             }}
           >
             {descriptionAnnotations.popup}
-            <div data-comment-content={descriptionSourceId}>
+            <div ref={descContentRef} data-comment-content={descriptionSourceId}>
               {guest ? (
                 <ReadonlyContent content={issue.description ?? ""} attachments={descEditorAttachments} />
               ) : (
+              <>
+              {descLive?.ready && (
+                <div hidden={!showLiveDesc}>
+                  <ContentEditor
+                    ref={showLiveDesc ? descEditorRef : undefined}
+                    key={`${id}:${descLive.generation}`}
+                    collaboration={descLive.collaboration}
+                    onReady={() => setDescLiveReadyFor(descLive.generation)}
+                    placeholder={t(($) => $.detail.desc_placeholder)}
+                    onUploadFile={handleDescriptionUpload}
+                    currentIssueId={id}
+                    selectionAction={descriptionSelectionAction}
+                    attachments={descEditorAttachments}
+                  />
+                </div>
+              )}
+              {!showLiveDesc && (
               <ContentEditor
                 ref={descEditorRef}
                 key={id}
@@ -4206,6 +4247,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 selectionAction={descriptionSelectionAction}
                 attachments={descEditorAttachments}
               />
+              )}
+              </>
               )}
             </div>
             {descStorageRefusal && (
@@ -4467,40 +4510,33 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                       </DropdownMenuContent>
                     </DropdownMenu>
                   ))}
-                <Popover>
-                  <PopoverTrigger className="cursor-pointer hover:opacity-80 transition-opacity">
-                    {subscribers.length > 0 ? (
-                      <AvatarGroup>
-                        {subscribers.slice(0, 4).map((sub) => (
-                          <ActorAvatar
-                            key={`${sub.user_type}-${sub.user_id}`}
-                            actorType={sub.user_type}
-                            actorId={sub.user_id}
-                            size="md"
-                            enableHoverCard
-                          />
-                        ))}
-                        {subscribers.length > 4 && (
-                          <AvatarGroupCount>+{subscribers.length - 4}</AvatarGroupCount>
-                        )}
-                      </AvatarGroup>
-                    ) : (
-                      <span className="flex items-center justify-center h-6 w-6 rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground">
-                        <Users className="h-3 w-3" />
-                      </span>
-                    )}
-                  </PopoverTrigger>
-                  <SubscriberPopoverContent
-                    members={members}
-                    agents={agents}
-                    subscribers={subscribers}
-                    toggleSubscriber={toggleSubscriber}
-                    togglesDisabled={
-                      !subscriptionKnown || togglePending || !user?.id
-                    }
-                    t={t}
-                  />
-                </Popover>
+                {/* A guest sees who follows the issue but changes only its own
+                    subscription; the server refuses the rest. */}
+                {guest ? (
+                  subscribers.length > 0 && <SubscriberAvatars subscribers={subscribers} />
+                ) : (
+                  <Popover>
+                    <PopoverTrigger className="cursor-pointer hover:opacity-80 transition-opacity">
+                      {subscribers.length > 0 ? (
+                        <SubscriberAvatars subscribers={subscribers} />
+                      ) : (
+                        <span className="flex items-center justify-center h-6 w-6 rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground">
+                          <Users className="h-3 w-3" />
+                        </span>
+                      )}
+                    </PopoverTrigger>
+                    <SubscriberPopoverContent
+                      members={members}
+                      agents={agents}
+                      subscribers={subscribers}
+                      toggleSubscriber={toggleSubscriber}
+                      togglesDisabled={
+                        !subscriptionKnown || togglePending || !user?.id
+                      }
+                      t={t}
+                    />
+                  </Popover>
+                )}
               </div>
             </div>
 
@@ -4543,7 +4579,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
-                      initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
+                      initialScrollTop={ownsTimelineScroll ? undefined : restoredScrollTop}
                       heightEstimates={timelineHeightEstimates}
                       increaseViewportBy={timelineOverscan}
                       totalListHeightChanged={handleTimelineHeightChange}

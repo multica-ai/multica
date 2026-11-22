@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "正在加载通知...",
     "empty": "暂无通知",
-    "mark_done_tooltip": "标为已完成",
     "archive_tooltip": "归档",
     "time": {
       "just_now": "刚刚",
@@ -64,13 +63,13 @@
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
-    "empty": "收件箱为空",
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
     "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置、升级套餐或加购之前，后续自动化执行将不会启动。",
     "project_owner_joined_body": "{{name}} 是工作区所有者，已把自己加入这个私有项目，现在可以看到其中的任务、评论和附件。",
     "open_project": "打开项目",
+    "open_app": "打开应用",
     "autopilot_quota_upgrade": "查看选项",
     "archive": "归档",
     "unarchive": "取消归档",
@@ -124,6 +123,7 @@
     "set_due_date_to": "截止日期设为 {{date}}",
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
+    "commented": "评论了",
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
     "autopilot_quota_blocked": "执行已被阻止：额度已用完",
@@ -145,6 +145,10 @@
     "leaves": "离开后移出收件箱",
     "filtered": "不再符合筛选",
     "notification_archived": "通知已归档",
+    "changed_status": "已改为{{status}}",
+    "reassigned": "已改派给 {{name}}",
+    "unassigned": "已取消分配",
+    "ran_quick_action": "已运行 {{name}}",
     "next": "下一条",
     "next_tooltip": "打开下一条：{{title}}"
   },
@@ -155,7 +159,6 @@
     "mark_read_failed": "标为已读失败",
     "mark_unread_failed": "标为未读失败",
     "archive_failed": "归档失败",
-    "mark_done_failed": "标为已完成失败",
     "mark_all_read_failed": "全部标为已读失败",
     "archive_all_failed": "归档全部失败",
     "archive_all_read_failed": "归档已读失败",
@@ -212,5 +215,30 @@
     "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。",
     "col_updates": "延后期间",
     "col_back": "恢复时间"
+  },
+  "auto_archive_prompt": {
+    "title": "处理完的通知，可以自动归档",
+    "description": "收件箱新增了自动归档：你处理完一个任务，它的通知就会移出收件箱。只算你自己的操作，有新动态会重新进收件箱。",
+    "options": {
+      "handled": "完成任务或触发智能体运行时自动归档；只整理字段或不触发智能体的评论留在原地",
+      "completed": "只有完成或取消任务才归档",
+      "never": "自己手动归档"
+    },
+    "hint": "之后可以在 设置 › 通知 里修改",
+    "confirm": "确定"
+  },
+  "zero": {
+    "cleared_title": "收件箱已清空",
+    "just_archived": "刚归档了 {{label}}",
+    "just_snoozed": "已将 {{label}} 延后至 {{time}}",
+    "just_unsubscribed": "已取消订阅并归档 {{label}}",
+    "just_archived_many_other": "已归档 {{count}} 条通知",
+    "snoozed_summary_other": "{{count}} 条延后通知 · 最早 {{time}} 回来",
+    "bar_snoozed_other": "{{count}} 条已延后",
+    "go_to_my_work": "前往我的工作",
+    "filtered_title": "当前筛选下的通知已处理完",
+    "filtered_remaining_other": "收件箱里还有 {{count}} 条其他通知待处理",
+    "clear_and_continue": "清除筛选，继续处理",
+    "undo_item": "撤销 {{label}}"
   }
 }

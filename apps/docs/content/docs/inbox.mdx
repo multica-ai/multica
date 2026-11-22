@@ -94,11 +94,11 @@ Click a row to open its issue at the comment or app request the notification is 
 
 <InboxDemo />
 
-An issue opened from the inbox carries the inbox's actions in its header:
+An issue opened from the inbox shows a bar under its header. It says who did what, and when, then offers what usually settles the notification:
 
+- **Status**, **Assignee** and **Quick actions** change the issue itself, as its properties do. Quick actions appear once your workspace has some.
 - **Snooze** (`H`) takes the issue out of your inbox until a time you pick, and opens the next one. See [Snooze an issue](#snooze-an-issue) below.
-- **Mark as done** sets the issue to `done`, archives the notification, and opens the next one. It archives the notification even when **Archive issues you complete** is off. It's offered while the issue isn't done or cancelled yet.
-- **Archive** (`E`) archives the notification and opens the next one. Archiving doesn't modify or delete the issue.
+- **Archive** (`E`) archives the notification and opens the next one. Archiving doesn't modify or delete the issue. To finish the issue, change its status instead; by default that archives its notification too (see [When a notification leaves the inbox](#when-a-notification-leaves-the-inbox)).
 - **Unsubscribe & archive** (`⇧E`) is offered on issues that aren't yours: not assigned to you or to an agent you own. It unsubscribes you from the issue, archives the notification and opens the next one. Ordinary updates stop reaching your inbox, while @mentions still do. On an issue with sub-issues you choose between this issue only and this issue with all its sub-issues. For this issue only, the confirmation offers **Undo**, which restores the subscription as it was. Leaving the sub-issues as well can't be undone there; subscribe again on the issue page instead. The same action is on the hover card and in a row's right-click menu.
 
 The next one is the next row the section lists under its current filters, so you can work through the inbox without going back to the list.
@@ -116,14 +116,14 @@ The section's ⋯ menu holds **View archived** and the bulk actions:
 
 ## Snooze an issue
 
-Snooze takes an issue out of your inbox until a time you pick, then brings it back on top, unread. Snooze from the alarm-clock button in the issue header (or press `H`), from the button beside Archive when you hover a row, or from a row's hover card. Pick **1 hour**, **3 hours**, **1 day**, **3 days** or **1 week**, or **Pick a date and time…** for any time within a year. A day or more keeps the current time of day, except that one chosen between 22:00 and 6:00 comes back at 9:00. The confirmation lets you undo; undoing a change of time puts back the previous one.
+Snooze takes an issue out of your inbox until a time you pick, then brings it back on top, unread. Snooze from **Snooze** in the issue's inbox bar (or press `H`), from the button beside Archive when you hover a row, or from a row's hover card. Pick **1 hour**, **3 hours**, **1 day**, **3 days** or **1 week**, or **Pick a date and time…** for any time within a year. A day or more keeps the current time of day, except that one chosen between 22:00 and 6:00 comes back at 9:00. The confirmation lets you undo (`Z`); undoing a change of time puts back the previous one.
 
 While an issue is snoozed:
 
 - new notifications on it wait with it and don't count toward the unread badge. When it comes back, the row says **Snooze ended** and how many updates arrived meanwhile;
 - it comes back early when someone mentions you by name, it is assigned to you, a run fails, an app asks for your action, or all its sub-issues finish. `@all` mentions don't wake it;
-- **Mark all as read** and the archive-all actions leave it alone. Archiving it ends the snooze, and so does completing the issue yourself while **Archive issues you complete** is on;
-- opening the issue from anywhere else doesn't read it or end the snooze. Its header shows when it comes back; open that to bring it back now (`H`) or change the time.
+- **Mark all as read** and the archive-all actions leave it alone. Archiving it ends the snooze, and so does completing the issue yourself while **Archive issues you handle** counts completing (it does by default);
+- opening the issue from anywhere else doesn't read it or end the snooze. Its inbox bar shows when it comes back; **Change time** there brings it back now (`H`) or picks another time.
 
 Snooze is personal: it only changes your own inbox. Everything you've snoozed is in the **Snoozed** view under Views, also reachable from **View snoozed** in the inbox menu.
 
@@ -131,19 +131,19 @@ Snooze is personal: it only changes your own inbox. Everything you've snoozed is
 
 Reading a notification doesn't remove it. A row leaves the inbox only when:
 
-- you archive it, from its row, the hover card, the issue header, or a bulk action;
+- you archive it, from its row, the hover card, the inbox bar, or a bulk action;
 - you snooze its issue. This one is temporary: the issue comes back at the time you picked, or earlier when something needs you. See [Snooze an issue](#snooze-an-issue);
-- you move its issue to any status in the `done` or `closed` category yourself, while **Archive issues you complete** is on (it is by default). Only your own notifications on that issue are archived, read or not. When someone else or an agent completes an issue, its notifications stay in your inbox, so you still see the news;
+- you handle its issue yourself, as **Archive issues you handle** in **Settings → Notifications** says. The default, **When you complete it or trigger an agent**, counts moving the issue to a `done` or `closed` status, and any action that actually hands work to an agent: commenting, running a quick action, or steering an active run; assigning an agent or squad on a non-`backlog` issue; promoting an agent- or squad-assigned issue out of `backlog` (including to `todo`); moving into a workflow step with an agent handler; rerunning a task; or manually firing a wakeup. Organizing an issue without waking an agent—such as moving an unassigned issue from `backlog` to `todo`, parking an agent assignment in `backlog`, unassigning, posting a `/note` comment, suppressing triggers, or hitting a blocked runtime—leaves the notification in your inbox. **When you complete it** counts only `done` and `closed`, **Never** turns this off, and **Custom** picks actions one by one, including replying, moving status forward, reassigning, or changing priority, project, dates or labels, which are off by default. Only your own notifications on that issue are archived, read or not. When someone else or an agent does the same, its notifications stay in your inbox, so you still see the news;
 - it's a **Run failed** notification and its issue moves to a status that hands it back to a person: `in_review`, a custom status in the `started` category, or any status in the `done` or `closed` category. This archives everyone's Run failed notifications on the issue, whoever moved it, and doesn't depend on the setting above. `blocked` is the exception: it hands the issue over too, but the work is still stuck, so the earlier failures are still worth reading.
 - your inbox in the workspace goes past 2,000 notifications. It keeps the newest 2,000 and shortly afterwards archives the older ones, read or not. A notification that comes back from a snooze or that you restore from the archive counts from when it came back. Notifications on a snoozed issue don't count and are left alone.
 
-Open windows drop an archived row right away, except the one you have open. When its notification leaves the inbox some other way (you set the issue to `done` from its status, another window archived it, or an edit took it out of the section's filters), the row stays lit where it was and the issue header says what happened. **Undo** brings the notification back, and **Next** (or `E`) opens the next row. The row leaves once you move on.
+Open windows drop an archived row right away, except the one you have open. When its notification leaves the inbox some other way (you set the issue to `done` from its status, another window archived it, or an edit took it out of the section's filters), the row stays lit where it was and the inbox bar says what happened. When a change you make from the bar archives the notification, the bar names it, as in *Changed to In Progress · Notification archived*, and keeps **Status**, **Assignee** and **Quick actions** for the next change. **Undo** (or `Z`) brings the notification back, and **Next** (or `E`) opens the next row. The row leaves once you move on. When it was the last notification in your inbox, the bar says **Inbox cleared** instead, with how many issues are snoozed, and offers **Go to My work** in place of **Next**; `E` opens the cleared inbox. That is **After archiving → Stay on the issue**, the default; with **Open the next one**, a change you make that archives the open notification opens the next row, or the cleared inbox, right away, and the confirmation offers **Undo**.
 
-When you take the open row out yourself, from the issue header, its row, the hover card, or a bulk action that includes it, the next row opens instead. With nothing left to open, the issue stays open. Archiving, marking as done and the bulk actions confirm with **Undo**, which brings the notifications back and leaves the issue's status as it is.
+When you take the open row out yourself, from the inbox bar, its row, the hover card, or a bulk action that includes it, the next row opens instead. With nothing left to open, the inbox page opens on **Inbox cleared**. It names what you just did, with **Undo** (or `Z`) to bring it back, and shows how many issues are snoozed and when the next one returns. When filters hid the rest of your inbox, it says how many notifications are left and offers **Clear filters and continue** instead. Going back returns to the issue. Archiving and the bulk actions confirm with **Undo**, which brings the notifications back and leaves the issue's status as it is. Confirmations that offer **Undo**, for archiving, snoozing and unsubscribing alike, stay for 10 seconds, and while one shows, `Z` undoes that latest action.
 
 A later notification on the issue lands in the inbox again.
 
-**Settings → Notifications → Leaving the Inbox** has the **Archive issues you complete** switch and links to the archived notifications.
+**Settings → Notifications → Leaving the Inbox** holds **Archive issues you handle** (**Never**, **When you complete it**, **When you complete it or trigger an agent**, or **Custom**), **After archiving** (**Stay on the issue** or **Open the next one**), and a link to the archived notifications.
 
 ## Display and notification types
 

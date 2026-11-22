@@ -790,13 +790,9 @@
       "load_failed": "No se pudieron cargar las aplicaciones de este agente.",
       "empty": "No hay apps conectadas disponibles.",
       "level": "Alcance de la cuenta",
-      "team_connected": "Cuenta del equipo conectada",
-      "team_missing": "Cuenta del equipo sin conectar",
-      "personal_connected": "Tu cuenta está conectada",
-      "personal_missing": "No has conectado esta aplicación",
       "team_admin_only": "Solo los administradores del espacio de trabajo pueden dar a un agente acceso a una cuenta del equipo.",
       "team_shared_warning": "Cualquiera que pueda ejecutar este agente podrá usar esta cuenta de equipo a través de él.",
-      "manage_link": "Gestionar cuentas en Ajustes → Aplicaciones conectadas",
+      "manage_link": "Gestionar cuentas en Apps → Cuentas",
       "save_failed_toast": "No se pudo guardar. Inténtalo de nuevo",
       "team_help": "Cuenta compartida del espacio de trabajo, conectada por administradores.",
       "personal_help": "Cada ejecución usa la cuenta de quien la inicia. Cada persona debe conectar su propia cuenta.",
@@ -1075,7 +1071,14 @@
     "status": "Estado",
     "runs_7d": "Ejecuciones (7 d)",
     "edit_access_aria": "Acceso: {{value}}. Cambiar acceso",
-    "all_settings": "Todos los ajustes"
+    "all_settings": "Todos los ajustes",
+    "apps": "Apps",
+    "apps_needs_account_one": "{{count}} necesita tu cuenta",
+    "apps_needs_account_other": "{{count}} necesitan tu cuenta",
+    "apps_count_one": "{{count}} aplicación",
+    "apps_count_other": "{{count}} aplicaciones",
+    "apps_none": "Ninguna",
+    "apps_aria": "Apps: {{value}}. Mostrar apps"
   },
   "intro": {
     "title": "Incorpora a tu primer compañero de IA",
@@ -1100,5 +1103,36 @@
       "comment": "Corregido: las tarjetas de precios se apilan en una columna por debajo de 375 px. El PR está abierto y los tests pasan.",
       "step_read": "Leer {{file}}"
     }
+  },
+  "apps_section": {
+    "title": "Apps",
+    "empty": "Este agente aún no usa ninguna aplicación.",
+    "connect_yours": "Conectar la tuya",
+    "reconnect": "Volver a conectar",
+    "connect_team": "Conectar cuenta del equipo",
+    "acts_as_team": "Actúa con la cuenta del equipo",
+    "acts_as_starter": "Actúa con la cuenta de quien inicia la ejecución"
+  },
+  "add_app_dialog": {
+    "title": "Añadir una aplicación a {{agent}}",
+    "description": "Una aplicación con cuenta personal usa la cuenta de quien inicia el agente, así que puedes añadirla sin tener tu propia cuenta.",
+    "search_one": "Buscar entre {{count}} aplicación",
+    "search_other": "Buscar entre {{count}} aplicaciones",
+    "search_label": "Buscar aplicaciones",
+    "curated": "Seleccionada",
+    "recommended_team": "Suele usarse una cuenta del equipo",
+    "recommended_personal": "Suele usarse una cuenta personal",
+    "team_connected": "Cuenta del equipo conectada",
+    "add": "Añadir",
+    "add_aria": "Añadir {{app}}",
+    "empty": "No hay aplicaciones que coincidan.",
+    "load_failed": "No se pudieron cargar las aplicaciones.",
+    "added_toast": "{{app}} se añadió a {{agent}}."
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} quiere usar {{app}}",
+    "new_app": "Nueva aplicación para este agente",
+    "adds_app_note": "Al responder, se añade {{app}} a {{agent}} para las próximas ejecuciones.",
+    "add_to_agent": "Añadir {{app}} a {{agent}}"
   }
 }

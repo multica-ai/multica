@@ -65,6 +65,10 @@ type run struct {
 // authenticates with the bearer token minted at claim; the token only works
 // while its task is dispatched or running.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.serveRPC(w, r, s.dispatch)
+}
+
+func (s *Service) serveRPC(w http.ResponseWriter, r *http.Request, dispatch func(context.Context, *run, rpcRequest) (rpcResponse, bool)) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -103,7 +107,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var out []rpcResponse
 	for _, req := range reqs {
-		resp, notify := s.dispatch(r.Context(), rn, req)
+		resp, notify := dispatch(r.Context(), rn, req)
 		if !notify {
 			out = append(out, resp)
 		}
@@ -221,7 +225,9 @@ func (s *Service) dispatch(ctx context.Context, rn *run, req rpcRequest) (rpcRes
 
 const gatewayInstructions = "Multica apps. Use apps_list to see your apps, apps_search_tools to find a tool, apps_get_tool for its input schema, then apps_run_tool. " +
 	"Allowed calls run immediately and return their result. Never work around a blocked call. " +
-	"If an account is not connected, use apps_request_connection and end your turn; you will be resumed after it is connected."
+	"If an account is not connected, use apps_request_connection and end your turn; you will be resumed after it is connected. " +
+	"If you need an app that apps_list does not show, call apps_request_connection with its slug (e.g. googlecalendar) and end your turn: " +
+	"the person who started the run may add it to you and connect their account."
 
 func gatewayTools() []map[string]any {
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
@@ -267,11 +273,11 @@ func gatewayTools() []map[string]any {
 		},
 		{
 			"name":        toolRequestConnection,
-			"description": "Ask the person who triggered this run to connect their account for an app that shows not_connected. End your turn after calling it.",
+			"description": "Ask for an app account that shows not_connected: your own account goes to the person who triggered this run, a team account to the workspace admins. Also adds an app you do not have yet. End your turn after calling it.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"app":     str("App slug from apps_list"),
+					"app":     str("App slug from apps_list, or the slug of an app you do not have yet, e.g. googlecalendar"),
 					"summary": str("One sentence: why you need this app."),
 				},
 				"required": []string{"app"},
@@ -331,6 +337,9 @@ func (s *Service) toolListApps(ctx context.Context, rn *run) map[string]any {
 		Account string `json:"account"`
 		Level   string `json:"level"`
 		Status  string `json:"status"`
+		// Server is set for an app whose tools are called directly on its
+		// own MCP server rather than through apps_run_tool.
+		Server string `json:"server,omitempty"`
 	}
 	out := []appView{}
 	for slug, app := range rn.apps {
@@ -342,10 +351,14 @@ func (s *Service) toolListApps(ctx context.Context, rn *run) map[string]any {
 		if _, err := s.resolveAccount(ctx, rn.workspaceID, rn.triggeredBy, slug, app.AccountScope); err != nil {
 			status = "not_connected"
 		}
-		out = append(out, appView{
+		view := appView{
 			App: slug, Name: runtimeapps.DisplayNameForToolkitSlug(slug),
 			Account: app.AccountScope, Level: level, Status: status,
-		})
+		}
+		if remote, ok := s.RemoteApp(slug); ok {
+			view.Name, view.Server = remote.Name, remote.Slug
+		}
+		out = append(out, view)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].App < out[j].App })
 	return jsonResult(map[string]any{"apps": out})
@@ -384,6 +397,9 @@ func (s *Service) toolSearch(ctx context.Context, rn *run, slug, query string) m
 	app, ok := rn.apps[slug]
 	if !ok {
 		return textResult(fmt.Sprintf("app %q is not available to you in this run; call apps_list", slug), true)
+	}
+	if remote, ok := s.RemoteApp(slug); ok {
+		return remoteServerHint(remote)
 	}
 	tools, err := s.composio.ListToolkitTools(ctx, slug)
 	if err != nil {
@@ -442,6 +458,9 @@ func (s *Service) toolGet(ctx context.Context, rn *run, toolSlug string) map[str
 	if !ok {
 		return textResult("this tool does not belong to an app you can use in this run", true)
 	}
+	if remote, ok := s.RemoteApp(app.ToolkitSlug); ok {
+		return remoteServerHint(remote)
+	}
 	tool, err := s.composio.GetTool(ctx, app.ToolkitSlug, toolSlug)
 	if err != nil {
 		return textResult("tool not found", true)
@@ -466,6 +485,9 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 		return textResult("this tool does not belong to an app you can use in this run", true)
 	}
 	slug := NormalizeSlug(app.ToolkitSlug)
+	if remote, ok := s.RemoteApp(slug); ok {
+		return remoteServerHint(remote)
+	}
 	tool, err := s.composio.GetTool(ctx, slug, toolSlug)
 	if err != nil {
 		return textResult("tool not found", true)
@@ -484,30 +506,8 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 		}
 		return textResult("could not resolve the account for this app", true)
 	}
-	switch policy {
-	case PolicyBlock:
-		call.outcome = "blocked"
-		first := s.firstBlock(ctx, call)
-		s.recordCall(ctx, call)
-		if first && rn.triggeredBy.Valid {
-			s.notify(ctx, db.AppActionRequest{
-				WorkspaceID: rn.workspaceID, Status: "blocked", Kind: KindAction,
-				TaskID: rn.task.ID, AgentID: rn.agent.ID, IssueID: rn.task.IssueID, ChatSessionID: rn.task.ChatSessionID,
-				ApproverUserID: rn.triggeredBy, AccountScope: app.AccountScope,
-				ToolkitSlug: slug, ToolSlug: tool.Slug, ActionClass: class,
-			}, NotifActionResult)
-		}
-		return textResult(fmt.Sprintf("blocked: %s calls (%s) are not allowed for you on %s. Do not work around this; tell the person what you would have done.", class, tool.Slug, slug), true)
-	}
-	// Tool lookup may involve a network call, and one gateway request may
-	// contain a batch. Check again immediately before allowing execution.
-	if !s.mayRun(ctx, rn.task, rn.agent) {
-		return textResult("this run is no longer allowed to use this agent", true)
-	}
-	if s.overLimit(ctx, rn.workspaceID, slug, acct) {
-		call.outcome = "rate_limited"
-		s.recordCall(ctx, call)
-		return textResult(fmt.Sprintf("rate limited: this %s account already ran %d calls in the last minute. Wait a minute before the next call, and batch work where the app allows it.", slug, s.perMinute), true)
+	if refusal := s.refuseCall(ctx, rn, app, &call, policy); refusal != nil {
+		return refusal
 	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
 	s.touch(ctx, rn.workspaceID, acct)
@@ -528,26 +528,107 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 	return jsonResult(resp.Data)
 }
 
+// refuseCall applies what stands between an allowed policy and executing a
+// call: a blocking rule, the run losing access, and the account's rate limit.
+// It records and returns the refusal, or nil when the call may run.
+func (s *Service) refuseCall(ctx context.Context, rn *run, app db.AgentApp, call *toolCall, policy string) map[string]any {
+	if policy == PolicyBlock {
+		call.outcome = "blocked"
+		first := s.firstBlock(ctx, *call)
+		s.recordCall(ctx, *call)
+		if first && rn.triggeredBy.Valid {
+			s.notify(ctx, db.AppActionRequest{
+				WorkspaceID: rn.workspaceID, Status: "blocked", Kind: KindAction,
+				TaskID: rn.task.ID, AgentID: rn.agent.ID, IssueID: rn.task.IssueID, ChatSessionID: rn.task.ChatSessionID,
+				ApproverUserID: rn.triggeredBy, AccountScope: app.AccountScope,
+				ToolkitSlug: call.toolkit, ToolSlug: call.tool, ActionClass: call.class,
+			}, NotifActionResult)
+		}
+		return textResult(fmt.Sprintf("blocked: %s calls (%s) are not allowed for you on %s. Do not work around this; tell the person what you would have done.", call.class, call.tool, call.toolkit), true)
+	}
+	// Tool lookup may involve a network call, and one gateway request may
+	// contain a batch. Check again immediately before allowing execution.
+	if !s.mayRun(ctx, rn.task, rn.agent) {
+		return textResult("this run is no longer allowed to use this agent", true)
+	}
+	if s.overLimit(ctx, rn.workspaceID, call.toolkit, call.acct) {
+		call.outcome = "rate_limited"
+		s.recordCall(ctx, *call)
+		return textResult(fmt.Sprintf("rate limited: this %s account already ran %d calls in the last minute. Wait a minute before the next call, and batch work where the app allows it.", call.toolkit, s.perMinute), true)
+	}
+	return nil
+}
+
 func (s *Service) toolRequestConnection(ctx context.Context, rn *run, slug, summary string) map[string]any {
 	slug = NormalizeSlug(slug)
 	app, ok := rn.apps[slug]
 	if !ok {
-		return textResult(fmt.Sprintf("app %q is not available to you in this run", slug), true)
+		return s.requestNewApp(ctx, rn, slug, summary)
 	}
 	if _, err := s.resolveAccount(ctx, rn.workspaceID, rn.triggeredBy, slug, app.AccountScope); err == nil {
 		return textResult("the account is already connected; use the app directly", false)
 	}
-	if app.AccountScope == ScopeTeam {
-		return textResult("this app uses the team account, which a workspace admin connects in Settings › Apps. Tell the person in your reply and end your turn.", true)
-	}
 	if !rn.triggeredBy.Valid {
+		if app.AccountScope == ScopeTeam {
+			return textResult("no person started this run, so the request cannot wait on it. A workspace admin connects the team account in Apps › Accounts; say so in your reply and end your turn.", true)
+		}
 		return textResult("no person triggered this run, so nobody can be asked to connect an account", true)
 	}
-	req, err := s.createRequest(ctx, rn, "connect", app, "", "", map[string]any{}, summary)
+	req, err := s.createRequest(ctx, rn, KindConnect, app, "", "", map[string]any{}, summary)
 	if err != nil {
 		return textResult("could not send the connection request", true)
 	}
-	return textResult(fmt.Sprintf("requested: %s is asked to connect %s (request %s). End your turn now; you will be resumed after they connect.", "the person who triggered this run", slug, util.UUIDToString(req.ID)), false)
+	who := "the person who triggered this run is"
+	if app.AccountScope == ScopeTeam {
+		who = "the workspace admins are"
+	}
+	return textResult(fmt.Sprintf("requested: %s asked to connect %s (request %s). End your turn now; you will be resumed after it is connected.", who, slug, util.UUIDToString(req.ID)), false)
+}
+
+// requestNewApp asks the person who triggered the run to add an app the agent
+// does not have, through their personal account. Team accounts act as the
+// whole workspace, so only an admin attaches one, in the agent's settings.
+func (s *Service) requestNewApp(ctx context.Context, rn *run, slug, summary string) map[string]any {
+	if slug == "" {
+		return textResult("app is required", true)
+	}
+	if !rn.catalog.Allows(slug) {
+		return textResult(fmt.Sprintf("app %q is not available in this workspace", slug), true)
+	}
+	if !rn.triggeredBy.Valid {
+		return textResult("no person triggered this run, so nobody can be asked to add an app", true)
+	}
+	known, err := s.knownToolkit(ctx, slug)
+	if err != nil {
+		return textResult("could not look up this app right now; try again later", true)
+	}
+	if !known {
+		return textResult(fmt.Sprintf("there is no app with the slug %q", slug), true)
+	}
+	if s.resumer == nil || !s.resumer.CanManageAgent(ctx, rn.workspaceID, rn.agent.ID, rn.triggeredBy) {
+		return textResult(fmt.Sprintf("%s is not on your app list, and the person who started this run cannot add apps to you. "+
+			"Do not retry; say so in your reply and end your turn.", appLabel(slug)), true)
+	}
+	app := db.AgentApp{ToolkitSlug: slug, AccountScope: ScopePersonal}
+	req, err := s.createRequest(ctx, rn, KindConnect, app, "", "", map[string]any{}, summary)
+	if err != nil {
+		return textResult("could not send the request", true)
+	}
+	return textResult(fmt.Sprintf("requested: the person who triggered this run is asked to add %s to you and connect their account (request %s). "+
+		"End your turn now; you will be resumed after they do.", slug, util.UUIDToString(req.ID)), false)
+}
+
+// knownToolkit reports whether slug names a real app: a curated one, or one
+// the provider lists tools for.
+func (s *Service) knownToolkit(ctx context.Context, slug string) (bool, error) {
+	if _, ok := Curated(slug); ok {
+		return true, nil
+	}
+	tools, err := s.composio.ListToolkitTools(ctx, slug)
+	if err != nil {
+		return false, err
+	}
+	return len(tools) > 0, nil
 }
 
 func truncate(s string, n int) string {

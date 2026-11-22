@@ -14,3 +14,9 @@ export const i18n = defineI18n({
 });
 
 export type Lang = (typeof i18n.languages)[number];
+
+export function asLang(lang: string): Lang {
+  return (i18n.languages as readonly string[]).includes(lang)
+    ? (lang as Lang)
+    : (i18n.defaultLanguage as Lang);
+}

@@ -578,10 +578,7 @@
     "change_subscribers_placeholder": "Change subscribers...",
     "members_group": "Members",
     "agents_group": "Agents",
-    "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
-    "pin_tooltip": "Pin to sidebar",
-    "unpin_tooltip": "Unpin from sidebar",
     "quick_jump_label": "Quick navigation",
     "description_nav_label": "Issue description",
     "sub_issues_nav_progress": "{{done}}/{{total}} completed",
@@ -856,6 +853,17 @@
     "title": "No issues match these filters",
     "unread_title": "No unread issues",
     "clear_button": "Clear filters"
+  },
+  "presence": {
+    "viewing_one": "{{count}} viewing",
+    "viewing_other": "{{count}} viewing",
+    "editing": "Editing",
+    "watching": "Viewing",
+    "where": "In \"{{section}}\"",
+    "more_one": "{{count}} more: {{names}}",
+    "more_other": "{{count}} more: {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Click a name to jump to their cursor"
   },
   "agent_live": {
     "is_working": "{{name}} is working",

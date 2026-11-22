@@ -11,6 +11,7 @@
     "usage": "분석",
     "runtimes": "런타임",
     "skills": "스킬",
+    "apps": "앱",
     "settings": "설정",
     "views": "뷰",
     "docs": "문서"
@@ -23,6 +24,7 @@
     "member": "멤버",
     "squad": "스쿼드",
     "skill": "스킬",
+    "app": "앱",
     "machine": "머신",
     "runtime": "런타임",
     "attachment": "첨부파일",

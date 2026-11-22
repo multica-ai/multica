@@ -64,6 +64,7 @@ vi.mock("@multica/core/auth", () => {
   };
 });
 vi.mock("../../navigation", () => ({
+  useWarmRoute: () => undefined,
   useIntentNavigate: () => vi.fn(),
   useNavigation: () => ({ getShareableUrl: (path: string) => `https://app.example${path}` }),
   AppLink: ({

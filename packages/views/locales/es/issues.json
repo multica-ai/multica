@@ -547,10 +547,7 @@
     "change_subscribers_placeholder": "Cambiar suscriptores...",
     "members_group": "Miembros",
     "agents_group": "Agentes",
-    "mark_done_tooltip": "Marcar como hecho",
     "archive_tooltip": "Archivar",
-    "pin_tooltip": "Fijar en la barra lateral",
-    "unpin_tooltip": "Dejar de fijar de la barra lateral",
     "thread_nav_label": "Ir a la conversación de comentarios",
     "thread_nav_resolved_label": "{{title}} (resuelto)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -839,6 +836,17 @@
     "title": "Ninguna tarea coincide con estos filtros",
     "clear_button": "Limpiar filtros",
     "unread_title": "No hay tareas sin leer"
+  },
+  "presence": {
+    "viewing_one": "{{count}} viendo",
+    "viewing_other": "{{count}} viendo",
+    "editing": "Editando",
+    "watching": "Viendo",
+    "where": "En «{{section}}»",
+    "more_one": "{{count}} más: {{names}}",
+    "more_other": "{{count}} más: {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Haz clic en un nombre para ir a su cursor"
   },
   "agent_live": {
     "is_working": "{{name}} está trabajando",

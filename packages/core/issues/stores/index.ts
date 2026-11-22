@@ -37,7 +37,7 @@ export {
   selectExpandedResolved,
 } from "./resolved-expand-store";
 export { useCommentComposerStore, type CommentImageLayout, type RunningAgentReply } from "./comment-composer-store";
-export { useCommentDraftStore, type CommentDraftKey } from "./comment-draft-store";
+export { useCommentDraftStore, type CommentDraftKey, type PendingAnnotationDraft } from "./comment-draft-store";
 export {
   myIssuesViewStore,
   type MyIssuesViewState,

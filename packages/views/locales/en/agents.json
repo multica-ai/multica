@@ -223,7 +223,14 @@
     "status": "Status",
     "runs_7d": "Runs (7d)",
     "edit_access_aria": "Access: {{value}}. Change access",
-    "all_settings": "All settings"
+    "all_settings": "All settings",
+    "apps": "Apps",
+    "apps_needs_account_one": "{{count}} needs your account",
+    "apps_needs_account_other": "{{count}} need your account",
+    "apps_count_one": "{{count}} app",
+    "apps_count_other": "{{count}} apps",
+    "apps_none": "None",
+    "apps_aria": "Apps: {{value}}. Show apps"
   },
   "pickers": {
     "concurrency_range": "Max concurrent runs ({{min}}–{{max}})",
@@ -808,13 +815,9 @@
       "load_failed": "Couldn't load this agent's apps.",
       "empty": "No connected apps available.",
       "level": "Account scope",
-      "team_connected": "Team account connected",
-      "team_missing": "Team account not connected",
-      "personal_connected": "Your account is connected",
-      "personal_missing": "You haven't connected this app",
       "team_admin_only": "Only workspace admins can give an agent a team account.",
       "team_shared_warning": "Anyone who can run this agent can use this team account through it.",
-      "manage_link": "Manage accounts in Settings → Connected apps",
+      "manage_link": "Manage accounts in Apps → Accounts",
       "save_failed_toast": "Couldn't save — please try again",
       "team_help": "Shared workspace account, connected by admins.",
       "personal_help": "Each run uses the account of whoever triggers it. They must connect their own account.",
@@ -1100,5 +1103,36 @@
       "comment": "Fixed: pricing cards stack into one column under 375px. PR is open and tests pass.",
       "step_read": "Read {{file}}"
     }
+  },
+  "apps_section": {
+    "title": "Apps",
+    "empty": "This agent doesn't use any apps yet.",
+    "connect_yours": "Connect yours",
+    "reconnect": "Reconnect",
+    "connect_team": "Connect team account",
+    "acts_as_team": "Acts as the team account",
+    "acts_as_starter": "Acts as whoever starts the run"
+  },
+  "add_app_dialog": {
+    "title": "Add an app to {{agent}}",
+    "description": "A personal-account app uses the account of whoever starts the agent, so you can add it without an account of your own.",
+    "search_one": "Search {{count}} app",
+    "search_other": "Search {{count}} apps",
+    "search_label": "Search apps",
+    "curated": "Curated",
+    "recommended_team": "Usually a team account",
+    "recommended_personal": "Usually a personal account",
+    "team_connected": "Team account connected",
+    "add": "Add",
+    "add_aria": "Add {{app}}",
+    "empty": "No apps match.",
+    "load_failed": "Couldn't load apps.",
+    "added_toast": "Added {{app}} to {{agent}}."
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} wants to use {{app}}",
+    "new_app": "New app for this agent",
+    "adds_app_note": "Answering adds {{app}} to {{agent}} for future runs.",
+    "add_to_agent": "Add {{app}} to {{agent}}"
   }
 }

@@ -72,7 +72,7 @@ test.describe("HTML preview fullscreen", () => {
       });
       const block = page.locator(
         location === "description"
-          ? ".code-block-wrapper"
+          ? '[data-dynamic-code-block] [data-dynamic-block="html"]'
           : `[data-comment-content="${comment!.id}"] [data-dynamic-block="html"]`,
       );
       await block.scrollIntoViewIfNeeded();
@@ -154,7 +154,7 @@ test.describe("HTML preview fullscreen", () => {
       });
 
       if (location === "description") {
-        await block.getByRole("button", { name: "Show source" }).click();
+        await block.getByRole("tab", { name: "Source" }).click();
         await opener.scrollIntoViewIfNeeded();
         const sourceHeight = (await block.boundingBox())!.height;
         const sourceScroll = await scroller.evaluate(readScroll);

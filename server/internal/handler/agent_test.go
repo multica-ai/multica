@@ -279,7 +279,7 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	// Insert source issues directly: this test is about the working-agent
 	// projection, so it must not inherit unrelated CreateIssue validation or
 	// side effects. The fixtures cover every direct My Issues relation plus
-	// all three squad-involvement branches.
+	// owned-leader squads (included) and non-leader squad memberships (excluded).
 	insertedIssueIDs := make([]string, 0, 6)
 	insertIssue := func(
 		title, creatorType, creatorID string,
@@ -457,25 +457,21 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		{
 			name:      "mine defaults to any",
 			query:     "?type=issue&scope=mine",
-			wantCount: 5,
+			wantCount: 3,
 			wantIssueIDs: []string{
 				assignedIssueID,
 				ownedAgentIssueID,
-				directMemberSquadIssueID,
 				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
 		},
 		{
 			name:      "mine any",
 			query:     "?type=issue&scope=mine&relation=any",
-			wantCount: 5,
+			wantCount: 3,
 			wantIssueIDs: []string{
 				assignedIssueID,
 				ownedAgentIssueID,
-				directMemberSquadIssueID,
 				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
 		},
 		{
@@ -493,12 +489,10 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		{
 			name:      "mine involved",
 			query:     "?type=issue&scope=mine&relation=involved",
-			wantCount: 4,
+			wantCount: 2,
 			wantIssueIDs: []string{
 				ownedAgentIssueID,
-				directMemberSquadIssueID,
 				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
 		},
 	} {
@@ -566,6 +560,9 @@ func TestListWorkspaceWorkingAgentsRejectsInvalidFilters(t *testing.T) {
 		"/api/working-agents?type=issue&parent=not-a-uuid",
 		"/api/working-agents?type=chat&parent=00000000-0000-0000-0000-000000000000",
 		"/api/working-agents?type=issue&scope=mine&parent=00000000-0000-0000-0000-000000000000",
+		"/api/working-agents?type=issue&project=not-a-uuid",
+		"/api/working-agents?type=chat&project=00000000-0000-0000-0000-000000000000",
+		"/api/working-agents?type=issue&parent=00000000-0000-0000-0000-000000000000&project=00000000-0000-0000-0000-000000000000",
 	} {
 		t.Run(path, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -700,6 +697,36 @@ func TestListWorkspaceWorkingAgentsParentScope(t *testing.T) {
 		}
 		if _, ok := byID[siblingAgentID]; ok {
 			t.Errorf("childless issue must not return the sibling agent")
+		}
+	})
+
+	t.Run("project narrows to the project's issues", func(t *testing.T) {
+		var projectID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO project (workspace_id, title) VALUES ($1, 'working-agents-project')
+			RETURNING id
+		`, testWorkspaceID).Scan(&projectID); err != nil {
+			t.Fatalf("insert project: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(ctx, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
+			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+		})
+		if _, err := testPool.Exec(ctx, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, firstChildID); err != nil {
+			t.Fatalf("move issue into project: %v", err)
+		}
+
+		byID := read(t, "?type=issue&project="+projectID)
+
+		child, ok := byID[childAgentID]
+		if !ok {
+			t.Fatalf("agent running on the project's issue was not returned")
+		}
+		if child.RunningTaskCount != 1 || len(child.IssueIDs) != 1 || child.IssueIDs[0] != firstChildID {
+			t.Errorf("got %d running on %v, want 1 on [%s]", child.RunningTaskCount, child.IssueIDs, firstChildID)
+		}
+		if _, ok := byID[siblingAgentID]; ok {
+			t.Errorf("agent running outside the project must not be returned")
 		}
 	})
 

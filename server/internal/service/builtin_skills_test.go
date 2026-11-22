@@ -776,6 +776,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"multica agent skills list <agent-id> --output json",
 				"replace-all",
 				"`set` is the replacement path",
+				// MUL-9874: shared skills are edited from a revision so one
+				// agent's save cannot silently erase another's.
+				"multica skill update <skill-id> --content-file ./SKILL.md --base-revision <revision>",
+				"revision_conflict",
+				"Do not drop `--base-revision` to force the write through",
 			},
 			notWant: []string{
 				"multica agent skills set <agent-id> --skill-ids <skill-id>",

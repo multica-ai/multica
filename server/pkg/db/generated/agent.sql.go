@@ -6821,33 +6821,11 @@ WHERE a.workspace_id = $1
                 AND EXISTS (
                   SELECT 1
                   FROM squad s
+                  JOIN agent leader ON leader.id = s.leader_id
                   WHERE s.id = i.assignee_id
                     AND s.workspace_id = a.workspace_id
-                    AND (
-                      EXISTS (
-                        SELECT 1
-                        FROM squad_member sm
-                        WHERE sm.squad_id = s.id
-                          AND sm.member_type = 'member'
-                          AND sm.member_id = $4::uuid
-                      )
-                      OR EXISTS (
-                        SELECT 1
-                        FROM agent leader
-                        WHERE leader.id = s.leader_id
-                          AND leader.workspace_id = a.workspace_id
-                          AND leader.owner_id = $4::uuid
-                      )
-                      OR EXISTS (
-                        SELECT 1
-                        FROM squad_member sm
-                        JOIN agent owned_member ON owned_member.id = sm.member_id
-                        WHERE sm.squad_id = s.id
-                          AND sm.member_type = 'agent'
-                          AND owned_member.workspace_id = a.workspace_id
-                          AND owned_member.owner_id = $4::uuid
-                      )
-                    )
+                    AND leader.workspace_id = a.workspace_id
+                    AND leader.owner_id = $4::uuid
                 )
               )
             )
@@ -6865,6 +6843,16 @@ WHERE a.workspace_id = $1
         AND child.parent_issue_id = $5::uuid
     )
   )
+  AND (
+    $6::uuid IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM issue pi
+      WHERE pi.id = atq.issue_id
+        AND pi.workspace_id = a.workspace_id
+        AND pi.project_id = $6::uuid
+    )
+  )
 GROUP BY a.id, a.name, a.avatar_url, a.created_at
 ORDER BY a.created_at ASC
 `
@@ -6875,6 +6863,7 @@ type ListWorkspaceWorkingAgentsParams struct {
 	MineRelation  string      `json:"mine_relation"`
 	MemberID      pgtype.UUID `json:"member_id"`
 	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	ProjectID     pgtype.UUID `json:"project_id"`
 }
 
 type ListWorkspaceWorkingAgentsRow struct {
@@ -6897,6 +6886,8 @@ type ListWorkspaceWorkingAgentsRow struct {
 // (NULL = workspace); when set it narrows issue work to the direct children
 // of that issue, so an issue detail's sub-issue header reads the same
 // projection as the Issues list header instead of deriving its own count.
+// project_id is optional (NULL = workspace); when set it narrows issue work to
+// that project's issues, for the project page's working-agents section.
 func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, arg ListWorkspaceWorkingAgentsParams) ([]ListWorkspaceWorkingAgentsRow, error) {
 	rows, err := q.db.Query(ctx, listWorkspaceWorkingAgents,
 		arg.WorkspaceID,
@@ -6904,6 +6895,7 @@ func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, arg ListWorksp
 		arg.MineRelation,
 		arg.MemberID,
 		arg.ParentIssueID,
+		arg.ProjectID,
 	)
 	if err != nil {
 		return nil, err

@@ -98,6 +98,13 @@ export type ProjectContextChange =
   | { kind: "startFreshChat"; agentId: string; projectId: string }
   | { kind: "setDraftProject"; projectId: string | null };
 
+export type ChatArchiveAdvanceDirection = "next" | "prev";
+
+export type ChatArchiveAdvanceResult =
+  | { moved: false }
+  | { moved: true; targetSessionId: string; direction: ChatArchiveAdvanceDirection }
+  | { moved: true; targetSessionId: null; direction: null };
+
 export function planProjectContextChange(input: {
   targetProjectId: string | null;
   activeSessionId: string | null;
@@ -829,15 +836,24 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // right agent even when the next chat belongs to a different agent. A no-op
   // when the archived session isn't the open one — that selection stays put.
   const advanceSelectionAfterArchive = useCallback(
-    (session: { id: string; agent_id: string }) => {
-      if (activeSessionId !== session.id) return;
+    (session: { id: string; agent_id: string }): ChatArchiveAdvanceResult => {
+      if (activeSessionId !== session.id) return { moved: false };
       const history = sortChatSessions(
         sessions.filter((s) => s.status !== "archived"),
       );
       const idx = history.findIndex((s) => s.id === session.id);
-      const next = history[idx + 1] ?? history[idx - 1] ?? null;
-      if (next) handleSelectSession(next);
-      else setActiveSession(null);
+      const next = history[idx + 1] ?? null;
+      if (next) {
+        handleSelectSession(next);
+        return { moved: true, targetSessionId: next.id, direction: "next" };
+      }
+      const prev = history[idx - 1] ?? null;
+      if (prev) {
+        handleSelectSession(prev);
+        return { moved: true, targetSessionId: prev.id, direction: "prev" };
+      }
+      setActiveSession(null);
+      return { moved: true, targetSessionId: null, direction: null };
     },
     [activeSessionId, sessions, handleSelectSession, setActiveSession],
   );

@@ -223,7 +223,14 @@
     "status": "Statut",
     "runs_7d": "Exécutions (7 j)",
     "edit_access_aria": "Accès : {{value}}. Modifier l'accès",
-    "all_settings": "Tous les paramètres"
+    "all_settings": "Tous les paramètres",
+    "apps": "Apps",
+    "apps_needs_account_one": "{{count}} requiert votre compte",
+    "apps_needs_account_other": "{{count}} requièrent votre compte",
+    "apps_count_one": "{{count}} app",
+    "apps_count_other": "{{count}} apps",
+    "apps_none": "Aucune",
+    "apps_aria": "Apps : {{value}}. Afficher les apps"
   },
   "pickers": {
     "concurrency_range": "Exécutions simultanées maximales ({{min}}–{{max}})",
@@ -808,13 +815,9 @@
       "load_failed": "Impossible de charger les apps de cet agent.",
       "empty": "Aucune app connectée disponible.",
       "level": "Portée du compte",
-      "team_connected": "Compte d'équipe connecté",
-      "team_missing": "Compte d'équipe non connecté",
-      "personal_connected": "Votre compte est connecté",
-      "personal_missing": "Vous n'avez pas connecté cette app",
       "team_admin_only": "Seuls les admins de l'espace peuvent donner un compte d'équipe à un agent.",
       "team_shared_warning": "Toute personne pouvant exécuter cet agent peut utiliser ce compte d’équipe par son intermédiaire.",
-      "manage_link": "Gérer les comptes dans Paramètres → Applications connectées",
+      "manage_link": "Gérer les comptes dans Apps → Comptes",
       "save_failed_toast": "Échec de l'enregistrement, veuillez réessayer",
       "team_help": "Compte partagé de l’espace de travail, connecté par les administrateurs.",
       "personal_help": "Chaque exécution utilise le compte de la personne qui la déclenche. Chacun doit connecter son compte.",
@@ -1100,5 +1103,36 @@
       "comment": "Corrigé : sous 375px, les cartes tarifs passent sur une colonne. PR ouverte, tests au vert.",
       "step_read": "Lecture de {{file}}"
     }
+  },
+  "apps_section": {
+    "title": "Apps",
+    "empty": "Cet agent n'utilise encore aucune app.",
+    "connect_yours": "Connecter le vôtre",
+    "reconnect": "Reconnecter",
+    "connect_team": "Connecter un compte d'équipe",
+    "acts_as_team": "Agit avec le compte d'équipe",
+    "acts_as_starter": "Agit avec le compte de la personne qui lance l'exécution"
+  },
+  "add_app_dialog": {
+    "title": "Ajouter une app à {{agent}}",
+    "description": "Une app avec compte personnel utilise le compte de la personne qui lance l'agent : vous pouvez donc l'ajouter sans avoir votre propre compte.",
+    "search_one": "Rechercher parmi {{count}} app",
+    "search_other": "Rechercher parmi {{count}} apps",
+    "search_label": "Rechercher une app",
+    "curated": "Sélection",
+    "recommended_team": "Souvent un compte d'équipe",
+    "recommended_personal": "Souvent un compte personnel",
+    "team_connected": "Compte d'équipe connecté",
+    "add": "Ajouter",
+    "add_aria": "Ajouter {{app}}",
+    "empty": "Aucune app ne correspond.",
+    "load_failed": "Impossible de charger les apps.",
+    "added_toast": "{{app}} ajoutée à {{agent}}."
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} veut utiliser {{app}}",
+    "new_app": "Nouvelle app pour cet agent",
+    "adds_app_note": "Répondre ajoute {{app}} à {{agent}} pour les prochaines exécutions.",
+    "add_to_agent": "Ajouter {{app}} à {{agent}}"
   }
 }

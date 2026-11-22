@@ -15,6 +15,7 @@ import { InboxPage } from "./inbox-page";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 let workspaceId = "workspace-1";
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => workspaceId }));
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => false }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
@@ -27,9 +28,9 @@ vi.mock("../../modals/use-limit-recovery-prompt", () => ({
 
 const detailUnmounted = vi.hoisted(() => vi.fn());
 vi.mock("../../issues/components/issue-detail", () => ({
-  IssueDetail: ({ issueId, notice }: { issueId: string; notice?: ReactNode }) => {
+  IssueDetail: ({ issueId, notice }: { issueId: string; notice?: (issueActions: ReactNode) => ReactNode }) => {
     useEffect(() => () => detailUnmounted(issueId), [issueId]);
-    return <div data-testid="detail">{issueId}<div data-testid="notice">{notice}</div></div>;
+    return <div data-testid="detail">{issueId}<div data-testid="notice">{notice?.(null)}</div></div>;
   },
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
 }));

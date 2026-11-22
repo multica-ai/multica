@@ -31,7 +31,7 @@ import type {
 } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
-import { IssueInboxActions } from "../../issues/actions/issue-inbox-actions";
+import { IssueInboxBar } from "../../issues/actions/issue-inbox-actions";
 import { KeptRowsRelease, WorkPanel } from "./work-panel";
 
 const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn() }));
@@ -209,7 +209,7 @@ function renderPanel(
         {/* Each desktop tab mounts its own page. */}
         {desktop && pathname.startsWith("/acme/issues/") && (
           <div data-testid="issue-header">
-            <IssueInboxActions key={pathname} issueId={pathname.split("/").at(-1)!} onMarkDone={() => {}} />
+            <IssueInboxBar key={pathname} issueId={pathname.split("/").at(-1)!} />
           </div>
         )}
         {sheetOpen && spaceForPath(pathname) === "work" && <WorkPanel />}
@@ -868,5 +868,29 @@ describe("WorkPanel and the open issue's project", () => {
     });
     expect(litIssueRows()).toEqual([within(list).getByRole("link", { name: ISSUE.title })]);
     await waitFor(() => expect(useSidebarTreeStore.getState().locate).toBeNull());
+  });
+});
+
+describe("KeptRowsRelease Inbox Zero undo", () => {
+  const cleared = () => useInboxSelectionStore.getState().lastClearedByWorkspace["ws-1"];
+  const recordCleared = () =>
+    useInboxSelectionStore.getState().recordLastCleared("ws-1", {
+      kind: "archived",
+      itemId: `inbox-${ISSUE.id}`,
+      key: ISSUE.id,
+      label: ISSUE.identifier,
+      href: `/acme/issues/${ISSUE.identifier}`,
+      clearedAt: 1,
+    });
+
+  beforeEach(() => useInboxSelectionStore.setState({ lastClearedByWorkspace: {} }));
+
+  it("forgets it once the Inbox is left, even for the issue it cleared", () => {
+    recordCleared();
+    renderPanel("/acme/inbox");
+    expect(cleared()).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+    expect(cleared()).toBeUndefined();
   });
 });

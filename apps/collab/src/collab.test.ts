@@ -22,9 +22,14 @@ interface FakeDoc {
   revision: number;
   ystate: string | null;
   ystateRevision: number | null;
-  stores: { contributors: string[]; content: string; message?: string }[];
+  stores: { contributors: string[]; content: string; message?: string; live?: boolean; seen?: string[] }[];
 }
 let fake: FakeDoc;
+const ISSUE_ID = "0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c";
+const ISSUE_NAME = `issue:${ISSUE_ID}`;
+let fakeIssue: FakeDoc;
+const mentionsIn = (content: string) =>
+  [...content.matchAll(/mention:\/\/(member|agent)\/([0-9a-f-]{36})/g)].map((m) => `${m[1]}:${m[2]}`);
 /** When set, stores wait for it before answering. */
 let storeGate: { requested: number; release: Promise<void> } | null = null;
 let apiServer: HttpServer;
@@ -48,40 +53,49 @@ beforeAll(async () => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    if (req.method === "GET" && req.url === `/internal/collab/docs/${DOC_ID}`) {
+    const route = /^\/internal\/collab\/(docs|issues)\/([^/]+)(\/store)?$/.exec(req.url ?? "");
+    const issue = route?.[1] === "issues";
+    const target = route && route[2] === (issue ? ISSUE_ID : DOC_ID) ? (issue ? fakeIssue : fake) : null;
+    if (!route || !target) return send(404, {});
+    // Issues have no title; their stores answer with the mentions stored.
+    const stored = () =>
+      issue ? { revision: target.revision, mentions: mentionsIn(target.content) } : { revision: target.revision, title: "T" };
+    if (req.method === "GET" && !route[3]) {
       return send(200, {
         workspace_id: "ws",
-        title: "T",
-        content: fake.content,
-        revision: fake.revision,
-        ystate: fake.ystate,
-        ystate_revision: fake.ystateRevision,
+        title: issue ? "" : "T",
+        content: target.content,
+        revision: target.revision,
+        ystate: target.ystate,
+        ystate_revision: target.ystateRevision,
       });
     }
-    if (req.method === "POST" && req.url === `/internal/collab/docs/${DOC_ID}/store`) {
+    if (req.method === "POST" && route[3]) {
       const body = JSON.parse(Buffer.concat(chunks).toString());
       if (storeGate && !body.state_only) {
         storeGate.requested += 1;
         await storeGate.release;
       }
-      if (body.base_revision !== fake.revision) {
-        return send(409, { revision: fake.revision, content: fake.content });
+      if (body.base_revision !== target.revision) {
+        return send(409, { revision: target.revision, content: target.content });
       }
       if (body.state_only) {
-        fake.ystate = body.ystate;
-        fake.ystateRevision = fake.revision;
-        return send(200, { revision: fake.revision, title: "T" });
+        target.ystate = body.ystate;
+        target.ystateRevision = target.revision;
+        return send(200, stored());
       }
-      fake.revision += 1;
-      fake.content = body.content;
-      fake.ystate = body.ystate;
-      fake.ystateRevision = fake.revision;
-      fake.stores.push({
+      target.revision += 1;
+      target.content = body.content;
+      target.ystate = body.ystate;
+      target.ystateRevision = target.revision;
+      target.stores.push({
         contributors: body.contributors.map((c: Actor) => c.id),
         content: body.content,
         message: body.message,
+        live: body.live,
+        seen: body.seen_mentions,
       });
-      return send(200, { revision: fake.revision, title: "T" });
+      return send(200, stored());
     }
     send(404, {});
   });
@@ -113,20 +127,26 @@ function resetDoc(content: string) {
   storeGate = null;
 }
 
-function ticket(actor: Actor) {
+function resetIssue(content: string) {
+  fakeIssue = { content, revision: 7, ystate: null, ystateRevision: null, stores: [] };
+  storeGate = null;
+}
+
+function ticket(actor: Actor, name = NAME) {
   return signTicket(
-    { document: NAME, workspaceId: "ws", actor, readOnly: false, expiresAt: Math.floor(Date.now() / 1000) + 60 },
+    { document: name, workspaceId: "ws", actor, readOnly: false, expiresAt: Math.floor(Date.now() / 1000) + 60 },
     SECRET,
   );
 }
 
-async function connect(actor: Actor, opts: { document?: Y.Doc; epoch?: string } = {}) {
+async function connect(actor: Actor, opts: { document?: Y.Doc; epoch?: string; name?: string } = {}) {
   const document = opts.document ?? new Y.Doc();
+  const name = opts.name ?? NAME;
   const provider = new HocuspocusProvider({
     url: collabUrl,
-    name: NAME,
+    name,
     document,
-    token: () => JSON.stringify({ ticket: ticket(actor), epoch: opts.epoch }),
+    token: () => JSON.stringify({ ticket: ticket(actor, name), epoch: opts.epoch }),
   });
   providers.push(provider);
   await waitFor(() => provider.isSynced, 3000);
@@ -148,8 +168,8 @@ function typeInto(doc: Y.Doc, block: number, offset: number, text: string) {
   (element.get(0) as Y.XmlText).insert(offset, text);
 }
 
-async function internal(path: "write" | "edit" | "flush", body: unknown) {
-  const res = await fetch(`http://127.0.0.1:${collab.server.address.port}/internal/documents/${NAME}/${path}`, {
+async function internal(path: "write" | "edit" | "flush", body: unknown, name = NAME) {
+  const res = await fetch(`http://127.0.0.1:${collab.server.address.port}/internal/documents/${name}/${path}`, {
     method: "POST",
     headers: { "X-Collab-Secret": SECRET, "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -509,5 +529,47 @@ describe("collaboration server", () => {
     expect(markdown(a.document)).toBe("Small doc");
     expect(a.document.getMap("meta").get("epoch")).not.toBe("old-epoch");
     expect(Buffer.from(fake.ystate!, "base64").byteLength).toBeLessThan(10_000);
+  });
+});
+
+describe("issue descriptions", () => {
+  it("saves what editors type to the issue as live, passing on the mentions already stored", async () => {
+    resetIssue(`Hi [@Bob](mention://member/${bob.id})\n\nSecond`);
+    const a = await connect(ada, { name: ISSUE_NAME });
+    const b = await connect(bob, { name: ISSUE_NAME });
+    typeInto(a.document, 1, 6, " line");
+    await waitFor(() => fakeIssue.stores.length === 1, 2000);
+    expect(fakeIssue.stores[0]).toMatchObject({ contributors: [ada.id], live: true, seen: [] });
+    expect(fakeIssue.content).toContain("Second line");
+
+    typeInto(b.document, 1, 11, "!");
+    await waitFor(() => fakeIssue.stores.length === 2, 2000);
+    expect(fakeIssue.stores[1]).toMatchObject({ contributors: [bob.id], live: true, seen: [`member:${bob.id}`] });
+  });
+
+  it("saves an agent's edit to an issue as an explicit write of its own", async () => {
+    resetIssue("Status: draft");
+    const a = await connect(ada, { name: ISSUE_NAME });
+    const result = await internal(
+      "edit",
+      { actor: agent, edits: [{ old_text: "draft", new_text: "approved" }] },
+      ISSUE_NAME,
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.revision).toBe(8);
+    await waitFor(() => markdown(a.document) === "Status: approved");
+    expect(fakeIssue.stores).toEqual([
+      { contributors: [agent.id], content: "Status: approved", message: undefined, live: false, seen: [] },
+    ]);
+  });
+
+  it("reports an issue that no longer exists as gone", async () => {
+    resetIssue("Anything");
+    const result = await internal(
+      "write",
+      { actor: agent, content: "x" },
+      "issue:0193a1b2-c3d4-7e5f-8a9b-000000000000",
+    );
+    expect(result.status).toBe(404);
   });
 });

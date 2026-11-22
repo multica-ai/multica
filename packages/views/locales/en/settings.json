@@ -439,6 +439,10 @@
         "label": "Snooze notification",
         "description": "Snooze the open inbox issue, or bring it back now if it is snoozed."
       },
+      "undoInboxAction": {
+        "label": "Undo inbox action",
+        "description": "Undo the last archive, snooze or unsubscribe while its toast shows; after that, put back the open notification once it is archived, or what Inbox cleared names."
+      },
       "send": {
         "label": "Send",
         "description": "Also submits new issues."
@@ -597,7 +601,6 @@
       "billing": "Billing",
       "code": "Code",
       "channels": "Messaging",
-      "apps": "Connected apps",
       "workflows": "Workflows",
       "voice_input": "Voice input"
     },
@@ -860,8 +863,35 @@
       "manual_label": "Archive by hand",
       "manual_description": "From its row in the sidebar, or the top of the notification",
       "manual_value": "Anytime",
-      "done_label": "Archive issues you complete",
-      "done_description": "When you move an issue to Done or Cancelled, its notifications are archived. Issues others complete stay in your Inbox.",
+      "auto_label": "Archive issues you handle",
+      "auto_description": "Only your own actions count. A later notification brings an issue back.",
+      "auto_presets": {
+        "never": "Never",
+        "completed": "When you complete it",
+        "handled": "When you complete it or trigger an agent",
+        "custom": "Custom",
+        "custom_item": "Custom..."
+      },
+      "auto_recommended": "Recommended",
+      "auto_groups": {
+        "settle": "Handling it",
+        "tidy": "Tidying it"
+      },
+      "auto_actions": {
+        "completed": "Complete",
+        "agent_trigger": "Trigger an agent",
+        "comment": "Reply",
+        "status": "Move it forward",
+        "assignee": "Reassign",
+        "priority": "Change priority",
+        "project": "Change project",
+        "dates": "Change dates",
+        "labels": "Change labels"
+      },
+      "after_label": "After archiving",
+      "after_description": "When the notification you're reading is archived this way. Archiving by hand (E) still opens the next one.",
+      "after_stay": "Stay on the issue",
+      "after_next": "Open the next one",
       "archived_label": "Archived notifications",
       "archived_description": "Find them again and unarchive them",
       "archived_action": "View archived"
@@ -1728,6 +1758,7 @@
   "layout": {
     "scope": {
       "account": "Account · synced",
+      "all_workspaces": "All your workspaces",
       "device": "This device only",
       "device_workspace": "This device · {{name}}",
       "workspace": "{{name}} workspace",
@@ -1818,22 +1849,8 @@
     "authorization_expired": "WeChat authorization expired. Scan again to reconnect."
   },
   "connected_apps": {
-    "description": "Accounts your agents use to access external apps. Allowed actions run immediately.",
     "loading": "Loading apps...",
     "load_failed": "Couldn't load apps.",
-    "team_title": "Team accounts",
-    "team_description": "Shared accounts the workspace owns, such as a support inbox or the company GitHub. Admins connect them; agents given the team account act as it.",
-    "team_empty": "No team accounts yet.",
-    "team_empty_member": "No team accounts yet. Ask a workspace admin to connect one.",
-    "personal_title": "My accounts",
-    "personal_description": "Your own accounts. When you trigger a run, agents use these for apps set to the triggerer's account.",
-    "personal_empty": "You haven't connected any accounts.",
-    "connected_by": "Connected by {{name}}",
-    "last_used": "Last used {{when}}",
-    "last_used_never": "Never used",
-    "used_by_one": "Used by {{count}} agent",
-    "used_by_other": "Used by {{count}} agents",
-    "expired": "Needs reconnecting",
     "reconnect": "Reconnect",
     "rules": "Rules",
     "activity": "Activity",
@@ -1849,35 +1866,7 @@
     "toast_disconnected": "Disconnected",
     "toast_failed": "Something went wrong. Please try again.",
     "add": {
-      "search": "Search apps...",
-      "empty": "No apps match.",
-      "curated": "Curated",
-      "recommended_team": "Usually a team account",
-      "recommended_personal": "Usually a personal account",
-      "connect_team": "Connect team account",
-      "connect_personal": "Connect my account",
-      "connecting": "Connecting...",
-      "connected": "Connected",
-      "connect": "Connect",
-      "team_description": "A shared workspace account. Choose which agents can use it on each agent’s Apps page.",
-      "personal_description": "Use your own connected account when you start a run."
-    },
-    "disconnect_team": {
-      "title": "Disconnect the team {{app}} account?",
-      "description": "Agents using the team account lose access right away.",
-      "agents": "Agents using it",
-      "no_agents": "No agent uses it.",
-      "active_tasks": "Runs in progress: {{count}}",
-      "active_autopilots": "Active autopilots: {{count}}",
-      "pending": "Confirmations that will be cancelled: {{count}}",
-      "cancel": "Cancel",
-      "confirm": "Disconnect"
-    },
-    "disconnect_personal": {
-      "title": "Disconnect your {{app}} account?",
-      "description": "Runs you trigger can no longer use it. You can reconnect later.",
-      "cancel": "Cancel",
-      "confirm": "Disconnect"
+      "empty": "No apps match."
     },
     "detail": {
       "team_title": "{{app}} · team account",
@@ -1965,7 +1954,13 @@
       "rate_limited": "This account reached its limit of calls per minute. Approve again in a minute.",
       "rate_limited_some_one": "{{count}} request hit the per-minute limit. Approve it again in a minute.",
       "rate_limited_some_other": "{{count}} requests hit the per-minute limit. Approve them again in a minute.",
-      "withdrawn": "You can no longer use this agent, so the request was withdrawn."
+      "withdrawn": "You can no longer use this agent, so the request was withdrawn.",
+      "title_connect_team": "{{agent}} needs a {{app}} account",
+      "title_member_ask": "{{name}} asked for a team {{app}} account",
+      "waiting_for_admin": "Waiting for an admin",
+      "team_note": "Every agent that acts as the team account can use it.",
+      "admins_notified": "Workspace admins were notified in Inbox.",
+      "connect_team": "Connect for the team"
     },
     "tools": {
       "tab": "Tools",
@@ -2001,6 +1996,124 @@
       "cancel": "Cancel",
       "admin_required": "A workspace admin can restore access.",
       "account_link": "This account has saved action restrictions. Restore access in Connected apps."
+    },
+    "status": {
+      "connected": "Connected",
+      "not_connected": "Not connected",
+      "needs_reconnecting": "Needs reconnecting",
+      "requested": "Requested"
+    },
+    "owner": {
+      "team": "Team account",
+      "personal": "Your account"
+    },
+    "account_row": {
+      "admins_notified": "admins notified",
+      "withdraw": "Withdraw",
+      "decline": "Decline",
+      "toast_declined": "Requests declined. Waiting agents continue without it.",
+      "toast_withdrawn": "Request withdrawn"
+    },
+    "disclosure": {
+      "title": "Connect {{app}}",
+      "personal_subtitle": "Your own account. You'll sign in to the app on the next screen.",
+      "team_subtitle": "A team account the whole workspace shares. You'll sign in to the app on the next screen.",
+      "without_asking": "Agents can do this without asking each time",
+      "logged": "Every call an agent makes is recorded on the issue or chat it ran for.",
+      "used_by": "Agents using {{app}}: {{agents}}. They'll act as this account.",
+      "used_by_none": "No agent uses this app yet. Add it to an agent from the agent's page.",
+      "visibility_personal": "Only runs you start use it. It also works in your other workspaces.",
+      "visibility_team": "Agents given the team account act as it, whoever starts the run.",
+      "cancel": "Cancel",
+      "continue": "Continue"
+    },
+    "hub": {
+      "description": "Everything agents in {{workspace}} can work in, and whose account they use.",
+      "tabs": {
+        "in_use": "In use",
+        "attention": "Needs attention",
+        "accounts": "Accounts",
+        "all": "All apps"
+      },
+      "search": "Search apps",
+      "popular": "Popular in {{workspace}}",
+      "scope_team": "Team account",
+      "scope_personal": "Personal account",
+      "scope_both": "Team and personal accounts",
+      "used_by": "Used by {{agents}}",
+      "wanted_by": "Wanted by {{agents}}",
+      "members_asked_one": "{{count}} member asked",
+      "members_asked_other": "{{count}} members asked",
+      "connect": "Connect",
+      "reconnect": "Reconnect",
+      "ask_admin": "Ask an admin",
+      "toast_requested": "Workspace admins were asked to connect {{app}}.",
+      "empty_in_use": "No apps in use yet. Set one up to let agents work in it.",
+      "empty_attention": "Nothing needs your attention.",
+      "no_matches": "No apps match your search.",
+      "unavailable": "Apps aren't available on this server.",
+      "retry": "Try again"
+    },
+    "app_page": {
+      "agents_title": "Agents",
+      "agents_empty": "This workspace has no agents yet.",
+      "source_label": "Account {{agent}} uses for {{app}}",
+      "source_team": "Team account",
+      "source_personal": "Whoever starts the run",
+      "not_using": "Not using {{app}}",
+      "enable": "Let {{agent}} use {{app}}",
+      "team_admin_only": "Only workspace admins can change team account access.",
+      "save_failed": "Couldn't update the agent.",
+      "activity_title": "Recent activity",
+      "activity_empty": "No agent has used {{app}} yet.",
+      "as_team": "as team account",
+      "as_you": "as you",
+      "in_chat": "chat",
+      "accounts_title": "Accounts",
+      "account_actions": "{{account}} actions",
+      "capabilities_title": "What agents can do",
+      "capabilities_note": "Without asking each time.",
+      "accounts_description": "Which {{app}} sign-ins agents can use in {{workspace}}.",
+      "team_account_hint": "Shared by everyone in {{workspace}} · admins connect it",
+      "your_account_hint": "Used only in runs you start",
+      "agents_description": "Each agent picks whose account it acts as.",
+      "ready_team": "Ready with the team account",
+      "needs_team": "Needs the team account",
+      "ready_yours": "Ready with your account",
+      "needs_yours": "Needs your account"
+    },
+    "accounts_page": {
+      "empty": "You haven't connected any accounts in this workspace.",
+      "used_by": "used by {{agents}}",
+      "team_title": "Team accounts",
+      "team_description_admin": "Shared by everyone in the workspace. Only admins connect them.",
+      "team_description_member": "Admins connect these. You can see them and ask for one.",
+      "team_empty": "No team accounts yet.",
+      "yours_title": "Your accounts",
+      "yours_description": "Only you can use these; agents use them in runs you start.",
+      "needed_by": "{{agents}} needs it"
+    },
+    "disconnect_dialog": {
+      "title": "Disconnect {{app}}?",
+      "team_body": "These agents act as this account. Their next {{app}} step will ask the admins instead of working.",
+      "personal_body": "These agents use it in runs you start. The next run you start will ask you to connect it again.",
+      "agents": "Agents that use it",
+      "no_agents": "No agent uses it.",
+      "running": "Run in progress — it stops",
+      "active_runs_one": "{{count}} run in progress stops now.",
+      "active_runs_other": "{{count}} runs in progress stop now.",
+      "impact_failed": "Couldn't check which agents use it.",
+      "cancel": "Cancel",
+      "confirm": "Disconnect"
+    },
+    "team_requests": {
+      "title": "{{app}} team account needed",
+      "run_waiting": "Run waiting",
+      "asked": "Asked",
+      "summary": " · “{{summary}}”",
+      "resumes": "Connecting it once answers every request here, and waiting runs pick up where they stopped.",
+      "decline_all": "Decline all",
+      "open_app": "Open app"
     }
   },
   "voice_input": {
