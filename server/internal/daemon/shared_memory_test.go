@@ -48,6 +48,20 @@ func TestSharedMemoryQueryUsesExplicitQuestionInRoutingComment(t *testing.T) {
 	}
 }
 
+func TestSharedMemoryQueryKeepsCommentWithMultipleQuestionsInOneSpan(t *testing.T) {
+	for _, questions := range []string{
+		"구매 결정은 무엇인가? 예산은 얼마인가?",
+		"구매 결정은 무엇인가？ 예산은 얼마인가?",
+	} {
+		t.Run(questions, func(t *testing.T) {
+			comment := "두 질문에 답해주세요: `" + questions + "`."
+			if got := sharedMemoryQuery(Task{TriggerCommentContent: comment}); got != comment {
+				t.Fatalf("retrieval query = %q, want full comment %q", got, comment)
+			}
+		})
+	}
+}
+
 func TestSharedMemoryPromptBoundsCountAndApproximateTokenBudget(t *testing.T) {
 	facts := make([]sharedMemoryFact, 12)
 	for i := range facts {

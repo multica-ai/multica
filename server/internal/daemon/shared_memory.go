@@ -163,6 +163,9 @@ func quotedMemoryQuestion(comment string) string {
 	var question string
 	for i := 1; i < len(parts); i += 2 {
 		span := strings.TrimSpace(parts[i])
+		if strings.Count(span, "?")+strings.Count(span, "？") > 1 {
+			return ""
+		}
 		if strings.ContainsAny(span, "\r\n") ||
 			(!strings.HasSuffix(span, "?") && !strings.HasSuffix(span, "？")) {
 			continue
