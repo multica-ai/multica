@@ -7,6 +7,7 @@
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs chat issue --json"
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --queued --json"
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs sidebar"
+//   make env-exec ARGS="-- node scripts/dev-fixtures.mjs app-request --app posthog --member"
 //
 // Replies come from the daemon API, driven with the environment profile's user
 // token: the script registers a fixture runtime, then claims, starts and
@@ -22,8 +23,9 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const KINDS = ["chat", "builder", "issue", "task", "sidebar"];
-// `sidebar` fills the whole Work panel, so `all` leaves it out.
+const KINDS = ["chat", "builder", "issue", "task", "sidebar", "app-request", "app-resume"];
+// `sidebar` fills the whole Work panel, and the app fixtures need Composio, so
+// `all` leaves them out.
 const ALL_KINDS = ["chat", "builder", "issue", "task"];
 const FIXTURE_DAEMON_ID = "dev-fixtures";
 const FIXTURE_AGENT_NAME = "Fixture Agent";
@@ -31,7 +33,8 @@ const FIXTURE_WORKER_NAME = "Fixture Worker";
 // Matches the daemon's own heartbeat period.
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
-const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issue | task | sidebar>... [--queued] [--hold] [--json]
+const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issue | task | sidebar | app-request | app-resume>...
+         [--queued] [--hold] [--app SLUG] [--member] [--json]
 
   chat      a chat session: a user message and an assistant reply with a table, code and a long log line
   builder   an Agent Builder session with the same kind of reply and a filled-in draft
@@ -40,12 +43,23 @@ const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issu
   sidebar   a Work panel in use: 11 issues in 3 projects, read and unread notifications from 3 agents,
             pinned issues and a pinned project, and 2 saved views
   all       chat, builder, issue and task
+  app-request  an issue assigned to the Fixture Agent whose run asks for an app account through
+            apps_request_connection, then ends its turn; needs \`node scripts/fake-composio.mjs up\`
+  app-resume   answer the run that resumed after the account was connected: it lists its apps,
+            runs one read tool of each connected app, and completes
   --queued  task: also leave a second task queued behind the running one, on the same issue
   --hold    task: keep the fixture runtime heartbeating until Ctrl-C, so it stays online
+  --app     app-request: the app slug to ask for (default googlecalendar)
+  --member  app-request: start the run as Alice (alice@localhost), a plain member of the workspace;
+            --json adds her member_token for signing a browser in as her
   --json    print the created ids and URLs as JSON instead of text; task adds task_id, auth_token and agent_id
 
 A held task stays running for the server's reconnect grace (MULTICA_RUNTIME_RECONNECT_GRACE,
 3 hours by default), but without --hold the runtime itself shows offline after about 150 seconds.
+
+The app request goes to the person who started the run for an app the agent lacks or a personal
+account, and to the workspace admins for a team account. Configure the Fixture Agent's apps in the
+UI to choose which.
 
 Run through \`make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"\`.`;
 
@@ -59,20 +73,28 @@ function parseCli(argv) {
   let json = false;
   let queued = false;
   let hold = false;
-  for (const arg of argv) {
+  let app;
+  let member = false;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
     if (arg === "-h" || arg === "--help") {
       console.log(USAGE);
       process.exit(0);
     } else if (arg === "--json") json = true;
     else if (arg === "--queued") queued = true;
     else if (arg === "--hold") hold = true;
-    else if (arg === "all") ALL_KINDS.forEach((kind) => kinds.add(kind));
+    else if (arg === "--member") member = true;
+    else if (arg === "--app") {
+      app = argv[++i];
+      if (!app) fail(`--app needs an app slug.\n\n${USAGE}`);
+    } else if (arg === "all") ALL_KINDS.forEach((kind) => kinds.add(kind));
     else if (KINDS.includes(arg)) kinds.add(arg);
     else fail(`unknown argument ${arg}\n\n${USAGE}`);
   }
   if (kinds.size === 0) fail(`name at least one fixture.\n\n${USAGE}`);
   if ((queued || hold) && !kinds.has("task")) fail(`--queued and --hold apply to the task fixture.\n\n${USAGE}`);
-  return { kinds: KINDS.filter((kind) => kinds.has(kind)), json, queued, hold };
+  if ((app || member) && !kinds.has("app-request")) fail(`--app and --member apply to the app-request fixture.\n\n${USAGE}`);
+  return { kinds: KINDS.filter((kind) => kinds.has(kind)), json, queued, hold, app: app ?? "googlecalendar", member };
 }
 
 function loadProfile(env) {
@@ -567,6 +589,141 @@ async function seedTask({ request, profile, runtime, worker, appUrl, slug, queue
   return result;
 }
 
+const MEMBER_EMAIL = "alice@localhost";
+
+// Signs Alice in with the environment's fixed verification code and makes her
+// a plain member of the workspace, so runs she starts route team-account
+// requests to the admins and she sees "Ask an admin" in the UI.
+async function ensureMember(request, profile) {
+  const post = async (path, body) => {
+    const response = await fetch(`${profile.apiUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`POST ${path} → ${response.status} ${text.slice(0, 300)}`);
+    return text ? JSON.parse(text) : null;
+  };
+  await post("/auth/send-code", { email: MEMBER_EMAIL });
+  const { token } = await post("/auth/verify-code", {
+    email: MEMBER_EMAIL,
+    code: process.env.MULTICA_DEV_VERIFICATION_CODE || "888888",
+  });
+  const asMember = client({ ...profile, token });
+  await asMember("PATCH", "/api/me", { name: "Alice" });
+  await asMember("POST", "/api/me/onboarding/complete", {}).catch(() => {});
+
+  const members = listOf(await request("GET", `/api/workspaces/${profile.workspaceId}/members`), "members");
+  if (!members.some((m) => m.email === MEMBER_EMAIL || m.user?.email === MEMBER_EMAIL)) {
+    await request("POST", `/api/workspaces/${profile.workspaceId}/members`, { email: MEMBER_EMAIL, role: "member" });
+    for (const invitation of listOf(await asMember("GET", "/api/invitations"), "invitations")) {
+      if (invitation.workspace_id === profile.workspaceId) await asMember("POST", `/api/invitations/${invitation.id}/accept`, {});
+    }
+  }
+  return { email: MEMBER_EMAIL, token };
+}
+
+// Calls the apps gateway the claim handed this run, the way an agent's MCP
+// client does. Null when the claim has none: Composio is off.
+function appsGateway(task) {
+  const server = task.agent?.mcp_config?.mcpServers?.multica_apps ?? task.mcp_config?.mcpServers?.multica_apps;
+  if (!server?.url) return null;
+  let id = 0;
+  return async function call(name, args = {}) {
+    const response = await fetch(server.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...server.headers },
+      body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name, arguments: args } }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.result) {
+      throw new Error(`apps gateway ${name} → ${response.status} ${JSON.stringify(body).slice(0, 300)}`);
+    }
+    return { text: body.result.content?.[0]?.text ?? "", isError: Boolean(body.result.isError) };
+  };
+}
+
+const NO_GATEWAY =
+  "the run was handed no apps gateway. Start the fake Composio first: `node scripts/fake-composio.mjs up`.";
+
+async function seedAppRequest({ request, profile, runtime, agent, appUrl, slug, app, member }) {
+  const starter = member ? await ensureMember(request, profile) : null;
+  const asStarter = starter ? client({ ...profile, token: starter.token }) : request;
+  const issue = await asStarter("POST", "/api/issues", {
+    title: `Fixture: a run that needs ${app}`,
+    description: `The Fixture Agent asks for ${app} through apps_request_connection and ends its turn. Connect the account and run \`dev-fixtures.mjs app-resume\` to finish it.`,
+    status: "todo",
+    priority: "medium",
+    assignee_type: "agent",
+    assignee_id: agent.id,
+    allow_duplicate: true,
+  });
+  const pending = await waitForQueuedTask(request, issue.id, agent.id);
+  const task = await claimAndStart(request, runtime, pending.id, ASSISTANT_REPLY);
+  const call = appsGateway(task);
+  const requested = call
+    ? await call("apps_request_connection", { app, summary: `Needs ${app} to finish ${issue.identifier}.` })
+    : { text: NO_GATEWAY, isError: true };
+  if (requested.isError) {
+    await request("POST", `/api/daemon/tasks/${task.id}/fail`, { error: requested.text }).catch(() => {});
+    throw new Error(`apps_request_connection(${app}) failed: ${requested.text}`);
+  }
+  await request("POST", `/api/daemon/tasks/${task.id}/complete`, {
+    output: `I need ${app} for this and asked for it. I'll continue once it is connected.`,
+  });
+  return {
+    issue_id: issue.id,
+    identifier: issue.identifier,
+    url: `${appUrl}/${slug}/issues/${issue.identifier}`,
+    task_id: task.id,
+    agent_id: agent.id,
+    request: requested.text,
+    ...(starter ? { member_email: starter.email, member_token: starter.token } : {}),
+  };
+}
+
+// A connected account resumes the waiting run as a new task for the same
+// agent. This claims it, uses every connected app once through the gateway,
+// so the app pages show the call in Recent activity, and completes it.
+async function seedAppResume({ request, runtime, appUrl, slug }) {
+  const deadline = Date.now() + 30_000;
+  let task;
+  while (!(task = (await request("POST", `/api/daemon/runtimes/${runtime.id}/tasks/claim`, {}))?.task)) {
+    if (Date.now() > deadline) {
+      throw new Error("no run is waiting to resume. Connect the account the app-request run asked for, then run app-resume again.");
+    }
+    await sleep(500);
+  }
+  await request("POST", `/api/daemon/tasks/${task.id}/start`);
+  const call = appsGateway(task);
+  if (!call) {
+    await request("POST", `/api/daemon/tasks/${task.id}/complete`, { output: ASSISTANT_REPLY });
+    throw new Error(`claimed task ${task.id}, but ${NO_GATEWAY}`);
+  }
+  const { apps = [] } = JSON.parse((await call("apps_list")).text || "{}");
+  const used = [];
+  for (const app of apps.filter((a) => a.status === "connected" && !a.server)) {
+    const { tools = [] } = JSON.parse((await call("apps_search_tools", { app: app.app })).text || "{}");
+    const tool = tools.find((t) => t.class === "read" && t.policy === "allow");
+    if (!tool) continue;
+    const result = await call("apps_run_tool", { tool: tool.tool, arguments: {}, summary: "Fixture: read once after resuming" });
+    used.push(`${tool.tool}${result.isError ? ` (failed: ${result.text})` : ""}`);
+  }
+  const summary = apps.map((a) => `${a.name}: ${a.status}`).join(", ") || "no apps";
+  await request("POST", `/api/daemon/tasks/${task.id}/complete`, {
+    output: `Resumed after the connection. Apps: ${summary}.${used.length ? ` Ran ${used.join(", ")}.` : ""}`,
+  });
+  const issue = task.issue_id ? await request("GET", `/api/issues/${task.issue_id}`) : null;
+  return {
+    task_id: task.id,
+    issue_id: task.issue_id,
+    url: issue ? `${appUrl}/${slug}/issues/${issue.identifier}` : appUrl,
+    apps,
+    ran: used,
+  };
+}
+
 const listOf = (response, key) => (Array.isArray(response) ? response : response?.[key] ?? []);
 
 async function ensureProject(request, existing, project) {
@@ -711,26 +868,37 @@ async function holdRuntime(request, runtime) {
 }
 
 async function main() {
-  const { kinds, json, queued, hold } = parseCli(process.argv.slice(2));
+  const { kinds, json, queued, hold, app, member } = parseCli(process.argv.slice(2));
   const profile = loadProfile(process.env);
   const request = client(profile);
 
   const workspaces = (await request("GET", "/api/workspaces")) ?? [];
   const workspace = workspaces.find((ws) => ws.id === profile.workspaceId);
   if (!workspace) fail(`the profile's workspace ${profile.workspaceId} is not visible to its token.`);
-  const context = { request, profile, appUrl: profile.appUrl, slug: workspace.slug, queued };
+  const context = { request, profile, appUrl: profile.appUrl, slug: workspace.slug, queued, app, member };
 
   if (kinds.some((kind) => kind !== "issue")) {
     context.runtime = await ensureRuntime(request, profile.workspaceId);
   }
-  if (kinds.includes("chat")) context.agent = await ensureAgent(request, context.runtime, FIXTURE_AGENT);
+  if (kinds.includes("chat") || kinds.includes("app-request")) {
+    context.agent = await ensureAgent(request, context.runtime, FIXTURE_AGENT);
+  }
   if (kinds.includes("task")) context.worker = await ensureAgent(request, context.runtime, FIXTURE_WORKER);
 
-  const seeders = { chat: seedChat, builder: seedBuilder, issue: seedIssue, task: seedTask, sidebar: seedSidebar };
+  const seeders = {
+    chat: seedChat,
+    builder: seedBuilder,
+    issue: seedIssue,
+    task: seedTask,
+    sidebar: seedSidebar,
+    "app-request": seedAppRequest,
+    "app-resume": seedAppResume,
+  };
   const result = {};
   for (const kind of kinds) {
     result[kind] = await seeders[kind](context);
-    if (!json) console.log(`[dev-fixtures] ${kind.padEnd(8)}${result[kind].url}`);
+    if (!json) console.log(`[dev-fixtures] ${kind.padEnd(12)}${result[kind].url}`);
+    if (!json && result[kind].request) console.log(`[dev-fixtures] ${"".padEnd(12)}${result[kind].request}`);
   }
   if (json) console.log(JSON.stringify(result, null, 2));
   if (hold) await holdRuntime(request, context.runtime);

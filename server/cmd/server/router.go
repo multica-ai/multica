@@ -1373,11 +1373,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// dynamically from the project's /auth_configs at request time, so enabling
 	// a toolkit is a dashboard action, not a redeploy. State signing uses
 	// COMPOSIO_STATE_SECRET, or a key derived from JWT_SECRET when that is unset.
+	// COMPOSIO_BASE_URL replaces the Composio API root; local environments set
+	// it to scripts/fake-composio.mjs. Unset means the real Composio API.
 	if composioAPIKey := strings.TrimSpace(os.Getenv("COMPOSIO_API_KEY")); composioAPIKey != "" {
 		if !featureflags.ComposioMCPAppsEnabled(context.Background(), opts.FeatureFlags) {
 			slog.Info("composio integration disabled (feature flag off)")
 		} else {
-			sdkClient, err := composiosdk.NewClient(composiosdk.Options{APIKey: composioAPIKey})
+			composioBaseURL := strings.TrimSpace(os.Getenv("COMPOSIO_BASE_URL"))
+			if composioBaseURL != "" {
+				slog.Warn("composio: COMPOSIO_BASE_URL overrides the Composio API", "base_url", composioBaseURL)
+			}
+			sdkClient, err := composiosdk.NewClient(composiosdk.Options{APIKey: composioAPIKey, BaseURL: composioBaseURL})
 			if err != nil {
 				slog.Error("composio: SDK client init failed; composio integration disabled", "error", err)
 			} else {
