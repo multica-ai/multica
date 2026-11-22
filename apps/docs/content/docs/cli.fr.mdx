@@ -294,6 +294,12 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args` est un tableau JSON placé à la fin des arguments de lancement. Choisissez le modèle avec `--model` ; certains outils refusent un `--model` dans les arguments personnalisés.
 - `--permission-mode` détermine qui peut invoquer l'agent : `private` pour le propriétaire seul, ou `public_to` avec `--public-to-workspace` ou `--public-to-member <user-id>`. `--visibility private|workspace` est l'ancienne forme, convertie en `--permission-mode` ; si les deux sont fournis, `--permission-mode` l'emporte.
 
+### Historique d'exécution d'un agent
+
+`multica agent tasks <agent-id> --limit 200` renvoie la page d'exécutions la plus récente. La taille de page par défaut et maximale est 200. S'il existe d'autres exécutions, stderr affiche un curseur ; passez-le tel quel avec `--before '<cursor>'` pour lire la page suivante. `--output json` conserve le format tableau JSON et inclut uniquement l'utilisation de cette page.
+
+Le point de terminaison correspondant `GET /api/agents/{id}/tasks` accepte `limit` et `before` et conserve sa réponse sous forme de tableau JSON. L'en-tête de réponse `X-Agent-Tasks-Next-Cursor` fournit le curseur suivant ; son absence indique la dernière page. Les curseurs préservent l'ordre `(created_at, id)`, y compris la précision des horodatages. Les limites ou curseurs invalides renvoient HTTP 400 ; les limites supérieures à 200 sont plafonnées. Les clients qui ne suivent pas le curseur ne reçoivent que les 200 exécutions les plus récentes.
+
 ## Daemon et runtimes
 
 ```bash
@@ -470,6 +476,12 @@ Les fichiers de configuration du CLI contiennent des jetons qui permettent d'acc
 ## Référence des commandes
 
 Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelles, regroupées comme le CLI lui-même les regroupe. Toutes les commandes acceptent les options globales `--server-url`, `--workspace-id`, `--profile` et `--debug`. `--output` est déclarée commande par commande, et le format par défaut varie : les commandes `list` affichent par défaut un tableau, tandis que les commandes `get` et `create` renvoient le plus souvent du JSON. Les options complètes sont définies par `multica <command> --help`.
+
+### Pièces jointes de tâche
+
+Pour `issue create`, `issue update` et `issue comment add`, chaque `--attachment` prend un chemin de fichier littéral, y compris les virgules ou guillemets doubles présents dans le nom du fichier. Répétez l'option pour plusieurs fichiers : `--attachment 'report,final.csv' --attachment notes.txt`. Omettre l'option n'attache aucun fichier ; un chemin explicitement vide renvoie une erreur. Tous les chemins locaux sont vérifiés avant tout téléversement.
+
+Migration depuis l'ancien découpage CSV : remplacez `--attachment a,b` par `--attachment a --attachment b` pour joindre deux fichiers. La première forme désigne désormais un seul fichier nommé `a,b`. Retirez les guillemets CSV supplémentaires de l'ancien contournement `--attachment '"report,final.csv"'` ; utilisez `--attachment 'report,final.csv'`, sauf si le nom du fichier contient réellement ces guillemets doubles.
 
 ### Core
 
