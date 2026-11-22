@@ -11,6 +11,7 @@
     "usage": "分析",
     "runtimes": "ランタイム",
     "skills": "スキル",
+    "apps": "アプリ",
     "settings": "設定",
     "views": "ビュー",
     "docs": "ドキュメント"
@@ -23,6 +24,7 @@
     "member": "メンバー",
     "squad": "スクワッド",
     "skill": "スキル",
+    "app": "アプリ",
     "machine": "マシン",
     "runtime": "ランタイム",
     "attachment": "添付ファイル",

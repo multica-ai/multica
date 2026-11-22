@@ -69,6 +69,7 @@
     "autopilot_quota_exceeded_body": "このワークスペースは現在の期間の自動化実行上限 {{limit}} 回に達しました。実行枠が {{resetAt}} にリセットされるか、アップグレードまたは実行回数の追加購入を行うまで、以降の自動化は開始されません。",
     "project_owner_joined_body": "{{name}} はワークスペースのオーナーで、このプライベートプロジェクトに自分を追加しました。タスク、コメント、添付ファイルを閲覧できるようになりました。",
     "open_project": "プロジェクトを開く",
+    "open_app": "アプリを開く",
     "autopilot_quota_upgrade": "オプションを見る",
     "archive": "アーカイブ",
     "unarchive": "アーカイブ解除",

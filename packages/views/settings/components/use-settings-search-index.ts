@@ -298,11 +298,6 @@ export function useSettingsSearchIndex(
         title: t(($) => $.voice_input.history.title),
         description: t(($) => $.voice_input.history.description),
       },
-      {
-        tab: "apps",
-        title: t(($) => $.page.tabs.apps),
-        description: t(($) => $.connected_apps.description),
-      },
       // Workspace
       { tab: "workspace", anchor: "name", title: t(($) => $.workspace.name_label) },
       { tab: "workspace", anchor: "description", title: t(($) => $.workspace.description_label) },

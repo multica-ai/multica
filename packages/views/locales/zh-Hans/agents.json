@@ -211,7 +211,12 @@
     "status": "状态",
     "runs_7d": "运行（7 天）",
     "edit_access_aria": "访问权限：{{value}}。更改访问权限",
-    "all_settings": "全部设置"
+    "all_settings": "全部设置",
+    "apps": "应用",
+    "apps_needs_account_other": "{{count}} 个需要你的账号",
+    "apps_count_other": "{{count}} 个应用",
+    "apps_none": "无",
+    "apps_aria": "应用：{{value}}。查看应用"
   },
   "pickers": {
     "concurrency_range": "最大并行运行数（{{min}}–{{max}}）",
@@ -786,13 +791,9 @@
       "load_failed": "无法加载此智能体的应用。",
       "empty": "暂无已连接的应用。",
       "level": "账号范围",
-      "team_connected": "团队账号已连接",
-      "team_missing": "团队账号未连接",
-      "personal_connected": "你的账号已连接",
-      "personal_missing": "你还没有连接这个应用",
       "team_admin_only": "只有工作区管理员可以为智能体配置团队账号。",
       "team_shared_warning": "能运行这个智能体的人，都能通过它使用该团队账号。",
-      "manage_link": "在 设置 → 已连接应用 中管理账号",
+      "manage_link": "在 应用 → 账号 中管理账号",
       "save_failed_toast": "保存失败，请重试",
       "team_help": "工作区共用的账号，由管理员连接。",
       "personal_help": "每次运行使用触发者自己已连接的账号；未连接时需先连接。",
@@ -1071,5 +1072,35 @@
       "comment": "修好了：价格卡片在 375px 下改为单列。已开 PR，测试通过。",
       "step_read": "读取 {{file}}"
     }
+  },
+  "apps_section": {
+    "title": "应用",
+    "empty": "这个智能体还没有使用任何应用。",
+    "connect_yours": "连接我的账号",
+    "reconnect": "重新连接",
+    "connect_team": "连接团队账号",
+    "acts_as_team": "以团队账号行动",
+    "acts_as_starter": "以发起运行的人的账号行动"
+  },
+  "add_app_dialog": {
+    "title": "为 {{agent}} 添加应用",
+    "description": "使用个人账号的应用会用发起运行者的账号，所以即使你自己没有账号也可以添加。",
+    "search_other": "搜索 {{count}} 个应用",
+    "search_label": "搜索应用",
+    "curated": "精选",
+    "recommended_team": "通常用团队账号",
+    "recommended_personal": "通常用个人账号",
+    "team_connected": "团队账号已连接",
+    "add": "添加",
+    "add_aria": "添加 {{app}}",
+    "empty": "没有匹配的应用。",
+    "load_failed": "无法加载应用。",
+    "added_toast": "已将 {{app}} 添加给 {{agent}}。"
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} 想使用 {{app}}",
+    "new_app": "此智能体的新应用",
+    "adds_app_note": "回应后，{{agent}} 之后的运行都可以使用 {{app}}。",
+    "add_to_agent": "将 {{app}} 添加给 {{agent}}"
   }
 }

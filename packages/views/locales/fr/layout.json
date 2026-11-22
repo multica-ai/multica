@@ -11,6 +11,7 @@
     "usage": "Statistiques",
     "runtimes": "Runtimes",
     "skills": "Skills",
+    "apps": "Apps",
     "settings": "Paramètres",
     "views": "Vues",
     "docs": "Documents"
@@ -23,6 +24,7 @@
     "member": "Membre",
     "squad": "Squad",
     "skill": "Skill",
+    "app": "App",
     "machine": "Machine",
     "runtime": "Runtime",
     "attachment": "Pièce jointe",

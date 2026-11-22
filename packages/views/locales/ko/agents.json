@@ -211,7 +211,12 @@
     "status": "상태",
     "runs_7d": "실행 (7일)",
     "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경",
-    "all_settings": "모든 설정"
+    "all_settings": "모든 설정",
+    "apps": "앱",
+    "apps_needs_account_other": "{{count}}개에 내 계정 필요",
+    "apps_count_other": "앱 {{count}}개",
+    "apps_none": "없음",
+    "apps_aria": "앱: {{value}}. 앱 보기"
   },
   "pickers": {
     "concurrency_range": "최대 동시 실행 수({{min}}-{{max}})",
@@ -645,13 +650,9 @@
       "load_failed": "이 에이전트의 앱을 불러오지 못했습니다.",
       "empty": "연결된 앱이 없습니다.",
       "level": "계정 범위",
-      "team_connected": "팀 계정 연결됨",
-      "team_missing": "팀 계정 미연결",
-      "personal_connected": "내 계정 연결됨",
-      "personal_missing": "이 앱을 아직 연결하지 않았습니다",
       "team_admin_only": "에이전트에 팀 계정을 부여할 수 있는 사람은 워크스페이스 관리자뿐입니다.",
       "team_shared_warning": "이 에이전트를 실행할 수 있는 사람은 누구나 이 팀 계정으로 작업할 수 있습니다.",
-      "manage_link": "설정 → 연결된 앱에서 계정 관리",
+      "manage_link": "앱 → 계정에서 계정 관리",
       "save_failed_toast": "저장하지 못했습니다. 다시 시도하세요",
       "team_help": "관리자가 연결하는 워크스페이스 공용 계정입니다.",
       "personal_help": "실행을 시작한 사람의 계정을 사용합니다. 각자 계정을 연결해야 합니다.",
@@ -1071,5 +1072,35 @@
       "comment": "수정했습니다. 375px 이하에서 요금 카드가 한 열로 바뀝니다. PR을 열었고 테스트도 통과했습니다.",
       "step_read": "{{file}} 읽기"
     }
+  },
+  "apps_section": {
+    "title": "앱",
+    "empty": "이 에이전트는 아직 앱을 사용하지 않습니다.",
+    "connect_yours": "내 계정 연결",
+    "reconnect": "다시 연결",
+    "connect_team": "팀 계정 연결",
+    "acts_as_team": "팀 계정으로 동작",
+    "acts_as_starter": "실행을 시작한 사람의 계정으로 동작"
+  },
+  "add_app_dialog": {
+    "title": "{{agent}}에 앱 추가",
+    "description": "개인 계정 앱은 에이전트를 시작한 사람의 계정을 사용하므로, 내 계정이 없어도 추가할 수 있습니다.",
+    "search_other": "앱 {{count}}개 검색",
+    "search_label": "앱 검색",
+    "curated": "엄선",
+    "recommended_team": "보통 팀 계정",
+    "recommended_personal": "보통 개인 계정",
+    "team_connected": "팀 계정 연결됨",
+    "add": "추가",
+    "add_aria": "{{app}} 추가",
+    "empty": "일치하는 앱이 없습니다.",
+    "load_failed": "앱을 불러오지 못했습니다.",
+    "added_toast": "{{agent}}에 {{app}}을(를) 추가했습니다."
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}}이(가) {{app}} 사용을 요청합니다",
+    "new_app": "이 에이전트의 새 앱",
+    "adds_app_note": "응답하면 이후 실행부터 {{agent}}이(가) {{app}}을(를) 사용할 수 있습니다.",
+    "add_to_agent": "{{agent}}에 {{app}} 추가"
   }
 }

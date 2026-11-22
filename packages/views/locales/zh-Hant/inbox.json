@@ -69,6 +69,7 @@
     "autopilot_quota_exceeded_body": "目前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置、升級方案或加購之前，後續自動化執行將不會啟動。",
     "project_owner_joined_body": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。",
     "open_project": "開啟專案",
+    "open_app": "開啟應用程式",
     "autopilot_quota_upgrade": "查看選項",
     "archive": "歸檔",
     "unarchive": "取消歸檔",
