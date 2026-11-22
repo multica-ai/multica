@@ -29,7 +29,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode); project workflows — status columns, handoffs, a `[Project workflow]` block in your prompt, reading or changing a workflow (`multica workflow`, `multica project workflow`) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/environments.md` | Local environments in the issue sidebar: writing `.multica/environments.toml`, `multica env start` / `stop` / `list`, detected servers |
-| `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
+| `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive; editing a workspace skill's content without overwriting someone else's save (`--base-revision`) |
 | `references/themes.md` | Building or changing a Multica app theme: the format, the checker, delivering to Desktop's themes folder or as a `.zip` |
 | `references/inbox.md` | Going through the runtime owner's inbox for them: listing unread notifications, marking read or unread, archiving, snoozing, bulk clean-up (`multica inbox`) |
 

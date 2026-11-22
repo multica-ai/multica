@@ -13,7 +13,7 @@ describe("DocsGate", () => {
   it("shows an empty state instead of the page while docs_v1 is off", () => {
     renderWithI18n(<DocsGate><p>doc page</p></DocsGate>);
     expect(screen.queryByText("doc page")).toBeNull();
-    expect(screen.getByText("Docs isn't available here")).toBeTruthy();
+    expect(screen.getByText("Docs isn't enabled in this workspace")).toBeTruthy();
   });
 
   it("renders the page once the server config turns docs_v1 on", () => {

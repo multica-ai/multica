@@ -67,6 +67,27 @@ function mapMutationOptions(
   };
 }
 
+/**
+ * Answer the one-time auto-archive question. The server applies the answer to
+ * every workspace where it is still pending, so every workspace's cached
+ * preferences are refetched.
+ */
+export function useResolveAutoArchivePrompt() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation<NotificationPreferenceResponse, Error, NotificationPreferences>({
+    mutationFn: (preferences) => api.resolveAutoArchivePrompt(preferences),
+    onSuccess: (data) => {
+      qc.setQueryData(notificationPreferenceKeys.all(wsId), data);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: notificationPreferenceKeys.root() });
+      qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+    },
+  });
+}
+
 export function useUpdateNotificationPreferences() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

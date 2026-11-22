@@ -3,6 +3,31 @@ const { defineConfig } = require('eslint/config');
 const expoConfig = require("eslint-config-expo/flat");
 const coreExports = require("../../packages/core/package.json").exports;
 
+const MOBILE_I18N_ATTRIBUTE_GUARD = {
+  selector: [
+    "JSXAttribute[name.name=/^(placeholder|title|aria-label|alt|accessibilityLabel)$/] > Literal[value=/[A-Za-z]/]:not([value=/^https?:/])",
+    "JSXAttribute[name.name=/^(placeholder|title|aria-label|alt|accessibilityLabel)$/] > JSXExpressionContainer > Literal[value=/[A-Za-z]/]:not([value=/^https?:/])",
+    "JSXAttribute[name.name=/^(placeholder|title|aria-label|alt|accessibilityLabel)$/] > JSXExpressionContainer > TemplateLiteral > TemplateElement[value.raw=/[A-Za-z]/]:not([value.raw=/^https?:/])",
+  ].join(", "),
+  message:
+    "User-visible copy in placeholder/title/aria-label/alt/accessibilityLabel must come from useTranslation().",
+};
+
+const MOBILE_I18N_JSX_TEXT_GUARD = {
+  selector:
+    ":not(JSXElement[openingElement.name.name='code']) > JSXText[value=/[A-Za-z]{2,}/]",
+  message:
+    "User-visible JSX text must come from useT() / useTranslation() rather than a hardcoded string literal.",
+};
+
+const MOBILE_I18N_TOAST_GUARD = {
+  selector: [
+    ":matches(CallExpression[callee.name='toast'], CallExpression[callee.object.name='toast']) > Literal[value=/[A-Za-z]/]:not([value=/^https?:/])",
+    ":matches(CallExpression[callee.name='toast'], CallExpression[callee.object.name='toast']) > TemplateLiteral > TemplateElement[value.raw=/[A-Za-z]/]:not([value.raw=/^https?:/])",
+  ].join(", "),
+  message: "Toast copy must come from useTranslation().",
+};
+
 // Mobile shares only types and pure helpers with core. These barrels re-export
 // nothing else; every other core barrel also pulls in hooks, Query factories,
 // stores or React context, which must not load under React Native.
@@ -35,6 +60,18 @@ module.exports = defineConfig([
     files: ["**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-restricted-imports": ["error", { paths: coreBarrelImports }],
+    },
+  },
+  {
+    files: ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        MOBILE_I18N_ATTRIBUTE_GUARD,
+        MOBILE_I18N_JSX_TEXT_GUARD,
+        MOBILE_I18N_TOAST_GUARD,
+      ],
     },
   },
 ]);

@@ -379,4 +379,49 @@ describe("selection to reply", () => {
     action.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
   });
+
+  it("preserves an in-progress annotation note across unmount and remount without stealing focus", async () => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+    const first = renderWithI18n(<Fixture child />);
+    selectText(first.container, "mouse", '[data-comment-content="child"]');
+    fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
+    const input = await screen.findByRole("textbox", { name: "Comment" });
+    fireEvent.change(input, { target: { value: "In-progress draft note" } });
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+
+    // Simulate Virtuoso unmounting the thread card on scroll-out.
+    first.unmount();
+    expect(useCommentDraftStore.getState().getPendingAnnotation(key)?.annotation.note).toBe("In-progress draft note");
+
+    // Remounting the card restores the open popup with the typed draft intact.
+    renderWithI18n(<Fixture child />);
+    const restored = await screen.findByRole("textbox", { name: "Comment" });
+    expect(restored).toHaveValue("In-progress draft note");
+    expect(restored).not.toHaveFocus();
+
+    // Explicit dismiss clears the persisted pending draft so it does not reopen.
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument());
+    expect(useCommentDraftStore.getState().drafts[key]).toBeUndefined();
+  });
+
+  it("preserves unsaved edits to an existing annotation across unmount and remount", async () => {
+    useCommentDraftStore.getState().addAnnotation(key, {
+      id: "saved-1", sourceCommentId: "root", sourceActorName: "agent",
+      quote: "Selected text", start: 0, prefix: "", suffix: "", note: "Original note",
+    });
+    const first = renderWithI18n(<Fixture />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+    const edit = await screen.findByRole("textbox", { name: "Comment" });
+    fireEvent.change(edit, { target: { value: "Half-finished revision" } });
+    expect(useCommentDraftStore.getState().getAnnotations(key)[0]?.note).toBe("Original note");
+
+    first.unmount();
+    renderWithI18n(<Fixture />);
+    const restored = await screen.findByRole("textbox", { name: "Comment" });
+    expect(restored).toHaveValue("Half-finished revision");
+    fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
+    expect(useCommentDraftStore.getState().getAnnotations(key)[0]?.note).toBe("Half-finished revision");
+    expect(useCommentDraftStore.getState().getPendingAnnotation(key)).toBeUndefined();
+  });
 });

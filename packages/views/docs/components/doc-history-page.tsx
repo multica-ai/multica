@@ -69,9 +69,10 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
           {
             href: p.docDetail(docId),
             label: doc.data?.title || t(($) => $.untitled),
+            className: "min-w-0 max-w-72 truncate",
           },
         ]}
-        leaf={t(($) => $.history.title)}
+        leaf={<span className="shrink-0">{t(($) => $.history.title)}</span>}
       />
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <div className="max-h-52 shrink-0 overflow-auto border-b p-3 md:max-h-none md:w-60 md:border-r md:border-b-0">
@@ -97,8 +98,18 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                     : ""}
                 </span>
                 <span className="mt-1 block truncate text-caption">
-                  {getActorName(v.authorType, v.authorId)}
+                  {(v.contributors.length > 1
+                    ? v.contributors
+                    : [{ type: v.authorType, id: v.authorId }]
+                  )
+                    .map((c) => getActorName(c.type, c.id))
+                    .join(", ")}
                 </span>
+                {v.message && (
+                  <span className="block truncate text-caption text-muted-foreground">
+                    {v.message}
+                  </span>
+                )}
                 <span className="block text-caption text-muted-foreground">
                   {new Date(v.updatedAt).toLocaleString()}
                 </span>
@@ -114,13 +125,14 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
               </Button>
             ) : version.data ? (
               <>
-                <div className="mb-6 flex items-center justify-between gap-3">
-                  <h1 className="text-display-sm font-semibold">
+                <div className="mb-6 flex items-start justify-between gap-3">
+                  <h1 className="min-w-0 flex-1 text-display-sm font-semibold leading-snug wrap-anywhere">
                     {version.data.title || t(($) => $.untitled)}
                   </h1>
                   <Button
                     variant="outline"
                     size="sm"
+                    className="shrink-0"
                     disabled={
                       update.isPending ||
                       !doc.data ||

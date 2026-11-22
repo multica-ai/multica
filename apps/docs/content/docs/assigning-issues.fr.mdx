@@ -97,7 +97,7 @@ Dans les scripts, utilisez `--to-id <uuid>` pour éviter de cibler un mauvais ob
 
 Utilisez `--no-start` lorsque l'assignation doit enregistrer le responsable sans créer de nouvelle exécution — par exemple lorsque le même agent traite déjà la tâche depuis une autre exécution. La même option est disponible sur `issue update` et `issue status`. Si un flux qui ne fait qu'enregistrer le responsable modifie à la fois l'assignation et le statut, passez-la aux deux commandes : neutraliser le déclenchement de l'assignation ne neutralise pas une exécution déclenchée ensuite par le changement de statut.
 
-Si une assignation ou un changement de statut ne démarre aucune exécution — par exemple parce que la tâche est en Triage ou que l'agent n'a pas de runtime — la commande en indique la raison sur stderr. `issue batch update` affiche la même indication dans sa colonne de raison.
+Si une assignation ou un changement de statut ne démarre aucune exécution — par exemple parce que la tâche est en `backlog` ou que l'agent n'a pas de runtime — la commande en indique la raison sur stderr. `issue batch update` affiche la même indication dans sa colonne de raison.
 
 ## Étapes suivantes
 

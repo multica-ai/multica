@@ -12,8 +12,8 @@ type IssueId = "OPS-41" | "OPS-42" | "OPS-43" | "OPS-44";
 const ISSUE_MENU: IssueStatus[] = ["todo", "in_progress", "in_review", "done", "cancelled"];
 const PROJECT_MENU: ProjectStatus[] = ["planned", "in_progress", "paused", "completed", "cancelled"];
 
-// Progress counts issues in the done and closed categories (handler/project.go).
-const finished = (s: IssueStatus) => s === "done" || s === "cancelled";
+// Progress is done ÷ issues still in scope; cancelled ones leave the scope
+// (newProjectProgress in handler/project.go).
 
 const issueDot: Record<IssueStatus, string> = {
   todo: "border-muted-foreground",
@@ -60,7 +60,7 @@ const copy = {
       firstMenu: "Pick Done.",
       second: "Progress went up a step. The partner promotion is no longer happening: set OPS-44 to Cancelled.",
       secondMenu: "Pick Cancelled. A cancelled issue has left the project's scope.",
-      allDone: "Cancelled counts toward progress too, so the project is at 100%. Its own status is still In Progress: it does not follow the issues. Click the project status.",
+      allDone: "OPS-44 left the scope, so the three remaining issues are all done and the project is at 100%. Its own status is still In Progress: it does not follow the issues. Click the project status.",
       projectMenu: "Pick Completed. Changing it would not touch any issue either.",
       done: "The project is now Completed; that never happens on its own. Use Replay to watch again.",
     },
@@ -101,7 +101,7 @@ const copy = {
       firstMenu: "选择已完成。",
       second: "进度前进了一格。合作推广不做了：把 OPS-44 改为已取消。",
       secondMenu: "选择已取消。取消表示这项工作已从项目范围中结束。",
-      allDone: "已取消同样计入进度，项目到了 100%，但项目状态还是进行中：它不跟随任务变化。点击项目状态。",
+      allDone: "OPS-44 移出了范围，剩下 3 个任务都已完成，项目到了 100%，但项目状态还是进行中：它不跟随任务变化。点击项目状态。",
       projectMenu: "选择已完成。修改项目状态也不会改动其中的任务。",
       done: "项目状态改成了已完成，这一步不会自动发生。点右上角可以重新演示。",
     },
@@ -142,7 +142,7 @@ const copy = {
       firstMenu: "完了を選んでください。",
       second: "進捗が 1 段進みました。パートナーとの共同プロモーションは取りやめになったので、OPS-44 をキャンセル済みにしてください。",
       secondMenu: "キャンセル済みを選んでください。キャンセルは、その作業がプロジェクトの範囲から外れたことを表します。",
-      allDone: "キャンセル済みも進捗に数えるので、プロジェクトは 100% になりました。それでもプロジェクトのステータスは進行中のままで、タスクには連動しません。プロジェクトのステータスをクリックしてください。",
+      allDone: "OPS-44 は範囲から外れ、残る 3 件がすべて完了したので、プロジェクトは 100% になりました。それでもプロジェクトのステータスは進行中のままで、タスクには連動しません。プロジェクトのステータスをクリックしてください。",
       projectMenu: "完了を選んでください。プロジェクトのステータスを変えても、タスクは変わりません。",
       done: "プロジェクトが完了になりました。これは自動では起きません。右上から最初に戻せます。",
     },
@@ -183,7 +183,7 @@ const copy = {
       firstMenu: "완료를 선택하세요.",
       second: "진행률이 한 칸 올랐습니다. 파트너 공동 홍보는 하지 않기로 했으니 OPS-44를 취소됨으로 바꾸세요.",
       secondMenu: "취소됨을 선택하세요. 취소는 그 작업이 프로젝트 범위에서 끝났다는 뜻입니다.",
-      allDone: "취소됨도 진행률에 들어가서 프로젝트가 100%가 됐습니다. 그래도 프로젝트 상태는 여전히 진행 중입니다. 태스크를 따라 바뀌지 않습니다. 프로젝트 상태를 클릭하세요.",
+      allDone: "OPS-44가 범위에서 빠지고 남은 3개가 모두 완료되어 프로젝트가 100%가 됐습니다. 그래도 프로젝트 상태는 여전히 진행 중입니다. 태스크를 따라 바뀌지 않습니다. 프로젝트 상태를 클릭하세요.",
       projectMenu: "완료됨을 선택하세요. 프로젝트 상태를 바꿔도 태스크는 바뀌지 않습니다.",
       done: "프로젝트가 완료됨이 됐습니다. 이 단계는 자동으로 일어나지 않습니다. 오른쪽 위에서 다시 볼 수 있습니다.",
     },
@@ -224,7 +224,7 @@ const copy = {
       firstMenu: "Choisissez Terminé.",
       second: "L'avancement a progressé d'un cran. La promotion avec le partenaire n'aura pas lieu : passez OPS-44 à Annulé.",
       secondMenu: "Choisissez Annulé. Une tâche annulée est sortie du périmètre du projet.",
-      allDone: "Annulé compte aussi dans l'avancement : le projet est à 100 %. Son propre statut reste En cours, car il ne suit pas les tâches. Cliquez sur le statut du projet.",
+      allDone: "OPS-44 est sorti du périmètre et les trois tâches restantes sont terminées : le projet est à 100 %. Son propre statut reste En cours, car il ne suit pas les tâches. Cliquez sur le statut du projet.",
       projectMenu: "Choisissez Terminé. Changer le statut du projet ne touche à aucune tâche non plus.",
       done: "Le projet est maintenant Terminé ; cela n'arrive jamais tout seul. Relancez la démo pour la revoir.",
     },
@@ -257,8 +257,9 @@ export function ProjectDemo() {
 
   const shownPhase: Phase = visible ? phase : "idle";
   const ids = Object.keys(statuses) as IssueId[];
-  const done = ids.filter((id) => finished(statuses[id])).length;
-  const percent = Math.round((done / ids.length) * 100);
+  const done = ids.filter((id) => statuses[id] === "done").length;
+  const scope = ids.filter((id) => statuses[id] !== "cancelled").length;
+  const percent = scope > 0 ? Math.floor((done / scope) * 100) : 0;
   const step = visible ? SCRIPT[phase] : undefined;
 
   const toggleMenu = () => {
@@ -357,7 +358,7 @@ export function ProjectDemo() {
               />
             </span>
             <span key={done} className="shrink-0 text-caption tabular-nums text-muted-foreground motion-safe:animate-in motion-safe:fade-in">
-              {done}/{ids.length} · {percent}%
+              {done}/{scope} · {percent}%
             </span>
           </dd>
         </dl>

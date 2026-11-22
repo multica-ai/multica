@@ -24,7 +24,7 @@ export type ChannelId = "slack" | "lark" | "dingtalk" | "wecom" | "telegram";
 
 export const CHANNELS: { id: ChannelId; name: string; Mark: ComponentType<{ className?: string }> }[] = [
   { id: "slack", name: "Slack", Mark: SlackMark },
-  { id: "lark", name: "Feishu", Mark: LarkMark },
+  { id: "lark", name: "Lark", Mark: LarkMark },
   { id: "dingtalk", name: "DingTalk", Mark: DingTalkMark },
   { id: "wecom", name: "WeCom", Mark: WecomMark },
   { id: "telegram", name: "Telegram", Mark: TelegramMark },

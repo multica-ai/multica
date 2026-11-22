@@ -171,6 +171,7 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 	var b strings.Builder
 	var lines strings.Builder
 	gateway := ""
+	remote := false
 	for _, app := range apps {
 		serverName := sanitizeBriefCodeToken(app.ServerName)
 		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
@@ -189,6 +190,13 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 			fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`%s\n", name, toolkitSlug, serverName, gatewayAppDetail(app))
 			continue
 		}
+		if app.Provider == "multica_remote" {
+			// Served by Multica under the app's own server name: its tools
+			// are called directly, not through the apps_* meta tools.
+			remote = true
+			fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`%s\n", name, toolkitSlug, serverName, gatewayAppDetail(app))
+			continue
+		}
 		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
 	}
 	if lines.Len() == 0 {
@@ -201,6 +209,10 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 		fmt.Fprintf(&b, "On `%s`, find tools with `apps_search_tools`, read the schema with `apps_get_tool`, then call `apps_run_tool`. "+
 			"Allowed calls run immediately and return their result. Never work around a blocked call. "+
 			"For a `not connected` account, call `apps_request_connection` and end your turn.\n", gateway)
+	}
+	if remote {
+		b.WriteString("Call the tools of an app on its own MCP server directly. " +
+			"For a `not connected` account, call `apps_request_connection` on `multica_apps` and end your turn.\n")
 	}
 	b.WriteString("\n")
 	return b.String()
@@ -276,13 +288,14 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `multica issue comment list <issue-id> [--roots-only] [--summary] [--thread <comment-id> [--tail N] | --recent N] [--since <RFC3339>] [--compact] --output json` — thread-aware comment reads. Read in two bounded steps: scan with `--roots-only --summary`, then expand one thread with `--thread <id> --tail N`. Careful with `--recent N`: it caps THREADS, not comments, and can return the whole history on a small issue. Resolved-thread folding, paging cursors, and full flag semantics: `--help`.\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <YYYY-MM-DD>] [--attachment <path>]` — create an issue. Put agent-authored long descriptions in `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182); write that file inside your working directory, never `/tmp` or shared paths.\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <YYYY-MM-DD>]` — update fields; pass `--parent \"\"` to clear parent.\n")
+	b.WriteString("- `multica issue edit-description <id> --old <exact text> --new <text>` — people may be editing a description live, so change part of it with this; a whole new `--description-file` on `issue update` should carry `--description-base-revision <description_revision from issue get>` so edits made since are merged in.\n")
 	b.WriteString("- `multica issue assign <id> (--to X | --to-id <uuid> | --unassign)` — change ownership; assigning to an agent can start a run.\n")
 	writeIssueStatusCommand(b, ctx)
 	b.WriteString(duplicateOfCommandLine)
 	b.WriteString("- `multica issue wakeup <create|list|get|update|disable|trigger|delete|runs|events>` — persist an event, condition or time wakeup on this issue, then finish the current run. When the platform can check the fact itself, use one `--until-*` condition so no run starts before it holds; check the rule's `last_error` for missing PR links or snapshots, which are retried automatically. Conditions, PR rules and actor filters: `multica issue wakeup create --help` and the multica-platform issues reference.\n")
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
 	if ctx.DocsEnabled {
-		b.WriteString("- `multica doc list|search|get|create|update|move` — workspace docs; `doc search <query>` matches titles and content; `doc update` needs `--base-revision` from `multica doc get` (details: `multica doc --help`).\n")
+		b.WriteString("- `multica doc list|search|get|create|edit|update|move|folder` — workspace docs and folders (`doc folder list|create|update|move`); `doc search <query>` matches titles and content; people may be editing a doc live, so change part of it with `doc edit <id> --old <exact text> --new <text>`; `doc update` rewrites the whole doc and needs `--base-revision` from `multica doc get` (details: `multica doc --help`).\n")
 	}
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file` with a file inside your working directory; full flags: `multica issue comment add --help`.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>] [--fresh]` — repository checkout on a dedicated branch; re-running it keeps a checkout that has uncommitted or unpushed work, or is already on this task's branch, and only fetches; a clean, fully pushed checkout on another branch starts over on a new branch. `--fresh` discards uncommitted and untracked files for a new branch; commits stay on the old branch, so push any you still need first.\n\n")

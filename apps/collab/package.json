@@ -1,0 +1,28 @@
+{
+  "name": "@multica/collab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hocuspocus/server": "^4.9.0",
+    "@multica/views": "workspace:*",
+    "happy-dom": "^21.0.4",
+    "node-diff3": "^4.0.0",
+    "tsx": "^4.21.0",
+    "y-protocols": "catalog:",
+    "yjs": "catalog:"
+  },
+  "devDependencies": {
+    "@hocuspocus/provider": "catalog:",
+    "@multica/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
+    "vitest": "catalog:"
+  }
+}

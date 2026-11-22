@@ -170,12 +170,12 @@ describe("AgentBatchToolbar — presence", () => {
     const view = renderToolbar([makeRow("a", "user-1")]);
 
     fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
-    await screen.findByText(/Applies to 1 agents/);
+    await screen.findByText(/Applies to 1 agent/);
 
     view.rerenderRows([]);
 
     await waitFor(() => {
-      expect(screen.queryByText(/Applies to 1 agents/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Applies to 1 agent/)).not.toBeInTheDocument();
       expect(
         screen.queryByRole("button", { name: "Set access scope" }),
       ).not.toBeInTheDocument();
@@ -208,7 +208,7 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Set access scope" }),
     );
-    await screen.findByText(/Applies to 1 agents/);
+    await screen.findByText(/Applies to 1 agent/);
 
     // No radio clicked yet — Apply must be disabled
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
@@ -222,7 +222,7 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
     renderToolbar([makeRow("a", "user-1")]);
 
     fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
-    await screen.findByText(/Applies to 1 agents/);
+    await screen.findByText(/Applies to 1 agent/);
 
     fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
 
@@ -279,7 +279,7 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
     renderToolbar([makeRow("a", "user-1")]);
 
     fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
-    await screen.findByText(/Applies to 1 agents/);
+    await screen.findByText(/Applies to 1 agent/);
     fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled(),
@@ -293,7 +293,7 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
-    await screen.findByText(/Applies to 1 agents/);
+    await screen.findByText(/Applies to 1 agent/);
 
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
     expect(

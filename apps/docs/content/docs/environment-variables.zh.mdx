@@ -47,6 +47,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途运行的宽限时间；低于 `150s` 时按 `150s` 处理 |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Web 和 Desktop 为每个工作区维护本地搜索索引；设为 `off` 可切回由服务端搜索 |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | 在数据统计页开启 365 天时间范围；如果整年统计查询对数据库压力过大可设为 `off` |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 
@@ -194,15 +196,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 编码的 32 字节 Bot token 加密密钥 |
 | WeChat | `MULTICA_WEIXIN_SECRET_KEY` | Base64 编码的 32 字节密钥，加密微信机器人凭据和扫码状态 |
 | Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | 流式回复中展示的工具步骤：`auto`（默认，私聊显示细节，群聊只显示工作类型）、`off`、`summary` 或 `detail` |
-| Composio | `COMPOSIO_API_KEY` | 启用 Composio 工具连接 |
-| Composio | `COMPOSIO_CALLBACK_BASE_URL` | 回调 API 地址；可回退到 `MULTICA_PUBLIC_URL` |
-| Composio | `COMPOSIO_STATE_SECRET` | OAuth state 签名密钥；可从 `JWT_SECRET` 派生 |
 | 自托管 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 集成开关，compose 默认开启 |
 | 自托管 Git | `MULTICA_VCS_SECRET_KEY` | base64 编码的 32 字节加密密钥（`openssl rand -base64 32`）；未配置时该功能整体不可用 |
-| 插件 | `MULTICA_PLUGIN_SECRET_KEY` | base64 编码的 32 字节密钥，用于加密已存 secret 和 surface 启动 URL |
-| 插件 | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 路由到后端的独立无 Cookie 浏览器 origin；必须不同于 app/API origin，并保留 `Host` |
-| 插件 | `MULTICA_PLUGIN_API_URL` | 带版本的插件 Public API 完整 Base URL，例如 `https://plugin-api.example.com/v1`；未设置时使用 `MULTICA_PUBLIC_URL` + `/v1` |
-| 插件 | `MULTICA_PLUGIN_DIR` | 开发时用于发布本地插件包的可选绝对目录 |
 | 主题商店 | `MULTICA_THEME_REGISTRY_URL` | 改用其他仓库的 `index.json`，比如官方仓库的 fork；见 [主题与外观](/themes#自托管) |
 
 不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像，并在合并后改状态，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
@@ -310,6 +305,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 | 工具 | 前缀 | 有模型变量 |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓（选择 Amp 模式，例如 `high`） |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓（取值是 `agy models` 显示的完整名称） |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -318,7 +314,9 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓（取值是 dsh 模型目录中的 id，例如 `deepseek-official/deepseek-chat`） |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓（取值是 dim 模型目录中的 id） |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -336,6 +334,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —（模型由 ZeroClaw 的智能体配置管理） |
 
 </Accordion>
@@ -343,7 +342,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型，详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 另有 `MULTICA_DSH_PROFILE_BUNDLE` 和 `MULTICA_DSH_PLUGIN_PATH`，见下一节。
 
-全机默认参数 `MULTICA_<前缀>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具，对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+全机默认参数 `MULTICA_<前缀>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code、Amp、Factory Droid 和 QwenPaw 七款工具，对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_AMP_ARGS`、`MULTICA_DROID_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

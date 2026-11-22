@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
@@ -120,12 +121,83 @@ func TestReportCursorMcpLoginNoticePostsOnlyWhenLoginMissing(t *testing.T) {
 		t.Fatalf("login workspace config missing after task cleanup: %v", err)
 	}
 	loginAuth := execenv.CursorMcpAuthPath(filepath.Join(loginDir, "cursor-data"), loginWork)
-	if err := os.WriteFile(loginAuth, []byte(`{"mobbin":{"tokens":{"access_token":"a","refresh_token":"r"}}}`), 0o600); err != nil {
-		t.Fatalf("log in through workspace: %v", err)
+	cursorRenameWrite(t, loginAuth, `{"mobbin":{"tokens":{"access_token":"a","refresh_token":"r"}}}`)
+	// The agent's next task collects the login before it starts.
+	execenv.SyncCursorMcpLoginWorkspaces("", store, "", quietTaskLog())
+	if got := storeAccessToken(t, store, "mobbin"); got != "a" {
+		t.Fatalf("login did not land in the agent store: %s", readTestFile(t, store))
 	}
-	if got := readTestFile(t, store); !strings.Contains(got, `"access_token":"a"`) {
-		t.Fatalf("login did not land in the agent store: %s", got)
+}
+
+// cursorRenameWrite saves path the way cursor-agent 2026.11.19 does, renaming
+// a new file over it.
+func cursorRenameWrite(t *testing.T, path, content string) {
+	t.Helper()
+	tmp := path + ".cursor-tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {
+		t.Fatalf("write %s: %v", tmp, err)
 	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatalf("rename over %s: %v", path, err)
+	}
+}
+
+func storeAccessToken(t *testing.T, store, server string) string {
+	t.Helper()
+	var entries map[string]struct {
+		Tokens struct {
+			AccessToken string `json:"access_token"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal([]byte(readTestFile(t, store)), &entries); err != nil {
+		t.Fatalf("parse store: %v", err)
+	}
+	return entries[server].Tokens.AccessToken
+}
+
+func TestStartCursorMcpAuthMirrorSyncsDuringAndAfterRun(t *testing.T) {
+	t.Parallel()
+
+	if stop := startCursorMcpAuthMirror(nil, time.Millisecond, quietTaskLog()); stop == nil {
+		t.Fatal("stop for a task-local login = nil")
+	} else {
+		stop()
+	}
+
+	root := t.TempDir()
+	store := filepath.Join(root, "store", "mcp-auth.json")
+	projectAuth := filepath.Join(root, "task", "cursor-data", "projects", "p", "mcp-auth.json")
+	for _, path := range []string{store, projectAuth} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	baseFile := filepath.Join(root, "task", "cursor-mcp-auth-base.json")
+	base, _ := json.Marshal(map[string]string{"project_auth": projectAuth, "auth": "{}\n"})
+	if err := os.WriteFile(baseFile, base, 0o600); err != nil {
+		t.Fatalf("write base: %v", err)
+	}
+	mirror := &execenv.CursorMcpAuthMirror{ProjectAuth: projectAuth, Target: store, BaseFile: baseFile}
+
+	stop := startCursorMcpAuthMirror(mirror, 5*time.Millisecond, quietTaskLog())
+	cursorRenameWrite(t, projectAuth, `{"mobbin":{"tokens":{"access_token":"a","refresh_token":"r"}}}`)
+	deadline := time.Now().Add(5 * time.Second)
+	for storeAccessToken(t, store, "mobbin") != "a" {
+		if time.Now().After(deadline) {
+			t.Fatalf("login not merged while the run is going: %s", readTestFile(t, store))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	cursorRenameWrite(t, projectAuth, `{"mobbin":{"tokens":{"access_token":"b","refresh_token":"r2"}}}`)
+	stop()
+	if got := storeAccessToken(t, store, "mobbin"); got != "b" {
+		t.Fatalf("stop did not run a final sync: %s", readTestFile(t, store))
+	}
+	stop()
 }
 
 func TestCursorMcpLoginNoticeOnUserDataDirPointsAtUserLoginWorkspace(t *testing.T) {
@@ -159,11 +231,10 @@ func TestCursorMcpLoginNoticeOnUserDataDirPointsAtUserLoginWorkspace(t *testing.
 	}
 
 	loginAuth := execenv.CursorMcpAuthPath(userData, loginWork)
-	if err := os.WriteFile(loginAuth, []byte(`{"mobbin":{"tokens":{"access_token":"a","refresh_token":"r"}}}`), 0o600); err != nil {
-		t.Fatalf("log in through workspace: %v", err)
-	}
-	if got := readTestFile(t, store); !strings.Contains(got, `"access_token":"a"`) {
-		t.Fatalf("login did not land in the agent store: %s", got)
+	cursorRenameWrite(t, loginAuth, `{"mobbin":{"tokens":{"access_token":"a","refresh_token":"r"}}}`)
+	execenv.SyncCursorMcpLoginWorkspaces("", store, userData, quietTaskLog())
+	if got := storeAccessToken(t, store, "mobbin"); got != "a" {
+		t.Fatalf("login did not land in the agent store: %s", readTestFile(t, store))
 	}
 }
 

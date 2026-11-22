@@ -4,6 +4,7 @@ import {
   createContext,
   use,
   useEffect,
+  useMemo,
   useState,
   useCallback,
   useSyncExternalStore,
@@ -34,6 +35,8 @@ type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => 
 export type WSStatus = WSConnectionStatus | "offline";
 
 interface WSContextValue {
+  /** WebSocket URL of the live doc co-editing service. */
+  collabUrl: string;
   subscribe: (event: WSEventType, handler: EventHandler) => () => void;
   onReconnect: (callback: () => void) => () => void;
   subscribeStatus: (listener: () => void) => () => void;
@@ -41,6 +44,16 @@ interface WSContextValue {
 }
 
 const WSContext = createContext<WSContextValue | null>(null);
+
+/** The co-editing service is served next to realtime: `…/ws` → `…/collab`. */
+export function collabUrlFromWsUrl(wsUrl: string): string {
+  const url = new URL(wsUrl, globalThis.location?.href ?? "http://localhost");
+  if (url.protocol === "http:") url.protocol = "ws:";
+  if (url.protocol === "https:") url.protocol = "wss:";
+  url.pathname = url.pathname.replace(/\/ws\/?$/, "") + "/collab";
+  url.search = "";
+  return url.toString();
+}
 
 export interface WSProviderProps {
   children: ReactNode;
@@ -186,9 +199,11 @@ export function WSProvider({
     [wsClient],
   );
 
+  const collabUrl = useMemo(() => collabUrlFromWsUrl(wsUrl), [wsUrl]);
+
   return (
     <WSContext.Provider
-      value={{ subscribe, onReconnect: onReconnectCb, subscribeStatus, getStatus }}
+      value={{ collabUrl, subscribe, onReconnect: onReconnectCb, subscribeStatus, getStatus }}
     >
       {children}
     </WSContext.Provider>

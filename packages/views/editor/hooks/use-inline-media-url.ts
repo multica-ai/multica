@@ -84,17 +84,20 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // load failure as meaningful (the viewer skips broken images) waits it out
 // instead of rendering it.
 // Viewers and neighbour prefetch reauthenticate stale metadata on mount;
-// inline thumbnails stay lazy.
+// inline thumbnails stay lazy. A disabled call fetches nothing and returns
+// the picked URL, for a caller that is not rendering the original.
 export function useResignedInlineMedia(
   attachmentId: string | undefined,
   rawPickedUrl: string,
   blobFallback: boolean,
   {
+    enabled = true,
     refreshOnMount = false,
     metadataSource = "workspace",
     workspaceId,
     currentMetadata,
   }: {
+    enabled?: boolean;
     refreshOnMount?: boolean;
     metadataSource?: "workspace" | "markdown-link";
     /** Workspace that owns the attachment, when it may not be the current one. */
@@ -117,6 +120,7 @@ export function useResignedInlineMedia(
     }
   })();
   const needsResign =
+    enabled &&
     !!resignAttachmentId &&
     !!pickedUrl &&
     (refreshOnMount ||
@@ -218,24 +222,28 @@ export function useResignedInlineMedia(
 // cookie, so the browser can lazy-load and cache it. Clients that cannot ride
 // that cookie (see useResignedInlineMedia) fetch the bytes through the
 // authenticated client instead; a thumbnail is small enough to hold as a blob.
-// `failed` tells the caller to fall back to the original.
+// `failed` tells the caller to fall back to the original. A disabled call
+// loads nothing and returns an empty url.
 export function useAttachmentThumbnailURL(
   attachmentId: string,
   thumbnailPath: string,
+  enabled = true,
 ): { url: string; pending: boolean; failed: boolean } {
   const native =
     (api.getBaseUrl?.() ?? "") === "" &&
     thumbnailPath.startsWith("/") &&
     !thumbnailPath.startsWith("//");
+  const fetchBytes = enabled && !native;
   const { data: blob, isError } = useQuery({
     queryKey: ["attachment-thumbnail-blob", attachmentId],
     queryFn: ({ signal }) => api.getAttachmentThumbnailBlob(attachmentId, signal),
-    enabled: !native,
+    enabled: fetchBytes,
     staleTime: Infinity,
     gcTime: INLINE_BLOB_GC_MS,
     retry: false,
   });
-  const blobUrl = useObjectURL(native ? undefined : `thumbnail:${attachmentId}`, blob, !!blob);
+  const blobUrl = useObjectURL(fetchBytes ? `thumbnail:${attachmentId}` : undefined, blob, !!blob);
+  if (!enabled) return { url: "", pending: false, failed: false };
   if (native) return { url: thumbnailPath, pending: false, failed: false };
   if (isError) return { url: "", pending: false, failed: true };
   return { url: blobUrl, pending: !blobUrl, failed: false };

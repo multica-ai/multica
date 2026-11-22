@@ -33,11 +33,11 @@
       "other_machine_hint": "在那台机器上运行两条命令",
       "cloud_services": "云服务",
       "qoder_manage_hint": "已连接 · 管理连接",
-      "cloud_runtime_hint": "创建一台 Multica 托管的云节点"
+      "cloud_runtime_hint": "由 Multica 托管的云端节点，随时可用"
     },
     "columns": {
       "name": "名称",
-      "harness": "Harness",
+      "harness": "CLI",
       "agents": "智能体",
       "workload": "负载",
       "status": "状态"
@@ -75,7 +75,7 @@
     "description": "让 Mika 帮你安排任务和协调智能体。",
     "action": "和 Mika 开始",
     "failed": "无法启动 Mika",
-    "dialog_title": "让 Mika 在哪台机器上运行？",
+    "dialog_title": "让 Mika 在哪个运行时上运行？",
     "cancel": "取消"
   },
   "machine": {
@@ -112,7 +112,7 @@
       "workload_idle": "全部空闲",
       "workload_hint": "{{running}} 个运行中 · {{queued}} 个排队中",
       "cli": "CLI",
-      "cloud_worker": "云端 worker",
+      "cloud_worker": "云端节点",
       "local_daemon": "本地守护进程"
     },
     "rename": "重命名机器",
@@ -132,7 +132,7 @@
   "health": {
     "online": {
       "label": "在线",
-      "description": "最近 45 秒内收到心跳。可以派发运行。"
+      "description": "已连接，可随时接收运行。"
     },
     "recently_lost": {
       "label": "最近失联",
@@ -140,11 +140,11 @@
     },
     "offline": {
       "label": "离线",
-      "description": "5 分钟以上没有心跳。请重启守护进程或排查主机。"
+      "description": "已断开超过 5 分钟。请重启该机器上的守护进程或检查网络连接。"
     },
     "long_offline": {
       "label": "长期离线",
-      "description": "6 天以上没有心跳。如果这台主机不会恢复，请将关联智能体改绑到其他运行时，或删除此运行时。"
+      "description": "已断开超过 6 天。如果这台机器不会恢复，请将关联智能体改绑到其他运行时，或删除此运行时。"
     }
   },
   "detail": {
@@ -154,7 +154,7 @@
     "last_seen": "最后活跃 {{when}}",
     "never_seen": "从未连接",
     "fact_owner": "所有者",
-    "fact_device": "设备",
+    "fact_device": "机器",
     "fact_runtime": "运行时",
     "fact_daemon_cli": "守护进程 CLI",
     "fact_daemon_id": "守护进程 ID",
@@ -182,8 +182,8 @@
       "members": "仅你和所选成员可以在此运行时上创建智能体。"
     },
     "visibility_hint_readonly": {
-      "private": "仅运行时所有者可以在此运行时上创建智能体，也只有他们能切换为「公开」。",
-      "public": "工作区内任何成员都可以在此运行时上创建智能体。只有运行时所有者能切回「私有」。",
+      "private": "仅运行时所有者可以在此运行时上创建智能体，也只有他们能切换为\"公开\"。",
+      "public": "工作区内任何成员都可以在此运行时上创建智能体。只有运行时所有者能切回\"私有\"。",
       "members": "仅所有者和所选成员可以在此运行时创建智能体。"
     },
     "visibility_members_title": "共享给成员",
@@ -208,7 +208,7 @@
     },
     "delete_dialog": {
       "self_heal_notice": "该运行时由正在运行的本地守护进程托管。删除会成功，但守护进程会在数秒内重新注册一个新的运行时——若想彻底移除，请先停止守护进程。",
-      "profile_backed_notice": "该运行时来自自定义运行时配置。删除它只会移除当前运行时实例；只要配置仍存在，运行中的守护进程就可以再次注册它。若要彻底移除，请在“自定义运行时”中删除对应配置。",
+      "profile_backed_notice": "该运行时来自自定义运行时配置。删除它只会移除当前运行时实例；只要配置仍存在，运行中的守护进程就可以再次注册它。若要彻底移除，请在\"自定义运行时\"中删除对应配置。",
       "light": {
         "title": "删除运行时？",
         "description": "确定要删除\"{{name}}\"吗？此操作无法撤销。",
@@ -269,7 +269,7 @@
     "troubleshooting": "那台机器打不开浏览器？",
     "trouble_intro": "改用 token 登录替代第 2 步，适用于任何有终端的环境。",
     "trouble_token_hint_prefix": "在 ",
-    "trouble_token_hint_destination": "设置 → Tokens",
+    "trouble_token_hint_destination": "设置 → API 令牌",
     "trouble_token_hint_suffix": " 中创建 token。守护进程只使用出站连接——无需开放入站端口。",
     "trouble_check_status": "检查状态",
     "trouble_view_logs": "查看日志",
@@ -283,9 +283,9 @@
   "cloud_runtime": {
     "action": "云端运行时",
     "title": "云端运行时",
-    "description": "创建云端运行环境。",
+    "description": "由 Multica 托管的云端运行时，可随时运行智能体。",
     "create_title": "新节点",
-    "nodes_title": "Fleet 节点",
+    "nodes_title": "云端节点",
     "refresh": "刷新",
     "nodes_empty": "还没有云端节点",
     "nodes_failed": "云端运行时不可用",
@@ -303,12 +303,12 @@
     "fields": {
       "name": "名称",
       "instance_type": "实例规格",
-      "region": "Region",
-      "disk_size": "磁盘大小 GiB",
-      "image_id": "AMI ID",
-      "subnet_id": "Subnet ID",
-      "key_name": "Key pair",
-      "bootstrap_pat": "Bootstrap PAT"
+      "region": "区域",
+      "disk_size": "磁盘大小（GiB）",
+      "image_id": "镜像 ID（AMI）",
+      "subnet_id": "子网 ID",
+      "key_name": "SSH 密钥对",
+      "bootstrap_pat": "初始化访问令牌（PAT）"
     },
     "placeholders": {
       "name": "cloud-dev-01",
@@ -338,9 +338,9 @@
     "unknown_error": "未知错误",
     "initiate_failed": "启动更新失败",
     "scheduled_tasks": "{{running}} 个运行中",
-    "note_no_interrupt": "不会中断正在运行的任务。",
+    "note_no_interrupt": "不会中断正在进行的运行。",
     "expired_note": "等待机器空闲已超过 24 小时，本次排队已失效。",
-    "busy_note": "机器正在执行任务，本次没有开始更新。请在空闲时重试。",
+    "busy_note": "机器正在执行运行，本次未开始更新。请在空闲时重试。",
     "another_update_note": "这台机器上已有另一个更新在排队或安装中。",
     "status": {
       "pending": "等待守护进程...",
@@ -400,21 +400,21 @@
     "learn_more": "查看配置指南",
     "close": "关闭",
     "add_new": "新建自定义运行时",
-    "list_title": "运行时后端",
+    "list_title": "基础运行时",
     "custom_section_title": "自定义运行时（{{count}}）",
     "custom_section_aria": "自定义运行时",
-    "builtin_section_title": "支持的基础协议（{{count}}）",
-    "builtin_section_hint": "内置协议族为只读参考。",
+    "builtin_section_title": "内置运行时（{{count}}）",
+    "builtin_section_hint": "内置运行时为只读参考。",
     "builtin_section_aria": "支持的内置协议族",
     "builtin_reference": "参考",
     "empty_title": "创建第一个自定义运行时",
-    "empty_description": "选择一个基础协议族，然后指定 Multica 要运行的命令。",
+    "empty_description": "选择一个兼容的基础运行时，再指定 Multica 要执行的自定义命令。",
     "badge_builtin": "内置",
     "badge_custom": "自定义",
     "badge_disabled": "已禁用",
     "builtin_detail": {
-      "title": "内置协议族",
-      "description": "{{family}} 是内置协议类型，无法编辑或删除。",
+      "title": "内置运行时",
+      "description": "{{family}} 是内置运行时，无法编辑或删除。",
       "read_only": "只读"
     },
     "detail": {
@@ -535,7 +535,7 @@
     "title": "Qoder Cloud Agents 运行时",
     "description": "连接 Qoder Cloud Agents，由 Multica 管理执行并加密保存凭证。工作区管理员可修改配置。",
     "loading": "加载中...",
-    "unavailable": "请先在服务端配置 MULTICA_VCS_SECRET_KEY。",
+    "unavailable": "此服务端尚未启用 Qoder Cloud Agents，需要服务端管理员先配置凭证加密密钥（MULTICA_VCS_SECRET_KEY）。",
     "online": "在线",
     "error": "连接异常",
     "starting": "启动中",
@@ -582,10 +582,10 @@
     "shared_credentials_hint": "凭证在当前工作区内共享，PAT 加密保存后不再显示。",
     "agent_count_other": "{{count}} 个智能体",
     "github_url": "GitHub URL",
-    "github_token": "GitHub 访问凭证",
+    "github_token": "GitHub 访问令牌",
     "execution": "执行设置",
     "concurrency": "并发运行数",
-    "concurrency_hint": "超过上限的任务会排队等待。",
+    "concurrency_hint": "超过上限的运行会排队等待。",
     "run_timeout": "单次运行超时（分钟）",
     "run_timeout_hint": "超过该时长仍未结束的运行会被取消并标记为失败。",
     "data_disclosure_title": "Multica 会发送给 Qoder 的内容",
@@ -601,10 +601,10 @@
       "submit": "连接",
       "connected": "Qoder 已连接，几秒后即可使用。",
       "token": "个人访问令牌",
-      "token_rejected": "{{region}}不认这个令牌。令牌只能在创建它的站点使用。",
+      "token_rejected": "{{region}} 无法验证此令牌。令牌仅在创建它的站点有效。",
       "retry_cn": "切换到中国站重试",
       "retry_global": "切换到国际站重试",
-      "verifying": "正在验证令牌…",
+      "verifying": "正在验证令牌...",
       "verified": "令牌已验证",
       "environment_waiting": "令牌验证后自动加载",
       "repo_count_other": "{{count}} 个仓库",
@@ -659,7 +659,7 @@
       "description_agents_other": "下面 {{count}} 个智能体会被解绑，保留指令和历史，之后可以换到其他运行时。",
       "plan_changed": "Qoder 上的智能体有变化，请确认最新列表后再操作。",
       "confirm": "断开连接",
-      "working": "正在断开…",
+      "working": "正在断开...",
       "cancel": "取消",
       "done": "已断开 Qoder"
     }
@@ -678,22 +678,22 @@
       },
       "cloud": {
         "title": "或者用云端节点",
-        "description": "不想自己管机器？创建一台 Multica 托管的云节点。"
+        "description": "无需本机开机，直接使用 Multica 托管的云端节点运行智能体。"
       }
     },
     "art": {
       "this_computer": "这台电脑 · 桌面端",
-      "detected": "自动识别到的 harness",
+      "detected": "自动识别到的运行时",
       "run_there": "在那台机器上运行",
       "connected": "{{name}} 已连接到 Multica"
     }
   },
   "rate_limits": {
     "title": "额度",
-    "caption": "运行任务时由 CLI 上报",
+    "caption": "执行运行时由 CLI 上报",
     "updated": "{{ago}}更新",
     "empty_title": "还没有额度数据",
-    "empty_hint": "这个运行时下次执行任务时会自动记录。API Key 账号没有套餐额度。",
+    "empty_hint": "该运行时下次执行运行时会自动记录。API Key 账号没有套餐额度。",
     "window_session": "会话",
     "window_session_hours": "会话 · {{hours}} 小时",
     "window_weekly": "本周",

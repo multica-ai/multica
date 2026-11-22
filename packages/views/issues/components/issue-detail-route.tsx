@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { inboxKeys } from "@multica/core/inbox/queries";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import type { InboxItem } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton, IssueNotFound, IssueLoadError } from "./issue-detail";
 import { IssuePeekHost } from "./issue-peek";
@@ -41,8 +44,9 @@ export function useCanonicalIssueUrl(
   const navigation = useNavigation();
   // A deliverable link keeps its `/deliverables/{name}` tail: dropping it
   // would turn the address into a plain issue link while the file is open.
-  const canonicalHref = identifier
-    ? `${deliverable ? paths.issueDeliverable(identifier, deliverable) : paths.issueDetail(identifier)}${hash}`
+  const canonicalRef = identifier ? issueRouteRef({ id: routeId, identifier }) : null;
+  const canonicalHref = canonicalRef
+    ? `${deliverable ? paths.issueDeliverable(canonicalRef, deliverable) : paths.issueDetail(canonicalRef)}${hash}`
     : null;
   // `useWorkspacePaths()` and the navigation adapter are both rebuilt on
   // render, so this ref — not the dependency array — is what guarantees the
@@ -87,9 +91,26 @@ function useHighlightHash(): { hash: string; commentId?: string; appRequestId?: 
  */
 export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetailRouteProps) {
   const wsId = useWorkspaceId();
+  const qc = useQueryClient();
   const {
     canonicalId, issue, isResolving, notFound, loadFailed, isRetrying, retry, hasLoaded,
   } = useCanonicalIssue(wsId, routeId);
+  const sidebarInboxIssue = useInboxSelectionStore((s) =>
+    wsId ? (s.sidebarIssueByWorkspace[wsId] ?? null) : null,
+  );
+  const cachedInboxRow = wsId
+    ? (qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId)) ?? []).find(
+        (item) =>
+          !item.archived &&
+          (item.issue_id === (canonicalId ?? routeId) ||
+            (item.issue_identifier != null && item.issue_identifier.toUpperCase() === routeId.toUpperCase())),
+      ) ?? null
+    : null;
+  const fromInboxSkeleton =
+    !!sidebarInboxIssue &&
+    (sidebarInboxIssue === routeId ||
+      sidebarInboxIssue === canonicalId ||
+      (cachedInboxRow?.issue_id != null && sidebarInboxIssue === cachedInboxRow.issue_id));
   const highlight = useHighlightHash();
   const landing = useInboxSelectionStore((s) =>
     s.landing && s.landing.issueId === canonicalId ? s.landing : null,
@@ -109,7 +130,7 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
   // Once the link has opened its file and the viewer has closed (or the file
   // is missing), the address becomes the plain issue page. A replace: Back
   // should leave the issue, not re-open the file.
-  const issueRef = issue?.identifier ?? routeId;
+  const issueRef = issueRouteRef({ id: routeId, identifier: issue?.identifier });
   const latestNav = useRef({ paths, navigation });
   latestNav.current = { paths, navigation };
   const onDeliverableLinkDone = useCallback(() => {
@@ -121,7 +142,14 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
     return <IssueLoadError showBackLink={!onDelete} onRetry={retry} isRetrying={isRetrying} />;
   }
 
-  if (isResolving || (!issue && !notFound)) return <IssueDetailSkeleton />;
+  if (isResolving || (!issue && !notFound)) {
+    return (
+      <IssueDetailSkeleton
+        showInboxBar={fromInboxSkeleton}
+        inboxItem={fromInboxSkeleton ? cachedInboxRow : undefined}
+      />
+    );
+  }
 
   // Render not-found here rather than handing the unresolved segment down.
   // `IssueDetail` would mount a second observer on the query that just failed,

@@ -20,7 +20,7 @@ import {
 } from "@multica/ui/icons";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { PRIORITY_CONFIG, PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import { addDaysDateOnly, todayDateOnly } from "@multica/core/issues/date";
 import type { CommonIssueFields } from "@multica/core/issues/batch";
@@ -77,6 +77,8 @@ interface BatchMenuItemsProps {
   projectId: string | null;
   allowedStatuses: ReadonlySet<string> | null;
   disabled: boolean;
+  /** False for a viewer who can delete no issue at all (a guest): the entry is left out. */
+  offersDelete: boolean;
   canDelete: boolean;
   onStatus: (status: string) => void;
   onAssignee: (updates: Partial<UpdateIssueRequest>) => void;
@@ -98,6 +100,7 @@ export function BatchMenuItems({
   projectId,
   allowedStatuses,
   disabled,
+  offersDelete,
   canDelete,
   onStatus,
   onAssignee,
@@ -123,7 +126,7 @@ export function BatchMenuItems({
   const maxStage = issues.reduce((max, issue) => Math.max(max, issue.stage ?? 0), 0);
 
   const copyLinks = () => {
-    const links = issues.map((issue) => getShareableUrl(paths.issueDetail(issue.identifier || issue.id)));
+    const links = issues.map((issue) => getShareableUrl(paths.issueDetail(issueRouteRef(issue))));
     void copyText(links.join("\n")).then((ok) => {
       if (ok) toast.success(t(($) => $.batch.links_copied, { count }));
     });
@@ -299,16 +302,20 @@ export function BatchMenuItems({
           {tLayout(($) => $.collection.clear_selection)}
         </P.Item>
       )}
-      <P.Separator />
-      <P.Item
-        variant="destructive"
-        disabled={disabled || !canDelete}
-        title={!canDelete ? t(($) => $.batch.delete_restricted) : undefined}
-        onClick={onDelete}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-        {t(($) => $.batch.delete_count, { count })}
-      </P.Item>
+      {offersDelete && (
+        <>
+          <P.Separator />
+          <P.Item
+            variant="destructive"
+            disabled={disabled || !canDelete}
+            title={!canDelete ? t(($) => $.batch.delete_restricted) : undefined}
+            onClick={onDelete}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t(($) => $.batch.delete_count, { count })}
+          </P.Item>
+        </>
+      )}
     </>
   );
 }

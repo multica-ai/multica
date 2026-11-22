@@ -365,7 +365,7 @@ func sinceFromDays(now time.Time, days int, loc *time.Location) time.Time {
 // bucket + N prior full days). If tzName is empty or unparseable, falls back
 // to UTC — never returns an error so handlers stay simple.
 func parseSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype.Timestamptz {
-	return parseDaysCutoff(r, defaultDays, tzName, 0)
+	return parseDaysCutoff(r, defaultDays, tzName, 0, maxDaysParam)
 }
 
 // parseExactSinceParamInTZ is parseSinceParamInTZ without the extra day of
@@ -378,12 +378,32 @@ func parseSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype
 // served off the N+1 cutoff silently covers one more day than the chart beside
 // it. Endpoints whose rows carry no date should use this variant instead.
 func parseExactSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype.Timestamptz {
-	return parseDaysCutoff(r, defaultDays, tzName, 1)
+	return parseDaysCutoff(r, defaultDays, tzName, 1, maxDaysParam)
 }
 
-// parseDaysCutoff is the shared body of the two cutoff parsers. `trimDays`
-// pulls the cutoff forward, so 0 keeps the N+1 headroom and 1 closes the
-// window to exactly N calendar days.
+// maxDaysParam is the largest `days` the runtime usage endpoints accept.
+const maxDaysParam = 365
+
+// parseDaysParam reads `?days=N`. A missing, malformed, non-positive or
+// larger-than-maxDays value falls back to defaultDays rather than erroring.
+func parseDaysParam(r *http.Request, defaultDays, maxDays int) int {
+	if d := r.URL.Query().Get("days"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 && parsed <= maxDays {
+			return parsed
+		}
+	}
+	return defaultDays
+}
+
+// loadViewingLocation resolves an IANA zone name, falling back to UTC.
+func loadViewingLocation(tzName string) *time.Location {
+	loc, err := time.LoadLocation(tzName)
+	if err != nil || loc == nil {
+		return time.UTC
+	}
+	return loc
+}
+
 // dayWindowNow is the clock every `days=N` cutoff reads.
 //
 // A variable so a test can pin it. Without one, a fixture and the cutoff that
@@ -394,22 +414,18 @@ func parseExactSinceParamInTZ(r *http.Request, defaultDays int, tzName string) p
 // wrote is excluded. Production always reads the real clock.
 var dayWindowNow = time.Now
 
+// parseDaysCutoff is the shared body of the two cutoff parsers. `trimDays`
+// pulls the cutoff forward, so 0 keeps the N+1 headroom and 1 closes the
+// window to exactly N calendar days.
 func parseDaysCutoff(
 	r *http.Request,
 	defaultDays int,
 	tzName string,
 	trimDays int,
+	maxDays int,
 ) pgtype.Timestamptz {
-	days := defaultDays
-	if d := r.URL.Query().Get("days"); d != "" {
-		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 && parsed <= 365 {
-			days = parsed
-		}
-	}
-	loc, err := time.LoadLocation(tzName)
-	if err != nil || loc == nil {
-		loc = time.UTC
-	}
+	days := parseDaysParam(r, defaultDays, maxDays)
+	loc := loadViewingLocation(tzName)
 	// Guard the floor: days is already >= 1 here, and trimming a 1-day
 	// window by one would put the cutoff at start-of-today+0 — still correct
 	// ("today only"), which is exactly what days=1 means.

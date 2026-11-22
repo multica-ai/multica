@@ -343,9 +343,13 @@ type Environment struct {
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
 	// CursorUserDataDir is set instead of CursorDataDir when the task runs on
-	// the user's Cursor data dir and its project there is linked to the
+	// the user's Cursor data dir and its project there is seeded with the
 	// agent's MCP login. Cursor uses that dir by default, so it is not exported.
 	CursorUserDataDir string
+	// CursorMcpAuthMirror merges the MCP login changes Cursor makes in the
+	// task's copy back into the agent's login. Nil when the login is
+	// task-local or the provider is not Cursor.
+	CursorMcpAuthMirror *CursorMcpAuthMirror
 	// HermesHome is the effective HERMES_HOME overlay (set only for
 	// the hermes provider, and only when the agent has skills bound — empty
 	// otherwise, leaving the user's real home in place). With a conversation
@@ -735,15 +739,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// still reads ~/.cursor/mcp.json, but only servers with approval entries in
 	// this per-task data dir can load, so user-global MCP servers do not leak
 	// into managed-MCP runs. Without managed MCP the task runs on the user's
-	// data dir, and only its MCP login is linked there.
+	// data dir, and only its MCP login is copied there.
 	if params.Provider == "cursor" {
-		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, params.CursorMcpAuthSource, params.CursorMcpAuthStore, manifest, logger)
-		if err != nil {
+		if err := prepareCursorMcp(env, envRoot, workDir, params.McpConfig, params.CursorMcpAuthSource, params.CursorMcpAuthStore, params.CursorUserDataDir, manifest, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare cursor mcp config: %w", err)
-		}
-		env.CursorDataDir = cursorDataDir
-		if cursorDataDir == "" {
-			env.CursorUserDataDir = linkCursorUserMcpAuth(params.CursorUserDataDir, envRoot, workDir, params.CursorMcpAuthSource, params.CursorMcpAuthStore, logger)
 		}
 	}
 
@@ -1075,14 +1074,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// mcp_config must replace the prior run's .cursor/mcp.json and isolated
 	// approvals before the next cursor-agent process starts.
 	if params.Provider == "cursor" && env.RootDir != "" {
-		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, params.CursorMcpAuthSource, params.CursorMcpAuthStore, manifest, logger)
-		if err != nil {
+		if err := prepareCursorMcp(env, env.RootDir, params.WorkDir, params.McpConfig, params.CursorMcpAuthSource, params.CursorMcpAuthStore, params.CursorUserDataDir, manifest, logger); err != nil {
 			logger.Warn("execenv: refresh cursor mcp config failed", "error", err)
 			return nil
-		}
-		env.CursorDataDir = cursorDataDir
-		if cursorDataDir == "" {
-			env.CursorUserDataDir = linkCursorUserMcpAuth(params.CursorUserDataDir, env.RootDir, params.WorkDir, params.CursorMcpAuthSource, params.CursorMcpAuthStore, logger)
 		}
 	}
 

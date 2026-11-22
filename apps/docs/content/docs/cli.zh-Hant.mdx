@@ -283,7 +283,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-env` 系列只在 `agent create` 中可用。之後修改用 `agent env set`，它整體替換原有變數，值寫成 `****` 的鍵保留原值。
 - `agent update --mcp-config null` 清除 MCP 配置。
 - `--custom-args` 是 JSON 陣列，排在啟動引數的最後。選模型用 `--model`，部分工具會拒絕出現在自定義引數裡的 `--model`。
-- 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。在 Multica Cloud 上，Business 包含成員名單。Free 和 Pro 工作區開啟強制後，`agent create` 或 `agent update` 新建名單或往名單裡加人會以 `feature_locked` 拒絕；移除成員、原樣儲存名單、改成 `private` 或 `--public-to-workspace` 仍然可以。
+- 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。
 
 ### AI 代理執行記錄
 
@@ -314,7 +314,7 @@ multica runtime profile create --display-name "內部 Claude 封裝" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` 為當前 profile 登記開機自啟，平臺差異見[開機自啟](/daemon-runtimes#autostart)。`runtime usage` 預設統計 90 天，`--days` 最多 365。`runtime update` 讓那臺電腦上的守護程序把 CLI 更新到指定版本，`--wait` 等待更新結束；更新失敗、更新逾時或等待本身逾時時，命令會以非零狀態退出。`runtime profile create` 用 `--runtime-type` 指定相容的工具（舊的 `--protocol-family` 仍可用）；固定引數目前只能在網頁端填寫。 `runtime profile create` 預設綁定目前機器；使用 `--daemon-id <id>` 可以選擇另一臺已登記的本機。 舊配置可以透過 `multica runtime profile update <profile-id> --daemon-id <id>` 綁定機器。
+`daemon autostart` 為當前 profile 登記開機自啟，平臺差異見[開機自啟](/daemon-runtimes#autostart)。`runtime usage` 預設統計 90 天，`--days` 最多 365。`runtime update` 讓那臺電腦上的守護程序把 CLI 更新到指定版本。與在**執行時**頁面點選**更新**（忙碌時會[排隊等待閒置](/daemon-runtimes#updating-cli)）不同，這項請求不會排隊：如果機器正在執行任務，這次更新會直接失敗，而不會等待。`--wait` 等待更新結束；更新失敗、更新逾時或等待本身逾時時，命令會以非零狀態退出。`runtime profile create` 用 `--runtime-type` 指定相容的工具（舊的 `--protocol-family` 仍可用）；固定引數目前只能在網頁端填寫。 `runtime profile create` 預設綁定目前機器；使用 `--daemon-id <id>` 可以選擇另一臺已登記的本機。 舊配置可以透過 `multica runtime profile update <profile-id> --daemon-id <id>` 綁定機器。
 
 刪除仍繫結活躍 AI 代理的執行時時，命令預設拒絕。`multica runtime delete <id> --cascade` 會解綁這些 AI 代理、保留其配置與歷史記錄，並取消它們的活動執行。
 
