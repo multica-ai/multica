@@ -116,6 +116,7 @@ import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { CommentInput } from "./comment-input";
+import { PublishedDescriptionAnchors } from "./published-description-anchors";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -2502,6 +2503,31 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
       replyToRoot.has(commentId) ? jumpToReply(commentId) : jumpToThread(commentId),
     [replyToRoot, jumpToReply, jumpToThread],
   );
+  // Own focus at the detail lifetime: scrolling a virtualized header can
+  // unmount its published marker before the destination row is mounted.
+  const [publishedFocusId, setPublishedFocusId] = useState<string | null>(null);
+  const jumpToPublishedComment = useCallback((commentId: string) => {
+    jumpToMinimapTarget(commentId);
+    setPublishedFocusId(commentId);
+  }, [jumpToMinimapTarget]);
+  useEffect(() => {
+    if (!publishedFocusId || !scrollContainerEl) return;
+    let frame = 0, count = 0;
+    const cancel = () => setPublishedFocusId(null);
+    const focus = () => {
+      const row = scrollContainerEl.querySelector<HTMLElement>(`#comment-${CSS.escape(publishedFocusId)}`);
+      const target = row?.querySelector<HTMLElement>("[data-comment-content]") ?? row;
+      if (target) { target.tabIndex = -1; target.focus({ preventScroll: true }); cancel(); }
+      else if (++count < 60) frame = requestAnimationFrame(focus);
+      else cancel();
+    };
+    frame = requestAnimationFrame(focus);
+    for (const event of ["pointerdown", "keydown", "wheel", "touchmove"]) document.addEventListener(event, cancel, { capture: true, passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      for (const event of ["pointerdown", "keydown", "wheel", "touchmove"]) document.removeEventListener(event, cancel, true);
+    };
+  }, [publishedFocusId, scrollContainerEl]);
   // With comments that arrived while the reader was away, land on the first
   // of them so they read in order; otherwise go to the very end.
   const firstNewCommentId = newComments.ids[0];
@@ -3988,6 +4014,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             nothing and render unchanged. */}
         <div
           ref={attachScrollContainer}
+          data-description-anchor-scroll
           data-tab-scroll-root={isPeek ? undefined : scrollContainerKey}
           className="@container relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
           onContextMenu={pageMenu.onContextMenu}
@@ -4200,6 +4227,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             }}
           >
             {descriptionAnnotations.popup}
+            <PublishedDescriptionAnchors issueId={id} entries={timeline} onJumpToComment={jumpToPublishedComment} />
             <div data-comment-content={descriptionSourceId}>
               {guest ? (
                 <ReadonlyContent content={issue.description ?? ""} attachments={descEditorAttachments} />

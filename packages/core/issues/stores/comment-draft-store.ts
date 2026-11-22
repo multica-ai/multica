@@ -83,6 +83,7 @@ interface CommentDraftStore {
   removeUpload: (key: CommentDraftKey, clientUploadId: string) => void;
   getAnnotations: (key: CommentDraftKey) => ReplyAnnotation[];
   addAnnotation: (key: CommentDraftKey, annotation: ReplyAnnotation) => string | undefined;
+  hydrateAnnotationSource: (key: CommentDraftKey, id: string, sourceText: string, start: number) => void;
   updateAnnotation: (key: CommentDraftKey, id: string, note: string) => void;
   removeAnnotation: (key: CommentDraftKey, id: string) => void;
   getPendingAnnotation: (key: CommentDraftKey) => PendingAnnotationDraft | undefined;
@@ -146,6 +147,7 @@ function samePendingAnnotation(a?: PendingAnnotationDraft, b?: PendingAnnotation
     a.annotation.sourceCommentId === b.annotation.sourceCommentId &&
     a.annotation.sourceActorName === b.annotation.sourceActorName &&
     a.annotation.sourceRevision === b.annotation.sourceRevision &&
+    a.annotation.sourceText === b.annotation.sourceText &&
     a.annotation.quote === b.annotation.quote &&
     a.annotation.note === b.annotation.note &&
     a.annotation.start === b.annotation.start &&
@@ -313,6 +315,13 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
         });
         return annotation.id;
       },
+      hydrateAnnotationSource: (key, id, sourceText, start) => set((s) => {
+        const current = s.drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS;
+        const source = current.find((a) => a.id === id);
+        if (!source || source.sourceText !== undefined || !source.sourceCommentId.startsWith("description:") || sourceText.slice(start, start + source.quote.length) !== source.quote) return s;
+        const annotations = current.map((a) => a.id === id ? { ...a, sourceText, start } : a);
+        return { drafts: writeDraft(s.drafts, key, s.drafts[key]?.content ?? "", uploadsOf(s.drafts, key), annotations) };
+      }),
       updateAnnotation: (key, id, note) => set((s) => {
         const current = s.drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS;
         if (!current.some((a) => a.id === id && a.note !== note)) return s;

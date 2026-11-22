@@ -1,5 +1,6 @@
 "use client";
 
+import type { DescriptionAnchor } from "@multica/core/drafts/description-anchor";
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import {
   useQuery,
@@ -342,10 +343,10 @@ export function useIssueTimeline(issueId: string, userId?: string, focusCommentI
   // on success — so a slow send no longer leaves the box full next to an
   // already-posted comment, and a failed send keeps the draft.
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]): Promise<string | false> => {
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], descriptionAnchors?: DescriptionAnchor[]): Promise<string | false> => {
       if (!content.trim() || !userId) return false;
       try {
-        const comment = await createComment({ content, attachmentIds, suppressAgentIds, steerTaskIds });
+        const comment = await createComment({ content, attachmentIds, suppressAgentIds, steerTaskIds, descriptionAnchors });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
         return comment.id;
       } catch (err) {
@@ -361,7 +362,7 @@ export function useIssueTimeline(issueId: string, userId?: string, focusCommentI
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]): Promise<string | false> => {
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], descriptionAnchors?: DescriptionAnchor[]): Promise<string | false> => {
       if (!content.trim() || !userId) return false;
       try {
         const comment = await createComment({
@@ -371,6 +372,7 @@ export function useIssueTimeline(issueId: string, userId?: string, focusCommentI
           attachmentIds,
           suppressAgentIds,
           steerTaskIds,
+          descriptionAnchors,
         });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
         return comment.id;

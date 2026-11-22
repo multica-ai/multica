@@ -823,7 +823,10 @@
       "selection_failed": "Impossible de capturer la sélection. Sélectionnez du texte dans un seul commentaire ou une seule description, puis réessayez.",
       "source_label": "Commentaire de {{name}}",
       "edit": "Modifier l'annotation {{number}}",
-      "note_placeholder": "Ajouter un commentaire…"
+      "note_placeholder": "Ajouter un commentaire…",
+      "view_published_comment": "Voir le commentaire {{number}}",
+      "back_to_description": "Revenir à la description",
+      "published_outdated": "Référence obsolète : le passage a été supprimé ou ne peut pas être identifié de façon unique."
     }
   },
   "agent_activity": {

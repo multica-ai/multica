@@ -52,7 +52,7 @@ export function captureCommentSelection(card: HTMLElement, selection: Selection 
   if (!text.slice(start, end).trim()) return null;
   return {
     sourceCommentId: root.dataset.commentContent!,
-    quote: text.slice(start, end), start,
+    quote: text.slice(start, end), start, sourceText: root.dataset.commentContent?.startsWith("description:") ? text : undefined,
     prefix: text.slice(Math.max(0, start - 32), start),
     suffix: text.slice(end, end + 32),
     range: range.cloneRange(), root,

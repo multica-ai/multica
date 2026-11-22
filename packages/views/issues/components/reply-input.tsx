@@ -1,5 +1,6 @@
 "use client";
 
+import { descriptionAnchorsForSend, type DescriptionAnchor } from "@multica/core/drafts/description-anchor";
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
 import { annotationsWithPending, type AnnotationComposerSlot } from "./annotation-composer";
 import { ReplyAnnotations } from "./reply-annotations";
@@ -55,7 +56,7 @@ interface ReplyInputProps {
   avatarId: string;
   /** Resolves true on success, false on failure — the reply box keeps its text
    *  (locked + spinning) until then, clearing only on success. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], descriptionAnchors?: DescriptionAnchor[]) => Promise<string | boolean>;
   /** Called after the server accepts the reply and the composer is cleared. */
   onAccepted?: (commentId: string) => void;
   size?: "sm" | "default";
@@ -232,11 +233,13 @@ function ReplyInput({
       const activeIds = pendingAttachments
         .filter((a) => contentReferencesAttachment(content, a))
         .map((a) => a.id);
+      const descriptionAnchors = descriptionAnchorsForSend(issueId, draftKey ? useCommentDraftStore.getState().getAnnotations(draftKey) : []);
       return onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
         steerTaskIds.length > 0 ? steerTaskIds : undefined,
+        ...(descriptionAnchors.length ? [descriptionAnchors] as [DescriptionAnchor[]] : []),
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;

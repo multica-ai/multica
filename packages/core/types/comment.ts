@@ -16,6 +16,7 @@ export interface Reaction {
 }
 
 export interface Comment {
+  description_anchors?: import("../drafts/description-anchor").DescriptionAnchor[];
   id: string;
   issue_id: string;
   author_type: CommentAuthorType;
