@@ -355,3 +355,48 @@ func TestDaemonStopWaitsForProfileCleanupAfterHealthCloses(t *testing.T) {
 		t.Fatalf("graceful daemon was killed: %v", err)
 	}
 }
+
+func TestDaemonStatusReportsHeldLockWithoutHealth(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	const profile = "status-no-health-test"
+	mkProfiles(t, profile)
+	child, release := startStopLockHolder(t, profile, false)
+	serveHealthAs(t, profile, map[string]any{"status": "stopped"})
+
+	status := func(output string) string {
+		t.Helper()
+		out, err := captureStdout(t, func() error {
+			return runDaemonStatus(daemonStatusCmdFor(t, profile, output), nil)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	out := status("")
+	if !strings.Contains(out, "health unavailable") || !strings.Contains(out, "profile lock held") || strings.Contains(out, ": stopped") {
+		t.Errorf("status with held lock = %q, want health unavailable and profile lock held", out)
+	}
+	var held map[string]any
+	if err := json.Unmarshal([]byte(status("json")), &held); err != nil {
+		t.Fatal(err)
+	}
+	if held["status"] != "stopped" || held["profile_lock_held"] != true {
+		t.Errorf("status JSON with held lock = %v, want stopped and the held-lock diagnostic", held)
+	}
+
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	var idle map[string]any
+	if err := json.Unmarshal([]byte(status("json")), &idle); err != nil {
+		t.Fatal(err)
+	}
+	if idle["status"] != "stopped" || idle["profile_lock_held"] != nil {
+		t.Errorf("status JSON after lock release = %v, want stopped without the held-lock diagnostic", idle)
+	}
+}

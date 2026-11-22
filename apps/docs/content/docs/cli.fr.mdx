@@ -309,6 +309,8 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
+Si le point de contrôle d’état est indisponible alors qu’un processus local détient le verrou du profil, `daemon status` le signale. La sortie JSON ajoute `profile_lock_held: true` et conserve la valeur existante de `status` pour les scripts.
+
 ```bash
 multica daemon autostart enable
 multica runtime usage <runtime-id> --days 30

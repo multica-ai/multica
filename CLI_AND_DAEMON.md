@@ -235,6 +235,8 @@ multica daemon status --output json
 
 Shows PID, uptime, detected agents, and watched workspaces.
 
+If the health endpoint is unavailable while a local process holds the profile lock, `daemon status` reports that condition. JSON output adds `profile_lock_held: true` and keeps the existing `status` value for scripts.
+
 ### Logs
 
 ```bash

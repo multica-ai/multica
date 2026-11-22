@@ -309,6 +309,8 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
+로컬 프로세스가 프로필 잠금을 유지한 상태에서 상태 확인 엔드포인트에 연결할 수 없으면 `daemon status`가 이 상태를 표시합니다. JSON 출력에는 `profile_lock_held: true`가 추가되며 스크립트에서 사용하는 기존 `status` 값은 유지됩니다.
+
 ```bash
 multica daemon autostart enable
 multica runtime usage <runtime-id> --days 30
