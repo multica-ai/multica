@@ -7,7 +7,7 @@ import type { AgentRuntime } from "@multica/core/types";
 import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
-import { MikaRuntimeChoice } from "./mika-runtime-choice";
+import { AgentRuntimeChoice } from "./agent-runtime-choice";
 
 vi.mock("@multica/core/api", () => ({ api: { listRuntimeModels: vi.fn() } }));
 
@@ -20,11 +20,11 @@ const runtimes = [
   { id: "rt-2", name: "Server", provider: "codex", status: "offline" },
 ] as AgentRuntime[];
 
-function renderChoice(props: Partial<Parameters<typeof MikaRuntimeChoice>[0]>) {
+function renderChoice(props: Partial<Parameters<typeof AgentRuntimeChoice>[0]>) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
       <I18nProvider locale="en" resources={RESOURCES}>
-        <MikaRuntimeChoice
+        <AgentRuntimeChoice
           runtimes={runtimes}
           value={{ runtimeId: "rt-1", model: "" }}
           onChange={() => {}}
@@ -36,7 +36,7 @@ function renderChoice(props: Partial<Parameters<typeof MikaRuntimeChoice>[0]>) {
   );
 }
 
-describe("MikaRuntimeChoice list layout", () => {
+describe("AgentRuntimeChoice list layout", () => {
   it("selects a runtime and clears the model chosen for the previous one", async () => {
     const onChange = vi.fn();
     renderChoice({ value: { runtimeId: "rt-1", model: "opus" }, onChange });
@@ -50,7 +50,7 @@ describe("MikaRuntimeChoice list layout", () => {
 
   // The dropdown layout honoured `disabled`; the list layout dropped it, so a
   // member could switch machines while the connect request was in flight and
-  // end up with Mika on a runtime they no longer had selected.
+  // end up with an agent on a runtime they no longer had selected.
   it("stops the choice changing while a submit is in flight", async () => {
     const onChange = vi.fn();
     renderChoice({ disabled: true, onChange });
@@ -63,8 +63,8 @@ describe("MikaRuntimeChoice list layout", () => {
   });
 });
 
-describe("MikaRuntimeChoice layout", () => {
-  // Regression: the Mika setup dialog's content is a CSS grid. A grid item
+describe("AgentRuntimeChoice layout", () => {
+  // Regression: the agent setup dialog's content is a CSS grid. A grid item
   // without min-w-0 grows to its content width, so an overlong model id
   // (e.g. a hex-encoded Claude Code custom model) stretched the dialog
   // instead of being ellipsized by the pickers.

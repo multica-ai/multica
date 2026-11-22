@@ -5,7 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { qoderOptions, type QoderConnection } from "@multica/core/runtimes/qoder";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
@@ -23,6 +22,7 @@ const TEST_RESOURCES = {
   en: { common: enCommon, layout: enLayout, runtimes: enRuntimes },
 };
 const WS = "ws-test";
+const onboardingMocks = vi.hoisted(() => ({ hasPersonalAgent: true }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
 vi.mock("@multica/core/auth", () => ({
@@ -37,8 +37,9 @@ vi.mock("@multica/core/paths", () => ({
 }));
 vi.mock("@multica/core/realtime", () => ({ useWSEvent: () => {} }));
 vi.mock("@multica/core/onboarding", () => ({
-  memberNeedsMikaSetup: () => false,
-  useBootstrapMika: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  findPersonalAgent: () => (onboardingMocks.hasPersonalAgent ? { id: "agent-1" } : undefined),
+  createPersonalAgent: vi.fn(),
+  uniqueAgentName: (base: string) => base,
 }));
 vi.mock("../../navigation", () => ({
   AppLink: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
@@ -119,7 +120,6 @@ function renderPage({
   qc.setQueryData(agentListOptions(WS).queryKey, []);
   qc.setQueryData(memberListOptions(WS).queryKey, []);
   qc.setQueryData(agentTaskSnapshotOptions(WS).queryKey, []);
-  qc.setQueryData(chatSessionsOptions(WS).queryKey, []);
   qc.setQueryData(qoderOptions(WS).queryKey, connection);
   return render(
     <QueryClientProvider client={qc}>
@@ -334,6 +334,25 @@ describe("RuntimesPage", () => {
         await screen.findByRole("menuitemradio", { name: /All runtimes/ }),
       ).toHaveTextContent(connection.configured ? "2" : "1");
       unmount();
+    }
+  });
+
+  it("defaults the create-your-agent dialog to a known coding tool over the first online runtime", async () => {
+    onboardingMocks.hasPersonalAgent = false;
+    try {
+      const user = userEvent.setup();
+      renderPage({
+        runtimes: [
+          makeRuntime({ id: "rt-antigravity", provider: "antigravity", name: "Antigravity (dev-machine.local)" }),
+          makeRuntime({ id: "rt-codex", provider: "codex", name: "Codex (dev-machine.local)" }),
+        ],
+      });
+      await user.click(screen.getByRole("button", { name: "Create agent" }));
+      const dialog = await screen.findByRole("dialog", { name: "Create your agent" });
+      expect(within(dialog).getByText("Codex (dev-machine.local)")).toBeInTheDocument();
+      expect(within(dialog).queryByText("Antigravity (dev-machine.local)")).not.toBeInTheDocument();
+    } finally {
+      onboardingMocks.hasPersonalAgent = true;
     }
   });
 });

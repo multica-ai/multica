@@ -70,12 +70,15 @@
       "offline": "오프라인"
     }
   },
-  "mika_setup": {
-    "title": "런타임이 준비되었습니다. Mika와 시작하세요.",
-    "description": "Mika가 태스크를 정리하고 에이전트를 조율하도록 하세요.",
-    "action": "Mika와 시작",
-    "failed": "Mika를 시작하지 못했습니다",
-    "dialog_title": "Mika를 어디에서 실행할까요?",
+  "agent_setup": {
+    "title": "내 에이전트 만들기",
+    "description": "나만 사용할 수 있는 비공개 에이전트로, 내 컴퓨터 중 하나에서 실행됩니다. 준비되면 채팅이 열립니다.",
+    "action": "에이전트 만들기",
+    "dialog_title": "내 에이전트 만들기",
+    "name_label": "에이전트 이름",
+    "private_note": "나만 사용할 수 있습니다. 나중에 에이전트 페이지에서 팀과 공유할 수 있습니다.",
+    "create": "만들고 채팅 시작",
+    "failed": "에이전트를 만들지 못했습니다",
     "cancel": "취소"
   },
   "machine": {

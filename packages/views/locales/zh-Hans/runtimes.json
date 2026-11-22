@@ -70,12 +70,15 @@
       "offline": "离线"
     }
   },
-  "mika_setup": {
-    "title": "运行时已准备好，和 Mika 开始。",
-    "description": "让 Mika 帮你安排任务和协调智能体。",
-    "action": "和 Mika 开始",
-    "failed": "无法启动 Mika",
-    "dialog_title": "让 Mika 在哪个运行时上运行？",
+  "agent_setup": {
+    "title": "创建你的智能体",
+    "description": "一个只有你能用的私有智能体，跑在你自己的电脑上。建好后直接打开对话。",
+    "action": "创建智能体",
+    "dialog_title": "创建你的智能体",
+    "name_label": "智能体名字",
+    "private_note": "只有你能用。以后可以在\"智能体\"里分享给团队。",
+    "create": "创建并开始对话",
+    "failed": "没能创建你的智能体",
     "cancel": "取消"
   },
   "machine": {
