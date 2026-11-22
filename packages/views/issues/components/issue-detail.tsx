@@ -84,7 +84,7 @@ import { PropRow } from "../../common/prop-row";
 import { useIsGuest } from "@multica/core/permissions";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
-import type { Attachment, InboxItem, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { Attachment, InboxItem, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, IssueSubscriber, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { commentLandingTarget, isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
@@ -248,6 +248,25 @@ export function issueHighlightMementoKey(issueId: string): string {
 // what a click does.
 const SUBSCRIPTION_ACTION_CLASS =
   "text-label text-muted-foreground hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50";
+
+function SubscriberAvatars({ subscribers }: { subscribers: IssueSubscriber[] }) {
+  return (
+    <AvatarGroup>
+      {subscribers.slice(0, 4).map((sub) => (
+        <ActorAvatar
+          key={`${sub.user_type}-${sub.user_id}`}
+          actorType={sub.user_type}
+          actorId={sub.user_id}
+          size="md"
+          enableHoverCard
+        />
+      ))}
+      {subscribers.length > 4 && (
+        <AvatarGroupCount>+{subscribers.length - 4}</AvatarGroupCount>
+      )}
+    </AvatarGroup>
+  );
+}
 
 function SubscriberPopoverContent({
   members,
@@ -4405,40 +4424,33 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
                       </DropdownMenuContent>
                     </DropdownMenu>
                   ))}
-                <Popover>
-                  <PopoverTrigger className="cursor-pointer hover:opacity-80 transition-opacity">
-                    {subscribers.length > 0 ? (
-                      <AvatarGroup>
-                        {subscribers.slice(0, 4).map((sub) => (
-                          <ActorAvatar
-                            key={`${sub.user_type}-${sub.user_id}`}
-                            actorType={sub.user_type}
-                            actorId={sub.user_id}
-                            size="md"
-                            enableHoverCard
-                          />
-                        ))}
-                        {subscribers.length > 4 && (
-                          <AvatarGroupCount>+{subscribers.length - 4}</AvatarGroupCount>
-                        )}
-                      </AvatarGroup>
-                    ) : (
-                      <span className="flex items-center justify-center h-6 w-6 rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground">
-                        <Users className="h-3 w-3" />
-                      </span>
-                    )}
-                  </PopoverTrigger>
-                  <SubscriberPopoverContent
-                    members={members}
-                    agents={agents}
-                    subscribers={subscribers}
-                    toggleSubscriber={toggleSubscriber}
-                    togglesDisabled={
-                      !subscriptionKnown || togglePending || !user?.id
-                    }
-                    t={t}
-                  />
-                </Popover>
+                {/* A guest sees who follows the issue but changes only its own
+                    subscription; the server refuses the rest. */}
+                {guest ? (
+                  subscribers.length > 0 && <SubscriberAvatars subscribers={subscribers} />
+                ) : (
+                  <Popover>
+                    <PopoverTrigger className="cursor-pointer hover:opacity-80 transition-opacity">
+                      {subscribers.length > 0 ? (
+                        <SubscriberAvatars subscribers={subscribers} />
+                      ) : (
+                        <span className="flex items-center justify-center h-6 w-6 rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground">
+                          <Users className="h-3 w-3" />
+                        </span>
+                      )}
+                    </PopoverTrigger>
+                    <SubscriberPopoverContent
+                      members={members}
+                      agents={agents}
+                      subscribers={subscribers}
+                      toggleSubscriber={toggleSubscriber}
+                      togglesDisabled={
+                        !subscriptionKnown || togglePending || !user?.id
+                      }
+                      t={t}
+                    />
+                  </Popover>
+                )}
               </div>
             </div>
 
