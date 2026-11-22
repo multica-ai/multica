@@ -47,6 +47,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途运行的宽限时间；低于 `150s` 时按 `150s` 处理 |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Web 和 Desktop 为每个工作区维护本地搜索索引；设为 `off` 可切回由服务端搜索 |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | 在数据统计页开启 365 天时间范围；如果整年统计查询对数据库压力过大可设为 `off` |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 
@@ -303,6 +305,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 | 工具 | 前缀 | 有模型变量 |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓（选择 Amp 模式，例如 `high`） |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓（取值是 `agy models` 显示的完整名称） |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -311,7 +314,9 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓（取值是 dsh 模型目录中的 id，例如 `deepseek-official/deepseek-chat`） |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓（取值是 dim 模型目录中的 id） |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -329,6 +334,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —（模型由 ZeroClaw 的智能体配置管理） |
 
 </Accordion>
@@ -336,7 +342,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型，详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 另有 `MULTICA_DSH_PROFILE_BUNDLE` 和 `MULTICA_DSH_PLUGIN_PATH`，见下一节。
 
-全机默认参数 `MULTICA_<前缀>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具，对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+全机默认参数 `MULTICA_<前缀>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code、Amp、Factory Droid 和 QwenPaw 七款工具，对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_AMP_ARGS`、`MULTICA_DROID_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

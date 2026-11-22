@@ -47,6 +47,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 실행을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Web과 Desktop이 워크스페이스별 로컬 검색 인덱스를 유지합니다. `off`로 설정하면 클라이언트가 다시 서버를 통해 검색합니다 |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | 분석 페이지에서 365일 범위를 활성화합니다. 1년 단위 대시보드 쿼리가 데이터베이스에 너무 느리면 `off`로 설정하세요 |
 
 Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`가 hold와 실제 종료에 필요한 시간의 합보다 커야 합니다.
 
@@ -303,6 +305,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 | 도구 | 접두사 | 모델 변수 |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓(Amp 모드 선택, 예: `high`) |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓(값은 `agy models`에 표시되는 이름 그대로) |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -311,7 +314,9 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓(값은 dsh 모델 카탈로그의 ID, 예: `deepseek-official/deepseek-chat`) |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓(값은 dim 모델 카탈로그의 ID) |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -329,6 +334,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —(모델은 ZeroClaw의 에이전트 설정에서 관리) |
 
 </Accordion>
@@ -336,7 +342,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 QwenPaw와 MiniMax Code에는 Multica가 모델을 전달하지 않으므로 모델 변수가 없습니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness에는 `MULTICA_DSH_PROFILE_BUNDLE`과 `MULTICA_DSH_PLUGIN_PATH`도 있으며 다음 섹션에서 설명합니다.
 
-컴퓨터 전체 기본 인수 `MULTICA_<PREFIX>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
+컴퓨터 전체 기본 인수 `MULTICA_<PREFIX>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, Amp, Factory Droid, QwenPaw 일곱 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_AMP_ARGS`, `MULTICA_DROID_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

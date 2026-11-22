@@ -294,6 +294,12 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args` 是 JSON 数组，排在启动参数的最后。选模型用 `--model`，部分工具会拒绝出现在自定义参数里的 `--model`。
 - 谁能调用智能体用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是旧写法，会映射到 `--permission-mode`；两者同时给出时以 `--permission-mode` 为准。
 
+### 智能体运行记录
+
+`multica agent tasks <agent-id> --limit 200` 返回最新一页运行记录。默认与最大分页大小都是 200。还有更多运行记录时，stderr 会打印一个 cursor；原样传入 `--before '<cursor>'` 即可读取下一页。`--output json` 保持数组输出，且只包含该页的用量。
+
+对应的 `GET /api/agents/{id}/tasks` 接口接受 `limit` 和 `before`，返回的仍是 JSON 数组。响应头 `X-Agent-Tasks-Next-Cursor` 提供下一个 cursor；没有该响应头说明已是最后一页。cursor 保留 `(created_at, id)` 顺序，包含时间戳精度。无效的 limit 或 cursor 返回 HTTP 400；超过 200 的 limit 会被截断到 200。不按 cursor 翻页的客户端只会收到最新的 200 条运行记录。
+
 ## 守护进程和运行时
 
 ```bash
