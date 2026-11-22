@@ -170,7 +170,11 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		case "copilot":
 			providerRoot = filepath.Join(home, ".copilot", "skills")
 		case "opencode":
-			providerRoot = filepath.Join(home, ".config", "opencode", "skills")
+			configHome := os.Getenv("XDG_CONFIG_HOME")
+			if !filepath.IsAbs(configHome) {
+				configHome = filepath.Join(home, ".config")
+			}
+			providerRoot = filepath.Join(configHome, "opencode", "skills")
 		case "codearts":
 			providerRoot = filepath.Join(home, ".codeartsdoer", "skills")
 		case "deveco":

@@ -102,6 +102,8 @@ Runtime-local skills already installed on a connected computer (Claude Code and 
 
 For Oh-My-Pi, the inherited list and runtime copies follow the runtime command's selected profile and effective skill filters. Discovery runs in an empty directory and covers user-level configuration; project settings and explicitly assigned Multica skills are separate. If OMP cannot return its skill roster, refresh reports an error.
 
+For OpenCode, listing and importing user skills use `$XDG_CONFIG_HOME/opencode/skills` when the daemon has an absolute `XDG_CONFIG_HOME`. The default is `~/.config/opencode/skills`.
+
 ### Check skill delivery and tool calls [#skill-execution]
 
 In the issue’s execution log, open the run and select the **Context received** icon. The receipt lists workspace skills for that run. A skill marked **Not verified** with a file path means Multica wrote the complete skill package to that location. Whether the runtime read or executed the skill is still unverified. **Not delivered** means delivery failed.

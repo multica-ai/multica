@@ -102,6 +102,8 @@ scripts/check.sh
 
 对于 Oh-My-Pi，继承列表和从运行时复制的操作会遵循启动命令选定的 profile 及生效的 skill 筛选配置。发现过程在空目录中运行，读取用户级配置；项目配置和显式分配的 Multica skill 单独处理。如果 OMP 无法返回 skill 清单，刷新会报错。
 
+如果守护进程的 `XDG_CONFIG_HOME` 是绝对路径，Multica 会在 `$XDG_CONFIG_HOME/opencode/skills` 中列出和导入 OpenCode 的用户级 skill。默认目录为 `~/.config/opencode/skills`。
+
 ### 查看 skill 交付和工具调用 [#skill-execution]
 
 在任务的执行日志中打开运行，点击 **上下文回执** 图标。回执列出本次运行的工作区 skill。如果某个 skill 显示文件路径和 **未验证**，说明 Multica 已将完整的 skill 包写入该路径，运行时是否读取或执行了该 skill 仍待确认。**未送达** 表示交付失败。

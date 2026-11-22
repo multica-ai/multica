@@ -100,6 +100,8 @@ Certains outils de codage IA lisent aussi des skills au niveau du projet directe
 
 Les skills locaux au runtime déjà installés sur un ordinateur connecté (Claude Code et Codex) apparaissent dans l'onglet **Skills** de l'agent et peuvent être désactivés agent par agent. Cette désactivation requiert également le droit de modifier l'agent.
 
+Pour OpenCode, la liste et l’import des skills utilisateur utilisent `$XDG_CONFIG_HOME/opencode/skills` lorsque `XDG_CONFIG_HOME` est un chemin absolu dans l’environnement du daemon. Le dossier par défaut est `~/.config/opencode/skills`.
+
 ### Vérifier la transmission d’un skill et les appels d’outils [#skill-execution]
 
 Dans le journal d’exécution de la tâche, ouvrez l’exécution et sélectionnez l’icône **Contexte reçu**. Le récapitulatif liste les skills de l’espace de travail pour cette exécution. Si un skill affiche un chemin et l’état **Non vérifié**, Multica a écrit le paquet complet à cet emplacement. Il reste à vérifier si l’environnement d’exécution a lu ou exécuté le skill. L’état **Non transmis** indique un échec de transmission.
