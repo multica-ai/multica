@@ -529,6 +529,8 @@ If the selected GHCR tag has not been published yet, fall back to `make selfhost
 >
 > The command connects as `POSTGRES_USER` from `.env`. If you changed that value after the first start, put the original user name back first: PostgreSQL keeps the role it was initialized with. Do not run `docker compose down -v` to fix this: it deletes the database volume.
 
+> **Running the self-host stack from more than one checkout?** Each checkout needs its own Docker Compose project, or the second one recreates the first one's postgres container with a different password. `make selfhost`, `make selfhost-build`, and the installer write a per-checkout `COMPOSE_PROJECT_NAME` into a new `.env` when another checkout already uses the default `multica` project, and they refuse to start or stop a project whose containers belong to another directory. An existing `.env` without `COMPOSE_PROJECT_NAME` keeps `multica` and its volumes. To move an existing checkout off the shared project, add `COMPOSE_PROJECT_NAME=<name>` to its `.env`; that starts with a new, empty database volume.
+
 ---
 
 ## Manual Docker Compose Setup

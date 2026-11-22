@@ -31,6 +31,12 @@
 # any more: `make selfhost` (via scripts/selfhost-wait.sh) and both installers
 # read it back with `docker compose port`, so the health check and the printed
 # URL always match what was actually published.
+#
+# `multica` is only the default project name. COMPOSE_PROJECT_NAME (shell or
+# .env) outranks it, which is how a second checkout on the same machine gets
+# its own containers and volumes instead of recreating the first one's
+# postgres. `make selfhost` and scripts/install.sh set it when needed; see
+# scripts/selfhost-project.sh.
 
 name: multica
 

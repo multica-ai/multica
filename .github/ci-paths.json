@@ -128,6 +128,7 @@
     "scripts/perf-compare.mjs",
     "scripts/perf-compare.test.sh",
     "scripts/selfhost-wait.sh",
+    "scripts/selfhost-project.sh",
     "scripts/install.sh",
     "scripts/install.ps1",
     "scripts/check.sh",
@@ -157,6 +158,7 @@
   "installer": [
     "scripts/install.sh",
     "scripts/install.test.sh",
+    "scripts/selfhost-project.sh",
     "scripts/install.ps1",
     "scripts/install.ps1.test.ps1",
     ".env.example",

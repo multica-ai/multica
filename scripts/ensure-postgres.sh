@@ -68,20 +68,22 @@ is_local() {
 
 if is_local; then
   # ---------- Local: use Docker ----------
+  # Pin the shared project. COMPOSE_PROJECT_NAME in .env is for self-host
+  # and would otherwise start a second postgres on 127.0.0.1:5432.
   echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
-  docker compose up -d postgres
+  docker compose -p multica up -d postgres
 
   echo "==> Waiting for PostgreSQL to be ready..."
-  until docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
+  until docker compose -p multica exec -T postgres pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
     sleep 1
   done
 
   echo "==> Ensuring database '$POSTGRES_DB' exists..."
-  db_exists="$(docker compose exec -T postgres \
+  db_exists="$(docker compose -p multica exec -T postgres \
     psql -U "$POSTGRES_USER" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'")"
 
   if [ "$db_exists" != "1" ]; then
-    docker compose exec -T postgres \
+    docker compose -p multica exec -T postgres \
       psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 \
       -c "CREATE DATABASE \"$POSTGRES_DB\"" \
       > /dev/null

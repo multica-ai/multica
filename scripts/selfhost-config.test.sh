@@ -402,6 +402,20 @@ cat >"$stub_dir/docker" <<'STUB'
 # answer is whatever the recipe truly asked Compose for.
 set -uo pipefail
 args=("$@")
+# Container / volume lookups from scripts/selfhost-project.sh. STUB_PROJECT_OWNERS
+# is "project=working_dir" lines, STUB_PROJECT_VOLUMES is project names.
+if [ "${1:-}" = "ps" ] || [ "${1:-}" = "volume" ]; then
+  project=""
+  for arg in "$@"; do
+    case "$arg" in label=com.docker.compose.project=*) project=${arg#label=com.docker.compose.project=} ;; esac
+  done
+  if [ "$1" = "ps" ]; then
+    printf '%s\n' "${STUB_PROJECT_OWNERS:-}" | sed -n "s#^${project}=##p"
+  else
+    printf '%s\n' "${STUB_PROJECT_VOLUMES:-}" | grep -Fx "$project" | sed 's/$/_pgdata/'
+  fi
+  exit 0
+fi
 sub=""
 subidx=0
 for ((i = 0; i < ${#args[@]}; i++)); do
@@ -430,9 +444,11 @@ process.stdin.on("end", () => {
   }
   console.log("postgres_password=" + config.services.postgres.environment.POSTGRES_PASSWORD);
   console.log("local_upload_base_url=" + (config.services.backend.environment.LOCAL_UPLOAD_BASE_URL ?? ""));
+  console.log("project=" + config.name);
 });
 ' >>"$STUB_PUBLISHED_RECORD"
   ;;
+down) echo "down" >>"$STUB_PUBLISHED_RECORD" ;;
 port)
   service=${args[subidx + 1]}
   published=$(grep "^${service}=" "$STUB_PUBLISHED_RECORD" 2>/dev/null | tail -n 1 | cut -d= -f2)
@@ -462,7 +478,7 @@ chmod +x "$stub_dir/docker" "$stub_dir/curl"
 recipe_dir="$tmp_dir/recipe"
 mkdir -p "$recipe_dir/scripts"
 cp Makefile .env.example docker-compose.selfhost.yml docker-compose.selfhost.build.yml "$recipe_dir/"
-cp scripts/selfhost-wait.sh "$recipe_dir/scripts/"
+cp scripts/selfhost-wait.sh scripts/selfhost-project.sh "$recipe_dir/scripts/"
 
 record="$tmp_dir/published"
 curl_log="$tmp_dir/probed"
@@ -796,5 +812,119 @@ for first_run_target in selfhost selfhost-build; do
   done
 done
 rm -f "$recipe_dir/.env.worktree"
+
+# ---------------------------------------------------------------------------
+# One Compose project per checkout (regression for #7967)
+#
+# docker-compose.selfhost.yml defaults to `name: multica`, so two checkouts used
+# to share one postgres container and volume, and the second one's password
+# broke the first one's backend. A fresh .env must get its own project when
+# another checkout already uses `multica`, and no recipe may start or stop a
+# project whose containers came from another directory. Existing installs,
+# whose .env has no COMPOSE_PROJECT_NAME, must keep `multica`.
+# ---------------------------------------------------------------------------
+
+other_checkout="/elsewhere/checkout-a"
+project_record() {
+  grep '^project=' "$record" | tail -n 1 | cut -d= -f2- || true
+}
+
+# Real Compose: COMPOSE_PROJECT_NAME from the env file or the shell outranks
+# `name:`, and an empty value keeps the default.
+project_env="$tmp_dir/.env.project"
+cp .env.example "$project_env"
+if [ "$(docker compose --env-file "$project_env" -f docker-compose.selfhost.yml config --format json | node -pe 'JSON.parse(require("fs").readFileSync(0)).name')" != "multica" ]; then
+  echo "docker-compose.selfhost.yml must keep the multica project name by default"
+  exit 1
+fi
+printf 'COMPOSE_PROJECT_NAME=multica-other\n' >>"$project_env"
+if [ "$(docker compose --env-file "$project_env" -f docker-compose.selfhost.yml config --format json | node -pe 'JSON.parse(require("fs").readFileSync(0)).name')" != "multica-other" ]; then
+  echo "COMPOSE_PROJECT_NAME in the env file must outrank the default project name"
+  exit 1
+fi
+
+for first_run_target in selfhost selfhost-build; do
+  # Nothing else on the machine: keep the default and leave .env alone.
+  run_first_recipe "$first_run_target" >/dev/null
+  if grep -q '^COMPOSE_PROJECT_NAME=' "$recipe_dir/.env" || [ "$(project_record)" != "multica" ]; then
+    echo "[$first_run_target alone] must keep the multica project and not write COMPOSE_PROJECT_NAME"
+    exit 1
+  fi
+
+  # Another checkout's containers, or a leftover volume, own `multica`.
+  for taken in owners volumes; do
+    if [ "$taken" = "owners" ]; then
+      export STUB_PROJECT_OWNERS="multica=$other_checkout"
+    else
+      export STUB_PROJECT_VOLUMES="multica"
+    fi
+    run_first_recipe "$first_run_target" >/dev/null
+    unset STUB_PROJECT_OWNERS STUB_PROJECT_VOLUMES
+    written="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$recipe_dir/.env")"
+    case "$written" in
+    multica-recipe-*) ;;
+    *)
+      echo "[$first_run_target, multica taken by $taken] expected a per-checkout COMPOSE_PROJECT_NAME, got '${written:-<none>}'"
+      exit 1
+      ;;
+    esac
+    if [ "$(project_record)" != "$written" ]; then
+      echo "[$first_run_target, multica taken by $taken] Compose ran as '$(project_record)', not '$written'"
+      exit 1
+    fi
+  done
+done
+
+# The per-checkout name is stable, so later runs and selfhost-stop reuse it.
+first_name="$written"
+if [ "$(cd "$recipe_dir" && STUB_PROJECT_OWNERS="multica=$other_checkout" PATH="$stub_dir:$PATH" bash scripts/selfhost-project.sh pick-name)" != "$first_name" ]; then
+  echo "derived project names must be stable for one checkout"
+  exit 1
+fi
+
+# An existing .env without COMPOSE_PROJECT_NAME keeps `multica`, its volume and
+# its data, even when the volume is there (that is the install's own volume).
+STUB_PROJECT_VOLUMES="multica" run_recipe selfhost '' '' '' >/dev/null
+if [ "$(project_record)" != "multica" ]; then
+  echo "an existing install must keep the multica project, got '$(project_record)'"
+  exit 1
+fi
+
+# The same checkout restarting its own stack is fine.
+STUB_PROJECT_OWNERS="multica=$recipe_dir" run_recipe selfhost '' '' '' >/dev/null
+if [ "$(project_record)" != "multica" ]; then
+  echo "a checkout must be able to restart its own stack"
+  exit 1
+fi
+
+# Starting or stopping a project another checkout owns is refused before
+# Compose runs, with the fix in the message.
+for guarded_target in selfhost selfhost-build selfhost-stop; do
+  if output="$(STUB_PROJECT_OWNERS="multica=$other_checkout" run_recipe "$guarded_target" '' '' '' 2>&1)"; then
+    echo "[$guarded_target] must refuse a project owned by $other_checkout"
+    exit 1
+  fi
+  if grep -Eq '^(project=|down)' "$record"; then
+    echo "[$guarded_target] Compose ran even though the project belongs to another checkout"
+    exit 1
+  fi
+  if ! grep -Fq "$other_checkout" <<<"$output" || ! grep -Fq "COMPOSE_PROJECT_NAME=multica-recipe-" <<<"$output"; then
+    echo "[$guarded_target] refusal must name the owner and suggest COMPOSE_PROJECT_NAME"
+    echo "$output"
+    exit 1
+  fi
+done
+
+# A checkout with its own project is not blocked by the other one.
+STUB_PROJECT_OWNERS="multica=$other_checkout" run_recipe selfhost "\$a COMPOSE_PROJECT_NAME=$first_name" '' '' >/dev/null
+if [ "$(project_record)" != "$first_name" ]; then
+  echo "a checkout with its own COMPOSE_PROJECT_NAME must start next to another checkout's stack"
+  exit 1
+fi
+STUB_PROJECT_OWNERS="multica=$other_checkout" run_recipe selfhost-stop "\$a COMPOSE_PROJECT_NAME=$first_name" '' '' >/dev/null
+if ! grep -qx 'down' "$record"; then
+  echo "selfhost-stop must stop a checkout's own project"
+  exit 1
+fi
 
 echo "self-host env derivation ok"

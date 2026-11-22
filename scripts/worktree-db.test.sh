@@ -65,7 +65,7 @@ fi
 printf 'y\n' | PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
   bash "$root_dir/scripts/drop-database.sh" "$local_env" >"$output"
 require_contains "$docker_log" \
-  "compose exec -T postgres dropdb --username multica --maintenance-db postgres --if-exists --force -- multica_feature_123"
+  "compose -p multica exec -T postgres dropdb --username multica --maintenance-db postgres --if-exists --force -- multica_feature_123"
 require_contains "$output" "Dropped database 'multica_feature_123'."
 
 remote_env="$tmp_dir/remote.env"
@@ -167,7 +167,7 @@ if [ -e "$worktree" ]; then
   fail "remove-worktree did not remove the worktree after database deletion"
 fi
 require_contains "$docker_log" \
-  "compose exec -T postgres dropdb --username multica --maintenance-db postgres --if-exists --force -- multica_worktree_456"
+  "compose -p multica exec -T postgres dropdb --username multica --maintenance-db postgres --if-exists --force -- multica_worktree_456"
 
 dirty_worktree="$tmp_dir/dirty-worktree"
 git -C "$repo" worktree add -q -b dirty-feature "$dirty_worktree"
