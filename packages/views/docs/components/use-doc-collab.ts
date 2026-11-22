@@ -138,6 +138,7 @@ export function useDocCollab(
   const [mode, setMode] = useState<"checking" | "solo" | "live">(initial.mode);
   const [document, setDocument] = useState<string | null>(initial.document);
   const [carried, setCarried] = useState<string | null>(null);
+  const [session, setSession] = useState<DocSession | null>(null);
   const target = `${kind}:${docId}`;
   const [settledTarget, setSettledTarget] = useState(target);
   if (settledTarget !== target) {
@@ -146,9 +147,10 @@ export function useDocCollab(
     setMode(next.mode);
     setDocument(next.document);
     setCarried(null);
+    // The previous doc's session stays in state until its effect cleans up.
+    setSession(null);
   }
   const [generation, setGeneration] = useState(0);
-  const [session, setSession] = useState<DocSession | null>(null);
   const [slow, setSlow] = useState(false);
   const discard = useRef(false);
   const contentRef = useRef(content);
