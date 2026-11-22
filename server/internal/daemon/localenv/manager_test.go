@@ -25,14 +25,22 @@ import (
 // a server on MULTICA_PORT, or as a command that fails on start.
 func TestHelperProcess(t *testing.T) {
 	switch os.Getenv("LOCALENV_HELPER") {
-	case "serve":
+	case "serve", "serve-files":
 		ln, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("MULTICA_PORT"))
 		if err != nil {
 			fmt.Println("listen:", err)
 			os.Exit(2)
 		}
 		fmt.Println("serving", os.Getenv("MULTICA_ENVIRONMENT"))
-		http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") }))
+		if os.Getenv("LOCALENV_HELPER") == "serve-files" {
+			root, err := os.Getwd()
+			if err != nil {
+				os.Exit(2)
+			}
+			http.Serve(ln, http.FileServer(http.Dir(root)))
+		} else {
+			http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") }))
+		}
 	case "detach":
 		// What `make up` does: start the server in a process group of its
 		// own, then stay around for as long as the environment should live.

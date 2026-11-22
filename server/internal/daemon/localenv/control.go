@@ -87,6 +87,15 @@ func (m *Manager) Restart(id string, resolve func(dir string) (Task, bool)) (Env
 		return Environment{}, err
 	}
 	if e != nil {
+		m.mu.Lock()
+		e.restartPins++
+		m.mu.Unlock()
+		defer func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			e.restartPins--
+			m.releaseWorktreesLocked()
+		}()
 		m.stop(e, "")
 	}
 	if _, err := os.Stat(filepath.Join(rec.RepoRoot, filepath.FromSlash(ConfigPath))); err != nil {

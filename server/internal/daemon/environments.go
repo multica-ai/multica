@@ -129,6 +129,14 @@ func (s *environmentService) trackTask(envRoot string, task localenv.Task) func(
 	}
 }
 
+// finalizeWorktree serializes delivery/removal with declared environment starts.
+func (s *environmentService) finalizeWorktree(w *execenv.LocalWorktree, logger *slog.Logger) (execenv.LocalWorktreeOutcome, error) {
+	if s == nil {
+		return w.Finalize(logger)
+	}
+	return s.manager.FinalizeWorktree(w)
+}
+
 // servesFrom reports whether a live environment runs from inside dir, so GC
 // leaves the directory alone until it stops.
 func (s *environmentService) servesFrom(dir string) bool {

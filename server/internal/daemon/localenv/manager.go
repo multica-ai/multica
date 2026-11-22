@@ -19,6 +19,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 const (
@@ -128,11 +130,16 @@ type record struct {
 	// ended while this one ran. What is left of them, such as an API both
 	// used, is still in use and still declared.
 	Adopted []int `json:"adopted,omitempty"`
+	// Worktree is set only after successful task branch delivery. It survives
+	// daemon restarts until the last environment using that checkout ends.
+	Worktree *execenv.FinalizedLocalWorktree `json:"worktree,omitempty"`
 }
 
 type entry struct {
 	rec      record
 	stopping bool
+	// Restart keeps the checkout pinned between stopping and replacing a process.
+	restartPins int
 	// leaderDone is closed once the start command's own process has exited.
 	// It is nil for an environment adopted after a daemon restart, whose
 	// liveness is checked on its process group instead.
@@ -188,7 +195,7 @@ func (m *Manager) Load() error {
 		if err := json.Unmarshal(data, &rec); err != nil || rec.ID != d.Name() {
 			continue
 		}
-		if rec.EndedAt != nil && m.now().Sub(*rec.EndedAt) > endedRetention {
+		if rec.EndedAt != nil && rec.Worktree == nil && m.now().Sub(*rec.EndedAt) > endedRetention {
 			continue
 		}
 		m.envs[rec.ID] = &entry{rec: rec}
@@ -205,6 +212,7 @@ func (m *Manager) Load() error {
 			go m.probe(e)
 		}
 	}
+	m.releaseWorktreesLocked()
 	return nil
 }
 
@@ -369,10 +377,11 @@ func (m *Manager) Tick() {
 			expired = append(expired, e)
 		case e.live() && e.leaderGone() && !groupAlive(e.rec.PID):
 			m.endLocked(e, StateExited, "")
-		case !e.live() && now.Sub(*e.rec.EndedAt) > endedRetention:
+		case !e.live() && e.restartPins == 0 && e.rec.Worktree == nil && now.Sub(*e.rec.EndedAt) > endedRetention:
 			delete(m.envs, id)
 		}
 	}
+	m.releaseWorktreesLocked()
 	sweepLogs := now.Sub(m.lastLogSwep) > time.Hour
 	if sweepLogs {
 		m.lastLogSwep = now
@@ -538,6 +547,7 @@ func (m *Manager) stop(e *entry, detail string) {
 	if e.live() {
 		m.endLocked(e, StateStopped, e.rec.Detail)
 	}
+	m.releaseWorktreesLocked()
 	m.logger.Info("environment stopped", "name", rec.Name, "id", rec.ID)
 }
 
@@ -555,6 +565,7 @@ func (m *Manager) endLocked(e *entry, state, detail string) {
 		heir.rec.Adopted = append(heir.rec.Adopted, e.rec.Adopted...)
 		m.persistLocked(heir)
 	}
+	m.releaseWorktreesLocked()
 }
 
 // heirLocked picks the live environment that takes over an ended one's
