@@ -360,8 +360,10 @@ h1{font-size:20px;margin:0 0 8px}p{color:#555;font-size:14px;line-height:1.5}
       const toolSlug = decodeURIComponent(api.slice("/tools/execute/".length)).toUpperCase();
       const body = await readBody(req);
       if (!findTool(toolSlug)) return send(res, 404, { error: { message: "tool not found" } });
+      // Accounts issued before a restart are unknown here but still live in
+      // Multica's database; only an account revoked since is refused.
       const account = accounts.get(body.connected_account_id);
-      if (body.connected_account_id && account?.status !== "ACTIVE") {
+      if (account && account.status !== "ACTIVE") {
         return send(res, 200, { successful: false, error: "connected account is not active", data: {} });
       }
       log(`execute ${toolSlug} as ${body.connected_account_id ?? body.user_id ?? "?"}`);
@@ -465,7 +467,7 @@ function environment({ optional = false } = {}) {
     manifest: join(stateDir, "manifest.env"),
     stateFile: join(stateDir, "fake-composio.json"),
     logFile: join(status.logs, "fake-composio.log"),
-    apiRunning: status.components?.api?.state === "running",
+    apiRunning: ["running", "stale"].includes(status.components?.api?.state),
     components: Object.entries(status.components ?? {})
       .filter(([, component]) => component.state !== "stopped")
       .map(([name]) => name),
