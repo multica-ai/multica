@@ -77,9 +77,11 @@ import { MemberProfileCard } from "../../members/member-profile-card";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
-import { InboxArchiveButton, InboxOpenBar } from "../../inbox/components/inbox-bar";
+import { InboxArchiveButton, InboxBarSkeleton, InboxOpenBar } from "../../inbox/components/inbox-bar";
 import { InboxIssueActions } from "./inbox-issue-actions";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
+import { useInboxSelectionStore, type InboxTransitionDirection } from "@multica/core/inbox/selection-store";
+import { useReducedMotion } from "@multica/core/appearance";
 import { PropRow } from "../../common/prop-row";
 import { useIsGuest } from "@multica/core/permissions";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
@@ -1293,12 +1295,41 @@ const ISSUE_DETAIL_LAYOUT_ID = "multica_issue_detail_layout";
  * an identifier URL to its issue — the two waits are indistinguishable to the
  * user, and rendering the same skeleton keeps them that way.
  */
+function IssueSidebarSkeletonRows({ className }: { className?: string }) {
+  return (
+    <div className={cn("space-y-5", className)}>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Skeleton className="h-3 w-16 shrink-0" />
+          <Skeleton className="h-5 w-24" />
+        </div>
+      ))}
+      <Skeleton className="h-px w-full" />
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Skeleton className="h-3 w-16 shrink-0" />
+          <Skeleton className="h-4 w-28" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function IssueDetailSkeleton({
   leading,
   trailing,
   sidebar = true,
   layoutId = ISSUE_DETAIL_LAYOUT_ID,
-}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean; layoutId?: string } = {}) {
+  showInboxBar = false,
+  inboxItem,
+}: {
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  sidebar?: boolean;
+  layoutId?: string;
+  showInboxBar?: boolean;
+  inboxItem?: InboxItem | null;
+} = {}) {
   const { defaultLayout } = useDefaultLayout({ id: layoutId });
   const sidebarOpen = sidebar && getAnimatedRightSidebarInitialOpen(true, defaultLayout);
 
@@ -1309,13 +1340,20 @@ export function IssueDetailSkeleton({
           to offer while this skeleton owns the screen. */}
       <DetailStateBar trailing={trailing}>
         {leading ?? (
-          <>
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-4 w-4" />
-            <Skeleton className="h-4 w-24" />
-          </>
+          inboxItem?.issue_identifier ? (
+            <span className="text-caption font-medium text-muted-foreground">
+              {inboxItem.issue_identifier}
+            </span>
+          ) : (
+            <>
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-4 w-4" />
+              <Skeleton className="h-4 w-24" />
+            </>
+          )
         )}
       </DetailStateBar>
+      {(showInboxBar || inboxItem) && <InboxBarSkeleton item={inboxItem} />}
       <div className="flex flex-1 min-h-0">
         {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
             column doesn't shift sideways when real content mounts. */}
@@ -1324,7 +1362,13 @@ export function IssueDetailSkeleton({
               comment), so the skeleton doesn't reflow sideways when real
               content mounts. */}
           <div className={cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] space-y-6 md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]")}>
-            <Skeleton className="h-8 w-3/4" />
+            {inboxItem?.title ? (
+              <div className="text-xl font-semibold tracking-tight text-foreground leading-snug">
+                {inboxItem.title}
+              </div>
+            ) : (
+              <Skeleton className="h-8 w-3/4" />
+            )}
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-4 w-5/6" />
@@ -1344,20 +1388,8 @@ export function IssueDetailSkeleton({
           </div>
         </div>
         {sidebarOpen && (
-          <div className="hidden md:block w-80 border-l p-4 space-y-5">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-5 w-24" />
-              </div>
-            ))}
-            <Skeleton className="h-px w-full" />
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-4 w-28" />
-              </div>
-            ))}
+          <div className="hidden md:block w-80 border-l p-4">
+            <IssueSidebarSkeletonRows />
           </div>
         )}
       </div>
@@ -1539,12 +1571,32 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
     () => (landingAtMount ? 0 : null),
   );
   const [landingSettled, setLandingSettled] = useState(false);
+  const [landingAligned, setLandingAligned] = useState(() => !landingAtMount);
   const releaseLandingOverscan = useCallback(() => setLandingSettled(true), []);
   // The landing frame also leaves out what is off the reading path: the
   // properties sidebar, the composer and the thread rail. They mount once the
   // target has painted, a frame or two after it.
   const [landingChromeHeld, setLandingChromeHeld] = useState(() => landingAtMount);
   const releaseLandingChrome = useCallback(() => setLandingChromeHeld(false), []);
+  const reduceMotion = useReducedMotion();
+  const fromSidebarInbox = useInboxSelectionStore(
+    (s) => !!wsId && s.sidebarIssueByWorkspace[wsId] === id,
+  );
+  const pendingInboxTransition = useInboxSelectionStore((s) =>
+    wsId ? s.transitionByWorkspace[wsId] : undefined,
+  );
+  const [inboxTransition, setInboxTransition] = useState<{
+    issueId: string;
+    direction: InboxTransitionDirection;
+  } | null>(null);
+  const activeInboxTransition: InboxTransitionDirection | null = isPeek
+    ? null
+    : inboxTransition?.issueId === id
+      ? inboxTransition.direction
+      : pendingInboxTransition?.targetKey === id
+        ? pendingInboxTransition.direction
+        : null;
+  const hideUnalignedLanding = landingAtMount && !landingAligned && landingChromeHeld;
   // A landing request whose link names no comment has nothing to land on.
   // The fragment is in by the next frame, so a hold still without a target
   // then is let go.
@@ -1552,6 +1604,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   useEffect(() => {
     if (!holdingWithoutTarget) return;
     const frame = requestAnimationFrame(() => {
+      setLandingAligned(true);
       releaseLandingChrome();
       releaseLandingOverscan();
     });
@@ -2581,6 +2634,11 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
 
   const loading = issueLoading;
+  useEffect(() => {
+    if (loading || isPeek || !wsId) return;
+    const direction = useInboxSelectionStore.getState().consumeTransition(wsId, id);
+    if (direction) setInboxTransition({ issueId: id, direction });
+  }, [loading, isPeek, wsId, id]);
 
   // Deep links keep the timeline virtualized. Mount the enclosing row by
   // index, then center and highlight the exact comment once its anchor exists.
@@ -2658,6 +2716,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
       didHighlightRef.current = highlightCommentId;
       writeViewState(issueHighlightMementoKey(id), highlightCommentId);
       onHighlightLandedRef.current?.();
+      setLandingAligned(true);
       releaseLandingChrome();
       releaseLandingOverscan();
     };
@@ -2674,6 +2733,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
       container, virtualizer: virtuosoRef.current,
       index: targetIdx, commentId: landingId,
       onMounted: () => {
+        setLandingAligned(true);
         // After the frame that paints the target, not inside it.
         requestAnimationFrame(() => window.setTimeout(releaseLandingChrome, 0));
         didHighlightRef.current = highlightCommentId;
@@ -3116,7 +3176,16 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   if (loading) {
     // The host's trailing controls hold the peek's only close button, so the
     // waiting and missing states carry them too.
-    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek && desktopSidebarOpen} layoutId={layoutId} />;
+    return (
+      <IssueDetailSkeleton
+        leading={leadingAction}
+        trailing={trailingActions}
+        sidebar={!isPeek && desktopSidebarOpen}
+        layoutId={layoutId}
+        showInboxBar={!isPeek && (!!inboxItem || fromSidebarInbox)}
+        inboxItem={isPeek ? undefined : inboxItem}
+      />
+    );
   }
 
   if (!issue) {
@@ -3598,7 +3667,9 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
     metadata: <MetadataSection metadata={issue.metadata ?? {}} />,
   };
 
-  const sidebarContent = landingChromeHeld ? null : (
+  const sidebarContent = landingChromeHeld ? (
+    <IssueSidebarSkeletonRows className="p-2" />
+  ) : (
     <IssueSidebarSections
       sections={sidebarSections}
       available={ISSUE_SIDEBAR_SECTIONS.filter(
@@ -3882,6 +3953,14 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             isPeek
               ? "mx-auto w-full px-6 py-5"
               : cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] max-md:pb-chat-launcher md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]"),
+            hideUnalignedLanding && "opacity-0",
+            !hideUnalignedLanding &&
+              activeInboxTransition &&
+              (reduceMotion
+                ? "animate-inbox-enter-fade"
+                : activeInboxTransition === "next"
+                  ? "animate-inbox-enter-next"
+                  : "animate-inbox-enter-prev"),
           )}
         >
           <IssueDuplicateBanner

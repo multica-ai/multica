@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { inboxKeys } from "@multica/core/inbox/queries";
 import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import type { InboxItem } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton, IssueNotFound, IssueLoadError } from "./issue-detail";
 import { IssuePeekHost } from "./issue-peek";
@@ -88,9 +91,26 @@ function useHighlightHash(): { hash: string; commentId?: string; appRequestId?: 
  */
 export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetailRouteProps) {
   const wsId = useWorkspaceId();
+  const qc = useQueryClient();
   const {
     canonicalId, issue, isResolving, notFound, loadFailed, isRetrying, retry, hasLoaded,
   } = useCanonicalIssue(wsId, routeId);
+  const sidebarInboxIssue = useInboxSelectionStore((s) =>
+    wsId ? (s.sidebarIssueByWorkspace[wsId] ?? null) : null,
+  );
+  const cachedInboxRow = wsId
+    ? (qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId)) ?? []).find(
+        (item) =>
+          !item.archived &&
+          (item.issue_id === (canonicalId ?? routeId) ||
+            (item.issue_identifier != null && item.issue_identifier.toUpperCase() === routeId.toUpperCase())),
+      ) ?? null
+    : null;
+  const fromInboxSkeleton =
+    !!sidebarInboxIssue &&
+    (sidebarInboxIssue === routeId ||
+      sidebarInboxIssue === canonicalId ||
+      (cachedInboxRow?.issue_id != null && sidebarInboxIssue === cachedInboxRow.issue_id));
   const highlight = useHighlightHash();
   const landing = useInboxSelectionStore((s) =>
     s.landing && s.landing.issueId === canonicalId ? s.landing : null,
@@ -122,7 +142,14 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
     return <IssueLoadError showBackLink={!onDelete} onRetry={retry} isRetrying={isRetrying} />;
   }
 
-  if (isResolving || (!issue && !notFound)) return <IssueDetailSkeleton />;
+  if (isResolving || (!issue && !notFound)) {
+    return (
+      <IssueDetailSkeleton
+        showInboxBar={fromInboxSkeleton}
+        inboxItem={fromInboxSkeleton ? cachedInboxRow : undefined}
+      />
+    );
+  }
 
   // Render not-found here rather than handing the unresolved segment down.
   // `IssueDetail` would mount a second observer on the query that just failed,

@@ -144,6 +144,7 @@ export function InboxEmptyState({
       return;
     }
     store.returnRow(wsId, entry.key);
+    store.recordTransition(wsId, entry.key, "prev");
     if (entry.kind === "unsubscribed") store.rememberSidebarIssue(wsId, entry.issueId);
     else if (entry.href.includes("/issues/")) store.rememberSidebarIssue(wsId, entry.key);
     push?.(entry.href);

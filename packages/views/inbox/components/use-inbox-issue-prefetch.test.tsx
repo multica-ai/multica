@@ -26,12 +26,17 @@ function row(id: string, read = false): InboxItem {
   return { id: `n-${id}`, issue_id: id, issue_identifier: `MUL-${id}`, read } as InboxItem;
 }
 
-function setup(rows: InboxItem[]) {
+function setup(rows: InboxItem[], openKey?: string | null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
-  const hook = renderHook(({ items }) => useInboxIssuePrefetch("ws", items, (item) => `/ws/issues/${item.issue_identifier}`), {
-    wrapper, initialProps: { items: rows },
-  });
+  const hook = renderHook(
+    ({ items, activeKey }) =>
+      useInboxIssuePrefetch("ws", items, (item) => `/ws/issues/${item.issue_identifier}`, activeKey),
+    {
+      wrapper,
+      initialProps: { items: rows, activeKey: openKey },
+    },
+  );
   return { qc, hook };
 }
 
@@ -72,8 +77,32 @@ describe("useInboxIssuePrefetch", () => {
 
   it("does not restart when realtime replaces the same rows", async () => {
     const { hook } = setup([row("a")]);
-    hook.rerender({ items: [row("a")] });
+    hook.rerender({ items: [row("a")], activeKey: undefined });
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(api.getIssue).toHaveBeenCalledTimes(1);
+  });
+
+  it("anchors prefetch on the next two rows after the currently open row, including read rows past index 3", async () => {
+    const rows = [
+      row("a"),
+      row("b"),
+      row("c"),
+      row("d", true),
+      row("e", true),
+      row("f", true),
+      row("g"),
+    ];
+    setup(rows, "d");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    // next1 ("e", read) and next2 ("f", read) warm first, followed by the top unread rows.
+    expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual([
+      "MUL-e",
+      "MUL-f",
+      "MUL-a",
+      "MUL-b",
+      "MUL-c",
+    ]);
   });
 });

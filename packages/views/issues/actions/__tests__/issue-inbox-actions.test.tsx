@@ -11,6 +11,7 @@ import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { inboxListOptions, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { childIssuesOptions, issueDetailOptions, issueSubscribersOptions } from "@multica/core/issues/queries";
+import { notificationPreferenceKeys } from "@multica/core/notification-preferences/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import type { Agent, InboxItem, Issue, SnoozedInboxIssue } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
@@ -566,5 +567,47 @@ describe("IssueInboxBar once an action is undone", () => {
     // The user continues reading the same issue; a later status change archives it.
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
     expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+  });
+
+  it("keeps the 40px InboxBar mounted while handing off to the next notification", async () => {
+    const nav = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
+    expect(useInboxSelectionStore.getState().transitionByWorkspace.ws).toMatchObject({
+      targetKey: "issue-2",
+      direction: "next",
+    });
+
+    // Simulate the archive mutation removing the row from the Inbox cache before
+    // the next issue's route mounts: the bar keeps its 40px slot instead of collapsing.
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+    expect(document.querySelector("[data-inbox-bar]")).not.toBeNull();
+  });
+
+  it("shows a cancellable auto-advance buffer with Stay here when after_auto_archive=next", async () => {
+    const focusSpy = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    try {
+      const nav = setup();
+      act(() => {
+        nav.qc.setQueryData(notificationPreferenceKeys.all("ws"), {
+          workspace_id: "ws",
+          preferences: { after_auto_archive: "next" },
+        });
+      });
+      noteInboxBarAction("issue-1", { type: "status", status: "done" });
+      noteInboxAutoArchive({ issue_id: "issue-1", reason: "actor_acted" });
+      act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+
+      expect(await screen.findByRole("button", { name: "Stay here" })).toBeInTheDocument();
+      expect(document.querySelector("[data-inbox-auto-advance-bar]")).not.toBeNull();
+      expect(nav.push).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Stay here" }));
+      expect(screen.queryByRole("button", { name: "Stay here" })).toBeNull();
+      expect(document.querySelector("[data-inbox-auto-advance-bar]")).toBeNull();
+      expect(nav.push).not.toHaveBeenCalled();
+    } finally {
+      focusSpy.mockRestore();
+    }
   });
 });

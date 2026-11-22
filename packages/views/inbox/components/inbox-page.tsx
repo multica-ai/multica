@@ -126,6 +126,7 @@ import {
   useRestoreInbox,
 } from "./use-leave-inbox-row";
 import { useInboxSnooze } from "./use-inbox-snooze";
+import { useInboxIssuePrefetch } from "./use-inbox-issue-prefetch";
 import { useInboxShortcut } from "./use-inbox-shortcut";
 import { InboxAppRequest } from "../../common/app-requests";
 import { useT } from "../../i18n";
@@ -595,8 +596,17 @@ export function InboxPage() {
   // The rows in the order the user sees them: on desktop the Work panel
   // section's, which applies the same filters.
   const listedItems = opensAnyLiveRow ? sectionList.rows : selectionItems;
+  // Warm the next two rows around the active selection on Archived & compact
+  // lists so unarchive/archive auto-advance renders from cache without flashing.
+  useInboxIssuePrefetch(
+    wsId,
+    isArchivedView || isCompact ? listedItems : [],
+    (item) => inboxRowHref(wsPaths, item),
+    selectedKey || null,
+  );
   const leaveRow = useInboxSelectionStore((s) => s.leaveRow);
   const recordLastCleared = useInboxSelectionStore((s) => s.recordLastCleared);
+  const recordTransition = useInboxSelectionStore((s) => s.recordTransition);
   // Moving the selection off a row (an Inbox action on it) lets it go rather
   // than keep it in place.
   const advanceSelectionPast = (id: string, list: InboxItem[], cleared?: LastInboxCleared) => {
@@ -607,7 +617,9 @@ export function InboxPage() {
     // Only clear the selection when nothing else is left.
     const next = nextInboxRow(list, selectedKey);
     if (!next && cleared) recordLastCleared(wsId, cleared);
-    setSelectedKey(next ? inboxRowKey(next) : "");
+    const nextKey = next ? inboxRowKey(next) : "";
+    recordTransition(wsId, nextKey, "next");
+    setSelectedKey(nextKey);
   };
   // A batch archive that takes the open row moves on to the next one it leaves.
   const archiveBatch = (
@@ -666,7 +678,7 @@ export function InboxPage() {
     });
   };
 
-  const settledCause = useMoveOnAfterAutoArchive({
+  const { cause: settledCause, autoAdvance: settledAutoAdvance } = useMoveOnAfterAutoArchive({
     settled: settledRow,
     next: settledRow ? nextInboxRow(listedItems, settledRow.key) : null,
     onNext: () => {
@@ -1010,6 +1022,7 @@ export function InboxPage() {
         }
         next={nextInboxRow(listedItems, settledRow.key)}
         onNext={() => advanceSelectionPast(settledRow.item.id, listedItems)}
+        autoAdvance={settledAutoAdvance}
       />
     ) : null;
 
