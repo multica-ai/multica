@@ -1,5 +1,6 @@
 import { defineDocs, defineConfig } from "fumadocs-mdx/config";
 import { MARKDOWN_PLACEHOLDERS, markdownElementVisibility } from "./lib/markdown-export";
+import { remarkDropIncludedTitle } from "./lib/remark-included-title";
 export const docs = defineDocs({
   dir: "content/docs",
   docs: {
@@ -15,5 +16,8 @@ export const docs = defineDocs({
 });
 
 export default defineConfig({
-  mdxOptions: {},
+  mdxOptions: {
+    // Before the preset's heading plugins, so the dropped title stays out of the TOC.
+    remarkPlugins: (plugins) => [remarkDropIncludedTitle, ...plugins],
+  },
 });
