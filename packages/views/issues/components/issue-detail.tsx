@@ -45,7 +45,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { StorageLimitNotice } from "../../billing/storage-limit-notice";
-import { useDocCollab } from "../../docs/components/use-doc-collab";
+import { useDocCollab, type DocCollaborator } from "../../docs/components/use-doc-collab";
 import { ContentEditor, ReadonlyContent, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence, ImageThumbnailsProvider } from "../../editor";
 import {
   WAKEUP_ACTIVITY_ACTIONS,
@@ -123,7 +123,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
 import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
-import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
+import { IssuePresenceHeaderChip } from "./issue-presence-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
@@ -1447,8 +1447,6 @@ export function IssueLoadError({
 // Loading skeleton
 
 const ISSUE_DETAIL_LAYOUT_ID = "multica_issue_detail_layout";
-const REVEALED_WAKEUPS: readonly IssueSidebarSection[] = ["wakeups"];
-
 /**
  * Exported so `IssueDetailRoute` can show the identical frame while it resolves
  * an identifier URL to its issue — the two waits are indistinguishable to the
@@ -3074,6 +3072,17 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   const [descSoloHeld, setDescSoloHeld] = useState(false);
   useEffect(() => setDescSoloHeld(false), [id]);
   const showLiveDesc = !!descLive?.ready && descLiveReadyFor === descLive.generation && !descSoloHeld;
+  const descContentRef = useRef<HTMLDivElement>(null);
+  const descPresence = useMemo(
+    () => descLive?.collaborators.filter((c) => !(c.kind === "member" && c.id === user?.id)) ?? [],
+    [descLive?.collaborators, user?.id],
+  );
+  const jumpToCollaborator = useCallback((c: DocCollaborator) => {
+    const caret = descContentRef.current?.querySelector<HTMLElement>(
+      `.collaboration-carets__caret[data-collaborator="${CSS.escape(`${c.kind}:${c.id}`)}"]`,
+    );
+    caret?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, []);
   const descCarried = descCollab.mode === "solo" ? (descCollab.carried ?? null) : null;
   const queueDescriptionSaveRef = useRef<
     ((draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] }) => void) | null
@@ -3222,22 +3231,6 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
       else panel.collapse();
     });
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
-
-  // The header's wakeup chip opens the sidebar and brings the Wakeups section
-  // into view with focus on its heading, showing it on this issue even when
-  // the reader hid it from the sidebar. The reveal lasts until the reader
-  // switches the section in settings or moves to another issue.
-  const [revealedWakeupsFor, setRevealedWakeupsFor] = useState<string | null>(null);
-  if (revealedWakeupsFor !== null && revealedWakeupsFor !== id) setRevealedWakeupsFor(null);
-  const openWakeups = useCallback(() => {
-    setRevealedWakeupsFor(id);
-    if (!sidebarOpen) handleToggleSidebar();
-    window.requestAnimationFrame(() => {
-      const heading = document.getElementById(`issue-wakeups-${id}`);
-      heading?.scrollIntoView({ block: "nearest" });
-      heading?.focus({ preventScroll: true });
-    });
-  }, [handleToggleSidebar, id, sidebarOpen]);
 
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
@@ -3773,8 +3766,6 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             ? GUEST_SIDEBAR_SECTIONS.has(section)
             : (section !== "pull_requests" || githubSettings.prSidebar) && (section !== "plugins" || pluginsEnabled),
       )}
-      revealed={revealedWakeupsFor === id ? REVEALED_WAKEUPS : undefined}
-      onRevealEnd={() => setRevealedWakeupsFor(null)}
     />
   );
 
@@ -3937,6 +3928,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
           />
         )}
         <BreadcrumbHeader
+          className="@container/issue-header"
           leading={leadingAction}
           segments={breadcrumbSegments}
           leaf={
@@ -3956,11 +3948,23 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
           }
           actions={
             <>
-            {/* Live "agent is working" chip, leftmost in the right cluster so
-                it never overlaps the title (which truncates to make room).
-                It self-hides when no agent is active. */}
-            {!guest && <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />}
-            {!guest && <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />}
+            {/* What is happening on the issue right now, left of the actions:
+                who else has it open, then which agent is working. Each chip
+                hides itself when there is nothing to say; the hairline before
+                the actions shows only while one of them does. */}
+            {!guest && (
+              <div className="flex items-center gap-1 empty:hidden after:ml-1 after:h-4 after:w-px after:bg-border">
+                {descLive && (
+                  <IssuePresenceHeaderChip
+                    collaborators={descPresence}
+                    locate={descLive.locate}
+                    watchCarets={descLive.watchCarets}
+                    onJump={jumpToCollaborator}
+                  />
+                )}
+                <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
+              </div>
+            )}
             {!guest && <IssueDetailActionsDropdown
               issue={issue}
               locateInSidebar={!isPeek}
@@ -4234,7 +4238,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             }}
           >
             {descriptionAnnotations.popup}
-            <div data-comment-content={descriptionSourceId}>
+            <div ref={descContentRef} data-comment-content={descriptionSourceId}>
               {guest ? (
                 <ReadonlyContent content={issue.description ?? ""} attachments={descEditorAttachments} />
               ) : (

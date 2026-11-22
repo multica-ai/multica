@@ -109,3 +109,31 @@ test("two people and an API edit share one live description", async ({ browser }
   await a.page.context().close();
   await b.page.context().close();
 });
+
+test("the header shows who else is on the issue and where they are editing", async ({ browser }) => {
+  const issue = await alice.createIssue("Launch plan", {
+    description: "## Goals\n\nShip on Friday.\n\n## Risks\n\nThe import API may slip.",
+  });
+  const a = await openLive(browser, alice.getToken()!, issue.id);
+  test.skip(!a.live, "Live issue descriptions are off; start collab with FF_ISSUE_DESCRIPTION_LIVE=true.");
+  const chip = a.page.getByRole("button", { name: "1 viewing" });
+  await expect(chip).toHaveCount(0);
+
+  const b = await openLive(browser, bob.getToken()!, issue.id);
+  await expect(chip).toBeVisible();
+  await chip.click();
+  await expect(a.page.getByText("Viewing · 1")).toBeVisible();
+  await expect(a.page.locator('[data-presence-row="Bob Chen"]')).toBeVisible();
+  await a.page.keyboard.press("Escape");
+
+  await typeAt(b.page, "The import API may slip.", "End", " Bob owns it.");
+  await chip.click();
+  await expect(a.page.getByText("Editing · 1")).toBeVisible();
+  await expect(a.page.getByText('In "Risks"')).toBeVisible();
+  await a.page.locator('[data-presence-row="Bob Chen"]').click();
+  await expect(a.page.locator('.collaboration-carets__caret[data-collaborator^="member:"]')).toBeInViewport();
+
+  await b.page.context().close();
+  await expect(chip).toHaveCount(0, { timeout: 15_000 });
+  await a.page.context().close();
+});

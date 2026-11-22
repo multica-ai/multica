@@ -921,6 +921,21 @@
     "clear_button": "Очистить фильтры",
     "unread_title": "Нет непрочитанных задач"
   },
+  "presence": {
+    "viewing_one": "{{count}} смотрит",
+    "viewing_few": "{{count}} смотрят",
+    "viewing_many": "{{count}} смотрят",
+    "viewing_other": "{{count}} смотрят",
+    "editing": "Редактируют",
+    "watching": "Смотрят",
+    "where": "В «{{section}}»",
+    "more_one": "Ещё {{count}}: {{names}}",
+    "more_few": "Ещё {{count}}: {{names}}",
+    "more_many": "Ещё {{count}}: {{names}}",
+    "more_other": "Ещё {{count}}: {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Нажмите на имя, чтобы перейти к курсору"
+  },
   "agent_live": {
     "is_working": "{{name}} работает",
     "is_queued": "{{name}} в очереди",

@@ -45,6 +45,8 @@ export interface DocCollaborator {
   name: string;
   color: string;
   kind: "member" | "agent";
+  /** Has a caret in the document, as opposed to only having it open. */
+  editing: boolean;
 }
 
 // ---- Ticket and saved state --------------------------------------------------
@@ -300,17 +302,32 @@ export class DocSession {
     const next: DocCollaborator[] = [];
     for (const [key, state] of this.provider.awareness?.getStates() ?? []) {
       if (key === this.ydoc.clientID) continue;
-      const u = (state as { user?: Partial<DocCollaborator> }).user;
+      const { user: u, cursor } = state as { user?: Partial<DocCollaborator>; cursor?: unknown };
       if (!u?.name || !u.id) continue;
       const dedupe = `${u.kind}:${u.id}`;
-      if (seen.has(dedupe)) continue;
+      const editing = !!cursor;
+      if (seen.has(dedupe)) {
+        // The same person in two tabs is editing if either tab is.
+        if (editing) {
+          const index = next.findIndex((c) => `${c.kind}:${c.id}` === dedupe);
+          if (index >= 0 && !next[index]!.editing) next[index] = { ...next[index]!, key, editing };
+        }
+        continue;
+      }
       seen.add(dedupe);
-      next.push({ key, id: u.id, name: u.name, color: u.color ?? colorFor(u.id), kind: u.kind === "agent" ? "agent" : "member" });
+      next.push({ key, id: u.id, name: u.name, color: u.color ?? colorFor(u.id), kind: u.kind === "agent" ? "agent" : "member", editing });
     }
-    const signature = next.map((c) => `${c.key}:${c.kind}:${c.id}:${c.name}:${c.color}`).join("|");
+    const signature = next.map((c) => `${c.key}:${c.kind}:${c.id}:${c.name}:${c.color}:${c.editing}`).join("|");
     if (signature === this.signature) return;
     this.signature = signature;
     this.update({ collaborators: next });
+  };
+
+  /** Calls `listener` on every awareness change, caret moves included. */
+  watchAwareness = (listener: () => void): (() => void) => {
+    const awareness = this.provider.awareness;
+    awareness?.on("change", listener);
+    return () => awareness?.off("change", listener);
   };
 
   /** Out of the cache: no page joins it again, and it ends with its last user. */

@@ -1,10 +1,11 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import * as Y from "yjs";
 import { useAuthStore } from "@multica/core/auth";
 import { configStore } from "@multica/core/config";
 import { useWS } from "@multica/core/realtime";
 import type { EditorCollaboration } from "../../editor/extensions";
-import { createDocumentCodec } from "../../editor/schema/codec";
+import { COLLAB_FIELD, createDocumentCodec } from "../../editor/schema/codec";
 import {
   acquireDocSession,
   colorFor,
@@ -47,6 +48,10 @@ export type DocCollabState =
       collaborators: DocCollaborator[];
       /** Changes the editor's key when the session starts over. */
       generation: number;
+      /** The heading a collaborator's caret is under, if any. */
+      locate: (key: number) => string | null;
+      /** Calls back on every caret move, for views that show where people are. */
+      watchCarets: (listener: () => void) => () => void;
     };
 
 const IDLE_STATE: DocSessionState = { ready: false, synced: false, connected: false, collaborators: [], reset: false };
@@ -63,6 +68,44 @@ function editedContent(session: DocSession, base: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** The text of the last heading at or above a collaborator's caret. */
+export function locateCaret(session: DocSession, key: number): string | null {
+  const cursor = (session.provider.awareness?.getStates().get(key) as { cursor?: { head?: unknown } } | undefined)?.cursor;
+  if (!cursor?.head) return null;
+  let position: Y.AbsolutePosition | null = null;
+  try {
+    position = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(cursor.head), session.ydoc);
+  } catch {
+    return null;
+  }
+  if (!position) return null;
+  const root = session.ydoc.getXmlFragment(COLLAB_FIELD);
+  const blocks = root.toArray();
+  let index = position.index;
+  if (position.type !== root) {
+    let block: Y.AbstractType<unknown> | null = position.type;
+    while (block && block.parent !== root) block = block.parent as Y.AbstractType<unknown> | null;
+    if (!block) return null;
+    index = blocks.indexOf(block as (typeof blocks)[number]);
+  }
+  for (let i = Math.min(index, blocks.length - 1); i >= 0; i--) {
+    const block = blocks[i];
+    if (block instanceof Y.XmlElement && block.nodeName === "heading") {
+      const text = plainText(block).trim();
+      if (text) return text;
+    }
+  }
+  return null;
+}
+
+function plainText(node: Y.XmlElement | Y.XmlText | Y.XmlHook): string {
+  if (node instanceof Y.XmlText) {
+    return (node.toDelta() as { insert?: unknown }[]).map((d) => (typeof d.insert === "string" ? d.insert : "")).join("");
+  }
+  if (node instanceof Y.XmlElement) return node.toArray().map(plainText).join("");
+  return "";
 }
 
 /**
@@ -169,6 +212,8 @@ export function useDocCollab(
     };
   }, [session, user]);
 
+  const locate = useCallback((key: number) => (session ? locateCaret(session, key) : null), [session]);
+
   if (!enabled) return { mode: "solo" };
   if (mode === "solo") return { mode, carried };
   // A reset session is about to be replaced; nothing may keep editing it.
@@ -182,5 +227,7 @@ export function useDocCollab(
     collaboration,
     collaborators: state.collaborators,
     generation: session.id,
+    locate,
+    watchCarets: session.watchAwareness,
   };
 }

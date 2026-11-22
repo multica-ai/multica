@@ -854,6 +854,17 @@
     "unread_title": "Aucune tâche non lue",
     "clear_button": "Effacer les filtres"
   },
+  "presence": {
+    "viewing_one": "{{count}} présent",
+    "viewing_other": "{{count}} présents",
+    "editing": "En train de modifier",
+    "watching": "Consultent la page",
+    "where": "Dans « {{section}} »",
+    "more_one": "{{count}} de plus : {{names}}",
+    "more_other": "{{count}} de plus : {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Cliquez sur un nom pour aller à son curseur"
+  },
   "agent_live": {
     "is_working": "{{name}} travaille",
     "is_queued": "{{name}} est en file d'attente",
