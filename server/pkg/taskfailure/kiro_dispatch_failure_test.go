@@ -68,3 +68,38 @@ func TestNormalizeDaemonReasonUpgradesKiroDispatchFailure(t *testing.T) {
 		t.Errorf("plain server error was upgraded: got %q", got)
 	}
 }
+
+// kiroThrottledErr is verbatim from GH #10652.
+const kiroThrottledErr = `kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=Encountered an error in the response stream: The request was throttled by the service (request_id: eb275a9a-ad2a-481e-b072-37a1d1ec63f4))`
+
+func TestClassifyKiroThrottled(t *testing.T) {
+	t.Parallel()
+
+	if got := Classify(kiroThrottledErr); got != ReasonAgentProviderCapacityOrRateLimit {
+		t.Errorf("Classify(throttled) = %q, want %q", got, ReasonAgentProviderCapacityOrRateLimit)
+	}
+	// A bare "throttled" is not provider evidence.
+	if got := Classify("log output throttled to 1 line per second"); got == ReasonAgentProviderCapacityOrRateLimit {
+		t.Errorf("bare throttled classified as rate limit")
+	}
+}
+
+// An installed daemon predating the throttling witness reports
+// provider_server_error; the server upgrades the label.
+func TestNormalizeDaemonReasonUpgradesKiroThrottled(t *testing.T) {
+	t.Parallel()
+
+	for _, legacy := range []string{
+		string(ReasonAgentProviderServerError),
+		string(ReasonAgentUnknown),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(legacy, kiroThrottledErr); got != ReasonAgentProviderCapacityOrRateLimit {
+			t.Errorf("NormalizeDaemonReason(%q, throttled) = %q, want %q", legacy, got, ReasonAgentProviderCapacityOrRateLimit)
+		}
+	}
+	// A more specific reason the daemon chose is left alone.
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), kiroThrottledErr); got != ReasonAgentProviderAuthOrAccess {
+		t.Errorf("auth reason was overwritten: got %q", got)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/projectaccess"
@@ -497,4 +498,103 @@ func TestSearchIndexCopyFromRoleBasedAccessIsRebuilt(t *testing.T) {
 	if next.AccessRules != searchIndexAccessRules {
 		t.Errorf("returned cursor access rules = %d, want %d", next.AccessRules, searchIndexAccessRules)
 	}
+}
+
+// MUL-9325: PUT /api/projects/{id} used to read member_ids only when the
+// visibility changed, so naming members for a project that was already
+// private succeeded and added nobody. Older CLIs still send exactly that.
+func TestProjectUpdateMemberIDsAreNeverDropped(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, f.insider, f.projectID)
+	plain := createPlainMember(t, f.marker+"-plain@multica.test")
+	addProjectMemberRow(t, f.projectID, plain)
+	newcomer := createPlainMember(t, f.marker+"-newcomer@multica.test")
+	title := func() string {
+		var s string
+		if err := testPool.QueryRow(context.Background(), `SELECT title FROM project WHERE id = $1`, f.projectID).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	visibility := func() string {
+		var s string
+		if err := testPool.QueryRow(context.Background(), `SELECT visibility FROM project WHERE id = $1`, f.projectID).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	refused := map[string]any{"visibility": "private", "member_ids": []string{newcomer}, "title": "must not change"}
+	assertUnchanged := func(t *testing.T) {
+		t.Helper()
+		if projectMemberIDs(t, f.projectID)[newcomer] || title() == "must not change" {
+			t.Fatal("a refused update still changed the project")
+		}
+	}
+
+	t.Run("callers who could not add members directly are refused alike", func(t *testing.T) {
+		const denied = "only workspace admins and the member who manages this project's access can add members"
+		addProjectMembersAs(t, plain, f.projectID, newcomer).Want(http.StatusForbidden)
+		if body := updateProjectAs(t, plain, f.projectID, refused).Want(http.StatusForbidden).Text(); !strings.Contains(body, denied) {
+			t.Fatalf("non-manager: body = %s, want the member endpoint's message", body)
+		}
+		assertUnchanged(t)
+
+		agent := dbfx.Agent(t, f.marker+" insider agent", testRuntimeID, testutil.Cols{"owner_id": f.insider})
+		task := dbfx.Task(t, agent, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": f.secretIssue, "status": "running",
+			"originator_user_id": f.insider, "accountable_user_id": f.insider})
+		req := asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, refused), f.insider)
+		req.Header.Set("X-Actor-Source", "task_token")
+		req.Header.Set("X-Agent-ID", agent)
+		req.Header.Set("X-Task-ID", task)
+		testutil.Call(t, testHandler.UpdateProject, withURLParam(req, "id", f.projectID)).Want(http.StatusForbidden)
+		assertUnchanged(t)
+
+		updateProjectAs(t, f.insider, f.projectID, map[string]any{"member_ids": []string{"00000000-0000-0000-0000-00000000beef"}, "title": "must not change"}).
+			Want(http.StatusBadRequest)
+		assertUnchanged(t)
+	})
+
+	t.Run("the access manager adds them, with or without restating the visibility", func(t *testing.T) {
+		t.Cleanup(func() { removeProjectMemberRow(t, f.projectID, newcomer) })
+		updateProjectAs(t, f.insider, f.projectID, map[string]any{"visibility": "private", "member_ids": []string{newcomer}}).Want(http.StatusOK)
+		if !projectMemberIDs(t, f.projectID)[newcomer] {
+			t.Fatal("member_ids with an unchanged visibility added nobody")
+		}
+		removeProjectMemberRow(t, f.projectID, newcomer)
+		updateProjectAs(t, testUserID, f.projectID, map[string]any{"member_ids": []string{newcomer}}).Want(http.StatusOK)
+		if !projectMemberIDs(t, f.projectID)[newcomer] {
+			t.Fatal("member_ids without visibility added nobody")
+		}
+	})
+
+	t.Run("together with a new lead who is not yet a member", func(t *testing.T) {
+		t.Cleanup(func() {
+			dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, f.insider, f.projectID)
+			removeProjectMemberRow(t, f.projectID, newcomer)
+			removeProjectMemberRow(t, f.projectID, f.outsider)
+		})
+		updateProjectAs(t, f.insider, f.projectID, map[string]any{"lead_type": "member", "lead_id": f.outsider, "member_ids": []string{newcomer}}).
+			Want(http.StatusOK)
+		if members := projectMemberIDs(t, f.projectID); !members[newcomer] || !members[f.outsider] {
+			t.Fatalf("members = %v, want the named member and the new lead", members)
+		}
+	})
+
+	t.Run("a project made workspace-visible takes no new members", func(t *testing.T) {
+		updateProjectAs(t, testUserID, f.projectID, map[string]any{"visibility": "workspace", "member_ids": []string{newcomer}}).
+			Want(http.StatusBadRequest)
+		if visibility() != projectaccess.VisibilityPrivate || projectMemberIDs(t, f.projectID)[newcomer] {
+			t.Fatal("a refused switch still changed the project")
+		}
+		// The web app's access dialog restates the current list.
+		updateProjectAs(t, testUserID, f.projectID, map[string]any{"visibility": "workspace", "member_ids": []string{testUserID, f.insider, plain}}).
+			Want(http.StatusOK)
+		if visibility() != projectaccess.VisibilityWorkspace {
+			t.Fatal("project did not turn workspace-visible")
+		}
+		updateProjectAs(t, testUserID, f.projectID, map[string]any{"member_ids": []string{newcomer}}).Want(http.StatusBadRequest)
+		if projectMemberIDs(t, f.projectID)[newcomer] {
+			t.Fatal("a workspace-visible project gained a member")
+		}
+	})
 }

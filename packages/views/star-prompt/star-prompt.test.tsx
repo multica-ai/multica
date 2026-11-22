@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance, type ApiClient } from "@multica/core/api";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { useSessionPromptStore } from "@multica/core/session-prompt";
+import { useDevPromptStore, useSessionPromptStore } from "@multica/core/session-prompt";
 import {
   claimStarPromptShowing,
   markStarPromptStarred,
@@ -117,7 +117,8 @@ beforeEach(() => {
   stores.auth.setState({ user: eligibleUser() });
   stores.chat.setState({ isOpen: false });
   useStarPromptStore.setState({ moment: null });
-  useSessionPromptStore.setState({ prompted: false });
+  useSessionPromptStore.setState({ prompted: false, deckDealt: false, surveyPending: false, corner: null });
+  useDevPromptStore.setState({ request: null });
   workspace.current = { id: "ws-1", slug: "acme" };
 });
 
@@ -211,6 +212,34 @@ describe("StarPrompt", () => {
     expect(listIssues).not.toHaveBeenCalled();
   });
 
+  it("holds the corner while it shows and gives it back on close", async () => {
+    renderPrompt();
+    await agentFinishesIssue();
+    await screen.findByText("Lambda has completed 4 issues");
+    expect(useSessionPromptStore.getState().corner).toBe("star");
+
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(useSessionPromptStore.getState().corner).toBeNull();
+  });
+
+  it("skips the moment while the What's new deck holds the corner", async () => {
+    useSessionPromptStore.setState({ corner: "whats-new" });
+    renderPrompt();
+    await agentFinishesIssue();
+
+    expect(listIssues).not.toHaveBeenCalled();
+    expect(claimStarPromptShowing).not.toHaveBeenCalled();
+  });
+
+  it("shows on demand from the dev toolbar without spending a showing", async () => {
+    useSessionPromptStore.setState({ prompted: true });
+    renderPrompt();
+    act(() => useDevPromptStore.getState().trigger("star"));
+
+    expect(await screen.findByText("Dev agent has completed 3 issues")).toBeInTheDocument();
+    expect(claimStarPromptShowing).not.toHaveBeenCalled();
+  });
+
   it("waits quietly while the workspace is still resolving", async () => {
     workspace.current = null;
     renderPrompt();
@@ -294,7 +323,7 @@ describe("StarPrompt for a workspace that finishes work in custom done statuses"
     first.unmount();
 
     // A new app session: fresh module state and caches, same signed-in user.
-    useSessionPromptStore.setState({ prompted: false });
+    useSessionPromptStore.setState({ prompted: false, deckDealt: false, surveyPending: false, corner: null });
     qc.clear();
     renderSession();
     await agentFinishesIssue();

@@ -14,7 +14,7 @@ import {
 // filter. Search stays session-local.
 export type ProjectLayout = "table" | "board";
 
-export type ProjectGroupBy = "none" | "status" | "priority" | "lead";
+export type ProjectGroupBy = "none" | "status" | "priority" | "lead" | "folder";
 
 export type ProjectSortField =
   | "name"
@@ -81,7 +81,7 @@ export const PROJECT_COLUMN_KEYS: readonly ProjectColumnKey[] = [
   "created",
 ];
 
-export const PROJECT_GROUP_BY_VALUES: readonly ProjectGroupBy[] = ["none", "status", "priority", "lead"];
+export const PROJECT_GROUP_BY_VALUES: readonly ProjectGroupBy[] = ["none", "status", "priority", "lead", "folder"];
 
 /** Issues count and start date are opt-in; the rest show by default. */
 export const PROJECT_DEFAULT_HIDDEN_COLUMNS: ProjectColumnKey[] = ["issues", "start_date"];

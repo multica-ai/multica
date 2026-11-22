@@ -1,3 +1,4 @@
+import { toHtml } from "hast-util-to-html";
 import { common, createLowlight } from "lowlight";
 
 const baseLowlight = createLowlight(common);
@@ -22,4 +23,29 @@ export function highlightCode(value: string, language?: string) {
   return normalizedLanguage && baseLowlight.registered(normalizedLanguage)
     ? baseLowlight.highlight(normalizedLanguage, value)
     : baseLowlight.highlight("plaintext", value);
+}
+
+const HIGHLIGHTED_HTML_LIMIT = 300;
+const highlightedHtml = new Map<string, string>();
+
+/**
+ * `highlightCode` serialized to HTML, cached by language and source. A code
+ * block highlights again every time its comment remounts (scrolled back into a
+ * virtualized timeline, the issue reopened), for an identical result.
+ */
+export function highlightCodeHtml(value: string, language?: string): string {
+  const key = `${language?.trim().toLowerCase() ?? ""}\u0000${value}`;
+  const hit = highlightedHtml.get(key);
+  if (hit !== undefined) {
+    // Least recently used goes first.
+    highlightedHtml.delete(key);
+    highlightedHtml.set(key, hit);
+    return hit;
+  }
+  const html = toHtml(highlightCode(value, language));
+  highlightedHtml.set(key, html);
+  if (highlightedHtml.size > HIGHLIGHTED_HTML_LIMIT) {
+    highlightedHtml.delete(highlightedHtml.keys().next().value!);
+  }
+  return html;
 }

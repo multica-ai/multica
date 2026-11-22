@@ -3,11 +3,15 @@
 -- MATCHING notification, which is the row the list renders; issue filters and
 -- "unread" then test that group. Issue filters never match a notification
 -- without an issue, "is not" included. Type groups mirror INBOX_TYPE_GROUPS.
+-- review_requested, task_completed, agent_blocked and agent_completed are no
+-- longer written, but archived rows from older servers still carry them.
 
 -- name: ListArchivedInboxPage :many
 -- Select narrow group representatives before loading bodies or comment anchors.
+-- notification_types matches exact types, for callers such as the CLI that
+-- filter by one type rather than a type group.
 WITH base AS MATERIALIZED (
-    SELECT i.id, i.issue_id, COALESCE(i.issue_id, i.id) AS group_id, i.created_at, i.read,
+    SELECT i.id, i.issue_id, COALESCE(i.issue_id, i.id) AS group_id, i.created_at, i.read, i.type,
            CASE
                WHEN i.type = 'mentioned' THEN 'mention'
                WHEN i.type IN ('new_comment', 'reaction_added') THEN 'comment'
@@ -25,11 +29,11 @@ WITH base AS MATERIALIZED (
       AND i.recipient_id = sqlc.arg(recipient_id)::uuid
       AND i.archived = true
       -- MUL-8472: private projects the caller cannot see.
-      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
-          SELECT 1 FROM issue hidden_issue
-          WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
-      ))
+      -- A row without an issue counts as outside any project, which a guest's
+      -- hidden set holds (projectaccess.NoProject), as ListInboxItems does.
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(
+          (SELECT hidden_issue.project_id FROM issue hidden_issue WHERE hidden_issue.id = i.issue_id),
+          '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
       AND (sqlc.narg(group_id)::uuid IS NULL OR i.issue_id = sqlc.narg(group_id)::uuid
            OR (i.issue_id IS NULL AND i.id = sqlc.narg(group_id)::uuid))
       AND (i.issue_id IS NULL OR NOT EXISTS (
@@ -44,6 +48,7 @@ WITH base AS MATERIALIZED (
     FROM base
     WHERE (cardinality(sqlc.arg(types)::text[]) = 0
            OR (type_group = ANY(sqlc.arg(types)::text[])) <> ('type' = ANY(sqlc.arg(negated)::text[])))
+      AND (cardinality(sqlc.arg(notification_types)::text[]) = 0 OR type = ANY(sqlc.arg(notification_types)::text[]))
       AND (cardinality(sqlc.arg(actors)::text[]) = 0
            OR COALESCE(actor = ANY(sqlc.arg(actors)::text[]), false) <> ('actor' = ANY(sqlc.arg(negated)::text[])))
       AND (sqlc.narg(received_after)::timestamptz IS NULL OR created_at >= sqlc.narg(received_after)::timestamptz)
@@ -90,6 +95,7 @@ WITH base AS MATERIALIZED (
     LIMIT sqlc.arg(page_limit)::int
 )
 SELECT sqlc.embed(i), selected.issue_status, selected.issue_priority,
+       iss.number AS issue_number,
        iss.project_id AS issue_project_id,
        iss.assignee_type AS issue_assignee_type,
        iss.assignee_id AS issue_assignee_id,
@@ -138,11 +144,11 @@ WITH base AS MATERIALIZED (
       AND i.recipient_id = sqlc.arg(recipient_id)::uuid
       AND i.archived = true
       -- MUL-8472: private projects the caller cannot see.
-      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
-          SELECT 1 FROM issue hidden_issue
-          WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
-      ))
+      -- A row without an issue counts as outside any project, which a guest's
+      -- hidden set holds (projectaccess.NoProject), as ListInboxItems does.
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(
+          (SELECT hidden_issue.project_id FROM issue hidden_issue WHERE hidden_issue.id = i.issue_id),
+          '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
           WHERE active.workspace_id = i.workspace_id

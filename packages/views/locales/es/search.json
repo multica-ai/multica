@@ -4,6 +4,7 @@
   "placeholder": "Busca o escribe lo que necesitas hacer...",
   "groups": {
     "pages": "Páginas",
+    "views": "Vistas",
     "commands": "Comandos",
     "members": "Miembros",
     "projects": "Proyectos",
@@ -16,6 +17,7 @@
     "autopilots": "Automatizaciones",
     "chats": "Chats",
     "skills": "Skills",
+    "docs": "Documentos",
     "new": "Nuevo",
     "best_match": "Mejor coincidencia",
     "actions": "Acciones"
@@ -139,7 +141,7 @@
   },
   "delegate": {
     "row": "Encargar a un agente: «{{prompt}}»",
-    "hint": "Creación rápida"
+    "hint": "Crear con agente"
   },
   "best": {
     "assign": "Asignar {{subject}} a {{name}}",
@@ -162,5 +164,6 @@
     "prefix_commands": "Comandos",
     "prefix_issues": "Tareas",
     "prefix_people": "Personas y agentes"
-  }
+  },
+  "untitled_doc": "Sin título"
 }

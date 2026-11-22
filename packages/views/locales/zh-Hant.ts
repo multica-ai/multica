@@ -1,4 +1,5 @@
 import type { LocaleResources } from "@multica/core/i18n";
+import zhHantDocs from "./zh-Hant/docs.json";
 import zhHantCommon from "./zh-Hant/common.json";
 import zhHantAuth from "./zh-Hant/auth.json";
 import zhHantSettings from "./zh-Hant/settings.json";
@@ -26,6 +27,7 @@ import zhHantSquads from "./zh-Hant/squads.json";
 import zhHantBilling from "./zh-Hant/billing.json";
 
 const resources: LocaleResources = {
+  docs: zhHantDocs,
   common: zhHantCommon,
   auth: zhHantAuth,
   settings: zhHantSettings,

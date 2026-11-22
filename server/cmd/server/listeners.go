@@ -36,7 +36,8 @@ import (
 // inherits the same cost silently. Keeping the list declarative puts the
 // internal/external payload boundary in one reviewable place.
 var internalOnlyPayloadKeys = map[string][]string{
-	protocol.EventIssueUpdated: {"prev_description", "prev_title"},
+	// The live-session keys feed activity folding and mention dedup.
+	protocol.EventIssueUpdated: {"prev_description", "prev_title", "description_live_editors", "description_seen_mentions"},
 	// task:failed error text is consumed synchronously by channel outbounds.
 	// It may contain provider/runtime detail that belongs in the originating
 	// chat transcript, not in the workspace-wide realtime fanout.
@@ -120,6 +121,8 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 		protocol.EventInboxDeleted:       true,
 		protocol.EventInboxBatchRead:     true,
 		protocol.EventInboxBatchArchived: true,
+		protocol.EventInboxSnoozed:       true,
+		protocol.EventInboxUnsnoozed:     true,
 		protocol.EventInvitationCreated:  true,
 		protocol.EventInvitationRevoked:  true,
 		protocol.EventIssueUnreadChanged: true,
@@ -152,6 +155,20 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 		sendToRecipient(b, e, recipientID)
 	})
 
+	// inbox:snoozed — a snooze names its recipient at the top level; a row
+	// written into a snooze carries it on the nested item, like inbox:new.
+	bus.Subscribe(protocol.EventInboxSnoozed, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		recipientID, _ := payload["recipient_id"].(string)
+		if item, ok := payload["item"].(map[string]any); ok && recipientID == "" {
+			recipientID, _ = item["recipient_id"].(string)
+		}
+		sendToRecipient(b, e, recipientID)
+	})
+
 	// inbox:read, inbox:archived, inbox:unarchived, inbox:batch-read,
 	// inbox:batch-archived, issue_unread:changed — extract recipient from
 	// top-level payload
@@ -159,6 +176,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxUnarchived,
 		protocol.EventInboxDeleted,
 		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
+		protocol.EventInboxUnsnoozed,
 		protocol.EventIssueUnreadChanged,
 	} {
 		bus.Subscribe(eventType, func(e events.Event) {

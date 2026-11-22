@@ -476,7 +476,7 @@ export default function SearchModal() {
             ) : trimmedQuery && !hasResults ? (
               <View className="items-center justify-center py-12 px-6">
                 <Text className="text-sm text-muted-foreground text-center">
-                  No results for &ldquo;{trimmedQuery}&rdquo;
+                  {t("list.search_no_results", { query: trimmedQuery })}
                 </Text>
               </View>
             ) : null

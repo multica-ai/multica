@@ -32,6 +32,14 @@ export const queryClient = new QueryClient({
   },
 });
 
+// Keep the previous inbox result on overload and let the next event or
+// refresh fetch again, without changing other queries' retries. The inbox
+// screen shows a load error with a retry when nothing has loaded yet.
+queryClient.setQueryDefaults(["inbox"], {
+  retry: (failureCount, error) =>
+    (error as { status?: number } | null)?.status !== 503 && failureCount < 1,
+});
+
 // ── focusManager ← AppState ──────────────────────────────────────────
 // Foregrounding the app counts as "focus" → triggers refetchOnWindowFocus
 // for any stale queries the user is currently looking at.

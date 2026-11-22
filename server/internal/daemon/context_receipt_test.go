@@ -140,6 +140,16 @@ func TestBuildContextReceiptLoadStates(t *testing.T) {
 			delivery: ReceiptDeliveryFile, load: ReceiptLoadVerifiedOtherVersion, path: "AGENTS.md",
 		},
 		{
+			name:     "pi at its re-probed version",
+			in:       contextReceiptInput{Provider: "pi", RuntimeVersion: "1.5.2"},
+			delivery: ReceiptDeliveryFile, load: ReceiptLoadVerified, path: "AGENTS.md",
+		},
+		{
+			name:     "pi above its re-probed version",
+			in:       contextReceiptInput{Provider: "pi", RuntimeVersion: "1.6.0"},
+			delivery: ReceiptDeliveryFile, load: ReceiptLoadVerifiedOtherVersion, path: "AGENTS.md",
+		},
+		{
 			name:     "unprobed runtime",
 			in:       contextReceiptInput{Provider: "qwen", RuntimeVersion: "0.9.0"},
 			delivery: ReceiptDeliveryFile, load: ReceiptLoadUnverified, path: "QWEN.md",

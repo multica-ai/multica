@@ -79,7 +79,7 @@ async function setup() {
   const user = userEvent.setup();
   await screen.findByRole("button", { name: "Alpha" });
   const toggle = async (name: string) => user.click(within(screen.getByRole("dialog")).getByRole("button", { name }));
-  const search = screen.getByPlaceholderText("Find or create a label…");
+  const search = screen.getByPlaceholderText("Find or create a label...");
   const beginCreate = async () => {
     await user.type(search, "Gamma");
     await user.click(screen.getByRole("button", { name: /Create.*Gamma/ }));

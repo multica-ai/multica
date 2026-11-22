@@ -127,6 +127,9 @@ type Catalog struct {
 	// enter the server's day-scale model-catalog cache, which would pin one
 	// transient failure as the answer for 24h (MUL-5549).
 	Fallback bool
+	// EffortDiscoveryIncomplete distinguishes live ACP models with partial
+	// effort metadata from a static fallback. Fallback remains true for older servers.
+	EffortDiscoveryIncomplete bool
 	// CLIThinkingLevels is the effort vocabulary the installed binary itself
 	// accepts, read from the binary (claude's `--help`) rather than from any
 	// model list. nil means it is unknown; a non-nil empty slice means the
@@ -161,7 +164,7 @@ func discovered(models []Model, err error) (Catalog, error) {
 	if errors.Is(err, errACPEffortDiscoveryIncomplete) {
 		// The model IDs are real, but missing effort metadata must not be used
 		// to reject saved settings or cached as a complete discovery.
-		return Catalog{Models: models, Fallback: true}, nil
+		return Catalog{Models: models, Fallback: true, EffortDiscoveryIncomplete: true}, nil
 	}
 	return Catalog{Models: models}, err
 }

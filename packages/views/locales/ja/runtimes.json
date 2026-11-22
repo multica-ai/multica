@@ -37,7 +37,7 @@
     },
     "columns": {
       "name": "名前",
-      "harness": "Harness",
+      "harness": "CLI",
       "agents": "エージェント",
       "workload": "負荷",
       "status": "ステータス"
@@ -88,7 +88,7 @@
     "section_local": "ローカル",
     "section_remote": "リモート",
     "section_cloud": "クラウド",
-    "this_machine": "このデバイス",
+    "this_machine": "このマシン",
     "local_badge": "ローカル · このマシン",
     "pending_custom_runtimes": "登録待ちのカスタムランタイム",
     "daemon_title": "デーモン",
@@ -112,7 +112,7 @@
       "workload_idle": "すべてアイドル",
       "workload_hint": "実行中 {{running}} 件 · キュー待ち {{queued}} 件",
       "cli": "CLI",
-      "cloud_worker": "クラウドワーカー",
+      "cloud_worker": "クラウドノード",
       "local_daemon": "ローカルデーモン"
     },
     "rename": "マシンの名前を変更",
@@ -132,7 +132,7 @@
   "health": {
     "online": {
       "label": "オンライン",
-      "description": "直近 45 秒以内に heartbeat を受信しました。実行をディスパッチする準備ができています。"
+      "description": "接続済みで、実行を受け付けられます。"
     },
     "recently_lost": {
       "label": "最近接続が切れました",
@@ -140,11 +140,11 @@
     },
     "offline": {
       "label": "オフライン",
-      "description": "5 分以上 heartbeat がありません。デーモンを再起動するか、ホストを調べてください。"
+      "description": "5 分以上切断されています。このマシンのデーモンを再起動するか、ネットワーク接続を確認してください。"
     },
     "long_offline": {
       "label": "長期オフライン",
-      "description": "6 日以上 heartbeat がありません。このホストを復旧しない場合は、紐づくエージェントを別のランタイムに再割り当てするか、このランタイムを削除してください。"
+      "description": "6 日以上切断されています。このマシンがオンラインに戻らない場合は、エージェントを別のランタイムに再バインドするか、このランタイムを削除してください。"
     }
   },
   "detail": {
@@ -154,7 +154,7 @@
     "last_seen": "最終確認 {{when}}",
     "never_seen": "未接続",
     "fact_owner": "所有者",
-    "fact_device": "デバイス",
+    "fact_device": "マシン",
     "fact_runtime": "ランタイム",
     "fact_daemon_cli": "デーモン CLI",
     "fact_daemon_id": "デーモン ID",
@@ -210,7 +210,7 @@
       "self_heal_notice": "このランタイムは実行中のローカルデーモンに管理されています。削除自体は成功しますが、デーモンプロセスを停止しない限り、数秒以内に新しいランタイムとして再登録されます。完全に削除するには先にデーモンを停止してください。",
       "profile_backed_notice": "このランタイムはカスタムランタイムプロファイルから登録されています。ここで削除しても現在のランタイムインスタンスだけが削除され、プロファイルが残っている間は実行中のデーモンが再登録できます。完全に削除するには、Custom runtimes からカスタムランタイムプロファイルを削除してください。",
       "light": {
-        "title": "ランタイムを削除しますか?",
+        "title": "このランタイムを削除しますか？",
         "description": "「{{name}}」を削除してもよろしいですか? この操作は元に戻せません。",
         "cancel": "キャンセル",
         "confirm": "ランタイムを削除",
@@ -285,7 +285,7 @@
     "title": "クラウドランタイム",
     "description": "クラウドランタイムを作成します。",
     "create_title": "新規ノード",
-    "nodes_title": "Fleet ノード",
+    "nodes_title": "クラウドノード",
     "refresh": "更新",
     "nodes_empty": "クラウドノードなし",
     "nodes_failed": "クラウドランタイムを利用できません",
@@ -304,11 +304,11 @@
       "name": "名前",
       "instance_type": "インスタンスタイプ",
       "region": "リージョン",
-      "disk_size": "ディスクサイズ GiB",
-      "image_id": "AMI ID",
+      "disk_size": "ディスクサイズ（GiB）",
+      "image_id": "イメージ ID（AMI）",
       "subnet_id": "Subnet ID",
-      "key_name": "キーペア",
-      "bootstrap_pat": "Bootstrap PAT"
+      "key_name": "SSH キーペア",
+      "bootstrap_pat": "ブートストラップトークン（PAT）"
     },
     "placeholders": {
       "name": "cloud-dev-01",
@@ -332,10 +332,19 @@
     "available": "利用可能",
     "action": "更新",
     "retry": "再試行",
+    "cancel": "キャンセル",
+    "cancel_failed": "取り消しを確認できませんでした。更新がこのまま実行される可能性があります。もう一度お試しください。",
+    "cancel_conflict": "取り消せません。インストールはすでに始まっています。",
     "unknown_error": "不明なエラー",
     "initiate_failed": "更新を開始できませんでした",
+    "scheduled_tasks": "{{running}} 件実行中",
+    "note_no_interrupt": "実行中のタスクは中断されません。",
+    "expired_note": "マシンがアイドルになるのを 24 時間待ったため、期限切れになりました。",
+    "busy_note": "マシンがタスクを実行中だったため、更新は開始されませんでした。アイドル時に再試行してください。",
+    "another_update_note": "このマシンでは別の更新がすでにキュー待ちまたはインストール中です。",
     "status": {
       "pending": "デーモンを待っています...",
+      "scheduled": "アイドル時に更新",
       "running": "更新中...",
       "completed": "更新が完了しました。デーモンを再起動しています...",
       "failed": "更新に失敗しました",
@@ -376,35 +385,36 @@
     "pending_health_warning": "Daemon 同期待ち",
     "pending_health_error": "登録エラー",
     "pending_health_disabled": "無効",
-    "pending_cli_unknown": "待機中"
+    "pending_cli_unknown": "待機中",
+    "col_rate_limits": "上限"
   },
   "profiles": {
     "cta": "ランタイムを追加",
     "add_custom": "カスタムランタイムを追加",
     "this_machine": "このマシン",
     "unassigned_title": "マシンに接続されていないカスタムランタイム",
-    "unassigned_description": "これらのワークスペースランタイムは、どのマシンにも接続されていません。対応するコマンドがあるマシンを接続するか、行の操作から編集または削除できます。",
+    "unassigned_description": "割り当て済みのマシンを再接続してください。既存の未設定ランタイムは、編集からマシンを指定できます。",
     "dialog_title": "カスタムランタイム",
-    "dialog_description": "カスタムランタイム定義はワークスペース全体に適用され、接続済みのすべてのマシンへ同期されます。コマンドが利用可能なマシンでのみランタイムが登録されます。",
-    "create_dialog_description": "{{machine}} からカスタムコマンドを設定します。定義はワークスペース全体に同期され、そのコマンドを利用できるマシンでのみ登録されます。",
+    "dialog_description": "カスタムランタイムは 1 台のマシンに紐づきます。",
+    "create_dialog_description": "このカスタムコマンドは {{machine}} でのみ登録されます。",
     "learn_more": "設定ガイドを見る",
     "close": "閉じる",
     "add_new": "新しいカスタムランタイム",
-    "list_title": "ランタイムバックエンド",
+    "list_title": "ベースランタイム",
     "custom_section_title": "カスタムランタイム（{{count}}）",
     "custom_section_aria": "カスタムランタイム",
-    "builtin_section_title": "サポートされている基本プロトコル（{{count}}）",
-    "builtin_section_hint": "組み込みファミリーは読み取り専用の参考情報です。",
+    "builtin_section_title": "組み込みランタイム（{{count}}）",
+    "builtin_section_hint": "組み込みランタイムは読み取り専用の参照オプションです。",
     "builtin_section_aria": "サポートされている組み込みプロトコルファミリー",
     "builtin_reference": "参考",
     "empty_title": "最初のカスタムランタイムを作成",
-    "empty_description": "ベースプロトコルファミリーを選び、Multica が実行するコマンドを指定します。",
+    "empty_description": "互換性のあるベースランタイムを選択し、Multica が実行するコマンドを指定してください。",
     "badge_builtin": "組み込み",
     "badge_custom": "カスタム",
     "badge_disabled": "無効",
     "builtin_detail": {
-      "title": "組み込みプロトコルファミリー",
-      "description": "{{family}} は組み込みのプロトコルファミリーです。編集や削除はできません。",
+      "title": "組み込みランタイム",
+      "description": "{{family}} は組み込みランタイムのため、編集や削除はできません。",
       "read_only": "読み取り専用"
     },
     "detail": {
@@ -424,6 +434,9 @@
       "step_family_hint": "このコマンドと互換性のある CLI を選択します。",
       "step_details_label": "ランタイムを設定",
       "step_progress": "ステップ {{current}} / {{total}}",
+      "machine_label": "所属マシン（任意）",
+      "machine_placeholder": "現在のマシンを維持",
+      "machine_hint": "マシンを選ぶと、他のマシンの未使用のコピーが削除されます。",
       "family_label": "ベースランタイム",
       "family_locked_hint": "作成後はベースランタイムを変更できません。",
       "display_name_label": "表示名",
@@ -522,7 +535,7 @@
     "title": "Qoder Cloud Agents runtime",
     "description": "Connect Qoder Cloud Agents. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
     "loading": "Loading…",
-    "unavailable": "サーバーの設定が必要です：MULTICA_VCS_SECRET_KEY を設定してください。",
+    "unavailable": "このサーバーでは Qoder Cloud Agents がまだ有効になっていません。サーバー管理者が認証情報の暗号化（MULTICA_VCS_SECRET_KEY）を設定する必要があります。",
     "online": "Online",
     "error": "Connection error",
     "starting": "Starting",
@@ -670,9 +683,42 @@
     },
     "art": {
       "this_computer": "このコンピューター · デスクトップ",
-      "detected": "検出された harness",
+      "detected": "検出されたランタイム",
       "run_there": "そのマシンで実行",
       "connected": "{{name}} が Multica に接続されました"
     }
+  },
+  "rate_limits": {
+    "title": "利用上限",
+    "caption": "タスク実行中に CLI が報告",
+    "updated": "{{ago}}に更新",
+    "empty_title": "まだ上限のデータがありません",
+    "empty_hint": "このランタイムが次にタスクを実行したときに記録されます。API キーのアカウントにはプランの上限がありません。",
+    "window_session": "セッション",
+    "window_session_hours": "{{hours}} 時間セッション",
+    "window_weekly": "週間",
+    "window_weekly_opus": "週間 · Opus",
+    "window_weekly_sonnet": "週間 · Sonnet",
+    "window_generic": "その他の上限",
+    "short_session": "セッション",
+    "short_weekly": "週間",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "その他",
+    "used": "{{pct}}% 使用",
+    "limited": "上限に到達",
+    "resets_in": "{{duration}}後にリセット",
+    "resets_at": "{{time}} にリセット",
+    "reset_since": "前回の報告後にリセット済み",
+    "verdict_ahead": "ペースより {{pct}}% 速い · 約 {{duration}}で上限",
+    "verdict_on_pace": "このペースならリセットまで持ちます",
+    "verdict_limited": "リセット後に再開",
+    "credits": "クレジット",
+    "credits_balance": "残り {{balance}}",
+    "credits_unlimited": "無制限",
+    "credits_none": "なし",
+    "duration_minutes": "{{minutes}} 分",
+    "duration_hours": "{{hours}} 時間 {{minutes}} 分",
+    "duration_days": "{{days}} 日 {{hours}} 時間"
   }
 }

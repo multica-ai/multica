@@ -45,6 +45,7 @@ import { cn } from "@multica/ui/lib/utils";
 import type { CreateIssueViewRequest, IssueView } from "@multica/core/api/schemas";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
 import type { IssueViewScope } from "@multica/core/issue-views/queries";
 import {
@@ -129,6 +130,7 @@ export function IssueViewHeader({
   baseMenu,
   baseBadge,
   hideCreate = false,
+  afterTitle,
   trailing,
 }: {
   controller: IssueSurfaceController;
@@ -139,11 +141,15 @@ export function IssueViewHeader({
   baseBadge?: ReactNode;
   /** Drops the new-issue button, e.g. on an archived project. */
   hideCreate?: boolean;
+  /** Page-level navigation right after the title, e.g. the project's tabs. */
+  afterTitle?: ReactNode;
   /** Layout toggles at the far end, e.g. the project's properties panel. */
   trailing?: ReactNode;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  // A guest (MUL-9420) cannot create issues.
+  const guest = useIsGuest(wsId);
   const paths = useWorkspacePaths();
   const viewScope = viewScopeOf(base);
   const { activeView, setActive, missing } = useActiveIssueView(wsId, viewScope);
@@ -378,7 +384,7 @@ export function IssueViewHeader({
   return (
     <>
       <PageHeader className="@container/issue-header">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-clip">
+        <div className="flex min-w-0 flex-1 items-center gap-1 self-stretch overflow-x-clip">
           {renaming && activeView ? (
             <span className="flex min-w-0 shrink-0 items-center gap-2">
               <Layers className="size-4 shrink-0 text-muted-foreground" />
@@ -504,6 +510,8 @@ export function IssueViewHeader({
             </DropdownMenu>
           )}
 
+          {afterTitle}
+
           <IssueFilterMenu
             align="start"
             open={filterOpen}
@@ -573,7 +581,7 @@ export function IssueViewHeader({
             onTableFacetChange={controller.setActiveTableFacet}
             iconOnly
           />
-          {!hideCreate && (
+          {!hideCreate && !guest && (
             <IconButton
               label={t(($) => $.views.new_issue)}
               shortcut={<ActionShortcutKeycaps action="createIssue" />}

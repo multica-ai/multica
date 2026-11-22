@@ -57,11 +57,12 @@ import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
+import { useRecordAssigneePick } from "../issues/components/pickers/assignee-picker";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useProjectWithWorkflow, useProjectWorkflow, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
@@ -100,8 +101,8 @@ import {
 } from "../issues/components/pickers/custom-property-picker";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+import { StorageLimitNotice, storageLimitRefusal, type StorageLimitRefusal } from "../billing/storage-limit-notice";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
-import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 import { CopyParentFields } from "./copy-parent-fields";
 
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -267,7 +268,6 @@ export function ManualCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setManual = useIssueDraftStore((s) => s.setManual);
@@ -312,6 +312,9 @@ export function ManualCreatePanel({
     return draft.manual.assigneeId;
   });
   const [assigneeCleared, setAssigneeCleared] = useState(data?.manual_assignee_cleared === true);
+  const recordAssigneePick = useRecordAssigneePick();
+  // The draft's pending hand pick that the request in flight submits.
+  const submittedPickRef = useRef<IssueCreateDraft["manual"]["assigneePick"]>(undefined);
   const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
     (data?.due_date as string | undefined) ?? draft.shared.dueDate,
@@ -425,7 +428,10 @@ export function ManualCreatePanel({
     attachments: draftAttachments,
     handleUpload,
     gate,
+    storageRefusal,
+    dismissStorageRefusal,
   } = useIssueCreateUploads("manual", uploadGate, descEditorRef);
+  const [storageCopyRefusal, setStorageCopyRefusal] = useState<StorageLimitRefusal | null>(null);
 
   // Sync field changes to the draft store — manual-only fields to the manual
   // slot, project / priority / due date to the shared slot.
@@ -433,9 +439,15 @@ export function ManualCreatePanel({
   const updateStatus = (v: IssueStatus) => { setStatus(v); setManual({ status: v }); };
   const updatePriority = (v: IssuePriority) => { setPriority(v); setShared({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
+    // Re-picking the current assignee is not a new pick; clearing drops it.
+    const changed = type !== assigneeType || id !== assigneeId;
     setAssigneeType(type); setAssigneeId(id);
     setAssigneeCleared(!id);
-    setManual({ assigneeType: type, assigneeId: id });
+    setManual({
+      assigneeType: type,
+      assigneeId: id,
+      ...(changed ? { assigneePick: type && id ? { type, id } : undefined } : {}),
+    });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
   const updateParent = (id?: string) => {
@@ -564,6 +576,13 @@ export function ManualCreatePanel({
       const pendingDesc = descEditorRef.current?.flushPendingUpdate?.();
       if (pendingDesc != null) setManual({ description: pendingDesc });
       submittedDraftRef.current = useIssueDraftStore.getState().draft;
+      // Only a hand pick of the submitted assignee feeds the picker's
+      // ranking; a prefilled or remembered assignee never matches one.
+      const pendingPick = submittedDraftRef.current.manual.assigneePick;
+      submittedPickRef.current =
+        pendingPick?.type === assigneeType && pendingPick?.id === assigneeId
+          ? pendingPick
+          : undefined;
       try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
       const activeAttachmentIds = draftAttachments
@@ -707,7 +726,7 @@ export function ManualCreatePanel({
               type="button"
               className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
               onClick={() => {
-                router.push(p.issueDetail(issue.id));
+                router.push(p.issueDetail(issueRouteRef(issue)));
                 toast.dismiss(toastId);
               }}
             >
@@ -718,6 +737,13 @@ export function ManualCreatePanel({
       }
       return true;
     } catch (err) {
+      // A sub-issue copies its source attachments; a full workspace refuses
+      // that before creating anything (MUL-9489).
+      const copyRefusal = anchorCommentId ? storageLimitRefusal(err, "") : null;
+      if (copyRefusal) {
+        if (mountedRef.current) setStorageCopyRefusal({ ...copyRefusal, kind: "copy" });
+        return false;
+      }
       const sourceCode = err instanceof ApiError && err.body && typeof err.body === "object"
         ? (err.body as { code?: unknown }).code
         : undefined;
@@ -736,10 +762,6 @@ export function ManualCreatePanel({
       }
       if (anchorCommentId && sourceCode === "source_context_too_large") {
         toast.error(sourceContextFailureMessage(err) ?? tIssues(($) => $.source_context.error_too_large));
-        return false;
-      }
-      if (sourceCode === "issue_limit_reached") {
-        showIssueLimitUpgradePrompt();
         return false;
       }
       if (sourceCode === "invalid_issue_property" && err instanceof ApiError) {
@@ -815,7 +837,7 @@ export function ManualCreatePanel({
                   type="button"
                   className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
                   onClick={() => {
-                    router.push(p.issueDetail(dup.issue.id));
+                    router.push(p.issueDetail(issueRouteRef(dup.issue)));
                     toast.dismiss(toastId);
                   }}
                 >
@@ -837,6 +859,9 @@ export function ManualCreatePanel({
     }
   },
     onAccepted: () => {
+      const pick = submittedPickRef.current;
+      if (pick) recordAssigneePick(pick.type, pick.id);
+      submittedPickRef.current = undefined;
       // Only the assignee persists across independent create sessions.
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
@@ -851,6 +876,11 @@ export function ManualCreatePanel({
       const untouched =
         useIssueDraftStore.getState().draft === submittedDraftRef.current;
       if (untouched) clearDraft();
+      // A kept draft must not count the same pick again on its next create;
+      // a newer pick made during the request stays.
+      else if (pick && useIssueDraftStore.getState().draft.manual.assigneePick === pick) {
+        setManual({ assigneePick: undefined });
+      }
       if (!mountedRef.current || !untouched) return;
       if (keepOpen) {
         resetForNextIssue();
@@ -976,7 +1006,6 @@ export function ManualCreatePanel({
               shortcut={sendShortcut}
               decorative
               className="ml-1 max-sm:hidden"
-              keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
         </>
@@ -1087,6 +1116,21 @@ export function ManualCreatePanel({
               {descDragOver && <FileDropOverlay />}
             </div>
 
+            {storageRefusal && (
+              <StorageLimitNotice
+                refusal={storageRefusal}
+                onDismiss={dismissStorageRefusal}
+                className="mx-5 mb-2"
+              />
+            )}
+            {storageCopyRefusal && (
+              <StorageLimitNotice
+                refusal={storageCopyRefusal}
+                onDismiss={() => setStorageCopyRefusal(null)}
+                className="mx-5 mb-2"
+              />
+            )}
+
             {anchorCommentId && (
               <SourceContextPreviewCard
                 preview={sourcePreview}
@@ -1147,6 +1191,7 @@ export function ManualCreatePanel({
                     u.assignee_type ?? undefined,
                     u.assignee_id ?? undefined,
                   )}
+                  recordPicks={false}
                   triggerRender={<PillButton />}
                   tooltip={tIssues(($) => $.detail.prop_assignee)}
                   align="start"

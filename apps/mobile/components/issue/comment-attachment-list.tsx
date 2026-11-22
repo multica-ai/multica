@@ -30,6 +30,7 @@ import { MarkdownImage } from "@/lib/markdown/markdown-image";
 import { resolveAttachmentUrl } from "@/lib/attachment-url";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { useT } from "@/lib/i18n";
 import { Text } from "@/components/ui/text";
 
 interface Props {
@@ -90,6 +91,7 @@ function FileCard({
   attachment: Attachment;
   theme: typeof THEME["light"];
 }) {
+  const { t } = useT("issues");
   const sizeLabel = formatBytes(attachment.size_bytes);
   return (
     <Pressable
@@ -110,7 +112,7 @@ function FileCard({
         }
       }}
       accessibilityRole="button"
-      accessibilityLabel={`Open ${attachment.filename}`}
+      accessibilityLabel={t("resources.open_attachment", { filename: attachment.filename })}
       className="flex-row items-center gap-2 px-3 py-2 rounded-md bg-secondary/60 active:opacity-80"
     >
       <Ionicons

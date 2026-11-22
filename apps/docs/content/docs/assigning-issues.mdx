@@ -74,7 +74,7 @@ Whether you can assign an agent is decided by its Access:
 - **Specific people**: the owner and the listed members can run it;
 - **Entire workspace**: every workspace member can run it.
 
-Workspace owners and admins can manage agents, but being able to see one doesn't mean being able to run it. The assignee picker disables agents you can't run. See [Agents](/agents#permissions-and-access) for the full rules.
+Workspace owners and admins can manage agents, but being able to see one doesn't mean being able to run it. The assignee picker doesn't list agents you can't run. See [Agents](/agents#permissions-and-access) for the full rules.
 
 ## Change or remove the assignee
 
@@ -96,6 +96,8 @@ multica issue assign MUL-42 --unassign
 In scripts, use `--to-id <uuid>` to avoid matching the wrong object with the same name. Look up UUIDs with `multica agent list --output json` or `multica workspace member list --output json`.
 
 Use `--no-start` when the assignment should record ownership without creating a new run — for example, when the same agent is already handling the issue from another run. The same flag is available on `issue update` and `issue status`. If an ownership-only flow changes both assignment and status, pass it to both commands; suppressing the assignment does not suppress a later status-triggered run.
+
+If an assignment or status change starts no run — for example because the issue is in `backlog` or the agent has no runtime — the command says why on stderr. `issue batch update` shows the same note in its reason column.
 
 ## Next steps
 

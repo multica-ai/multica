@@ -34,6 +34,7 @@ import {
   pickContentLang,
 } from "./templates";
 import { useT } from "../i18n";
+import { issueRouteRef, type IssueRouteRef } from "@multica/core/paths";
 
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
   source: [],
@@ -169,7 +170,7 @@ export function OnboardingFlow({
   const bootstrapMika = useBootstrapMika(workspace?.id ?? "");
   // Keyed by workspace so retrying Skip after completeOnboarding failed reuses
   // the guide issue instead of creating a second one.
-  const guideIssueRef = useRef<{ workspaceId: string; issueId: string } | null>(
+  const guideIssueRef = useRef<{ workspaceId: string; issueRef: IssueRouteRef } | null>(
     null,
   );
 
@@ -300,11 +301,11 @@ export function OnboardingFlow({
         }
         return;
       }
-      let issueId =
+      let issueRef =
         guideIssueRef.current?.workspaceId === workspace.id
-          ? guideIssueRef.current.issueId
+          ? guideIssueRef.current.issueRef
           : null;
-      if (!issueId) {
+      if (!issueRef) {
         const contentLang = pickContentLang(i18n.language);
         try {
           const issue = await api.createIssue(
@@ -318,7 +319,7 @@ export function OnboardingFlow({
             },
             workspace.slug,
           );
-          issueId = issue.id;
+          issueRef = issueRouteRef(issue);
         } catch (err) {
           // A reload, or a create whose response was lost, leaves the guide
           // from an earlier attempt in place; the duplicate guard then
@@ -336,9 +337,9 @@ export function OnboardingFlow({
             toast.error(t(($) => $.errors.guide_failed));
             return;
           }
-          issueId = duplicate.issue.id;
+          issueRef = issueRouteRef(duplicate.issue);
         }
-        guideIssueRef.current = { workspaceId: workspace.id, issueId };
+        guideIssueRef.current = { workspaceId: workspace.id, issueRef };
       }
       try {
         await completeOnboarding("runtime_skipped", workspace.id);
@@ -348,7 +349,7 @@ export function OnboardingFlow({
         );
         return;
       }
-      onComplete(workspace, { kind: "issue", issueId });
+      onComplete(workspace, { kind: "issue", issueRef });
     },
     [answers, bootstrapMika, i18n.language, workspace, onComplete, t, user.id],
   );
@@ -479,7 +480,7 @@ export function OnboardingFlow({
 export type OnboardingMode = "first_run" | "new_workspace";
 
 export type OnboardingDestination =
-  | { kind: "issue"; issueId: string }
+  | { kind: "issue"; issueRef: IssueRouteRef }
   | {
       kind: "chat";
       sessionId: string;

@@ -1,0 +1,102 @@
+{
+  "untitled": "Sin título",
+  "version_number": "v{{number}}",
+  "kb": "Documentos",
+  "actions": {
+    "new": "Nuevo",
+    "new_doc": "Nuevo documento",
+    "new_folder": "Nueva carpeta",
+    "rename": "Renombrar",
+    "move": "Mover a...",
+    "delete": "Eliminar",
+    "cancel": "Cancelar",
+    "history": "Historial",
+    "more": "Más",
+    "copy_link": "Copiar enlace"
+  },
+  "errors": {
+    "move": "No se pudo mover el elemento",
+    "delete": "No se pudo eliminar el elemento",
+    "save": "No se pudieron guardar los cambios"
+  },
+  "move": {
+    "title": "Mover \"{{title}}\"",
+    "destination": "Destino",
+    "root": "Documentos (nivel superior)",
+    "current": "Actual",
+    "confirm": "Mover"
+  },
+  "delete": {
+    "title": "¿Eliminar este documento?",
+    "description": "Se eliminará \"{{title}}\" y todo su historial. Esta acción no se puede deshacer.",
+    "confirm": "Eliminar",
+    "folder_title": "¿Eliminar esta carpeta?",
+    "folder_description": "¿Eliminar \"{{title}}\"? Solo se pueden eliminar carpetas vacías. Esta acción no se puede deshacer."
+  },
+  "tree": {
+    "more": "Más acciones para {{title}}",
+    "empty": "Aún no hay documentos",
+    "new_doc_in": "Nuevo documento en {{title}}"
+  },
+  "editor": {
+    "placeholder": "Escribe o pulsa / para ver los comandos...",
+    "title_label": "Título",
+    "saving": "Guardando...",
+    "saved": "Guardado",
+    "save_failed": "Sin guardar · Reintentar",
+    "retry": "Reintentar",
+    "conflict": "{{name}} actualizó el documento. Tu borrador se conserva. Recarga para continuar.",
+    "reload": "Cargar última versión",
+    "draft": "Tu borrador guardado",
+    "unsaved_changes": "Cambios sin guardar",
+    "live": "En vivo",
+    "reconnecting": "Reconectando...",
+    "connecting": "Conectando...",
+    "title_save_failed": "No se guardó el título",
+    "editing_now": "Editando ahora"
+  },
+  "history": {
+    "title": "Historial",
+    "current": "Actual",
+    "restore": "Restaurar esta versión",
+    "loading": "Cargando..."
+  },
+  "not_found": {
+    "title": "Documento no encontrado",
+    "description": "Puede haberse eliminado."
+  },
+  "edited": "Editado {{time}}",
+  "view_history": "Ver historial",
+  "outline": "Esquema",
+  "link_copied": "Enlace copiado",
+  "unavailable": {
+    "title": "Documentos no está activado en este espacio de trabajo",
+    "description": "Este espacio de trabajo no tiene Documentos activado."
+  },
+  "comments": {
+    "title": "Comentarios",
+    "add": "Comentar",
+    "open": "Abiertos {{count}}",
+    "resolved": "Resueltos {{count}}",
+    "close": "Cerrar comentarios",
+    "quote_missing": "El texto comentado cambió",
+    "reply_placeholder": "Responde o menciona con @…",
+    "new_placeholder": "Añade un comentario o menciona con @ a alguien...",
+    "submit": "Comentar",
+    "reply": "Responder",
+    "cancel": "Cancelar",
+    "resolve": "Resolver",
+    "reopen": "Reabrir",
+    "delete": "Eliminar comentario",
+    "resolved_by": "Resuelto por {{name}}",
+    "replies_one": "{{count}} respuesta",
+    "replies_other": "{{count}} respuestas",
+    "empty_open": "No hay comentarios abiertos. Selecciona texto y elige Comentar para empezar uno.",
+    "empty_resolved": "No hay comentarios resueltos.",
+    "errors": {
+      "save": "No se pudo publicar el comentario",
+      "delete": "No se pudo eliminar el comentario",
+      "resolve": "No se pudo actualizar el comentario"
+    }
+  }
+}

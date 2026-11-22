@@ -14,6 +14,9 @@ export type ShortcutActionId =
   | "newChat"
   | "findInIssue"
   | "archiveInboxItem"
+  | "unsubscribeArchiveInboxItem"
+  | "snoozeInboxItem"
+  | "undoInboxAction"
   | "send"
   | "voiceInput"
   | "goBack"
@@ -108,6 +111,25 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     id: "archiveInboxItem",
     category: "general",
     defaultShortcut: createShortcutChord("E"),
+    allowInEditable: false,
+  },
+  // Shift on archive: "archive, and stop telling me about this issue".
+  {
+    id: "unsubscribeArchiveInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("E", { shift: true }),
+    allowInEditable: false,
+  },
+  {
+    id: "snoozeInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("H"),
+    allowInEditable: false,
+  },
+  {
+    id: "undoInboxAction",
+    category: "general",
+    defaultShortcut: createShortcutChord("Z"),
     allowInEditable: false,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
@@ -324,10 +346,10 @@ export function formatShortcut(
 
   if (platform === "macos") {
     return [
-      modifiers.primary ? "⌘" : "",
       modifiers.control ? "⌃" : "",
       modifiers.alt ? "⌥" : "",
       modifiers.shift ? "⇧" : "",
+      modifiers.primary ? "⌘" : "",
       modifiers.meta ? "Meta" : "",
       key,
     ].join("");

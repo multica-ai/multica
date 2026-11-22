@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef } from "react";
+import { createContext, useContext, useId, useRef, type RefObject } from "react";
 import { ChevronDown } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
@@ -62,23 +62,42 @@ export function PanelHeader({
   );
 }
 
+const PanelScrollContext = createContext<RefObject<HTMLDivElement | null> | null>(null);
+
+/** The scroll container of the enclosing `PanelBody`, for lists that virtualize inside it. */
+export function usePanelScrollRef() {
+  return useContext(PanelScrollContext);
+}
+
+/**
+ * Whether `PanelBody` masks its scroll edges. Some Android Chromium/WebView
+ * builds paint the mask's opaque stop as a solid black layer inside the
+ * compact nav sheet, covering its rows, so the sheet turns the fade off on
+ * touch screens, where scrolling already shows the overflow.
+ */
+export const PanelScrollFadeContext = createContext(true);
+
 export function PanelBody({
   children,
   onClickCapture,
+  onAuxClickCapture,
 }: {
   children: React.ReactNode;
   onClickCapture?: React.MouseEventHandler<HTMLDivElement>;
+  onAuxClickCapture?: React.MouseEventHandler<HTMLDivElement>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(ref, 24);
+  const fade = useContext(PanelScrollFadeContext);
   return (
     <div
       ref={ref}
-      style={fadeStyle}
+      style={fade ? fadeStyle : undefined}
       onClickCapture={onClickCapture}
+      onAuxClickCapture={onAuxClickCapture}
       className="scrollbar-slim min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
     >
-      {children}
+      <PanelScrollContext.Provider value={ref}>{children}</PanelScrollContext.Provider>
     </div>
   );
 }
@@ -89,7 +108,8 @@ export function PanelSection({
   collapsed,
   onCollapsedChange,
   children,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"section">, "children" | "className"> & {
   label: string;
   /** Rendered at the end of the label row (e.g. a create button). */
   action?: React.ReactNode;
@@ -102,7 +122,7 @@ export function PanelSection({
   const contentId = useId();
   const collapsible = !!onCollapsedChange;
   return (
-    <section data-mc="panel-section" aria-labelledby={id} className="mt-5">
+    <section {...props} data-mc="panel-section" aria-labelledby={id} className="mt-5">
       <div className="group/section flex h-7 items-center gap-1 pl-3 pr-1">
         <h3 id={id} className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">
           {collapsible ? (

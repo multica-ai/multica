@@ -11,9 +11,11 @@ import {
   applyChatDoneToCache,
   applyChatQuickActionsToCache,
   promotePendingTaskToRunning,
+  reconcileAcceptedChatSend,
   seedAcceptedPendingTask,
   seedPendingTaskFromQueued,
 } from "./chat-ws-updaters";
+import { hideQueuedChatMessages } from "@multica/core/chat/pending";
 import { chatKeys } from "@/data/queries/chat";
 
 // chat-ws-updaters imports chatKeys from data/queries/chat, which transitively
@@ -241,6 +243,39 @@ describe("pending task queue events", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: chatKeys.pendingTask(SESSION),
     });
+    // Re-queued guidance changes its message's owner; only a refetch moves
+    // the row from the transcript to the queued rows.
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: chatKeys.messages(SESSION),
+    });
+  });
+
+  it("skips the messages refetch for a turn its message already names", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [{
+      id: "message-follow-up",
+      chat_session_id: SESSION,
+      role: "user",
+      content: "follow up",
+      task_id: "task-follow-up",
+      created_at: "2026-07-09T00:00:01Z",
+    }]);
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    seedPendingTaskFromQueued(qc, {
+      task_id: "task-follow-up",
+      agent_id: "agent-1",
+      issue_id: "",
+      chat_session_id: SESSION,
+      status: "queued",
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: chatKeys.pendingTask(SESSION),
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: chatKeys.messages(SESSION),
+    });
   });
 
   it("refetches pending state and messages when a task is dispatched", () => {
@@ -385,5 +420,201 @@ describe("applyChatQuickActionsToCache", () => {
       { label: "Draft it", prompt: "Draft the complete plan", primary: true },
     ]);
     unsub();
+  });
+});
+
+describe("reconcileAcceptedChatSend", () => {
+  const ACTIVE_STARTED = "2026-11-16T00:00:00Z";
+  const SENT_AT = "2026-11-16T00:05:00Z";
+
+  function earlier(): ChatMessage[] {
+    return [
+      {
+        id: "message-request",
+        chat_session_id: SESSION,
+        role: "user",
+        content: "fix the build",
+        task_id: "task-root",
+        created_at: ACTIVE_STARTED,
+      },
+    ];
+  }
+
+  // The state handleSend leaves behind before the POST: the optimistic bubble
+  // at the end of the transcript and a placeholder behind the running head.
+  function sendingDuringReply(head: ChatPendingTask = {
+    task_id: "task-retry",
+    status: "running",
+    created_at: ACTIVE_STARTED,
+    supports_queue: true,
+  }) {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [
+      ...earlier(),
+      {
+        id: "optimistic-1",
+        chat_session_id: SESSION,
+        role: "user",
+        content: "use the new path",
+        task_id: null,
+        created_at: SENT_AT,
+      },
+    ]);
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION), {
+      ...head,
+      queued_tasks: [{
+        task_id: "optimistic-optimistic-1",
+        status: "queued",
+        created_at: SENT_AT,
+        message_id: "optimistic-1",
+        content: "use the new path",
+      }],
+    });
+    return qc;
+  }
+
+  function reconcile(
+    qc: QueryClient,
+    result: Parameters<typeof reconcileAcceptedChatSend>[1]["result"],
+  ) {
+    reconcileAcceptedChatSend(qc, {
+      chat_session_id: SESSION,
+      optimistic_message_id: "optimistic-1",
+      optimistic_task_id: "optimistic-optimistic-1",
+      content: "use the new path",
+      result,
+    });
+  }
+
+  it("keeps the running retry and files steered guidance under its root request", () => {
+    const qc = sendingDuringReply();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    reconcile(qc, {
+      message_id: "message-guidance",
+      task_id: "task-retry",
+      created_at: ACTIVE_STARTED,
+      supports_queue: true,
+      queued: false,
+      steered: true,
+      message_task_id: "task-root",
+      message_created_at: SENT_AT,
+    });
+
+    // Same head, same start time: the status pill keeps its identity and
+    // elapsed timer, and no turn is invented for the guidance.
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION))).toEqual({
+      task_id: "task-retry",
+      status: "running",
+      created_at: ACTIVE_STARTED,
+      supports_queue: true,
+      queued_tasks: [],
+    });
+    // The guidance stays after the request it amends, with its own time.
+    expect(qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION))).toEqual([
+      ...earlier(),
+      expect.objectContaining({
+        id: "message-guidance",
+        task_id: "task-root",
+        created_at: SENT_AT,
+      }),
+    ]);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: chatKeys.messages(SESSION),
+    });
+  });
+
+  it("tracks an explicitly queued send as the next turn", () => {
+    const qc = sendingDuringReply();
+
+    reconcile(qc, {
+      message_id: "message-next",
+      task_id: "task-next",
+      created_at: SENT_AT,
+      supports_queue: true,
+      queued: true,
+      steered: false,
+      message_task_id: "task-next",
+      message_created_at: SENT_AT,
+    });
+
+    const pending = qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION));
+    expect(pending).toMatchObject({
+      task_id: "task-retry",
+      status: "running",
+      queued_tasks: [{
+        task_id: "task-next",
+        message_id: "message-next",
+        content: "use the new path",
+      }],
+    });
+    const messages = qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION)) ?? [];
+    // The shared filter now hides it from the transcript; the queued rows
+    // under the live reply show it instead.
+    expect(hideQueuedChatMessages(messages, pending).map((m) => m.id)).toEqual([
+      "message-request",
+    ]);
+  });
+
+  it("reads a pre-steering server response as a queued follow-up", () => {
+    const qc = sendingDuringReply({
+      task_id: "task-active",
+      status: "running",
+      created_at: ACTIVE_STARTED,
+      supports_queue: true,
+    });
+
+    reconcile(qc, {
+      message_id: "message-next",
+      task_id: "task-next",
+      created_at: SENT_AT,
+      supports_queue: true,
+      queued: true,
+    });
+
+    expect(qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION))?.at(-1)).toMatchObject({
+      id: "message-next",
+      task_id: "task-next",
+      created_at: SENT_AT,
+    });
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION))).toMatchObject({
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [{ task_id: "task-next", message_id: "message-next" }],
+    });
+  });
+
+  it("starts a new turn when nothing was running", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [{
+      id: "optimistic-1",
+      chat_session_id: SESSION,
+      role: "user",
+      content: "use the new path",
+      task_id: null,
+      created_at: SENT_AT,
+    }]);
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION), {
+      task_id: "optimistic-optimistic-1",
+      status: "queued",
+      created_at: SENT_AT,
+    });
+
+    reconcile(qc, {
+      message_id: "message-1",
+      task_id: "task-1",
+      created_at: SENT_AT,
+      supports_queue: true,
+      queued: false,
+      steered: false,
+      message_task_id: "task-1",
+      message_created_at: SENT_AT,
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION))).toMatchObject({
+      task_id: "task-1",
+      status: "queued",
+      queued_tasks: [],
+    });
   });
 });

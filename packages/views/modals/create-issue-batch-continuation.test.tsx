@@ -110,10 +110,6 @@ vi.mock("@multica/core/auth", () => {
   };
 });
 
-vi.mock("./use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: () => vi.fn(),
-}));
-
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (wsId: string, id: string) => ({
     queryKey: ["issues", wsId, "detail", id],
@@ -484,7 +480,7 @@ function ModeSwitchHarness({ data }: { data?: Record<string, unknown> | null }) 
 /** Keep the batch pattern for the next issue: submit once with keep-open on. */
 async function submitAndKeepOpen(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByPlaceholderText("Issue title"), "First batch issue");
-  await user.click(screen.getByRole("button", { name: "Create Issue" }));
+  await user.click(screen.getByRole("button", { name: "Create issue" }));
   await waitFor(() => expect(draftState().batchContinuationBaseline).toBeDefined());
   expect(screen.getByPlaceholderText("Issue title")).toHaveValue("");
 }
@@ -499,7 +495,7 @@ describe("assignee across create-mode switches", () => {
     await user.click(await screen.findByRole("button", { name: /^Agent X$/ }));
     await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
     expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "agent-x");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
       assignee_type: "agent", assignee_id: "agent-x",
     })));
@@ -555,7 +551,7 @@ describe("keep-open continuation cleanup", () => {
 
     renderUi(<ModeSwitchHarness />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Fresh manual issue");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     await waitFor(() =>
       expect(mockCreateIssue).toHaveBeenLastCalledWith(
         expect.objectContaining({ status: "todo" }),
@@ -673,7 +669,7 @@ describe("keep-open continuation cleanup", () => {
 
     renderUi(<ModeSwitchHarness />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Ordinary follow-up");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     await waitFor(() =>
       expect(mockCreateIssue).toHaveBeenLastCalledWith(
         expect.objectContaining({ status: "backlog", priority: "high" }),

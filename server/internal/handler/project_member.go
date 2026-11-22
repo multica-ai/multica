@@ -6,11 +6,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -46,6 +48,10 @@ type AddProjectMembersRequest struct {
 type projectAccessUpdate struct {
 	visibility string // target visibility; "" leaves it unchanged
 	addIDs     []pgtype.UUID
+	// privateAddition names how the update adds to private-project
+	// configuration ("make_private", "add_members"), or is "" when it does
+	// not. It decides whether the private_projects paid feature applies.
+	privateAddition string
 }
 
 func (u projectAccessUpdate) empty() bool { return u.visibility == "" && len(u.addIDs) == 0 }
@@ -136,14 +142,19 @@ func parseProjectMemberIDs(w http.ResponseWriter, raw []string, field string) ([
 }
 
 // prepareProjectAccessUpdate validates the access side of a project update
-// before anything is written. Two things change who can see a project:
+// before anything is written. Three things change who can see a project:
 //
 //   - a visibility switch (requested = nil leaves it alone), which takes a
 //     human who manages the project's access;
+//   - member_ids on a project that is or stays private, which adds them as
+//     POST /members would and takes the same human;
 //   - on a private project, a new member lead who is not yet a project member.
 //     A member lead must be a project member, so the update adds them, which
 //     is granting access: it takes a human who could add members directly.
 //     Agents never grant access, here or anywhere else.
+//
+// member_ids is never dropped silently: on a project that is or becomes
+// workspace-visible, naming anyone not already a project member is a 400.
 //
 // newLeadType / newLeadID are the lead the project will have after the update.
 func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Request, project db.Project, requested *string, rawMemberIDs []string, newLeadType pgtype.Text, newLeadID pgtype.UUID, leadChanged bool) (projectAccessUpdate, bool) {
@@ -210,22 +221,120 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 				}
 			}
 			update.addIDs = ids
+			update.privateAddition = privateProjectOpMakePrivate
+		} else if !h.requireExistingProjectMembers(w, r, project, rawMemberIDs) {
+			return projectAccessUpdate{}, false
 		}
 		return update, true
 	}
 
-	if current != projectaccess.VisibilityPrivate || !leadChanged || !memberLead {
+	if current != projectaccess.VisibilityPrivate {
+		if !h.requireExistingProjectMembers(w, r, project, rawMemberIDs) {
+			return projectAccessUpdate{}, false
+		}
 		return projectAccessUpdate{}, true
 	}
-	isMember, err := h.isProjectMember(r, project, newLeadID)
+
+	var update projectAccessUpdate
+	if len(rawMemberIDs) > 0 {
+		if !h.requireHumanProjectAccessActor(w, r, workspaceID) {
+			return projectAccessUpdate{}, false
+		}
+		ids, ok := parseProjectMemberIDs(w, rawMemberIDs, "member_ids")
+		if !ok {
+			return projectAccessUpdate{}, false
+		}
+		member, ok := h.workspaceMember(w, r, workspaceID)
+		if !ok {
+			return projectAccessUpdate{}, false
+		}
+		if !h.requireProjectAccessManager(w, r, member, project, "only workspace admins and the member who manages this project's access can add members") {
+			return projectAccessUpdate{}, false
+		}
+		update.addIDs = ids
+	}
+	if leadChanged && memberLead && !slices.Contains(update.addIDs, newLeadID) {
+		isMember, err := h.isProjectMember(r, project, newLeadID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check project membership")
+			return projectAccessUpdate{}, false
+		}
+		if !isMember {
+			update.addIDs = append(update.addIDs, newLeadID)
+		}
+	}
+	// The web app's access dialog writes back the current member list, so only
+	// someone who is not a member yet adds to the private project.
+	if len(update.addIDs) > 0 {
+		grows, err := h.projectMembersGrow(r, project, update.addIDs)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list project members")
+			return projectAccessUpdate{}, false
+		}
+		if grows {
+			update.privateAddition = privateProjectOpAddMembers
+		}
+	}
+	return update, true
+}
+
+// Private-project operations restricted by the private_projects paid feature.
+// Everything else on a private project stays allowed under the restriction:
+// removing members, making it workspace-visible, deleting or archiving it,
+// changing the lead to an existing member, an agent or nobody, editing any
+// other field, and the workspace owner's recovery join (JoinPrivateProject),
+// which must keep a project with no members reachable.
+const (
+	privateProjectOpCreate      = "create"
+	privateProjectOpMakePrivate = "make_private"
+	privateProjectOpAddMembers  = "add_members"
+)
+
+// projectMembersGrow reports whether adding ids to project would add anyone
+// who is not a member yet.
+func (h *Handler) projectMembersGrow(r *http.Request, project db.Project, ids []pgtype.UUID) (bool, error) {
+	existing, err := h.Queries.ListProjectMemberUserIDs(r.Context(), db.ListProjectMemberUserIDsParams{
+		ProjectID:   project.ID,
+		WorkspaceID: project.WorkspaceID,
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check project membership")
-		return projectAccessUpdate{}, false
+		return false, err
 	}
-	if isMember {
-		return projectAccessUpdate{}, true
+	for _, id := range ids {
+		if !slices.Contains(existing, id) {
+			return true, nil
+		}
 	}
-	return projectAccessUpdate{addIDs: []pgtype.UUID{newLeadID}}, true
+	return false, nil
+}
+
+// requireExistingProjectMembers answers 400 unless every id in member_ids is
+// already a project member. A workspace-visible project gains no members from
+// an update; the web app's access dialog sends the current list when it makes
+// a project public, which stays accepted.
+func (h *Handler) requireExistingProjectMembers(w http.ResponseWriter, r *http.Request, project db.Project, rawMemberIDs []string) bool {
+	if len(rawMemberIDs) == 0 {
+		return true
+	}
+	ids, ok := parseProjectMemberIDs(w, rawMemberIDs, "member_ids")
+	if !ok {
+		return false
+	}
+	existing, err := h.Queries.ListProjectMemberUserIDs(r.Context(), db.ListProjectMemberUserIDsParams{
+		ProjectID:   project.ID,
+		WorkspaceID: project.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list project members")
+		return false
+	}
+	for _, id := range ids {
+		if !slices.Contains(existing, id) {
+			writeError(w, http.StatusBadRequest, "member_ids only adds members to a private project")
+			return false
+		}
+	}
+	return true
 }
 
 // writeProjectUpdate stores params and, in the same transaction, a prepared
@@ -430,6 +539,25 @@ func (h *Handler) AddProjectMembers(w http.ResponseWriter, r *http.Request) {
 	if !h.requireProjectAccessManager(w, r, member, project, "only workspace admins and the member who manages this project's access can add members") {
 		return
 	}
+	// Sharing the project with a guest who is not in it yet is a guest
+	// addition (MUL-9420), whatever the project's visibility.
+	guestAdmission, ok := h.requireGuestProjectAddition(w, r, project.WorkspaceID, project.ID, ids)
+	if !ok {
+		return
+	}
+	var admission featureAdmission
+	if projectVisibilityOrDefault(project.Visibility) == projectaccess.VisibilityPrivate {
+		grows, err := h.projectMembersGrow(r, project, ids)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list project members")
+			return
+		}
+		if grows {
+			if admission, ok = h.requireFeatureAddition(w, r, project.WorkspaceID, entitlement.FeaturePrivateProjects, privateProjectOpAddMembers); !ok {
+				return
+			}
+		}
+	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -458,6 +586,8 @@ func (h *Handler) AddProjectMembers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit project members")
 		return
 	}
+	admission.admitted(r.Context())
+	guestAdmission.admitted(r.Context())
 	h.publishProjectMembersChanged(project, member.UserID)
 	h.ListProjectMembers(w, r)
 }

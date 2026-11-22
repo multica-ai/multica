@@ -10,6 +10,12 @@ import {
   type CommandBarContext,
 } from "@multica/core/command-bar";
 import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { configStore } from "@multica/core/config";
+import { docTreeOptions } from "@multica/core/docs";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
@@ -165,6 +171,9 @@ vi.mock("@multica/core/auth", async (importOriginal) => {
     }),
   };
 });
+
+const composio = vi.hoisted(() => ({ available: true }));
+vi.mock("../common/use-composio-available", () => ({ useComposioAvailable: () => composio.available }));
 
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
@@ -362,11 +371,14 @@ const rowText = (text: string) =>
 
 describe("SearchCommand", () => {
   beforeEach(() => {
+    composio.available = true;
     queryData.clear();
     apiFns.clear();
     apiFns.set("getBaseUrl", vi.fn(() => "http://127.0.0.1:8080"));
     apiFns.set("searchIssues", vi.fn(() => Promise.resolve({ issues: [], total: 0 })));
     apiFns.set("searchProjects", vi.fn(() => Promise.resolve({ projects: [], total: 0 })));
+    apiFns.set("searchDocs", vi.fn(() => Promise.resolve({ docs: [] })));
+    configStore.getState().setFeatureFlags({ [DOCS_V1_FLAG]: true });
     mockPush.mockReset();
     mockPathname.current = "/ws-test/issues";
     mockGetShareableUrl.mockReset().mockImplementation((p: string) => `https://app.multica/${p}`);
@@ -416,6 +428,40 @@ describe("SearchCommand", () => {
     expect(renderedValues()).toEqual(["command:new-issue", "command:chat-with-agent"]);
   });
 
+  describe("guest (MUL-9420)", () => {
+    beforeEach(() => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+    });
+
+    it("offers no New issue on an empty query", () => {
+      renderSearch();
+
+      expect(renderedValues()).not.toContain("command:new-issue");
+    });
+
+    it("finds no New issue command and no hand-to-agent row while typing", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "new");
+
+      expect(await rowText("New project")).toBeInTheDocument();
+      expect(screen.queryByText((_, el) => el?.textContent === "New issue" && el?.tagName === "SPAN")).toBeNull();
+      expect(renderedValues()).not.toContain("hand-to-agent");
+    });
+
+    it("drops Change status and New issue from a project's context commands", () => {
+      registerContext({
+        kind: "project",
+        project: { id: "proj-1", title: "Shared project", archived_at: null },
+      } as CommandBarContext);
+      renderSearch();
+
+      expect(renderedValues()).toContain("command:context-project:project-copy-link");
+      expect(renderedValues()).not.toContain("command:context-project:project-status");
+      expect(renderedValues()).not.toContain("command:context-project:project-new-issue");
+    });
+  });
+
   describe("pages and global commands", () => {
     it("filters navigation pages by query", async () => {
       const user = userEvent.setup();
@@ -436,6 +482,17 @@ describe("SearchCommand", () => {
         await user.type(input(), enLayout.nav[page.navKey]);
         await waitFor(() => expect(renderedValues()).toContain(`page:${key}`));
       }
+    });
+
+    it("leaves Apps out when the server has no connected apps", async () => {
+      composio.available = false;
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), enLayout.nav.apps);
+      await waitFor(() => expect(renderedValues()).not.toContain("page:apps"));
+      await user.clear(input());
+      await user.type(input(), enLayout.nav.skills);
+      await waitFor(() => expect(renderedValues()).toContain("page:skills"));
     });
 
     it("does not surface a page on an incidental substring of a hidden keyword", async () => {
@@ -689,6 +746,75 @@ describe("SearchCommand", () => {
       expect(renderedValues()).toContain("best-action:chat");
     });
 
+    it("finds a doc by title, names its folder, and opens it", async () => {
+      seed(docTreeOptions("ws-test"), {
+        folders: [{ id: "folder-eng", title: "Engineering" }],
+        docs: [
+          { id: "doc-runbook", title: "Release runbook", folderId: "folder-eng" },
+          { id: "doc-blank", title: "", folderId: null },
+        ],
+      });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "runbook");
+
+      const docs = await screen.findByRole("group", { name: "Docs" });
+      const rows = within(docs).getAllByRole("option");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent("Release runbookEngineering");
+      fireEvent.click(rows[0]!);
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/docs/doc-runbook");
+    });
+
+    it("offers no Docs page or doc rows while docs_v1 is off", async () => {
+      configStore.getState().setFeatureFlags({});
+      seed(docTreeOptions("ws-test"), {
+        folders: [],
+        docs: [{ id: "doc-runbook", title: "Docs runbook", folderId: null }],
+      });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "docs");
+
+      // Past the doc search debounce, so a request would have gone out.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+      expect(renderedValues()).not.toContain("page:docs");
+      expect(screen.queryByRole("group", { name: "Docs" })).not.toBeInTheDocument();
+      expect(api("searchDocs")).not.toHaveBeenCalled();
+    });
+
+    it("adds server content hits under Docs with an excerpt, without repeating title hits", async () => {
+      seed(docTreeOptions("ws-test"), {
+        folders: [{ id: "folder-eng", title: "Engineering" }],
+        docs: [{ id: "doc-rotation", title: "Key rotation", folderId: "folder-eng" }],
+      });
+      const summary = (id: string, title: string) => ({
+        id, workspaceId: "ws-test", folderId: "folder-eng", title, revision: 1, versionCount: 1,
+        createdByType: "member", createdById: ME, updatedByType: "member", updatedById: ME,
+        createdAt: "2026-11-19T00:00:00Z", updatedAt: "2026-11-19T00:00:00Z",
+      });
+      api("searchDocs").mockResolvedValue({
+        docs: [
+          { ...summary("doc-rotation", "Key rotation"), matchSource: "title", matchedSnippet: null },
+          {
+            ...summary("doc-runbook", "Release runbook"),
+            matchSource: "content",
+            matchedSnippet: "...before cutover, follow [Key rotation](mention://doc/doc-rotation) steps...",
+          },
+        ],
+      });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "rotation");
+
+      const docs = await screen.findByRole("group", { name: "Docs" });
+      await waitFor(() => expect(within(docs).getAllByRole("option")).toHaveLength(2));
+      const rows = within(docs).getAllByRole("option");
+      expect(rows[0]).toHaveTextContent("Key rotationEngineering");
+      expect(rows[1]).toHaveTextContent("Release runbook...before cutover, follow Key rotation steps...");
+      expect(api("searchDocs")).toHaveBeenCalledWith(expect.objectContaining({ q: "rotation", limit: 10 }));
+    });
+
     it("lists workspace members and navigates to the member page", async () => {
       const user = userEvent.setup();
       seed(memberListOptions("ws-test"), [
@@ -733,7 +859,7 @@ describe("SearchCommand", () => {
           {
             ...makeIssue({ id: "issue-snippet", identifier: "MUL-99", title: "HTML rendering pipeline" }),
             match_source: "title",
-            matched_description_snippet: "...uses HTML templates for rendering...",
+            matched_description_snippet: "...uses HTML templates from [Render guide](mention://doc/doc-1) for rendering...",
             matched_comment_snippet: "...we should migrate away from HTML...",
           },
         ],
@@ -744,7 +870,7 @@ describe("SearchCommand", () => {
 
       await waitFor(() => expect(renderedValues()).toContain("issue-snippet"), { timeout: 2000 });
       expect(
-        screen.getByText((_, el) => !!el?.textContent?.includes("uses HTML templates") && el?.tagName === "SPAN"),
+        screen.getByText((_, el) => !!el?.textContent?.includes("uses HTML templates from Render guide for") && el?.tagName === "SPAN"),
       ).toBeInTheDocument();
       expect(
         screen.getByText((_, el) => !!el?.textContent?.includes("migrate away from HTML") && el?.tagName === "SPAN"),
@@ -796,6 +922,89 @@ describe("SearchCommand", () => {
       fireEvent.click(await rowText("Acme Corp"));
 
       expect(mockPush).toHaveBeenCalledWith("/acme-hq/issues");
+    });
+  });
+
+  describe("views", () => {
+    const makeView = (id: string, name: string, over: Record<string, unknown> = {}) => ({
+      id,
+      workspace_id: "ws-test",
+      owner_id: ME,
+      name,
+      scope_type: "workspace",
+      scope_id: null,
+      visibility: "private",
+      query: {},
+      display: {},
+      ...over,
+    });
+
+    beforeEach(() => {
+      act(() => useActiveIssueViewStore.setState({ active: {} }));
+      seed(issueViewEverywhereOptions("ws-test"), [
+        makeView("view-bugs", "Open bugs"),
+        makeView("view-launch", "Launch blockers", { scope_type: "project", scope_id: "proj-1" }),
+      ]);
+      seed(projectListOptions("ws-test"), { projects: [{ id: "proj-1", title: "Website" }] });
+    });
+
+    const viewRows = () => within(screen.getByRole("group", { name: "Views" })).getAllByRole("option");
+
+    it("opens a saved view on its surface and makes it the active view", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "open bugs");
+      fireEvent.click(await rowText("Open bugs"));
+
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues?view=view-bugs");
+      expect(useActiveIssueViewStore.getState().active).toEqual({ "ws-test:workspace": "view-bugs" });
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("names the project a project view opens in", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "launch");
+
+      await waitFor(() => expect(viewRows()[0]).toHaveTextContent("Launch blockersWebsite"));
+      fireEvent.click(viewRows()[0]!);
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/projects/proj-1?view=view-launch");
+    });
+
+    it("opens a built-in view", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "working");
+      fireEvent.click(await rowText("Working"));
+
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues?view=working");
+      expect(useActiveIssueViewStore.getState().active).toEqual({ "ws-test:workspace": "working" });
+    });
+
+    it('lists every view under the Views page for "views"', async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "views");
+
+      await waitFor(() => expect(viewRows()).toHaveLength(7));
+      expect(renderedValues().indexOf("page:views")).toBeLessThan(renderedValues().indexOf("view:view-bugs"));
+    });
+
+    it("leaves this tab's active view alone when the view opens in a new tab", async () => {
+      const user = userEvent.setup();
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      renderSearch();
+      await user.type(input(), "open bugs");
+      fireEvent.click(await rowText("Open bugs"), { metaKey: true });
+
+      expect(open).toHaveBeenCalledWith(
+        "https://app.multica//ws-test/issues?view=view-bugs",
+        "_blank",
+        "noopener,noreferrer",
+      );
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(useActiveIssueViewStore.getState().active).toEqual({});
+      open.mockRestore();
     });
   });
 
@@ -960,6 +1169,34 @@ describe("SearchCommand", () => {
       );
     });
 
+    it("offers Delete issue on an issue the viewer created", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+      await waitFor(() => expect(renderedValues()).toContain("command:context-issue:issue-delete"));
+    });
+
+    it("drops Delete issue on someone else's issue", async () => {
+      act(() => {
+        for (const token of registered.splice(0)) useCommandBarContextStore.getState().unregister(token);
+      });
+      registerContext({ kind: "issue", issue: { ...issue, creator_id: "user-other" } });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+
+      expect(renderedValues()).not.toContain("command:context-issue:issue-delete");
+    });
+
+    it("drops Delete issue for a guest, even on an issue it created (MUL-9877)", async () => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+
+      expect(renderedValues()).not.toContain("command:context-issue:issue-delete");
+    });
+
     it("hides issue commands once the page unregisters", () => {
       act(() => {
         for (const token of registered.splice(0)) useCommandBarContextStore.getState().unregister(token);
@@ -1077,7 +1314,7 @@ describe("SearchCommand", () => {
       expect(handRow()).toHaveTextContent(`Hand to agent: “${prompt}”`);
       fireEvent.keyDown(input(), { key: "Enter" });
 
-      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-812");
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/MUL-812");
       expect(mockOpenModal).not.toHaveBeenCalled();
       expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });
@@ -1162,7 +1399,7 @@ describe("SearchCommand", () => {
       await user.type(input(), "localized");
 
       await waitFor(() => expect(screen.getByText("进行中")).toBeInTheDocument(), { timeout: 2000 });
-      expect(screen.queryByText("In Progress")).toBeNull();
+      expect(screen.queryByText("In progress")).toBeNull();
     });
 
     it("keeps live rows of both types above every cancelled row", async () => {

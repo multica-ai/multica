@@ -34,6 +34,8 @@ const (
 // classes; every other app works through automatic classification.
 type CuratedApp struct {
 	Slug string
+	// Name is how people see the app in inbox items and notes.
+	Name string
 	// Scope is the recommended account type: team, personal, or "" for either.
 	Scope string
 	// Overrides pins the class of specific tools, keyed by upper-case tool slug.
@@ -41,32 +43,33 @@ type CuratedApp struct {
 }
 
 var curatedApps = []CuratedApp{
-	{Slug: "gmail", Scope: ScopePersonal},
-	{Slug: "googlecalendar", Scope: ScopePersonal, Overrides: map[string]string{
+	{Slug: "gmail", Name: "Gmail", Scope: ScopePersonal},
+	{Slug: "googlecalendar", Name: "Google Calendar", Scope: ScopePersonal, Overrides: map[string]string{
 		"GOOGLECALENDAR_CREATE_EVENT":    ClassSend,
 		"GOOGLECALENDAR_UPDATE_EVENT":    ClassSend,
 		"GOOGLECALENDAR_PATCH_EVENT":     ClassSend,
 		"GOOGLECALENDAR_QUICK_ADD":       ClassSend,
 		"GOOGLECALENDAR_FIND_FREE_SLOTS": ClassRead,
 	}},
-	{Slug: "outlook", Scope: ScopePersonal},
-	{Slug: "slack", Scope: ScopePersonal},
-	{Slug: "notion"},
-	{Slug: "googledrive"},
-	{Slug: "googledocs"},
-	{Slug: "googlesheets"},
-	{Slug: "confluence"},
-	{Slug: "linear"},
-	{Slug: "jira"},
-	{Slug: "asana"},
-	{Slug: "figma"},
-	{Slug: "sentry", Scope: ScopeTeam},
-	{Slug: "posthog", Scope: ScopeTeam},
-	{Slug: "hubspot", Scope: ScopeTeam},
-	{Slug: "zendesk", Scope: ScopeTeam},
-	{Slug: "intercom", Scope: ScopeTeam},
-	{Slug: "stripe", Scope: ScopeTeam},
-	{Slug: "airtable", Scope: ScopeTeam},
+	{Slug: "outlook", Name: "Outlook", Scope: ScopePersonal},
+	{Slug: "slack", Name: "Slack", Scope: ScopePersonal},
+	{Slug: "notion", Name: "Notion"},
+	{Slug: "googledrive", Name: "Google Drive"},
+	{Slug: "googledocs", Name: "Google Docs"},
+	{Slug: "googlesheets", Name: "Google Sheets"},
+	{Slug: "confluence", Name: "Confluence"},
+	{Slug: "linear", Name: "Linear"},
+	{Slug: "jira", Name: "Jira"},
+	{Slug: "asana", Name: "Asana"},
+	{Slug: "figma", Name: "Figma"},
+	{Slug: "mobbin", Name: "Mobbin", Scope: ScopePersonal},
+	{Slug: "sentry", Name: "Sentry", Scope: ScopeTeam},
+	{Slug: "posthog", Name: "PostHog", Scope: ScopeTeam},
+	{Slug: "hubspot", Name: "HubSpot", Scope: ScopeTeam},
+	{Slug: "zendesk", Name: "Zendesk", Scope: ScopeTeam},
+	{Slug: "intercom", Name: "Intercom", Scope: ScopeTeam},
+	{Slug: "stripe", Name: "Stripe", Scope: ScopeTeam},
+	{Slug: "airtable", Name: "Airtable", Scope: ScopeTeam},
 }
 
 var curatedBySlug = func() map[string]CuratedApp {

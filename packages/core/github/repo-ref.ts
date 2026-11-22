@@ -116,11 +116,16 @@ export function looksLikeCommitSha(value: string): boolean {
 export function splitGithubUrlRef(input: string): { url: string; ref?: string } {
   const value = input.trim();
   const match = value.match(
-    /^(https?:\/\/(?:www\.)?github\.com\/[^/\s]+\/[^/\s]+?)(?:\.git)?\/tree\/(.+)$/i,
+    /^(https?:\/\/(?:www\.)?github\.com\/[^/?#\s]+\/[^/?#\s]+?)(?:\.git)?\/tree\/([^?#]+)(?:[?#].*)?$/i,
   );
   const [, cloneUrl, rawRef] = match ?? [];
   if (!cloneUrl || !rawRef) return { url: value };
-  const ref = rawRef.replace(/\/+$/, "");
-  if (!ref || validateGitRef(ref).ok === false) return { url: value };
+  let ref: string;
+  try {
+    ref = decodeURIComponent(rawRef.replace(/\/+$/, ""));
+  } catch {
+    return { url: value };
+  }
+  if (!ref || ref !== ref.trim() || validateGitRef(ref).ok === false) return { url: value };
   return { url: cloneUrl, ref };
 }

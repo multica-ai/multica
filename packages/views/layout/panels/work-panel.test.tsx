@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { EMPTY_ISSUE_VIEW_PREFERENCE } from "@multica/core/api/schemas";
@@ -31,6 +31,7 @@ import type {
 } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
+import { IssueInboxBar } from "../../issues/actions/issue-inbox-actions";
 import { KeptRowsRelease, WorkPanel } from "./work-panel";
 
 const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn() }));
@@ -154,6 +155,10 @@ function renderPanel(
   projects: Project[] = [],
   unreadIssueIds: string[] = [],
   inbox: InboxItem[] = [],
+  /** As on web, a push lands only once the next page has loaded ("Finish loading"). */
+  deferPush = false,
+  /** As on desktop: links can open tabs, and an issue page shows its header. */
+  desktop = false,
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   qc.setQueryData(inboxListOptions("ws-1").queryKey, inbox);
@@ -180,8 +185,17 @@ function renderPanel(
     const [peek, setPeek] = useState(false);
     // A compact sheet unmounts the panel whenever it closes.
     const [sheetOpen, setSheetOpen] = useState(true);
+    const [loading, setLoading] = useState<string | null>(null);
+    const [newTab, setNewTab] = useState<string | null>(null);
+    const openTab = (path: string) => setPathname(new URL(path, "http://x").pathname);
     const adapter: NavigationAdapter = {
-      push: setPathname,
+      openInNewTab: desktop
+        ? (path, _title, opts) => {
+            setNewTab(path);
+            if (opts?.activate) openTab(path);
+          }
+        : undefined,
+      push: deferPush ? setLoading : setPathname,
       replace: setPathname,
       back: vi.fn(),
       pathname,
@@ -192,12 +206,24 @@ function renderPanel(
     return (
       <NavigationProvider value={adapter}>
         <KeptRowsRelease />
+        {/* Each desktop tab mounts its own page. */}
+        {desktop && pathname.startsWith("/acme/issues/") && (
+          <div data-testid="issue-header">
+            <IssueInboxBar key={pathname} issueId={pathname.split("/").at(-1)!} />
+          </div>
+        )}
         {sheetOpen && spaceForPath(pathname) === "work" && <WorkPanel />}
+        <button type="button" onClick={() => newTab && openTab(newTab)}>
+          Switch to new tab
+        </button>
         <button type="button" onClick={() => setPathname("/acme/agents")}>
           Leave Work
         </button>
         <button type="button" onClick={() => setPathname(`/acme/issues/${ISSUE.id}`)}>
           Return to issue
+        </button>
+        <button type="button" onClick={() => loading && setPathname(new URL(loading, "http://x").pathname)}>
+          Finish loading
         </button>
         <button type="button" onClick={() => setSheetOpen((open) => !open)}>
           Toggle sheet
@@ -236,7 +262,12 @@ beforeEach(() => {
   });
   useActiveIssueViewStore.setState({ active: {} });
   useSidebarKeptStore.setState({ held: {} });
-  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: {} });
+  useInboxSelectionStore.setState({
+    sidebarIssueByWorkspace: {},
+    sidebarTabIssuesByWorkspace: {},
+    heldRows: {},
+    leftRowKeyByWorkspace: {},
+  });
   apiMock.listIssueTableRows.mockResolvedValue({
     rows: [ISSUE, OTHER].map((issue) => ({ issue })),
     total: 2,
@@ -269,10 +300,23 @@ function inboxItem(issue: Issue): InboxItem {
 }
 
 describe("WorkPanel sections", () => {
-  it("orders Inbox, Pinned, Views, Projects", () => {
+  const sections = () => Array.from(document.querySelectorAll<HTMLElement>("[data-mc='panel-section']"));
+  const labels = () => sections().map((section) => section.querySelector("h3")?.textContent);
+
+  it("orders Pinned, Inbox, Views, Projects", () => {
     renderPanel("/acme/my-issues", [PIN], [PROJECT]);
-    const labels = Array.from(document.querySelectorAll("[data-mc='panel-section'] h3"), (h) => h.textContent);
-    expect(labels).toEqual(["Inbox", "Pinned", "Views", "Projects"]);
+    expect(labels()).toEqual(["Pinned", "Inbox", "Views", "Projects"]);
+  });
+
+  // The panel body drops the top margin of a section that is its first child.
+  it("starts the panel with its first section, with or without pins", () => {
+    renderPanel("/acme/my-issues", [PIN], [PROJECT]);
+    expect(sections()[0]!.parentElement!.firstElementChild).toBe(sections()[0]);
+    cleanup();
+
+    renderPanel("/acme/my-issues", [], [PROJECT]);
+    expect(labels()[0]).toBe("Inbox");
+    expect(sections()[0]!.parentElement!.firstElementChild).toBe(sections()[0]);
   });
 });
 
@@ -288,6 +332,21 @@ describe("WorkPanel Inbox highlight", () => {
     expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page");
     expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
     expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("lights an issue opened from the Inbox at its identifier URL", async () => {
+    const qc = renderPanel("/acme/my-issues", [], [], [], [{ ...inboxItem(ISSUE), issue_identifier: ISSUE.identifier }]);
+    await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
+    const row = within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME });
+    expect(row).toHaveAttribute("href", `/acme/issues/${ISSUE.identifier}`);
+    fireEvent.click(row);
+    // The issue page loads it by its identifier.
+    act(() => qc.setQueryData(issueDetailOptions("ws-1", ISSUE.identifier).queryKey, ISSUE));
+
+    await waitFor(() =>
+      expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page"),
+    );
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
   });
 
   it("moves the light to the list the issue is clicked in next", async () => {
@@ -310,18 +369,32 @@ describe("WorkPanel Inbox highlight", () => {
     expect(allIssues()).not.toHaveAttribute("aria-current");
   });
 
-  it("falls back to the other lists once the notification is archived", async () => {
+  it("keeps the open row lit in place once its notification is archived some other way", async () => {
     const qc = renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
     await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
     fireEvent.click(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME }));
     act(() => {
-      qc.setQueryData(inboxListOptions("ws-1").queryKey, [{ ...inboxItem(ISSUE), archived: true }]);
+      qc.setQueryData(inboxListOptions("ws-1").queryKey, []);
     });
 
-    await waitFor(() =>
-      expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page"),
-    );
-    expect(inInbox()).toBeNull();
+    const row = await within(inInbox()).findByRole("link", { name: /Leaves the Inbox when you move on/ });
+    expect(row).toHaveAttribute("aria-current", "page");
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("lights nothing else once an Inbox action took the open row with nothing left to open", async () => {
+    const qc = renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
+    await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
+    fireEvent.click(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME }));
+    act(() => {
+      useInboxSelectionStore.getState().leaveRow("ws-1", ISSUE.id);
+      qc.setQueryData(inboxListOptions("ws-1").queryKey, []);
+    });
+
+    await waitFor(() => expect(inInbox()).toBeNull());
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
   });
 
   it("lights an issue opened from a row's hover card in the Inbox", async () => {
@@ -355,6 +428,147 @@ describe("WorkPanel Inbox highlight", () => {
     await within(inInbox()).findByRole("link", { name: /^Other 4/ });
     expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page");
     expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+  });
+});
+
+describe("WorkPanel Inbox highlight while the next page loads", () => {
+  const inInbox = () => document.querySelector('[data-sidebar-list="inbox"]') as HTMLElement;
+  const inMyIssues = () => document.querySelector('[data-sidebar-list="builtin:my_work"]') as HTMLElement;
+  const inboxRow = (issue: Issue) => within(inInbox()).getByRole("link", { name: new RegExp(`^${issue.title}`) });
+  const finishLoading = () => fireEvent.click(screen.getByRole("button", { name: "Finish loading" }));
+
+  // Under the collapsed Projects section, an issue without a project that no
+  // other row marks lights All issues.
+  async function openFromInbox(expanded: string[]) {
+    useSidebarTreeStore.setState({ expanded, projectsCollapsed: true });
+    const qc = renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE), inboxItem(OTHER)], true);
+    act(() => {
+      qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
+    });
+    fireEvent.click(inboxRow(ISSUE));
+    finishLoading();
+    expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+    return qc;
+  }
+
+  it("keeps the open issue lit in the Inbox until the next notification's page arrives", async () => {
+    await openFromInbox([]);
+    fireEvent.click(inboxRow(OTHER));
+
+    expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+
+    finishLoading();
+    expect(inboxRow(OTHER)).toHaveAttribute("aria-current", "page");
+    expect(inboxRow(ISSUE)).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps the open issue lit in the Inbox until an issue clicked in a view arrives", async () => {
+    await openFromInbox(["builtin:my_work"]);
+    fireEvent.click(await within(await waitFor(inMyIssues)).findByRole("link", { name: OTHER.title }));
+
+    expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+
+    finishLoading();
+    expect(within(inMyIssues()).getByRole("link", { name: OTHER.title })).toHaveAttribute("aria-current", "page");
+    expect(inboxRow(ISSUE)).not.toHaveAttribute("aria-current");
+  });
+
+  it.each([{ metaKey: true }, { ctrlKey: true }, { metaKey: true, shiftKey: true }])(
+    "keeps the open issue's records when another notification opens in a new tab (%o)",
+    async (modifiers) => {
+      await openFromInbox([]);
+      fireEvent.click(inboxRow(OTHER), modifiers);
+
+      expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+      expect(useInboxSelectionStore.getState().sidebarIssueByWorkspace["ws-1"]).toBe(ISSUE.id);
+      // A browser tab has a store of its own.
+      expect(useInboxSelectionStore.getState().sidebarTabIssuesByWorkspace["ws-1"]).toBeUndefined();
+
+      // Nothing was left pending for a later page to settle.
+      fireEvent.click(screen.getByRole("button", { name: "Leave Work" }));
+      fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+      expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+    },
+  );
+
+  it("lights nothing else while the issue header moves on from an archived notification", async () => {
+    const qc = await openFromInbox([]);
+    act(() => {
+      qc.setQueryData(inboxListOptions("ws-1").queryKey, [{ ...inboxItem(ISSUE), archived: true }, inboxItem(OTHER)]);
+      useInboxSelectionStore.getState().leaveRow("ws-1", ISSUE.id);
+      useInboxSelectionStore.getState().rememberSidebarIssue("ws-1", OTHER.id);
+    });
+
+    await waitFor(() => expect(within(inInbox()).queryByRole("link", { name: INBOX_ROW_NAME })).toBeNull());
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+});
+
+describe("WorkPanel Inbox across desktop tabs", () => {
+  const inInbox = () => document.querySelector('[data-sidebar-list="inbox"]') as HTMLElement;
+  const inMyIssues = () => document.querySelector('[data-sidebar-list="builtin:my_work"]') as HTMLElement;
+  const inboxRow = (issue: Issue) => within(inInbox()).getByRole("link", { name: new RegExp(`^${issue.title}`) });
+  const offersInboxActions = () => !!within(screen.getByTestId("issue-header")).queryByRole("button", { name: "Archive" });
+  const switchToNewTab = () => fireEvent.click(screen.getByRole("button", { name: "Switch to new tab" }));
+  const switchBack = () => fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+
+  async function openFromInbox() {
+    useSidebarTreeStore.setState({ expanded: ["builtin:my_work"], projectsCollapsed: true });
+    const qc = renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE), inboxItem(OTHER)], false, true);
+    act(() => {
+      qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
+      qc.setQueryData(issueDetailOptions("ws-1", OTHER.id).queryKey, OTHER);
+    });
+    fireEvent.click(inboxRow(ISSUE));
+    expect(offersInboxActions()).toBe(true);
+  }
+
+  it.each([
+    ["Cmd-click", (link: HTMLElement) => fireEvent.click(link, { metaKey: true })],
+    ["Ctrl-click", (link: HTMLElement) => fireEvent.click(link, { ctrlKey: true })],
+    [
+      "middle click",
+      (link: HTMLElement) => fireEvent(link, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 })),
+    ],
+  ])("keeps both issues opened from the Inbox after a %s opens a background tab", async (_, open) => {
+    await openFromInbox();
+    open(inboxRow(OTHER));
+
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+
+    switchToNewTab();
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(OTHER)).toHaveAttribute("aria-current", "page");
+
+    switchBack();
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps both issues opened from the Inbox after a Cmd+Shift-click opens a foreground tab", async () => {
+    await openFromInbox();
+    fireEvent.click(inboxRow(OTHER), { metaKey: true, shiftKey: true });
+
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(OTHER)).toHaveAttribute("aria-current", "page");
+
+    switchBack();
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+  });
+
+  it("stops counting a tab's issue as opened from the Inbox once it is opened from another list", async () => {
+    await openFromInbox();
+    fireEvent.click(inboxRow(OTHER), { metaKey: true });
+    switchToNewTab();
+    fireEvent.click(await within(inMyIssues()).findByRole("link", { name: OTHER.title }));
+
+    expect(offersInboxActions()).toBe(false);
+    expect(within(inMyIssues()).getByRole("link", { name: OTHER.title })).toHaveAttribute("aria-current", "page");
   });
 });
 
@@ -654,5 +868,29 @@ describe("WorkPanel and the open issue's project", () => {
     });
     expect(litIssueRows()).toEqual([within(list).getByRole("link", { name: ISSUE.title })]);
     await waitFor(() => expect(useSidebarTreeStore.getState().locate).toBeNull());
+  });
+});
+
+describe("KeptRowsRelease Inbox Zero undo", () => {
+  const cleared = () => useInboxSelectionStore.getState().lastClearedByWorkspace["ws-1"];
+  const recordCleared = () =>
+    useInboxSelectionStore.getState().recordLastCleared("ws-1", {
+      kind: "archived",
+      itemId: `inbox-${ISSUE.id}`,
+      key: ISSUE.id,
+      label: ISSUE.identifier,
+      href: `/acme/issues/${ISSUE.identifier}`,
+      clearedAt: 1,
+    });
+
+  beforeEach(() => useInboxSelectionStore.setState({ lastClearedByWorkspace: {} }));
+
+  it("forgets it once the Inbox is left, even for the issue it cleared", () => {
+    recordCleared();
+    renderPanel("/acme/inbox");
+    expect(cleared()).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+    expect(cleared()).toBeUndefined();
   });
 });

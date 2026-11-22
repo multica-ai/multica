@@ -4,6 +4,7 @@ import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   ManualUpdateCheckResult,
+  UpdaterDownloadState,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import {
@@ -162,6 +163,11 @@ const desktopAPI = {
   /** OS-preferred locale (BCP 47), passed from main via additionalArguments.
    *  Used by the renderer's LocaleAdapter as the system-preference signal. */
   systemLocale,
+  /** Report the renderer's resolved in-app locale to main so native dialogs
+   *  and daemon error messages follow the user's Settings choice. */
+  setLocale: (locale: string) => {
+    ipcRenderer.send("locale:set", locale);
+  },
   /** Subscribe to OS language changes detected after boot. The renderer
    *  decides whether to act (no-op when the user has an explicit Settings
    *  choice). Returns an unsubscribe function. */
@@ -505,6 +511,12 @@ const daemonAPI = {
 };
 
 const updaterAPI = {
+  getDownloadState: (): Promise<UpdaterDownloadState> => ipcRenderer.invoke("updater:get-download-state"),
+  onDownloadState: (callback: (state: UpdaterDownloadState) => void) => {
+    const handler = (_: unknown, state: UpdaterDownloadState) => callback(state);
+    ipcRenderer.on("updater:download-state", handler);
+    return () => ipcRenderer.removeListener("updater:download-state", handler);
+  },
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
     ipcRenderer.on("updater:update-available", handler);

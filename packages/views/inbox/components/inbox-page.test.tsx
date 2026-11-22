@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { ApiError } from "@multica/core/api";
 import type { AgentTask, InboxItem } from "@multica/core/types";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
@@ -22,9 +22,13 @@ const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem
   tasks: [],
 };
 
+const NO_SNOOZED: never[] = [];
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
 const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
-const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn() }));
+// The active list as a read that failed before anything loaded, and is
+// possibly being tried again.
+const activeFailure = { failed: false, retrying: false, refetch: vi.fn() };
+const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn(), getQueryData: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
   useQueryClient: () => queryClient,
@@ -33,11 +37,18 @@ vi.mock("@tanstack/react-query", () => ({
     return ({
     data: options.queryKey.includes("archived")
       ? { items: listData.lookup ?? listData.archived, hasMore: false, nextCursor: null }
-      : options.queryKey.includes("agent-task-snapshot") ? listData.tasks : listData.active,
+      : options.queryKey.includes("agent-task-snapshot") ? listData.tasks
+      : options.queryKey.includes("working-agents") ? []
+      : options.queryKey.includes("snoozed") ? NO_SNOOZED : listData.active,
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
     ...(options.queryKey.includes("lookup") ? lookupState : {}),
+    ...(options.queryKey.at(-1) === "list" && activeFailure.failed
+      ? activeFailure.retrying
+        ? { data: undefined, isError: false, isLoading: true, isFetching: true, errorUpdateCount: 1, refetch: activeFailure.refetch }
+        : { data: undefined, isError: true, isFetching: false, errorUpdateCount: 1, refetch: activeFailure.refetch }
+      : {}),
   }); },
   useInfiniteQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
@@ -53,9 +64,15 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
+vi.mock("@multica/core/permissions", () => ({
+  useIsGuest: () => false,
+}));
+
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
+    issues: () => "/acme/issues",
     issueDetail: (id: string) => `/acme/issues/${id}`,
   }),
 }));
@@ -83,6 +100,7 @@ vi.mock("@multica/core/inbox/queries", () => ({
   inboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "list"] }),
   archivedInboxPagesOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "pages"] }),
   archivedInboxLookupOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "lookup"] }),
+  snoozedInboxOptions: () => ({ queryKey: ["inbox", "workspace-1", "snoozed"] }),
   deduplicateInboxItems: (items: InboxItem[]) => items.filter((i) => !i.archived),
   deduplicateArchivedInboxItems: (items: InboxItem[]) => items.filter((i) => i.archived),
   useInboxUnreadCount: () => 2,
@@ -95,27 +113,31 @@ const markUnreadMutate = vi.fn();
 const archiveMutate = vi.fn();
 const unarchiveMutate = vi.fn();
 const retrySourceContextMutateAsync = vi.fn();
-const showIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 const showAutopilotQuotaRecoveryPrompt = vi.hoisted(() => vi.fn());
 
-vi.mock("../../modals/use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: (reason?: string) =>
-    reason === "autopilot_quota"
-      ? showAutopilotQuotaRecoveryPrompt
-      : showIssueLimitUpgradePrompt,
+vi.mock("../../modals/use-limit-recovery-prompt", () => ({
+  useLimitRecoveryPrompt: () => showAutopilotQuotaRecoveryPrompt,
 }));
 
 vi.mock("@multica/core/inbox/mutations", () => {
-  const mutation = () => ({ mutate: vi.fn() });
+  const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(() => Promise.resolve()) });
+  // The shared archive handlers await the request; settle it through the spy's callbacks.
+  const settled = (spy: typeof archiveMutate) => (id: string) =>
+    new Promise<void>((resolve, reject) => spy(id, { onSuccess: resolve, onError: reject }));
   return {
     useMarkInboxRead: () => ({ mutate: markReadMutate }),
     useMarkInboxUnread: () => ({ mutate: markUnreadMutate }),
-    useArchiveInbox: () => ({ mutate: archiveMutate }),
-    useUnarchiveInbox: () => ({ mutate: unarchiveMutate }),
+    useArchiveInbox: () => ({ mutate: archiveMutate, mutateAsync: settled(archiveMutate) }),
+    useUnarchiveInbox: () => ({ mutate: unarchiveMutate, mutateAsync: settled(unarchiveMutate) }),
+    useSnoozeInbox: mutation,
+    useUnsnoozeInbox: mutation,
+    cachedInboxSnoozedUntil: () => null,
     useMarkAllInboxRead: mutation,
     useArchiveAllInbox: mutation,
     useArchiveAllReadInbox: mutation,
     useArchiveCompletedInbox: mutation,
+    useUnsubscribeArchiveInbox: mutation,
+    undoUnsubscribeArchiveInbox: vi.fn(),
     useRetrySourceContextQuickCreate: () => ({
       mutateAsync: retrySourceContextMutateAsync,
       isPending: false,
@@ -138,10 +160,11 @@ vi.mock("../../issues/components/issue-detail", () => ({
 }));
 
 const replace = vi.fn();
+const push = vi.fn();
 let searchParams = new URLSearchParams();
 
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ searchParams, replace }),
+  useNavigation: () => ({ searchParams, replace, push }),
   // Real hook: reports the detail-pane swap to the shell's progress bar.
   // Nothing here renders that bar, and the page reads nothing back from it.
   useReportNavigating: () => {},
@@ -233,7 +256,7 @@ vi.mock("./autopilot-quota-notice", () => ({
     </button>
   ),
 }));
-vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }) }));
+vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }), useLocale: () => "en" }));
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -259,7 +282,12 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 }
 
 function reset() {
-  useInboxSelectionStore.setState({ lastResolvedKeyByWorkspace: {} });
+  useInboxSelectionStore.setState({
+    lastResolvedKeyByWorkspace: {},
+    heldRows: {},
+    leftRowKeyByWorkspace: {},
+    lastClearedByWorkspace: {},
+  });
   listData.active = [];
   listData.archived = [];
   listData.lookup = undefined;
@@ -267,6 +295,9 @@ function reset() {
   lookupState.isLoading = false;
   lookupState.isError = false;
   lookupState.refetch.mockClear();
+  activeFailure.failed = false;
+  activeFailure.retrying = false;
+  activeFailure.refetch.mockClear();
   queryCalls.length = 0;
   searchParams = new URLSearchParams();
   replace.mockClear();
@@ -276,7 +307,6 @@ function reset() {
   unarchiveMutate.mockClear();
   retrySourceContextMutateAsync.mockReset();
   retrySourceContextMutateAsync.mockResolvedValue({});
-  showIssueLimitUpgradePrompt.mockClear();
   showAutopilotQuotaRecoveryPrompt.mockClear();
   modalState.modal = null;
   modalState.open.mockClear();
@@ -446,6 +476,40 @@ describe("InboxPage", () => {
     expect(container.querySelector("[data-slot='list-column']")).toBeNull();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Inbox");
     expect(screen.queryByTestId("issue-detail")).toBeNull();
+  });
+
+  // A list that never loaded is not an empty Inbox (MUL-9635).
+  it.each([
+    ["a phone", PHONE],
+    ["desktop", DESKTOP],
+  ])("on %s, offers another try when the Inbox could not load, not an empty Inbox", (_device, width) => {
+    reset();
+    layout.width = width;
+    activeFailure.failed = true;
+
+    render(<InboxPage />);
+
+    const alert = screen.getByRole("alert");
+    expect(screen.queryByTestId("list")).toBeNull();
+    fireEvent.click(within(alert).getByRole("button"));
+    expect(activeFailure.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a phone", PHONE],
+    ["desktop", DESKTOP],
+  ])("on %s, keeps the load error while it is tried again", (_device, width) => {
+    reset();
+    layout.width = width;
+    activeFailure.failed = true;
+    activeFailure.retrying = true;
+    searchParams = new URLSearchParams("issue=issue-1");
+
+    render(<InboxPage />);
+
+    expect(within(screen.getByRole("alert")).getByRole("button")).toBeDisabled();
+    // Still unknown, so the open notification is not sent to its issue page.
+    expect(replace).not.toHaveBeenCalled();
   });
 
   // The live Inbox lives in the Work panel; the archive has nowhere else to list.
@@ -738,6 +802,25 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("list").dataset.view).toBe("archived");
   });
 
+  it("switches to the archive from the page header title menu on desktop", async () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [];
+    listData.archived = [item({ id: "archived-1", archived: true })];
+    const { container } = render(<InboxPage />);
+
+    expect(screen.queryByTestId("list")).toBeNull();
+    const titleMenu = container.querySelector("h1 [aria-haspopup='menu']") as HTMLElement;
+    expect(titleMenu).not.toBeNull();
+    fireEvent.click(titleMenu);
+    const [inboxOption, archivedOption] = await screen.findAllByRole("menuitemradio");
+    expect(inboxOption).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(archivedOption!);
+
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived");
+    expect(screen.getByTestId("list").dataset.view).toBe("archived");
+  });
+
   it("hides the batch-actions menu in the archived view", () => {
     // Every batch action archives from the MAIN inbox; offering them over the
     // archived list would read as "archive all of these" and do the opposite.
@@ -908,40 +991,6 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("autopilot-quota-recovery"));
 
     expect(showAutopilotQuotaRecoveryPrompt).toHaveBeenCalledTimes(1);
-    expect(showIssueLimitUpgradePrompt).not.toHaveBeenCalled();
-  });
-
-  it("shows issue-limit recovery when a source-context retry is rejected", async () => {
-    reset();
-    retrySourceContextMutateAsync.mockRejectedValue(
-      new ApiError(
-        "workspace has reached its issue limit",
-        402,
-        "Payment Required",
-        { code: "issue_limit_reached" },
-      ),
-    );
-    listData.active = [
-      item({
-        id: "source-context-limit",
-        issue_id: null,
-        type: "quick_create_failed",
-        details: {
-          task_id: "task-1",
-          source_context_id: "context-1",
-          original_prompt: "make a child",
-        },
-      }),
-    ];
-
-    render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    fireEvent.click(screen.getByTestId("retry-source-context"));
-
-    await act(async () => undefined);
-    expect(showIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
-    expect(showAutopilotQuotaRecoveryPrompt).not.toHaveBeenCalled();
-    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("marks the opened notification read", () => {
@@ -1001,6 +1050,25 @@ describe("InboxPage", () => {
     rerender(<InboxPage />);
 
     expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
+    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+  });
+
+  it("keeps a phone's open notification in place once it is archived some other way", () => {
+    reset();
+    searchParams = new URLSearchParams("issue=issue-a");
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a" }),
+      item({ id: "inbox-b", issue_id: "issue-b" }),
+    ];
+    const notice = () => (issueDetailProps.at(-1)?.notice as ((issueActions: ReactNode) => ReactNode) | undefined)?.(null);
+    const { rerender } = render(<InboxPage />);
+    expect(notice()).toBeFalsy();
+
+    listData.active = [item({ id: "inbox-b", issue_id: "issue-b" })];
+    rerender(<InboxPage />);
+
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
+    expect(notice()).toBeTruthy();
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
@@ -1226,35 +1294,39 @@ describe("InboxPage", () => {
       onError?: (err: unknown) => void;
     };
 
-    function settle(
+    async function settle(
       spy: typeof archiveMutate,
       outcome: "success" | "error",
       err: unknown = new Error("boom"),
     ) {
       const options = spy.mock.calls.at(-1)?.[1] as MutateOptions | undefined;
-      act(() => {
+      await act(async () => {
         if (outcome === "success") options?.onSuccess?.();
         else options?.onError?.(err);
       });
     }
 
-    it("confirms an archive from the row action", () => {
+    it("confirms an archive from the row action, with an undo", async () => {
       renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
-      settle(archiveMutate, "success");
+      await settle(archiveMutate, "success");
+      expect(toast.success).toHaveBeenCalledWith(
+        "Inbox",
+        expect.objectContaining({ duration: 10_000, action: { label: "Inbox", onClick: expect.any(Function) } }),
+      );
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });
 
-    it("confirms an archive driven by the shortcut", () => {
+    it("confirms an archive driven by the shortcut", async () => {
       renderWithOpenItem();
       fireEvent.keyDown(document, { key: "e" });
-      settle(archiveMutate, "success");
+      await settle(archiveMutate, "success");
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });
 
-    it("confirms a restore", () => {
+    it("confirms a restore", async () => {
       reset();
       searchParams = new URLSearchParams("view=archived");
       listData.archived = [
@@ -1263,15 +1335,15 @@ describe("InboxPage", () => {
 
       render(<InboxPage />);
       act(() => rowActions?.onAction("archived-1"));
-      settle(unarchiveMutate, "success");
+      await settle(unarchiveMutate, "success");
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });
 
-    it("reports a failed archive as a failure only", () => {
+    it("reports a failed archive as a failure only", async () => {
       renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
-      settle(archiveMutate, "error");
+      await settle(archiveMutate, "error");
 
       expect(toast.error).toHaveBeenCalledTimes(1);
       expect(toast.success).not.toHaveBeenCalled();

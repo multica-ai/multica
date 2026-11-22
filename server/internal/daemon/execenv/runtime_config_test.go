@@ -887,6 +887,26 @@ func TestConnectedAppsBlockLivesOutsideBrief(t *testing.T) {
 	}
 }
 
+func TestConnectedAppsBlockRemoteAppUsesItsOwnServer(t *testing.T) {
+	t.Parallel()
+	block := BuildConnectedAppsBlock([]runtimeapps.ConnectedApp{{
+		Provider: "multica_remote", ServerName: "mobbin", ToolkitSlug: "mobbin", ToolkitName: "Mobbin",
+		AccountScope: "personal", Level: "read", AccountStatus: "not_connected",
+	}})
+	for _, want := range []string{
+		"- Mobbin (`mobbin`) via MCP server `mobbin` — account of the person who triggered this run, read only, not connected",
+		"Call the tools of an app on its own MCP server directly.",
+		"call `apps_request_connection` on `multica_apps`",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("missing %q in\n%s", want, block)
+		}
+	}
+	if strings.Contains(block, "apps_run_tool") {
+		t.Errorf("a remote app alone must not point at apps_run_tool:\n%s", block)
+	}
+}
+
 func TestConnectedAppsBlockRunsDirectly(t *testing.T) {
 	t.Parallel()
 	for _, level := range []string{"write", "confirm_writes"} {
