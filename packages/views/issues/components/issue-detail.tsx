@@ -4207,6 +4207,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
                     placeholder={t(($) => $.detail.desc_placeholder)}
                     onUploadFile={handleDescriptionUpload}
                     currentIssueId={id}
+                    commitRepository={commitRepository ?? null}
                     selectionAction={descriptionSelectionAction}
                     attachments={descEditorAttachments}
                   />
@@ -4252,6 +4253,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
                 // the image markdown and its attachment_ids bind (MUL-3254).
                 flushPendingOnUnmount
                 currentIssueId={id}
+                commitRepository={commitRepository ?? null}
                 selectionAction={descriptionSelectionAction}
                 attachments={descEditorAttachments}
               />
