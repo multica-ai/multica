@@ -150,7 +150,9 @@
     "unassigned": "할당 해제됨",
     "ran_quick_action": "{{name}} 실행됨",
     "next": "다음",
-    "next_tooltip": "다음 열기: {{title}}"
+    "next_tooltip": "다음 열기: {{title}}",
+    "opening_next": "다음 항목 열기 예정",
+    "stay_here": "여기에 머무르기"
   },
   "errors": {
     "archived_lookup_failed": "링크된 알림을 불러오지 못했습니다",

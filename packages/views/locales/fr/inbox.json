@@ -153,7 +153,9 @@
     "unassigned": "Désassigné",
     "ran_quick_action": "Action lancée : {{name}}",
     "next": "Suivante",
-    "next_tooltip": "Ouvrir la suivante : {{title}}"
+    "next_tooltip": "Ouvrir la suivante : {{title}}",
+    "opening_next": "Passage à la suivante",
+    "stay_here": "Rester ici"
   },
   "errors": {
     "archived_lookup_failed": "Échec du chargement de la notification liée",

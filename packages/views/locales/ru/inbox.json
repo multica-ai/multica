@@ -159,7 +159,9 @@
     "unassigned": "Исполнитель снят",
     "ran_quick_action": "Запущено: {{name}}",
     "next": "Следующее",
-    "next_tooltip": "Открыть следующее: {{title}}"
+    "next_tooltip": "Открыть следующее: {{title}}",
+    "opening_next": "Открытие следующего",
+    "stay_here": "Остаться здесь"
   },
   "errors": {
     "archived_lookup_failed": "Не удалось загрузить связанное уведомление",

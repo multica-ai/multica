@@ -49,19 +49,22 @@ export function useLeaveInboxRow() {
   const leaveRow = useInboxSelectionStore((s) => s.leaveRow);
   const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
   const recordLastCleared = useInboxSelectionStore((s) => s.recordLastCleared);
+  const recordTransition = useInboxSelectionStore((s) => s.recordTransition);
   return useCallback(
     (key: string, next: InboxItem | null, cleared?: LastInboxCleared) => {
       leaveRow(wsId, key);
       if (!next) {
         rememberSidebarIssue(wsId, null);
+        recordTransition(wsId, "", "next");
         if (cleared) recordLastCleared(wsId, cleared);
         push(p.inbox());
         return;
       }
       rememberSidebarIssue(wsId, next.issue_id ?? null);
+      recordTransition(wsId, inboxRowKey(next), "next");
       push(inboxRowHref(p, next));
     },
-    [wsId, p, push, leaveRow, rememberSidebarIssue, recordLastCleared],
+    [wsId, p, push, leaveRow, rememberSidebarIssue, recordLastCleared, recordTransition],
   );
 }
 

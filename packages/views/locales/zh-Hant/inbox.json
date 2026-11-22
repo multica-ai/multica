@@ -150,7 +150,9 @@
     "unassigned": "已取消分配",
     "ran_quick_action": "已執行 {{name}}",
     "next": "下一條",
-    "next_tooltip": "開啟下一條：{{title}}"
+    "next_tooltip": "開啟下一條：{{title}}",
+    "opening_next": "即將開啟下一條",
+    "stay_here": "留在這裡"
   },
   "errors": {
     "archived_lookup_failed": "無法載入連結指向的通知",
