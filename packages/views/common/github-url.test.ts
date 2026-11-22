@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { githubShortLabel, midTruncate } from "./github-url";
+import { githubRepoWebUrl, githubShortLabel, midTruncate } from "./github-url";
 
 describe("githubShortLabel", () => {
   it("extracts owner/repo from an https URL", () => {
@@ -84,5 +84,18 @@ describe("midTruncate", () => {
     expect(out).toContain("…");
     expect(out.startsWith("aaaaaaaaaa")).toBe(true);
     expect(out.endsWith("aaaaaaaaaa")).toBe(true);
+  });
+});
+
+
+describe("githubRepoWebUrl", () => {
+  it("keeps the full repository slug and returns an HTTPS page for SSH remotes", () => {
+    expect(githubRepoWebUrl("git@github.com:example/a-long-repository-name-without-truncation.git"))
+      .toBe("https://github.com/example/a-long-repository-name-without-truncation");
+  });
+
+  it("rejects other hosts and paths with encoded separators", () => {
+    expect(githubRepoWebUrl("https://git.example.com/example/project")).toBeNull();
+    expect(githubRepoWebUrl("https://github.com/example/project%2Fbranch")).toBeNull();
   });
 });

@@ -9,6 +9,7 @@ import {
 export type CurrentIssueRenderContextValue = Readonly<{
   id: string;
   identifier: string;
+  commitRepository?: string;
 }>;
 
 /**

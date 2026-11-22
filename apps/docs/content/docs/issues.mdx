@@ -138,6 +138,8 @@ Uploading a file again with the same name and type adds a new version of the sam
 
 An issue belongs to at most one [project](/projects); the project provides shared instructions and resources for runs inside it. Moving an issue to another project does not create a copy.
 
+When an issue's project has exactly one GitHub repository, references such as `commit 716c854` or `head a61a00da` in its description and comments open the commit on GitHub. A range such as `87757b4..f98adf6` opens the comparison. A short hash without commit context stays as text.
+
 Larger work can be split into sub-issues: the parent issue keeps the overall goal while sub-issues progress independently. Parent and child statuses do not affect each other.
 
 Open a direct child from **Sub-issues** in the issue's right sidebar. With 10 or fewer children, their order matches the inline list. With more, it initially shows 10, putting unfinished children first and keeping stage order within each group. **Show N more** expands all children in the sidebar; **Collapse** returns to the first 10. Both keep your reading position and leave the narrow-screen sidebar open. Progress counts all children. **Customize sidebar** lets you hide or reorder this section.

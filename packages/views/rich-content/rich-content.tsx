@@ -72,6 +72,8 @@ import { useOpenAttachmentLink } from "../editor/use-open-attachment-link";
 import { Attachment as AttachmentRenderer } from "../editor/attachment";
 import { computeClosedFences, type ClosedFence } from "./streaming-fence";
 import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
+import { remarkCommitReferences } from "./commit-references";
+import { useCurrentIssueRenderContext } from "../issues/current-issue-render-context";
 import {
   CodeBlockShell,
   RichFenceBlock,
@@ -535,7 +537,7 @@ interface RenderedMarkdown {
 const RENDERED_MARKDOWN_LIMIT = 150;
 const renderedMarkdown = new Map<string, RenderedMarkdown>();
 
-function renderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
+function renderMarkdown(content: string, cdnDomain: string, repository?: string): RenderedMarkdown {
   const processed = highlightToHtml(
     preprocessMarkdown(content, { cdnDomain, autolinkIssueIdentifiers: true }),
   );
@@ -548,7 +550,7 @@ function renderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
     // react-markdown's synchronous renderer is a plain function of its options.
     element: ReactMarkdown({
       children: processed,
-      remarkPlugins: REMARK_PLUGINS,
+      remarkPlugins: repository ? [...REMARK_PLUGINS, [remarkCommitReferences, repository]] : REMARK_PLUGINS,
       rehypePlugins: REHYPE_PLUGINS,
       urlTransform: markdownUrlTransform,
       components: COMPONENTS,
@@ -556,8 +558,8 @@ function renderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
   };
 }
 
-function cachedRenderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
-  const key = `${cdnDomain}\u0000${content}`;
+function cachedRenderMarkdown(content: string, cdnDomain: string, repository?: string): RenderedMarkdown {
+  const key = `${cdnDomain}\u0000${repository ?? ""}\u0000${content}`;
   const hit = renderedMarkdown.get(key);
   if (hit) {
     // Least recently used goes first.
@@ -565,7 +567,7 @@ function cachedRenderMarkdown(content: string, cdnDomain: string): RenderedMarkd
     renderedMarkdown.set(key, hit);
     return hit;
   }
-  const rendered = renderMarkdown(content, cdnDomain);
+  const rendered = renderMarkdown(content, cdnDomain, repository);
   renderedMarkdown.set(key, rendered);
   if (renderedMarkdown.size > RENDERED_MARKDOWN_LIMIT) {
     renderedMarkdown.delete(renderedMarkdown.keys().next().value!);
@@ -612,10 +614,11 @@ export const RichContent = memo(function RichContent({
   // late config arrival reprocesses exactly once.
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
 
+  const repository = useCurrentIssueRenderContext()?.commitRepository;
   const settled = phase === "settled";
   const { processed, closedFences, element } = useMemo(
-    () => (settled ? cachedRenderMarkdown : renderMarkdown)(content, cdnDomain),
-    [content, cdnDomain, settled],
+    () => (settled ? cachedRenderMarkdown : renderMarkdown)(content, cdnDomain, repository),
+    [content, cdnDomain, repository, settled],
   );
   const tableSource = useMemo(() => ({ source: content, rendered: processed }), [content, processed]);
 

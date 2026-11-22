@@ -165,6 +165,8 @@ import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useModalStore } from "@multica/core/modals";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
+import { projectResourcesOptions } from "@multica/core/projects";
+import { githubRepoWebUrl } from "../../common/github-url";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
@@ -3171,14 +3173,26 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
 
   // Keep the identity value stable across unrelated issue-detail updates so
   // context consumers only re-render when the owning issue changes identity.
+  const { data: projectResources } = useQuery({
+    ...projectResourcesOptions(wsId, issue?.project_id ?? ""),
+    enabled: !!issue?.project_id,
+  });
+  const commitRepository = useMemo(() => {
+    const repos = projectResources?.filter((resource) => resource.resource_type === "github_repo");
+    if (repos?.length !== 1) return undefined;
+    const ref = repos[0]?.resource_ref;
+    return ref && "url" in ref && typeof ref.url === "string"
+      ? githubRepoWebUrl(ref.url) ?? undefined
+      : undefined;
+  }, [projectResources]);
   const resolvedIssueId = issue?.id;
   const resolvedIssueIdentifier = issue?.identifier;
   const currentIssueRenderContext = useMemo(
     () =>
       resolvedIssueId && resolvedIssueIdentifier
-        ? { id: resolvedIssueId, identifier: resolvedIssueIdentifier }
+        ? { id: resolvedIssueId, identifier: resolvedIssueIdentifier, commitRepository }
         : null,
-    [resolvedIssueId, resolvedIssueIdentifier],
+    [resolvedIssueId, resolvedIssueIdentifier, commitRepository],
   );
 
   if (issueReadState.loadFailed) {
