@@ -37,10 +37,10 @@ A project can contain any number of issues; an issue belongs to at most one proj
 Project progress is computed automatically from linked issues:
 
 ```text
-progress = issues whose status is in the done or closed category ÷ all issues in the project
+progress = issues in the done category ÷ (all issues in the project − issues in the closed category)
 ```
 
-Among the built-in statuses that means `done` and `cancelled`; custom statuses in those two categories count as well. `cancelled` means that work has been closed out of the project's scope, so it counts toward progress.
+Among the built-in statuses, `done` counts as completed and `cancelled` is closed. A closed issue has left the project's scope, so it counts neither as completed nor toward the total; the project shows how many were cancelled next to its progress. Custom statuses follow their category. The percentage is rounded down, so 100% means every issue still in scope is done. A project with no issues in scope shows 0%.
 
 Project status and issue status are independent: finishing every issue does not set the project to `completed`, and changing the project's status does not bulk-change its issues.
 

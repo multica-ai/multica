@@ -88,7 +88,7 @@ describe("ProjectProgressSection", () => {
     renderSection({ ...baseProject, issue_count: 0, done_count: 0, progress: { ...detail.progress, scope: 0, completed: 0, started: 0, unstarted: 0, cancelled: 0, percent: 0 } });
 
     expect(screen.getByText("0%")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "New Issue" }));
+    await userEvent.click(screen.getByRole("button", { name: "New issue" }));
     expect(open).toHaveBeenCalledWith("create-issue", { project_id: "project-1" });
     await userEvent.click(screen.getByRole("button", { name: "Add existing issue" }));
     expect(open).toHaveBeenCalledWith("project-add-issue", { projectId: "project-1" });

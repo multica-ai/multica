@@ -129,7 +129,7 @@ function ProgressSummary({ progress }: { progress: ProjectProgress }) {
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-caption text-muted-foreground">
         {legend.map((item) => (
           <span key={item.key} className="inline-flex items-center gap-1.5">
-            <span className={cn("size-2 rounded-[2px]", item.swatch)} aria-hidden="true" />
+            <span className={cn("size-2 rounded-xs", item.swatch)} aria-hidden="true" />
             {item.label}
             <span className="tabular-nums text-foreground">{item.count}</span>
           </span>
@@ -290,7 +290,7 @@ function AssigneeBreakdown({ rows }: { rows: ProjectProgressAssignee[] }) {
               <span className="min-w-0 flex-1 truncate">
                 {name}
                 {row.assignee_type === "agent" && (
-                  <span className="ml-1.5 rounded border px-1 text-micro text-muted-foreground">
+                  <span className="ml-1.5 rounded-sm border px-1 text-micro text-muted-foreground">
                     {t(($) => $.detail.progress_panel.agent_tag)}
                   </span>
                 )}
