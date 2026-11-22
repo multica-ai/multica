@@ -146,6 +146,7 @@ import type {
   CancelTaskResponse,
   Project,
   ArchiveProjectResponse,
+  ProjectProgressDetail,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -427,6 +428,8 @@ import {
   SearchIssuesResponseSchema,
   ProjectSchema,
   ArchiveProjectResponseSchema,
+  ProjectProgressDetailSchema,
+  EMPTY_PROJECT_PROGRESS_DETAIL,
   ListProjectMembersResponseSchema,
   ListPrivateProjectsResponseSchema,
   ProjectSubscriptionSchema,
@@ -4958,6 +4961,13 @@ export class ApiClient {
   async getProject(id: string): Promise<Project> {
     const raw = await this.fetch<unknown>(`/api/projects/${id}`);
     return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "GET /api/projects/:id" });
+  }
+
+  async getProjectProgress(id: string): Promise<ProjectProgressDetail> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/progress`);
+    return parseWithFallback(raw, ProjectProgressDetailSchema, EMPTY_PROJECT_PROGRESS_DETAIL, {
+      endpoint: "GET /api/projects/:id/progress",
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {

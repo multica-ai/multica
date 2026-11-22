@@ -37,10 +37,10 @@ Un projet peut contenir un nombre quelconque de tâches ; une tâche appartient 
 L'avancement du projet est calculé automatiquement à partir des tâches liées :
 
 ```text
-avancement = tâches dont le statut appartient à la catégorie done ou closed ÷ toutes les tâches du projet
+avancement = tâches de la catégorie done ÷ (toutes les tâches du projet − tâches de la catégorie closed)
 ```
 
-Parmi les statuts intégrés, ce sont `done` et `cancelled` ; les statuts personnalisés rangés dans ces deux catégories comptent de la même façon. `cancelled` signifie que ce travail a été retiré du périmètre du projet, il compte donc dans l'avancement.
+Parmi les statuts intégrés, `done` compte comme terminé et `cancelled` appartient à closed. Une tâche closed est sortie du périmètre du projet : elle ne compte ni comme terminée ni dans le total, et le projet affiche à part le nombre de tâches annulées à côté de l'avancement. Les statuts personnalisés suivent leur catégorie. Le pourcentage est arrondi à l'inférieur, donc 100 % signifie que toutes les tâches du périmètre sont terminées. Un projet sans tâche dans son périmètre affiche 0 %.
 
 Le statut du projet et celui des tâches sont indépendants : terminer toutes les tâches ne fait pas passer le projet à `completed`, et modifier le statut du projet ne touche pas à ses tâches.
 

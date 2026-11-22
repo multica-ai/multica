@@ -102,7 +102,29 @@
     "toast_project_deleted": "Projet supprimé",
     "toast_move_issue_failed": "Échec du déplacement de la tâche",
     "archive_action": "Archiver le projet",
-    "restore_action": "Restaurer le projet"
+    "restore_action": "Restaurer le projet",
+    "progress_panel": {
+      "summary_one": "{{completed}} sur {{count}} tâche terminée",
+      "summary_other": "{{completed}} sur {{count}} tâches terminées",
+      "legend_completed": "Terminées",
+      "legend_started": "En cours",
+      "legend_unstarted": "Non commencées",
+      "cancelled_note_one": "{{count}} tâche annulée n'est pas comptée",
+      "cancelled_note_other": "{{count}} tâches annulées ne sont pas comptées",
+      "empty_hint": "La progression et la tendance démarrent dès que des tâches sont ajoutées.",
+      "chart_label": "Progression hebdomadaire",
+      "chart_today": "Aujourd'hui",
+      "forecast_no_due": "Au rythme récent, terminé le {{date}}",
+      "forecast_ahead_one": "Au rythme récent, terminé le {{date}}, {{count}} jour avant l'échéance",
+      "forecast_ahead_other": "Au rythme récent, terminé le {{date}}, {{count}} jours avant l'échéance",
+      "forecast_behind_one": "Au rythme récent, terminé le {{date}}, {{count}} jour après l'échéance",
+      "forecast_behind_other": "Au rythme récent, terminé le {{date}}, {{count}} jours après l'échéance",
+      "forecast_on_due": "Au rythme récent, terminé le {{date}}, pile à l'échéance",
+      "forecast_none": "Trop peu de tâches terminées récemment pour prévoir une date de fin.",
+      "by_assignee": "Par responsable",
+      "agent_tag": "Agent",
+      "unassigned": "Non assigné"
+    }
   },
   "resources": {
     "section_header": "Ressources",

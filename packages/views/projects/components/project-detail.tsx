@@ -25,7 +25,7 @@ import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
-import { getProjectIssueMetrics } from "./project-issue-metrics";
+import { ProjectProgressSection } from "./project-progress-section";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
@@ -328,7 +328,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     );
   }
 
-  const issueMetrics = getProjectIssueMetrics(project);
   const archived = !!project.archived_at;
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
 
@@ -468,32 +467,19 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </div>
 
       {/* Progress */}
-      {issueMetrics.totalCount > 0 && (() => {
-        const pct = Math.round((issueMetrics.completedCount / issueMetrics.totalCount) * 100);
-        return (
-          <div>
-            <button
-              type="button"
-              className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setProgressOpen(!progressOpen)}
-            >
-              {t(($) => $.detail.section_progress)}
-              <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${progressOpen ? "rotate-90" : ""}`} />
-            </button>
-            {progressOpen && <div className="pl-2 flex items-center gap-3">
-              <div className="relative h-2 flex-1 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-all"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <span className="text-caption text-muted-foreground tabular-nums shrink-0">
-                {issueMetrics.completedCount}/{issueMetrics.totalCount}
-              </span>
-            </div>}
-          </div>
-        );
-      })()}
+      <div>
+        <button
+          type="button"
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setProgressOpen(!progressOpen)}
+        >
+          {t(($) => $.detail.section_progress)}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${progressOpen ? "rotate-90" : ""}`} />
+        </button>
+        {progressOpen && <div className="pl-2">
+          <ProjectProgressSection project={project} />
+        </div>}
+      </div>
 
       {/* Description */}
       <div>

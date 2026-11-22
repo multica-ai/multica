@@ -77,11 +77,31 @@ SELECT count(*) FROM issue
 WHERE project_id = $1;
 
 -- name: GetProjectIssueStats :many
+-- done_count counts every terminal issue (done and closed categories) and
+-- keeps that meaning for older clients; completed_count is the done category
+-- alone, so cancelled = done_count - completed_count.
 SELECT project_id,
        count(*)::bigint AS total_count,
        count(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done_count,
+       count(*) FILTER (WHERE status = ANY(sqlc.arg('completed_status_keys')::text[]))::bigint AS completed_count,
+       count(*) FILTER (WHERE status = ANY(sqlc.arg('started_status_keys')::text[]))::bigint AS started_count,
        max(GREATEST(updated_at, last_activity_at))::timestamptz AS last_issue_activity_at
 FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;
+
+-- name: ListProjectProgressIssues :many
+SELECT id, status, assignee_type, assignee_id, created_at
+FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND project_id = sqlc.arg('project_id')::uuid;
+
+-- name: ListIssueStatusChangesSince :many
+SELECT issue_id, details, created_at
+FROM activity_log
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND issue_id = ANY(sqlc.arg('issue_ids')::uuid[])
+  AND action = 'status_changed'
+  AND created_at >= sqlc.arg('since')::timestamptz
+ORDER BY created_at, id;

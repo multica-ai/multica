@@ -980,6 +980,23 @@ multica project get <id>
 multica project get <id> --output json
 ```
 
+The response includes `progress`: `scope` is every issue except cancelled ones,
+`completed` counts done issues, `started` issues are tracked but do not add to
+`percent`. The table output shows it as a PROGRESS column (`5/11 (45%)`).
+
+### Project Progress
+
+```bash
+multica project progress <id>                  # summary and forecast
+multica project progress <id> --history        # weekly scope / started / completed
+multica project progress <id> --by assignee    # per-assignee breakdown
+multica project progress <id> --output json    # everything above
+```
+
+The forecast is a completion date from the trailing 4-week completion rate;
+it is omitted when there is less than a week of history or nothing was
+completed recently.
+
 ### Create Project
 
 ```bash
