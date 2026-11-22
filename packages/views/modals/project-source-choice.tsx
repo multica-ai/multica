@@ -10,6 +10,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import {useModalStore} from "@multica/core/modals";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 export function ProjectSourceChoiceModal() {
@@ -68,7 +69,7 @@ export function ProjectSourceChoiceModal() {
   <DialogDescription>{current.project.title} — {t($ => $.source.description)}</DialogDescription>
   {error && <p role="alert" className="text-destructive">{error}</p>}
   <div className="flex flex-col gap-2">
-  <Button disabled={busy} onClick={() => { current.finish("cancel"); nav.push(paths.projectDetail(current.project.id)); }}>{t($ => $.source.configure)}</Button>
+  <Button disabled={busy} onClick={() => { current.finish("cancel"); useModalStore.getState().close(); nav.push(paths.projectDetail(current.project.id)); }}>{t($ => $.source.configure)}</Button>
   <Button variant="outline" disabled={busy} onClick={() => current.finish("once")}>{t($ => $.source.once)}</Button>
   <Button variant="outline" disabled={busy} onClick={() => void save()}>{t($ => $.source.no_code)}</Button>
   </div>
