@@ -62,6 +62,12 @@ func TestInsertTaskIdentityPinAfterWrapper(t *testing.T) {
 			pin:    "/tmp/reassert-task-env",
 			want:   []string{"run", "--", "/tmp/reassert-task-env"},
 		},
+		{
+			name:   "go test helper end of flags",
+			prefix: []string{"-test.run=^TestSkillInvocationHelperProcess$", "--", "skill-invocation-helper"},
+			pin:    "/tmp/reassert-task-env",
+			want:   []string{"-test.run=^TestSkillInvocationHelperProcess$", "--", "skill-invocation-helper"},
+		},
 	}
 
 	for _, tt := range tests {

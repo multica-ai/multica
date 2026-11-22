@@ -37,10 +37,17 @@ func sortedEnvKeys(env map[string]string) []string {
 }
 
 // insertTaskIdentityPinAfterWrapper splices pinPath immediately after the
-// first `--` in a custom-runtime launch prefix (`doppler run -- opencode`).
-// Secrets wrappers treat everything after `--` as the command they exec, so
-// the pin runs in that grandchild and re-exports task identity last.
-// Prefixes without `--` are returned unchanged (built-in runtimes).
+// first secrets-wrapper `--` in a custom-runtime launch prefix
+// (`doppler run -- opencode`). Secrets wrappers treat everything after `--`
+// as the command they exec, so the pin runs in that grandchild and re-exports
+// task identity last.
+//
+// The separator is only recognized when a positional token precedes it
+// (`run --`, `exec profile --`). A flag-only prefix that uses `--` merely to
+// end options — including Go test helpers (`-test.run=^TestFoo$ -- helper`) —
+// is returned unchanged, otherwise the pin would be taken as the helper's
+// first argument and the real command would never start.
+// Prefixes without `--` are also unchanged (built-in runtimes).
 func insertTaskIdentityPinAfterWrapper(prefix []string, pinPath string) []string {
 	if pinPath == "" {
 		return prefix
@@ -49,6 +56,9 @@ func insertTaskIdentityPinAfterWrapper(prefix []string, pinPath string) []string
 		if arg != "--" {
 			continue
 		}
+		if !prefixHasPositionalBefore(prefix, i) {
+			return prefix
+		}
 		out := make([]string, 0, len(prefix)+1)
 		out = append(out, prefix[:i+1]...)
 		out = append(out, pinPath)
@@ -56,6 +66,15 @@ func insertTaskIdentityPinAfterWrapper(prefix []string, pinPath string) []string
 		return out
 	}
 	return prefix
+}
+
+func prefixHasPositionalBefore(prefix []string, dashIndex int) bool {
+	for _, arg := range prefix[:dashIndex] {
+		if arg != "" && !strings.HasPrefix(arg, "-") {
+			return true
+		}
+	}
+	return false
 }
 
 func writeTaskIdentityPin(dir string, env map[string]string) (string, error) {
