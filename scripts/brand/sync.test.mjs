@@ -30,6 +30,13 @@ for (const { name, from, to, drift, stay } of [
     stay: ["apps/web/public/favicon.svg"],
   },
   {
+    name: "the graphic star stroke",
+    from: "export const STAR_GRAPHIC_STROKE = 9;",
+    to: "export const STAR_GRAPHIC_STROKE = 10;",
+    drift: ["apps/mobile/components/brand/multica-bleed-mark.tsx"],
+    stay: ["apps/mobile/components/brand/multica-logo.tsx", "apps/web/public/favicon.svg"],
+  },
+  {
     name: "the tile radius",
     from: "export const ICON_TILE_RADIUS = 22.5;",
     to: "export const ICON_TILE_RADIUS = 30;",
