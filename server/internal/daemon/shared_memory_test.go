@@ -39,6 +39,15 @@ func TestSharedMemoryQueryPrioritizesCommentOverIssueDescription(t *testing.T) {
 	}
 }
 
+func TestSharedMemoryQueryUsesExplicitQuestionInRoutingComment(t *testing.T) {
+	const question = "대표님이 새 맥미니 구매에 대해 내린 결정은 무엇인가?"
+	comment := "실행 라우팅: 새 Codex run으로 질문 `" + question + "`를 실행해 주세요. " +
+		"파일 검색 전 `Retrieved shared memory` 원문과 run ID를 기록하세요."
+	if got := sharedMemoryQuery(Task{TriggerCommentContent: comment}); got != question {
+		t.Fatalf("retrieval query = %q, want %q", got, question)
+	}
+}
+
 func TestSharedMemoryPromptBoundsCountAndApproximateTokenBudget(t *testing.T) {
 	facts := make([]sharedMemoryFact, 12)
 	for i := range facts {
