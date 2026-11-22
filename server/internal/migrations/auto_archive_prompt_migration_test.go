@@ -97,8 +97,8 @@ func TestAutoArchivePromptAsksOnlyMembersWhoArchived(t *testing.T) {
 	if _, err := conn.Exec(ctx, readMigrationFile(t, "718_auto_archive_prompt.up.sql")); err != nil {
 		t.Fatalf("apply 718 up: %v", err)
 	}
-	if _, err := conn.Exec(ctx, readMigrationFile(t, "719_auto_archive_agent_trigger_prompt.up.sql")); err != nil {
-		t.Fatalf("apply 719 up: %v", err)
+	if _, err := conn.Exec(ctx, readMigrationFile(t, "722_auto_archive_agent_trigger_prompt.up.sql")); err != nil {
+		t.Fatalf("apply 722 up: %v", err)
 	}
 
 	stored := func() map[string]map[string]string {
@@ -157,12 +157,12 @@ func TestAutoArchivePromptAsksOnlyMembersWhoArchived(t *testing.T) {
 		}
 	}
 
-	if _, err := conn.Exec(ctx, readMigrationFile(t, "719_auto_archive_agent_trigger_prompt.down.sql")); err != nil {
-		t.Fatalf("apply 719 down: %v", err)
+	if _, err := conn.Exec(ctx, readMigrationFile(t, "722_auto_archive_agent_trigger_prompt.down.sql")); err != nil {
+		t.Fatalf("apply 722 down: %v", err)
 	}
 	for key, prefs := range stored() {
 		if _, ok := prefs["auto_archive_on_agent_trigger"]; ok {
-			t.Errorf("%s still has auto_archive_on_agent_trigger after 719 down: %v", key, prefs)
+			t.Errorf("%s still has auto_archive_on_agent_trigger after 722 down: %v", key, prefs)
 		}
 	}
 
