@@ -441,7 +441,7 @@
       },
       "undoInboxAction": {
         "label": "Undo inbox action",
-        "description": "Undo the last archive, snooze or unsubscribe while its toast shows, or put the open notification back once it is archived."
+        "description": "Undo the last archive, snooze or unsubscribe while its toast shows; after that, put back the open notification once it is archived, or what Inbox cleared names."
       },
       "send": {
         "label": "Send",
