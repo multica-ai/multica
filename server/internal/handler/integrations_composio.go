@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/featureflags"
@@ -187,13 +188,19 @@ func (h *Handler) GetComposioConnectionImpact(w http.ResponseWriter, r *http.Req
 		return
 	}
 	ctx := r.Context()
-	conn, err := h.Queries.GetUserComposioConnection(ctx, db.GetUserComposioConnectionParams{ID: connUUID, UserID: userUUID})
-	if err != nil {
+	var slug string
+	var workspaceID pgtype.UUID
+	if conn, err := h.Queries.GetUserComposioConnection(ctx, db.GetUserComposioConnectionParams{ID: connUUID, UserID: userUUID}); err == nil {
+		slug, workspaceID = connectedapps.NormalizeSlug(conn.ToolkitSlug), conn.WorkspaceID
+	} else if remote, rerr := h.remotePersonalConnection(ctx, connUUID, userUUID); rerr == nil {
+		// Personal remote app accounts are disconnected through this API too.
+		slug, workspaceID = remote.AppSlug, remote.WorkspaceID
+	} else {
 		writeError(w, http.StatusNotFound, "composio connection not found")
 		return
 	}
 	rows, err := h.Queries.ListPersonalAppAgentsForUser(ctx, db.ListPersonalAppAgentsForUserParams{
-		UserID: userUUID, ToolkitSlug: connectedapps.NormalizeSlug(conn.ToolkitSlug),
+		UserID: userUUID, ToolkitSlug: slug,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
@@ -202,7 +209,7 @@ func (h *Handler) GetComposioConnectionImpact(w http.ResponseWriter, r *http.Req
 	agents := make([]ComposioImpactAgent, 0, len(rows))
 	ids := make([]pgtype.UUID, 0, len(rows))
 	for _, row := range rows {
-		if conn.WorkspaceID.Valid && row.WorkspaceID != conn.WorkspaceID {
+		if workspaceID.Valid && row.WorkspaceID != workspaceID {
 			continue
 		}
 		if !h.CanActFor(ctx, row.WorkspaceID, row.ID, userUUID) {
@@ -231,6 +238,15 @@ func (h *Handler) GetComposioConnectionImpact(w http.ResponseWriter, r *http.Req
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+}
+
+func (h *Handler) remotePersonalConnection(ctx context.Context, id, userID pgtype.UUID) (db.RemoteAppConnection, error) {
+	if h.ConnectedApps == nil {
+		return db.RemoteAppConnection{}, pgx.ErrNoRows
+	}
+	return h.Queries.GetRemoteAppConnectionForOwner(ctx, db.GetRemoteAppConnectionForOwnerParams{
+		ID: id, Scope: connectedapps.ScopePersonal, OwnerID: userID,
+	})
 }
 
 // ListComposioConnections (GET /api/integrations/composio/connections) returns

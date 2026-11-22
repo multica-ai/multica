@@ -2089,6 +2089,7 @@
       "title": "{{app}} 팀 계정이 필요합니다",
       "run_waiting": "실행 대기 중",
       "asked": "요청함",
+      "summary": " · “{{summary}}”",
       "resumes": "한 번 연결하면 여기 있는 모든 요청이 해결되고, 대기 중인 실행은 멈춘 곳에서 이어집니다.",
       "decline_all": "모두 거절",
       "open_app": "앱 열기"

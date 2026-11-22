@@ -2112,6 +2112,7 @@
       "title": "Compte d'équipe {{app}} requis",
       "run_waiting": "Exécution en attente",
       "asked": "Demandé",
+      "summary": " · « {{summary}} »",
       "resumes": "Le connecter une fois répond à toutes ces demandes, et les exécutions en attente reprennent là où elles se sont arrêtées.",
       "decline_all": "Tout refuser",
       "open_app": "Ouvrir l'app"

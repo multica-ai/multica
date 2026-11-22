@@ -2112,6 +2112,7 @@
       "title": "Se necesita la cuenta del equipo de {{app}}",
       "run_waiting": "Ejecución en espera",
       "asked": "Pedida",
+      "summary": " · «{{summary}}»",
       "resumes": "Conectarla una vez responde a todas estas solicitudes, y las ejecuciones en espera continúan donde se quedaron.",
       "decline_all": "Rechazar todas",
       "open_app": "Abrir app"

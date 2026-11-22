@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useEffect, useState } from "react";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -65,19 +66,34 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderPage() {
+// Re-renders with the new search on replace, like the web and desktop routers.
+function RoutedAppsPage({ search }: { search: string }) {
+  const [current, setCurrent] = useState(search);
+  useEffect(() => setCurrent(search), [search]);
   const adapter: NavigationAdapter = {
-    push: vi.fn(), replace, back: vi.fn(), pathname: "/acme/apps",
-    searchParams: new URLSearchParams(nav.search), hash: "", getShareableUrl: (p) => p,
+    push: vi.fn(), back: vi.fn(), pathname: "/acme/apps",
+    replace: (url) => {
+      replace(url);
+      setCurrent(url.split("?")[1] ?? "");
+    },
+    searchParams: new URLSearchParams(current), hash: "", getShareableUrl: (p) => p,
   };
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithI18n(
-    <QueryClientProvider client={client}>
-      <NavigationProvider value={adapter}>
-        <AppsPage />
-      </NavigationProvider>
-    </QueryClientProvider>,
+  return (
+    <NavigationProvider value={adapter}>
+      <AppsPage />
+    </NavigationProvider>
   );
+}
+
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const tree = (search: string) => (
+    <QueryClientProvider client={client}>
+      <RoutedAppsPage search={search} />
+    </QueryClientProvider>
+  );
+  const view = renderWithI18n(tree(nav.search));
+  return { ...view, navigate: (search: string) => view.rerender(tree(search)) };
 }
 
 describe("AppsPage", () => {
@@ -272,5 +288,15 @@ describe("AppsPage › Accounts", () => {
     expect(within(team).getByText("Notion")).toBeInTheDocument();
     expect(within(team).queryByText("Slack")).not.toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Your accounts" })).getByText("You haven't connected any accounts in this workspace.")).toBeInTheDocument();
+  });
+
+  it("follows the URL when it changes outside the tabs, e.g. the sidebar link or Back", async () => {
+    const { navigate } = renderPage();
+    expect(await screen.findByRole("region", { name: "Team accounts" })).toBeInTheDocument();
+    navigate("");
+    await waitFor(() => expect(screen.getByRole("tab", { name: /In use/ })).toHaveAttribute("aria-selected", "true"));
+    expect(screen.queryByRole("region", { name: "Team accounts" })).not.toBeInTheDocument();
+    navigate("tab=accounts");
+    expect(await screen.findByRole("region", { name: "Team accounts" })).toBeInTheDocument();
   });
 });

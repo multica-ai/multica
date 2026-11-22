@@ -2089,6 +2089,7 @@
       "title": "需要 {{app}} 團隊帳號",
       "run_waiting": "執行等待中",
       "asked": "已申請",
+      "summary": " · 「{{summary}}」",
       "resumes": "連線一次即可回應這裡的所有請求，等待中的執行會從中斷處繼續。",
       "decline_all": "全部拒絕",
       "open_app": "開啟應用程式"

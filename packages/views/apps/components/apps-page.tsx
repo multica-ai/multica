@@ -78,7 +78,7 @@ function AppsDirectory() {
   const requestTeam = useRequestTeamApp();
   const withdrawTeam = useDismissTeamAppRequests();
   const navigation = useNavigation();
-  const [tab, setTabState] = useState<DirectoryTab>(() => parseTab(navigation.searchParams.get("tab")));
+  const tab = parseTab(navigation.searchParams.get("tab"));
   const [query, setQuery] = useState("");
   const [connecting, setConnecting] = useState<ConnectTarget | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
@@ -87,7 +87,6 @@ function AppsDirectory() {
 
   // The tab lives in the URL so a connect flow started here comes back to it.
   const setTab = (next: DirectoryTab) => {
-    setTabState(next);
     const params = new URLSearchParams(navigation.searchParams);
     if (next === "in_use") params.delete("tab");
     else params.set("tab", next);

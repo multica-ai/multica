@@ -56,7 +56,7 @@ func (h *Handler) teamAppHasAccount(ctx context.Context, workspaceID pgtype.UUID
 		return false, nil
 	}
 	remoteRows, err := h.Queries.ListRemoteAppConnectionsForOwner(ctx, db.ListRemoteAppConnectionsForOwnerParams{
-		Scope: connectedapps.ScopeTeam, OwnerID: workspaceID,
+		Scope: connectedapps.ScopeTeam, OwnerID: workspaceID, WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		return false, err

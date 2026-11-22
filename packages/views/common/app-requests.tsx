@@ -175,7 +175,11 @@ function TeamAccountRequests({ slug, requests }: { slug: string; requests: AppRe
                 <span className="font-medium">
                   {run ? getActorName("agent", r.agent_id) : getActorName("member", r.approver_user_id)}
                 </span>
-                {r.summary ? <span className="text-muted-foreground"> · “{r.summary}”</span> : null}
+                {r.summary ? (
+                  <span className="text-muted-foreground">
+                    {t(($) => $.connected_apps.team_requests.summary, { summary: r.summary })}
+                  </span>
+                ) : null}
               </span>
               <Badge variant="outline" className="shrink-0">
                 {run ? t(($) => $.connected_apps.team_requests.run_waiting) : t(($) => $.connected_apps.team_requests.asked)}

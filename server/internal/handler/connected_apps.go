@@ -653,6 +653,17 @@ func (h *Handler) RequestTeamApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	remoteTeam, err := h.remoteConnections(r, connectedapps.ScopeTeam, workspaceID, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list team accounts")
+		return
+	}
+	for _, row := range remoteTeam {
+		if row.Status == "active" && row.AppSlug == slug {
+			writeError(w, http.StatusConflict, "the workspace already has a team account for this app")
+			return
+		}
+	}
 	if _, err := h.ConnectedApps.AskTeamAccount(ctx, workspaceID, member.UserID, slug, agentID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save the request")
 		return

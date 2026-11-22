@@ -2089,6 +2089,7 @@
       "title": "需要 {{app}} 团队账号",
       "run_waiting": "运行等待中",
       "asked": "已申请",
+      "summary": " · \"{{summary}}\"",
       "resumes": "连接一次即可回应这里的所有请求，等待中的运行会从中断处继续。",
       "decline_all": "全部拒绝",
       "open_app": "打开应用"

@@ -2112,6 +2112,7 @@
       "title": "{{app}} team account needed",
       "run_waiting": "Run waiting",
       "asked": "Asked",
+      "summary": " · “{{summary}}”",
       "resumes": "Connecting it once answers every request here, and waiting runs pick up where they stopped.",
       "decline_all": "Decline all",
       "open_app": "Open app"
