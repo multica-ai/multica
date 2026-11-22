@@ -267,5 +267,26 @@
     "toast_completed": "« {{name}} » est terminé",
     "notice": "Ce projet est archivé. Il n'apparaît plus dans les listes ni les sélecteurs de projets et n'accepte plus de nouvelles tâches ; ses tâches restent consultables et modifiables.",
     "prop_label": "Archivé"
+  },
+  "source": {
+    "title": "Choisir une source d’exécution",
+    "description": "Ce projet n’a pas encore de source de code. Choisissez le mode de cette exécution.",
+    "configure": "Configurer la source",
+    "once": "Exécuter une fois sans code",
+    "no_code": "Marquer le projet sans code",
+    "no_code_description": "Les exécutions de ce projet n’utilisent pas de code. Ce choix est conservé jusqu’à sa modification.",
+    "reset": "Choisir à nouveau une source",
+    "save_failed": "Impossible d’enregistrer le choix. Réessayez avant de lancer l’exécution.",
+    "label": "Source d’exécution",
+    "kind_no_code": "Sans code",
+    "kind_local_directory": "Dossier local",
+    "kind_github_repo": "Dépôt géré",
+    "mode_in_place": "Écriture directe · tâches une par une",
+    "mode_worktree": "Worktree isolé · tâches parallèles · résultats sur une branche",
+    "mode_managed_checkout": "Copie gérée",
+    "pending": "Source choisie ; en attente de validation par l’environnement",
+    "ready": "Source résolue",
+    "unavailable": "Source indisponible",
+    "local_confirmation": "Dossier : {{path}} · daemon propriétaire : {{daemon}}"
   }
 }

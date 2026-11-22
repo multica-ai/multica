@@ -1,5 +1,7 @@
 "use client";
 
+import {ExecutionSourceDetails} from "./execution-source";
+
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useTraceIssueLabels } from "./use-trace-issue-labels";
@@ -858,6 +860,7 @@ export function AgentTranscriptDialog({
       ? failureReasonLabel(task.failure_reason, t)
       : cancelReasonLabel(task, t);
   const hasRunDetails =
+    !!task.execution_source ||
     !!runtimeInfo ||
     !!workdirCopyTarget?.relativePath ||
     !!task.branch_name ||
@@ -969,6 +972,7 @@ export function AgentTranscriptDialog({
                       {t(($) => $.transcript.run_info)}
                     </div>
                     <div className="space-y-1 text-caption">
+                      <ExecutionSourceDetails task={task} />
                       {runtimeInfo && (
                         <RunDetailRow
                           label={t(($) => $.transcript.details_runtime)}

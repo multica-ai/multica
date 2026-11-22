@@ -46,7 +46,17 @@ export interface ListPrivateProjectsResponse {
   total: number;
 }
 
+export type ProjectSourceIntent = "unspecified" | "resources" | "no_code";
+
+/** Interactive writes opt in; automation and older clients keep their behavior. */
+export interface ProjectSourceChoiceRequest {
+  source_decision?: "ask";
+  /** One request only; keys bind each consent to its project during a batch. */
+  source_decisions?: Record<string, "no_code_once">;
+}
+
 export interface Project {
+  source_intent?: ProjectSourceIntent;
   id: string;
   workspace_id: string;
   title: string;
@@ -95,6 +105,7 @@ export interface ArchiveProjectResponse extends Project {
 }
 
 export interface CreateProjectRequest {
+  source_intent?: ProjectSourceIntent;
   title: string;
   visibility?: ProjectVisibility;
   member_ids?: string[];
@@ -114,6 +125,7 @@ export interface CreateProjectRequest {
 }
 
 export interface UpdateProjectRequest {
+  source_intent?: ProjectSourceIntent;
   title?: string;
   visibility?: ProjectVisibility;
   member_ids?: string[];

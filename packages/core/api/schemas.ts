@@ -1810,6 +1810,7 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
 };
 
 export const ProjectSchema = z.object({
+ source_intent: z.enum(["unspecified","resources","no_code"]).optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string(),
   title: z.string(),
@@ -1838,6 +1839,11 @@ export const ProjectSchema = z.object({
   archived_by_type: z.enum(["member", "agent"]).nullable().default(null).catch(null),
   archived_by_id: z.string().nullable().default(null).catch(null),
 }).loose();
+
+export const ProjectSourceChoiceErrorSchema = z.object({
+  code: z.literal("project_source_required"),
+  project: ProjectSchema,
+});
 
 export const ArchiveProjectResponseSchema = ProjectSchema.extend({
   paused_autopilot_ids: z.array(z.string()).default([]).catch([]),
@@ -2451,6 +2457,7 @@ const TaskUsageSchema = z.object({
 }).loose();
 
 export const AgentTaskSchema = z.object({
+ execution_source: z.object({kind:z.string(),mode:z.string(),label:z.string().optional(),daemon_id:z.string().optional(),repositories:z.array(z.object({url:z.string(),ref:z.string().optional()})).optional()}).optional(),
   wakeup_id: z.string().optional().catch(undefined),
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   cancelled_by: TaskCancellationActorSchema.optional().catch(undefined),

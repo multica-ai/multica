@@ -1,10 +1,11 @@
+import type { ProjectSourceChoiceRequest } from "./project";
 import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
 import type { IssuePropertyValues, PropertyFilterValue } from "./property";
 import type { MemberRole } from "./workspace";
 import type { Project, ProjectStatus } from "./project";
 
 // Issue API
-export interface CreateIssueRequest {
+export interface CreateIssueRequest extends ProjectSourceChoiceRequest {
   title: string;
   description?: string;
   status?: IssueStatus;
@@ -50,7 +51,7 @@ export type CreateCommentSubIssueRequest =
   | CreateCommentSubIssueManualRequest
   | CreateCommentSubIssueAgentRequest;
 
-export interface UpdateIssueRequest {
+export interface UpdateIssueRequest extends ProjectSourceChoiceRequest {
   /** Legacy aggregate compare-and-swap token. New text editors use field
    * baselines so unrelated issue activity does not reject their edits. */
   expected_revision?: number;

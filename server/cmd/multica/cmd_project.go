@@ -213,6 +213,9 @@ func init() {
 	projectCreateCmd.Flags().StringArray("member", nil, "Member of a private project (name, email or user id; may be repeated). You are always added")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
+	projectUpdateCmd.Flags().String("source-intent", "", "Execution source intent: unspecified, resources, or no_code")
+	projectCreateCmd.Flags().String("source-intent", "", "Execution source intent: unspecified, resources, or no_code")
+
 	// project resource list
 	projectResourceListCmd.Flags().String("output", "table", "Output format: table or json")
 	projectResourceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -475,13 +478,14 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
 		lead := formatLead(project, actors)
-		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "ARCHIVED", "DESCRIPTION"}
+		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "ARCHIVED", "SOURCE INTENT", "DESCRIPTION"}
 		rows := [][]string{{
 			strVal(project, "id"),
 			strVal(project, "title"),
 			strVal(project, "status"),
 			lead,
 			formatProjectArchived(project),
+			strVal(project, "source_intent"),
 			strVal(project, "description"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
@@ -534,6 +538,10 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if err := applyProjectVisibilityFlags(ctx, cmd, client, body); err != nil {
 		return err
+	}
+
+	if intent, _ := cmd.Flags().GetString("source-intent"); intent != "" {
+		body["source_intent"] = intent
 	}
 
 	// Bundle resources into the create payload so the server attaches them in
@@ -634,6 +642,10 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if cmd.Flags().Changed("source-intent") {
+		intent, _ := cmd.Flags().GetString("source-intent")
+		body["source_intent"] = intent
+	}
 	if len(body) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --visibility")
 	}

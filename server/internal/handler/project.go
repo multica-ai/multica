@@ -24,17 +24,18 @@ import (
 )
 
 type ProjectResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
-	CreatorType *string `json:"creator_type"`
-	CreatorID   *string `json:"creator_id"`
+	SourceIntent string  `json:"source_intent"`
+	ID           string  `json:"id"`
+	WorkspaceID  string  `json:"workspace_id"`
+	Title        string  `json:"title"`
+	Description  *string `json:"description"`
+	Icon         *string `json:"icon"`
+	Status       string  `json:"status"`
+	Priority     string  `json:"priority"`
+	LeadType     *string `json:"lead_type"`
+	LeadID       *string `json:"lead_id"`
+	CreatorType  *string `json:"creator_type"`
+	CreatorID    *string `json:"creator_id"`
 	// StartDate / DueDate are calendar days ("YYYY-MM-DD"), no time-of-day or
 	// timezone — same contract as issue.start_date / issue.due_date.
 	StartDate *string `json:"start_date"`
@@ -67,21 +68,22 @@ type ProjectResponse struct {
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		CreatorType: textToPtr(p.CreatorType),
-		CreatorID:   uuidToPtr(p.CreatorID),
-		StartDate:   dateToPtr(p.StartDate),
-		DueDate:     dateToPtr(p.DueDate),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
+		SourceIntent: p.SourceIntent,
+		ID:           uuidToString(p.ID),
+		WorkspaceID:  uuidToString(p.WorkspaceID),
+		Title:        p.Title,
+		Description:  textToPtr(p.Description),
+		Icon:         textToPtr(p.Icon),
+		Status:       p.Status,
+		Priority:     p.Priority,
+		LeadType:     textToPtr(p.LeadType),
+		LeadID:       uuidToPtr(p.LeadID),
+		CreatorType:  textToPtr(p.CreatorType),
+		CreatorID:    uuidToPtr(p.CreatorID),
+		StartDate:    dateToPtr(p.StartDate),
+		DueDate:      dateToPtr(p.DueDate),
+		CreatedAt:    timestampToString(p.CreatedAt),
+		UpdatedAt:    timestampToString(p.UpdatedAt),
 		// Until issue stats are applied, the project's own edits are its activity.
 		LastActivityAt: timestampToString(p.UpdatedAt),
 		WorkflowID:     uuidToPtr(p.WorkflowID),
@@ -148,16 +150,17 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 }
 
 type CreateProjectRequest struct {
-	Title       string                                `json:"title"`
-	Description *string                               `json:"description"`
-	Icon        *string                               `json:"icon"`
-	Status      string                                `json:"status"`
-	Priority    string                                `json:"priority"`
-	LeadType    *string                               `json:"lead_type"`
-	LeadID      *string                               `json:"lead_id"`
-	StartDate   *string                               `json:"start_date"`
-	DueDate     *string                               `json:"due_date"`
-	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	SourceIntent *string                               `json:"source_intent,omitempty"`
+	Title        string                                `json:"title"`
+	Description  *string                               `json:"description"`
+	Icon         *string                               `json:"icon"`
+	Status       string                                `json:"status"`
+	Priority     string                                `json:"priority"`
+	LeadType     *string                               `json:"lead_type"`
+	LeadID       *string                               `json:"lead_id"`
+	StartDate    *string                               `json:"start_date"`
+	DueDate      *string                               `json:"due_date"`
+	Resources    []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 	// Visibility "private" creates a private project (MUL-8472). MemberIDs seeds its member list; the creator is
 	// always added.
 	Visibility *string  `json:"visibility,omitempty"`
@@ -179,15 +182,16 @@ type CreateProjectResourceRequestPayload struct {
 }
 
 type UpdateProjectRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
-	StartDate   *string `json:"start_date"`
-	DueDate     *string `json:"due_date"`
+	SourceIntent *string `json:"source_intent,omitempty"`
+	Title        *string `json:"title"`
+	Description  *string `json:"description"`
+	Icon         *string `json:"icon"`
+	Status       *string `json:"status"`
+	Priority     *string `json:"priority"`
+	LeadType     *string `json:"lead_type"`
+	LeadID       *string `json:"lead_id"`
+	StartDate    *string `json:"start_date"`
+	DueDate      *string `json:"due_date"`
 	// Visibility switches between "workspace" and "private" (MUL-8472).
 	// MemberIDs adds project members to a project that is or becomes
 	// "private"; see prepareProjectAccessUpdate.
@@ -511,20 +515,35 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	sourceIntent := "unspecified"
+	if req.SourceIntent != nil {
+		sourceIntent = *req.SourceIntent
+	}
+	if !validateProjectEnum(w, "source_intent", sourceIntent, []string{"unspecified", "resources", "no_code"}) {
+		return
+	}
+	if sourceIntent == "no_code" && len(req.Resources) > 0 {
+		writeError(w, 400, "no_code projects cannot include resources")
+		return
+	}
+	if len(req.Resources) > 0 {
+		sourceIntent = "resources"
+	}
 	createParams := db.CreateProjectParams{
-		CreatorType: pgtype.Text{String: actorType, Valid: true},
-		CreatorID:   creatorID,
-		WorkspaceID: wsUUID,
-		Title:       req.Title,
-		Description: ptrToText(req.Description),
-		Icon:        ptrToText(req.Icon),
-		Status:      status,
-		LeadType:    leadType,
-		LeadID:      leadID,
-		Priority:    priority,
-		StartDate:   startDate,
-		DueDate:     dueDate,
-		WorkflowID:  workflowID,
+		SourceIntent: sourceIntent,
+		CreatorType:  pgtype.Text{String: actorType, Valid: true},
+		CreatorID:    creatorID,
+		WorkspaceID:  wsUUID,
+		Title:        req.Title,
+		Description:  ptrToText(req.Description),
+		Icon:         ptrToText(req.Icon),
+		Status:       status,
+		LeadType:     leadType,
+		LeadID:       leadID,
+		Priority:     priority,
+		StartDate:    startDate,
+		DueDate:      dueDate,
+		WorkflowID:   workflowID,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -682,6 +701,16 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(bodyBytes, &rawFields)
 
 	params := db.UpdateProjectParams{ID: prevProject.ID}
+	if req.SourceIntent != nil {
+		if !validateProjectEnum(w, "source_intent", *req.SourceIntent, []string{"unspecified", "resources", "no_code"}) {
+			return
+		}
+		if *req.SourceIntent == "no_code" && h.loadProjectResourceCount(r.Context(), prevProject.ID) > 0 {
+			writeError(w, 400, "Remove project resources before marking the project no code")
+			return
+		}
+		params.SourceIntent = pgtype.Text{String: *req.SourceIntent, Valid: true}
+	}
 	_, params.DescriptionSet = rawFields["description"]
 	_, params.IconSet = rawFields["icon"]
 	_, params.LeadTypeSet = rawFields["lead_type"]

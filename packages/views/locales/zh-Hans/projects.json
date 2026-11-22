@@ -262,5 +262,26 @@
     "toast_completed": "\"{{name}}\"已完成",
     "notice": "该项目已归档：不会出现在项目列表和选择器中，也不能新建任务；已有任务仍可查看和编辑。",
     "prop_label": "归档于"
+  },
+  "source": {
+    "title": "选择执行来源",
+    "description": "此项目尚未配置代码来源。请选择本次运行方式。",
+    "configure": "配置来源",
+    "once": "仅本次不使用代码",
+    "no_code": "将项目标记为无需代码",
+    "no_code_description": "此项目的运行无需代码。该选择会保留，直到你主动修改。",
+    "reset": "重新选择来源",
+    "save_failed": "无法保存来源选择。请重试后再启动运行。",
+    "label": "执行来源",
+    "kind_no_code": "无需代码",
+    "kind_local_directory": "本地目录",
+    "kind_github_repo": "受管仓库",
+    "mode_in_place": "直接写入 · 任务串行执行",
+    "mode_worktree": "隔离工作树 · 任务并行 · 结果保存在分支",
+    "mode_managed_checkout": "受管检出",
+    "pending": "来源已选择，等待运行时验证",
+    "ready": "来源已解析",
+    "unavailable": "来源不可用",
+    "local_confirmation": "目录：{{path}} · 所属守护进程：{{daemon}}"
   }
 }

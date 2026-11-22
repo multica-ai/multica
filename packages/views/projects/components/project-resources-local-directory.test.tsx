@@ -1,8 +1,10 @@
+import type {ReactNode} from "react";
+import {QueryClient,QueryClientProvider} from "@tanstack/react-query";
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { renderWithI18n } from "../../test/i18n";
+import { renderWithI18n as renderWithTestI18n } from "../../test/i18n";
 import en from "../../locales/en/projects.json";
 
 const state = vi.hoisted(() => ({
@@ -15,6 +17,11 @@ const state = vi.hoisted(() => ({
   pickDirectory: vi.fn(),
   validateLocalDirectory: vi.fn(),
 }));
+
+function renderWithI18n(ui:ReactNode) {
+ const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+ return renderWithTestI18n(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 const NOW = Date.now();
 
@@ -58,7 +65,8 @@ function runtime(daemonId: string, host: string, status: "online" | "offline") {
   };
 }
 
-vi.mock("@tanstack/react-query", () => ({
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@tanstack/react-query")>(),
   useQuery: (options: { queryKey?: unknown[] }) => {
     const key = options?.queryKey?.[0];
     if (key === "project-resources") return { data: state.resources };

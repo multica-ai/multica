@@ -193,6 +193,7 @@ type AgentTaskQueue struct {
 	CancelledByName           pgtype.Text `json:"cancelled_by_name"`
 	IssueSnapshot             []byte      `json:"issue_snapshot"`
 	WorkflowStep              pgtype.Text `json:"workflow_step"`
+	ExecutionSource           []byte      `json:"execution_source"`
 }
 
 type AgentToLabel struct {
@@ -1725,6 +1726,7 @@ type Project struct {
 	ArchivedByType pgtype.Text        `json:"archived_by_type"`
 	ArchivedByID   pgtype.UUID        `json:"archived_by_id"`
 	FolderID       pgtype.UUID        `json:"folder_id"`
+	SourceIntent   string             `json:"source_intent"`
 }
 
 type ProjectFolder struct {

@@ -262,5 +262,26 @@
     "toast_completed": "「{{name}}」已完成",
     "notice": "此專案已歸檔：不會出現在專案列表和選擇器中，也不能新增任務；既有任務仍可檢視和編輯。",
     "prop_label": "歸檔"
+  },
+  "source": {
+    "title": "選擇執行來源",
+    "description": "此專案尚未設定程式碼來源。請選擇本次執行方式。",
+    "configure": "設定來源",
+    "once": "僅本次不使用程式碼",
+    "no_code": "將專案標記為無需程式碼",
+    "no_code_description": "此專案的執行無需程式碼。此選擇會保留，直到你主動修改。",
+    "reset": "重新選擇來源",
+    "save_failed": "無法儲存來源選擇。請重試後再開始執行。",
+    "label": "執行來源",
+    "kind_no_code": "無需程式碼",
+    "kind_local_directory": "本機資料夾",
+    "kind_github_repo": "受管儲存庫",
+    "mode_in_place": "直接寫入 · 工作依序執行",
+    "mode_worktree": "隔離工作樹 · 工作並行 · 結果保留在分支",
+    "mode_managed_checkout": "受管檢出",
+    "pending": "來源已選擇，等待執行階段驗證",
+    "ready": "來源已解析",
+    "unavailable": "來源無法使用",
+    "local_confirmation": "資料夾：{{path}} · 所屬常駐程式：{{daemon}}"
   }
 }

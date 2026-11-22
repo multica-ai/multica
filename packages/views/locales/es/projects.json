@@ -267,5 +267,26 @@
     "toast_completed": "«{{name}}» está completado",
     "notice": "Este proyecto está archivado. No aparece en las listas ni en los selectores de proyectos y no acepta tareas nuevas; sus tareas se pueden seguir viendo y editando.",
     "prop_label": "Archivado"
+  },
+  "source": {
+    "title": "Elegir una fuente de ejecución",
+    "description": "Este proyecto aún no tiene una fuente de código. Elige cómo ejecutar esta tarea.",
+    "configure": "Configurar fuente",
+    "once": "Ejecutar una vez sin código",
+    "no_code": "Marcar proyecto sin código",
+    "no_code_description": "Las ejecuciones de este proyecto no usan código. Esta elección se guarda hasta que la cambies.",
+    "reset": "Volver a elegir una fuente",
+    "save_failed": "No se pudo guardar la elección. Reintenta antes de ejecutar.",
+    "label": "Fuente de ejecución",
+    "kind_no_code": "Sin código",
+    "kind_local_directory": "Carpeta local",
+    "kind_github_repo": "Repositorio administrado",
+    "mode_in_place": "Edición directa · tareas de una en una",
+    "mode_worktree": "Worktree aislado · tareas simultáneas · resultados en una rama",
+    "mode_managed_checkout": "Copia administrada",
+    "pending": "Fuente seleccionada; esperando la validación del entorno",
+    "ready": "Fuente resuelta",
+    "unavailable": "Fuente no disponible",
+    "local_confirmation": "Carpeta: {{path}} · daemon responsable: {{daemon}}"
   }
 }

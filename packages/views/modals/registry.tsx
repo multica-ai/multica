@@ -16,6 +16,7 @@ import { getProjectFoldersExtension } from "../extensions";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { RunConfirmModal } from "./run-confirm";
 import { WorkflowHandoffModal } from "./workflow-handoff";
+import { ProjectSourceChoiceModal } from "./project-source-choice";
 import { LimitRecoveryDialog } from "./limit-recovery-dialog";
 
 export function ModalRegistry() {
@@ -88,6 +89,7 @@ export function ModalRegistry() {
   return (
     <>
       {activeModal}
+      <ProjectSourceChoiceModal />
       <LimitRecoveryDialog />
       {FoldersHost && <FoldersHost />}
     </>

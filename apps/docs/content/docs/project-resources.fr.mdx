@@ -18,11 +18,19 @@ Deux types de ressources sont pris en charge aujourd'hui :
 | **Dépôt GitHub** | Du code partagé par l'équipe, avec des checkouts gérés par le runtime | Un répertoire de travail géré par le runtime |
 | **Répertoire local** | Un checkout existant, un très gros dépôt, ou lorsque vous voulez inspecter directement les modifications locales | Le dossier d'origine ou un worktree isolé, sur un ordinateur précis |
 
+## Choisir une source de code ou un projet sans code
+
+À la création d’un projet sur le web ou Desktop, choisissez un dépôt géré, un dossier local sur Desktop, ou **Marquer le projet sans code**. Une liste de ressources vide ne vaut pas un choix explicite de travailler sans code.
+
+Une affectation interactive dans un projet sans source définie propose un choix avant de lancer l’exécution. **Configurer la source** ouvre le projet sans lancer l’exécution. **Exécuter une fois sans code** ne concerne que cette exécution. **Marquer le projet sans code** est conservé après actualisation et exclut aussi les dépôts de l’espace de travail. Retirez les ressources liées avant de marquer un projet existant sans code. Ajouter une ressource réactive son utilisation ; retirer la dernière ressource remet le projet sans source définie.
+
+Les détails d’une exécution montrent la source choisie pour celle-ci, avec les refs des dépôts ou le mode effectif du dossier local. Une ancienne exécution sans reçu de source n’est pas reconstruite à partir des paramètres actuels du projet.
+
 ## Comment les ressources entrent dans une exécution
 
 Lorsqu'un agent traite une tâche du projet, Multica ajoute le nom du projet, sa description et la liste des ressources au contexte de l'exécution, et écrit `.multica/project/resources.json` dans le répertoire de travail.
 
-La liste des dépôts rattachés à l'espace de travail est toujours incluse dans le contexte de l'exécution. Les dépôts rattachés au projet précisent en plus le code et la ref par défaut qu'utilise cet ensemble de travail.
+Les dépôts du projet ont priorité sur ceux de l’espace de travail. Les dépôts de l’espace de travail servent de repli quand aucun dépôt du projet n’est sélectionné, sauf pour les exécutions explicitement choisies sans code.
 
 Un répertoire local ne s'applique qu'au daemon auquel il est lié. Lorsque le daemon chargé d'une exécution dispose d'un répertoire local correspondant, l'agent utilise le répertoire d'origine en mode `in_place`, ou un worktree isolé de celui-ci en mode `worktree` ; les autres ordinateurs continuent d'utiliser les dépôts du projet ou de l'espace de travail.
 
@@ -60,7 +68,7 @@ Assurez-vous que le daemon local de l'application de bureau est en ligne.
 </Step>
 <Step>
 
-Pour un projet existant, ouvrez **Ressources → Dossiers locaux** et suivez les étapes ci-dessous. Lors de la création d'un projet, utilisez plutôt l'onglet **Dossier local** ; le dossier et son mode sont enregistrés avec le projet.
+Pour un projet existant, ouvrez **Ressources → Dossiers locaux** et suivez les étapes ci-dessous. Lors de la création d'un projet, utilisez plutôt l’option **Dossier local** ; le dossier et son mode sont enregistrés avec le projet.
 
 </Step>
 <Step>

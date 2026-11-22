@@ -314,6 +314,7 @@ export interface TaskCancellationActor {
 }
 
 export interface AgentTask {
+ execution_source?: {kind:string;mode:string;label?:string;daemon_id?:string;repositories?:{url:string;ref?:string}[]};
   /** Owning issue labels supplied by subtree execution-history reads. */
   issue_identifier?: string;
   issue_title?: string;

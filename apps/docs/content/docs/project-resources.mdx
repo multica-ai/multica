@@ -18,11 +18,19 @@ Two resource types are supported today:
 | **GitHub repository** | Code shared by the team, with checkouts managed by the runtime | A runtime-managed working directory |
 | **Local directory** | An existing checkout, a very large repository, or when you want to inspect local changes directly | The original folder or an isolated worktree on a specific computer |
 
+## Choose code or explicitly no code
+
+When creating a project in web or Desktop, choose a managed repository, a Desktop local folder, or **Mark project no code**. An empty resource list alone does not express a no-code choice.
+
+Before an interactive assignment starts a run in an undecided project, **Configure source** opens the project without starting the run. **Run once without code** applies only to that run. **Mark project no code** is saved and survives refreshes; it also excludes workspace repository fallback. Remove linked resources before marking an existing project no code. Adding a resource changes the project back to resource-based execution; removing its last resource leaves it undecided.
+
+Run details show the source selected for that run, including repository refs or the local folder's effective mode. Older runs without a source receipt are not reconstructed from today's project settings.
+
 ## How resources enter a run
 
 When an agent works an issue inside the project, Multica adds the project name, project description, and resource list to the run's context, and writes `.multica/project/resources.json` into the working directory.
 
-The workspace's linked repository list is always included in the run context. Repositories linked to the project additionally specify the code and default ref this body of work uses.
+Project repository resources take precedence over workspace repositories. Workspace repositories remain the fallback when no project repository is selected, except for runs explicitly chosen without code.
 
 A local directory only applies to the daemon it is bound to. When the daemon executing a run has a matching local directory, the agent uses it in `in_place` mode or an isolated worktree of it in `worktree` mode; other computers keep using the project's GitHub repositories or the workspace repositories.
 
@@ -60,7 +68,7 @@ Make sure Desktop's local daemon is online.
 </Step>
 <Step>
 
-For an existing project, open **Resources → Local folders** and follow the steps below. When creating a project, use the **Local folder** tab instead; the folder and mode are saved when you create the project.
+For an existing project, open **Resources → Local folders** and follow the steps below. When creating a project, use the **Local folder** choice instead; the folder and mode are saved when you create the project.
 
 </Step>
 <Step>

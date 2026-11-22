@@ -206,15 +206,16 @@ export function CreateProjectModal({
     repo.url.toLowerCase().includes(repoQuery),
   );
 
-  // A project's source is binary: either a set of GitHub repos OR a local
-  // working directory — never both. Mode is the source of truth for what
+  // A project may use GitHub repos, a local directory, or explicitly no code.
+  // Repo and local selections are mutually exclusive. A local
+  // directory selection is pinned to its owning daemon. Mode determines what
   // gets persisted on submit; switching mode does NOT clear the other
   // side's stash, so toggling back and forth restores the user's prior
   // selection. Only the mode-matching side is sent to the API. Local mode
   // is hidden entirely on web (no daemon to bind the path to).
   const desktop = isDesktopShell();
   const daemonStatus = useLocalDaemonStatus();
-  const [sourceMode, setSourceMode] = useState<"repos" | "local">("repos");
+  const [sourceMode, setSourceMode] = useState<"repos" | "local" | "no_code">("repos");
   const [selectedLocalPath, setSelectedLocalPath] = useState<string | null>(null);
   const [selectedLocalLabel, setSelectedLocalLabel] = useState<string | null>(null);
   const [localPickError, setLocalPickError] = useState<string | null>(null);
@@ -281,7 +282,7 @@ export function CreateProjectModal({
       ? "in_place"
       : (localMode ?? preselectedLocalMode);
 
-  const handleSourceModeChange = (mode: "repos" | "local") => {
+  const handleSourceModeChange = (mode: "repos" | "local" | "no_code") => {
     setSourceMode(mode);
     setLocalPickError(null);
   };
@@ -355,7 +356,7 @@ export function CreateProjectModal({
   const leadLabel =
     leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
   const hasLead = !!(leadType && leadId);
-  const hasSource = sourceMode === "local" ? !!selectedLocalPath : selectedRepos.length > 0;
+  const hasSource = sourceMode === "no_code" || (sourceMode === "local" ? !!selectedLocalPath : selectedRepos.length > 0);
 
   const createProject = useCreateProject();
   const paidFeatureError = usePaidFeatureErrorMessage();
@@ -372,6 +373,7 @@ export function CreateProjectModal({
     // Checked here as well as on the button: TitleEditor's onSubmit calls this
     // directly, so a disabled button alone leaves the keyboard path open.
     if (!title.trim() || submitting) return;
+    if (sourceMode === "local" && (!selectedLocalPath || !daemonStatus.daemonId || !daemonStatus.running)) return;
     if (sourceMode === "repos" && hasRejectedRepoRef) return;
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
@@ -421,6 +423,7 @@ export function CreateProjectModal({
         ...(workflowId ? { workflow_id: workflowId } : {}),
         // Server attaches these in the same transaction as the project.
         resources,
+        source_intent: sourceMode === "no_code" ? "no_code" : resources?.length ? "resources" : "unspecified",
         ...(visibility === "private" ? { visibility, member_ids: memberIds } : {}),
       });
       if (folderId && folders.canFile) folders.moveProject(project.id, folderId);
@@ -601,6 +604,16 @@ export function CreateProjectModal({
           <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.create_project.description_hint)}
           </p>
+        </div>
+
+        <div className="px-5 py-2 space-y-2">
+          <div role="group" aria-label={tProjects($=>$.source.label)} className="flex flex-wrap gap-2">
+            <Button type="button" variant={sourceMode==="repos"?"secondary":"ghost"} onClick={()=>{handleSourceModeChange("repos");setRepoPopoverOpen(true)}}>{tProjects($=>$.source.kind_github_repo)}</Button>
+            {desktop && <Button type="button" variant={sourceMode==="local"?"secondary":"ghost"} onClick={()=>{handleSourceModeChange("local");setRepoPopoverOpen(true)}}>{tProjects($=>$.source.kind_local_directory)}</Button>}
+            <Button type="button" aria-pressed={sourceMode==="no_code"} variant={sourceMode==="no_code"?"secondary":"ghost"} onClick={()=>handleSourceModeChange("no_code")}>{tProjects($=>$.source.no_code)}</Button>
+          </div>
+          {sourceMode==="no_code"&&<p className="text-caption text-muted-foreground">{tProjects($=>$.source.no_code_description)}</p>}
+          {sourceMode==="local"&&selectedLocalPath&&<p className="text-caption break-all">{tProjects($=>$.source.local_confirmation,{path:selectedLocalPath,daemon:daemonStatus.daemonId??""})} · {effectiveLocalMode==="worktree"?tProjects($=>$.source.mode_worktree):tProjects($=>$.source.mode_in_place)}</p>}
         </div>
 
         {/* Optional properties appear inline once selected; their pickers
@@ -784,7 +797,7 @@ export function CreateProjectModal({
               <PopoverTrigger
                 render={
                   <PillButton>
-                    {sourceMode === "local" ? (
+                    {sourceMode === "no_code" ? <span>{tProjects($=>$.source.no_code)}</span> : sourceMode === "local" ? (
                       <>
                         <FolderOpen className="size-3" />
                         <span className="max-w-[12rem] truncate">
@@ -808,40 +821,7 @@ export function CreateProjectModal({
               />
             )}
             <PopoverContent side="top" align="start" className="w-72 p-2 space-y-2" finalFocus={hasSource ? undefined : moreOptionsRef}>
-              {/* Source mode is binary — repo OR local directory, never both.
-                  Local option is desktop-only because a local_directory
-                  resource has to be pinned to a daemon_id, which doesn't
-                  exist on the web. */}
-              {desktop && (
-                <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/60 p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => handleSourceModeChange("repos")}
-                    className={cn(
-                      "rounded-xs px-2 py-1 text-caption transition-colors",
-                      sourceMode === "repos"
-                        ? "bg-background shadow-sm font-medium"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {t(($) => $.create_project.source_tab_repos)}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSourceModeChange("local")}
-                    className={cn(
-                      "rounded-xs px-2 py-1 text-caption transition-colors",
-                      sourceMode === "local"
-                        ? "bg-background shadow-sm font-medium"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {t(($) => $.create_project.source_tab_local)}
-                  </button>
-                </div>
-              )}
-
-              {sourceMode === "repos" ? (
+              {sourceMode === "no_code" ? <p className="text-caption">{tProjects($=>$.source.no_code_description)}</p> : sourceMode === "repos" ? (
                 <>
                   <div className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.create_project.repos_heading)}
@@ -1170,7 +1150,8 @@ export function CreateProjectModal({
             disabled={
               !title.trim() ||
               submitting ||
-              (sourceMode === "repos" && hasRejectedRepoRef)
+              (sourceMode === "repos" && hasRejectedRepoRef) ||
+              (sourceMode === "local" && (!selectedLocalPath || !daemonStatus.daemonId || !daemonStatus.running))
             }
             className="shrink-0"
           >

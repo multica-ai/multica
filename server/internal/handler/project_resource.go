@@ -969,6 +969,7 @@ type claimProjectContext struct {
 	Title       string
 	Description string
 	Archived    bool
+	NoCode      bool
 	Resources   []ProjectResourceData
 	Repos       []RepoData
 }
@@ -981,6 +982,12 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 	resp.ProjectTitle = c.Title
 	resp.ProjectDescription = c.Description
 	resp.ProjectArchived = c.Archived
+	if c.NoCode {
+		resp.ProjectNoCode = true
+		resp.ProjectResources = nil
+		resp.Repos = nil
+		return
+	}
 	if len(c.Resources) > 0 {
 		resp.ProjectResources = c.Resources
 	}
@@ -1024,6 +1031,7 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 			out.Title = project.Title
 			out.Description = project.Description.String
 			out.Archived = project.ArchivedAt.Valid
+			out.NoCode = project.SourceIntent == "no_code"
 
 			rows, resErr := h.Queries.ListProjectResourcesInWorkspace(ctx, db.ListProjectResourcesInWorkspaceParams{
 				ProjectID:   project.ID,
@@ -1040,7 +1048,7 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 		}
 	}
 
-	if len(out.Repos) > 0 {
+	if out.NoCode || len(out.Repos) > 0 {
 		return out, nil
 	}
 

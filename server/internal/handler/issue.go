@@ -2781,14 +2781,16 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 // keeping the sub-issue intent of the entry point regardless of whether
 // the user submits via manual or agent mode.
 type QuickCreateIssueRequest struct {
-	AgentID       string   `json:"agent_id,omitempty"`
-	SquadID       string   `json:"squad_id,omitempty"`
-	Prompt        string   `json:"prompt"`
-	Priority      string   `json:"priority,omitempty"`
-	DueDate       string   `json:"due_date,omitempty"`
-	ProjectID     string   `json:"project_id,omitempty"`
-	ParentIssueID string   `json:"parent_issue_id,omitempty"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	SourceDecision  string            `json:"source_decision,omitempty"`
+	SourceDecisions map[string]string `json:"source_decisions,omitempty"`
+	AgentID         string            `json:"agent_id,omitempty"`
+	SquadID         string            `json:"squad_id,omitempty"`
+	Prompt          string            `json:"prompt"`
+	Priority        string            `json:"priority,omitempty"`
+	DueDate         string            `json:"due_date,omitempty"`
+	ProjectID       string            `json:"project_id,omitempty"`
+	ParentIssueID   string            `json:"parent_issue_id,omitempty"`
+	AttachmentIDs   []string          `json:"attachment_ids,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -3006,6 +3008,19 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		parentIssueUUID = pid
 	}
 
+	// An agent-mode sub-issue uses its parent's project when no project was supplied.
+	if !projectUUID.Valid && parentIssueUUID.Valid {
+		parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: parentIssueUUID, WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, 400, "parent issue not found in this workspace")
+			return
+		}
+		projectUUID = parent.ProjectID
+	}
+	if !h.requireProjectSourceChoice(w, r, projectUUID, req.SourceDecision, req.SourceDecisions, true) {
+		return
+	}
+	r = r.WithContext(service.WithProjectSourceDecisions(r.Context(), req.SourceDecisions))
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
 		if errors.Is(err, service.ErrProjectAccessDenied) {
@@ -3138,18 +3153,20 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title         string   `json:"title"`
-	Description   *string  `json:"description"`
-	Status        string   `json:"status"`
-	Priority      string   `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage,omitempty"`
-	StartDate     *string  `json:"start_date"`
-	DueDate       *string  `json:"due_date"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	SourceDecision  string            `json:"source_decision,omitempty"`
+	SourceDecisions map[string]string `json:"source_decisions,omitempty"`
+	Title           string            `json:"title"`
+	Description     *string           `json:"description"`
+	Status          string            `json:"status"`
+	Priority        string            `json:"priority"`
+	AssigneeType    *string           `json:"assignee_type"`
+	AssigneeID      *string           `json:"assignee_id"`
+	ParentIssueID   *string           `json:"parent_issue_id"`
+	ProjectID       *string           `json:"project_id"`
+	Stage           *int32            `json:"stage,omitempty"`
+	StartDate       *string           `json:"start_date"`
+	DueDate         *string           `json:"due_date"`
+	AttachmentIDs   []string          `json:"attachment_ids,omitempty"`
 	// LabelIDs are issue-scoped labels to attach to the new issue in the same
 	// transaction as the create. Unknown or non-issue ids are rejected with
 	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.
@@ -3590,6 +3607,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 
+	sourceCandidate := db.Issue{WorkspaceID: wsUUID, ProjectID: workflowProjectID, AssigneeType: assigneeType, AssigneeID: assigneeID, Status: status}
+	_, sourceWouldRun := h.IssueService.WillEnqueueRun(r.Context(), service.IssueTriggerInput{Issue: sourceCandidate, IsCreate: true}, h.issueTriggerWriteProbe(r, creatorType, actualCreatorID, sourceCandidate))
+	if !h.requireProjectSourceChoice(w, r, workflowProjectID, req.SourceDecision, req.SourceDecisions, sourceWouldRun) {
+		return
+	}
+	r = r.WithContext(service.WithProjectSourceDecisions(r.Context(), req.SourceDecisions))
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
 		WorkspaceID:            wsUUID,
 		Title:                  req.Title,
@@ -3697,8 +3720,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
-	Title            *string `json:"title"`
+	SourceDecision   string            `json:"source_decision,omitempty"`
+	SourceDecisions  map[string]string `json:"source_decisions,omitempty"`
+	ExpectedRevision *int64            `json:"expected_revision,omitempty"`
+	Title            *string           `json:"title"`
 	// TitleBase is the title adopted by the editor before producing Title. It
 	// protects title edits without coupling them to unrelated issue mutations.
 	TitleBase   *string `json:"title_base,omitempty"`
@@ -4226,6 +4251,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	if !h.requireIssueWriteSource(w, r, prevIssue, params, req, handoff != nil) {
+		return
+	}
+	r = r.WithContext(service.WithProjectSourceDecisions(r.Context(), req.SourceDecisions))
 
 	// The agent this write hands the issue to gets the change as its own run,
 	// not also through its event wakeups.
@@ -4915,6 +4945,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireBatchSourceChoices(w, r, req, wsUUID) {
+		return
+	}
+	r = r.WithContext(service.WithProjectSourceDecisions(r.Context(), req.Updates.SourceDecisions))
 	seen := make(map[pgtype.UUID]bool, len(req.IssueIDs))
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)

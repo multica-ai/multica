@@ -18,7 +18,7 @@ UPDATE project SET
     archived_by_id = $4,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id, source_intent
 `
 
 type ArchiveProjectParams struct {
@@ -60,6 +60,7 @@ func (q *Queries) ArchiveProject(ctx context.Context, arg ArchiveProjectParams) 
 		&i.ArchivedByType,
 		&i.ArchivedByID,
 		&i.FolderID,
+		&i.SourceIntent,
 	)
 	return i, err
 }
@@ -80,26 +81,27 @@ const createProject = `-- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
     lead_type, lead_id, priority, start_date, due_date, workflow_id,
-    creator_type, creator_id
+    creator_type, creator_id, source_intent
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id, source_intent
 `
 
 type CreateProjectParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      string      `json:"status"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
-	Priority    string      `json:"priority"`
-	StartDate   pgtype.Date `json:"start_date"`
-	DueDate     pgtype.Date `json:"due_date"`
-	WorkflowID  pgtype.UUID `json:"workflow_id"`
-	CreatorType pgtype.Text `json:"creator_type"`
-	CreatorID   pgtype.UUID `json:"creator_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	Title        string      `json:"title"`
+	Description  pgtype.Text `json:"description"`
+	Icon         pgtype.Text `json:"icon"`
+	Status       string      `json:"status"`
+	LeadType     pgtype.Text `json:"lead_type"`
+	LeadID       pgtype.UUID `json:"lead_id"`
+	Priority     string      `json:"priority"`
+	StartDate    pgtype.Date `json:"start_date"`
+	DueDate      pgtype.Date `json:"due_date"`
+	WorkflowID   pgtype.UUID `json:"workflow_id"`
+	CreatorType  pgtype.Text `json:"creator_type"`
+	CreatorID    pgtype.UUID `json:"creator_id"`
+	SourceIntent string      `json:"source_intent"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -117,6 +119,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.WorkflowID,
 		arg.CreatorType,
 		arg.CreatorID,
+		arg.SourceIntent,
 	)
 	var i Project
 	err := row.Scan(
@@ -141,6 +144,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.ArchivedByType,
 		&i.ArchivedByID,
 		&i.FolderID,
+		&i.SourceIntent,
 	)
 	return i, err
 }
@@ -161,7 +165,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id, source_intent FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -195,6 +199,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.ArchivedByType,
 		&i.ArchivedByID,
 		&i.FolderID,
+		&i.SourceIntent,
 	)
 	return i, err
 }
@@ -249,7 +254,7 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueS
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id, source_intent FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -300,6 +305,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.ArchivedByType,
 			&i.ArchivedByID,
 			&i.FolderID,
+			&i.SourceIntent,
 		); err != nil {
 			return nil, err
 		}
@@ -358,7 +364,7 @@ UPDATE project SET
     archived_by_id = NULL,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND archived_at IS NOT NULL
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id, source_intent
 `
 
 type RestoreProjectParams struct {
@@ -391,28 +397,48 @@ func (q *Queries) RestoreProject(ctx context.Context, arg RestoreProjectParams) 
 		&i.ArchivedByType,
 		&i.ArchivedByID,
 		&i.FolderID,
+		&i.SourceIntent,
 	)
 	return i, err
 }
 
+const saveTaskExecutionSource = `-- name: SaveTaskExecutionSource :one
+UPDATE agent_task_queue SET execution_source = $2::jsonb
+WHERE id = $1 RETURNING execution_source
+`
+
+type SaveTaskExecutionSourceParams struct {
+	ID      pgtype.UUID `json:"id"`
+	Column2 []byte      `json:"column_2"`
+}
+
+func (q *Queries) SaveTaskExecutionSource(ctx context.Context, arg SaveTaskExecutionSourceParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, saveTaskExecutionSource, arg.ID, arg.Column2)
+	var execution_source []byte
+	err := row.Scan(&execution_source)
+	return execution_source, err
+}
+
 const updateProject = `-- name: UpdateProject :one
 UPDATE project SET
-    title = COALESCE($2, title),
-    description = CASE WHEN $3::boolean THEN $4 ELSE description END,
-    icon = CASE WHEN $5::boolean THEN $6 ELSE icon END,
-    status = COALESCE($7, status),
-    priority = COALESCE($8, priority),
-    lead_type = CASE WHEN $9::boolean THEN $10 ELSE lead_type END,
-    lead_id = CASE WHEN $11::boolean THEN $12 ELSE lead_id END,
-    start_date = CASE WHEN $13::boolean THEN $14 ELSE start_date END,
-    due_date = CASE WHEN $15::boolean THEN $16 ELSE due_date END,
+    source_intent = COALESCE($2, source_intent),
+    title = COALESCE($3, title),
+    description = CASE WHEN $4::boolean THEN $5 ELSE description END,
+    icon = CASE WHEN $6::boolean THEN $7 ELSE icon END,
+    status = COALESCE($8, status),
+    priority = COALESCE($9, priority),
+    lead_type = CASE WHEN $10::boolean THEN $11 ELSE lead_type END,
+    lead_id = CASE WHEN $12::boolean THEN $13 ELSE lead_id END,
+    start_date = CASE WHEN $14::boolean THEN $15 ELSE start_date END,
+    due_date = CASE WHEN $16::boolean THEN $17 ELSE due_date END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id, source_intent
 `
 
 type UpdateProjectParams struct {
 	ID             pgtype.UUID `json:"id"`
+	SourceIntent   pgtype.Text `json:"source_intent"`
 	Title          pgtype.Text `json:"title"`
 	DescriptionSet bool        `json:"description_set"`
 	Description    pgtype.Text `json:"description"`
@@ -433,6 +459,7 @@ type UpdateProjectParams struct {
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
 	row := q.db.QueryRow(ctx, updateProject,
 		arg.ID,
+		arg.SourceIntent,
 		arg.Title,
 		arg.DescriptionSet,
 		arg.Description,
@@ -472,6 +499,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.ArchivedByType,
 		&i.ArchivedByID,
 		&i.FolderID,
+		&i.SourceIntent,
 	)
 	return i, err
 }

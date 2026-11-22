@@ -386,7 +386,8 @@ SELECT
         WHEN sqlc.narg(workflow_handoff_revision)::bigint IS NOT NULL
         THEN jsonb_build_object('workflow_handoff_revision', sqlc.narg(workflow_handoff_revision)::bigint)
         ELSE '{}'::jsonb
-    END, '{}'::jsonb),
+    END || CASE WHEN COALESCE(sqlc.narg('source_no_code')::boolean, FALSE)
+        THEN '{"source_no_code":true}'::jsonb ELSE '{}'::jsonb END, '{}'::jsonb),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),

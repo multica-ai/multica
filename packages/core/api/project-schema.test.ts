@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ProjectSchema } from "./schemas";
+import { ProjectSchema, ProjectSourceChoiceErrorSchema } from "./schemas";
 
 const project = {
   id: "project", workspace_id: "workspace", title: "Project", description: null,
@@ -22,4 +22,21 @@ describe("project creator response compatibility", () => {
       expect(parsed.creator_id).toBe("creator");
     }
   });
+});
+
+describe("execution source response compatibility", () => {
+  it.each([undefined, "future_source", null, 42])("keeps the project when source metadata is unknown: %j", (intent) => {
+    const parsed = ProjectSchema.parse({ ...project, source_intent: intent });
+    expect(parsed.id).toBe(project.id);
+    expect(parsed.source_intent).toBeUndefined();
+  });
+  it("preserves an explicit no-code choice", () => {
+    expect(ProjectSchema.parse({ ...project, source_intent: "no_code" }).source_intent).toBe("no_code");
+  });
+});
+
+it("validates a source-choice error before exposing project data to the UI", () => {
+  expect(ProjectSourceChoiceErrorSchema.safeParse({code:"project_source_required",project:{id:"malformed"}}).success).toBe(false);
+  const parsed=ProjectSourceChoiceErrorSchema.parse({code:"project_source_required",project:{...project,source_intent:"unspecified"}});
+  expect(parsed.project.id).toBe(project.id);
 });

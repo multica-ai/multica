@@ -114,6 +114,7 @@
     "./search-index": "./search-index/index.ts",
     "./projects": "./projects/index.ts",
     "./projects/deletion-permissions": "./projects/deletion-permissions.ts",
+    "./projects/source-choice": "./projects/source-choice.ts",
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
     "./projects/access": "./projects/access.ts",

@@ -1,3 +1,4 @@
+import { hasProjectSourceHost, requestProjectSourceChoice, cachedProjectSourceChoice } from "../projects/source-choice";
 import type { ListWeixinInstallationsResponse, WeixinLogin } from "../types/weixin";
 import { ListWeixinInstallationsSchema, WeixinLoginSchema, EMPTY_WEIXIN_INSTALLATIONS, INVALID_WEIXIN_LOGIN } from "../weixin/schema";
 import {
@@ -426,6 +427,7 @@ import {
   ActiveRuntimeUpdateResponseSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
+  ProjectSourceChoiceErrorSchema,
   ArchiveProjectResponseSchema,
   ListProjectMembersResponseSchema,
   ListPrivateProjectsResponseSchema,
@@ -981,6 +983,47 @@ function isReplayableBody(body: BodyInit | null | undefined): boolean {
 }
 
 export class ApiClient {
+  // The shared UI host reads existing caches synchronously. A stale or absent
+  // cache is handled by the normal write's side-effect-free validation response.
+  private async sourceAwareWrite<T>(
+    path: string,
+    init: ApiRequestInit,
+    body: object,
+    batch = false,
+  ): Promise<T> {
+    if (!hasProjectSourceHost()) {
+      return this.fetch<T>(path, { ...init, body: JSON.stringify(body) });
+    }
+    const sourceInput = (batch ? (body as { updates: object }).updates : body) as {
+      source_decisions?: Record<string, string>;
+    };
+    const decisions: Record<string, string> = { ...sourceInput.source_decisions };
+    for (;;) {
+      const cached = cachedProjectSourceChoice(path, body, decisions);
+      if (cached) {
+        const choice = await requestProjectSourceChoice(cached);
+        if (choice === "cancel") throw new Error("Source selection cancelled");
+        decisions[cached.id] = choice === "once" ? "no_code_once" : "confirmed";
+        continue;
+      }
+      const control = { source_decision: "ask", source_decisions: { ...decisions } };
+      const payload = batch
+        ? { ...body, updates: { ...(body as { updates: object }).updates, ...control } }
+        : { ...body, ...control };
+      try {
+        return await this.fetch<T>(path, { ...init, body: JSON.stringify(payload) });
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 409) throw error;
+        const detail = ProjectSourceChoiceErrorSchema.safeParse(error.body);
+        if (!detail.success || !detail.data.project.id) throw error;
+        const choice = await requestProjectSourceChoice(detail.data.project);
+        if (choice === "cancel") throw error;
+        // "saved" is returned only after an authoritative project write.
+        decisions[detail.data.project.id] = choice === "once" ? "no_code_once" : "confirmed";
+      }
+    }
+  }
+
   private parseDoc(raw: unknown, endpoint: string): Doc {
     const doc = parseWithFallback<Doc | null>(raw, DocSchema, null, {
       endpoint,
@@ -1902,11 +1945,11 @@ export class ApiClient {
     // "created" card pointing at an empty issue id. parseWithFallback already
     // logged the schema issues + raw payload; the empty message lets the modal
     // render its localized "failed to create" toast.
-    const raw = await this.fetch<unknown>("/api/issues", {
+    const raw = await this.sourceAwareWrite<unknown>("/api/issues", {
       method: "POST",
       headers: workspaceHeader(workspaceSlug),
-      body: JSON.stringify(data),
-    });
+
+    }, data);
     const issue = parseWithFallback<Issue | null>(raw, CreateIssueResponseSchema, null, {
       endpoint: "POST /api/issues",
     });
@@ -1927,10 +1970,7 @@ export class ApiClient {
     parent_issue_id?: string | null;
     attachment_ids?: string[];
   }): Promise<{ task_id: string }> {
-    return this.fetch("/api/issues/quick-create", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    return this.sourceAwareWrite<{task_id:string}>("/api/issues/quick-create", {method:"POST"}, data);
   }
 
   async getCommentSubIssuePreview(anchorCommentId: string): Promise<SourceContextPreview> {
@@ -2025,17 +2065,14 @@ export class ApiClient {
   }
 
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
-    return this.fetch(`/api/issues/${id}`, {
+    return this.sourceAwareWrite<Issue>(`/api/issues/${id}`, {
       method: "PUT",
-      body: JSON.stringify(data),
-    });
+
+    }, data);
   }
 
   async moveIssue(id: string, data: MoveIssueRequest): Promise<Issue> {
-    return this.fetch(`/api/issues/${id}/move`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    return this.sourceAwareWrite<Issue>(`/api/issues/${id}/move`, {method:"POST"}, data);
   }
 
   async listIssueDuplicates(id: string): Promise<IssueDuplicates> {
@@ -2089,10 +2126,10 @@ export class ApiClient {
     updates: UpdateIssueRequest,
     ops: { labels?: BatchIssueLabelOps; properties?: BatchIssuePropertyOps } = {},
   ): Promise<BatchUpdateIssuesResponse> {
-    const raw = await this.fetch<unknown>("/api/issues/batch-update", {
+    const raw = await this.sourceAwareWrite<unknown>("/api/issues/batch-update", {
       method: "POST",
-      body: JSON.stringify({ issue_ids: issueIds, updates, ...ops }),
-    });
+
+    }, { issue_ids: issueIds, updates, ...ops }, true);
     const response = parseWithFallback(raw, BatchUpdateIssuesResponseSchema, UNCONFIRMED_BATCH_UPDATE, {
       endpoint: "POST /api/issues/batch-update",
     });

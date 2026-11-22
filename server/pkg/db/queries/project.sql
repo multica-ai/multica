@@ -48,13 +48,14 @@ FOR UPDATE;
 INSERT INTO project (
     workspace_id, title, description, icon, status,
     lead_type, lead_id, priority, start_date, due_date, workflow_id,
-    creator_type, creator_id
+    creator_type, creator_id, source_intent
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 ) RETURNING *;
 
 -- name: UpdateProject :one
 UPDATE project SET
+    source_intent = COALESCE(sqlc.narg('source_intent'), source_intent),
     title = COALESCE(sqlc.narg('title'), title),
     description = CASE WHEN sqlc.arg('description_set')::boolean THEN sqlc.narg('description') ELSE description END,
     icon = CASE WHEN sqlc.arg('icon_set')::boolean THEN sqlc.narg('icon') ELSE icon END,
@@ -85,3 +86,7 @@ FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;
+
+-- name: SaveTaskExecutionSource :one
+UPDATE agent_task_queue SET execution_source = $2::jsonb
+WHERE id = $1 RETURNING execution_source;

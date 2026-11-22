@@ -399,6 +399,8 @@ type TaskCancellationActor struct {
 }
 
 type AgentTaskResponse struct {
+	ProjectNoCode   bool                 `json:"-"`
+	ExecutionSource *TaskExecutionSource `json:"execution_source,omitempty"`
 	// Restricted marks a run on an issue in a private project the caller
 	// cannot see (MUL-8472): only identity, status, timing and usage remain.
 	Restricted bool `json:"restricted,omitempty"`
@@ -893,6 +895,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		TaskID string `json:"comment_change_cancelled_task_id"`
 	}
 	_ = json.Unmarshal(t.Context, &cancellation)
+	var executionSource *TaskExecutionSource
+	_ = json.Unmarshal(t.ExecutionSource, &executionSource)
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
@@ -927,6 +931,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
 		CancelledBy:              taskCancellationActorToResponse(t),
 
+		ExecutionSource:        executionSource,
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),

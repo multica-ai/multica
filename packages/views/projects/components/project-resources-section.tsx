@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useUpdateProject } from "@multica/core/projects/mutations";
+import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
@@ -162,6 +164,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       </button>
       {open && (
         <div className="space-y-4 pl-2">
+          {resources.length===0&&<EmptyProjectSourceIntent projectId={projectId} />}
           <RepositoryGroup wsId={wsId} projectId={projectId} repos={repos} />
           {(desktopMode || folders.length > 0) && (
             <LocalFolderGroup
@@ -178,6 +181,18 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       )}
     </div>
   );
+}
+
+function EmptyProjectSourceIntent({projectId}:{projectId:string}) {
+ const {t}=useT("projects"),wsId=useWorkspaceId();
+ const {data:project}=useQuery(projectDetailOptions(wsId,projectId));
+ const updateProject=useUpdateProject();
+ return <div className="space-y-2">
+  <p className="text-caption">{project?.source_intent==="no_code"?t($=>$.source.no_code_description):t($=>$.source.description)}</p>
+  <Button variant="outline" disabled={updateProject.isPending||!project} onClick={()=>updateProject.mutate({id:projectId,source_intent:project?.source_intent==="no_code"?"unspecified":"no_code"},{onError:e=>toast.error(errorMessage(e,t($=>$.source.save_failed)))})}>
+   {project?.source_intent==="no_code"?t($=>$.source.reset):t($=>$.source.no_code)}
+  </Button>
+ </div>;
 }
 
 function GroupHeader({

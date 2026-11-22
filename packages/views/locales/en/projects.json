@@ -267,5 +267,26 @@
     "toast_completed": "“{{name}}” is completed",
     "notice": "This project is archived. It's hidden from project lists and pickers and accepts no new issues; its issues stay readable and editable.",
     "prop_label": "Archived"
+  },
+  "source": {
+    "title": "Choose an execution source",
+    "description": "This project has no code source yet. Choose how this run should work.",
+    "configure": "Configure source",
+    "once": "Run once without code",
+    "no_code": "Mark project no code",
+    "no_code_description": "Runs in this project do not use code. This choice is saved until you change it.",
+    "reset": "Choose a source again",
+    "save_failed": "Could not save the source choice. Retry before starting a run.",
+    "label": "Execution source",
+    "kind_no_code": "No code",
+    "kind_local_directory": "Local folder",
+    "kind_github_repo": "Managed repository",
+    "mode_in_place": "Writes directly · tasks run one at a time",
+    "mode_worktree": "Isolated worktree · concurrent tasks · results on a branch",
+    "mode_managed_checkout": "Managed checkout",
+    "pending": "Source selected; awaiting runtime validation",
+    "ready": "Source resolved",
+    "unavailable": "Source unavailable",
+    "local_confirmation": "Folder: {{path}} · owning daemon: {{daemon}}"
   }
 }

@@ -37,6 +37,7 @@ export function useUpdateProject() {
       api.updateProject(id, data),
     onMutate: ({ id, ...data }) => {
       qc.cancelQueries({ queryKey: projectKeys.list(wsId) });
+      qc.cancelQueries({ queryKey: projectKeys.detail(wsId,id),exact:true });
       const prevList = qc.getQueryData<ListProjectsResponse>(projectKeys.list(wsId));
       const prevDetail = qc.getQueryData<Project>(projectKeys.detail(wsId, id));
       qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId), (old) =>
@@ -46,6 +47,10 @@ export function useUpdateProject() {
         old ? { ...old, ...data } : old,
       );
       return { prevList, prevDetail, id };
+    },
+    onSuccess: (saved) => {
+      qc.setQueryData(projectKeys.detail(wsId,saved.id),saved);
+      qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId),old=>old?{...old,projects:old.projects.map(p=>p.id===saved.id?saved:p)}:old);
     },
     onError: (err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(projectKeys.list(wsId), ctx.prevList);
