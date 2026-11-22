@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // runtimeLocalMcpServerSummary is the intentionally non-secret inventory
@@ -33,13 +35,13 @@ type runtimeLocalMcpServerSummary struct {
 // A present config (including an empty mcpServers map) opts into the merged,
 // task-local config so adding one managed server no longer disables unrelated
 // runtime servers.
-func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage) (json.RawMessage, error) {
+func mergeRuntimeAndAgentMcpConfig(provider, cliVersion string, agentConfig json.RawMessage) (json.RawMessage, error) {
 	trimmed := bytes.TrimSpace(agentConfig)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return agentConfig, nil
 	}
 
-	runtimeServers, supported, err := loadRuntimeMcpServerConfigs(provider)
+	runtimeServers, supported, err := loadRuntimeMcpServerConfigs(provider, cliVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +261,7 @@ func stripJSONC(raw []byte) ([]byte, error) {
 // for task-local merging. Callers must never send the result to the server or
 // logs; the public capabilities endpoint continues to use the redacted summary
 // type above.
-func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) {
+func loadRuntimeMcpServerConfigs(provider, cliVersion string) (map[string]any, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
@@ -308,7 +310,7 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		return map[string]any{}, false, nil
 	}
 
-	configured, err := readRuntimeMcpServers(provider, path, key, format)
+	configured, err := readRuntimeMcpServers(provider, cliVersion, path, key, format)
 	if err != nil {
 		return nil, true, err
 	}
@@ -387,7 +389,7 @@ func loadClaudePluginMcpServerConfigs(home string) map[string]any {
 	return out
 }
 
-func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary, bool, error) {
+func listRuntimeLocalMcpServers(provider, cliVersion string) ([]runtimeLocalMcpServerSummary, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
@@ -455,7 +457,7 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		return []runtimeLocalMcpServerSummary{}, false, nil
 	}
 
-	servers, err := readRuntimeMcpServers(provider, path, key, format)
+	servers, err := readRuntimeMcpServers(provider, cliVersion, path, key, format)
 	if err != nil {
 		return nil, true, err
 	}
@@ -550,7 +552,7 @@ func readRuntimeMcpDocument(path, format string) (map[string]any, error) {
 	return cfg, nil
 }
 
-func readRuntimeMcpServers(provider, path, key, format string) (map[string]any, error) {
+func readRuntimeMcpServers(provider, cliVersion, path, key, format string) (map[string]any, error) {
 	cfg, err := readRuntimeMcpDocument(path, format)
 	if err != nil {
 		return nil, err
@@ -564,14 +566,15 @@ func readRuntimeMcpServers(provider, path, key, format string) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	baseServers, baseNative := opencodeMcpServersByLayout(cfg, key)
-	overlayServers, overlayNative := opencodeMcpServersByLayout(overlay, key)
+	usesV2 := agent.OpenCodeVersionIsV2OrLater(cliVersion)
+	baseServers := opencodeMcpServers(cfg, key, usesV2)
+	overlayServers := opencodeMcpServers(overlay, key, usesV2)
 	if baseServers == nil {
 		return overlayServers, nil
 	}
-	// OpenCode 1.x deep-merges global config objects. Native 2.x
-	// configurations replace whole server entries by name in load order.
-	if !baseNative && !overlayNative {
+	// OpenCode 2.x replaces servers by name, even when both files use the
+	// legacy flat layout. Unknown versions follow the 1.x deep-merge rule.
+	if !usesV2 {
 		mergeOpenCodeMcpObjects(baseServers, overlayServers)
 	} else {
 		for name, entry := range overlayServers {
@@ -593,23 +596,55 @@ func mergeOpenCodeMcpObjects(base, overlay map[string]any) {
 	}
 }
 
-// opencodeMcpServersByLayout returns the server map and whether it uses
-// OpenCode 2.x's nested layout. OpenCode 1.x stores servers directly under mcp.
-func opencodeMcpServersByLayout(cfg map[string]any, key string) (map[string]any, bool) {
+func opencodeMcpServers(cfg map[string]any, key string, usesV2 bool) map[string]any {
 	mcp, ok := cfg[key].(map[string]any)
 	if !ok {
-		return nil, false
+		return nil
 	}
+	if usesV2 {
+		return normalizeOpenCodeV2McpServers(mcp)
+	}
+	// Keep recognizing nested inventories when CLI version detection is
+	// unavailable, including a document containing only timeout defaults.
 	if servers, ok := mcp["servers"].(map[string]any); ok && !isFlatOpenCodeMcpServer(servers) {
-		return servers, true
+		return servers
 	}
-	// A v2 document can set global timeouts without defining any servers.
-	// A v1 server with the same name still has ordinary server fields.
-	if timeout, ok := mcp["timeout"]; ok && !isFlatOpenCodeMcpServer(timeout) {
+	if !isFlatOpenCodeMcpServer(mcp["timeout"]) {
 		delete(mcp, "timeout")
-		return mcp, true
 	}
-	return mcp, false
+	return mcp
+}
+
+func normalizeOpenCodeV2McpServers(mcp map[string]any) map[string]any {
+	servers := make(map[string]any, len(mcp))
+	for name, value := range mcp {
+		server, ok := value.(map[string]any)
+		if !ok || !isTypedOpenCodeMcpServer(server) {
+			continue
+		}
+		// OpenCode 2.x ignores enabled-only overrides and migrates the
+		// enabled flag on complete legacy entries to disabled.
+		if server["enabled"] == false {
+			server["disabled"] = true
+		}
+		servers[name] = server
+	}
+	if native, ok := mcp["servers"].(map[string]any); ok && !isTypedOpenCodeMcpServer(native) {
+		// A legacy override named "servers" is not a nested server map.
+		if _, enabledOnly := native["enabled"].(bool); enabledOnly {
+			return servers
+		}
+		for name, value := range native {
+			if server, ok := value.(map[string]any); ok && isTypedOpenCodeMcpServer(server) {
+				servers[name] = server
+			}
+		}
+	}
+	return servers
+}
+
+func isTypedOpenCodeMcpServer(server map[string]any) bool {
+	return server["type"] == "local" || server["type"] == "remote"
 }
 
 func isFlatOpenCodeMcpServer(value any) bool {
