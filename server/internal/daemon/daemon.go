@@ -6488,7 +6488,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}
 		return nil, true
 	}
-	if err := validateLocalPath(assignment.AbsPath); err != nil {
+	reportInvalidPath := func(err error) {
 		taskLog.Error("local_directory: path validation failed", "error", err)
 		failureReason := "local_directory_error"
 		if errors.Is(err, errLocalDirectoryMissing) {
@@ -6502,6 +6502,9 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
+	}
+	if err := validateLocalPath(assignment.AbsPath); err != nil {
+		reportInvalidPath(err)
 		return nil, true
 	}
 
@@ -6673,6 +6676,15 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
 		}
 		return nil, true
+	}
+	// The linked directory can move while this task is queued. Check again
+	// before execution setup creates context files at the old path.
+	if waitCounted {
+		if err := validateLocalPath(assignment.AbsPath); err != nil {
+			release()
+			reportInvalidPath(err)
+			return nil, true
+		}
 	}
 	taskLog.Info("local_directory: lock acquired")
 	return release, false
