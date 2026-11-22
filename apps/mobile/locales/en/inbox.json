@@ -1,8 +1,7 @@
 {
   "title": "Inbox",
   "empty": {
-    "title": "You're all caught up",
-    "body": "Notifications and agent updates appear here."
+    "title": "Inbox cleared"
   },
   "actions": {
     "mark_read": "Mark as read",

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -7,7 +7,6 @@ import {
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import type { InboxItem } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -16,6 +15,7 @@ import { Header } from "@/components/ui/header";
 import { IconButton } from "@/components/ui/icon-button";
 import { HeaderActions } from "@/components/ui/app-header-actions";
 import { SwipeableInboxRow } from "@/components/inbox/swipeable-inbox-row";
+import { InboxZero } from "@/components/inbox/inbox-zero";
 import { inboxListOptions } from "@/data/queries/inbox";
 import {
   useArchiveAllInbox,
@@ -26,8 +26,6 @@ import {
   useMarkInboxRead,
 } from "@/data/mutations/inbox";
 import { useWorkspaceStore } from "@/data/workspace-store";
-import { useColorScheme } from "@/lib/use-color-scheme";
-import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
 import {
   deduplicateInboxItems,
@@ -38,7 +36,6 @@ export default function Inbox() {
   const { t } = useT("inbox");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
-  const { colorScheme } = useColorScheme();
   const { data: rawItems, isLoading, error, refetch, isRefetching } = useQuery(
     inboxListOptions(wsId),
   );
@@ -48,6 +45,17 @@ export default function Inbox() {
     () => deduplicateInboxItems(rawItems ?? []),
     [rawItems],
   );
+  // Inbox Zero: the bleed mark rises once, when the last notification leaves
+  // while the tab is open; an Inbox that opens (or reloads) empty shows it at
+  // rest. Loading and error are not counts, so neither arms it. Mirrors
+  // packages/views/inbox/components/inbox-page.tsx.
+  const zeroCount = isLoading || error ? -1 : data.length;
+  const [prevZeroCount, setPrevZeroCount] = useState(zeroCount);
+  const [zeroRises, setZeroRises] = useState(false);
+  if (zeroCount !== prevZeroCount) {
+    setPrevZeroCount(zeroCount);
+    setZeroRises(prevZeroCount > 0 && zeroCount === 0);
+  }
   const markRead = useMarkInboxRead();
   const markAllRead = useMarkAllInboxRead();
   const archive = useArchiveInbox();
@@ -133,16 +141,16 @@ export default function Inbox() {
             <Text>{t("common:actions.retry")}</Text>
           </Button>
         </View>
-      ) : !data || data.length === 0 ? (
-        <InboxEmpty iconColor={THEME[colorScheme].mutedForeground} />
       ) : (
+        // Stays a list when empty so Inbox Zero keeps pull-to-refresh.
         <FlatList
           data={data}
           keyExtractor={(item) => item.id}
           ItemSeparatorComponent={() => (
             <View className="h-px bg-border ml-16" />
           )}
-          contentContainerClassName="pb-6"
+          ListEmptyComponent={<InboxZero rises={zeroRises} />}
+          contentContainerClassName={data.length === 0 ? "flex-grow" : "pb-6"}
           renderItem={({ item }) => (
             <SwipeableInboxRow
               item={item}
@@ -173,22 +181,6 @@ function InboxLoading() {
           </View>
         </View>
       ))}
-    </View>
-  );
-}
-
-function InboxEmpty({ iconColor }: { iconColor: string }) {
-  const { t } = useT("inbox");
-
-  return (
-    <View className="flex-1 items-center justify-center px-8 gap-3">
-      <Ionicons name="mail-open-outline" size={42} color={iconColor} />
-      <Text className="text-base font-medium text-foreground text-center">
-        {t("empty.title")}
-      </Text>
-      <Text className="text-sm text-muted-foreground text-center">
-        {t("empty.body")}
-      </Text>
     </View>
   );
 }
