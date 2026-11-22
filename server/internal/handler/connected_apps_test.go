@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
@@ -504,6 +505,31 @@ func TestConnectedApps_AdminOnlyTeamSurfaces(t *testing.T) {
 	// A team app without a connected team account reports not_connected.
 	if _, text, _ := f.gateway(t, f.token(t), "apps_list", nil); !strings.Contains(text, `"status": "not_connected"`) {
 		t.Fatalf("apps_list = %s, want not_connected", text)
+	}
+}
+
+func TestConnectedApps_TeamImpactListsLiveAgents(t *testing.T) {
+	f := newAppsFixture(t)
+	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "team"}}); w.Code != http.StatusOK {
+		t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+	}
+	archived := dbfx.Agent(t, fmt.Sprintf("apps-archived-%d", testSeq.Add(1)), handlerTestRuntimeID(t), testutil.Cols{
+		"owner_id": testUserID, "instructions": "", "archived_at": testutil.Raw("now()"),
+		"custom_env": testutil.Raw("'{}'::jsonb"), "custom_args": testutil.Raw("'[]'::jsonb"),
+	})
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, archived) })
+	deleted := uuid.NewString()
+	for _, agentID := range []string{archived, deleted} {
+		dbfx.Exec(t, `INSERT INTO agent_app (workspace_id, agent_id, toolkit_slug, account_scope, level) VALUES ($1, $2, 'gmail', 'team', 'write')`, testWorkspaceID, agentID)
+	}
+
+	var resp struct {
+		Agents []map[string]string `json:"agents"`
+	}
+	req := appsReqAs(t, testUserID, http.MethodGet, "/api/apps/team/impact?toolkit_slug=gmail", nil)
+	testutil.Call(t, f.h.GetTeamAppImpact, req).Want(http.StatusOK).JSON(&resp)
+	if len(resp.Agents) != 1 || resp.Agents[0]["id"] != f.agentID || resp.Agents[0]["name"] == "" {
+		t.Fatalf("impact agents = %+v, want only the live agent %s", resp.Agents, f.agentID)
 	}
 }
 

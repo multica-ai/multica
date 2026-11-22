@@ -19,8 +19,8 @@ const catalog: AppCatalogEntry[] = [
   { slug: "zendesk", name: "Zendesk", category: "Support", curated: false },
 ];
 
-const build = (o: AppsOverview, extra: { viewerId?: string; agentIds?: Set<string> } = {}) =>
-  buildAppDirectory({ overview: o, catalog, viewerId: extra.viewerId ?? "me", agentIds: extra.agentIds });
+const build = (o: AppsOverview, extra: { viewerId?: string } = {}) =>
+  buildAppDirectory({ overview: o, catalog, viewerId: extra.viewerId ?? "me" });
 
 const slugs = (apps: { slug: string }[]) => apps.map((a) => a.slug);
 
@@ -125,14 +125,8 @@ describe("buildAppDirectory", () => {
     expect(dir.all.find((a) => a.slug === "slack")!.request).toBeUndefined();
   });
 
-  it("leaves out archived agents and revoked accounts", () => {
-    const dir = build(
-      overview({
-        personal: [connection("notion", "revoked")],
-        agent_apps: [{ agent_id: "archived", toolkit_slug: "gmail", account_scope: "personal", level: "write" }],
-      }),
-      { agentIds: new Set(["a1"]) },
-    );
+  it("leaves out revoked accounts", () => {
+    const dir = build(overview({ personal: [connection("notion", "revoked")] }));
     expect(dir.inUse).toEqual([]);
     expect(dir.attention).toEqual([]);
   });

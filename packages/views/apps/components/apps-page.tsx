@@ -17,7 +17,6 @@ import {
   useRequestTeamApp,
   useRestoreAppAccess,
 } from "@multica/core/connected-apps";
-import { agentListOptions } from "@multica/core/workspace/queries";
 import type { AppAccountScope } from "@multica/core/types";
 import { ConnectAppDialog } from "../../common/connect-app-dialog";
 import { SavedAppRestriction } from "../../common/saved-app-restriction";
@@ -25,6 +24,7 @@ import { useComposioAvailable } from "../../common/use-composio-available";
 import { CollectionPageState } from "../../layout/collection-page";
 import { PageHeader } from "../../layout/page-header";
 import { useTeamAppAccess } from "../../common/use-team-app-access";
+import { useViewerAppsOverview } from "../../common/use-viewer-apps-overview";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { useAppConnectReturn } from "../hooks/use-app-connect-return";
@@ -73,7 +73,7 @@ function AppsDirectory() {
   const overview = useQuery(appsOverviewOptions(wsId));
   const teamAccess = useTeamAppAccess(overview.data);
   const catalog = useQuery(appCatalogOptions(wsId));
-  const agents = useQuery(agentListOptions(wsId));
+  const viewerOverview = useViewerAppsOverview(wsId, overview.data);
   const restore = useRestoreAppAccess();
   const requestTeam = useRequestTeamApp();
   const withdrawTeam = useDismissTeamAppRequests();
@@ -83,7 +83,7 @@ function AppsDirectory() {
   const [connecting, setConnecting] = useState<ConnectTarget | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   useAppConnectReturn();
-  const accountRows = useAccountRows(overview.data, catalog.data?.apps ?? []);
+  const accountRows = useAccountRows(viewerOverview, catalog.data?.apps ?? []);
 
   // The tab lives in the URL so a connect flow started here comes back to it.
   const setTab = (next: DirectoryTab) => {
@@ -95,17 +95,9 @@ function AppsDirectory() {
   };
 
   const directory = useMemo(() => {
-    if (!overview.data) return null;
-    const visibleAgents = agents.data
-      ? new Set(agents.data.filter((a) => !a.archived_at).map((a) => a.id))
-      : undefined;
-    return buildAppDirectory({
-      overview: overview.data,
-      catalog: catalog.data?.apps ?? [],
-      viewerId,
-      agentIds: visibleAgents,
-    });
-  }, [overview.data, catalog.data, agents.data, viewerId]);
+    if (!viewerOverview) return null;
+    return buildAppDirectory({ overview: viewerOverview, catalog: catalog.data?.apps ?? [], viewerId });
+  }, [viewerOverview, catalog.data, viewerId]);
 
   const handlers: DirectoryCardHandlers = {
     asking,
@@ -130,7 +122,7 @@ function AppsDirectory() {
   if (overview.isLoading) {
     return <p className="px-6 py-8 text-body text-muted-foreground">{t(($) => $.connected_apps.loading)}</p>;
   }
-  if (overview.isError || !directory || !overview.data) {
+  if (overview.isError || !directory || !viewerOverview) {
     return (
       <CollectionPageState
         role="alert"
@@ -175,10 +167,10 @@ function AppsDirectory() {
           </p>
         </div>
 
-        {overview.data.catalog_mode !== "all" && (
+        {viewerOverview.catalog_mode !== "all" && (
           <SavedAppRestriction
             kind="catalog"
-            onRestore={overview.data.can_manage ? () => restore.mutateAsync({ catalog: true }) : undefined}
+            onRestore={viewerOverview.can_manage ? () => restore.mutateAsync({ catalog: true }) : undefined}
           />
         )}
 
@@ -205,7 +197,7 @@ function AppsDirectory() {
         </div>
 
         {tab === "accounts" ? (
-          <AccountsList overview={overview.data} rows={accountRows} matches={matchesAccount} />
+          <AccountsList overview={viewerOverview} rows={accountRows} matches={matchesAccount} />
         ) : shown.length > 0 ? (
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {shown.map((app) => <DirectoryCard key={app.slug} app={app} handlers={handlers} />)}

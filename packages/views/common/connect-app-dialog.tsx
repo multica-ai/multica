@@ -20,6 +20,7 @@ import { appsOverviewOptions } from "@multica/core/connected-apps";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { AppAccountScope, AppActionClass } from "@multica/core/types";
 import { ComposioToolkitLogo } from "./composio-toolkit-logo";
+import { useViewerAppsOverview } from "./use-viewer-apps-overview";
 import { usePaidFeatureErrorMessage } from "../billing";
 import { useT } from "../i18n";
 import { currentPath, useNavigation } from "../navigation";
@@ -57,9 +58,10 @@ export function ConnectAppDialog({
   const qc = useQueryClient();
   const paidFeatureError = usePaidFeatureErrorMessage();
   const overview = useQuery({ ...appsOverviewOptions(wsId), enabled: open });
+  const viewerOverview = useViewerAppsOverview(wsId, overview.data);
   const [pending, setPending] = useState(false);
 
-  const agentNames = (overview.data?.agent_apps ?? [])
+  const agentNames = (viewerOverview?.agent_apps ?? [])
     .filter((a) => a.toolkit_slug === slug && a.account_scope === scope)
     .map((a) => getActorName("agent", a.agent_id));
 

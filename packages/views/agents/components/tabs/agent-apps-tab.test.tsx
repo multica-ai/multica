@@ -17,9 +17,13 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
   api: {
     listAgentApps: vi.fn(), getAppsOverview: vi.fn(), listAppCatalog: vi.fn(), updateAgentApps: vi.fn(),
-    getWorkspaceFeatures: vi.fn(),
+    getWorkspaceFeatures: vi.fn(), listAgents: vi.fn(), listMembers: vi.fn(),
   },
 }));
+vi.mock("@multica/core/auth", () => {
+  const state = { user: { id: "me" } };
+  return { useAuthStore: (selector: (s: typeof state) => unknown) => selector(state) };
+});
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", () => ({ useWorkspacePaths: () => ({ settings: () => "/ws/settings", apps: () => "/ws/apps" }) }));
@@ -54,6 +58,8 @@ beforeEach(() => {
   });
   vi.mocked(api.updateAgentApps).mockImplementation(async (_id, body) => ({ apps: body.apps.map((app) => ({ ...app, agent_id: "a1" })) }));
   vi.mocked(api.getWorkspaceFeatures).mockResolvedValue({ features: {} });
+  vi.mocked(api.listAgents).mockResolvedValue([{ id: "a1", owner_id: "me", permission_mode: "private", invocation_targets: [], archived_at: null }] as never);
+  vi.mocked(api.listMembers).mockResolvedValue([{ user_id: "me", role: "member" }] as never);
 });
 
 afterEach(() => {

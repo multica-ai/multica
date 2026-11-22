@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/entitlement"
@@ -553,7 +554,8 @@ func (h *Handler) DisconnectTeamApp(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetTeamAppImpact (GET /api/apps/team/impact?toolkit_slug=) is what
-// disconnecting a team account would stop. Admins only.
+// disconnecting a team account would stop: the live agents that act as it.
+// Admins only.
 func (h *Handler) GetTeamAppImpact(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
@@ -579,12 +581,19 @@ func (h *Handler) GetTeamAppImpact(w http.ResponseWriter, r *http.Request) {
 		if app.ToolkitSlug != slug || app.AccountScope != connectedapps.ScopeTeam {
 			continue
 		}
-		agentIDs = append(agentIDs, app.AgentID)
-		name := ""
-		if agent, err := h.Queries.GetAgent(ctx, app.AgentID); err == nil {
-			name = agent.Name
+		agent, err := h.Queries.GetAgent(ctx, app.AgentID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
 		}
-		agents = append(agents, map[string]string{"id": uuidToString(app.AgentID), "name": name})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load agents")
+			return
+		}
+		if agent.ArchivedAt.Valid {
+			continue
+		}
+		agentIDs = append(agentIDs, app.AgentID)
+		agents = append(agents, map[string]string{"id": uuidToString(app.AgentID), "name": agent.Name})
 	}
 	var tasks, autopilots int64
 	if len(agentIDs) > 0 {

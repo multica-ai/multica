@@ -56,32 +56,30 @@ const SEVERITY: Record<AppAccountStatus, number> = {
 const POPULAR_LIMIT = 6;
 
 /**
- * Groups the workspace's apps for the Apps page. `agentIds` limits agent
- * usage to the agents the viewer can see (archived ones excluded).
+ * Groups the workspace's apps for the Apps page. Agent usage comes from
+ * `overview.agent_apps` as given; callers narrow it to the viewer's
+ * (`agentAppsForViewer`).
  */
 export function buildAppDirectory({
   overview,
   catalog,
   viewerId,
-  agentIds,
 }: {
   overview: AppsOverview;
   catalog: AppCatalogEntry[];
   viewerId: string | null;
-  agentIds?: ReadonlySet<string>;
 }): AppDirectory {
   const entries = new Map(catalog.map((entry) => [entry.slug, entry]));
   const slugs = new Set<string>(catalog.map((entry) => entry.slug));
   for (const c of [...overview.team, ...overview.personal]) {
     if (c.status !== "revoked") slugs.add(c.toolkit_slug);
   }
-  const agentApps = overview.agent_apps.filter((a) => !agentIds || agentIds.has(a.agent_id));
-  for (const a of agentApps) slugs.add(a.toolkit_slug);
+  for (const a of overview.agent_apps) slugs.add(a.toolkit_slug);
 
   const apps = new Map(
     [...slugs].map((slug) => [
       slug,
-      describeApp(slug, entries.get(slug), overview, agentApps, viewerId),
+      describeApp(slug, entries.get(slug), overview, viewerId),
     ]),
   );
   const described = [...apps.values()];
@@ -103,10 +101,9 @@ function describeApp(
   slug: string,
   entry: AppCatalogEntry | undefined,
   overview: AppsOverview,
-  agentApps: AppsOverview["agent_apps"],
   viewerId: string | null,
 ): DirectoryApp {
-  const uses = agentApps.filter((a) => a.toolkit_slug === slug);
+  const uses = overview.agent_apps.filter((a) => a.toolkit_slug === slug);
   const usedScopes = new Set(uses.map((a) => a.account_scope));
   const request = teamRequestFor(overview, slug);
   const hasTeam = !!accountFor(overview, "team", slug);
