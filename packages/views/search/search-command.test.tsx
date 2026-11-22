@@ -1169,6 +1169,34 @@ describe("SearchCommand", () => {
       );
     });
 
+    it("offers Delete issue on an issue the viewer created", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+      await waitFor(() => expect(renderedValues()).toContain("command:context-issue:issue-delete"));
+    });
+
+    it("drops Delete issue on someone else's issue", async () => {
+      act(() => {
+        for (const token of registered.splice(0)) useCommandBarContextStore.getState().unregister(token);
+      });
+      registerContext({ kind: "issue", issue: { ...issue, creator_id: "user-other" } });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+
+      expect(renderedValues()).not.toContain("command:context-issue:issue-delete");
+    });
+
+    it("drops Delete issue for a guest, even on an issue it created (MUL-9877)", async () => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "delete");
+
+      expect(renderedValues()).not.toContain("command:context-issue:issue-delete");
+    });
+
     it("hides issue commands once the page unregisters", () => {
       act(() => {
         for (const token of registered.splice(0)) useCommandBarContextStore.getState().unregister(token);

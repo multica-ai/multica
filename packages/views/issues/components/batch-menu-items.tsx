@@ -77,6 +77,8 @@ interface BatchMenuItemsProps {
   projectId: string | null;
   allowedStatuses: ReadonlySet<string> | null;
   disabled: boolean;
+  /** False for a viewer who can delete no issue at all (a guest): the entry is left out. */
+  offersDelete: boolean;
   canDelete: boolean;
   onStatus: (status: string) => void;
   onAssignee: (updates: Partial<UpdateIssueRequest>) => void;
@@ -98,6 +100,7 @@ export function BatchMenuItems({
   projectId,
   allowedStatuses,
   disabled,
+  offersDelete,
   canDelete,
   onStatus,
   onAssignee,
@@ -299,16 +302,20 @@ export function BatchMenuItems({
           {tLayout(($) => $.collection.clear_selection)}
         </P.Item>
       )}
-      <P.Separator />
-      <P.Item
-        variant="destructive"
-        disabled={disabled || !canDelete}
-        title={!canDelete ? t(($) => $.batch.delete_restricted) : undefined}
-        onClick={onDelete}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-        {t(($) => $.batch.delete_count, { count })}
-      </P.Item>
+      {offersDelete && (
+        <>
+          <P.Separator />
+          <P.Item
+            variant="destructive"
+            disabled={disabled || !canDelete}
+            title={!canDelete ? t(($) => $.batch.delete_restricted) : undefined}
+            onClick={onDelete}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t(($) => $.batch.delete_count, { count })}
+          </P.Item>
+        </>
+      )}
     </>
   );
 }

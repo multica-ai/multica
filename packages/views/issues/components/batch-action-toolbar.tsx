@@ -117,7 +117,7 @@ export function BatchActionToolbar({
     return first && selectedIssues.every((i) => i.project_id === first) ? first : null;
   }, [selectedIssues]);
   const wsId = useWorkspaceId();
-  const { canDelete } = useIssueDeletion(wsId);
+  const { canDelete, offersDelete } = useIssueDeletion(wsId);
   const canDeleteSelection = selectedIssues.every(canDelete);
   const { workflows } = useIssueWorkflows(wsId);
   const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: count > 0 && !sharedProjectId });
@@ -291,6 +291,7 @@ export function BatchActionToolbar({
     projectId: sharedProjectId,
     allowedStatuses,
     disabled: loading,
+    offersDelete,
     canDelete: canDeleteSelection,
     onStatus: (status: string) => handleBatchStatus({ status }),
     onAssignee: handleBatchAssignee,

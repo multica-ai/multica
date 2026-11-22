@@ -33,12 +33,14 @@ export function canManageProjectAccess(
 
 // Changing the lead of a private project can change who manages its access,
 // so only access managers may; elsewhere the lead stays an ordinary field.
+// A guest edits no project, so it sets no lead either.
 export function canChangeProjectLead(
   project: Pick<Project, "lead_type" | "lead_id" | "visibility">,
   userId: string | null | undefined,
   role: string | null | undefined,
   managerId: string | null | undefined,
 ): boolean {
+  if (role === "guest") return false;
   return project.visibility !== "private" || canManageProjectAccess(project, userId, role, managerId);
 }
 
