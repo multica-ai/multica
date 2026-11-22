@@ -37,10 +37,57 @@ describe("scrollToTimelineComment", () => {
     // 5000 - (600 - 100) / 2: the replacement row, centred.
     expect(container.scrollTop).toBe(4750);
   });
+
+  it("yields immediately when the user scrolls during alignment", async () => {
+    const container = document.createElement("div");
+    container.getBoundingClientRect = () => new DOMRect(0, 0, 400, 600);
+    Object.defineProperty(container, "clientHeight", { value: 600 });
+    document.body.append(container);
+    let driftingTop = 5000;
+    const el = document.createElement("div");
+    el.id = "comment-target";
+    el.getBoundingClientRect = () => new DOMRect(0, (driftingTop += 50) - container.scrollTop, 400, 100);
+    container.append(el);
+
+    const onComplete = vi.fn();
+    const onUserCancel = vi.fn();
+    scrollToTimelineComment({ container, virtualizer: null, index: 0, commentId: "target", onComplete, onUserCancel });
+    await frame();
+    await frame();
+
+    // User scrolls elsewhere mid-alignment.
+    container.scrollTop = 120;
+    container.dispatchEvent(new Event("wheel"));
+    await frame();
+    await frame();
+
+    expect(onUserCancel).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(container.scrollTop).toBe(120);
+  });
 });
 
 describe("revealTimelineList", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("stops revealing as soon as the user scrolls", () => {
+    const pending = new Map<number, FrameRequestCallback>();
+    let nextId = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { pending.set(++nextId, cb); return nextId; });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => { pending.delete(id); });
+    const container = document.createElement("div");
+    container.getBoundingClientRect = () => new DOMRect(0, 0, 400, 600);
+    const list = document.createElement("div");
+    list.getBoundingClientRect = () => new DOMRect(0, 2000, 400, 100);
+    const onUserCancel = vi.fn();
+
+    revealTimelineList(container, list, onUserCancel);
+    expect(pending.size).toBe(1);
+
+    container.dispatchEvent(new Event("wheel"));
+    expect(onUserCancel).toHaveBeenCalledTimes(1);
+    expect(pending.size).toBe(0);
+  });
 
   it("keeps one frame budget per list across the effect re-runs that restart it", () => {
     const pending = new Map<number, FrameRequestCallback>();
