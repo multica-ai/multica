@@ -133,3 +133,14 @@ describe("docs proxy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("docs cache keys", () => {
+  it("declares Vary: Accept on page URLs, which answer HTML or Markdown", async () => {
+    const rules = (await nextConfig.headers?.()) ?? [];
+    const rule = rules.find((entry) => entry.headers.some((header) => header.key === "Vary" && header.value === "Accept"));
+    expect(rule).toBeDefined();
+    const matches = (path: string) => new RegExp(`^${rule!.source}$`).test(path);
+    for (const page of ["/", "/agents", "/zh/agents", "/en/providers/claude-code"]) expect(matches(page)).toBe(true);
+    for (const file of ["/agents.md", "/llms.txt", "/_next/static/chunk", "/api/search", "/icon.svg"]) expect(matches(file)).toBe(false);
+  });
+});
