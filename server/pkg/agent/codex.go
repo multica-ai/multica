@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/redact"
-	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -1571,13 +1570,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			finalStatus = "failed"
 			stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
 			finalError = err.Error()
-			if !cleanupConfirmed {
-				finalStatus = "cleanup_unconfirmed"
-				finalError += "; retry suppressed: process cleanup/reap not confirmed"
-			} else if timedOut {
-				// Only a reaped process tree authorizes the daemon's timeout retry
-				// path. A bare legacy handshake error carries no such evidence.
+			// No turn has started, so a reaped process tree makes the timeout safe
+			// for the daemon's bounded retry path.
+			retrySafe := timedOut && cleanupConfirmed
+			if retrySafe {
 				finalStatus = "timeout"
+			} else if timedOut {
+				finalError += "; retry suppressed: process cleanup/reap not confirmed"
 			}
 			if c.threadSetupMethod != "" {
 				classification := classifyCodexStartupStderr(stderrTail, timedOut)
@@ -1593,7 +1592,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"latency_ms", time.Since(c.threadSetupStarted).Milliseconds(),
 					"cleanup_confirmed", cleanupConfirmed,
 					"reaped", cleanupConfirmed,
-					"retry_safe", false,
+					"retry_safe", retrySafe,
 					"retry_attempted", false,
 					"stderr_model_refresh_failure_count", classification.modelRefreshFailure,
 					"stderr_model_refresh_timeout_count", classification.modelRefreshTimeout,
@@ -1843,14 +1842,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
 			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), b.cfg.commandAt(execPath), cmd.Env, b.cfg.Logger)
 			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, stderrTail)
-		}
-		if finalStatus == "failed" && taskfailure.IsInterruptedRunTimeout(finalError) {
-			if cleanupConfirmed {
-				finalStatus = "timeout"
-			} else {
-				finalStatus = "cleanup_unconfirmed"
-				finalError += "; retry suppressed: process cleanup/reap not confirmed"
-			}
 		}
 
 		// A first turn that produced no semantic progress because Codex could

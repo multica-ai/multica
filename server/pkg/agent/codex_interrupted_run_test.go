@@ -7,11 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
-func TestCodexInterruptedRunHandshakeTimeout(t *testing.T) {
+func TestCodexThreadSetupHandshakeTimeout(t *testing.T) {
 	// Sequential: the negative seam changes the package cleanup override.
 	t.Cleanup(func() { codexCleanupConfirmationOverride.Store(0) })
 	if runtime.GOOS == "windows" {
@@ -48,15 +46,15 @@ while read line; do :; done
 					Cwd: work, ResumeSessionID: resume, Timeout: 15 * time.Second,
 					HandshakeTimeout: 5 * time.Second, ThreadHandshakeTimeout: 200 * time.Millisecond,
 				})
-				wantStatus := "timeout"
-				if !confirmed {
-					wantStatus = "cleanup_unconfirmed"
-				}
-				if result.Status != wantStatus || !strings.Contains(result.Error, method+" did not respond after") {
+				if !strings.Contains(result.Error, method+" did not respond after") {
 					t.Fatalf("wrong failure boundary: %+v", result)
 				}
-				if got := taskfailure.Classify(result.Error); got != taskfailure.ReasonProcessCleanupUnconfirmed {
-					t.Fatalf("raw handshake text must not authorize recovery: %q classified as %s", result.Error, got)
+				if confirmed {
+					if result.Status != "timeout" || strings.Contains(result.Error, "retry suppressed") {
+						t.Fatalf("confirmed cleanup should report a retryable timeout: %+v", result)
+					}
+				} else if result.Status != "failed" || !strings.HasSuffix(result.Error, "; retry suppressed: process cleanup/reap not confirmed") {
+					t.Fatalf("unconfirmed cleanup should stay a plain failure: %+v", result)
 				}
 				if data, err := os.ReadFile(marker); err != nil || string(data) != "retained work" {
 					t.Fatalf("existing work changed: %q %v", data, err)
@@ -66,46 +64,20 @@ while read line; do :; done
 	}
 }
 
-func TestCodexInterruptedRunRoutingCleanup(t *testing.T) {
+func TestCodexThreadSetupErrorWithUnconfirmedCleanupStaysFailed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 	t.Cleanup(func() { codexCleanupConfirmationOverride.Store(0) })
-	for _, confirmed := range []bool{true, false} {
-		codexCleanupConfirmationOverride.Store(0)
-		if !confirmed {
-			codexCleanupConfirmationOverride.Store(-1)
-		}
-		name := "confirmed"
-		if !confirmed {
-			name = "unconfirmed"
-		}
-		t.Run(name, func(t *testing.T) {
-			fake := writeFakeCodexAppServer(t, `read line
+	codexCleanupConfirmationOverride.Store(-1)
+	fake := writeFakeCodexAppServer(t, `read line
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 read line
 read line
-echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-routing"}}}'
-read line
-echo '{"jsonrpc":"2.0","id":3,"result":{}}'
-echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-routing","turn":{"id":"turn-routing","status":"failed","error":{"message":"workspace routing discovery timed out"}}}}'
+echo '{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"model not available"}}'
 `)
-			work := t.TempDir()
-			marker := filepath.Join(work, "existing-work.txt")
-			if err := os.WriteFile(marker, []byte("retained work"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			result := executeFakeCodex(t, fake, ExecOptions{Cwd: work, Timeout: 15 * time.Second, HandshakeTimeout: 5 * time.Second})
-			want := "timeout"
-			if !confirmed {
-				want = "cleanup_unconfirmed"
-			}
-			if result.Status != want || !strings.HasPrefix(result.Error, "workspace routing discovery timed out") || result.SessionID != "thr-routing" {
-				t.Fatalf("routing cleanup evidence lost: %+v", result)
-			}
-			if data, err := os.ReadFile(marker); err != nil || string(data) != "retained work" {
-				t.Fatalf("existing work changed: %q %v", data, err)
-			}
-		})
+	result := executeFakeCodex(t, fake, ExecOptions{Cwd: t.TempDir(), Timeout: 15 * time.Second, HandshakeTimeout: 5 * time.Second})
+	if result.Status != "failed" || !strings.Contains(result.Error, "model not available") || strings.Contains(result.Error, "retry suppressed") {
+		t.Fatalf("non-timeout thread/start error should be a plain failure: %+v", result)
 	}
 }
