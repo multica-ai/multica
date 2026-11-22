@@ -22,7 +22,9 @@ import type { DocCollabTicket } from "@multica/core/types";
  */
 
 /** Servers that answered that live editing is off. That is server
- *  configuration, so later docs open for solo editing without asking again. */
+ *  configuration, so later docs open for solo editing without asking again.
+ *  Docs are keyed by the server's URL, other kinds by `liveOffKey`: each kind
+ *  is switched on separately. */
 export const liveEditingOff = new Set<string>();
 /** Servers that answered that live editing is on; their socket can open
  *  before the next answer arrives. */
@@ -43,6 +45,8 @@ export interface DocCollaborator {
   name: string;
   color: string;
   kind: "member" | "agent";
+  /** Has a caret in the document, as opposed to only having it open. */
+  editing: boolean;
 }
 
 // ---- Ticket and saved state --------------------------------------------------
@@ -61,30 +65,46 @@ interface LiveInfo {
   value?: DocCollabTicket;
 }
 
+/** What a session edits: a doc, or the description of an issue. */
+export type LiveKind = "doc" | "issue";
+
+export const liveOffKey = (collabUrl: string, kind: LiveKind) =>
+  kind === "doc" ? collabUrl : `${kind}\n${collabUrl}`;
+
+function requestTicket(kind: LiveKind, id: string, options?: { state?: boolean }): Promise<DocCollabTicket> {
+  return kind === "issue" ? api.createIssueCollabTicket(id, options) : api.createDocCollabTicket(id, options);
+}
+
 /** Tickets are personal, so answers are kept per user like sessions are. */
 const liveInfos = new Map<string, LiveInfo>();
-const infoKey = (collabUrl: string, docId: string, userId: string) => `${collabUrl}\n${docId}\n${userId}`;
+const infoKey = (collabUrl: string, docId: string, userId: string, kind: LiveKind) =>
+  `${collabUrl}\n${kind === "doc" ? docId : `${kind}:${docId}`}\n${userId}`;
 
 /**
  * Asks for the doc's ticket and saved state, unless a recent answer is on
  * hand or on its way. Also opens the shared socket of a server known to edit
  * live, so it is up by the time the doc joins.
  */
-export function prefetchDocLive(collabUrl: string, docId: string, userId: string): Promise<DocCollabTicket> {
-  const key = infoKey(collabUrl, docId, userId);
+export function prefetchDocLive(
+  collabUrl: string,
+  docId: string,
+  userId: string,
+  kind: LiveKind = "doc",
+): Promise<DocCollabTicket> {
+  const key = infoKey(collabUrl, docId, userId, kind);
   const cached = liveInfos.get(key);
   if (cached && Date.now() - cached.at < LIVE_INFO_MAX_AGE_MS) return cached.promise;
   const info: LiveInfo = { at: Date.now(), promise: Promise.resolve({ enabled: false }) };
-  info.promise = api.createDocCollabTicket(docId, { state: true }).then(
+  info.promise = requestTicket(kind, docId, { state: true }).then(
     (ticket) => {
       info.value = ticket;
       if (ticket.enabled) {
-        liveEditingOff.delete(collabUrl);
+        liveEditingOff.delete(liveOffKey(collabUrl, kind));
         if (!liveEditingOn.has(collabUrl)) warmSocket(collabUrl);
         liveEditingOn.add(collabUrl);
       } else {
-        liveEditingOff.add(collabUrl);
-        liveEditingOn.delete(collabUrl);
+        liveEditingOff.add(liveOffKey(collabUrl, kind));
+        if (kind === "doc") liveEditingOn.delete(collabUrl);
       }
       return ticket;
     },
@@ -103,16 +123,21 @@ export function prefetchDocLive(collabUrl: string, docId: string, userId: string
 }
 
 /** The answer of a recent `prefetchDocLive`, if it has arrived. */
-export function peekDocLive(collabUrl: string, docId: string, userId: string): DocCollabTicket | undefined {
-  const info = liveInfos.get(infoKey(collabUrl, docId, userId));
+export function peekDocLive(
+  collabUrl: string,
+  docId: string,
+  userId: string,
+  kind: LiveKind = "doc",
+): DocCollabTicket | undefined {
+  const info = liveInfos.get(infoKey(collabUrl, docId, userId, kind));
   return info && Date.now() - info.at < LIVE_INFO_MAX_AGE_MS ? info.value : undefined;
 }
 
 /** Takes the answer for a session about to start: its state describes the
  *  doc only until the session moves on, so it is used once. */
-function takeDocLive(collabUrl: string, docId: string, userId: string): LiveTicket | undefined {
-  const value = peekDocLive(collabUrl, docId, userId);
-  liveInfos.delete(infoKey(collabUrl, docId, userId));
+function takeDocLive(collabUrl: string, docId: string, userId: string, kind: LiveKind): LiveTicket | undefined {
+  const value = peekDocLive(collabUrl, docId, userId, kind);
+  liveInfos.delete(infoKey(collabUrl, docId, userId, kind));
   return value?.enabled ? value : undefined;
 }
 
@@ -206,6 +231,7 @@ export class DocSession {
     private readonly docId: string,
     readonly document: string,
     seed: LiveTicket | undefined,
+    private readonly kind: LiveKind = "doc",
   ) {
     this.ticket = seed ?? null;
     let seeded = false;
@@ -232,7 +258,7 @@ export class DocSession {
       // Asked on every (re)join. The epoch names the copy this tab holds, so
       // the server can tell it to start over if the doc was rebuilt.
       token: async () => {
-        const ticket = ticketUsable(this.ticket) ? this.ticket : await api.createDocCollabTicket(this.docId);
+        const ticket = ticketUsable(this.ticket) ? this.ticket : await requestTicket(this.kind, this.docId);
         this.ticket = null;
         if (!ticket.enabled) throw new Error("live editing is off");
         const epoch = this.ydoc.getMap("meta").get("epoch");
@@ -276,17 +302,32 @@ export class DocSession {
     const next: DocCollaborator[] = [];
     for (const [key, state] of this.provider.awareness?.getStates() ?? []) {
       if (key === this.ydoc.clientID) continue;
-      const u = (state as { user?: Partial<DocCollaborator> }).user;
+      const { user: u, cursor } = state as { user?: Partial<DocCollaborator>; cursor?: unknown };
       if (!u?.name || !u.id) continue;
       const dedupe = `${u.kind}:${u.id}`;
-      if (seen.has(dedupe)) continue;
+      const editing = !!cursor;
+      if (seen.has(dedupe)) {
+        // The same person in two tabs is editing if either tab is.
+        if (editing) {
+          const index = next.findIndex((c) => `${c.kind}:${c.id}` === dedupe);
+          if (index >= 0 && !next[index]!.editing) next[index] = { ...next[index]!, key, editing };
+        }
+        continue;
+      }
       seen.add(dedupe);
-      next.push({ key, id: u.id, name: u.name, color: u.color ?? colorFor(u.id), kind: u.kind === "agent" ? "agent" : "member" });
+      next.push({ key, id: u.id, name: u.name, color: u.color ?? colorFor(u.id), kind: u.kind === "agent" ? "agent" : "member", editing });
     }
-    const signature = next.map((c) => `${c.key}:${c.kind}:${c.id}:${c.name}:${c.color}`).join("|");
+    const signature = next.map((c) => `${c.key}:${c.kind}:${c.id}:${c.name}:${c.color}:${c.editing}`).join("|");
     if (signature === this.signature) return;
     this.signature = signature;
     this.update({ collaborators: next });
+  };
+
+  /** Calls `listener` on every awareness change, caret moves included. */
+  watchAwareness = (listener: () => void): (() => void) => {
+    const awareness = this.provider.awareness;
+    awareness?.on("change", listener);
+    return () => awareness?.off("change", listener);
   };
 
   /** Out of the cache: no page joins it again, and it ends with its last user. */
@@ -336,7 +377,7 @@ export class DocSession {
 /** Live sessions by server, doc and user, oldest first. */
 const sessions = new Map<string, DocSession>();
 
-const sessionKey = (collabUrl: string, docId: string, userId: string) => `${collabUrl}\n${docId}\n${userId}`;
+const sessionKey = infoKey;
 
 function dropSession(session: DocSession) {
   if (sessions.get(session.key) === session) sessions.delete(session.key);
@@ -349,13 +390,19 @@ function dropSession(session: DocSession) {
  * the saved state a recent `prefetchDocLive` brought, if any. Pair with
  * `releaseDocSession`.
  */
-export function acquireDocSession(collabUrl: string, docId: string, userId: string, document: string): DocSession {
-  const key = sessionKey(collabUrl, docId, userId);
+export function acquireDocSession(
+  collabUrl: string,
+  docId: string,
+  userId: string,
+  document: string,
+  kind: LiveKind = "doc",
+): DocSession {
+  const key = sessionKey(collabUrl, docId, userId, kind);
   let session = sessions.get(key);
   if (session) {
     sessions.delete(key);
   } else {
-    session = new DocSession(key, collabUrl, docId, document, takeDocLive(collabUrl, docId, userId));
+    session = new DocSession(key, collabUrl, docId, document, takeDocLive(collabUrl, docId, userId, kind), kind);
   }
   sessions.set(key, session);
   session.retain();
@@ -373,8 +420,13 @@ export function releaseDocSession(session: DocSession, opts: { discard?: boolean
 }
 
 /** The doc's live session, if one is open or kept. */
-export function findDocSession(collabUrl: string, docId: string, userId: string): DocSession | undefined {
-  return sessions.get(sessionKey(collabUrl, docId, userId));
+export function findDocSession(
+  collabUrl: string,
+  docId: string,
+  userId: string,
+  kind: LiveKind = "doc",
+): DocSession | undefined {
+  return sessions.get(sessionKey(collabUrl, docId, userId, kind));
 }
 
 function base64ToBytes(base64: string): Uint8Array {

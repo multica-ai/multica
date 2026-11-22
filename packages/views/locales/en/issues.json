@@ -854,6 +854,17 @@
     "unread_title": "No unread issues",
     "clear_button": "Clear filters"
   },
+  "presence": {
+    "viewing_one": "{{count}} viewing",
+    "viewing_other": "{{count}} viewing",
+    "editing": "Editing",
+    "watching": "Viewing",
+    "where": "In \"{{section}}\"",
+    "more_one": "{{count}} more: {{names}}",
+    "more_other": "{{count}} more: {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Click a name to jump to their cursor"
+  },
   "agent_live": {
     "is_working": "{{name}} is working",
     "is_queued": "{{name}} is queued",

@@ -820,6 +820,15 @@
     "unread_title": "읽지 않은 태스크가 없습니다",
     "clear_button": "필터 해제"
   },
+  "presence": {
+    "viewing_other": "{{count}}명 보는 중",
+    "editing": "편집 중",
+    "watching": "보는 중",
+    "where": "'{{section}}' 편집 중",
+    "more_other": "외 {{count}}명: {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "이름을 누르면 그 사람의 커서로 이동합니다"
+  },
   "agent_live": {
     "is_working": "{{name}} 작업 중",
     "is_queued": "{{name}} 대기 중",

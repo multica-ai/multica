@@ -90,6 +90,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue_view":                         workspaceDelete,
 	"issue_view_preference":              workspaceDelete,
 	"issue_dependency":                   workspaceDelete,
+	"issue_description_collab_state":     workspaceDelete,
+	"issue_description_revision":         workspaceDelete,
 	"issue_label":                        workspaceDelete,
 	"issue_property":                     workspaceDelete,
 	"issue_pr_automation":                workspaceDelete,

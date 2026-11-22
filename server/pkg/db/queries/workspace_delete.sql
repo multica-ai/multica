@@ -617,6 +617,12 @@ deleted_child_events AS (
 deleted_unread AS (
  DELETE FROM issue_unread WHERE workspace_id=$1
 ),
+deleted_description_collab_state AS (
+ DELETE FROM issue_description_collab_state WHERE workspace_id=$1
+),
+deleted_description_revisions AS (
+ DELETE FROM issue_description_revision WHERE workspace_id=$1
+),
 deleted_issues AS (
     DELETE FROM issue WHERE issue.workspace_id = $1
 ),

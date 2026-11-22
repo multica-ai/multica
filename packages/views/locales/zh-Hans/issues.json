@@ -820,6 +820,15 @@
     "unread_title": "没有未读任务",
     "clear_button": "清除筛选"
   },
+  "presence": {
+    "viewing_other": "{{count}} 人在看",
+    "editing": "正在编辑",
+    "watching": "在看",
+    "where": "在改\"{{section}}\"",
+    "more_other": "还有 {{count}} 人：{{names}}",
+    "name_separator": "、",
+    "jump_hint": "点名字跳到对方的光标"
+  },
   "agent_live": {
     "is_working": "{{name}} 在工作",
     "is_queued": "{{name}} 排队中",

@@ -135,6 +135,7 @@ SET description = CASE
         ELSE description || E'\n\n' || sqlc.arg(markdown)
     END,
     revision = revision + 1,
+    description_revision = description_revision + 1,
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND workspace_id = sqlc.arg(workspace_id)
@@ -282,6 +283,8 @@ UPDATE issue AS i SET
     stage = changed.next_stage,
     duplicate_of_issue_id = changed.next_duplicate_of_issue_id,
     revision = i.revision + changed.did_change::integer,
+    description_revision = i.description_revision
+        + (changed.next_description IS DISTINCT FROM changed.description)::integer,
     last_activity_at = CASE WHEN changed.did_activity
         THEN GREATEST(COALESCE(i.last_activity_at, i.updated_at), now())
         ELSE i.last_activity_at
@@ -502,6 +505,12 @@ cleared_environment_configs AS (
 -- so their receipts are swept here by the issue_id copied onto each row.
 cleared_task_context_receipts AS (
     DELETE FROM task_context_receipt WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_description_collab_state AS (
+    DELETE FROM issue_description_collab_state WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_description_revisions AS (
+    DELETE FROM issue_description_revision WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 

@@ -42,6 +42,13 @@ const (
 	// for a deployment. It is a GLOBAL switch. Turning it off leaves existing
 	// doc rows untouched — they simply become unreachable until it is back on.
 	DocsV1 = "docs_v1"
+	// IssueDescriptionLive lets people and agents edit an issue's description
+	// together in real time (MUL-9778), on the collaboration service Docs use.
+	// Off by default; FF_ISSUE_DESCRIPTION_LIVE=true turns it on where that
+	// service is configured. It is a GLOBAL switch. Turning it off sends
+	// editors back to saving through the API; sessions already open still
+	// save what was typed.
+	IssueDescriptionLive = "issue_description_live"
 	// DashboardHistory365d offers the 365-day range on the workspace dashboard
 	// (MUL-9490). On by default; FF_DASHBOARD_HISTORY_365D=off hides the range
 	// again if the year-long dashboard queries turn out too slow for a
@@ -99,6 +106,10 @@ func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bo
 
 func DocsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, DocsV1, false)
+}
+
+func IssueDescriptionLiveEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, IssueDescriptionLive, false)
 }
 
 func DashboardHistory365dEnabled(ctx context.Context, flags *featureflag.Service) bool {

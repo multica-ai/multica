@@ -35,6 +35,26 @@ func parseMentions(content string) []mention {
 	return result
 }
 
+// previousDescriptionMentions keys the mentions an issue:updated description
+// change does not newly introduce: those of the previous description, plus
+// those a live editing session already stored. A mention typed live is saved
+// by autosave while half written, and an editor may delete and retype it;
+// either way it notifies once per session.
+func previousDescriptionMentions(payload map[string]any) map[string]bool {
+	prev := map[string]bool{}
+	if prevDescription, _ := payload["prev_description"].(*string); prevDescription != nil {
+		for _, m := range parseMentions(*prevDescription) {
+			prev[m.Type+":"+m.ID] = true
+		}
+	}
+	if seen, _ := payload["description_seen_mentions"].([]string); seen != nil {
+		for _, key := range seen {
+			prev[key] = true
+		}
+	}
+	return prev
+}
+
 // parentBubbleNotifTypes is the allowlist of inbox notification types that
 // bubble up from a sub-issue to subscribers of its parent. Other event types
 // only notify subscribers of the sub-issue itself, to keep parent watchers'
@@ -912,7 +932,6 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		descriptionChanged, _ := payload["description_changed"].(bool)
 		prevAssigneeType, _ := payload["prev_assignee_type"].(*string)
 		prevAssigneeID, _ := payload["prev_assignee_id"].(*string)
-		prevDescription, _ := payload["prev_description"].(*string)
 		archiveActions := issueFieldActions(payload)
 
 		if assigneeChanged {
@@ -1083,12 +1102,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if descriptionChanged && issue.Description != nil {
 			newMentions := parseMentions(*issue.Description)
 			if len(newMentions) > 0 {
-				prevMentioned := map[string]bool{}
-				if prevDescription != nil {
-					for _, m := range parseMentions(*prevDescription) {
-						prevMentioned[m.Type+":"+m.ID] = true
-					}
-				}
+				prevMentioned := previousDescriptionMentions(payload)
 				var added []mention
 				for _, m := range newMentions {
 					if !prevMentioned[m.Type+":"+m.ID] {
@@ -1096,6 +1110,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					}
 				}
 				skip := map[string]bool{e.ActorID: true}
+				if editors, ok := payload["description_live_editors"].([]handler.DocContributor); ok {
+					for _, editor := range editors {
+						skip[editor.ID] = true
+					}
+				}
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
 					issue.Title, "", skip, emptyDetails)
 			}

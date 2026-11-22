@@ -75,29 +75,17 @@ export function useIssueSidebarSectionLabels(): Record<IssueSidebarSection, stri
 export function IssueSidebarSections({
   sections,
   available,
-  revealed = [],
-  onRevealEnd,
 }: {
   sections: Record<IssueSidebarSection, ReactNode>;
   available: readonly IssueSidebarSection[];
-  /**
-   * Hidden sections to show anyway, such as the one a header chip jumped to.
-   * Switching one of them in settings ends its reveal, so the switch wins.
-   */
-  revealed?: readonly IssueSidebarSection[];
-  onRevealEnd?: (section: IssueSidebarSection) => void;
 }) {
   const { t } = useT("issues");
   const order = useIssueSidebarSectionsStore(selectIssueSidebarOrder);
   const hidden = useIssueSidebarSectionsStore((s) => s.hidden);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const isShown = (id: IssueSidebarSection) => !hidden.includes(id) || revealed.includes(id);
-  const visible = order.filter((id) => available.includes(id) && isShown(id));
-  const hiddenCount = available.filter((id) => !isShown(id)).length;
-  const onShownChange = (id: IssueSidebarSection) => {
-    if (revealed.includes(id)) onRevealEnd?.(id);
-  };
+  const visible = order.filter((id) => available.includes(id) && !hidden.includes(id));
+  const hiddenCount = available.filter((id) => hidden.includes(id)).length;
   const getEmptySections = () =>
     new Set(
       visible.filter(
@@ -110,7 +98,6 @@ export function IssueSidebarSections({
       <IssueSidebarSettings
         available={available}
         getEmptySections={getEmptySections}
-        onShownChange={onShownChange}
         trigger={
           <IconButton
             variant="ghost"
@@ -134,7 +121,6 @@ export function IssueSidebarSections({
             <IssueSidebarSettings
               available={available}
               getEmptySections={getEmptySections}
-              onShownChange={onShownChange}
               side="top"
               align="start"
               trigger={
@@ -164,7 +150,6 @@ export function IssueSidebarSettings({
   available,
   trigger,
   getEmptySections,
-  onShownChange,
   side = "bottom",
   align = "end",
 }: {
@@ -173,7 +158,6 @@ export function IssueSidebarSettings({
   trigger: ReactElement;
   /** Shown sections with nothing to render on this issue, read when the popover opens. */
   getEmptySections?: () => ReadonlySet<IssueSidebarSection>;
-  onShownChange?: (section: IssueSidebarSection, shown: boolean) => void;
   side?: "top" | "bottom";
   align?: "start" | "end";
 }) {
@@ -235,10 +219,7 @@ export function IssueSidebarSettings({
                     note={note}
                     shown={shown}
                     locked={locked}
-                    onShownChange={(next) => {
-                      setHidden(id, !next);
-                      onShownChange?.(id, next);
-                    }}
+                    onShownChange={(next) => setHidden(id, !next)}
                   />
                 );
               })}

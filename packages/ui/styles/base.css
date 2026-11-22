@@ -376,7 +376,18 @@ html[data-sidebar-resizing="true"] {
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-[data-group]:has(> [data-separator="active"]) > [data-right-sidebar-panel] {
+/* While a panel separator is dragged (ResizableHandle marks <html>), the
+ * resize cursor follows the captured pointer across the panels, and the
+ * right sidebar's flex-grow tracks the pointer without easing. */
+html[data-resizing="col"] * {
+  cursor: col-resize;
+}
+
+html[data-resizing="row"] * {
+  cursor: row-resize;
+}
+
+html[data-resizing] [data-right-sidebar-panel] {
   transition: none;
 }
 

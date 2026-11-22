@@ -1,21 +1,24 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import * as Y from "yjs";
 import { useAuthStore } from "@multica/core/auth";
 import { configStore } from "@multica/core/config";
 import { useWS } from "@multica/core/realtime";
 import type { EditorCollaboration } from "../../editor/extensions";
-import { createDocumentCodec } from "../../editor/schema/codec";
+import { COLLAB_FIELD, createDocumentCodec } from "../../editor/schema/codec";
 import {
   acquireDocSession,
   colorFor,
   findDocSession,
   liveEditingOff,
+  liveOffKey,
   peekDocLive,
   prefetchDocLive,
   releaseDocSession,
   type DocCollaborator,
   type DocSession,
   type DocSessionState,
+  type LiveKind,
 } from "./doc-live-session";
 
 export type { DocCollaborator };
@@ -45,6 +48,10 @@ export type DocCollabState =
       collaborators: DocCollaborator[];
       /** Changes the editor's key when the session starts over. */
       generation: number;
+      /** The heading a collaborator's caret is under, if any. */
+      locate: (key: number) => string | null;
+      /** Calls back on every caret move, for views that show where people are. */
+      watchCarets: (listener: () => void) => () => void;
     };
 
 const IDLE_STATE: DocSessionState = { ready: false, synced: false, connected: false, collaborators: [], reset: false };
@@ -63,36 +70,96 @@ function editedContent(session: DocSession, base: string): string | null {
   }
 }
 
-export function useDocCollab(docId: string, content: string): DocCollabState {
+/** The text of the last heading at or above a collaborator's caret. */
+export function locateCaret(session: DocSession, key: number): string | null {
+  const cursor = (session.provider.awareness?.getStates().get(key) as { cursor?: { head?: unknown } } | undefined)?.cursor;
+  if (!cursor?.head) return null;
+  let position: Y.AbsolutePosition | null = null;
+  try {
+    position = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(cursor.head), session.ydoc);
+  } catch {
+    return null;
+  }
+  if (!position) return null;
+  const root = session.ydoc.getXmlFragment(COLLAB_FIELD);
+  const blocks = root.toArray();
+  let index = position.index;
+  if (position.type !== root) {
+    let block: Y.AbstractType<unknown> | null = position.type;
+    while (block && block.parent !== root) block = block.parent as Y.AbstractType<unknown> | null;
+    if (!block) return null;
+    index = blocks.indexOf(block as (typeof blocks)[number]);
+  }
+  for (let i = Math.min(index, blocks.length - 1); i >= 0; i--) {
+    const block = blocks[i];
+    if (block instanceof Y.XmlElement && block.nodeName === "heading") {
+      const text = plainText(block).trim();
+      if (text) return text;
+    }
+  }
+  return null;
+}
+
+function plainText(node: Y.XmlElement | Y.XmlText | Y.XmlHook): string {
+  if (node instanceof Y.XmlText) {
+    return (node.toDelta() as { insert?: unknown }[]).map((d) => (typeof d.insert === "string" ? d.insert : "")).join("");
+  }
+  if (node instanceof Y.XmlElement) return node.toArray().map(plainText).join("");
+  return "";
+}
+
+/**
+ * The live session of a doc, or of an issue's description (`kind`). A host
+ * that stays mounted while `docId` changes gets a fresh state for each. With
+ * `enabled` false nothing is asked and the host edits solo, as for a guest.
+ */
+export function useDocCollab(
+  docId: string,
+  content: string,
+  kind: LiveKind = "doc",
+  enabled = true,
+): DocCollabState {
   const { collabUrl } = useWS();
   const user = useAuthStore((s) => s.user);
   const userId = user?.id ?? "";
   // A kept session or an answer fetched ahead of the page settles the mode
   // without waiting.
-  const [initial] = useState(() => {
-    if (liveEditingOff.has(collabUrl)) return { mode: "solo" as const, document: null };
+  const settle = () => {
+    if (liveEditingOff.has(liveOffKey(collabUrl, kind))) return { mode: "solo" as const, document: null };
     const document =
-      findDocSession(collabUrl, docId, userId)?.document ??
+      findDocSession(collabUrl, docId, userId, kind)?.document ??
       (() => {
-        const ticket = peekDocLive(collabUrl, docId, userId);
+        const ticket = peekDocLive(collabUrl, docId, userId, kind);
         return ticket?.enabled ? ticket.document : null;
       })();
     return document ? { mode: "live" as const, document } : { mode: "checking" as const, document: null };
-  });
+  };
+  const [initial] = useState(settle);
   const [mode, setMode] = useState<"checking" | "solo" | "live">(initial.mode);
   const [document, setDocument] = useState<string | null>(initial.document);
   const [carried, setCarried] = useState<string | null>(null);
-  const [generation, setGeneration] = useState(0);
   const [session, setSession] = useState<DocSession | null>(null);
+  const target = `${kind}:${docId}`;
+  const [settledTarget, setSettledTarget] = useState(target);
+  if (settledTarget !== target) {
+    const next = settle();
+    setSettledTarget(target);
+    setMode(next.mode);
+    setDocument(next.document);
+    setCarried(null);
+    // The previous doc's session stays in state until its effect cleans up.
+    setSession(null);
+  }
+  const [generation, setGeneration] = useState(0);
   const [slow, setSlow] = useState(false);
   const discard = useRef(false);
   const contentRef = useRef(content);
   contentRef.current = content;
 
   useEffect(() => {
-    if (mode !== "checking") return;
+    if (!enabled || mode !== "checking") return;
     let cancelled = false;
-    prefetchDocLive(collabUrl, docId, userId)
+    prefetchDocLive(collabUrl, docId, userId, kind)
       .then((ticket) => {
         if (cancelled) return;
         setDocument(ticket.enabled ? ticket.document : null);
@@ -104,18 +171,18 @@ export function useDocCollab(docId: string, content: string): DocCollabState {
     return () => {
       cancelled = true;
     };
-  }, [mode, docId, collabUrl, userId]);
+  }, [enabled, mode, docId, collabUrl, userId, kind]);
 
   useEffect(() => {
-    if (mode !== "live" || !document || !userId) return;
-    const next = acquireDocSession(collabUrl, docId, userId, document);
+    if (!enabled || mode !== "live" || !document || !userId) return;
+    const next = acquireDocSession(collabUrl, docId, userId, document, kind);
     discard.current = false;
     setSession(next);
     return () => {
       releaseDocSession(next, { discard: discard.current });
       setSession(null);
     };
-  }, [mode, document, docId, collabUrl, userId, generation]);
+  }, [enabled, mode, document, docId, collabUrl, userId, generation, kind]);
 
   const state = useSyncExternalStore(session?.subscribe ?? noSubscribe, session?.getState ?? idleState);
 
@@ -147,6 +214,9 @@ export function useDocCollab(docId: string, content: string): DocCollabState {
     };
   }, [session, user]);
 
+  const locate = useCallback((key: number) => (session ? locateCaret(session, key) : null), [session]);
+
+  if (!enabled) return { mode: "solo" };
   if (mode === "solo") return { mode, carried };
   // A reset session is about to be replaced; nothing may keep editing it.
   if (mode === "checking" || !collaboration || !session || state.reset) return { mode: "checking" };
@@ -159,5 +229,7 @@ export function useDocCollab(docId: string, content: string): DocCollabState {
     collaboration,
     collaborators: state.collaborators,
     generation: session.id,
+    locate,
+    watchCarets: session.watchAwareness,
   };
 }
