@@ -770,41 +770,45 @@ export function InboxPage() {
 
   // -- Shared sub-components --------------------------------------------------
 
+  // The archive is a second list of the same page, so the title doubles as
+  // the switch between the two instead of costing a row of its own. Reused in
+  // the desktop empty-detail header so guests (whose sidebar has no Inbox menu)
+  // and collapsed-list layouts keep the same switcher.
+  const viewSwitcher = (
+    <DropdownMenu>
+      <DropdownMenuTrigger className="-ml-1.5 mr-1.5 flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-accent/60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring aria-expanded:bg-accent/60">
+        <span className="min-w-0 truncate">
+          {isArchivedView ? t(($) => $.list.archived_title) : t(($) => $.page.title)}
+        </span>
+        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-auto min-w-44">
+        <DropdownMenuRadioGroup
+          value={view}
+          onValueChange={(value) => setView(value as InboxView)}
+        >
+          <DropdownMenuRadioItem value="inbox">
+            <Inbox className="h-4 w-4" />
+            <span className="flex-1">{t(($) => $.page.title)}</span>
+            {unreadCount > 0 && (
+              <span className="text-caption tabular-nums text-muted-foreground">
+                {unreadCount}
+              </span>
+            )}
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="archived">
+            <Archive className="h-4 w-4" />
+            {t(($) => $.list.archived_title)}
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   const listHeader = (
     <PanelHeader
       as="h1"
-      title={
-        // The archive is a second list of the same page, so the title doubles
-        // as the switch between the two instead of costing a row of its own.
-        <DropdownMenu>
-          <DropdownMenuTrigger className="-ml-1.5 mr-1.5 flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-accent/60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring aria-expanded:bg-accent/60">
-            <span className="min-w-0 truncate">
-              {isArchivedView ? t(($) => $.list.archived_title) : t(($) => $.page.title)}
-            </span>
-            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-auto min-w-44">
-            <DropdownMenuRadioGroup
-              value={view}
-              onValueChange={(value) => setView(value as InboxView)}
-            >
-              <DropdownMenuRadioItem value="inbox">
-                <Inbox className="h-4 w-4" />
-                <span className="flex-1">{t(($) => $.page.title)}</span>
-                {unreadCount > 0 && (
-                  <span className="text-caption tabular-nums text-muted-foreground">
-                    {unreadCount}
-                  </span>
-                )}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="archived">
-                <Archive className="h-4 w-4" />
-                {t(($) => $.list.archived_title)}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      }
+      title={viewSwitcher}
       leading={<CollapsedNavTrigger />}
       meta={
         !isArchivedView && unreadCount > 0 && (
@@ -1290,9 +1294,7 @@ export function InboxPage() {
     <>
       {(!archiveSplit || listCollapsed) && (
         <PageHeader>
-          <h1 className="text-body font-semibold">
-            {isArchivedView ? t(($) => $.list.archived_title) : t(($) => $.page.title)}
-          </h1>
+          <h1 className="text-body font-semibold">{viewSwitcher}</h1>
         </PageHeader>
       )}
       {liveFailed ? (
@@ -1307,7 +1309,6 @@ export function InboxPage() {
           inboxZeroRises={inboxZeroRises}
           isCompact={isCompact}
           onClearFiltersAndContinue={handleClearFiltersAndContinue}
-          onViewArchived={() => setView("archived")}
         />
       )}
     </>
