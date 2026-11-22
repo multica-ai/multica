@@ -6,6 +6,7 @@ import type { AgentTask, Issue, QuickAction } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
+import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
 import { useAssigneePicksStore } from "@multica/core/issues/stores/assignee-picks-store";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
@@ -108,8 +109,8 @@ const { openInNewTabMock, openInDesktopMock, getShareableUrlMock, navState } = v
   navState: { hasOpenInNewTab: true, hasOpenInDesktop: false, pathname: "/test/issues/issue-1", hash: "" },
 }));
 
-vi.mock("../../../navigation", () => ({
-  useNavigation: () => ({
+function navigationAdapter(): NavigationAdapter {
+  return {
     push: vi.fn(),
     pathname: navState.pathname,
     searchParams: new URLSearchParams(),
@@ -119,8 +120,8 @@ vi.mock("../../../navigation", () => ({
     ...(navState.hasOpenInNewTab ? { openInNewTab: openInNewTabMock } : {}),
     ...(navState.hasOpenInDesktop ? { openInDesktop: openInDesktopMock } : {}),
     getShareableUrl: getShareableUrlMock,
-  }),
-}));
+  };
+}
 
 const { toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),
@@ -203,7 +204,9 @@ function wrap(ui: React.ReactNode) {
   });
   return (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+      <QueryClientProvider client={qc}>
+        <NavigationProvider value={navigationAdapter()}>{ui}</NavigationProvider>
+      </QueryClientProvider>
     </I18nProvider>
   );
 }

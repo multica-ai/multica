@@ -6,7 +6,7 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
+  render as renderUI,
   screen,
   waitFor,
 } from "@testing-library/react";
@@ -32,6 +32,7 @@ import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-s
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
+import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 
 // Mutable so tests can simulate a workspace switch — the workspace layout
 // does not remount its children on switch, so the surface must handle the
@@ -89,14 +90,14 @@ vi.mock("../../i18n", () => ({
   useTimeAgo: () => () => "now",
 }));
 
-vi.mock("../../navigation", () => ({
+vi.mock("../../navigation", async () => ({
+  ...(await vi.importActual<typeof import("../../navigation/context")>("../../navigation/context")),
   useWarmRoute: () => undefined,
   AppLink: ({ children, href, ...props }: React.ComponentProps<"a">) => (
     <a href={href} {...props}>
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/" }),
   resolveClickIntent: () => "push",
   useIntentNavigate: () => () => {},
 }));
@@ -111,6 +112,19 @@ vi.mock("@multica/core/paths", async () => {
     useWorkspacePaths: () => actual.paths.workspace("test"),
   };
 });
+
+const navigation: NavigationAdapter = {
+  pathname: "/", searchParams: new URLSearchParams(), hash: "",
+  push: vi.fn(), replace: vi.fn(), back: vi.fn(), getShareableUrl: (path) => path,
+};
+
+// The surface now owns review provenance, even when a test renders only its
+// loading/list shell. Keep the real provider across render and rerender.
+function render(ui: React.ReactNode) {
+  return renderUI(ui, { wrapper: ({ children }) => (
+    <NavigationProvider value={navigation}>{children}</NavigationProvider>
+  ) });
+}
 
 function makeIssue(id: string, title: string, projectId: string): Issue {
   return {

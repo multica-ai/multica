@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -44,17 +45,16 @@ vi.mock("@multica/core/paths", async () => {
 });
 
 // Mock @multica/views/navigation (AppLink + useNavigation)
-vi.mock("../../navigation", () => ({
+vi.mock("../../navigation", async () => ({
+  ...(await vi.importActual<typeof import("../../navigation/context")>("../../navigation/context")),
   useWarmRoute: () => undefined,
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues", searchParams: new URLSearchParams() }),
   resolveClickIntent: () => "push",
   useIntentNavigate: () => () => {},
-  NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 vi.mock("../../chat/use-start-chat-with-draft", () => ({
@@ -660,6 +660,11 @@ import { IssuesPage } from "./issues-page";
 // Helpers
 // ---------------------------------------------------------------------------
 
+const navigation: NavigationAdapter = {
+  pathname: "/issues", searchParams: new URLSearchParams(), hash: "",
+  push: vi.fn(), replace: vi.fn(), back: vi.fn(), getShareableUrl: (path) => path,
+};
+
 function renderWithQuery(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: {
@@ -670,7 +675,7 @@ function renderWithQuery(ui: React.ReactElement) {
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
-        {ui}
+        <NavigationProvider value={navigation}>{ui}</NavigationProvider>
       </QueryClientProvider>
     </I18nProvider>,
   );
