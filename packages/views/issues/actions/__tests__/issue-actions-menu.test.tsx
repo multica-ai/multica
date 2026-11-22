@@ -14,9 +14,9 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mocks — same pattern as the issue-detail test suite.
 // ---------------------------------------------------------------------------
 
-const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true, offered: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: deletionPolicy.offered }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -213,6 +213,7 @@ beforeEach(() => {
   useAssigneePicksStore.setState({ byScope: {} });
   platform.desktop = false;
   deletionPolicy.allowed = true;
+  deletionPolicy.offered = true;
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
   openInDesktopMock.mockReset();
@@ -389,6 +390,15 @@ describe("IssueActionsDropdown", () => {
     expect(item.closest('[role="menuitem"]')).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(item);
     expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  it("leaves Delete issue out for a viewer who can delete nothing (a guest)", async () => {
+    deletionPolicy.allowed = false;
+    deletionPolicy.offered = false;
+    render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
+    fireEvent.click(screen.getByTestId("trigger"));
+    expect(await screen.findByText("Copy link")).toBeInTheDocument();
+    expect(screen.queryByText("Delete issue")).not.toBeInTheDocument();
   });
 
   it("clicking Delete issue opens the delete-confirm modal", async () => {

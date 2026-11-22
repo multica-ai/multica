@@ -14,7 +14,7 @@ vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: (selector: (s: typeof selection) => unknown) => selector(selection),
 }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => true }),
+  useIssueDeletion: () => ({ canDelete: () => true, offersDelete: true }),
 }));
 vi.mock("@multica/core/issues/mutations", () => ({
   useBatchUpdateIssues: () => ({ mutateAsync: batchUpdate, isPending: false }),
