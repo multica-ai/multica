@@ -1504,7 +1504,6 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   // must neither restore the full page's offset nor leave one behind for it.
   const scrollContainerKey = `${isPeek ? "peek" : "main"}:${id}`;
   const restoredScrollTop = useRestoredScrollOffset(scrollContainerKey);
-  const restoreScrollRef = useRestoredScrollRef(scrollContainerKey);
   // Whether this issue's comment-highlight deep link already landed here
   // (survives the tab's unmount, unlike didHighlightRef below): a remount
   // that restores the view must not re-run the jump.
@@ -1585,16 +1584,6 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   onHighlightLandedRef.current = onHighlightLanded;
   const writeViewState = useViewStateWriter();
   const rightSidebarShortcutTargetRef = useRef<HTMLDivElement | null>(null);
-  const attachScrollContainer = useCallback(
-    (el: HTMLDivElement | null) => {
-      // The peek has no sidebar, so it must not claim the toggle shortcut.
-      rightSidebarShortcutTargetRef.current = isPeek ? null : el;
-      setScrollContainerEl(el);
-      setScrollContainerWidth(el?.clientWidth ?? 0);
-      restoreScrollRef(el);
-    },
-    [isPeek, restoreScrollRef],
-  );
   const [pendingPostedCommentId, setPendingPostedCommentId] = useState<string | null>(null);
   const scrollToTimelineBottom = useCallback((commentId: string) => {
     setPendingPostedCommentId(commentId);
@@ -2166,6 +2155,23 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
     ready: timelineReady,
     skipRestore: isPeek || pendingHighlight,
   });
+  // When a deep-link landing or semantic reading anchor owns scroll, disable
+  // pixel scroll restoration so its settle-window hold cannot yank the scroll
+  // container back to a stale pixel offset while virtualized rows measure.
+  const ownsTimelineScroll = isPeek || landingAtMount || pendingHighlight || !!readingAnchor;
+  const restoreScrollRef = useRestoredScrollRef(scrollContainerKey, {
+    disabled: ownsTimelineScroll,
+  });
+  const attachScrollContainer = useCallback(
+    (el: HTMLDivElement | null) => {
+      // The peek has no sidebar, so it must not claim the toggle shortcut.
+      rightSidebarShortcutTargetRef.current = isPeek ? null : el;
+      setScrollContainerEl(el);
+      setScrollContainerWidth(el?.clientWidth ?? 0);
+      restoreScrollRef(el);
+    },
+    [isPeek, restoreScrollRef],
+  );
   useEffect(() => {
     const container = scrollContainerEl;
     if (!readingAnchor || !container || issueLoading || timelineLoading || commentTasksLoading) return;
@@ -4481,7 +4487,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
-                      initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
+                      initialScrollTop={ownsTimelineScroll ? undefined : restoredScrollTop}
                       heightEstimates={timelineHeightEstimates}
                       increaseViewportBy={timelineOverscan}
                       totalListHeightChanged={handleTimelineHeightChange}
