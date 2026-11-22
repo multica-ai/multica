@@ -451,6 +451,9 @@ importers:
 
   apps/docs:
     dependencies:
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@multica/ui':
         specifier: workspace:*
         version: link:../../packages/ui

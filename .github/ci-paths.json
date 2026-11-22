@@ -23,6 +23,8 @@
     "server/internal/daemon/config.go",
     "server/pkg/agent/builtin_runtimes.go",
     "server/internal/featureflags/keys.go",
+    "packages/core/ai-traffic/**",
+    "SELF_HOSTING_AI.md",
     "package.json",
     ".npmrc",
     "pnpm-lock.yaml",

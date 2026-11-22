@@ -22,6 +22,8 @@ for (const [name, files, selected] of [
   ["release creation", [".goreleaser.yml"], ["scripts"]],
   ["docs only", ["apps/docs/content/docs/guide.mdx"], ["quality", "docs"]],
   ["docs test", ["apps/docs/lib/unrendered-bold.test.ts"], ["quality", "docs"]],
+  ["AI traffic classifier", ["packages/core/ai-traffic/index.ts"], ["frontend", "quality", "docs"]],
+  ["self-hosting guide for agents", ["SELF_HOSTING_AI.md"], ["docs"]],
   ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality"]],
   ["mobile UI", ["apps/mobile/app/index.tsx"], ["quality"]],
   ["collaboration service", ["apps/collab/src/documents.ts"], ["frontend", "quality"]],
