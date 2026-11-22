@@ -85,7 +85,7 @@ describe("SteerReceipts", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send as a new run" }));
     await waitFor(() => expect(api.createComment).toHaveBeenCalledWith(
-      "issue", "Only fix web.", undefined, "thread", undefined, undefined, undefined,
+      "issue", "Only fix web.", undefined, "thread", undefined, undefined, undefined, undefined,
     ));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Send as a new run" })).not.toBeInTheDocument());
   });
