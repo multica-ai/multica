@@ -33,6 +33,7 @@ import { RESOURCES } from "../locales";
 import enLayout from "../locales/en/layout.json";
 import zhHansProjects from "../locales/zh-Hans/projects.json";
 import { SearchCommand } from "./search-command";
+import { DOC_SEARCH_DEBOUNCE_MS } from "./use-doc-search";
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
@@ -475,6 +476,10 @@ describe("SearchCommand", () => {
       const user = userEvent.setup();
       renderSearch();
       await user.type(input(), "a");
+
+      // Past the doc search debounce, so a request would have gone out.
+      await act(() => new Promise((resolve) => setTimeout(resolve, DOC_SEARCH_DEBOUNCE_MS + 100)));
+      expect(api("searchDocs")).not.toHaveBeenCalled();
 
       expect(requestedKeys).toContain(JSON.stringify(agentListOptions("ws-test").queryKey));
       expect(requestedKeys).not.toContain(JSON.stringify(autopilotListOptions("ws-test").queryKey));
