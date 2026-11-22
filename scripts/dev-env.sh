@@ -536,6 +536,26 @@ database_url_name() {
   ' "$1" 2>/dev/null || true
 }
 
+# Prints the user of a DATABASE_URL the shared compose container can serve, or
+# nothing: the container only ever publishes localhost:5432.
+container_database_user() {
+  node -e '
+    const url = new URL(process.argv[1]);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) process.exit(0);
+    if ((url.port || "5432") !== "5432") process.exit(0);
+    process.stdout.write(decodeURIComponent(url.username) || "multica");
+  ' "$1" 2>/dev/null || true
+}
+
+# The path ensure_database takes without psql, so a database `up` created
+# through the container can be dropped on a machine that never had psql.
+container_psql() {
+  local user=$1
+  shift
+  command -v docker >/dev/null 2>&1 || return 1
+  docker compose -f "$REPO_ROOT/docker-compose.yml" exec -T postgres psql -U "$user" -d postgres "$@"
+}
+
 # Diagnoses the failure mode this whole script exists to make impossible:
 # something other than the container owns 5432, so the container never bound
 # the host port and a docker-exec create landed in the wrong server.
@@ -1962,7 +1982,7 @@ cmd_down() {
 }
 
 cmd_destroy() {
-  local name="" assume_yes=0 reply admin_url failures=0
+  local name="" assume_yes=0 reply admin_url db_user failures=0
   local expected_workspaces expected_desktop_data desktop_profile_dir
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2006,8 +2026,18 @@ cmd_destroy() {
       failures=$((failures + 1))
     fi
   else
-    warn "psql not found; $DB_NAME was left in place."
-    failures=$((failures + 1))
+    db_user="$(container_database_user "$DATABASE_URL")"
+    if [ -n "$db_user" ] && container_psql "$db_user" -tAc 'SELECT 1' >/dev/null 2>&1; then
+      if container_psql "$db_user" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$DB_NAME\" WITH (FORCE)" >/dev/null; then
+        ok "dropped database $DB_NAME through the shared PostgreSQL container"
+      else
+        warn "failed to drop database $DB_NAME; keeping its manifest"
+        failures=$((failures + 1))
+      fi
+    else
+      warn "psql not found and the shared PostgreSQL container is not reachable; $DB_NAME was left in place."
+      failures=$((failures + 1))
+    fi
   fi
 
   if rm -rf "$PROFILE_DIR"; then

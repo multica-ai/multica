@@ -1149,6 +1149,70 @@ require_contains "$out" "manifest and slot were kept"
 dev_env destroy drop-fails-904 --yes > "$out" 2>&1 || fail "retrying destroy after database recovery failed"
 
 # ---------------------------------------------------------------------------
+# Without psql, `up` creates the database through the shared compose container,
+# so destroy has to drop it there too, or every destroy on such a machine leaks
+# its slot database.
+# ---------------------------------------------------------------------------
+no_psql_path=""
+IFS=: read -ra path_dirs <<< "$PATH"
+for dir in "${path_dirs[@]}"; do
+  [ "$dir" != "$fake_bin" ] || continue
+  if [ -e "$dir/psql" ]; then
+    shadow="$tmp_dir/no-psql/$(printf '%s' "$dir" | cksum | cut -d' ' -f1)"
+    mkdir -p "$shadow"
+    for exe in "$dir"/*; do [ "${exe##*/}" = psql ] || ln -sf "$exe" "$shadow/"; done
+    dir=$shadow
+  fi
+  no_psql_path="${no_psql_path:+$no_psql_path:}$dir"
+done
+docker_bin="$tmp_dir/docker-bin"
+mkdir -p "$docker_bin"
+cat > "$docker_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${DOCKER_LOG:-}" ] || printf '%s\n' "$*" >> "$DOCKER_LOG"
+[ "${DOCKER_POSTGRES_UP:-1}" = 1 ] || { echo 'service "postgres" is not running' >&2; exit 1; }
+case " $* " in
+  *" exec -T postgres psql "*"DROP DATABASE "*) exit 0 ;;
+  *" exec -T postgres psql "*) printf '1\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$docker_bin/docker"
+no_psql_dev_env() {
+  PATH="$docker_bin:$no_psql_path" bash "$root_dir/scripts/dev-env.sh" "$@"
+}
+PATH="$docker_bin:$no_psql_path" command -v psql >/dev/null 2>&1 \
+  && fail "the no-psql PATH still resolves psql"
+
+docker_log="$tmp_dir/docker-no-psql.log"
+write_manifest "no-psql-908" "$root_dir" 908
+status=0
+DOCKER_POSTGRES_UP=0 DOCKER_LOG="$docker_log" no_psql_dev_env destroy no-psql-908 --yes > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "destroy succeeded with neither psql nor the PostgreSQL container"
+require_contains "$out" "psql not found and the shared PostgreSQL container is not reachable"
+[ -f "$MULTICA_DEV_HOME/envs/no-psql-908/manifest.env" ] \
+  || fail "destroy discarded the manifest while the database was left in place"
+! grep -Fq "DROP DATABASE" "$docker_log" || fail "destroy tried to drop through a container that is not running"
+
+: > "$docker_log"
+DOCKER_LOG="$docker_log" no_psql_dev_env destroy no-psql-908 --yes > "$out" 2>&1 \
+  || { sed 's/^/  /' "$out" >&2; fail "destroy without psql did not drop the database through the container"; }
+grep -Fq "exec -T postgres psql -U multica -d postgres -v ON_ERROR_STOP=1 -c DROP DATABASE IF EXISTS \"multica_dev_env_test_908\" WITH (FORCE)" "$docker_log" \
+  || fail "destroy without psql did not drop the slot database in the container: $(cat "$docker_log")"
+[ ! -d "$MULTICA_DEV_HOME/envs/no-psql-908" ] || fail "destroy without psql kept the manifest after dropping the database"
+
+# The container only serves localhost:5432; a database elsewhere is not its to drop.
+write_manifest "no-psql-remote-909" "$root_dir" 909
+sed -i.bak 's#@localhost:5432/#@db.example.com:5432/#' "$MULTICA_DEV_HOME/envs/no-psql-remote-909/manifest.env"
+: > "$docker_log"
+status=0
+DOCKER_LOG="$docker_log" no_psql_dev_env destroy no-psql-remote-909 --yes > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "destroy without psql reported success for a remote database"
+[ ! -s "$docker_log" ] || fail "destroy dropped a remote environment's database through the local container: $(cat "$docker_log")"
+[ -f "$MULTICA_DEV_HOME/envs/no-psql-remote-909/manifest.env" ] || fail "destroy discarded the remote environment's manifest"
+rm -rf "$MULTICA_DEV_HOME/envs/no-psql-remote-909"
+
+# ---------------------------------------------------------------------------
 # destroy consumes the manifest: the slot is free afterwards, which is what
 # makes the registry an allocator rather than a second place to leak.
 # ---------------------------------------------------------------------------
