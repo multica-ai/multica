@@ -1,4 +1,5 @@
 import type { Lang } from "../voice-input/copy";
+import type { MockImageKind } from "./mock-images";
 
 export type IssueStatus = "in_review" | "in_progress" | "todo" | "done";
 export type IssuePriority = "urgent" | "high" | "medium" | "low";
@@ -9,11 +10,21 @@ export interface DemoActor {
   isAgent?: boolean;
 }
 
+export interface DemoCommentImage {
+  kind: MockImageKind;
+  caption: Record<Lang, string>;
+  /** Extra decode delay relative to base network latency. */
+  delayMultiplier: number;
+}
+
 export interface DemoComment {
   id: string;
   author: DemoActor;
   time: Record<Lang, string>;
-  body: Record<Lang, string>;
+  body: Record<Lang, string[]>;
+  code?: string;
+  runBadge?: Record<Lang, string>;
+  image?: DemoCommentImage;
   isTarget?: boolean;
 }
 
@@ -47,6 +58,166 @@ export const ACTORS = {
   cursor: { name: "Cursor", initials: "C", isAgent: true },
 } satisfies Record<string, DemoActor>;
 
+/**
+ * Generates realistic multi-comment history (12–16 comments per issue, ~3,000–4,500px tall)
+ * with embedded screenshots placed BOTH above and inside the target comment so scroll
+ * landing, async image CLS, and network request latency behave like real Multica issues.
+ */
+function buildLongTimeline(opts: {
+  issueTag: string;
+  agent: DemoActor;
+  reviewer: DemoActor;
+  leadBodyZh: string;
+  leadBodyEn: string;
+  targetBodyZh: string;
+  targetBodyEn: string;
+  targetTime: Record<Lang, string>;
+  targetAuthor: DemoActor;
+  followUpZh?: string;
+  followUpEn?: string;
+  images: [MockImageKind, MockImageKind, MockImageKind];
+  totalBeforeTarget: number;
+}): DemoComment[] {
+  const out: DemoComment[] = [];
+  const { issueTag, agent, reviewer, images, totalBeforeTarget } = opts;
+
+  for (let i = 1; i <= totalBeforeTarget; i++) {
+    const isAgentTurn = i % 2 === 1;
+    const author = isAgentTurn ? agent : i % 4 === 0 ? ACTORS.jiayuan : reviewer;
+    const minsAgo = (totalBeforeTarget - i + 2) * 14;
+    const time = {
+      zh: minsAgo >= 60 ? `${Math.floor(minsAgo / 60)} 小时前` : `${minsAgo} 分钟前`,
+      en: minsAgo >= 60 ? `${Math.floor(minsAgo / 60)}h ago` : `${minsAgo}m ago`,
+    };
+
+    if (i === 1) {
+      out.push({
+        id: `${issueTag}-c${i}`,
+        author: agent,
+        time,
+        runBadge: { zh: "运行 48s · 修改 5 个文件", en: "Ran 48s · 5 files" },
+        body: {
+          zh: [opts.leadBodyZh, "先贴一下本地复现的火焰图和关键指标，下面逐项拆解影响路径与边界条件。"],
+          en: [opts.leadBodyEn, "Attaching the local trace and key latency metrics below before breaking down the edge cases."],
+        },
+        image: {
+          kind: images[0],
+          caption: { zh: `图 1 · ${issueTag} 复现采集与耗时分布`, en: `Fig 1 · ${issueTag} reproduction trace` },
+          delayMultiplier: 0.9,
+        },
+      });
+      continue;
+    }
+
+    if (i === Math.floor(totalBeforeTarget * 0.45)) {
+      out.push({
+        id: `${issueTag}-c${i}`,
+        author: agent,
+        time,
+        runBadge: { zh: "运行 1m 12s · 新增 6 条单测", en: "Ran 1m 12s · 6 tests added" },
+        body: {
+          zh: [
+            "补了一轮真机对比截图，重点观察 40px InboxBar 槽位在切页间隙的变化以及长评论页里的滚动锚点表现。",
+            "同时检查了 React Query 缓存失效链路：在 `inbox:batch-archived` 到达后，旧列表引用会被重新计算一次，需要避免触发二次卸载。",
+          ],
+          en: [
+            "Captured a before/after UI comparison focused on the 40px InboxBar slot during route transitions and deep-thread scroll alignment.",
+            "Also audited the TanStack Query invalidation path after `inbox:batch-archived` to make sure cache patches never trigger a redundant unmount.",
+          ],
+        },
+        code: `// ${issueTag}: keep next + next+1 warm around openKey\nconst targets = [nextInboxRow(rows, openKey), nextInboxRow(rows, nextKey)].filter(Boolean);\nawait Promise.all(targets.map((row) => prefetchIssuePage(qc, wsId, row.issue_id)));`,
+        image: {
+          kind: images[1],
+          caption: { zh: `图 2 · ${issueTag} 切页前后布局对比截图`, en: `Fig 2 · ${issueTag} layout comparison` },
+          delayMultiplier: 1.45,
+        },
+      });
+      continue;
+    }
+
+    if (i === totalBeforeTarget - 2) {
+      out.push({
+        id: `${issueTag}-c${i}`,
+        author: agent,
+        time,
+        runBadge: { zh: "运行 34s · E2E 全绿", en: "Ran 34s · E2E green" },
+        body: {
+          zh: [
+            "在弱网（250ms / 600ms）和带 3 张大图的长讨论串上跑了 50 轮回归测试，确认没有出现主线程长任务阻塞，也没有回退到顶部的二次跳动。",
+            "附上最新一轮 Playwright 采样和网络瀑布图，方便评审确认。",
+          ],
+          en: [
+            "Ran 50 regression rounds under 250ms and 600ms throttled networks on long multi-image threads—zero main-thread stalls and zero top-scroll regressions.",
+            "Attached the latest Playwright verification output and waterfall.",
+          ],
+        },
+        image: {
+          kind: images[2],
+          caption: { zh: `图 3 · ${issueTag} 弱网与多图回归快照`, en: `Fig 3 · ${issueTag} throttled multi-image run` },
+          delayMultiplier: 1.9,
+        },
+      });
+      continue;
+    }
+
+    out.push({
+      id: `${issueTag}-c${i}`,
+      author,
+      time,
+      runBadge: isAgentTurn ? { zh: `运行 ${18 + i * 3}s`, en: `Ran ${18 + i * 3}s` } : undefined,
+      body: {
+        zh: isAgentTurn
+          ? [
+              `第 ${i} 轮排查更新：核对了 \`${issueTag}\` 在桌面端 Tab 切换、Web 端 Next.js 异步路由和侧边栏收起态下的表现。`,
+              "发现在评论区包含多张未指定宽高比的图片时，即使首帧准确滚到了目标评论，图片解码展开后仍会把视口往下推 200–500px。",
+            ]
+          : [
+              `看了第 ${i - 1} 楼的结果，方向是对的。再确认一下快速连按 E 超过预取窗口时的降级体验——不能一连按就满屏闪骨架屏。`,
+            ],
+        en: isAgentTurn
+          ? [
+              `Pass #${i} update on \`${issueTag}\`: verified desktop tabs, Next.js async navigation on web, and collapsed sidebar states.`,
+              "Confirmed that unreserved images above the target comment still push the viewport down by 200–500px once decoded, even when initial scroll landing is exact.",
+            ]
+          : [
+              `Reviewed comment #${i - 1}—looks solid. Double-check the fallback when someone mashes E faster than prefetch so it degrades calmly instead of flashing blank skeletons.`,
+            ],
+      },
+    });
+  }
+
+  // Deep notification target comment (sits ~2,800–4,200px down!)
+  out.push({
+    id: `${issueTag}-target`,
+    author: opts.targetAuthor,
+    time: opts.targetTime,
+    isTarget: true,
+    body: {
+      zh: [opts.targetBodyZh],
+      en: [opts.targetBodyEn],
+    },
+    image: {
+      kind: images[1],
+      caption: { zh: `附图 · ${issueTag} 通知目标评论内嵌截图`, en: `Attachment · ${issueTag} target comment screenshot` },
+      delayMultiplier: 1.15,
+    },
+  });
+
+  if (opts.followUpZh && opts.followUpEn) {
+    out.push({
+      id: `${issueTag}-tail`,
+      author: agent,
+      time: { zh: "1 分钟前", en: "1m ago" },
+      body: {
+        zh: [opts.followUpZh],
+        en: [opts.followUpEn],
+      },
+    });
+  }
+
+  return out;
+}
+
 export function createSeedIssues(): DemoInboxIssue[] {
   return [
     {
@@ -61,57 +232,40 @@ export function createSeedIssues(): DemoInboxIssue[] {
       priority: "high",
       assignee: ACTORS.emacs,
       actor: ACTORS.jiayuan,
-      reason: { zh: "Jiayuan 提及了你", en: "Jiayuan mentioned you" },
+      reason: { zh: "Jiayuan 提及了你 · 14 条评论", en: "Jiayuan mentioned you · 14 comments" },
       timeAgo: { zh: "刚刚", en: "just now" },
       unread: true,
       coldInCurrent: false,
       labels: { zh: ["交互细节", "收件箱"], en: ["Interaction", "Inbox"] },
       description: {
         zh: [
-          "连续处理收件箱通知时，按 E 归档或者改完状态自动归档切下一条，整个详情区域会出现多段跳动：InboxBar 短暂消失、骨架屏闪现、右侧属性栏闪白，然后滚动条又突然从顶部跳到评论位置。",
-          "需要把底层布局抖动与上层切页节奏拆开梳理：一方面消除 40px 纵向塌陷与预取盲区，另一方面设计一套既不拖慢高频 E E E 清理节奏、又不会在自动归档时产生「抽地毯」失控感的切换过渡。",
-          "这里用真实尺度的工作区布局对比五种方案，包含长正文与折叠线以下的评论锚点，可以直接连续归档、标记完成、发送 @智能体 评论和按 Z 撤销来感受差别。",
+          "连续处理收件箱通知时，真实的任务往往包含十几条长评论、多张内嵌图片和 200–600ms 的接口请求耗时。当前实现把 40px InboxBar 塌陷、冷缓存骨架屏、侧栏闪白、顶部闪现再瞬移到评论、以及图片无占位展开导致的视口偏移全部叠在了一起。",
+          "这版 Storybook 原型为每条任务构造了 12–16 条长评论（3,500px+ 高度）和 3 张异步加载图片，并在顶部提供 0ms / 250ms / 600ms 三档真实请求延迟与实时预热状态——既可以体验正常阅读节奏下的预取命中，也可以狂按 E 冲出预取窗口看真实加载态的表现。",
         ],
         en: [
-          "When working through Inbox notifications, pressing E to archive or completing an issue with auto-advance causes a multi-stage jump: the 40px InboxBar drops out, a skeleton flashes, the right sidebar blanks, and scroll teleports from the top down to the comment anchor.",
-          "We need to separate layout-shift fixes from transition choreography: eliminate the 40px bounce and prefetch gaps first, then pick a pacing that keeps rapid E-E-E triage instant while avoiding the rug-pull feeling on auto-archive.",
-          "This full-scale workbench lets you test five directions with long descriptions and below-the-fold comment anchors—try archiving, marking Done, sending an @agent comment, and pressing Z to undo.",
+          "Real Multica issues have 12–20+ long agent comments, multiple embedded screenshots, and 200–600ms network requests. Today's transition stacks a 40px InboxBar drop, cold Skeleton flash, right-sidebar blanking, top-of-page scroll teleport, and late image CLS.",
+          "This upgraded Storybook workbench gives every issue 12–16 long comments (3,500px+ tall), 3 async-loading screenshots above the target comment, and selectable 0ms / 250ms / 600ms network latency with live anchor prefetch.",
         ],
       },
       subIssues: [
-        { id: "MUL-9866", done: true, title: { zh: "排查 InboxBar 40px 跳动与预取盲区", en: "Audit 40px InboxBar shift and prefetch miss" } },
-        { id: "MUL-9867", done: false, title: { zh: "在 Storybook 搭建五种切换节奏原型", en: "Build 5 transition prototypes in Storybook" } },
+        { id: "MUL-9866", done: true, title: { zh: "排查 InboxBar 40px 跳动、预取盲区与图片偏移", en: "Audit 40px InboxBar shift, prefetch gaps, and image CLS" } },
+        { id: "MUL-9867", done: false, title: { zh: "在 Storybook 还原多评论 + 图片 + 请求耗时场景", en: "Simulate long threads, images, and request latency in Storybook" } },
       ],
-      comments: [
-        {
-          id: "c1",
-          author: ACTORS.emacs,
-          time: { zh: "12 分钟前", en: "12m ago" },
-          body: {
-            zh: "已定位代码里 5 处叠在一起的跳动来源：leaveRow 在 push 前同步卸载 InboxBar、Skeleton 缺少 40px 占位、idle 预取只覆盖前 3 条未读、landingChromeHeld 清空侧栏，以及自动归档无缓冲直接抽走页面。",
-            en: "Traced 5 stacked glitches in source: synchronous leaveRow unmounting InboxBar before push commits, skeleton missing the 40px bar slot, idle prefetch capped at first 3 unread rows, landingChromeHeld blanking the sidebar, and unbuffered auto-archive navigation.",
-          },
-        },
-        {
-          id: "c2",
-          author: ACTORS.bohan,
-          time: { zh: "8 分钟前", en: "8m ago" },
-          body: {
-            zh: "尤其是评论在页面靠下位置时，先闪一帧标题再瞬移下来非常明显。如果目标评论能对齐完再一起呈现，体感会稳很多。",
-            en: "Especially when the notification comment is far down the thread, flashing the title for a frame before teleporting down feels very jarring. Aligning before reveal will calm it down a lot.",
-          },
-        },
-        {
-          id: "c3",
-          author: ACTORS.jiayuan,
-          time: { zh: "2 分钟前", en: "2m ago" },
-          isTarget: true,
-          body: {
-            zh: "你在 Storybook 中来做一下吧，小窗口里没看出来太大区别——最好能在真实页面尺度下连续点几条、同时试一下标记完成后的自动切换。",
-            en: "Build it in Storybook—couldn't tell much difference in the tiny HTML mockup. Let's feel it at full app scale across multiple items, including auto-advance after marking Done.",
-          },
-        },
-      ],
+      comments: buildLongTimeline({
+        issueTag: "MUL-9865",
+        agent: ACTORS.emacs,
+        reviewer: ACTORS.bohan,
+        leadBodyZh: "已定位代码里叠在一起的 6 处跳动来源，其中在长讨论串里最扎眼的是「顶部闪一下 → 瞬移 3500px 到底部评论 → 上方图片晚 250ms 加载完又把评论顶出屏幕」。",
+        leadBodyEn: "Traced 6 stacked glitches; on long threads the worst sequence is flashing top-of-page, teleporting 3,500px down, and then having late images above push the target comment back off-screen.",
+        targetAuthor: ACTORS.jiayuan,
+        targetTime: { zh: "2 分钟前", en: "2m ago" },
+        targetBodyZh: "现在这个 Storybook 已经还原了真实长评论、异步大图和网络请求延迟：建议切到 A（现状）连按 E 感受 250ms/600ms 下的多段跳动与图片顶偏，再切到 B/C/D/E 对比稳态预取 + 宽高比占位 + 轻过渡的体感。",
+        targetBodyEn: "This workbench now simulates long threads, async images, and real request latency: try A (Current) at 250ms/600ms to feel the multi-stage jump & image push, then compare B/C/D/E.",
+        followUpZh: "提示：在 B/C/D/E 下稍微停 300ms 看顶部变成「下一条已预热」后按 E 是 0ms 秒切；如果连续狂按 E E E 超过预热速度，可以直接看到真实的加载降级态（顶栏不闪、40px Bar 锁稳、评论对齐后淡入）。",
+        followUpEn: "Tip: Wait ~300ms for the green 'Next pre-warmed' pill to feel 0ms warm switches, or mash E-E-E rapidly to outrun prefetch and test the live loading fallback.",
+        images: ["perf-chart", "ui-compare", "trace-waterfall"],
+        totalBeforeTarget: 12,
+      }),
     },
     {
       id: "mul-9848",
@@ -125,47 +279,37 @@ export function createSeedIssues(): DemoInboxIssue[] {
       priority: "medium",
       assignee: ACTORS.lambda,
       actor: ACTORS.lambda,
-      reason: { zh: "Lambda 运行已完成", en: "Lambda finished running" },
+      reason: { zh: "Lambda 运行已完成 · 13 条评论", en: "Lambda finished running · 13 comments" },
       timeAgo: { zh: "14 分钟", en: "14m" },
       unread: true,
       coldInCurrent: false,
       labels: { zh: ["UI 精修"], en: ["UI Polish"] },
       description: {
         zh: [
-          "清完收件箱后的空状态之前堆了过多入口按钮（前往我的工作、查看运行中的智能体、查看已归档），视觉重心分散，反而破坏了清零之后的平静感。",
-          "本轮收敛为只保留核心状态：居中完成标志、「收件箱已清空」标题、刚清空那一条的轻量内联撤销（支持按 Z），以及有延后通知时的一行极淡摘要。",
-          "请确认最终截图和文案在浅色/深色模式下都足够克制，无冗余边框或多余操作。",
+          "清完收件箱后的空状态之前堆了过多入口按钮，本轮收敛为只保留核心状态：完成标志、「收件箱已清空」标题、单行内联撤销（支持按 Z）和延后摘要。",
+          "本条同样包含 12 条长讨论和 3 张设计对比截图，目标评论位于页面底部 ~3,400px 处。",
         ],
         en: [
-          "The Inbox Zero screen previously stacked too many navigation buttons (My work, working agents, View archived), distracting from the calm relief of clearing the queue.",
-          "Trimmed down to the core Inbox-owned state: subtle check tile, cleared heading, quiet inline Undo (Z) for the last cleared item, and a single muted line for snoozed items if any exist.",
-          "Please verify light and dark mode contrast and confirm no duplicate subtitles remain.",
+          "Trimmed Inbox Zero down to the core state: check tile, cleared heading, quiet inline Undo (Z), and snoozed summary.",
+          "Includes 12 long comments and 3 screenshots with the target comment ~3,400px down.",
         ],
       },
       subIssues: [
         { id: "MUL-9849", done: true, title: { zh: "移除多余的导航 CTA 和快捷键提示", en: "Remove redundant navigation CTAs and shortcut hints" } },
       ],
-      comments: [
-        {
-          id: "c1",
-          author: ACTORS.alex,
-          time: { zh: "42 分钟前", en: "42m ago" },
-          body: {
-            zh: "之前空状态底下那排按钮确实有点吵，特别是每次清完最后一条都会跳出来三个大按钮。",
-            en: "Agreed—the row of three large buttons at the bottom felt noisy right after clearing the final item.",
-          },
-        },
-        {
-          id: "c2",
-          author: ACTORS.lambda,
-          time: { zh: "14 分钟前", en: "14m ago" },
-          isTarget: true,
-          body: {
-            zh: "PR #11193 已提交并通过全部单测。内联撤销按钮已经改成和 InboxBar 一致的 ghost 样式，按 Z 可在 toast 消失后继续撤销最后一条。",
-            en: "PR #11193 is up and all unit tests pass. Inline Undo now matches InboxBar's ghost button weight, and pressing Z continues to undo the last cleared row after the toast fades.",
-          },
-        },
-      ],
+      comments: buildLongTimeline({
+        issueTag: "MUL-9848",
+        agent: ACTORS.lambda,
+        reviewer: ACTORS.alex,
+        leadBodyZh: "整理了浅色/深色模式下 Inbox Zero 的视觉重心，移除了与侧栏重复的三个快捷按钮。",
+        leadBodyEn: "Audited Inbox Zero visual hierarchy in light and dark modes and removed the three redundant navigation buttons.",
+        targetAuthor: ACTORS.lambda,
+        targetTime: { zh: "14 分钟前", en: "14m ago" },
+        targetBodyZh: "PR #11193 已合并。注意观察切到这一条时：在 A 模式下，上方 3 张截图延迟展开会把这条评论直接往下顶 480px；而在 B/C/D/E 下图片容器预留了宽高比，这条评论的位置 0px 偏移。",
+        targetBodyEn: "PR #11193 merged. Notice how in Direction A the 3 screenshots above expand late and push this comment down by 480px, while B/C/D/E hold it at 0px shift.",
+        images: ["ui-compare", "ci-matrix", "perf-chart"],
+        totalBeforeTarget: 11,
+      }),
     },
     {
       id: "mul-9822",
@@ -179,7 +323,7 @@ export function createSeedIssues(): DemoInboxIssue[] {
       priority: "medium",
       assignee: ACTORS.bohan,
       actor: ACTORS.bohan,
-      reason: { zh: "Bohan 评论了", en: "Bohan commented" },
+      reason: { zh: "Bohan 评论了 · 15 条评论", en: "Bohan commented · 15 comments" },
       timeAgo: { zh: "38 分钟", en: "38m" },
       unread: true,
       agentRunning: true,
@@ -187,38 +331,30 @@ export function createSeedIssues(): DemoInboxIssue[] {
       labels: { zh: ["快捷键"], en: ["Shortcuts"] },
       description: {
         zh: [
-          "连续按 E 清完收件箱最后一条时，如果误按多了一下，toast 默认 10 秒后就会自动消失。此时页面上虽然还留着内联撤销按钮，但按 Z 却没反应。",
-          "把单键快捷键保护逻辑抽成共享的 useInboxUndoShortcut hook，在 toast 存在时由 toast 接管 Z，toast 消失后无缝交给 Inbox Zero 内联撤销接管。",
-          "同时要保证在搜索框、评论编辑器或任意可编辑节点内输入字母 z 时绝对不会误触发撤销。",
+          "把单键快捷键保护逻辑抽成共享的 `useInboxUndoShortcut` hook，在 toast 存在时由 toast 接管 `Z`，toast 消失后无缝交给 Inbox Zero 内联撤销接管。",
+          "这条讨论串包含 15 条评论与多段代码评审，目标评论在倒数第 2 条。",
         ],
         en: [
-          "When rapidly pressing E through the end of the Inbox, an accidental extra press lands on Inbox Zero. Once the 10s toast expires, the inline Undo button stays visible but pressing Z stopped working.",
-          "Shared the single-key shortcut guard in useInboxUndoShortcut so an active toast owns Z first, and Inbox Zero seamlessly takes over once the toast dismisses.",
-          "Verified editable targets, IME composition, and command bar inputs remain completely unaffected.",
+          "Unified single-key shortcut guards into `useInboxUndoShortcut` so toast owns `Z` first and Inbox Zero seamlessly takes over afterward.",
+          "15-comment engineering thread with target comment near the bottom.",
         ],
       },
       subIssues: [],
-      comments: [
-        {
-          id: "c1",
-          author: ACTORS.cursor,
-          time: { zh: "1 小时前", en: "1h ago" },
-          body: {
-            zh: "已检查所有单键监听（E / H / Shift+E / Z），现在都走同一套 isInboxShortcut 守卫，避免了中文输入法候选态误触。",
-            en: "Audited all single-key listeners (E / H / Shift+E / Z); they now share isInboxShortcut including IME composition guards.",
-          },
-        },
-        {
-          id: "c2",
-          author: ACTORS.bohan,
-          time: { zh: "38 分钟前", en: "38m ago" },
-          isTarget: true,
-          body: {
-            zh: "刚测了连续按 E 到最后一条再按 Z：现在能直接把任务恢复并跳回原任务页，但如果页面能给一个反向落回的微动效就更直觉了。",
-            en: "Just tested pressing E to the end and hitting Z: it restores and reopens the issue right away. A subtle reverse motion on undo would make the spatial return feel even clearer.",
-          },
-        },
-      ],
+      comments: buildLongTimeline({
+        issueTag: "MUL-9822",
+        agent: ACTORS.cursor,
+        reviewer: ACTORS.bohan,
+        leadBodyZh: "核对了 E / H / Shift+E / Z 在中文 IME 组合输入、评论框、命令面板中的拦截边界。",
+        leadBodyEn: "Audited E / H / Shift+E / Z guards across IME composition, editors, and command bar.",
+        targetAuthor: ACTORS.bohan,
+        targetTime: { zh: "38 分钟前", en: "38m ago" },
+        targetBodyZh: "试着在这里点「标记完成」或「快捷发送 @Emacs 评论」：在 A 下等 250–600ms 网络回包后会突然抽走页面；在 D 下 InboxBar 立刻给 1.4s 细进度条缓冲，期间滚动一下正文就会自动停住。",
+        targetBodyEn: "Try clicking Mark Done or Send @Emacs comment here: A yanks the page after network round-trip, while D settles InboxBar with a 1.4s cancellable progress line.",
+        followUpZh: "补充：此时按 Z 撤销可以同时感受反向落回过渡与左侧行平滑展开。",
+        followUpEn: "Also try pressing Z right after to feel the reverse motion and smooth row re-expansion.",
+        images: ["trace-waterfall", "ci-matrix", "ui-compare"],
+        totalBeforeTarget: 13,
+      }),
     },
     {
       id: "mul-9806",
@@ -232,48 +368,38 @@ export function createSeedIssues(): DemoInboxIssue[] {
       priority: "high",
       assignee: ACTORS.alex,
       actor: ACTORS.alex,
-      reason: { zh: "Alex 请求审查", en: "Alex requested review" },
+      reason: { zh: "Alex 请求审查 · 第 4 条（现状冷缓存）", en: "Alex requested review · Item #4 (cold in Current)" },
       timeAgo: { zh: "1 小时", en: "1h" },
       unread: true,
       coldInCurrent: true,
-      labels: { zh: ["自动归档", "文案"], en: ["Auto-archive", "Copy"] },
+      labels: { zh: ["自动归档", "冷缓存"], en: ["Auto-archive", "Cold cache"] },
       description: {
         zh: [
-          "（注意：这是列表第 4 条——在「现状 A」下超出前 3 条预取上限，切到这里会触发真实的冷加载骨架屏 + 40px 跳动！）",
-          "当用户在 InboxBar 修改状态、改派负责人或触发快捷指令并自动归档后，原本 settled bar 只显示干巴巴的「通知已归档」，容易让用户不确定刚刚的操作是否生效。",
-          "现在会明确显示「已改为已完成 · 通知已归档」或「已改派给 Emacs · 通知已归档」，并在同位置保留属性操作与撤销/下一条入口。",
+          "这是列表第 4 条——超出线上 `INBOX_IDLE_PREFETCH_LIMIT = 3` 的预取上限！在「A · 现状」下切到这里会完整经历：`InboxBar 闪消 (-40px) → 缺 bar 骨架屏 → Issue JSON 回来 (+40px + 侧栏闪白 + 停在顶部) → Timeline 回来瞬移 3,800px → 3 张图陆续顶偏 +480px`。",
+          "在 B/C/D/E 下，当你阅读前一条时锚点预取已经在后台把这一条预热好了；即使你连按 E 冲出预热窗口，顶栏与 40px InboxBar 也会立刻用列表元数据填满不闪跳。",
         ],
         en: [
-          "(Note: This is item #4—beyond the current 3-item unread prefetch cap, so Direction A faithfully reproduces the cold-cache Skeleton + 40px jump here!)",
-          "When an action in InboxBar auto-archives a notification, the settled bar previously only said 'Notification archived', leaving users unsure whether their status or assignee write took effect.",
-          "It now names the exact action ('Changed to Done · Notification archived') while keeping issue controls, Undo, and Next in the same 40px slot.",
+          "Item #4—beyond today's 3-item unread prefetch cap! In Direction A you feel the full cascade: -40px bar drop → barless skeleton → +40px jump at scrollTop=0 → 3,800px teleport → +480px image CLS.",
+          "In B/C/D/E anchor prefetch warms this row while you read #3; even if you mash E past prefetch, top chrome + 40px InboxBar populate immediately from list metadata.",
         ],
       },
       subIssues: [
         { id: "MUL-9807", done: true, title: { zh: "记录 InboxBar 发起的状态/负责人/快捷操作", en: "Track status, assignee, and quick-action causes from InboxBar" } },
         { id: "MUL-9808", done: true, title: { zh: "覆盖 8 个语言包的 settled 文案", en: "Add settled copy across all 8 locale bundles" } },
       ],
-      comments: [
-        {
-          id: "c1",
-          author: ACTORS.emacs,
-          time: { zh: "2 小时前", en: "2h ago" },
-          body: {
-            zh: "这里有个边界情况：如果指派智能体弹了二次确认框但用户点了取消，reflects() 会对比实际 issue 状态，避免误显示「已改派」。",
-            en: "Edge case covered: if assigning an agent opens a confirmation dialog that gets dismissed, reflects() compares against actual issue state so we never show a stale cause.",
-          },
-        },
-        {
-          id: "c2",
-          author: ACTORS.alex,
-          time: { zh: "1 小时前", en: "1h ago" },
-          isTarget: true,
-          body: {
-            zh: "在 `after_auto_archive = next` 模式下，因为一回来就切走了，这条「已改为已完成」的反馈用户根本来不及看。如果配合一个 1.4s 缓冲进度条，这个文案的价值就完全体现出来了。",
-            en: "Under `after_auto_archive = next`, the instant jump meant users never even saw the 'Changed to Done' confirmation. Pairing it with a short 1.4s buffer bar makes that confirmation genuinely useful.",
-          },
-        },
-      ],
+      comments: buildLongTimeline({
+        issueTag: "MUL-9806",
+        agent: ACTORS.emacs,
+        reviewer: ACTORS.alex,
+        leadBodyZh: "实现了 InboxBar 归档归因文案：区分「已改为已完成」「已改派给某人」「已运行快捷操作」三种来源。",
+        leadBodyEn: "Implemented action-specific settled copy in InboxBar for status, assignee, and quick-action causes.",
+        targetAuthor: ACTORS.alex,
+        targetTime: { zh: "1 小时前", en: "1h ago" },
+        targetBodyZh: "对比一下把网络延迟切到 600ms 后快速连按 E 到这一条：A 会连续跳 4 次，而 B/C/D/E 整个顶部框架纹丝不动，数据回来直接定位到这条评论平滑呈现。",
+        targetBodyEn: "Switch latency to 600ms and rapidly press E to reach this item: A jumps 4 times, while B/C/D/E keep the entire top frame locked and fade in aligned right on this comment.",
+        images: ["perf-chart", "trace-waterfall", "ci-matrix"],
+        totalBeforeTarget: 14,
+      }),
     },
     {
       id: "mul-9790",
@@ -287,36 +413,35 @@ export function createSeedIssues(): DemoInboxIssue[] {
       priority: "medium",
       assignee: ACTORS.cursor,
       actor: ACTORS.jiayuan,
-      reason: { zh: "Jiayuan 评论了（已读条目）", en: "Jiayuan commented (already read)" },
+      reason: { zh: "Jiayuan 评论了（已读 · 现状不预取）", en: "Jiayuan commented (read · skipped by Current)" },
       timeAgo: { zh: "3 小时", en: "3h" },
       unread: false,
       coldInCurrent: true,
-      labels: { zh: ["架构"], en: ["Architecture"] },
+      labels: { zh: ["架构", "已读条目"], en: ["Architecture", "Read row"] },
       description: {
         zh: [
-          "（注意：这是已读条目——线上 `useInboxIssuePrefetch` 只预取 `read !== true` 的行，所以切到已读通知时同样会冷加载闪骨架屏。）",
-          "把原本分散在顶部面包屑右侧的归档/延后按钮、以及正文上方的通知提示条统一收敛为 40px 高的 InboxBar，让「为什么收到这条通知」和「怎么处理它」在同一条视觉基线上。",
-          "正因为 InboxBar 固定占 40px，任何在路由切换瞬间卸载它、或骨架屏里漏掉它的行为，都会导致整页正文上下猛跳 40px。",
+          "这是一条**已读**通知——线上 `useInboxIssuePrefetch` 只预取 `read !== true` 的行，所以切到已读条目每次都会冷加载。",
+          "在 B/C/D/E 的锚点预取下，无论已读还是未读，只要它在当前条目的下一位就会被提前预热。",
         ],
         en: [
-          "(Note: This row is already read—today's `useInboxIssuePrefetch` skips read rows, so auto-advancing here also hits a cold skeleton flash in Direction A.)",
-          "Consolidated archive/snooze buttons and notification context into a single 40px InboxBar right under the breadcrumb header so context and actions sit on one baseline.",
-          "Because InboxBar owns a fixed 40px strip, unmounting it mid-navigation or omitting it from IssueDetailSkeleton immediately produces a jarring 40px vertical snap.",
+          "This row is already **read**—today's `useInboxIssuePrefetch` skips read rows, causing a cold skeleton every time.",
+          "With anchor prefetch in B/C/D/E, the next row is warmed regardless of read status.",
         ],
       },
       subIssues: [],
-      comments: [
-        {
-          id: "c1",
-          author: ACTORS.jiayuan,
-          time: { zh: "3 小时前", en: "3h ago" },
-          isTarget: true,
-          body: {
-            zh: "InboxBar 收拢之后整条任务页干净很多，现在唯一扎眼的就是切下一条时这条 bar 会闪没一下再蹦出来。",
-            en: "The unified InboxBar cleaned up the issue header nicely—the only eyesore left is watching the bar disappear and pop back in when moving to the next item.",
-          },
-        },
-      ],
+      comments: buildLongTimeline({
+        issueTag: "MUL-9790",
+        agent: ACTORS.cursor,
+        reviewer: ACTORS.jiayuan,
+        leadBodyZh: "将分散在标题栏右侧和正文上方的通知按钮统一收敛到 40px 的 InboxBar。",
+        leadBodyEn: "Consolidated notification actions into a single 40px InboxBar under the breadcrumb header.",
+        targetAuthor: ACTORS.jiayuan,
+        targetTime: { zh: "3 小时前", en: "3h ago" },
+        targetBodyZh: "InboxBar 收拢之后整条任务页干净很多，现在最重要的是把切下一条时这 40px bar 的闪烁、冷加载骨架屏和长评论多图跳动一起治干净。",
+        targetBodyEn: "The unified InboxBar looks clean—now we just need to eliminate the 40px flicker, cold skeleton jump, and multi-image scroll shift when advancing.",
+        images: ["ui-compare", "perf-chart", "trace-waterfall"],
+        totalBeforeTarget: 11,
+      }),
     },
     {
       id: "mul-9788",
@@ -330,34 +455,33 @@ export function createSeedIssues(): DemoInboxIssue[] {
       priority: "low",
       assignee: ACTORS.emacs,
       actor: ACTORS.emacs,
-      reason: { zh: "Emacs 完成了智能体运行", en: "Emacs completed a run" },
+      reason: { zh: "Emacs 完成了运行 · 最后一条", en: "Emacs finished run · Final item" },
       timeAgo: { zh: "5 小时", en: "5h" },
       unread: true,
       coldInCurrent: true,
       labels: { zh: ["自动归档"], en: ["Auto-archive"] },
       description: {
         zh: [
-          "把默认自动归档规则设为「完成任务或触发智能体运行时自动归档」，纯整理类操作（改标签、改优先级、不唤醒智能体的普通评论）留在原地。",
-          "这是列表的最后一条通知——归档或标记完成后，可以直接体验进入「收件箱已清空（Inbox Zero）」界面的完整收尾节奏，并按 Z 撤销回来。",
+          "列表最后一条通知：处理完之后进入 Inbox Zero 清空状态，可以按 `Z` 撤销直接回到这条长讨论串的原评论位置。",
         ],
         en: [
-          "Defaulted auto-archive to completing an issue or triggering an agent run, leaving tidy-up edits (labels, priority, plain comments) in place.",
-          "This is the final notification in the queue—archiving or completing it transitions cleanly into the calm Inbox Zero screen, where pressing Z brings it right back.",
+          "Final item in the queue: clearing it transitions to Inbox Zero, and pressing `Z` returns right back to this thread's target comment.",
         ],
       },
       subIssues: [],
-      comments: [
-        {
-          id: "c1",
-          author: ACTORS.emacs,
-          time: { zh: "5 小时前", en: "5h ago" },
-          isTarget: true,
-          body: {
-            zh: "最后一条通知处理完后进入 Inbox Zero，内联撤销和 MulticaBleedMark 动画都已就位。可以试试在这里点「归档 (E)」或「标记完成」。",
-            en: "Clearing this final item lands on Inbox Zero with the bleed mark and inline Undo ready. Try clicking Archive (E) or Mark Done here.",
-          },
-        },
-      ],
+      comments: buildLongTimeline({
+        issueTag: "MUL-9788",
+        agent: ACTORS.emacs,
+        reviewer: ACTORS.bohan,
+        leadBodyZh: "默认自动归档策略改为「完成任务或触发智能体运行」，纯字段整理留在收件箱。",
+        leadBodyEn: "Defaulted auto-archive to issue completion or agent trigger, keeping tidy-up edits in place.",
+        targetAuthor: ACTORS.emacs,
+        targetTime: { zh: "5 小时前", en: "5h ago" },
+        targetBodyZh: "这是最后一条通知：归档或标记完成后直接进入 Inbox Zero；按 Z 撤销可以体验从空状态返回长评论页的过渡。",
+        targetBodyEn: "Last item in the queue: archive or mark Done to reach Inbox Zero, then press Z to undo back into this long thread.",
+        images: ["ci-matrix", "ui-compare", "perf-chart"],
+        totalBeforeTarget: 10,
+      }),
     },
   ];
 }

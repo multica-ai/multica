@@ -35,7 +35,10 @@ import type { Lang } from "../voice-input/copy";
 import { useStoryEnv } from "../voice-input/env";
 import { ACTORS, createSeedIssues, type DemoInboxIssue, type IssuePriority, type IssueStatus } from "./data";
 import { DIRECTION_BY_ID, DIRECTIONS, type DirectionId } from "./directions";
+import { DelayedCommentImage } from "./mock-images";
 import "./inbox-transition.css";
+
+type LatencyPreset = 0 | 250 | 600;
 
 const COPY = {
   work: { zh: "工作", en: "Work" },
@@ -51,9 +54,12 @@ const COPY = {
   undo: { zh: "撤销", en: "Undo" },
   next: { zh: "下一条", en: "Next" },
   stayHere: { zh: "留在这里", en: "Stay here" },
-  reset: { zh: "重置列表", en: "Reset" },
-  slowMo: { zh: "慢动作 0.4x", en: "Slow-mo 0.4x" },
-  coldCache: { zh: "模拟冷缓存（第 4 条+）", en: "Cold cache (#4+)" },
+  reset: { zh: "重置", en: "Reset" },
+  slowMo: { zh: "慢动作 0.4x", en: "0.4x" },
+  latencyLabel: { zh: "请求延迟", en: "Latency" },
+  prefetchWarm: { zh: "下一条已预热", en: "Next pre-warmed" },
+  prefetchCold: { zh: "下一条未预热（会冷加载）", en: "Next cold (not prefetched)" },
+  prefetchWarming: { zh: "后台预热下一条中…", en: "Pre-warming next…" },
   clearedTitle: { zh: "收件箱已清空", en: "Inbox cleared" },
   clearedSub: { zh: "刚归档了", en: "Just archived" },
   snoozedSummary: { zh: "2 条延后通知 · 最早 明天 09:00 回来", en: "2 snoozed · next returns tomorrow 9:00 AM" },
@@ -77,9 +83,10 @@ const COPY = {
   doneCause: { zh: "已改为已完成 · 通知已归档", en: "Changed to Done · Notification archived" },
   assignCause: { zh: "已改派给 Emacs · 通知已归档", en: "Reassigned to Emacs · Notification archived" },
   commentCause: { zh: "已发送并唤醒 Emacs · 通知已归档", en: "Sent & woke Emacs · Notification archived" },
+  loadingTimeline: { zh: "正在加载时间线与评论…", en: "Loading timeline & comments…" },
   shortcutsHint: {
-    zh: "快捷键：E 归档 / H 延后 / Z 撤销 / Esc 停住缓冲 / R 重置",
-    en: "Shortcuts: E archive · H snooze · Z undo · Esc stay · R reset",
+    zh: "E 归档 · H 延后 · Z 撤销 · Esc 停住缓冲 · R 重置",
+    en: "E archive · H snooze · Z undo · Esc stay · R reset",
   },
 };
 
@@ -117,12 +124,23 @@ interface BufferState {
   paused: boolean;
 }
 
-type CurrentGlitchPhase = "idle" | "pre-route-bar-gone" | "skeleton" | "top-and-blank-sidebar";
+type LoadStage =
+  | "ready"
+  | "current-bar-gone"
+  | "current-skeleton"
+  | "current-issue-only"
+  | "current-top-blank-sidebar"
+  | "steady-loading-body";
 
 interface LeavingSnapshot {
   issue: DemoInboxIssue;
   direction: "next" | "prev";
   seq: number;
+}
+
+/** First 3 unread rows that production's `useInboxIssuePrefetch` warms on idle. */
+function initialWarmSet(list: DemoInboxIssue[]): Set<string> {
+  return new Set(list.filter((i) => !i.coldInCurrent).map((i) => i.id));
 }
 
 export function InboxWorkbench({
@@ -137,7 +155,7 @@ export function InboxWorkbench({
   const { lang } = useStoryEnv();
   const [direction, setDirection] = useState<DirectionId>(initialDirection);
   const [slowMo, setSlowMo] = useState(false);
-  const [simulateCold, setSimulateCold] = useState(true);
+  const [latencyMs, setLatencyMs] = useState<LatencyPreset>(250);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const [items, setItems] = useState<DemoInboxIssue[]>(() => createSeedIssues());
@@ -148,13 +166,28 @@ export function InboxWorkbench({
   const [toastMsg, setToastMsg] = useState<{ id: number; text: string } | null>(null);
   const [composerText, setComposerText] = useState("");
 
-  // Transition & glitch simulation state
+  // Realistic prefetch cache:
+  // - `warmIds`: issues whose detail + timeline are in TanStack Query cache.
+  // - `warmImageIds`: issues whose images have already been decoded in browser cache (only reused in B/C/D/E or repeat visits).
+  const [warmIds, setWarmIds] = useState<Set<string>>(() => initialWarmSet(createSeedIssues()));
+  const [warmImageIds, setWarmImageIds] = useState<Set<string>>(() => new Set(["mul-9865"]));
+  const [warmingNextId, setWarmingNextId] = useState<string | null>(null);
+
+  // Transition & network load state
   const [navSeq, setNavSeq] = useState(0);
   const [navDir, setNavDir] = useState<"next" | "prev" | "jump">("jump");
-  const [glitchPhase, setGlitchPhase] = useState<CurrentGlitchPhase>("idle");
+  const [loadStage, setLoadStage] = useState<LoadStage>("ready");
   const [buffer, setBuffer] = useState<BufferState | null>(null);
   const [leavingCard, setLeavingCard] = useState<LeavingSnapshot | null>(null);
   const [flashComment, setFlashComment] = useState(false);
+
+  // Live telemetry so reviewers can verify scroll depth, cache hits, and image CLS
+  const [telemetry, setTelemetry] = useState<{
+    scrollTop: number;
+    cacheHit: boolean;
+    clsPx: number;
+    loadMs: number;
+  }>({ scrollTop: 0, cacheHit: true, clsPx: 0, loadMs: 0 });
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const timersRef = useRef<number[]>([]);
@@ -172,11 +205,14 @@ export function InboxWorkbench({
     }
   }, []);
 
-  const schedule = useCallback((fn: () => void, ms: number) => {
-    const id = window.setTimeout(fn, Math.round(ms * motionScale));
-    timersRef.current.push(id);
-    return id;
-  }, [motionScale]);
+  const schedule = useCallback(
+    (fn: () => void, ms: number) => {
+      const id = window.setTimeout(fn, Math.round(ms * motionScale));
+      timersRef.current.push(id);
+      return id;
+    },
+    [motionScale],
+  );
 
   const showToast = useCallback((text: string) => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
@@ -184,57 +220,118 @@ export function InboxWorkbench({
     toastTimerRef.current = window.setTimeout(() => setToastMsg(null), 6500);
   }, []);
 
-  const resetAll = useCallback(() => {
-    clearPendingTimers();
-    const seed = createSeedIssues();
-    setItems(seed);
-    setSelectedId(seed[0]!.id);
-    setCollapsingIds([]);
-    setEnteringRowId(null);
-    setHistory([]);
-    setToastMsg(null);
-    setComposerText("");
-    setGlitchPhase("idle");
-    setBuffer(null);
-    setLeavingCard(null);
-    setNavDir("jump");
-    setNavSeq((s) => s + 1);
-  }, [clearPendingTimers]);
+  const resetWorkbench = useCallback(
+    (nextDir?: DirectionId) => {
+      clearPendingTimers();
+      if (nextDir) setDirection(nextDir);
+      const seed = createSeedIssues();
+      setItems(seed);
+      setSelectedId(seed[0]!.id);
+      setCollapsingIds([]);
+      setEnteringRowId(null);
+      setHistory([]);
+      setToastMsg(null);
+      setComposerText("");
+      setWarmIds(initialWarmSet(seed));
+      setWarmImageIds(new Set([seed[0]!.id]));
+      setWarmingNextId(null);
+      setLoadStage("ready");
+      setBuffer(null);
+      setLeavingCard(null);
+      setNavDir("jump");
+      setNavSeq((s) => s + 1);
+      setTelemetry({ scrollTop: 0, cacheHit: true, clsPx: 0, loadMs: 0 });
+    },
+    [clearPendingTimers],
+  );
 
   useEffect(() => {
     setDirection(initialDirection);
   }, [initialDirection]);
 
-  // Reset cleanly when switching direction so each direction starts from the same 6-item queue.
-  const switchDirection = useCallback((next: DirectionId) => {
-    setDirection(next);
-    clearPendingTimers();
-    const seed = createSeedIssues();
-    setItems(seed);
-    setSelectedId(seed[0]!.id);
-    setCollapsingIds([]);
-    setEnteringRowId(null);
-    setHistory([]);
-    setToastMsg(null);
-    setComposerText("");
-    setGlitchPhase("idle");
-    setBuffer(null);
-    setLeavingCard(null);
-    setNavDir("jump");
-    setNavSeq((s) => s + 1);
-  }, [clearPendingTimers]);
-
   const visibleRows = items;
   const activeIssue = items.find((i) => i.id === selectedId) ?? null;
 
-  // Align scroll container cleanly on issue arrival:
-  // - In `current` during `top-and-blank-sidebar`, we deliberately start at scrollTop = 0, then teleport down.
-  // - In B / C / D / E, we align synchronously in useLayoutEffect BEFORE paint so the user never sees a top-of-page flash!
+  const pickNextId = useCallback(
+    (list: DemoInboxIssue[], removingId: string): string | null => {
+      const idx = list.findIndex((i) => i.id === removingId);
+      if (idx === -1) return list[0]?.id ?? null;
+      for (let i = idx + 1; i < list.length; i++) {
+        const candidate = list[i]!;
+        if (!collapsingIds.includes(candidate.id)) return candidate.id;
+      }
+      for (let i = idx - 1; i >= 0; i--) {
+        const candidate = list[i]!;
+        if (!collapsingIds.includes(candidate.id)) return candidate.id;
+      }
+      return null;
+    },
+    [collapsingIds],
+  );
+
+  const nextIdForCurrent = selectedId ? pickNextId(visibleRows, selectedId) : null;
+  const nextIsWarm = !nextIdForCurrent || latencyMs === 0 || warmIds.has(nextIdForCurrent);
+
+  // Anchor prefetch in B / C / D / E: automatically warms `next` and `next+1` (including read rows!)
+  // in the background after `latencyMs`, mirroring the real solution. Rapidly pressing E outruns it!
+  useEffect(() => {
+    if (direction === "current" || !selectedId || latencyMs === 0) {
+      setWarmingNextId(null);
+      return;
+    }
+    const nextId = pickNextId(items, selectedId);
+    if (!nextId) {
+      setWarmingNextId(null);
+      return;
+    }
+    const nextNextId = pickNextId(
+      items.filter((i) => i.id !== selectedId),
+      nextId,
+    );
+    const pending: number[] = [];
+
+    if (!warmIds.has(nextId)) {
+      setWarmingNextId(nextId);
+      pending.push(
+        window.setTimeout(() => {
+          setWarmIds((prev) => new Set(prev).add(nextId));
+          setWarmImageIds((prev) => new Set(prev).add(nextId));
+          setWarmingNextId((curr) => (curr === nextId ? null : curr));
+        }, Math.round(latencyMs * 0.85 * motionScale)),
+      );
+    } else {
+      setWarmingNextId(null);
+    }
+
+    if (nextNextId && !warmIds.has(nextNextId)) {
+      pending.push(
+        window.setTimeout(() => {
+          setWarmIds((prev) => new Set(prev).add(nextNextId));
+          setWarmImageIds((prev) => new Set(prev).add(nextNextId));
+        }, Math.round(latencyMs * 1.65 * motionScale)),
+      );
+    }
+
+    return () => {
+      for (const id of pending) window.clearTimeout(id);
+    };
+  }, [direction, selectedId, items, latencyMs, warmIds, pickNextId, motionScale]);
+
+  // Scroll landing alignment:
+  // - In `current-issue-only` or `current-top-blank-sidebar`: deliberately paints scrollTop = 0 first!
+  // - In `ready`: aligns to the deep target comment (~3,000px down) BEFORE paint on B/C/D/E,
+  //   and teleports there on A once `ready` lands!
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el || !activeIssue) return;
-    if (direction === "current" && glitchPhase === "top-and-blank-sidebar") {
+    if (
+      loadStage === "current-issue-only" ||
+      loadStage === "current-top-blank-sidebar" ||
+      loadStage === "current-skeleton" ||
+      loadStage === "steady-loading-body"
+    ) {
       el.scrollTop = 0;
+      setTelemetry((t) => ({ ...t, scrollTop: 0 }));
       return;
     }
     const target = el.querySelector<HTMLElement>("[data-target-comment='true']");
@@ -242,40 +339,124 @@ export function InboxWorkbench({
       el.scrollTop = 0;
       const containerRect = el.getBoundingClientRect();
       const targetRect = target.getBoundingClientRect();
-      const alreadyInView =
-        targetRect.top >= containerRect.top + 16 && targetRect.bottom <= containerRect.bottom - 24;
-      if (!alreadyInView) {
-        el.scrollTop = Math.max(0, targetRect.top - containerRect.top - 24);
-      }
+      const alignedTop = Math.max(0, Math.round(targetRect.top - containerRect.top - 110));
+      el.scrollTop = alignedTop;
+      setTelemetry((t) => ({ ...t, scrollTop: alignedTop }));
     } else {
       el.scrollTop = 0;
+      setTelemetry((t) => ({ ...t, scrollTop: 0 }));
     }
-  }, [activeIssue, navSeq, direction, glitchPhase]);
+  }, [activeIssue, navSeq, loadStage]);
 
-  // Trigger a subtle target-comment highlight flash after landing.
+  // Flash target comment once settled.
   useEffect(() => {
-    if (!activeIssue || glitchPhase === "skeleton" || glitchPhase === "top-and-blank-sidebar") return;
+    if (!activeIssue || loadStage !== "ready") return;
     setFlashComment(true);
     const id = window.setTimeout(() => setFlashComment(false), Math.round(1600 * motionScale));
     return () => window.clearTimeout(id);
-  }, [activeIssue, navSeq, glitchPhase, motionScale]);
+  }, [activeIssue, navSeq, loadStage, motionScale]);
 
-  const pickNextId = useCallback((list: DemoInboxIssue[], removingId: string): string | null => {
-    const idx = list.findIndex((i) => i.id === removingId);
-    if (idx === -1) return list[0]?.id ?? null;
-    const remaining = list.filter((i) => i.id !== removingId && !collapsingIds.includes(i.id));
-    if (remaining.length === 0) return null;
-    // Same semantics as `nextInboxRow`: next below, else previous above.
-    for (let i = idx + 1; i < list.length; i++) {
-      const candidate = list[i]!;
-      if (!collapsingIds.includes(candidate.id)) return candidate.id;
-    }
-    for (let i = idx - 1; i >= 0; i--) {
-      const candidate = list[i]!;
-      if (!collapsingIds.includes(candidate.id)) return candidate.id;
-    }
-    return null;
-  }, [collapsingIds]);
+  const handleUnreservedImageExpand = useCallback((heightPx: number) => {
+    setTelemetry((t) => ({ ...t, clsPx: t.clsPx + heightPx }));
+  }, []);
+
+  const navigateToIssue = useCallback(
+    (targetIssue: DemoInboxIssue | null, dir: "next" | "prev" | "jump", fromIssue: DemoInboxIssue | null) => {
+      if (!targetIssue) {
+        setSelectedId(null);
+        setLoadStage("ready");
+        setNavDir(dir);
+        setNavSeq((s) => s + 1);
+        setTelemetry({ scrollTop: 0, cacheHit: true, clsPx: 0, loadMs: 0 });
+        return;
+      }
+
+      const effectiveLatency = latencyMs;
+      const isWarm = effectiveLatency === 0 || warmIds.has(targetIssue.id);
+
+      if (direction === "current") {
+        // Production multi-stage cascade on real latency:
+        // 1) Bar drops on old issue (-40px jump)
+        setLoadStage("current-bar-gone");
+        const barDropMs = Math.max(75, Math.round(effectiveLatency * 0.3));
+
+        if (!isWarm) {
+          // 2) Cold miss: Skeleton WITHOUT 40px InboxBar
+          schedule(() => {
+            setSelectedId(targetIssue.id);
+            setLoadStage("current-skeleton");
+            setNavDir(dir);
+            setNavSeq((s) => s + 1);
+            setTelemetry({ scrollTop: 0, cacheHit: false, clsPx: 0, loadMs: effectiveLatency });
+          }, barDropMs);
+
+          // 3) Issue detail JSON arrives (+40px bar pops back, right sidebar blanks, scrollTop=0, timeline still loading)
+          schedule(() => {
+            setLoadStage("current-issue-only");
+          }, barDropMs + Math.round(effectiveLatency * 0.65));
+
+          // 4) Timeline JSON arrives: still flashes top + blank sidebar briefly, then teleports 3,500px down!
+          schedule(() => {
+            setLoadStage("current-top-blank-sidebar");
+          }, barDropMs + Math.round(effectiveLatency * 1.15));
+
+          schedule(() => {
+            setWarmIds((prev) => new Set(prev).add(targetIssue.id));
+            setLoadStage("ready");
+            setNavSeq((s) => s + 1);
+          }, barDropMs + Math.round(effectiveLatency * 1.15) + 145);
+        } else {
+          // Warm cache in Current STILL suffers: -40px bar drop -> top-of-page + blank sidebar -> teleport down -> unreserved image CLS!
+          schedule(() => {
+            setSelectedId(targetIssue.id);
+            setLoadStage("current-top-blank-sidebar");
+            setNavDir(dir);
+            setNavSeq((s) => s + 1);
+            setTelemetry({ scrollTop: 0, cacheHit: true, clsPx: 0, loadMs: 0 });
+          }, barDropMs);
+
+          schedule(() => {
+            setLoadStage("ready");
+            setNavSeq((s) => s + 1);
+          }, barDropMs + 150);
+        }
+        return;
+      }
+
+      // Directions B / C / D / E:
+      if (direction === "card-stack" && fromIssue && (dir === "next" || dir === "prev")) {
+        const snapSeq = Date.now();
+        setLeavingCard({ issue: fromIssue, direction: dir, seq: snapSeq });
+        schedule(() => {
+          setLeavingCard((curr) => (curr?.seq === snapSeq ? null : curr));
+        }, 220);
+      } else {
+        setLeavingCard(null);
+      }
+
+      setSelectedId(targetIssue.id);
+      setNavDir(dir);
+      setNavSeq((s) => s + 1);
+
+      if (isWarm) {
+        // Warm hit: 0ms instant aligned switch, zero skeleton!
+        setLoadStage("ready");
+        setTelemetry({ scrollTop: 0, cacheHit: true, clsPx: 0, loadMs: 0 });
+      } else {
+        // Outran prefetch (rapid E-E-E on slow network):
+        // Keep BreadcrumbHeader + 40px InboxBar populated immediately from Inbox row metadata!
+        // Show calm body skeleton with thin 2px top progress bar, then align scroll BEFORE reveal.
+        setLoadStage("steady-loading-body");
+        setTelemetry({ scrollTop: 0, cacheHit: false, clsPx: 0, loadMs: effectiveLatency });
+        schedule(() => {
+          setWarmIds((prev) => new Set(prev).add(targetIssue.id));
+          setLoadStage("ready");
+          setNavSeq((s) => s + 1);
+        }, effectiveLatency);
+      }
+    },
+    [direction, latencyMs, warmIds, schedule],
+  );
 
   const performAdvance = useCallback(
     (targetId: string, kind: "archived" | "snoozed", toastLabel: string) => {
@@ -292,82 +473,21 @@ export function InboxWorkbench({
       showToast(toastLabel);
 
       if (direction === "current") {
-        // Reproduce production's multi-stage jump:
-        // 1) leaveRow drops InboxBar immediately on the OLD issue (-40px jump) + snaps list up
-        setGlitchPhase("pre-route-bar-gone");
         setItems((prev) => prev.filter((i) => i.id !== targetId));
-        setSelectedId(targetId); // old issue briefly stays on screen without InboxBar on async route
-
-        if (!nextIssue) {
-          schedule(() => {
-            setSelectedId(null);
-            setGlitchPhase("idle");
-            setNavDir("next");
-            setNavSeq((s) => s + 1);
-          }, 90);
-          return;
-        }
-
-        const isCold = simulateCold && nextIssue.coldInCurrent;
-        if (isCold) {
-          // 2) Cold cache: flash Skeleton WITHOUT 40px InboxBar
-          schedule(() => {
-            setSelectedId(nextIssue.id);
-            setGlitchPhase("skeleton");
-            setNavDir("next");
-            setNavSeq((s) => s + 1);
-          }, 95);
-          // 3) Issue arrives: InboxBar pops back (+40px jump), scroll starts at top, right sidebar blanks (`landingChromeHeld`)
-          schedule(() => {
-            setGlitchPhase("top-and-blank-sidebar");
-          }, 300);
-          // 4) Scroll teleports to target comment + sidebar pops back
-          schedule(() => {
-            setGlitchPhase("idle");
-            setNavSeq((s) => s + 1);
-          }, 470);
-        } else {
-          // Even on warm cache: 40px drop -> top-of-page + blank sidebar -> teleport to comment
-          schedule(() => {
-            setSelectedId(nextIssue.id);
-            setGlitchPhase("top-and-blank-sidebar");
-            setNavDir("next");
-            setNavSeq((s) => s + 1);
-          }, 80);
-          schedule(() => {
-            setGlitchPhase("idle");
-            setNavSeq((s) => s + 1);
-          }, 235);
-        }
+        navigateToIssue(nextIssue, "next", removing);
         return;
       }
 
-      // Directions B / C / D / E:
-      // 1) Smoothly collapse the archived row in the left Work panel
+      // Smoothly collapse row in left Work panel
       setCollapsingIds((prev) => (prev.includes(targetId) ? prev : [...prev, targetId]));
       window.setTimeout(() => {
         setItems((prev) => prev.filter((i) => i.id !== targetId));
         setCollapsingIds((prev) => prev.filter((id) => id !== targetId));
       }, Math.round(165 * motionScale));
 
-      // 2) For Card Stack (E), snapshot the outgoing issue so both layers animate cleanly
-      if (direction === "card-stack") {
-        const snapSeq = Date.now();
-        setLeavingCard({ issue: removing, direction: "next", seq: snapSeq });
-        schedule(() => {
-          setLeavingCard((curr) => (curr?.seq === snapSeq ? null : curr));
-        }, 210);
-      } else {
-        setLeavingCard(null);
-      }
-
-      // 3) Advance selection immediately with zero layout shift
-      setGlitchPhase("idle");
-      setSelectedId(nextId);
-      setNavDir("next");
-      setNavSeq((s) => s + 1);
+      navigateToIssue(nextIssue, "next", removing);
     },
-    [clearPendingTimers, items, pickNextId, showToast, direction, simulateCold, schedule, motionScale],
+    [clearPendingTimers, items, pickNextId, showToast, direction, navigateToIssue, motionScale],
   );
 
   const cancelBufferAndStay = useCallback(() => {
@@ -394,7 +514,6 @@ export function InboxWorkbench({
       if (!activeIssue) return;
       const targetId = activeIssue.id;
 
-      // Mutate the issue optimistically right away so user sees status / assignee / comment land.
       setItems((prev) =>
         prev.map((issue) => {
           if (issue.id !== targetId) return issue;
@@ -410,8 +529,8 @@ export function InboxWorkbench({
                 author: ACTORS.jiayuan,
                 time: { zh: "刚刚", en: "just now" },
                 body: {
-                  zh: composerText.trim() || "@Emacs 帮我看一下这个边界情况，确认没问题就提 PR。",
-                  en: composerText.trim() || "@Emacs please verify this edge case and open a PR once green.",
+                  zh: [composerText.trim() || "@Emacs 帮我看一下多图弱网下的锚点偏移，确认没问题就提 PR。"],
+                  en: [composerText.trim() || "@Emacs please verify multi-image anchor shift on slow networks, then open a PR."],
                 },
               },
             ],
@@ -421,16 +540,16 @@ export function InboxWorkbench({
       if (kind === "comment") setComposerText("");
 
       if (direction === "current") {
-        // Reproduce production's random 380ms WS + refetch latency rug-pull
+        // Reproduce HTTP + WS inbox:batch-archived + /api/inbox refetch round-trip rug-pull
         clearPendingTimers();
+        const serverRoundTrip = Math.max(260, Math.round(latencyMs * 1.45));
         schedule(() => {
           performAdvance(targetId, "archived", COPY.toastAutoArchived[lang]);
-        }, 380);
+        }, serverRoundTrip);
         return;
       }
 
       if (direction === "buffer") {
-        // Direction D: InboxBar settles immediately with a 1.4s 2px progress bar, cancellable on interaction.
         clearPendingTimers();
         const totalMs = Math.round(1400 * motionScale);
         const start = performance.now();
@@ -449,20 +568,18 @@ export function InboxWorkbench({
         return;
       }
 
-      // Directions B / C / E: brief 180ms confirmation beat so the optimistic status/comment paints, then smooth switch.
       clearPendingTimers();
       schedule(() => {
         performAdvance(targetId, "archived", COPY.toastAutoArchived[lang]);
       }, 180);
     },
-    [activeIssue, composerText, direction, clearPendingTimers, schedule, performAdvance, lang, motionScale],
+    [activeIssue, composerText, direction, clearPendingTimers, latencyMs, schedule, performAdvance, lang, motionScale],
   );
 
   const handleUndo = useCallback(() => {
     if (buffer) {
       clearPendingTimers();
       setBuffer(null);
-      // Restore issue status if user undoes right on the settled bar
       if (activeIssue?.status === "done") {
         setItems((prev) => prev.map((i) => (i.id === activeIssue.id ? { ...i, status: "in_review" } : i)));
       }
@@ -471,7 +588,7 @@ export function InboxWorkbench({
     const last = history[history.length - 1];
     if (!last) return;
     clearPendingTimers();
-    setGlitchPhase("idle");
+    setLoadStage("ready");
     setHistory((prev) => prev.slice(0, -1));
     setToastMsg(null);
 
@@ -480,7 +597,7 @@ export function InboxWorkbench({
       setLeavingCard({ issue: activeIssue, direction: "prev", seq: snapSeq });
       schedule(() => {
         setLeavingCard((curr) => (curr?.seq === snapSeq ? null : curr));
-      }, 210);
+      }, 220);
     } else {
       setLeavingCard(null);
     }
@@ -498,9 +615,10 @@ export function InboxWorkbench({
     setSelectedId(last.item.id);
     setNavDir("prev");
     setNavSeq((s) => s + 1);
+    setTelemetry((t) => ({ ...t, cacheHit: true, clsPx: 0, loadMs: 0 }));
   }, [buffer, history, clearPendingTimers, activeIssue, direction, schedule]);
 
-  // Global keyboard shortcuts matching Multica's Inbox shortcuts (skip editable fields).
+  // Global Inbox keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -525,7 +643,7 @@ export function InboxWorkbench({
         handleUndo();
       } else if (k === "r") {
         event.preventDefault();
-        resetAll();
+        resetWorkbench();
       } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         if (visibleRows.length === 0) return;
         event.preventDefault();
@@ -541,10 +659,7 @@ export function InboxWorkbench({
         if (targetRow && targetRow.id !== selectedId) {
           clearPendingTimers();
           setBuffer(null);
-          setGlitchPhase("idle");
-          setSelectedId(targetRow.id);
-          setNavDir(step === 1 ? "next" : "prev");
-          setNavSeq((s) => s + 1);
+          navigateToIssue(targetRow, step === 1 ? "next" : "prev", activeIssue);
         }
       }
     };
@@ -556,17 +671,19 @@ export function InboxWorkbench({
     handleManualArchive,
     handleManualSnooze,
     handleUndo,
-    resetAll,
+    resetWorkbench,
     visibleRows,
     selectedId,
     clearPendingTimers,
+    navigateToIssue,
+    activeIssue,
   ]);
 
   const unreadCount = visibleRows.filter((i) => i.unread && !collapsingIds.includes(i.id)).length;
   const activeMeta = DIRECTION_BY_ID[direction];
 
   const bodyEnterClass =
-    direction === "current"
+    direction === "current" || loadStage !== "ready"
       ? ""
       : direction === "crossfade"
         ? "inbox-stage-crossfade-enter"
@@ -585,132 +702,204 @@ export function InboxWorkbench({
             : "";
 
   const hideInboxBarForGlitch =
-    direction === "current" && (glitchPhase === "pre-route-bar-gone" || glitchPhase === "skeleton");
-  const showSkeletonForGlitch = direction === "current" && glitchPhase === "skeleton";
+    direction === "current" && (loadStage === "current-bar-gone" || loadStage === "current-skeleton");
+  const showCurrentFullSkeleton = direction === "current" && loadStage === "current-skeleton";
+  const showCurrentTimelineSkeleton = direction === "current" && loadStage === "current-issue-only";
+  const showSteadyBodySkeleton = direction !== "current" && loadStage === "steady-loading-body";
   const blankSidebarForGlitch =
-    direction === "current" && (glitchPhase === "top-and-blank-sidebar" || glitchPhase === "skeleton");
+    direction === "current" &&
+    (loadStage === "current-skeleton" ||
+      loadStage === "current-issue-only" ||
+      loadStage === "current-top-blank-sidebar");
 
-  const renderIssueBody = (issue: DemoInboxIssue, interactive: boolean) => (
-    <div className="mx-auto max-w-[720px] px-8 py-7">
-      <h1 className="text-display-sm font-semibold leading-snug tracking-tight text-foreground">
-        {issue.title[lang]}
-      </h1>
+  const reserveImages = direction !== "current";
 
-      <div className="mt-4 space-y-3 text-body leading-relaxed text-foreground/90">
-        {issue.description[lang].map((para, i) => (
-          <p key={i}>{para}</p>
-        ))}
-      </div>
+  const renderIssueBody = (issue: DemoInboxIssue, interactive: boolean) => {
+    const imagesAlreadyWarm = reserveImages && (latencyMs === 0 || warmImageIds.has(issue.id));
+    const targetIdx = issue.comments.findIndex((c) => c.isTarget);
 
-      {issue.subIssues.length > 0 && (
-        <div className="mt-6 rounded-lg border border-border bg-card/50 p-3">
-          <div className="mb-2 flex items-center justify-between text-caption font-medium text-muted-foreground">
-            <span>{COPY.subIssues[lang]}</span>
-            <span className="tabular-nums">
-              {issue.subIssues.filter((s) => s.done).length}/{issue.subIssues.length}
-            </span>
+    return (
+      <div className="mx-auto max-w-[740px] px-8 py-7">
+        <h1 className="text-display-sm font-semibold leading-snug tracking-tight text-foreground">
+          {issue.title[lang]}
+        </h1>
+
+        <div className="mt-4 space-y-3 text-body leading-relaxed text-foreground/90">
+          {issue.description[lang].map((para, i) => (
+            <p key={i}>{para}</p>
+          ))}
+        </div>
+
+        {issue.subIssues.length > 0 && (
+          <div className="mt-6 rounded-lg border border-border bg-card/50 p-3">
+            <div className="mb-2 flex items-center justify-between text-caption font-medium text-muted-foreground">
+              <span>{COPY.subIssues[lang]}</span>
+              <span className="tabular-nums">
+                {issue.subIssues.filter((s) => s.done).length}/{issue.subIssues.length}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {issue.subIssues.map((sub) => (
+                <div key={sub.id} className="flex items-center gap-2 text-body">
+                  <StatusGlyph status={sub.done ? "done" : "todo"} />
+                  <span className="text-caption tabular-nums text-muted-foreground">{sub.id}</span>
+                  <span className={cn("truncate", sub.done && "text-muted-foreground line-through")}>
+                    {sub.title[lang]}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="space-y-1.5">
-            {issue.subIssues.map((sub) => (
-              <div key={sub.id} className="flex items-center gap-2 text-body">
-                <StatusGlyph status={sub.done ? "done" : "todo"} />
-                <span className="text-caption tabular-nums text-muted-foreground">{sub.id}</span>
-                <span className={cn("truncate", sub.done && "text-muted-foreground line-through")}>
-                  {sub.title[lang]}
-                </span>
+        )}
+
+        <div className="my-7 border-t border-border" />
+
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-label font-medium text-muted-foreground">{COPY.activity[lang]}</h2>
+          <span className="text-caption tabular-nums text-faint-foreground">
+            {issue.comments.length} {lang === "zh" ? "条评论" : "comments"}
+          </span>
+        </div>
+
+        {interactive && showCurrentTimelineSkeleton ? (
+          <div className="space-y-4 pb-8">
+            <p className="text-caption text-muted-foreground">{COPY.loadingTimeline[lang]}</p>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-border p-4 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="size-6 rounded-full" />
+                  <Skeleton className="h-3.5 w-28" />
+                </div>
+                <Skeleton className="h-3.5 w-full" />
+                <Skeleton className="h-3.5 w-4/5" />
               </div>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="space-y-3 pb-8">
+            {issue.comments.map((comment, idx) => {
+              const isTarget = !!comment.isTarget;
+              const isAboveTarget = targetIdx >= 0 && idx < targetIdx;
+              const imgDelayMs =
+                !comment.image || latencyMs === 0 || imagesAlreadyWarm
+                  ? 0
+                  : Math.round(Math.max(180, latencyMs * comment.image.delayMultiplier) * motionScale);
 
-      <div className="my-7 border-t border-border" />
+              return (
+                <div
+                  key={comment.id}
+                  data-target-comment={interactive && isTarget ? "true" : undefined}
+                  className={cn(
+                    "rounded-lg border border-border bg-card px-4 py-3 transition-colors",
+                    isTarget && interactive && flashComment && "inbox-comment-flash",
+                  )}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ActorAvatar
+                      name={comment.author.name}
+                      initials={comment.author.initials}
+                      isAgent={comment.author.isAgent}
+                      size="sm"
+                    />
+                    <span className="text-body font-medium text-foreground">{comment.author.name}</span>
+                    <span className="text-caption text-muted-foreground">{comment.time[lang]}</span>
+                    {comment.runBadge && (
+                      <Badge variant="outline" className="text-micro font-normal text-muted-foreground">
+                        {comment.runBadge[lang]}
+                      </Badge>
+                    )}
+                    <span className="ml-auto flex items-center gap-1.5">
+                      {isTarget && (
+                        <Badge variant="secondary" className="text-micro font-normal text-brand">
+                          {COPY.targetTag[lang]}
+                        </Badge>
+                      )}
+                      <span className="text-micro tabular-nums text-faint-foreground">#{idx + 1}</span>
+                    </span>
+                  </div>
 
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-label font-medium text-muted-foreground">{COPY.activity[lang]}</h2>
-        <span className="text-caption tabular-nums text-faint-foreground">
-          {issue.comments.length}
-        </span>
-      </div>
+                  <div className="mt-2 space-y-2 text-body leading-relaxed text-foreground/90">
+                    {comment.body[lang].map((p, pIdx) => (
+                      <p key={pIdx}>{p}</p>
+                    ))}
+                  </div>
 
-      <div className="space-y-3 pb-8">
-        {issue.comments.map((comment) => {
-          const isTarget = !!comment.isTarget;
-          return (
-            <div
-              key={comment.id}
-              data-target-comment={interactive && isTarget ? "true" : undefined}
-              className={cn(
-                "rounded-lg border border-border bg-card px-4 py-3 transition-colors",
-                isTarget && interactive && flashComment && "inbox-comment-flash",
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <ActorAvatar
-                  name={comment.author.name}
-                  initials={comment.author.initials}
-                  isAgent={comment.author.isAgent}
-                  size="sm"
-                />
-                <span className="text-body font-medium text-foreground">{comment.author.name}</span>
-                <span className="text-caption text-muted-foreground">{comment.time[lang]}</span>
-                {isTarget && (
-                  <Badge variant="secondary" className="ml-auto text-micro font-normal text-brand">
-                    {COPY.targetTag[lang]}
-                  </Badge>
-                )}
-              </div>
-              <p className="mt-2 text-body leading-relaxed text-foreground/90">{comment.body[lang]}</p>
-            </div>
-          );
-        })}
-      </div>
+                  {comment.code && (
+                    <pre className="mt-2.5 overflow-x-auto rounded-md border border-border/70 bg-muted/60 px-3 py-2 font-mono text-caption text-foreground/90">
+                      <code>{comment.code}</code>
+                    </pre>
+                  )}
 
-      {interactive && (
-        <div
-          className="rounded-xl border border-border bg-card p-3 shadow-xs transition-colors focus-within:border-ring"
-          onFocus={cancelBufferAndStay}
-        >
-          <textarea
-            value={composerText}
-            onChange={(e) => setComposerText(e.target.value)}
-            rows={2}
-            placeholder={COPY.composerPlaceholder[lang]}
-            className="block w-full resize-none bg-transparent text-body text-foreground outline-none placeholder:text-muted-foreground"
-          />
-          <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/60 pt-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 gap-1.5 text-caption text-muted-foreground hover:text-foreground"
-              onClick={() => triggerAutoArchive("comment", COPY.commentCause[lang])}
-            >
-              <Sparkles className="size-3.5 text-brand" />
-              {COPY.quickAgentReply[lang]}
-            </Button>
-            <Button
-              size="sm"
-              className="h-7 gap-1.5"
-              disabled={!composerText.trim()}
-              onClick={() => triggerAutoArchive("comment", COPY.commentCause[lang])}
-            >
-              <Send className="size-3" />
-              {COPY.send[lang]}
-            </Button>
+                  {comment.image && (
+                    <DelayedCommentImage
+                      key={`${issue.id}-${comment.id}-${navSeq}-${reserveImages ? "r" : "u"}`}
+                      kind={comment.image.kind}
+                      caption={comment.image.caption}
+                      delayMs={interactive ? imgDelayMs : 0}
+                      reserveAspectRatio={reserveImages}
+                      loadedInitially={!interactive || imagesAlreadyWarm}
+                      onExpandedWithoutReserve={
+                        interactive && isAboveTarget ? handleUnreservedImageExpand : undefined
+                      }
+                      lang={lang}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
-        </div>
-      )}
-    </div>
-  );
+        )}
+
+        {interactive && !showCurrentTimelineSkeleton && (
+          <div
+            className="rounded-xl border border-border bg-card p-3 shadow-xs transition-colors focus-within:border-ring"
+            onFocus={cancelBufferAndStay}
+          >
+            <textarea
+              value={composerText}
+              onChange={(e) => setComposerText(e.target.value)}
+              rows={2}
+              placeholder={COPY.composerPlaceholder[lang]}
+              className="block w-full resize-none bg-transparent text-body text-foreground outline-none placeholder:text-muted-foreground"
+            />
+            <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/60 pt-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1.5 text-caption text-muted-foreground hover:text-foreground"
+                onClick={() => triggerAutoArchive("comment", COPY.commentCause[lang])}
+              >
+                <Sparkles className="size-3.5 text-brand" />
+                {COPY.quickAgentReply[lang]}
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 gap-1.5"
+                disabled={!composerText.trim()}
+                onClick={() => triggerAutoArchive("comment", COPY.commentCause[lang])}
+              >
+                <Send className="size-3" />
+                {COPY.send[lang]}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const lastCleared = history[history.length - 1] ?? null;
+  const targetCommentNumber = activeIssue
+    ? activeIssue.comments.findIndex((c) => c.isTarget) + 1
+    : 0;
+  const imageCount = activeIssue ? activeIssue.comments.filter((c) => !!c.image).length : 0;
 
   return (
     <div
       style={{ ["--inbox-motion-scale" as string]: String(motionScale) }}
       className={cn("flex w-full flex-col overflow-hidden bg-background text-foreground", heightClass)}
     >
-      {/* Compact prototype control strip above the app window */}
+      {/* Prototype control strip: Direction switcher + Network latency + Prefetch status + Slow-mo + Reset */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-surface px-3 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
           {allowSwitchDirection ? (
@@ -721,7 +910,7 @@ export function InboxWorkbench({
                   <button
                     key={d.id}
                     type="button"
-                    onClick={() => switchDirection(d.id)}
+                    onClick={() => resetWorkbench(d.id)}
                     className={cn(
                       "inline-flex cursor-pointer items-center gap-1 rounded-md px-2.5 py-1 text-caption font-medium transition-colors",
                       active
@@ -741,30 +930,64 @@ export function InboxWorkbench({
               <span className="font-semibold text-foreground">{activeMeta.name[lang]}</span>
             </div>
           )}
+
+          {/* Live prefetch status pill for the next item */}
+          {nextIdForCurrent && latencyMs > 0 && (
+            <span className="hidden items-center gap-1.5 rounded-md border border-border bg-background px-2 py-0.5 text-micro text-muted-foreground xl:inline-flex">
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  nextIsWarm
+                    ? "bg-emerald-500"
+                    : warmingNextId
+                      ? "animate-pulse bg-amber-500"
+                      : "bg-red-500",
+                )}
+              />
+              {nextIsWarm
+                ? COPY.prefetchWarm[lang]
+                : warmingNextId
+                  ? COPY.prefetchWarming[lang]
+                  : COPY.prefetchCold[lang]}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">
-          {direction === "current" && (
-            <Button
-              size="sm"
-              variant={simulateCold ? "secondary" : "ghost"}
-              className="h-7 gap-1.5 text-caption"
-              onClick={() => setSimulateCold((v) => !v)}
-            >
-              <ClockDot active={simulateCold} />
-              {COPY.coldCache[lang]}
-            </Button>
-          )}
+          {/* Network request latency preset */}
+          <div className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5 text-caption">
+            <span className="px-1.5 text-micro text-muted-foreground">{COPY.latencyLabel[lang]}</span>
+            {([0, 250, 600] as LatencyPreset[]).map((ms) => (
+              <button
+                key={ms}
+                type="button"
+                onClick={() => {
+                  setLatencyMs(ms);
+                  setWarmIds(initialWarmSet(items));
+                  setWarmImageIds(new Set(selectedId ? [selectedId] : []));
+                }}
+                className={cn(
+                  "cursor-pointer rounded-md px-2 py-0.5 text-micro font-medium tabular-nums transition-colors",
+                  latencyMs === ms
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {ms}ms
+              </button>
+            ))}
+          </div>
+
           <Button
             size="sm"
             variant={slowMo ? "secondary" : "ghost"}
-            className="h-7 gap-1.5 text-caption"
+            className="h-7 gap-1 text-caption"
             onClick={() => setSlowMo((v) => !v)}
           >
             <Gauge className="size-3.5" />
             {COPY.slowMo[lang]}
           </Button>
-          <Button size="sm" variant="outline" className="h-7 gap-1.5 text-caption" onClick={resetAll}>
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-caption" onClick={() => resetWorkbench()}>
             <RotateCcw className="size-3.5" />
             {COPY.reset[lang]}
             <Kbd>R</Kbd>
@@ -782,7 +1005,6 @@ export function InboxWorkbench({
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-            {/* Pinned section (surrounding chrome context) */}
             <section className="mb-3">
               <div className="flex h-7 items-center gap-1 px-2 text-caption font-medium text-muted-foreground">
                 <ChevronDown className="size-3 text-faint-foreground" />
@@ -796,7 +1018,6 @@ export function InboxWorkbench({
               </div>
             </section>
 
-            {/* Inbox section */}
             <section className="mb-3">
               <div className="flex h-7 items-center justify-between px-2">
                 <div className="flex items-center gap-1 text-caption font-medium text-muted-foreground">
@@ -816,6 +1037,7 @@ export function InboxWorkbench({
                     const isSelected = item.id === selectedId;
                     const isCollapsing = collapsingIds.includes(item.id);
                     const isEntering = enteringRowId === item.id;
+                    const isWarmRow = latencyMs === 0 || warmIds.has(item.id);
                     return (
                       <li
                         key={item.id}
@@ -830,17 +1052,14 @@ export function InboxWorkbench({
                             onClick={() => {
                               clearPendingTimers();
                               setBuffer(null);
-                              setGlitchPhase("idle");
-                              setSelectedId(item.id);
-                              setNavDir("jump");
-                              setNavSeq((s) => s + 1);
+                              navigateToIssue(item, "jump", activeIssue);
                             }}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
-                                setSelectedId(item.id);
-                                setNavDir("jump");
-                                setNavSeq((s) => s + 1);
+                                clearPendingTimers();
+                                setBuffer(null);
+                                navigateToIssue(item, "jump", activeIssue);
                               }
                             }}
                             className={cn(
@@ -875,16 +1094,19 @@ export function InboxWorkbench({
                                   size="xs"
                                 />
                                 <span className="min-w-0 flex-1 truncate">{item.reason[lang]}</span>
-                                {item.agentRunning && (
-                                  <Bot className="size-3 shrink-0 text-brand" />
+                                {!isWarmRow && latencyMs > 0 && (
+                                  <span
+                                    title={lang === "zh" ? "未缓存" : "Cold"}
+                                    className="text-micro text-faint-foreground"
+                                  >
+                                    {lang === "zh" ? "冷" : "cold"}
+                                  </span>
                                 )}
-                                {item.unread && (
-                                  <span className="size-1.5 shrink-0 rounded-full bg-brand" />
-                                )}
+                                {item.agentRunning && <Bot className="size-3 shrink-0 text-brand" />}
+                                {item.unread && <span className="size-1.5 shrink-0 rounded-full bg-brand" />}
                               </div>
                             </div>
 
-                            {/* Hover quick actions */}
                             <div className="absolute top-1.5 right-1.5 hidden items-center gap-0.5 rounded-md bg-app-shell/90 group-hover/inbox:flex">
                               <TooltipHint label={COPY.snooze[lang]} side="bottom">
                                 <button
@@ -922,7 +1144,6 @@ export function InboxWorkbench({
               )}
             </section>
 
-            {/* Projects section underneath so row-collapse glide is visibly clear */}
             <section>
               <div className="flex h-7 items-center gap-1 px-2 text-caption font-medium text-muted-foreground">
                 <ChevronDown className="size-3 text-faint-foreground" />
@@ -994,10 +1215,10 @@ export function InboxWorkbench({
             </>
           ) : (
             <>
-              {/* 48px BreadcrumbHeader */}
+              {/* 48px BreadcrumbHeader — immediately populated from Inbox row metadata in B/C/D/E even on cold miss */}
               <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-6">
                 <div className="flex min-w-0 items-center gap-1.5 text-body">
-                  {showSkeletonForGlitch ? (
+                  {showCurrentFullSkeleton ? (
                     <>
                       <Skeleton className="h-4 w-16" />
                       <Skeleton className="h-4 w-4" />
@@ -1027,7 +1248,7 @@ export function InboxWorkbench({
                 </div>
               </header>
 
-              {/* 40px InboxBar — stays rock-steady on B/C/D/E; vanishes mid-switch on A (reproducing the 40px vertical jump) */}
+              {/* 40px InboxBar — rock-steady in B/C/D/E; drops out mid-switch in A */}
               {!hideInboxBarForGlitch && (
                 <div
                   className={cn(
@@ -1077,7 +1298,6 @@ export function InboxWorkbench({
                         <ArrowDown className="size-3.5" />
                         <Kbd>E</Kbd>
                       </Button>
-                      {/* 2px progress line along the bottom edge of InboxBar */}
                       {!buffer.paused && (
                         <div
                           className="pointer-events-none absolute right-0 bottom-0 left-0 h-[2px] origin-left bg-brand"
@@ -1100,7 +1320,6 @@ export function InboxWorkbench({
                         </span>
                       </span>
 
-                      {/* Issue quick actions that trigger auto-archive */}
                       <Button
                         size="sm"
                         variant="ghost"
@@ -1151,6 +1370,13 @@ export function InboxWorkbench({
                         {COPY.archive[lang]}
                         <Kbd>E</Kbd>
                       </Button>
+
+                      {/* Calm loading hairline when rapid E outruns anchor prefetch */}
+                      {showSteadyBodySkeleton && (
+                        <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-[2px] overflow-hidden bg-muted">
+                          <div className="h-full w-2/3 animate-pulse bg-brand" />
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -1158,7 +1384,6 @@ export function InboxWorkbench({
 
               {/* Scrollable Reading Column */}
               <div className="relative min-h-0 flex-1 overflow-hidden">
-                {/* Outgoing card layer for Direction E (Card Stack) */}
                 {direction === "card-stack" && leavingCard && (
                   <div
                     key={`leave-${leavingCard.seq}`}
@@ -1175,35 +1400,53 @@ export function InboxWorkbench({
                   ref={scrollRef}
                   onWheel={cancelBufferAndStay}
                   onMouseDown={cancelBufferAndStay}
+                  onScroll={(e) => {
+                    const top = Math.round(e.currentTarget.scrollTop);
+                    setTelemetry((t) => (Math.abs(t.scrollTop - top) > 12 ? { ...t, scrollTop: top } : t));
+                  }}
                   className="h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]"
                 >
-                  {showSkeletonForGlitch ? (
-                    <div className="mx-auto max-w-[720px] space-y-6 px-8 py-7">
-                      <Skeleton className="h-8 w-3/4" />
+                  {showCurrentFullSkeleton || showSteadyBodySkeleton ? (
+                    <div className="mx-auto max-w-[740px] space-y-6 px-8 py-7">
+                      {showSteadyBodySkeleton ? (
+                        <h1 className="text-display-sm font-semibold leading-snug tracking-tight text-foreground">
+                          {activeIssue.title[lang]}
+                        </h1>
+                      ) : (
+                        <Skeleton className="h-8 w-3/4" />
+                      )}
                       <div className="space-y-2.5">
                         <Skeleton className="h-4 w-full" />
                         <Skeleton className="h-4 w-5/6" />
                         <Skeleton className="h-4 w-2/3" />
                       </div>
                       <Skeleton className="h-px w-full" />
-                      <div className="space-y-3">
-                        <Skeleton className="h-4 w-20" />
-                        <div className="flex items-start gap-3">
-                          <Skeleton className="size-8 shrink-0 rounded-full" />
-                          <div className="flex-1 space-y-2">
-                            <Skeleton className="h-4 w-32" />
-                            <Skeleton className="h-20 w-full rounded-lg" />
-                          </div>
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <Skeleton className="h-4 w-24" />
+                          {showSteadyBodySkeleton && (
+                            <span className="text-caption tabular-nums text-muted-foreground">
+                              {COPY.loadingTimeline[lang]} ({latencyMs}ms)
+                            </span>
+                          )}
                         </div>
+                        {Array.from({ length: 3 }).map((_, i) => (
+                          <div key={i} className="rounded-lg border border-border p-4 space-y-2.5">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="size-6 rounded-full" />
+                              <Skeleton className="h-3.5 w-32" />
+                            </div>
+                            <Skeleton className="h-3.5 w-full" />
+                            <Skeleton className="h-3.5 w-4/5" />
+                            {i === 0 && <Skeleton className="mt-2 h-44 w-full rounded-md" />}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ) : (
                     <div
                       key={`${activeIssue.id}-${navSeq}`}
-                      className={cn(
-                        bodyEnterClass,
-                        direction === "card-stack" && "bg-background",
-                      )}
+                      className={cn(bodyEnterClass, direction === "card-stack" && "bg-background")}
                     >
                       {renderIssueBody(activeIssue, true)}
                     </div>
@@ -1212,8 +1455,6 @@ export function InboxWorkbench({
               </div>
             </>
           )}
-
-          {/* Bottom-right Undo Toast (anchored to bottom-right of the shell like Sonner) */}
         </main>
 
         {/* Right Properties Sidebar */}
@@ -1283,6 +1524,7 @@ export function InboxWorkbench({
           </aside>
         )}
 
+        {/* Bottom-right Undo Toast */}
         {toastMsg && (
           <div
             key={toastMsg.id}
@@ -1302,14 +1544,45 @@ export function InboxWorkbench({
         )}
       </div>
 
-      {/* Subtle footer describing current direction mechanics + shortcuts */}
-      <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-border bg-surface px-4 py-1.5 text-caption text-muted-foreground">
-        <span className="min-w-0 truncate">
-          <strong className="font-medium text-foreground">
-            {activeMeta.letter} · {activeMeta.name[lang]}：
-          </strong>
-          {activeMeta.pitch[lang]}
-        </span>
+      {/* Telemetry footer showing live scroll depth, comment #, cache hit, and image CLS */}
+      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border bg-surface px-4 py-1.5 text-caption text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-2 tabular-nums">
+          {activeIssue && (
+            <>
+              <span className="font-medium text-foreground">
+                {lang === "zh"
+                  ? `定位评论 #${targetCommentNumber}/${activeIssue.comments.length}`
+                  : `Target #${targetCommentNumber}/${activeIssue.comments.length}`}
+              </span>
+              <span aria-hidden className="text-faint-foreground">·</span>
+              <span>
+                {imageCount} {lang === "zh" ? "张图" : "images"}
+              </span>
+              <span aria-hidden className="text-faint-foreground">·</span>
+              <span>scrollTop {telemetry.scrollTop}px</span>
+              <span aria-hidden className="text-faint-foreground">·</span>
+              <span className={telemetry.cacheHit ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>
+                {telemetry.cacheHit
+                  ? lang === "zh"
+                    ? "缓存命中 0ms"
+                    : "Cache hit 0ms"
+                  : lang === "zh"
+                    ? `冷请求 ${telemetry.loadMs}ms`
+                    : `Cold fetch ${telemetry.loadMs}ms`}
+              </span>
+              {telemetry.clsPx > 0 && (
+                <>
+                  <span aria-hidden className="text-faint-foreground">·</span>
+                  <span className="font-medium text-red-600 dark:text-red-400">
+                    {lang === "zh"
+                      ? `图片展开偏移 +${telemetry.clsPx}px`
+                      : `Image shift +${telemetry.clsPx}px`}
+                  </span>
+                </>
+              )}
+            </>
+          )}
+        </div>
         <span className="shrink-0 text-faint-foreground">{COPY.shortcutsHint[lang]}</span>
       </footer>
     </div>
@@ -1322,16 +1595,5 @@ function PropRow({ label, children }: { label: string; children: React.ReactNode
       <span className="text-caption text-muted-foreground">{label}</span>
       <div className="min-w-0">{children}</div>
     </div>
-  );
-}
-
-function ClockDot({ active }: { active: boolean }) {
-  return (
-    <span
-      className={cn(
-        "size-1.5 rounded-full",
-        active ? "bg-amber-500" : "bg-muted-foreground/40",
-      )}
-    />
   );
 }

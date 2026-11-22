@@ -23,8 +23,8 @@ function CompareAllPage() {
           </h1>
           <p className="mt-2 text-body text-muted-foreground">
             {lang === "zh"
-              ? "下面先给一个完整尺度的可交互工作台（顶部可直接切换 A–E、开关 0.4x 慢动作与第 4 条冷缓存），建议连续按 E 归档 4–5 条，再点「标记完成」或「发送 @Emacs 评论」对比自动归档手感。"
-              : "Try the full-scale interactive workbench below (switch A–E, toggle 0.4x slow-mo, or test cold-cache #4+). Press E through several items, then click Mark Done or send an @Emacs comment to compare auto-archive pacing."}
+              ? "每条任务都包含 11–15 条长评论（3,000px+ 高度）和 3 张异步加载图片，顶部可切 0ms / 250ms / 600ms 请求延迟。建议：1）切到 A 在 250ms/600ms 下连按 E，观察 40px 跳动、骨架屏、顶部闪现瞬移和图片晚加载把评论顶出视口；2）切到 B/C/D/E 体验锚点预热（0ms 秒切）以及狂按 E 冲出预热窗口时的稳态降级；3）点「标记完成」或「快捷发送 @Emacs 评论」感受自动归档节奏。"
+              : "Every issue has 11–15 long comments (3,000px+ tall) and 3 async-loading screenshots, with 0ms / 250ms / 600ms network presets. Try: (1) Direction A at 250ms/600ms to feel the 40px bar drop, skeleton flash, scroll teleport, and late-image shift; (2) B/C/D/E for warm 0ms switches and rapid E-E-E cold fallback; (3) Mark Done or @Emacs comment for auto-archive pacing."}
           </p>
         </header>
 
