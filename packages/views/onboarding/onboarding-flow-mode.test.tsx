@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enOnboarding from "../locales/en/onboarding.json";
@@ -25,22 +26,32 @@ vi.mock("@multica/core/workspace/mutations", () => ({
   useCreateWorkspace: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
+const authState = vi.hoisted(() => ({
+  questionnaire: {} as Record<string, unknown>,
+}));
+
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
     (selector: (s: { user: unknown }) => unknown) =>
-      selector({ user: { id: "u-1", onboarding_questionnaire: {} } }),
+      selector({
+        user: { id: "u-1", name: "Ada", onboarding_questionnaire: authState.questionnaire },
+      }),
     { getState: () => ({ user: { id: "u-1" } }) },
   ),
 }));
 
+vi.mock("./steps/step-agent-setup", () => ({
+  StepAgentSetup: ({ wsSlug }: { wsSlug: string }) => <div>agent setup for {wsSlug}</div>,
+}));
+
 // Returning one workspace proves new-workspace mode does not offer to
 // continue with it.
+const workspaceState = vi.hoisted(() => ({
+  workspaces: [{ id: "ws-1", name: "Existing", slug: "existing" }] as unknown[],
+}));
 vi.mock("@multica/core/workspace", () => {
   return {
-    useWorkspaceList: () => ({
-      workspaces: [{ id: "ws-1", name: "Existing", slug: "existing" }],
-      ready: true,
-    }),
+    useWorkspaceList: () => ({ workspaces: workspaceState.workspaces, ready: true }),
   };
 });
 
@@ -48,16 +59,18 @@ vi.mock("@multica/core/onboarding", async () => {
   const actual = await vi.importActual<Record<string, unknown>>(
     "@multica/core/onboarding",
   );
-  return { ...actual, useBootstrapMika: () => ({ mutateAsync: vi.fn() }) };
+  return actual;
 });
 
 import { OnboardingFlow } from "./onboarding-flow";
 
 function renderFlow(props: Record<string, unknown>) {
   return render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <OnboardingFlow onComplete={vi.fn()} {...props} />
-    </I18nProvider>,
+    <QueryClientProvider client={new QueryClient()}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <OnboardingFlow onComplete={vi.fn()} {...props} />
+      </I18nProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -82,10 +95,37 @@ describe("OnboardingFlow — new-workspace mode", () => {
   });
 
   it("still opens on the product intro in first-run mode", () => {
+    authState.questionnaire = {};
     renderFlow({});
 
     expect(
       screen.queryByRole("heading", { name: /Name your workspace/i }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText(/agent setup for/)).not.toBeInTheDocument();
+  });
+});
+
+describe("OnboardingFlow — resuming", () => {
+  it("picks up at the agent step for someone who answered the questions and made a workspace", () => {
+    // Started in the browser, now opening Desktop (or another computer).
+    authState.questionnaire = { role: "engineer", use_case: ["ship_code"] };
+    renderFlow({});
+
+    expect(screen.getByText("agent setup for existing")).toBeInTheDocument();
+  });
+
+  it("opens on the product intro when the answers exist but no workspace does", async () => {
+    authState.questionnaire = { role: "engineer", use_case: ["ship_code"] };
+    workspaceState.workspaces = [];
+    try {
+      renderFlow({});
+
+      expect(
+        await screen.findByRole("img", { name: "Welcome to Multica" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/agent setup for/)).not.toBeInTheDocument();
+    } finally {
+      workspaceState.workspaces = [{ id: "ws-1", name: "Existing", slug: "existing" }];
+    }
   });
 });

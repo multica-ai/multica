@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   api,
   ApiError,
@@ -12,23 +13,24 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import {
   completeOnboarding,
+  createPersonalAgent,
   ONBOARDING_STEP_ORDER,
   saveQuestionnaire,
-  useBootstrapMika,
+  type CodingToolsBridge,
   type OnboardingStep,
   type QuestionnaireAnswers,
 } from "@multica/core/onboarding";
 import { useWorkspaceList } from "@multica/core/workspace";
-import type { AgentRuntime, Workspace } from "@multica/core/types";
+import type { Workspace } from "@multica/core/types";
 import { StepWelcome } from "./steps/step-welcome";
 import { StepShell } from "./components/step-shell";
 import { StepAboutYou } from "./steps/step-about-you";
 import { StepWorkspace } from "./steps/step-workspace";
-import { StepRuntimeConnect } from "./steps/step-runtime-connect";
+import { StepAgentSetup, type CreatePersonalAgentRequest } from "./steps/step-agent-setup";
 import { StepPlatformFork } from "./steps/step-platform-fork";
+import { useRuntimePicker } from "./components/use-runtime-picker";
 import { OnboardingLogoutButton } from "./components/onboarding-logout-button";
 import {
-  getMikaOnboarding,
   INSTALL_RUNTIME_ISSUE_BODY,
   INSTALL_RUNTIME_ISSUE_TITLE,
   pickContentLang,
@@ -93,20 +95,19 @@ function mergeQuestionnaire(
 
 /**
  * Shell's onComplete contract carries the workspace plus an optional
- * destination. Runtime-connected onboarding opens the real Mika conversation
- * started by the final step; runtime-skipped onboarding opens the guide issue
- * it created; the Welcome skip lands on the workspace issue list.
+ * destination. Creating an agent opens a chat with it; skipping Step 3 opens
+ * the guide issue it created; the Welcome skip lands on the workspace issue
+ * list.
  *
  * Three exit shapes feed onComplete:
  *   - Skip-existing (Welcome): completeOnboarding marks onboarded; navigate
  *     to the existing workspace's issue list.
- *   - Runtime-skipped (no runtime on Step 3): create one install-runtime guide
+ *   - Runtime-skipped (no tool on Step 3): create one install-runtime guide
  *     issue assigned to the member, mark onboarding complete, and open that
- *     issue. Once a runtime appears, the Runtimes page offers the same Mika
- *     bootstrap used by the connected path.
- *   - Runtime-connected: create or repair the workspace's Mika on the selected
- *     runtime, start one hidden onboarding kickoff, mark onboarding complete,
- *     and open Mika's real chat. No fixed specialist team is created.
+ *     issue. Once a tool is connected, the Runtimes page offers to create the
+ *     member's agent.
+ *   - Agent created: create the member's private agent on the chosen runtime,
+ *     open a chat with it, mark onboarding complete, and land in that chat.
  *
  * Both workspace-provisioning exits finish their writes BEFORE
  * completeOnboarding: it refreshes the user, and the web shell unmounts this
@@ -132,10 +133,12 @@ interface OnboardingFlowProps {
    *  it — its CLI install flow already runs on the user's machine and
    *  the embedded picker reacts to daemon:register events. */
   onRuntimeRefresh?: () => void | Promise<void>;
-  /** Desktop wires this to the local daemon's live status so the runtime
-   *  step doesn't flash "no runtime found" while the daemon is still booting
-   *  or probing CLI versions (MUL-5119). Web omits it. */
+  /** Desktop wires this to the local daemon's live status so Step 3 does not
+   *  restart a daemon that is still booting or probing CLI versions
+   *  (MUL-5119). Web omits it. */
   runtimesPending?: boolean;
+  /** Desktop only: installs and signs in to AI coding tools on this machine. */
+  codingTools?: CodingToolsBridge;
 }
 
 export function OnboardingFlow({
@@ -145,6 +148,7 @@ export function OnboardingFlow({
   runtimeInstructions,
   onRuntimeRefresh,
   runtimesPending,
+  codingTools,
 }: OnboardingFlowProps) {
   const { t, i18n } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
@@ -164,10 +168,10 @@ export function OnboardingFlow({
     isNewWorkspace ? "workspace" : "welcome",
   );
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const qc = useQueryClient();
   // Raised by whichever step has a request in flight; locks Back and the
   // rail. Only the workspace step sets it today.
   const [stepBusy, setStepBusy] = useState(false);
-  const bootstrapMika = useBootstrapMika(workspace?.id ?? "");
   // Keyed by workspace so retrying Skip after completeOnboarding failed reuses
   // the guide issue instead of creating a second one.
   const guideIssueRef = useRef<{ workspaceId: string; issueRef: IssueRouteRef } | null>(
@@ -184,6 +188,22 @@ export function OnboardingFlow({
   const { workspaces, ready: workspacesReady } = useWorkspaceList({
     enabled: step === "welcome" || step === "workspace",
   });
+
+  // Someone who already answered the questions and made a workspace — on
+  // another computer, or in the browser before opening Desktop — picks up at
+  // Step 3 instead of walking the intro again. Decided once, on arrival.
+  const [resumeDecided, setResumeDecided] = useState(isNewWorkspace);
+  const answeredBefore =
+    storedQuestionnaire.role !== null || storedQuestionnaire.use_case.length > 0;
+  useEffect(() => {
+    if (resumeDecided || !workspacesReady) return;
+    setResumeDecided(true);
+    const existing = workspaces[0];
+    if (answeredBefore && existing && step === "welcome") {
+      setWorkspace(existing);
+      setStep("runtime");
+    }
+  }, [answeredBefore, resumeDecided, step, workspaces, workspacesReady]);
   const existingWorkspace = isNewWorkspace
     ? workspace
     : (workspace ?? workspaces[0] ?? null);
@@ -258,8 +278,8 @@ export function OnboardingFlow({
       setWorkspace(ws);
       // Deliberately NOT setCurrentWorkspace: that singleton is also written by
       // the desktop tab system, which reclaims it whenever the new workspace
-      // has no tab group yet. Racing it sent the rest of this flow — Mika, the
-      // session, the kickoff — into the previously-active workspace. Every call
+      // has no tab group yet. Racing it sent the rest of this flow — the
+      // agent and its chat — into the previously-active workspace. Every call
       // from here on names its target workspace instead, and the switch happens
       // once, on the navigation in onComplete.
       advanceFrom("workspace");
@@ -267,92 +287,75 @@ export function OnboardingFlow({
     [advanceFrom],
   );
 
-  const handleRuntimeNext = useCallback(
-    async (rt: AgentRuntime | null, model?: string) => {
+  const handleCreateAgent = useCallback(
+    async ({ runtime, name, description }: CreatePersonalAgentRequest) => {
       if (!workspace) return;
-      // A connected runtime provisions only Mika and immediately opens the
-      // real interactive onboarding conversation. Specialists are created
-      // later, only when the member's actual workflow justifies them.
-      if (rt) {
-        const contentLang = pickContentLang(i18n.language);
-        try {
-          // The earlier questionnaire saves are deliberately optimistic. Flush
-          // the latest snapshot here so the server-authored kickoff can read
-          // reliable role/use-case context instead of racing the last PATCH.
-          await saveQuestionnaire(answers);
-          const result = await bootstrapMika.mutateAsync({
-            workspaceSlug: workspace.slug,
-            runtimeId: rt.id,
-            model,
-            ...getMikaOnboarding(contentLang),
-          });
-          await completeOnboarding("full", workspace.id);
-          onComplete(workspace, {
-            kind: "chat",
-            sessionId: result.chatSession.id,
-          });
-        } catch (err) {
-          toast.error(
-            err instanceof Error
-              ? err.message
-              : t(($) => $.errors.mika_setup_failed),
-          );
-          throw err;
-        }
-        return;
-      }
-      let issueRef =
-        guideIssueRef.current?.workspaceId === workspace.id
-          ? guideIssueRef.current.issueRef
-          : null;
-      if (!issueRef) {
-        const contentLang = pickContentLang(i18n.language);
-        try {
-          const issue = await api.createIssue(
-            {
-              title: INSTALL_RUNTIME_ISSUE_TITLE[contentLang],
-              description: INSTALL_RUNTIME_ISSUE_BODY[contentLang],
-              status: "in_progress",
-              priority: "high",
-              assignee_type: "member",
-              assignee_id: user.id,
-            },
-            workspace.slug,
-          );
-          issueRef = issueRouteRef(issue);
-        } catch (err) {
-          // A reload, or a create whose response was lost, leaves the guide
-          // from an earlier attempt in place; the duplicate guard then
-          // answers with that issue, which is the one to open.
-          const duplicate =
-            err instanceof ApiError && err.status === 409
-              ? parseWithFallback<DuplicateIssueErrorBody | null>(
-                  err.body,
-                  DuplicateIssueErrorBodySchema,
-                  null,
-                  { endpoint: "POST /api/issues (active_duplicate_issue)" },
-                )
-              : null;
-          if (!duplicate) {
-            toast.error(t(($) => $.errors.guide_failed));
-            return;
-          }
-          issueRef = issueRouteRef(duplicate.issue);
-        }
-        guideIssueRef.current = { workspaceId: workspace.id, issueRef };
-      }
-      try {
-        await completeOnboarding("runtime_skipped", workspace.id);
-      } catch (err) {
-        toast.error(
-          err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
-        );
-        return;
-      }
-      onComplete(workspace, { kind: "issue", issueRef });
+      const { chatSession } = await createPersonalAgent({
+        workspaceSlug: workspace.slug,
+        workspaceId: workspace.id,
+        queryClient: qc,
+        runtimeId: runtime.id,
+        name,
+        description,
+      });
+      await completeOnboarding("full", workspace.id);
+      onComplete(workspace, { kind: "chat", sessionId: chatSession.id });
     },
-    [answers, bootstrapMika, i18n.language, workspace, onComplete, t, user.id],
+    [workspace, onComplete, qc],
   );
+
+  const handleRuntimeSkip = useCallback(async () => {
+    if (!workspace) return;
+    let issueRef =
+      guideIssueRef.current?.workspaceId === workspace.id
+        ? guideIssueRef.current.issueRef
+        : null;
+    if (!issueRef) {
+      const contentLang = pickContentLang(i18n.language);
+      try {
+        const issue = await api.createIssue(
+          {
+            title: INSTALL_RUNTIME_ISSUE_TITLE[contentLang],
+            description: INSTALL_RUNTIME_ISSUE_BODY[contentLang],
+            status: "in_progress",
+            priority: "high",
+            assignee_type: "member",
+            assignee_id: user.id,
+          },
+          workspace.slug,
+        );
+        issueRef = issueRouteRef(issue);
+      } catch (err) {
+        // A reload, or a create whose response was lost, leaves the guide
+        // from an earlier attempt in place; the duplicate guard then
+        // answers with that issue, which is the one to open.
+        const duplicate =
+          err instanceof ApiError && err.status === 409
+            ? parseWithFallback<DuplicateIssueErrorBody | null>(
+                err.body,
+                DuplicateIssueErrorBodySchema,
+                null,
+                { endpoint: "POST /api/issues (active_duplicate_issue)" },
+              )
+            : null;
+        if (!duplicate) {
+          toast.error(t(($) => $.errors.guide_failed));
+          return;
+        }
+        issueRef = issueRouteRef(duplicate.issue);
+      }
+      guideIssueRef.current = { workspaceId: workspace.id, issueRef };
+    }
+    try {
+      await completeOnboarding("runtime_skipped", workspace.id);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
+      );
+      return;
+    }
+    onComplete(workspace, { kind: "issue", issueRef });
+  }, [i18n.language, workspace, onComplete, t, user.id]);
 
   const handleBack = useCallback((from: OnboardingStep) => {
     // The workspace step is the entry point in new-workspace mode, so its
@@ -377,10 +380,10 @@ export function OnboardingFlow({
   // Once a workspace exists there is nothing left to cancel, so new-workspace
   // mode drops the back affordance on the runtime step. Walking back would
   // reach the workspace step, whose own back button means "leave" — and
-  // leaving there would strand a workspace with no runtime, no Mika, and no
+  // leaving there would strand a workspace with no runtime, no agent, and no
   // guidance. The remaining exits both end somewhere coherent: Skip runs the
   // runtime-skipped path (create the guide issue and open it), and
-  // continuing provisions Mika.
+  // continuing creates the member's agent.
   // Log out lives at the foot of the progress rail rather than pinned to the
   // window corner: pinned put it outside the measure and above Back, which
   // read as a second header row.
@@ -404,6 +407,10 @@ export function OnboardingFlow({
   // and replaying the shell's fade from opacity 0. That full-window re-fade is
   // the flash. Hoisting the shell makes the rail actually persistent and leaves
   // only the step body swapping.
+  if (step === "welcome" && answeredBefore && !resumeDecided) {
+    // Hold Welcome back until the resume check above has the workspace list.
+    return null;
+  }
   if (step === "welcome") {
     // Welcome has no rail, so the escape hatch stays pinned there.
     return (
@@ -450,31 +457,62 @@ export function OnboardingFlow({
         />
       )}
 
-      {/* Step 3 has two paths:
-            - Desktop (no cliInstructions slot) drives the local daemon's
-              runtime list directly.
-            - Web offers Download / CLI / Cloud; under the CLI path it embeds
-              the live probe, and Cloud is a soft exit via the waitlist. */}
+      {/* Step 3: Desktop installs tools on this machine and creates the
+          agent in place. Web hands off until one of the member's computers
+          is connected, then creates the agent the same way. */}
       {step === "runtime" &&
         workspace &&
         (!runtimeInstructions ? (
-          <StepRuntimeConnect
+          <StepAgentSetup
             wsId={workspace.id}
             wsSlug={workspace.slug}
-            onNext={handleRuntimeNext}
-            onRefresh={onRuntimeRefresh}
+            userName={user.name}
+            codingTools={codingTools}
+            onRuntimeRefresh={onRuntimeRefresh}
             runtimesPending={runtimesPending}
+            onCreate={handleCreateAgent}
+            onSkip={handleRuntimeSkip}
           />
         ) : (
-          <StepPlatformFork
-            wsId={workspace.id}
-            wsSlug={workspace.slug}
-            onNext={handleRuntimeNext}
+          <WebAgentStep
+            workspace={workspace}
+            userName={user.name}
             cliInstructions={runtimeInstructions}
+            onCreate={handleCreateAgent}
+            onSkip={handleRuntimeSkip}
           />
         ))}
     </StepShell>
   );
+}
+
+/** Web Step 3: hand off until a computer is connected, then create the agent. */
+function WebAgentStep({
+  workspace,
+  userName,
+  cliInstructions,
+  onCreate,
+  onSkip,
+}: {
+  workspace: Workspace;
+  userName: string;
+  cliInstructions: React.ReactNode;
+  onCreate: (request: CreatePersonalAgentRequest) => Promise<void>;
+  onSkip: () => Promise<void>;
+}) {
+  const { runtimes } = useRuntimePicker(workspace.id, workspace.slug);
+  if (runtimes.some((runtime) => runtime.status === "online")) {
+    return (
+      <StepAgentSetup
+        wsId={workspace.id}
+        wsSlug={workspace.slug}
+        userName={userName}
+        onCreate={onCreate}
+        onSkip={onSkip}
+      />
+    );
+  }
+  return <StepPlatformFork onSkip={onSkip} cliInstructions={cliInstructions} />;
 }
 
 export type OnboardingMode = "first_run" | "new_workspace";

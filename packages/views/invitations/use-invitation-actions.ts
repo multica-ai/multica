@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
+import { findPersonalAgent } from "@multica/core/onboarding";
 import { paths, useHasOnboarded } from "@multica/core/paths";
-import type { Invitation } from "@multica/core/types";
+import type { Invitation, Workspace } from "@multica/core/types";
 import {
   workspaceKeys,
   workspaceListOptions,
@@ -10,10 +11,31 @@ import {
 import { useNavigation } from "../navigation";
 
 /**
+ * Whether a member who just joined still needs their own agent there. A
+ * failed check answers "no": joining must never be held up by it.
+ */
+async function needsPersonalAgent(workspace: Workspace): Promise<boolean> {
+  const userId = useAuthStore.getState().user?.id;
+  if (!userId) return false;
+  try {
+    const agents = await api.listAgents({ workspace_id: workspace.id }, workspace.slug);
+    return !findPersonalAgent(agents, userId);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Accept / decline for a pending invitation. The invitations page is the only
  * surface that answers invitations; the workspace switcher links to it.
+ *
+ * `onJoinedWithoutAgent` lets the page offer agent setup to a member who has
+ * no agent in the workspace they joined; without it, joining lands on the
+ * workspace's issues.
  */
-export function useInvitationActions() {
+export function useInvitationActions(options?: {
+  onJoinedWithoutAgent?: (workspace: Workspace) => void;
+}) {
   const queryClient = useQueryClient();
   const { push } = useNavigation();
   const hasOnboarded = useHasOnboarded();
@@ -41,13 +63,18 @@ export function useInvitationActions() {
       }
       // staleTime: 0 forces a real fetch — the joined workspace has to be in
       // the list before its slug can be resolved.
-      return queryClient.fetchQuery({ ...workspaceListOptions(), staleTime: 0 });
+      const workspaces = await queryClient.fetchQuery({ ...workspaceListOptions(), staleTime: 0 });
+      const joined = workspaces.find((w) => w.id === invitation.workspace_id);
+      const needsAgent =
+        !!joined && !!options?.onJoinedWithoutAgent && (await needsPersonalAgent(joined));
+      return { joined, needsAgent };
     },
     // Land inside the joined workspace; staying put and just dropping the
     // invitation reads as nothing happened (MUL-820).
-    onSuccess: (workspaces, invitation) => {
-      const joined = workspaces.find((w) => w.id === invitation.workspace_id);
-      if (joined) push(paths.workspace(joined.slug).issues());
+    onSuccess: ({ joined, needsAgent }) => {
+      if (!joined) return;
+      if (needsAgent && options?.onJoinedWithoutAgent) options.onJoinedWithoutAgent(joined);
+      else push(paths.workspace(joined.slug).issues());
     },
     // On failure the invitation was usually concluded on another surface
     // while it was on screen, or the join went through and a later step

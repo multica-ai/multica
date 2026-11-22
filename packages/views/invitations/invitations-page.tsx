@@ -13,13 +13,15 @@ import {
   resolvePostAuthDestination,
   useHasOnboarded,
 } from "@multica/core/paths";
-import type { Invitation } from "@multica/core/types";
+import type { CodingToolsBridge } from "@multica/core/onboarding";
+import type { Invitation, Workspace } from "@multica/core/types";
 import { AppLink } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
 import { useT } from "../i18n";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { useInvitationActions } from "./use-invitation-actions";
+import { JoinedAgentSetup } from "../onboarding/joined-agent-setup";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -38,6 +40,10 @@ export interface InvitationsPageProps {
    * to go (the user has a workspace). Otherwise Log out is the only exit.
    */
   onBack?: () => void;
+  /** Desktop: lets a member who joined without an agent install a tool and create one. */
+  codingTools?: CodingToolsBridge;
+  onRuntimeRefresh?: () => void | Promise<void>;
+  runtimesPending?: boolean;
 }
 
 /**
@@ -50,10 +56,17 @@ export interface InvitationsPageProps {
  * workspace switcher. Un-onboarded users also get a way to skip to
  * onboarding — leaving this page never declines anything.
  */
-export function InvitationsPage({ invitationId, onBack }: InvitationsPageProps) {
+export function InvitationsPage({
+  invitationId,
+  onBack,
+  codingTools,
+  onRuntimeRefresh,
+  runtimesPending,
+}: InvitationsPageProps) {
   const { t } = useT("invite");
   const hasOnboarded = useHasOnboarded();
-  const { accept, decline } = useInvitationActions();
+  const [joined, setJoined] = useState<Workspace | null>(null);
+  const { accept, decline } = useInvitationActions({ onJoinedWithoutAgent: setJoined });
   const [error, setError] = useState<string | null>(null);
 
   const { data: pending = [], isLoading } = useQuery(myInvitationListOptions());
@@ -67,6 +80,17 @@ export function InvitationsPage({ invitationId, onBack }: InvitationsPageProps) 
     staleTime: 0,
   });
   const { data: workspaces = [] } = useQuery(workspaceListOptions());
+
+  if (joined) {
+    return (
+      <JoinedAgentSetup
+        workspace={joined}
+        codingTools={codingTools}
+        onRuntimeRefresh={onRuntimeRefresh}
+        runtimesPending={runtimesPending}
+      />
+    );
+  }
 
   if (isLoading || linked.isLoading) {
     return (

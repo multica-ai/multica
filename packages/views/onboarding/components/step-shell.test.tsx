@@ -70,7 +70,7 @@ describe("onboarding step shell", () => {
 
     const compact = container.querySelector("main .md\\:hidden")!;
     expect(compact).not.toBeNull();
-    expect(compact.textContent).toContain("Meet Mika");
+    expect(compact.textContent).toContain("Connect AI tools");
     expect(compact.querySelector("button")).not.toBeNull();
   });
 
@@ -114,7 +114,7 @@ describe("onboarding progress rail", () => {
     await userEvent.click(back);
     expect(onStepChange).toHaveBeenCalledWith("about_you");
 
-    expect(screen.queryByRole("button", { name: /meet mika/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /connect ai tools/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^workspace/i })).toBeNull();
   });
 
