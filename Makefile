@@ -36,6 +36,10 @@ export
 MULTICA_ARGS ?= $(ARGS)
 
 COMPOSE := docker compose
+# Dev-side calls must stay on the shared project (`name: multica` in
+# docker-compose.yml). COMPOSE_PROJECT_NAME in .env is for self-host and
+# would otherwise move db-up/db-down/db-reset off that container.
+DEV_COMPOSE := $(COMPOSE) -p multica
 
 define REQUIRE_ENV
 	@if [ ! -f "$(ENV_FILE)" ]; then \
@@ -272,10 +276,10 @@ check: ## Run typecheck, TS tests, Go tests, and Playwright E2E for the current 
 	@ENV_FILE="$(ENV_FILE)" bash scripts/check.sh
 
 db-up: ## Start the shared PostgreSQL container used by main and worktrees
-	@$(COMPOSE) up -d postgres
+	@$(DEV_COMPOSE) up -d postgres
 
 db-down: ## Stop the shared PostgreSQL container without removing its Docker volume
-	@$(COMPOSE) down
+	@$(DEV_COMPOSE) down
 
 db-drop: ## Permanently drop the current env's local database after confirmation
 	$(REQUIRE_ENV)
@@ -295,7 +299,7 @@ db-reset: ## Drop and recreate the current env's database, then re-run all migra
 	esac
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	@echo "==> Dropping and recreating database '$(POSTGRES_DB)'..."
-	@$(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d postgres -v ON_ERROR_STOP=1 \
+	@$(DEV_COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d postgres -v ON_ERROR_STOP=1 \
 		-c "DROP DATABASE IF EXISTS \"$(POSTGRES_DB)\" WITH (FORCE);" \
 		-c "CREATE DATABASE \"$(POSTGRES_DB)\";"
 	@echo "==> Running migrations..."

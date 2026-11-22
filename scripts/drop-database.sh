@@ -69,7 +69,9 @@ case "$answer" in
 esac
 
 cd "$root_dir"
-docker compose exec -T postgres \
+# Pin the shared project so a self-host COMPOSE_PROJECT_NAME in .env
+# cannot retarget this drop away from the container on 127.0.0.1:5432.
+docker compose -p multica exec -T postgres \
   dropdb \
   --username "$POSTGRES_USER" \
   --maintenance-db postgres \

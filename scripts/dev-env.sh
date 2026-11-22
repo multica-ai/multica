@@ -553,7 +553,9 @@ container_psql() {
   local user=$1
   shift
   command -v docker >/dev/null 2>&1 || return 1
-  docker compose -f "$REPO_ROOT/docker-compose.yml" exec -T postgres psql -U "$user" -d postgres "$@"
+  # Pin the shared project so a self-host COMPOSE_PROJECT_NAME in .env
+  # cannot miss the container `make destroy` needs to drop the slot database.
+  docker compose -p multica -f "$REPO_ROOT/docker-compose.yml" exec -T postgres psql -U "$user" -d postgres "$@"
 }
 
 # Diagnoses the failure mode this whole script exists to make impossible:
