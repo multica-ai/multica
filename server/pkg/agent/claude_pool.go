@@ -488,14 +488,9 @@ func (b *claudeBackend) executeWarm(ctx context.Context, prompt string, opts Exe
 			}
 			b.cfg.WarmPool.Park("claude", sessionID, warmProc)
 		} else {
-			if resultIsError || terminalReasonError != "" {
-				// Bound exit wait after an error result, matching cold execute.
-				select {
-				case <-warmProc.procDone:
-				case <-time.After(claudeErrorResultGrace()):
-					warmProc.terminateImmediately()
-				}
-			}
+			// Close stdin immediately so a persistent stream-json CLI waiting for
+			// the next user frame exits on EOF instead of blocking for the error
+			// result grace window.
 			warmProc.Close()
 			scanErr, exitErr = warmProc.getErrors()
 		}

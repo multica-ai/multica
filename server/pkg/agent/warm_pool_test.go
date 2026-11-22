@@ -505,6 +505,97 @@ done
 	}
 }
 
+func TestClaudeWarmPoolErrorResultClosesStdinImmediately(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	fakeClaude := filepath.Join(dir, "claude")
+	// Emits an error result and keeps reading stdin until EOF, matching a live
+	// stream-json Claude process. Without closing stdin immediately, this would
+	// stall for the full 10s claudeErrorResultGrace() before returning.
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"user"'*)
+      printf '{"type":"system","subtype":"init","session_id":"claude-err-1"}\n'
+      case "$line" in
+        *prompt_too_long*)
+          printf '{"type":"result","subtype":"success","session_id":"claude-err-1","result":"context full","is_error":false,"terminal_reason":"prompt_too_long"}\n'
+          ;;
+        *)
+          printf '{"type":"result","subtype":"error","session_id":"claude-err-1","result":"rate limit exceeded","is_error":true}\n'
+          ;;
+      esac
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakeClaude, []byte(script))
+
+	pool := NewWarmSessionPool(WarmSessionPoolConfig{
+		IdleTTL: 30 * time.Second,
+		MaxIdle: 4,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	defer pool.Close()
+
+	for _, tc := range []struct {
+		name      string
+		prompt    string
+		wantError string
+	}{
+		{name: "is_error", prompt: "trigger api error", wantError: "rate limit exceeded"},
+		{name: "terminal_reason_prompt_too_long", prompt: "trigger prompt_too_long", wantError: "prompt_too_long"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := New("claude", Config{
+				ExecutablePath: fakeClaude,
+				Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+				TaskID:         "task-err-" + tc.name,
+				WarmPool:       pool,
+				Env: map[string]string{
+					"MULTICA_TOKEN":        "mat_err",
+					"MULTICA_TASK_ID":      "task-err-" + tc.name,
+					"MULTICA_AGENT_ID":     "agent-err",
+					"MULTICA_WORKSPACE_ID": "ws-err",
+				},
+			})
+			if err != nil {
+				t.Fatalf("New(claude): %v", err)
+			}
+
+			start := time.Now()
+			sess, err := b.Execute(context.Background(), tc.prompt, ExecOptions{
+				Cwd:     dir,
+				Model:   "claude-opus-5-5",
+				Timeout: 15 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			for range sess.Messages {
+			}
+			res := <-sess.Result
+			elapsed := time.Since(start)
+
+			if res.Status != "failed" {
+				t.Fatalf("status = %q, want failed (res=%+v)", res.Status, res)
+			}
+			if !strings.Contains(res.Error, tc.wantError) {
+				t.Fatalf("error = %q, want substring %q", res.Error, tc.wantError)
+			}
+			if elapsed >= 2*time.Second {
+				t.Fatalf("error result took %v (expected immediate stdin EOF exit, not 10s grace wait)", elapsed)
+			}
+			if pool.Len() != 0 {
+				t.Fatalf("errored session was parked: pool.Len() = %d", pool.Len())
+			}
+		})
+	}
+}
+
 func TestClaudeStreamCoalescerLeadingCoalescingAndReconciliation(t *testing.T) {
 	t.Parallel()
 
