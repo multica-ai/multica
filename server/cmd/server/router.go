@@ -1404,17 +1404,31 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						// Connected Apps v2 (MUL-8516): runs reach their apps
 						// through the Multica gateway, which holds the Composio
 						// key and applies account rules and confirmations.
-						appsSvc, aerr := connectedapps.New(connectedapps.Config{
+						appsCfg := connectedapps.Config{
 							Queries:       queries,
 							Composio:      svc,
 							TokenSecret:   connectedapps.DeriveTokenSecret(stateSecret),
 							PublicBaseURL: callbackBase,
 							Bus:           bus,
-						})
+						}
+						// Remote MCP apps (MUL-9792) store OAuth tokens, so
+						// they need their own at-rest key; without it they
+						// stay off and Composio apps work as before.
+						if appsKey, kerr := secretbox.LoadKey("MULTICA_APPS_SECRET_KEY"); kerr == nil {
+							if box, berr := secretbox.New(appsKey); berr == nil {
+								appsCfg.SecretBox, appsCfg.DB = box, pool
+							} else {
+								slog.Error("connected apps: secretbox.New failed; remote MCP apps disabled", "error", berr)
+							}
+						} else {
+							slog.Info("connected apps: remote MCP apps disabled (MULTICA_APPS_SECRET_KEY not set)")
+						}
+						appsSvc, aerr := connectedapps.New(appsCfg)
 						if aerr != nil {
 							slog.Error("connected apps: init failed; agents run without apps", "error", aerr)
 						} else {
 							appsSvc.SetResumer(h)
+							appsSvc.SetTeamConnectGate(h.TeamAppConnectGate)
 							h.ConnectedApps = appsSvc
 						}
 						// Stage 3 (MUL-3721) hook: feed the per-task MCP
@@ -1706,6 +1720,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Apps MCP gateway (MUL-8516). Outside the Auth group: a run presents its
 	// task-scoped bearer token, verified by the gateway itself.
 	r.Post("/api/apps/mcp", h.AppsGateway)
+	r.Post("/api/apps/mcp/{app}", h.AppsRemoteGateway)
+	// Remote MCP app OAuth callback (MUL-9792). Public for the same reason
+	// as the Composio callback; the sealed state identifies the handshake.
+	r.Get("/api/apps/oauth/callback", h.AppsOAuthCallback)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {

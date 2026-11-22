@@ -170,6 +170,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"weixin_login_session":               workspaceDelete,
 	"weixin_account_state":               workspaceDelete,
 	"workspace_composio_connection":      workspaceDelete,
+	"remote_app_connection":              workspaceDelete, // team rows (owner_id = workspace); personal rows are user-owned
+	"remote_app_oauth_client":            workspaceDeleteKeep,
 	"agent_app":                          workspaceDelete,
 	"app_action_rule":                    workspaceDelete,
 	"app_action_request":                 workspaceDelete,

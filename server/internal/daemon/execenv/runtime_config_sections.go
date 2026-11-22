@@ -171,6 +171,7 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 	var b strings.Builder
 	var lines strings.Builder
 	gateway := ""
+	remote := false
 	for _, app := range apps {
 		serverName := sanitizeBriefCodeToken(app.ServerName)
 		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
@@ -189,6 +190,13 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 			fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`%s\n", name, toolkitSlug, serverName, gatewayAppDetail(app))
 			continue
 		}
+		if app.Provider == "multica_remote" {
+			// Served by Multica under the app's own server name: its tools
+			// are called directly, not through the apps_* meta tools.
+			remote = true
+			fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`%s\n", name, toolkitSlug, serverName, gatewayAppDetail(app))
+			continue
+		}
 		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
 	}
 	if lines.Len() == 0 {
@@ -201,6 +209,10 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 		fmt.Fprintf(&b, "On `%s`, find tools with `apps_search_tools`, read the schema with `apps_get_tool`, then call `apps_run_tool`. "+
 			"Allowed calls run immediately and return their result. Never work around a blocked call. "+
 			"For a `not connected` account, call `apps_request_connection` and end your turn.\n", gateway)
+	}
+	if remote {
+		b.WriteString("Call the tools of an app on its own MCP server directly. " +
+			"For a `not connected` account, call `apps_request_connection` on `multica_apps` and end your turn.\n")
 	}
 	b.WriteString("\n")
 	return b.String()

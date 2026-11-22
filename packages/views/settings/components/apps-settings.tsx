@@ -41,7 +41,7 @@ import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
 import { SavedAppRestriction } from "../../common/saved-app-restriction";
 import { useT, useTimeAgo } from "../../i18n";
 import { useNavigation } from "../../navigation";
-import { isDesktopShell } from "../../platform";
+import { isDesktopShell, openExternal } from "../../platform";
 import { AddAppDialog } from "./add-app-dialog";
 import { AppAccountDialog } from "./app-account-dialog";
 import { SettingsCard, SettingsSection } from "./settings-layout";
@@ -269,8 +269,22 @@ function AccountRow({
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
   const restore = useRestoreAppAccess();
+  const [reconnecting, setReconnecting] = useState(false);
   const name = app?.name || connection.toolkit_slug;
   const expired = connection.status === "expired";
+
+  async function reconnect() {
+    setReconnecting(true);
+    try {
+      const { redirect_url } = await api.connectApp(scope, connection.toolkit_slug);
+      openExternal(redirect_url, { webTarget: "same-tab" });
+      // Desktop opens the hosted flow in the system browser and stays here.
+      if (isDesktopShell()) setReconnecting(false);
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.toast_failed));
+      setReconnecting(false);
+    }
+  }
   const meta = [
     scope === "team" && connection.connected_by
       ? t(($) => $.connected_apps.connected_by, { name: getActorName("member", connection.connected_by) })
@@ -300,6 +314,11 @@ function AccountRow({
         </div>
         {canManage && (
           <>
+            {expired && (
+              <Button variant="outline" size="sm" onClick={reconnect} disabled={reconnecting}>
+                {t(($) => $.connected_apps.reconnect)}
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={onOpen}>
               {t(($) => $.connected_apps.activity)}
             </Button>

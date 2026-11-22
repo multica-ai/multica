@@ -1782,6 +1782,36 @@ type QuickAction struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type RemoteAppConnection struct {
+	ID            pgtype.UUID        `json:"id"`
+	AppSlug       string             `json:"app_slug"`
+	Scope         string             `json:"scope"`
+	OwnerID       pgtype.UUID        `json:"owner_id"`
+	ConnectedBy   pgtype.UUID        `json:"connected_by"`
+	OauthClientID pgtype.UUID        `json:"oauth_client_id"`
+	AccessToken   []byte             `json:"access_token"`
+	RefreshToken  []byte             `json:"refresh_token"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	Status        string             `json:"status"`
+	ConnectedAt   pgtype.Timestamptz `json:"connected_at"`
+	LastUsedAt    pgtype.Timestamptz `json:"last_used_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type RemoteAppOauthClient struct {
+	ID                      pgtype.UUID        `json:"id"`
+	AppSlug                 string             `json:"app_slug"`
+	RedirectUri             string             `json:"redirect_uri"`
+	AuthorizationEndpoint   string             `json:"authorization_endpoint"`
+	TokenEndpoint           string             `json:"token_endpoint"`
+	Scope                   string             `json:"scope"`
+	ClientID                string             `json:"client_id"`
+	ClientSecret            []byte             `json:"client_secret"`
+	TokenEndpointAuthMethod string             `json:"token_endpoint_auth_method"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+}
+
 type RuntimeProfile struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

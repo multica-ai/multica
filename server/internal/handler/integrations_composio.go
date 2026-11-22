@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 )
@@ -229,7 +230,13 @@ func (h *Handler) DeleteComposioConnection(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if err := h.Composio.Disconnect(r.Context(), userUUID, connUUID); err != nil {
+	err := h.Composio.Disconnect(r.Context(), userUUID, connUUID)
+	if errors.Is(err, composio.ErrConnectionNotFound) && h.ConnectedApps != nil {
+		// Personal remote app accounts are listed with these and removed
+		// through the same endpoint.
+		_, err = h.ConnectedApps.DisconnectRemote(r.Context(), connUUID, connectedapps.ScopePersonal, userUUID)
+	}
+	if err != nil {
 		if errors.Is(err, composio.ErrConnectionNotFound) {
 			writeError(w, http.StatusNotFound, "composio connection not found")
 			return
