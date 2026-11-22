@@ -79,11 +79,14 @@ export function checkRefs({ base, head, cwd }) {
   return findMigrationCollisions({ base: stemsAt(base), head: stemsAt(head), mergeBase: stemsAt(mergeBase) });
 }
 
+// Leaves out the suggested number on purpose: it moves with every migration
+// main gains, and the open-PR sweep reposts a status only when this text
+// changes.
 export function summarize(collisions, baseLabel) {
   if (collisions.length === 0) return `Migration numbers are free on ${baseLabel}`;
-  const numbers = collisions.map((collision) => collision.number).join(", ");
-  const verb = collisions.length === 1 ? "is" : "are";
-  return `Migration ${numbers} ${verb} already taken on ${baseLabel}; renumber from ${collisions[0].suggestedNumber}`;
+  const numbers = [...new Set(collisions.map((collision) => collision.number))];
+  const verb = numbers.length === 1 ? "is" : "are";
+  return `Migration ${numbers.join(", ")} ${verb} already taken; renumber above the highest on ${baseLabel}`;
 }
 
 function main(argv) {

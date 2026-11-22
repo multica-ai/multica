@@ -25,7 +25,7 @@ test("a number main took after the branch forked collides", () => {
       suggestedNumber: 722,
     },
   ]);
-  assert.equal(summarize(collisions, "origin/main"), "Migration 719 is already taken on origin/main; renumber from 722");
+  assert.equal(summarize(collisions, "origin/main"), "Migration 719 is already taken; renumber above the highest on origin/main");
 });
 
 test("a branch that renumbered past main is clear", () => {
@@ -49,6 +49,7 @@ test("two migrations the branch adds with one number both collide", () => {
     [["719_x", 720], ["719_y", 721]],
   );
   assert.equal(collisions[0].conflictsWith[0].addedByHead, true);
+  assert.equal(summarize(collisions, "main"), "Migration 719 is already taken; renumber above the highest on main");
 });
 
 test("renaming a migration within its own number is not a collision", () => {
