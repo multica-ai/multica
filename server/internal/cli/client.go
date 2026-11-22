@@ -47,6 +47,9 @@ func normalizeGOOS(goos string) string {
 // Used by ctrl subcommands (agent, runtime, status, etc.). Requests
 // automatically include auth and execution context headers when configured.
 type APIClient struct {
+	// InvocationContext is diagnostic metadata only; it never changes routing.
+	InvocationContext *InvocationContext
+
 	BaseURL     string
 	WorkspaceID string
 	Token       string
@@ -263,8 +266,8 @@ func (c *APIClient) setHeaders(req *http.Request) {
 
 // GetJSON performs a GET request and decodes the JSON response.
 //
-// On an HTTP error response (status >= 400) the returned error is a
-// *HTTPError so callers can use errors.As to inspect the status code
+// On an HTTP error response (status >= 400) the returned error is or wraps
+// a *HTTPError so callers can use errors.As to inspect the status code
 // (for example to recognize a 404 from a server that does not expose a
 // given endpoint and degrade gracefully). The error string format
 // ("GET <path> returned <code>: <body>") is preserved by HTTPError.Error().
@@ -283,7 +286,7 @@ func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return newHTTPError(http.MethodGet, path, resp)
+		return c.responseError(http.MethodGet, path, resp)
 	}
 	if out == nil {
 		return nil
@@ -309,7 +312,7 @@ func (c *APIClient) GetJSONWithHeaders(ctx context.Context, path string, out any
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return nil, newHTTPError(http.MethodGet, path, resp)
+		return nil, c.responseError(http.MethodGet, path, resp)
 	}
 	if out != nil {
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
@@ -354,7 +357,7 @@ func (c *APIClient) deleteJSON(ctx context.Context, path string, out any, onConf
 		return onConflict(resp.Body)
 	}
 	if resp.StatusCode >= 400 {
-		return newHTTPError(http.MethodDelete, path, resp)
+		return c.responseError(http.MethodDelete, path, resp)
 	}
 	if out != nil {
 		return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
@@ -383,7 +386,7 @@ func (c *APIClient) DeleteJSONWithBody(ctx context.Context, path string, body an
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return newHTTPError(http.MethodDelete, path, resp)
+		return c.responseError(http.MethodDelete, path, resp)
 	}
 	return nil
 }
@@ -410,7 +413,7 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return newHTTPError(http.MethodPost, path, resp)
+		return c.responseError(http.MethodPost, path, resp)
 	}
 	if out == nil {
 		return nil
@@ -440,7 +443,7 @@ func (c *APIClient) PutJSON(ctx context.Context, path string, body any, out any)
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return newHTTPError(http.MethodPut, path, resp)
+		return c.responseError(http.MethodPut, path, resp)
 	}
 	if out == nil {
 		return nil
@@ -470,7 +473,7 @@ func (c *APIClient) PatchJSON(ctx context.Context, path string, body any, out an
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return newHTTPError(http.MethodPatch, path, resp)
+		return c.responseError(http.MethodPatch, path, resp)
 	}
 	if out == nil {
 		return nil
@@ -557,7 +560,7 @@ func (c *APIClient) UploadIssueAttachment(ctx context.Context, fileData []byte, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return AttachmentResponse{}, newHTTPError(http.MethodPost, "/api/upload-file", resp)
+		return AttachmentResponse{}, c.withWorkspaceNotFoundContext(newHTTPError(http.MethodPost, "/api/upload-file", resp), resp, issueID != "" && c.WorkspaceID != "")
 	}
 
 	var result AttachmentResponse
@@ -620,7 +623,7 @@ func (c *APIClient) UploadChatAttachment(ctx context.Context, fileData []byte, f
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return AttachmentResponse{}, newHTTPError(http.MethodPost, "/api/upload-file", resp)
+		return AttachmentResponse{}, c.withWorkspaceNotFoundContext(newHTTPError(http.MethodPost, "/api/upload-file", resp), resp, taskID != "" && c.WorkspaceID != "")
 	}
 
 	var result AttachmentResponse
@@ -746,7 +749,7 @@ func (c *APIClient) ImportSkillFile(ctx context.Context, fileData []byte, filena
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return newHTTPError(http.MethodPost, "/api/skills/import", resp)
+		return c.responseError(http.MethodPost, "/api/skills/import", resp)
 	}
 	if out == nil {
 		return nil
@@ -784,7 +787,7 @@ func (c *APIClient) UploadPrivatePlugin(ctx context.Context, path string, archiv
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return newHTTPError(http.MethodPost, path, resp)
+		return c.responseError(http.MethodPost, path, resp)
 	}
 	if out == nil {
 		return nil
@@ -803,6 +806,7 @@ func (c *APIClient) UploadPrivatePlugin(ctx context.Context, path string, archiv
 // BaseURL and sent with the standard auth headers; absolute URLs are
 // used as-is so that their query-string signatures are not disturbed.
 func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byte, error) {
+	requestPath := downloadURL
 	isRelative := !strings.HasPrefix(downloadURL, "http://") && !strings.HasPrefix(downloadURL, "https://")
 	if isRelative {
 		if c.BaseURL == "" {
@@ -839,7 +843,7 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return nil, newHTTPError(http.MethodGet, downloadURL, resp)
+		return nil, c.withWorkspaceNotFoundContext(newHTTPError(http.MethodGet, downloadURL, resp), resp, workspaceAPIPath(requestPath, c.WorkspaceID != ""))
 	}
 
 	const maxDownloadSize = 100 << 20 // 100 MB
