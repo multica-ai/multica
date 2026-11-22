@@ -441,7 +441,7 @@
       },
       "undoInboxAction": {
         "label": "Annuler l'action de la boîte de réception",
-        "description": "Annule le dernier archivage, report ou désabonnement tant que son message s'affiche, ou restaure la notification ouverte une fois archivée."
+        "description": "Annule le dernier archivage, report ou désabonnement tant que son message s'affiche ; ensuite, restaure la notification ouverte une fois archivée ou ce qu'indique Boîte de réception vide."
       },
       "send": {
         "label": "Envoyer",
