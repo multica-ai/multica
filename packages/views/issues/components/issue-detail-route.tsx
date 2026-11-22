@@ -1,5 +1,7 @@
 "use client";
 
+import { REVIEW_PARAM, ReviewDetailContext } from "../review/session";
+
 import { useCallback, useEffect, useRef } from "react";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -42,8 +44,9 @@ export function useCanonicalIssueUrl(
   // A deliverable link keeps its `/deliverables/{name}` tail: dropping it
   // would turn the address into a plain issue link while the file is open.
   const canonicalRef = identifier ? issueRouteRef({ id: routeId, identifier }) : null;
+  const reviewToken = navigation.searchParams.get(REVIEW_PARAM);
   const canonicalHref = canonicalRef
-    ? `${deliverable ? paths.issueDeliverable(canonicalRef, deliverable) : paths.issueDetail(canonicalRef)}${hash}`
+    ? `${deliverable ? paths.issueDeliverable(canonicalRef, deliverable) : paths.issueDetail(canonicalRef)}${reviewToken ? `?${REVIEW_PARAM}=${encodeURIComponent(reviewToken)}` : ""}${hash}`
     : null;
   // `useWorkspacePaths()` and the navigation adapter are both rebuilt on
   // render, so this ref — not the dependency array — is what guarantees the
@@ -134,6 +137,7 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
   // description or comments opens it floating over the page. Keyed so moving
   // to another issue closes the peek.
   return (
+    <ReviewDetailContext.Provider value={canonicalId}>
     <IssuePeekHost key={canonicalId}>
       <IssueDetail
         issueId={canonicalId}
@@ -148,5 +152,6 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
         onDeliverableLinkDone={deliverable ? onDeliverableLinkDone : undefined}
       />
     </IssuePeekHost>
+    </ReviewDetailContext.Provider>
   );
 }

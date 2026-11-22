@@ -2019,5 +2019,13 @@
     "focus_failed": "无法切到 {{name}}",
     "retry": "重试",
     "dismiss": "忽略"
+  },
+  "review_queue": {
+    "completed": "事项已完成",
+    "undo": "撤销",
+    "changed": "评审列表已变化，请重试。",
+    "next_failed": "事项已完成，但无法确定下一项。可以返回列表或撤销。",
+    "undo_failed": "无法恢复事项，完成后它可能已被修改。",
+    "receipt_failed": "无法验证完成响应。"
   }
 }

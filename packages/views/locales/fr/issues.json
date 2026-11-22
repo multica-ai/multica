@@ -2110,5 +2110,13 @@
     "focus_failed": "Impossible de basculer vers {{name}}",
     "retry": "Réessayer",
     "dismiss": "Ignorer"
+  },
+  "review_queue": {
+    "completed": "Ticket terminé",
+    "undo": "Annuler",
+    "changed": "La liste de révision a changé. Réessayez.",
+    "next_failed": "Ticket terminé, mais le suivant est introuvable. Revenez à la liste ou annulez.",
+    "undo_failed": "Impossible de restaurer le ticket. Il a peut-être changé depuis.",
+    "receipt_failed": "Impossible de vérifier la réponse de clôture."
   }
 }

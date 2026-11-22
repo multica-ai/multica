@@ -1,5 +1,7 @@
 "use client";
 
+import { ReviewOriginProvider } from "../review/origin";
+
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import type { IssueViewState } from "@multica/core/issues/stores/view-store";
@@ -68,6 +70,7 @@ export interface IssueSurfaceRenderContext {
 }
 
 interface IssueSurfaceComponentProps extends IssueSurfaceProps {
+  reviewSourceKey?: string;
   renderHeader?: (context: IssueSurfaceRenderContext) => ReactNode;
   renderEmpty?: (context: IssueSurfaceRenderContext) => ReactNode;
   renderLoading?: (context: IssueSurfaceRenderContext) => ReactNode;
@@ -189,6 +192,7 @@ export function IssueSurface({
             by data identity, not surfaceKey (view-preference identity). */}
         <IssueSurfaceContent
           key={contentKey}
+          reviewSourceKey={resolvedSurfaceKey}
           scope={effectiveScope}
           modes={modes}
           createDefaults={createDefaults}
@@ -246,6 +250,7 @@ function IssueSurfaceContent({
   showClientEmpty,
   batchToolbar,
   contentClassName,
+  reviewSourceKey,
 }: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
   const workspaceId = useWorkspaceId();
   // A guest (MUL-9420) cannot create issues anywhere, sub-issues included.
@@ -310,6 +315,7 @@ function IssueSurfaceContent({
       controller.viewMode === "table");
 
   return (
+    <ReviewOriginProvider sourceId={JSON.stringify([reviewSourceKey, controller.viewMode])} query={controller.tableQuerySpec} enabled={!clientFilter && scope.type !== "team" && !controller.isLoading && !controller.filterDependencyError}>
     <IssueSurfaceActionsProvider actions={controller.actions}>
       {/* One shared right-click menu for every card/row this surface renders
           — see IssueContextMenuProvider. Inside the actions provider so the
@@ -447,6 +453,7 @@ function IssueSurfaceContent({
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>
     </IssueSurfaceActionsProvider>
+    </ReviewOriginProvider>
   );
 }
 

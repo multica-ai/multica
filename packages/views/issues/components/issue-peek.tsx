@@ -1,5 +1,7 @@
 "use client";
 
+import { useReviewOriginLink } from "../review/session";
+
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useReducedMotion } from "@multica/core/appearance";
@@ -23,7 +25,7 @@ import {
   isPortalLayerShortcutTarget,
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
-import { AppLink } from "../../navigation";
+import { useNavigation, AppLink } from "../../navigation";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { WindowTitleBarProvider } from "../../platform/window-title-bar";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
@@ -362,6 +364,8 @@ function IssuePeekTrailingActions({ issueId }: { issueId: string }) {
   const actions = useIssuePeekActions()!;
   const paths = useWorkspacePaths();
   const issueRef = useIssueRouteRef(useWorkspaceId(), issueId);
+  const reviewLink = useReviewOriginLink();
+  const reviewNav = useNavigation();
 
   return (
     <>
@@ -370,6 +374,11 @@ function IssuePeekTrailingActions({ issueId }: { issueId: string }) {
           render={
             <AppLink
               href={paths.issueDetail(issueRef)}
+              onClick={(event) => {
+                if (!reviewLink || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+                event.preventDefault();
+                reviewNav.push(reviewLink(paths.issueDetail(issueRef)));
+              }}
               aria-label={t(($) => $.peek.open_full_page)}
               className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground")}
             />

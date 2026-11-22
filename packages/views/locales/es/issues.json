@@ -2110,5 +2110,13 @@
     "focus_failed": "No se pudo cambiar a {{name}}",
     "retry": "Reintentar",
     "dismiss": "Descartar"
+  },
+  "review_queue": {
+    "completed": "Incidencia completada",
+    "undo": "Deshacer",
+    "changed": "La lista de revisión ha cambiado. Inténtalo de nuevo.",
+    "next_failed": "Incidencia completada, pero no se pudo determinar la siguiente. Vuelve a la lista o deshaz la acción.",
+    "undo_failed": "No se pudo restaurar la incidencia. Puede haber cambiado desde que se completó.",
+    "receipt_failed": "No se pudo verificar la respuesta de finalización."
   }
 }

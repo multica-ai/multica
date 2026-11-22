@@ -17,7 +17,8 @@ import { copyText, copyTextAndHtml } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { titleLinkPayload } from "../../common/title-link";
-import { runConfirmIntent } from "./run-confirm-gate";
+import { useReviewCompletion } from "../review/use-review-completion";
+import { runConfirmIntent, resolveStatusCategory } from "./run-confirm-gate";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import type { IssueSurfaceMutationOptions } from "../surface/actions-context";
 
@@ -68,6 +69,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     );
 
   const updateIssue = useUpdateIssue();
+  const reviewCompletion = useReviewCompletion();
   const surfaceActions = useIssueSurfaceActionsOptional();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
@@ -100,6 +102,10 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         openModal("issue-run-confirm", intent);
         return;
       }
+      if (issue && reviewCompletion(issue, updates,
+        updates.status ? resolveStatusCategory(updates.status, undefined, { entryOf }) : null,
+        (input) => updateIssue.mutateAsync(input),
+      )) return;
       if (surfaceActions) {
         surfaceActions.updateIssue(issueId, updates, {
           errorMessage: t(($) => $.detail.update_failed),
@@ -127,7 +133,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
           });
       }
     },
-    [issue, issueId, entryOf, surfaceActions, updateIssue, openModal, t],
+    [issue, issueId, entryOf, surfaceActions, updateIssue, openModal, t, reviewCompletion],
   );
 
   // Explicit "open it somewhere else" CTA, so the new tab takes focus

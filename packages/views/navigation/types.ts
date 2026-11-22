@@ -1,4 +1,6 @@
 export interface NavigationAdapter {
+  /** Logical tab/reload owner. In-memory review sessions never cross it. */
+  sessionKey?: string;
   push(path: string): void;
   replace(path: string): void;
   back(): void;

@@ -194,6 +194,7 @@ export function DesktopNavigationProvider({
   // The active session's url IS the location. Primitive subscription: this
   // only re-renders when the active url actually changes.
   const activeUrl = useActiveTabUrl();
+  const sessionKey = useTabStore((s) => `${getActiveTab(s)?.id ?? ""}:${s.mountGeneration}`);
   const location = useMemo(() => {
     const url = activeUrl ?? "/";
     const { pathname, suffix } = splitTabUrl(url);
@@ -205,6 +206,7 @@ export function DesktopNavigationProvider({
 
   const adapter: NavigationAdapter = useMemo(
     () => ({
+      sessionKey,
       push: (path: string) => {
         if (path === "/login") {
           useAuthStore.getState().logout();
@@ -274,7 +276,7 @@ export function DesktopNavigationProvider({
       workspacesInOtherWindows: () => [...otherWindowWorkspaces()],
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
-    [appUrl, location],
+    [appUrl, location, sessionKey],
   );
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;

@@ -67,6 +67,16 @@ describe("useCanonicalIssueUrl", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  it("preserves a tab-local review token and fragment across UUID canonicalization", () => {
+    const reviewWrapper = ({ children }: { children: ReactNode }) => <NavigationProvider value={{
+      push, replace, back: vi.fn(), pathname: "/acme/issues/uuid",
+      searchParams: new URLSearchParams("review=source-session"), hash: "#comment-c1",
+      getShareableUrl: (path) => path,
+    }}>{children}</NavigationProvider>;
+    renderHook(() => useCanonicalIssueUrl("uuid", "TRS-134", "#comment-c1"), { wrapper: reviewWrapper });
+    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134?review=source-session#comment-c1");
+  });
+
   it("leaves an already-canonical URL alone", () => {
     renderHook(() => useCanonicalIssueUrl("TRS-134", "TRS-134"), { wrapper });
     expect(replace).not.toHaveBeenCalled();
