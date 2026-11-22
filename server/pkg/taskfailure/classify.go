@@ -123,6 +123,9 @@ func explicitContextOverflow(lower string) bool {
 // independently.
 func Classify(rawError string) Reason {
 	trimmed := strings.TrimSpace(WithoutCodebuddyProtocolSummary(rawError))
+	if IsInterruptedRunTimeout(trimmed) {
+		return ReasonTimeout
+	}
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
 		// but that bucket is not part of the canonical taxonomy. In-flight
@@ -724,6 +727,11 @@ var legacyTokenRateLimitReasons = map[string]bool{
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
 	rawError = WithoutCodebuddyProtocolSummary(rawError)
+	// Installed daemons report these startup deadlines as unknown. Normalize
+	// before the service evaluates the existing bounded timeout retry policy.
+	if (reason == "agent_error" || reason == ReasonAgentUnknown.String() || reason == "") && IsInterruptedRunTimeout(rawError) {
+		return ReasonTimeout
+	}
 	// Older daemons treated the billing rejection as a rate limit because
 	// they only recognized the numeric status and the structured balance code.
 	if reason == ReasonAgentProviderCapacityOrRateLimit.String() &&
