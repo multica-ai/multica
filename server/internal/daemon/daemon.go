@@ -9234,8 +9234,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
 		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
 	}
+	taskWarmPool := selectTaskWarmPool(d.warmPool, usesCustomProfileCommand)
 	codexShellEnv := agentEnv
-	if provider == "codex" && d.warmPool != nil {
+	if provider == "codex" && taskWarmPool != nil {
 		// Ensure Codex's managed shell_environment_policy allowlist permits
 		// MULTICA_TASK_ENV_FILE so warm pooled sessions can deliver fresh
 		// per-turn credentials to `multica` CLI subprocesses.
@@ -9279,7 +9280,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		DaemonVersion:  d.cfg.CLIVersion,
 		CodexVersion:   codexVersion,
 		BuiltinRuntime: !usesCustomProfileCommand,
-		WarmPool:       d.warmPool,
+		WarmPool:       taskWarmPool,
 	}
 	if hermesOverlayActive {
 		// Retire an owner left by a crashed/interrupted daemon before it can
@@ -9615,8 +9616,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		//     paragraph twice.
 		// task and taskCtx are local (runTask takes task by value), so these
 		// mutations only affect the retry.
-		if d.warmPool != nil && task.PriorSessionID != "" {
-			d.warmPool.Evict(provider, task.PriorSessionID)
+		if taskWarmPool != nil && task.PriorSessionID != "" {
+			taskWarmPool.Evict(provider, task.PriorSessionID)
 		}
 		execOpts.ResumeSessionID = ""
 		task.PriorSessionID = ""
@@ -11691,6 +11692,18 @@ func codexShellAuthorizedCustomEnvNames(customEnv map[string]string) []string {
 // credentials.
 // Failure is fatal: launching with an unowned or malformed policy could either
 // drop the task-scoped token again or expose inherited daemon credentials.
+// selectTaskWarmPool returns the daemon's warm session pool only for built-in
+// runtimes. Custom runtime profile commands (wrappers, version-pinned shims,
+// sandbox launchers) always launch cold so startup wrappers can read per-task
+// variables such as MULTICA_TOKEN and MULTICA_TASK_ID directly from the process
+// environment.
+func selectTaskWarmPool(pool *agent.WarmSessionPool, usesCustomProfileCommand bool) *agent.WarmSessionPool {
+	if usesCustomProfileCommand {
+		return nil
+	}
+	return pool
+}
+
 func configureCodexTaskShellEnvironment(provider, codexHome string, inherited []string, agentEnv, agentCustomEnv map[string]string, logger *slog.Logger) error {
 	if provider != "codex" {
 		return nil
