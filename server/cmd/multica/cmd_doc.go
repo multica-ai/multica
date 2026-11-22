@@ -186,39 +186,29 @@ func fetchDocTree(ctx context.Context, client *cli.APIClient) (docTree, error) {
 
 // resolveDocRef accepts a full id or an unambiguous id prefix from `doc list`.
 func resolveDocRef(ctx context.Context, client *cli.APIClient, ref string, folders bool) (string, error) {
-	kind := "doc"
+	kind, listHint := "doc", "run `multica doc list`"
 	if folders {
-		kind = "folder"
+		kind, listHint = "folder", "run `multica doc folder list`"
 	}
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return "", fmt.Errorf("%s id is required", kind)
-	}
-	if uuidRegexp.MatchString(ref) {
-		return ref, nil
-	}
-	tree, err := fetchDocTree(ctx, client)
+	resolved, err := resolveIDByPrefixWithListHint(ctx, client, kind, ref, listHint, func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+		tree, err := fetchDocTree(ctx, client)
+		if err != nil {
+			return nil, err
+		}
+		items := tree.Docs
+		if folders {
+			items = tree.Folders
+		}
+		candidates := make([]idCandidate, 0, len(items))
+		for _, item := range items {
+			candidates = append(candidates, idCandidate{ID: strVal(item, "id"), Display: strVal(item, "title")})
+		}
+		return candidates, nil
+	})
 	if err != nil {
 		return "", err
 	}
-	items := tree.Docs
-	if folders {
-		items = tree.Folders
-	}
-	var matches []string
-	for _, item := range items {
-		if id := strVal(item, "id"); strings.HasPrefix(id, ref) {
-			matches = append(matches, id)
-		}
-	}
-	switch len(matches) {
-	case 1:
-		return matches[0], nil
-	case 0:
-		return "", fmt.Errorf("no %s matches %q", kind, ref)
-	default:
-		return "", fmt.Errorf("%q matches %d %ss; use a longer id", ref, len(matches), kind)
-	}
+	return resolved.ID, nil
 }
 
 func resolveDocFolderTarget(ctx context.Context, client *cli.APIClient, ref string) (any, error) {
