@@ -817,7 +817,7 @@
       "level": "Portée du compte",
       "team_admin_only": "Seuls les admins de l'espace peuvent donner un compte d'équipe à un agent.",
       "team_shared_warning": "Toute personne pouvant exécuter cet agent peut utiliser ce compte d’équipe par son intermédiaire.",
-      "manage_link": "Gérer les comptes dans Paramètres → Applications connectées",
+      "manage_link": "Gérer les comptes dans Apps → Comptes",
       "save_failed_toast": "Échec de l'enregistrement, veuillez réessayer",
       "team_help": "Compte partagé de l’espace de travail, connecté par les administrateurs.",
       "personal_help": "Chaque exécution utilise le compte de la personne qui la déclenche. Chacun doit connecter son compte.",

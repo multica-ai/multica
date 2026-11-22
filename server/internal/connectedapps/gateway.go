@@ -570,7 +570,7 @@ func (s *Service) toolRequestConnection(ctx context.Context, rn *run, slug, summ
 	}
 	if !rn.triggeredBy.Valid {
 		if app.AccountScope == ScopeTeam {
-			return textResult("no person started this run, so the request cannot wait on it. A workspace admin connects the team account in Settings › Accounts; say so in your reply and end your turn.", true)
+			return textResult("no person started this run, so the request cannot wait on it. A workspace admin connects the team account in Apps › Accounts; say so in your reply and end your turn.", true)
 		}
 		return textResult("no person triggered this run, so nobody can be asked to connect an account", true)
 	}

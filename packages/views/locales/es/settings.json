@@ -602,8 +602,7 @@
       "channels": "Mensajería",
       "code": "Código",
       "workflows": "Flujos de trabajo",
-      "voice_input": "Entrada de voz",
-      "accounts": "Cuentas"
+      "voice_input": "Entrada de voz"
     },
     "groups": {
       "personal": "Personal",
@@ -1867,17 +1866,7 @@
     "toast_disconnected": "Desconectada",
     "toast_failed": "Algo salió mal. Inténtalo de nuevo.",
     "add": {
-      "search": "Buscar aplicaciones…",
-      "empty": "No hay aplicaciones que coincidan.",
-      "curated": "Seleccionada",
-      "recommended_team": "Suele usarse una cuenta del equipo",
-      "recommended_personal": "Suele usarse una cuenta personal",
-      "connect_team": "Conectar cuenta de equipo",
-      "connect_personal": "Conectar mi cuenta",
-      "connected": "Conectada",
-      "connect": "Conectar",
-      "team_description": "Conecta una cuenta compartida del espacio de trabajo. Decide qué agentes pueden usarla en la página Apps de cada agente.",
-      "personal_description": "Usa tu propia cuenta conectada cuando inicies una ejecución."
+      "empty": "No hay aplicaciones que coincidan."
     },
     "detail": {
       "team_title": "{{app}} · cuenta del equipo",
@@ -2043,6 +2032,7 @@
       "tabs": {
         "in_use": "En uso",
         "attention": "Requieren atención",
+        "accounts": "Cuentas",
         "all": "Todas las aplicaciones"
       },
       "search": "Buscar aplicaciones",
@@ -2095,15 +2085,11 @@
       "needs_yours": "Necesita tu cuenta"
     },
     "accounts_page": {
-      "description": "Las cuentas con las que los agentes trabajan en otras apps. Las cuentas del equipo las comparten todos en {{workspace}} y las conectan los administradores. Tus cuentas solo se usan en las ejecuciones que inicias tú.",
-      "connect_account": "Conectar cuenta",
       "empty": "No has conectado ninguna cuenta en este espacio de trabajo.",
       "used_by": "la usa {{agents}}",
-      "search_description": "Cuentas del equipo y tus propias cuentas que los agentes usan en otras apps.",
       "team_title": "Cuentas del equipo",
       "team_description_admin": "Las comparte todo el espacio de trabajo. Solo los administradores las conectan.",
       "team_description_member": "Las conectan los administradores. Puedes verlas y pedir una.",
-      "connect_team_account": "Conectar cuenta del equipo",
       "team_empty": "Todavía no hay cuentas del equipo.",
       "yours_title": "Tus cuentas",
       "yours_description": "Solo tú puedes usarlas; los agentes las usan en las ejecuciones que inicias.",

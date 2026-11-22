@@ -13,7 +13,6 @@ import {
   MessagesSquare,
   Mic,
   Palette,
-  Plug,
   Search,
   Server,
   Settings,
@@ -45,8 +44,6 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
 import { ChannelsTab } from "./channels-tab";
-import { AccountsTab } from "./accounts-tab";
-import { useComposioAvailable } from "../../common/use-composio-available";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
@@ -142,7 +139,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
     false,
   );
-  const appsAvailable = useComposioAvailable();
   const voiceInputAvailable = localVoiceAPI() !== undefined;
   const entry = (
     value: string,
@@ -249,9 +245,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           key: "connections",
           label: t(($) => $.page.groups.connections),
           entries: [
-            ...(appsAvailable
-              ? [entry("accounts", t(($) => $.page.tabs.accounts), Plug, <AccountsTab />)]
-              : []),
             entry("code", t(($) => $.page.tabs.code), FolderGit2, <CodeTab />, {
               adminOnly: true,
             }),
@@ -295,9 +288,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   // Wakeup defaults moved to the issue wakeups list; old links land there.
   const wakeupsMoved = location.tab === "wakeups";
   const wakeupsTarget = wakeupsHref(paths.autopilots());
-  // The workspace's apps moved to their own page.
+  // The workspace's apps and accounts moved to their own page.
   const appsMoved = location.tab === "apps";
-  const appsTarget = movedAppsHref(paths.apps(), navigation.searchParams);
+  const appsTarget = movedAppsHref(paths.apps(), navigation.searchParams, location.section);
   const { replace } = navigation;
   useEffect(() => {
     if (wakeupsMoved) replace(wakeupsTarget);

@@ -26,11 +26,18 @@ import { CollectionPageState } from "../../layout/collection-page";
 import { PageHeader } from "../../layout/page-header";
 import { useTeamAppAccess } from "../../common/use-team-app-access";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
 import { useAppConnectReturn } from "../hooks/use-app-connect-return";
 import { buildAppDirectory, matchesAppSearch, type DirectoryApp } from "../lib/directory";
+import { AccountsList, useAccountRows } from "./accounts-list";
 import { DirectoryCard, SetUpCard, type DirectoryCardHandlers } from "./directory-card";
 
-type DirectoryTab = "in_use" | "attention" | "all";
+const TABS = ["in_use", "attention", "accounts", "all"] as const;
+type DirectoryTab = (typeof TABS)[number];
+
+function parseTab(value: string | null): DirectoryTab {
+  return (TABS as readonly string[]).includes(value ?? "") ? (value as DirectoryTab) : "in_use";
+}
 
 type ConnectTarget = { slug: string; name: string; logo?: string; scope: AppAccountScope };
 
@@ -70,11 +77,23 @@ function AppsDirectory() {
   const restore = useRestoreAppAccess();
   const requestTeam = useRequestTeamApp();
   const withdrawTeam = useDismissTeamAppRequests();
-  const [tab, setTab] = useState<DirectoryTab>("in_use");
+  const navigation = useNavigation();
+  const [tab, setTabState] = useState<DirectoryTab>(() => parseTab(navigation.searchParams.get("tab")));
   const [query, setQuery] = useState("");
   const [connecting, setConnecting] = useState<ConnectTarget | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   useAppConnectReturn();
+  const accountRows = useAccountRows(overview.data, catalog.data?.apps ?? []);
+
+  // The tab lives in the URL so a connect flow started here comes back to it.
+  const setTab = (next: DirectoryTab) => {
+    setTabState(next);
+    const params = new URLSearchParams(navigation.searchParams);
+    if (next === "in_use") params.delete("tab");
+    else params.set("tab", next);
+    const search = params.toString();
+    navigation.replace(`${navigation.pathname}${search ? `?${search}` : ""}`);
+  };
 
   const directory = useMemo(() => {
     if (!overview.data) return null;
@@ -128,12 +147,14 @@ function AppsDirectory() {
     );
   }
 
-  const lists: Record<DirectoryTab, DirectoryApp[]> = {
+  const lists: Record<Exclude<DirectoryTab, "accounts">, DirectoryApp[]> = {
     in_use: directory.inUse,
     attention: directory.attention,
     all: directory.all,
   };
-  const shown = lists[tab].filter((app) => matchesAppSearch(app, query));
+  const shown = tab === "accounts" ? [] : lists[tab].filter((app) => matchesAppSearch(app, query));
+  const needle = query.trim().toLowerCase();
+  const matchesAccount = (name: string) => !needle || name.toLowerCase().includes(needle);
   const emptyText = query.trim()
     ? t(($) => $.connected_apps.hub.no_matches)
     : tab === "attention"
@@ -167,6 +188,7 @@ function AppsDirectory() {
             <TabsList>
               <TabTrigger value="in_use" label={t(($) => $.connected_apps.hub.tabs.in_use)} count={directory.inUse.length} />
               <TabTrigger value="attention" label={t(($) => $.connected_apps.hub.tabs.attention)} count={directory.attention.length} />
+              <TabTrigger value="accounts" label={t(($) => $.connected_apps.hub.tabs.accounts)} count={accountRows.team.length + accountRows.personal.length} />
               <TabTrigger value="all" label={t(($) => $.connected_apps.hub.tabs.all)} count={directory.all.length} />
             </TabsList>
           </Tabs>
@@ -183,7 +205,9 @@ function AppsDirectory() {
           </div>
         </div>
 
-        {shown.length > 0 ? (
+        {tab === "accounts" ? (
+          <AccountsList overview={overview.data} rows={accountRows} matches={matchesAccount} />
+        ) : shown.length > 0 ? (
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {shown.map((app) => <DirectoryCard key={app.slug} app={app} handlers={handlers} />)}
           </ul>

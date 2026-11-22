@@ -61,9 +61,9 @@ describe("settings location", () => {
   });
 
   it.each(["connected=notion", "error=composio_connect_failed"])(
-    "sends the legacy personal Composio callback (%s) to Accounts",
+    "sends the legacy personal Composio callback (%s) to the Apps page's Accounts",
     (callback) => {
-      expect(resolve(`tab=integrations&${callback}`).tab).toBe("accounts");
+      expect(resolve(`tab=integrations&${callback}`)).toEqual({ tab: "apps", section: "accounts", integration: null });
     },
   );
 
@@ -77,14 +77,16 @@ describe("settings location", () => {
   });
 
   it.each([
-    ["tab=apps", "apps"],
+    ["tab=apps", null],
     ["tab=apps&connected=gmail", "accounts"],
     ["tab=apps&error=composio_connect_failed", "accounts"],
-    ["tab=apps&connected=gmail&scope=team", "apps"],
-    ["tab=apps&error=composio_connect_failed&scope=team", "apps"],
-    ["tab=apps&error=something_else", "apps"],
-  ])("routes %s to %s", (search, tab) => {
-    expect(resolve(search)).toEqual({ tab, section: null, integration: null });
+    ["tab=apps&connected=gmail&scope=team", null],
+    ["tab=apps&error=composio_connect_failed&scope=team", null],
+    ["tab=apps&error=something_else", null],
+    ["tab=accounts", "accounts"],
+    ["tab=connected-accounts", "accounts"],
+  ])("routes %s to the Apps page (tab %s)", (search, section) => {
+    expect(resolve(search)).toEqual({ tab: "apps", section, integration: null });
   });
 
   it("keeps only the connect result when a settings link moves to the Apps page", () => {
@@ -98,6 +100,9 @@ describe("settings location", () => {
     expect(
       movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&error=composio_connect_failed&reason=feature_locked&scope=team")),
     ).toBe("/acme/apps?error=composio_connect_failed&reason=feature_locked");
+    expect(
+      movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&connected=gmail"), "accounts"),
+    ).toBe("/acme/apps?tab=accounts&connected=gmail");
   });
 
   it("passes current pages and anchors through untouched", () => {

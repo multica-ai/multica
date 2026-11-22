@@ -51,9 +51,10 @@ function isPersonalComposioCallback(params: URLSearchParams) {
  * `?tab=apps&connected=…[&scope=team]` (once `?tab=integrations&connected=…`)
  * — so these mappings are part of the URL contract, not bookmarks we can drop.
  *
- * The workspace's apps left settings for their own page: `apps` here means
- * "redirect to it". A personal connection returns to Accounts, which was
- * `connected-accounts` before it held team accounts too.
+ * The workspace's apps and accounts left settings for the Apps page: `apps`
+ * here means "redirect to it", and section `accounts` its Accounts tab, where
+ * a personal connection returns. `accounts` and `connected-accounts` were
+ * settings tabs before.
  */
 export function resolveSettingsLocation(
   params: URLSearchParams,
@@ -80,16 +81,17 @@ export function resolveSettingsLocation(
       return { tab: "code", section: section ?? "repositories", integration: null };
     case "channels":
       return { tab: "channels", section, integration: null };
+    case "accounts":
     case "connected-accounts":
-      return { tab: "accounts", section, integration: null };
+      return { tab: "apps", section: "accounts", integration: null };
     case "apps":
       if (isPersonalComposioCallback(params)) {
-        return { tab: "accounts", section: null, integration: null };
+        return { tab: "apps", section: "accounts", integration: null };
       }
       return { tab: "apps", section: null, integration: null };
     case "integrations": {
       if (isPersonalComposioCallback(params)) {
-        return { tab: "accounts", section: null, integration: null };
+        return { tab: "apps", section: "accounts", integration: null };
       }
       if (isComposioCallback(params) || integration === "composio") {
         return { tab: "apps", section: null, integration: null };
@@ -132,8 +134,9 @@ export function settingsHref(
 }
 
 /** The Apps page for a retired settings link, keeping the connect result. */
-export function movedAppsHref(appsPath: string, searchParams: URLSearchParams) {
+export function movedAppsHref(appsPath: string, searchParams: URLSearchParams, section: string | null = null) {
   const params = new URLSearchParams();
+  if (section) params.set("tab", section);
   for (const key of ["connected", "error", "reason"]) {
     const value = searchParams.get(key);
     if (value) params.set(key, value);

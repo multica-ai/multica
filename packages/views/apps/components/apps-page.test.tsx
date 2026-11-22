@@ -3,14 +3,15 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import type { AppsOverview } from "@multica/core/types";
+import type { AppRequest, AppsOverview } from "@multica/core/types";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { renderWithI18n } from "../../test/i18n";
 import { AppsPage } from "./apps-page";
 
 vi.mock("@multica/core/api", () => ({ api: {
   getAppsOverview: vi.fn(), listAppCatalog: vi.fn(), listAgents: vi.fn(),
-  updateAppSettings: vi.fn(), requestTeamApp: vi.fn(), connectApp: vi.fn(),
+  updateAppSettings: vi.fn(), requestTeamApp: vi.fn(), connectApp: vi.fn(), listAppRequests: vi.fn(),
+  getPersonalAppImpact: vi.fn(), getTeamAppImpact: vi.fn(), deleteComposioConnection: vi.fn(), dismissTeamAppRequests: vi.fn(),
 } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", () => ({
@@ -56,6 +57,8 @@ beforeEach(() => {
     { id: "a2", name: "Triage", archived_at: null },
   ] as never);
   vi.mocked(api.requestTeamApp).mockResolvedValue(undefined as never);
+  vi.mocked(api.listAppRequests).mockResolvedValue({ requests: [] } as never);
+  vi.mocked(api.dismissTeamAppRequests).mockResolvedValue(undefined);
 });
 afterEach(() => {
   cleanup();
@@ -169,5 +172,105 @@ describe("AppsPage", () => {
     renderPage();
     expect(screen.getByText("Apps aren't available on this server.")).toBeInTheDocument();
     expect(api.getAppsOverview).not.toHaveBeenCalled();
+  });
+});
+
+function connectRequest(patch: Partial<AppRequest>): AppRequest {
+  return {
+    id: "r1", kind: "connect", status: "pending", agent_id: "a1", issue_id: "i1", chat_session_id: null,
+    approver_user_id: "me", account_scope: "personal", toolkit_slug: "linear", tool_slug: "", action_class: "read",
+    summary: "", error: null, reason: null, redacted: false, expires_at: "", decided_by: null, decided_at: null,
+    created_at: "", ...patch,
+  } as AppRequest;
+}
+
+describe("AppsPage › Accounts", () => {
+  const row = (scope: "team" | "personal", slug: string) =>
+    document.querySelector(`[data-account-row="${scope}:${slug}"]`) as HTMLElement;
+
+  beforeEach(() => {
+    nav.search = "tab=accounts";
+    overview = {
+      ...overview,
+      team: [
+        { id: "t-notion", toolkit_slug: "notion", status: "expired", connected_at: "", last_used_at: null },
+        { id: "t-slack", toolkit_slug: "slack", status: "active", connected_at: "", last_used_at: null },
+      ],
+      team_requests: [{ toolkit_slug: "linear", requested_by: ["u2"], asked_by: ["u2"], agent_ids: ["a2"], last_requested_at: "" }],
+      personal: [
+        { id: "p-gmail", toolkit_slug: "gmail", status: "active", connected_at: "", last_used_at: null },
+        { id: "p-old", toolkit_slug: "slack", status: "revoked", connected_at: "", last_used_at: null },
+      ],
+    };
+    vi.mocked(api.listAppRequests).mockResolvedValue({ requests: [connectRequest({})] } as never);
+    vi.mocked(api.getPersonalAppImpact).mockResolvedValue({
+      agents: [{ id: "a1", name: "Support", workspace_id: "ws-1", workspace_name: "Acme", running: true }],
+    });
+    vi.mocked(api.deleteComposioConnection).mockResolvedValue(undefined as never);
+  });
+
+  it("opens from the URL with the team's accounts, then the viewer's, needs-action first", async () => {
+    renderPage();
+    const team = await screen.findByRole("region", { name: "Team accounts" });
+    await within(team).findByText("Slack");
+    expect(within(team).getAllByText(/^(Notion|Linear|Slack)$/).map((el) => el.textContent)).toEqual(["Notion", "Linear", "Slack"]);
+    expect(screen.getByRole("tab", { name: /Accounts/ })).toHaveTextContent("5");
+    expect(within(row("team", "notion")).getAllByText("Needs reconnecting").length).toBeGreaterThan(0);
+    expect(within(row("team", "linear")).getAllByText(/Requested · admins notified/).length).toBeGreaterThan(0);
+    expect(row("team", "linear")).toHaveTextContent("Name a2 needs it");
+    // A member asks an admin; nothing connects an account apart from an app.
+    expect(within(row("team", "notion")).getByRole("button", { name: "Ask an admin" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Connect (team )?account/ })).not.toBeInTheDocument();
+
+    const yours = screen.getByRole("region", { name: "Your accounts" });
+    expect(row("personal", "gmail")).toHaveTextContent("used by Name a1");
+    await waitFor(() => expect(row("personal", "linear")).toHaveTextContent("Name a1 needs it"));
+    expect(within(row("personal", "linear")).getByRole("button", { name: "Connect" })).toBeInTheDocument();
+    expect(within(yours).queryByText("Slack")).not.toBeInTheDocument();
+  });
+
+  it("gives an admin Connect and Decline on a requested team account", async () => {
+    overview.can_manage = true;
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("region", { name: "Team accounts" }).then((team) => within(team).findByText("Linear"));
+    expect(within(row("team", "linear")).getAllByText(/Requested · Name a2, Name u2/).length).toBeGreaterThan(0);
+    expect(within(row("team", "notion")).getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+    await user.click(within(row("team", "linear")).getByRole("button", { name: "Decline" }));
+    await waitFor(() => expect(api.dismissTeamAppRequests).toHaveBeenCalledWith("linear"));
+  });
+
+  it("lets a member withdraw their own ask", async () => {
+    overview.team_requests = [{ toolkit_slug: "linear", requested_by: ["me"], asked_by: ["me"], agent_ids: [], last_requested_at: "" }];
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("region", { name: "Team accounts" }).then((team) => within(team).findByText("Linear"));
+    await user.click(within(row("team", "linear")).getByRole("button", { name: "Withdraw" }));
+    await waitFor(() => expect(api.dismissTeamAppRequests).toHaveBeenCalledWith("linear"));
+  });
+
+  it("disconnects after listing the agents that lose the account", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Gmail");
+    await user.click(within(row("personal", "gmail")).getByRole("button", { name: "Gmail actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Disconnect" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Disconnect Gmail?" });
+    await waitFor(() => expect(within(dialog).getByText("Support")).toBeInTheDocument());
+    await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(api.deleteComposioConnection).toHaveBeenCalledWith("p-gmail"));
+  });
+
+  it("filters accounts by search and keeps the tab in the URL", async () => {
+    nav.search = "";
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("tab", { name: /Accounts/ }));
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts");
+    await user.type(screen.getByRole("searchbox", { name: "Search apps" }), "not");
+    const team = screen.getByRole("region", { name: "Team accounts" });
+    expect(within(team).getByText("Notion")).toBeInTheDocument();
+    expect(within(team).queryByText("Slack")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Your accounts" })).getByText("You haven't connected any accounts in this workspace.")).toBeInTheDocument();
   });
 });

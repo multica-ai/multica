@@ -596,8 +596,7 @@
       "code": "代码",
       "channels": "消息渠道",
       "workflows": "工作流",
-      "voice_input": "语音输入",
-      "accounts": "账号"
+      "voice_input": "语音输入"
     },
     "groups": {
       "personal": "个人",
@@ -1850,17 +1849,7 @@
     "toast_disconnected": "已断开",
     "toast_failed": "操作失败，请重试。",
     "add": {
-      "search": "搜索应用...",
-      "empty": "没有匹配的应用。",
-      "curated": "精选",
-      "recommended_team": "通常用团队账号",
-      "recommended_personal": "通常用个人账号",
-      "connect_team": "连接团队账号",
-      "connect_personal": "连接我的账号",
-      "connected": "已连接",
-      "connect": "连接",
-      "team_description": "连接工作区共用的账号。哪些智能体可以使用，在各智能体的\"应用\"页设置。",
-      "personal_description": "连接你自己的账号。应用设为\"触发者账号\"时，由你触发的运行会使用它。"
+      "empty": "没有匹配的应用。"
     },
     "detail": {
       "team_title": "{{app}} · 团队账号",
@@ -2022,6 +2011,7 @@
       "tabs": {
         "in_use": "使用中",
         "attention": "需要处理",
+        "accounts": "账号",
         "all": "全部应用"
       },
       "search": "搜索应用",
@@ -2073,15 +2063,11 @@
       "needs_yours": "需要你的账号"
     },
     "accounts_page": {
-      "description": "智能体在其他应用中工作时使用的账号。团队账号由 {{workspace}} 所有人共享，由管理员连接；你的账号只在你发起的运行中使用。",
-      "connect_account": "连接账号",
       "empty": "你还没有在这个工作区连接任何账号。",
       "used_by": "{{agents}} 在用",
-      "search_description": "智能体在其他应用中使用的团队账号和你自己的账号。",
       "team_title": "团队账号",
       "team_description_admin": "整个工作区共享，只有管理员可以连接。",
       "team_description_member": "由管理员连接。你可以查看，也可以申请。",
-      "connect_team_account": "连接团队账号",
       "team_empty": "还没有团队账号。",
       "yours_title": "你的账号",
       "yours_description": "只有你能使用；智能体会在你发起的运行中使用它们。",

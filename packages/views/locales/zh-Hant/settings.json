@@ -596,8 +596,7 @@
       "code": "程式碼",
       "channels": "訊息渠道",
       "workflows": "工作流",
-      "voice_input": "語音輸入",
-      "accounts": "帳號"
+      "voice_input": "語音輸入"
     },
     "groups": {
       "personal": "個人",
@@ -1850,17 +1849,7 @@
     "toast_disconnected": "已中斷連線",
     "toast_failed": "操作失敗，請重試。",
     "add": {
-      "search": "搜尋應用…",
-      "empty": "沒有符合的應用。",
-      "curated": "精選",
-      "recommended_team": "通常用團隊帳號",
-      "recommended_personal": "通常用個人帳號",
-      "connect_team": "連線團隊帳號",
-      "connect_personal": "連線我的帳號",
-      "connected": "已連線",
-      "connect": "連線",
-      "team_description": "連線工作區共用的帳號。哪些 AI 代理可以使用，請在各 AI 代理的「應用程式」頁設定。",
-      "personal_description": "當你觸發執行時，使用你自己連線的帳號。"
+      "empty": "沒有符合的應用。"
     },
     "detail": {
       "team_title": "{{app}} · 團隊帳號",
@@ -2022,6 +2011,7 @@
       "tabs": {
         "in_use": "使用中",
         "attention": "需要處理",
+        "accounts": "帳號",
         "all": "全部應用"
       },
       "search": "搜尋應用",
@@ -2073,15 +2063,11 @@
       "needs_yours": "需要你的帳號"
     },
     "accounts_page": {
-      "description": "智慧體在其他應用程式中工作時使用的帳號。團隊帳號由 {{workspace}} 所有人共用，由管理員連線；你的帳號只在你發起的執行中使用。",
-      "connect_account": "連線帳號",
       "empty": "你還沒有在這個工作區連線任何帳號。",
       "used_by": "{{agents}} 在用",
-      "search_description": "智慧體在其他應用程式中使用的團隊帳號和你自己的帳號。",
       "team_title": "團隊帳號",
       "team_description_admin": "整個工作區共用，只有管理員可以連線。",
       "team_description_member": "由管理員連線。你可以查看，也可以申請。",
-      "connect_team_account": "連線團隊帳號",
       "team_empty": "還沒有團隊帳號。",
       "yours_title": "你的帳號",
       "yours_description": "只有你能使用；智慧體會在你發起的執行中使用它們。",

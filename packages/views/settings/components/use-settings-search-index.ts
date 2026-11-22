@@ -337,11 +337,6 @@ export function useSettingsSearchIndex(
         title: t(($) => $.page.tabs.quick_actions),
         description: t(($) => $.quick_actions.description),
       },
-      {
-        tab: "accounts",
-        title: t(($) => $.page.tabs.accounts),
-        description: t(($) => $.connected_apps.accounts_page.search_description),
-      },
       { tab: "code", anchor: "code-hosting", title: t(($) => $.code.hosting_title) },
       { tab: "code", anchor: "github", title: t(($) => $.page.tabs.github) },
       { tab: "code", anchor: "vcs", title: t(($) => $.vcs.section_title) },

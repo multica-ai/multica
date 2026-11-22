@@ -66,9 +66,6 @@ const shell = vi.hoisted(() => ({
   appsAvailable: false,
   role: "owner" as "owner" | "admin" | "member",
 }));
-vi.mock("./accounts-tab", () => ({
-  AccountsTab: () => <div>AccountsTab</div>,
-}));
 vi.mock("../../common/use-composio-available", () => ({
   useComposioAvailable: () => shell.appsAvailable,
 }));
@@ -392,22 +389,20 @@ describe("SettingsPage information architecture", () => {
     );
   });
 
-  it("lists Accounts first under Connections only when Composio is available", () => {
+  it("keeps accounts out of settings, sending old links to the Apps page's Accounts", () => {
+    shell.appsAvailable = true;
     const first = renderWithI18n(<SettingsPage />);
-    expect(screen.queryByRole("link", { name: "Accounts" })).toBeNull();
+    expect(within(nav()).queryByRole("link", { name: /Accounts|Connected apps/ })).toBeNull();
     first.unmount();
 
-    shell.appsAvailable = true;
-    navigationState.search = "tab=integrations&connected=notion";
+    navigationState.search = "tab=accounts";
+    const second = renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts");
+    second.unmount();
+
+    navigationState.search = "tab=connected-accounts";
     renderWithI18n(<SettingsPage />);
-    const connections = within(nav()).getByRole("region", { name: "Connections & extensions" });
-    expect(within(connections).getAllByRole("link")[0]).toHaveAccessibleName("Accounts");
-    expect(
-      within(connections).getByRole("link", { name: "Accounts" }),
-    ).toHaveAttribute("aria-current", "page");
-    expect(within(nav()).queryByRole("link", { name: "Connected apps" })).toBeNull();
-    expect(screen.getByText("AccountsTab")).toBeInTheDocument();
-    expect(replace).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts");
   });
 
   it("sends the retired Apps tab and team connect returns to the Apps page", () => {
@@ -422,12 +417,10 @@ describe("SettingsPage information architecture", () => {
     expect(replace).toHaveBeenLastCalledWith("/acme/apps?connected=notion");
   });
 
-  it("opens a personal connect return on Accounts", () => {
-    shell.appsAvailable = true;
+  it("sends a personal connect return to the Apps page's Accounts", () => {
     navigationState.search = "tab=apps&connected=notion";
     renderWithI18n(<SettingsPage />);
-    expect(screen.getByText("AccountsTab")).toBeInTheDocument();
-    expect(replace).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts&connected=notion");
   });
 
   it("marks pages a member can only view", () => {

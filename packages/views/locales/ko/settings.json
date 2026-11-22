@@ -596,8 +596,7 @@
       "code": "코드",
       "channels": "메신저",
       "workflows": "워크플로",
-      "voice_input": "음성 입력",
-      "accounts": "계정"
+      "voice_input": "음성 입력"
     },
     "groups": {
       "personal": "개인",
@@ -1850,17 +1849,7 @@
     "toast_disconnected": "연결이 해제되었습니다",
     "toast_failed": "문제가 발생했습니다. 다시 시도하세요.",
     "add": {
-      "search": "앱 검색…",
-      "empty": "일치하는 앱이 없습니다.",
-      "curated": "엄선",
-      "recommended_team": "보통 팀 계정",
-      "recommended_personal": "보통 개인 계정",
-      "connect_team": "팀 계정 연결",
-      "connect_personal": "내 계정 연결",
-      "connected": "연결됨",
-      "connect": "연결",
-      "team_description": "워크스페이스 공용 계정을 연결합니다. 사용할 에이전트는 각 에이전트의 앱 페이지에서 설정합니다.",
-      "personal_description": "실행을 시작할 때 직접 연결한 계정을 사용합니다."
+      "empty": "일치하는 앱이 없습니다."
     },
     "detail": {
       "team_title": "{{app}} · 팀 계정",
@@ -2022,6 +2011,7 @@
       "tabs": {
         "in_use": "사용 중",
         "attention": "확인 필요",
+        "accounts": "계정",
         "all": "모든 앱"
       },
       "search": "앱 검색",
@@ -2073,15 +2063,11 @@
       "needs_yours": "내 계정 필요"
     },
     "accounts_page": {
-      "description": "에이전트가 다른 앱에서 작업할 때 쓰는 계정입니다. 팀 계정은 {{workspace}} 전체가 공유하며 관리자가 연결합니다. 내 계정은 내가 시작한 실행에서만 사용됩니다.",
-      "connect_account": "계정 연결",
       "empty": "이 워크스페이스에서 연결한 계정이 없습니다.",
       "used_by": "{{agents}} 사용 중",
-      "search_description": "에이전트가 다른 앱에서 쓰는 팀 계정과 내 계정.",
       "team_title": "팀 계정",
       "team_description_admin": "워크스페이스 전체가 공유합니다. 관리자만 연결할 수 있습니다.",
       "team_description_member": "관리자가 연결합니다. 확인하고 요청할 수 있습니다.",
-      "connect_team_account": "팀 계정 연결",
       "team_empty": "아직 팀 계정이 없습니다.",
       "yours_title": "내 계정",
       "yours_description": "나만 사용할 수 있으며, 에이전트는 내가 시작한 실행에서 사용합니다.",

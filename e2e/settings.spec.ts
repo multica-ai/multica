@@ -67,7 +67,7 @@ test.describe("Settings", () => {
         catalog_mode: "all",
         can_manage: true,
         team: [],
-        agent_apps: [],
+        agent_apps: [{ agent_id: "agent-1", toolkit_slug: "notion", account_scope: "personal", level: "write" }],
         personal: connected
           ? [{ id: "conn-notion-1", toolkit_slug: "notion", status: "active", connected_at: new Date().toISOString(), last_used_at: null }]
           : [],
@@ -97,18 +97,17 @@ test.describe("Settings", () => {
     );
   }
 
-  test("connecting a personal account returns to Accounts and refreshes it", async ({
+  test("the old Accounts settings link opens Apps › Accounts, and a personal connect returns there", async ({
     page,
   }) => {
     await mockConnectedApps(page);
     const workspaceSlug = await loginAsDefault(page);
 
     await page.goto(`/${workspaceSlug}/settings?tab=accounts`, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(new RegExp(`/${workspaceSlug}/apps\\?tab=accounts$`), { timeout: 10000 });
     await waitForPageText(page, "Your accounts");
 
-    await page.getByRole("button", { name: "Connect account" }).click();
-    const picker = page.getByRole("dialog", { name: "Connect my account" });
-    await picker.getByRole("button", { name: /^Connect$/ }).click();
+    await page.locator('[data-account-row="personal:notion"]').getByRole("button", { name: "Connect" }).click();
     // Agents' abilities are disclosed before the hosted flow starts.
     await page.getByRole("dialog", { name: /Connect Notion/ }).getByRole("button", { name: "Continue" }).click();
 

@@ -792,7 +792,7 @@
       "level": "Alcance de la cuenta",
       "team_admin_only": "Solo los administradores del espacio de trabajo pueden dar a un agente acceso a una cuenta del equipo.",
       "team_shared_warning": "Cualquiera que pueda ejecutar este agente podrá usar esta cuenta de equipo a través de él.",
-      "manage_link": "Gestionar cuentas en Ajustes → Aplicaciones conectadas",
+      "manage_link": "Gestionar cuentas en Apps → Cuentas",
       "save_failed_toast": "No se pudo guardar. Inténtalo de nuevo",
       "team_help": "Cuenta compartida del espacio de trabajo, conectada por administradores.",
       "personal_help": "Cada ejecución usa la cuenta de quien la inicia. Cada persona debe conectar su propia cuenta.",

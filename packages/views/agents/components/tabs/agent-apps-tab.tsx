@@ -267,7 +267,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-caption text-muted-foreground">{t(($) => $.tab_body.connected_apps.connect_hint)}</p>
         <AppLink
-          href={paths.apps()}
+          href={`${paths.apps()}?tab=accounts`}
           className="inline-flex items-center gap-1.5 text-caption font-medium text-primary hover:underline"
         >
           <Plug className="size-3" />

@@ -602,8 +602,7 @@
       "code": "Code",
       "channels": "Messagerie",
       "workflows": "Workflows",
-      "voice_input": "Saisie vocale",
-      "accounts": "Comptes"
+      "voice_input": "Saisie vocale"
     },
     "groups": {
       "personal": "Personnel",
@@ -1867,17 +1866,7 @@
     "toast_disconnected": "Déconnecté",
     "toast_failed": "Une erreur est survenue. Veuillez réessayer.",
     "add": {
-      "search": "Rechercher une app…",
-      "empty": "Aucune app ne correspond.",
-      "curated": "Sélection",
-      "recommended_team": "Souvent un compte d'équipe",
-      "recommended_personal": "Souvent un compte personnel",
-      "connect_team": "Connecter un compte d’équipe",
-      "connect_personal": "Connecter mon compte",
-      "connected": "Connecté",
-      "connect": "Connecter",
-      "team_description": "Connectez un compte partagé de l’espace de travail. Autorisez son utilisation sur la page Apps de chaque agent.",
-      "personal_description": "Utilisez votre propre compte connecté lorsque vous lancez une exécution."
+      "empty": "Aucune app ne correspond."
     },
     "detail": {
       "team_title": "{{app}} · compte d'équipe",
@@ -2043,6 +2032,7 @@
       "tabs": {
         "in_use": "Utilisées",
         "attention": "À traiter",
+        "accounts": "Comptes",
         "all": "Toutes les apps"
       },
       "search": "Rechercher une app",
@@ -2095,15 +2085,11 @@
       "needs_yours": "Il faut votre compte"
     },
     "accounts_page": {
-      "description": "Les comptes avec lesquels les agents travaillent dans d'autres apps. Les comptes d'équipe sont partagés par tout {{workspace}} et connectés par les admins. Vos comptes ne servent que dans les exécutions que vous lancez.",
-      "connect_account": "Connecter un compte",
       "empty": "Vous n'avez connecté aucun compte dans cet espace de travail.",
       "used_by": "utilisé par {{agents}}",
-      "search_description": "Comptes d'équipe et vos propres comptes que les agents utilisent dans d'autres apps.",
       "team_title": "Comptes d'équipe",
       "team_description_admin": "Partagés par tout l'espace de travail. Seuls les admins les connectent.",
       "team_description_member": "Les admins les connectent. Vous pouvez les voir et en demander un.",
-      "connect_team_account": "Connecter un compte d'équipe",
       "team_empty": "Aucun compte d'équipe pour l'instant.",
       "yours_title": "Vos comptes",
       "yours_description": "Vous seul pouvez les utiliser ; les agents s'en servent dans les exécutions que vous lancez.",

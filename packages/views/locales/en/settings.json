@@ -602,8 +602,7 @@
       "code": "Code",
       "channels": "Messaging",
       "workflows": "Workflows",
-      "voice_input": "Voice input",
-      "accounts": "Accounts"
+      "voice_input": "Voice input"
     },
     "groups": {
       "personal": "Personal",
@@ -1867,17 +1866,7 @@
     "toast_disconnected": "Disconnected",
     "toast_failed": "Something went wrong. Please try again.",
     "add": {
-      "search": "Search apps...",
-      "empty": "No apps match.",
-      "curated": "Curated",
-      "recommended_team": "Usually a team account",
-      "recommended_personal": "Usually a personal account",
-      "connect_team": "Connect team account",
-      "connect_personal": "Connect my account",
-      "connected": "Connected",
-      "connect": "Connect",
-      "team_description": "A shared workspace account. Choose which agents can use it on each agent’s Apps page.",
-      "personal_description": "Use your own connected account when you start a run."
+      "empty": "No apps match."
     },
     "detail": {
       "team_title": "{{app}} · team account",
@@ -2043,6 +2032,7 @@
       "tabs": {
         "in_use": "In use",
         "attention": "Needs attention",
+        "accounts": "Accounts",
         "all": "All apps"
       },
       "search": "Search apps",
@@ -2095,15 +2085,11 @@
       "needs_yours": "Needs your account"
     },
     "accounts_page": {
-      "description": "Sign-ins agents use to work in other apps. Team accounts are shared by everyone in {{workspace}} and connected by admins. Your accounts are used only in runs you start.",
-      "connect_account": "Connect account",
       "empty": "You haven't connected any accounts in this workspace.",
       "used_by": "used by {{agents}}",
-      "search_description": "Team accounts and your own accounts that agents use in other apps.",
       "team_title": "Team accounts",
       "team_description_admin": "Shared by everyone in the workspace. Only admins connect them.",
       "team_description_member": "Admins connect these. You can see them and ask for one.",
-      "connect_team_account": "Connect team account",
       "team_empty": "No team accounts yet.",
       "yours_title": "Your accounts",
       "yours_description": "Only you can use these; agents use them in runs you start.",

@@ -793,7 +793,7 @@
       "level": "帳號範圍",
       "team_admin_only": "只有工作區管理員可以給 AI 代理團隊帳號。",
       "team_shared_warning": "能執行這個 AI 代理的人，都能透過它使用該團隊帳號。",
-      "manage_link": "在 設定 → 已連線應用 中管理帳號",
+      "manage_link": "在 應用程式 → 帳號 中管理帳號",
       "save_failed_toast": "儲存失敗，請重試",
       "team_help": "工作區共用的帳號，由管理員連線。",
       "personal_help": "每次執行使用觸發者自己已連線的帳號；尚未連線時須先連線。",

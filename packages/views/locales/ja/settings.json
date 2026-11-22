@@ -596,8 +596,7 @@
       "code": "コード",
       "channels": "メッセージング",
       "workflows": "ワークフロー",
-      "voice_input": "音声入力",
-      "accounts": "アカウント"
+      "voice_input": "音声入力"
     },
     "groups": {
       "personal": "個人",
@@ -1850,17 +1849,7 @@
     "toast_disconnected": "接続を解除しました",
     "toast_failed": "問題が発生しました。もう一度お試しください。",
     "add": {
-      "search": "アプリを検索…",
-      "empty": "一致するアプリはありません。",
-      "curated": "厳選",
-      "recommended_team": "通常はチームアカウント",
-      "recommended_personal": "通常は個人アカウント",
-      "connect_team": "チームアカウントを接続",
-      "connect_personal": "自分のアカウントを接続",
-      "connected": "接続済み",
-      "connect": "接続",
-      "team_description": "ワークスペース共有のアカウントを接続します。利用するエージェントは、各エージェントの「アプリ」で設定します。",
-      "personal_description": "自分が実行を開始したときに、自分自身の連携アカウントを使用します。"
+      "empty": "一致するアプリはありません。"
     },
     "detail": {
       "team_title": "{{app}} · チームアカウント",
@@ -2022,6 +2011,7 @@
       "tabs": {
         "in_use": "使用中",
         "attention": "要対応",
+        "accounts": "アカウント",
         "all": "すべてのアプリ"
       },
       "search": "アプリを検索",
@@ -2073,15 +2063,11 @@
       "needs_yours": "あなたのアカウントが必要"
     },
     "accounts_page": {
-      "description": "エージェントが他のアプリで作業するためのアカウントです。チームアカウントは {{workspace}} の全員で共有し、管理者が接続します。あなたのアカウントは、あなたが開始した実行でのみ使われます。",
-      "connect_account": "アカウントを接続",
       "empty": "このワークスペースではまだアカウントを接続していません。",
       "used_by": "{{agents}} が使用",
-      "search_description": "エージェントが他のアプリで使うチームアカウントとあなたのアカウント。",
       "team_title": "チームアカウント",
       "team_description_admin": "ワークスペースの全員で共有します。接続できるのは管理者だけです。",
       "team_description_member": "管理者が接続します。閲覧と依頼ができます。",
-      "connect_team_account": "チームアカウントを接続",
       "team_empty": "チームアカウントはまだありません。",
       "yours_title": "あなたのアカウント",
       "yours_description": "使えるのはあなただけです。エージェントはあなたが開始した実行で使います。",
