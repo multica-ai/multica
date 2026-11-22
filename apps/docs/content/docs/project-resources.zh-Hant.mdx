@@ -49,7 +49,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 <Callout type="warning">
 **這是特殊情況下的選項，不要因為方便就選它。** `local_directory` 是給那些"不得不這麼開發"的人準備的，典型是一個 checkout 就幾十 GB 的遊戲專案，不可能每來一次執行就重新 clone 一份。
 
-如果你的目錄只是一個能正常 clone 的普通 git 倉庫，請用 `github_repo`：它預設走 worktree 模式，同一個倉庫上的執行可以同時進行，數量不受限制。`local_directory` 預設同一時間只進行一次執行；如果這個目錄本身是 git 倉庫，可以主動開啟 worktree 模式恢復併發（見[執行如何共享這個目錄](#執行如何共享這個目錄)）。拿不準時，先對照頁首的兩種資源。
+如果你的目錄只是一個能正常 clone 的普通 git 倉庫，請用 `github_repo`：它預設走 worktree 模式，同一個倉庫上的執行可以同時進行，數量不受限制。新關聯的 `local_directory` 在那台電腦的執行時支援隔離時預設使用 worktree 模式，同一目錄上的執行可以同時進行；不支援時同一時間只進行一次執行。不是 git 倉庫的目錄請明確選擇 `in_place`（見[執行如何共享這個目錄](#執行如何共享這個目錄)）。拿不準時，先對照頁首的兩種資源。
 </Callout>
 
 <Steps>
@@ -82,7 +82,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 每個專案在同一臺守護程序上最多關聯一個本地目錄。團隊中的不同電腦可以分別為同一個專案關聯各自的目錄。
 
 <Callout type="warning">
-在預設的 `in_place` 模式下，本地目錄不是隔離環境：AI 代理會直接看到並修改當前分支和未提交的檔案，Multica 也不會自動切換分支、stash、commit、push 或建立 PR。worktree 模式不一樣，見下面的[執行如何共享這個目錄](#執行如何共享這個目錄)。
+在 `in_place` 模式下，本地目錄不是隔離環境：AI 代理會直接看到並修改當前分支和未提交的檔案，Multica 也不會自動切換分支、stash、commit、push 或建立 PR。worktree 模式不一樣，見下面的[執行如何共享這個目錄](#執行如何共享這個目錄)。
 </Callout>
 
 <span id="task-如何共享這個目錄" />
@@ -90,12 +90,12 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 ## 執行如何共享這個目錄
 
-本地目錄有兩種執行模式，按資源逐個設定。在資源面板裡可以直接切換，CLI 用 `--execution-mode`。Desktop 裡這兩種模式顯示為 **直接修改** 和 **並行執行**；API、CLI 和本頁其餘部分都使用識別符號。
+本地目錄有兩種執行模式，按資源逐個設定。新關聯的資源在那台電腦的執行時宣告支援隔離時預設使用 `worktree`，否則使用 `in_place`。在資源面板裡可以直接切換，CLI 用 `--execution-mode`。Desktop 裡這兩種模式顯示為 **直接修改** 和 **並行執行**；API、CLI 和本頁其餘部分都使用識別符號。
 
 <LocalDirModeDemo />
 
-<Tabs items={["in_place（直接修改，預設）", "worktree（並行執行）"]}>
-<Tab value="in_place（直接修改，預設）" id="in-place">
+<Tabs items={["in_place（直接修改）", "worktree（並行執行）"]}>
+<Tab value="in_place（直接修改）" id="in-place">
 
 AI 代理直接在你的目錄裡工作，同一時間只進行一次執行。兩次執行使用同一個真實目錄時，後到的執行進入 `waiting_local_directory`，等前一次釋放目錄後繼續。兩個路徑經不同符號連結指向同一目錄時，同樣序列。
 
@@ -219,13 +219,14 @@ multica project resource add <project-id> \
  --url https://github.com/multica-ai/multica \
  --ref main
 
-# 關聯指定守護程序上的本地目錄
+# 關聯指定守護程序上的本地目錄。不帶 --execution-mode 時，支援隔離的電腦預設使用 worktree；
+# 傳 --execution-mode in_place 讓執行直接修改這個目錄。非 git 目錄在這類電腦上需要明確指定 in_place。
 multica project resource add <project-id> \
  --type local_directory \
  --local-path /absolute/path/to/repo \
  --daemon-id <daemon-id>
 
-# 關聯一個本地 git 倉庫，並讓每次執行在各自的 worktree 中併發執行
+# 關聯一個本地 git 倉庫，並明確指定並行執行
 multica project resource add <project-id> \
  --type local_directory \
  --local-path /absolute/path/to/repo \

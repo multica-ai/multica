@@ -40,8 +40,9 @@ Common resource types:
 - `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional
   checkout `ref`, and optional prompt-only `default_branch_hint`;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`,
-  `daemon_id`, optional label, and optional `execution_mode` (`in_place`, the
-  default, or `worktree`).
+  `daemon_id`, optional label, and optional `execution_mode` (`in_place` or
+  `worktree`; a new resource without one starts in `worktree` when the daemon
+  advertises support, else in `in_place`).
 
 ## CLI
 
@@ -80,10 +81,13 @@ clear a date; an unset flag leaves it untouched.
 
 ## local_directory execution modes
 
-`--execution-mode` decides how tasks share a `local_directory`.
+`--execution-mode` decides how tasks share a `local_directory`. When a new
+resource omits it, the server stores `worktree` if the owning daemon advertises
+`local-worktree-v1` and leaves it unset otherwise.
 
-`in_place` (default) runs the agent in the user's directory, one task at a time;
-a second task waits in `waiting_local_directory`.
+`in_place` runs the agent in the user's directory, one task at a time; a second
+task waits in `waiting_local_directory`. Pass it explicitly for a folder that is
+not a git repository, since a defaulted `worktree` fails its first run there.
 
 `worktree` gives each task its own git worktree of that repo, so tasks run
 concurrently and each delivers its work as a branch in the user's repo instead
@@ -112,7 +116,7 @@ machine whose runtime cannot do worktrees gets its tasks cancelled rather than
 run in place. Saving `worktree` is refused (HTTP 422, code
 `daemon_version_unsupported`) while the daemon on that machine does not
 advertise the capability — the fix is updating the Multica app there, then
-retrying. Pass an empty value to clear it back to the default.
+retrying. Pass an empty value on update to clear it back to `in_place`.
 
 ## Archived projects
 

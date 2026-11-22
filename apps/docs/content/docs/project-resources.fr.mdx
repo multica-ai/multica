@@ -49,7 +49,7 @@ L'interface d'ajout d'un répertoire local n'existe que dans l'application de bu
 <Callout type="warning">
 **Réservez cette option aux cas particuliers ; ne la choisissez pas par commodité.** `local_directory` existe pour les personnes qui n'ont pas d'autre choix, typiquement un projet de jeu dont le checkout pèse des dizaines de gigaoctets et qu'il est impossible de recloner à chaque exécution.
 
-Si votre répertoire est un dépôt git ordinaire que vous pouvez cloner, utilisez plutôt `github_repo` : il utilise le mode worktree par défaut, et les exécutions sur un même dépôt peuvent avoir lieu simultanément, sans limite de nombre. Un `local_directory` traite une exécution à la fois par défaut ; si le répertoire est un dépôt git, vous pouvez activer le mode worktree pour retrouver le parallélisme (voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire)). En cas de doute, comparez d'abord les deux types de ressources en haut de la page.
+Si votre répertoire est un dépôt git ordinaire que vous pouvez cloner, utilisez plutôt `github_repo` : il utilise le mode worktree par défaut, et les exécutions sur un même dépôt peuvent avoir lieu simultanément, sans limite de nombre. Un `local_directory` nouvellement rattaché démarre en mode worktree lorsque le runtime de cette machine le prend en charge, ce qui permet aux exécutions sur un même répertoire d'avoir lieu en même temps ; sans cette prise en charge, il traite une exécution à la fois. Choisissez explicitement `in_place` pour un répertoire qui n'est pas un dépôt git (voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire)). En cas de doute, comparez d'abord les deux types de ressources en haut de la page.
 </Callout>
 
 <Steps>
@@ -82,19 +82,19 @@ Le répertoire doit être un chemin absolu, doit déjà exister et doit être ac
 Chaque projet peut rattacher au plus un répertoire local par daemon. Les différents ordinateurs d'une équipe peuvent chacun rattacher leur propre répertoire pour le même projet.
 
 <Callout type="warning">
-En mode `in_place` (par défaut), un répertoire local n'est pas un environnement isolé : l'agent voit et modifie directement votre branche actuelle et vos fichiers non commités, et Multica ne change pas automatiquement de branche, ne fait ni stash, ni commit, ni push, et n'ouvre pas de PR. Le mode worktree fonctionne autrement, voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire) ci-dessous.
+En mode `in_place`, un répertoire local n'est pas un environnement isolé : l'agent voit et modifie directement votre branche actuelle et vos fichiers non commités, et Multica ne change pas automatiquement de branche, ne fait ni stash, ni commit, ni push, et n'ouvre pas de PR. Le mode worktree fonctionne autrement, voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire) ci-dessous.
 </Callout>
 
 <span id="how-tasks-share-the-directory" />
 
 ## Comment les exécutions partagent le répertoire
 
-Un répertoire local dispose de deux modes d'exécution, définis par ressource avec `execution_mode`. L'application de bureau les nomme **Modifier directement** et **Exécuter en parallèle** lors de l'ajout d'un dossier, puis **Direct** et **Parallèle** sur l'étiquette du mode du dossier ; l'API, le CLI et le reste de cette page utilisent les identifiants.
+Un répertoire local dispose de deux modes d'exécution, définis par ressource avec `execution_mode`. Une nouvelle ressource démarre en `worktree` lorsque le runtime de cette machine annonce la prise en charge des worktrees, et en `in_place` sinon. L'application de bureau les nomme **Modifier directement** et **Exécuter en parallèle** lors de l'ajout d'un dossier, puis **Direct** et **Parallèle** sur l'étiquette du mode du dossier ; l'API, le CLI et le reste de cette page utilisent les identifiants.
 
 <LocalDirModeDemo />
 
-<Tabs items={["in_place (Direct, par défaut)", "worktree (Parallèle)"]}>
-<Tab value="in_place (Direct, par défaut)" id="in-place">
+<Tabs items={["in_place (Direct)", "worktree (Parallèle)"]}>
+<Tab value="in_place (Direct)" id="in-place">
 
 L'agent travaille directement dans votre répertoire, et les exécutions ont lieu une à la fois. Lorsque deux exécutions utilisent le même répertoire réel, la seconde passe en `waiting_local_directory` et reprend une fois que la première a libéré le répertoire. Deux chemins qui mènent au même répertoire via des liens symboliques différents sont sérialisés de la même manière.
 
@@ -218,13 +218,15 @@ multica project resource add <project-id> \
   --url https://github.com/multica-ai/multica \
   --ref main
 
-# Rattacher un répertoire local sur un daemon précis
+# Rattacher un répertoire local sur un daemon précis. Sans --execution-mode, une machine qui prend en
+# charge les worktrees démarre en mode worktree ; passez --execution-mode in_place pour que les exécutions
+# modifient le dossier directement. Un dossier qui n'est pas un dépôt git doit le préciser sur une telle machine.
 multica project resource add <project-id> \
   --type local_directory \
   --local-path /absolute/path/to/repo \
   --daemon-id <daemon-id>
 
-# Rattacher un dépôt git local et laisser les exécutions tourner simultanément, chacune dans son propre worktree
+# Rattacher un dépôt git local et indiquer explicitement le mode parallèle
 multica project resource add <project-id> \
   --type local_directory \
   --local-path /absolute/path/to/repo \

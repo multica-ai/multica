@@ -117,7 +117,10 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 
 // Execution modes for resource_type=local_directory. The zero value (absent
 // field) means in_place, so resources created before worktree mode existed keep
-// their original behavior without a data migration.
+// their original behavior without a data migration. New resources get the
+// default resolved at save time (defaultLocalDirectoryExecutionMode), so after
+// that the fallback still covers every row stored without a mode: written by a
+// client that predates the mode, or on a machine that cannot run worktrees.
 const (
 	// localDirectoryModeInPlace runs the agent directly in the user's
 	// directory, serialised by the daemon's per-path mutex: one task at a
@@ -138,9 +141,11 @@ const (
 // human-readable hint used by the UI; the row-level project_resource.label
 // column remains the generic column for any resource type.
 //
-// execution_mode selects how tasks share that directory: in_place (default)
-// keeps the historical one-task-at-a-time behavior, worktree gives each task an
-// isolated git worktree so tasks run concurrently.
+// execution_mode selects how tasks share that directory: in_place keeps the
+// historical one-task-at-a-time behavior, worktree gives each task an isolated
+// git worktree so tasks run concurrently. An absent mode is in_place on the
+// wire; new resources get it resolved at save time (see
+// defaultLocalDirectoryExecutionMode).
 type localDirectoryRef struct {
 	LocalPath     string `json:"local_path"`
 	DaemonID      string `json:"daemon_id"`
@@ -239,6 +244,51 @@ func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool 
 		return false
 	}
 	return runtimeHasCapability(newest.Metadata, protocol.DaemonCapabilityLocalWorktreeV1)
+}
+
+// defaultLocalDirectoryExecutionMode fills in execution_mode for a NEW
+// local_directory resource whose ref did not state one: a daemon that can run
+// worktrees gets worktree, anything else keeps the absent-means-in_place
+// fallback. An explicit mode is returned untouched.
+//
+// Create paths only. An omitted mode on update means "keep what is stored" and
+// an empty one means "clear back to in_place"; resolving a default there would
+// make a label-only edit flip the mode, and would re-run a pre-worktree ref
+// resent by an old client into parallel mode.
+//
+// The decision keys on the daemon's advertised capability rather than on
+// whether the folder is a git repository, because the server cannot see the
+// daemon's filesystem (only the Desktop shell checks is_git_repo) and there is
+// no server-to-daemon validation call. A non-git folder on a capable machine
+// therefore stores worktree and fails its first run with the daemon's explicit
+// "not a git repository ... switch the resource back to in_place" error. That
+// is the deliberate trade for not carrying a third, daemon-resolved mode: the
+// failure names its fix, and the Desktop path is unaffected because it always
+// sends the mode the user confirmed.
+func defaultLocalDirectoryExecutionMode(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, resourceType string, normalizedRef json.RawMessage) (json.RawMessage, error) {
+	if resourceType != "local_directory" {
+		return normalizedRef, nil
+	}
+	var ref localDirectoryRef
+	if err := json.Unmarshal(normalizedRef, &ref); err != nil {
+		// validateLocalDirectoryRef already rejected malformed refs before we
+		// get here; treat anything else as "leave it alone".
+		return normalizedRef, nil
+	}
+	if strings.TrimSpace(ref.ExecutionMode) != "" {
+		return normalizedRef, nil
+	}
+	// Same read and same newest-row rule as requireWorktreeCapableDaemon; the
+	// list is a handful of rows per workspace, and create is rare.
+	runtimes, err := q.ListAgentRuntimes(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if !daemonAdvertisesWorktree(runtimes, ref.DaemonID) {
+		return normalizedRef, nil
+	}
+	ref.ExecutionMode = localDirectoryModeWorktree
+	return json.Marshal(ref)
 }
 
 // runtimeSeenAfter orders two rows of the same daemon by last_seen_at. A row
@@ -576,6 +626,13 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 	normalizedRef, err := validateAndNormalizeResourceRef(req.ResourceType, req.ResourceRef)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// An omitted mode is not a choice of in_place: resolve it before the gate
+	// below, which reads the mode off this same ref.
+	normalizedRef, err = defaultLocalDirectoryExecutionMode(r.Context(), h.Queries, project.WorkspaceID, req.ResourceType, normalizedRef)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check runtime capabilities")
 		return
 	}
 

@@ -1509,6 +1509,226 @@ func TestCreateProjectGatesWorktreeLocalDirectory(t *testing.T) {
 	}
 }
 
+// seedWorktreeCapableDaemon registers an online runtime for daemonID whose
+// metadata advertises local-worktree-v1, the way a current daemon does at
+// registration. Without such a row the save-time default and the gate both
+// see a machine that cannot run worktrees.
+func seedWorktreeCapableDaemon(t *testing.T, daemonID string) {
+	t.Helper()
+	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, last_seen_at, visibility, owner_id
+		)
+		VALUES ($1, $2, $3, 'local', 'handler_test_runtime', 'online', 'worktree default fixture',
+			$4::jsonb, now(), 'private', $5)
+		RETURNING id
+	`, testWorkspaceID, daemonID, daemonID+" runtime", `{"capabilities":["local-worktree-v1"]}`, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+}
+
+// executionModeOf reads execution_mode off a returned resource ref. "" is the
+// stored absent form, which the daemon reads as in_place.
+func executionModeOf(t *testing.T, ref json.RawMessage) string {
+	t.Helper()
+	var fields map[string]any
+	if err := json.Unmarshal(ref, &fields); err != nil {
+		t.Fatalf("decode resource_ref: %v", err)
+	}
+	mode, _ := fields["execution_mode"].(string)
+	return mode
+}
+
+// A new local_directory that does not state a mode is a preference, not a
+// decision: on a machine that advertises worktree support it is stored as
+// worktree, so concurrent work on the project does not queue behind the
+// directory. Desktop already preselects this; resolving it on the server is
+// what gives the CLI and the API the same default (#11182).
+func TestCreateProjectResourceDefaultsToWorktreeOnCapableDaemon(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	project := createTestProjectForResources(t, "Worktree default")
+	const daemonID = "daemon-worktree-default"
+	seedWorktreeCapableDaemon(t, daemonID)
+
+	created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+		"local_path": "/Users/dev/work/game-client",
+		"daemon_id":  daemonID,
+	})
+	if got := executionModeOf(t, created.ResourceRef); got != localDirectoryModeWorktree {
+		t.Fatalf("execution_mode = %q, want %q: the machine can run it and the caller stated no preference",
+			got, localDirectoryModeWorktree)
+	}
+}
+
+// Without an advertised capability the absent mode stays absent, which the
+// daemon reads as in_place. Storing worktree here would be refused by the
+// save gate anyway; the point is that the row keeps working as it always did.
+func TestCreateProjectResourceKeepsInPlaceDefaultWithoutCapability(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	project := createTestProjectForResources(t, "In-place default")
+	// Deliberately no runtime row: a daemon that has never registered one
+	// cannot have advertised the capability.
+	const daemonID = "daemon-without-worktree-default"
+
+	created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+		"local_path": "/Users/dev/work/game-client",
+		"daemon_id":  daemonID,
+	})
+	if got := executionModeOf(t, created.ResourceRef); got != "" {
+		t.Fatalf("execution_mode = %q, want it absent (in_place) on a machine that cannot run worktrees", got)
+	}
+}
+
+// An explicit in_place is a request to have the agent edit the working copy.
+// The default must not override it on a machine that could have run worktrees.
+func TestCreateProjectResourceDoesNotOverrideExplicitInPlace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	project := createTestProjectForResources(t, "Explicit in-place")
+	const daemonID = "daemon-explicit-in-place"
+	seedWorktreeCapableDaemon(t, daemonID)
+
+	created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+		"local_path":     "/Users/dev/work/game-client",
+		"daemon_id":      daemonID,
+		"execution_mode": localDirectoryModeInPlace,
+	})
+	if got := executionModeOf(t, created.ResourceRef); got != localDirectoryModeInPlace {
+		t.Fatalf("execution_mode = %q, want the explicit %q kept", got, localDirectoryModeInPlace)
+	}
+}
+
+// The default is create-only. On update an omitted mode keeps the stored one
+// and an empty one clears it to in_place. Resolving a default there would let
+// a label edit, or an old client resending the ref it holds, flip a resource
+// into parallel mode as soon as the machine happens to be capable.
+func TestUpdateProjectResourceDoesNotApplyWorktreeDefault(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	project := createTestProjectForResources(t, "No default on update")
+	const daemonID = "daemon-updated-after-create"
+
+	// Stored while the machine could not run worktrees: no mode at all.
+	created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+		"local_path": "/Users/dev/work/game-client",
+		"daemon_id":  daemonID,
+	})
+	// The machine is upgraded and a capable runtime registers.
+	seedWorktreeCapableDaemon(t, daemonID)
+
+	update := func(body map[string]any) ProjectResourceResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, body)
+		req = withURLParams(req, "id", project.ID, "resourceId", created.ID)
+		testHandler.UpdateProjectResource(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateProjectResource(%v): %d %s", body, w.Code, w.Body.String())
+		}
+		var resp ProjectResourceResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+	refWithoutMode := map[string]any{
+		"local_path": "/Users/dev/work/game-client",
+		"daemon_id":  daemonID,
+	}
+
+	// A label-only edit never touches the ref.
+	if got := executionModeOf(t, update(map[string]any{"label": "Renamed"}).ResourceRef); got != "" {
+		t.Fatalf("a label edit resolved a default: execution_mode = %q", got)
+	}
+	// An old client renames by resending the ref it holds, which predates the
+	// mode. That is not a request for parallel runs.
+	if got := executionModeOf(t, update(map[string]any{"resource_ref": refWithoutMode}).ResourceRef); got != "" {
+		t.Fatalf("a resent pre-worktree ref resolved a default: execution_mode = %q", got)
+	}
+	// An explicit mode still lands, and an explicit empty value clears it to
+	// in_place instead of being read as "no preference".
+	plainRef := func(mode string) map[string]any {
+		ref := map[string]any{
+			"local_path":     "/Users/dev/work/game-client",
+			"daemon_id":      daemonID,
+			"execution_mode": mode,
+		}
+		return ref
+	}
+	if got := executionModeOf(t, update(map[string]any{"resource_ref": plainRef(localDirectoryModeWorktree)}).ResourceRef); got != localDirectoryModeWorktree {
+		t.Fatalf("explicit worktree on update: execution_mode = %q", got)
+	}
+	if got := executionModeOf(t, update(map[string]any{"resource_ref": plainRef("")}).ResourceRef); got != "" {
+		t.Fatalf("an explicit empty mode should clear to in_place, got %q", got)
+	}
+}
+
+// The bundled create path (project + resources in one request) resolves the
+// same default as POST /resources, so a `project create` that carries a local
+// folder lands in the same mode as adding that folder afterwards would.
+func TestCreateProjectBundledLocalDirectoryDefaultsToWorktree(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	const daemonID = "daemon-bundled-worktree-default"
+	seedWorktreeCapableDaemon(t, daemonID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Bundled worktree default",
+		"resources": []map[string]any{
+			{
+				"resource_type": "local_directory",
+				"resource_ref": map[string]any{
+					"local_path": "/Users/dev/work/game-client",
+					"daemon_id":  daemonID,
+				},
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: %d %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	t.Cleanup(func() {
+		r := withURLParam(newRequest("DELETE", "/api/projects/"+project.ID, nil), "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	})
+
+	lw := httptest.NewRecorder()
+	lreq := withURLParam(newRequest("GET", "/api/projects/"+project.ID+"/resources?workspace_id="+testWorkspaceID, nil), "id", project.ID)
+	testHandler.ListProjectResources(lw, lreq)
+	if lw.Code != http.StatusOK {
+		t.Fatalf("ListProjectResources: %d %s", lw.Code, lw.Body.String())
+	}
+	var listed struct {
+		Resources []ProjectResourceResponse `json:"resources"`
+	}
+	if err := json.NewDecoder(lw.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode ListProjectResources: %v", err)
+	}
+	if len(listed.Resources) != 1 {
+		t.Fatalf("expected one resource, got %d", len(listed.Resources))
+	}
+	if got := executionModeOf(t, listed.Resources[0].ResourceRef); got != localDirectoryModeWorktree {
+		t.Fatalf("bundled resource execution_mode = %q, want %q", got, localDirectoryModeWorktree)
+	}
+}
+
 // createTestProjectForResources / createLocalDirectoryResourceFor build the
 // fixtures the label-classification tests share, through the real handlers so
 // the rows look exactly like a client's would.

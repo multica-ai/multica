@@ -49,7 +49,7 @@ The UI for adding a local directory is Desktop-only, because browsers cannot pic
 <Callout type="warning">
 **This is for special cases; do not pick it just because it is convenient.** `local_directory` exists for people who have no other option — the canonical case is a game project whose checkout is tens of gigabytes, where re-cloning per run is simply not viable.
 
-If your directory is an ordinary git repo you can clone, use `github_repo` instead: it uses worktree mode by default, so any number of runs on the same repo can proceed at once. A `local_directory` processes one run at a time by default; if the directory is a git repo you can opt into worktree mode to get concurrency back (see [How runs share the directory](#how-runs-share-the-directory)). If you are unsure, compare the two resource types at the top of this page.
+If your directory is an ordinary git repo you can clone, use `github_repo` instead: it uses worktree mode by default, so any number of runs on the same repo can proceed at once. A new `local_directory` starts in worktree mode when the runtime on that machine supports it, so runs on the same folder proceed at once; on a machine without that support it processes one run at a time. Pick `in_place` explicitly for a folder that is not a git repository (see [How runs share the directory](#how-runs-share-the-directory)). If you are unsure, compare the two resource types at the top of this page.
 </Callout>
 
 <Steps>
@@ -82,19 +82,19 @@ The directory must be an absolute path, must already exist, and must be readable
 Each project can link at most one local directory per daemon. Different computers on a team can each link their own directory for the same project.
 
 <Callout type="warning">
-In the default `in_place` mode a local directory is not an isolated environment: the agent directly sees and modifies your current branch and uncommitted files, and Multica does not automatically switch branches, stash, commit, push, or open PRs. Worktree mode is different — see [How runs share the directory](#how-runs-share-the-directory) below.
+In `in_place` mode a local directory is not an isolated environment: the agent directly sees and modifies your current branch and uncommitted files, and Multica does not automatically switch branches, stash, commit, push, or open PRs. Worktree mode is different — see [How runs share the directory](#how-runs-share-the-directory) below.
 </Callout>
 
 <span id="how-tasks-share-the-directory" />
 
 ## How runs share the directory
 
-A local directory has two execution modes, set per resource with `execution_mode`. Desktop shows them as **Edit directly** and **Run in parallel** when you add a folder, and as **Direct** and **Parallel** on the folder's mode label; the API, the CLI and the rest of this page use the identifiers.
+A local directory has two execution modes, set per resource with `execution_mode`. A new resource starts in `worktree` when the runtime on that machine advertises worktree support, and in `in_place` otherwise. Desktop shows them as **Edit directly** and **Run in parallel** when you add a folder, and as **Direct** and **Parallel** on the folder's mode label; the API, the CLI and the rest of this page use the identifiers.
 
 <LocalDirModeDemo />
 
-<Tabs items={["in_place (Direct, default)", "worktree (Parallel)"]}>
-<Tab value="in_place (Direct, default)" id="in-place">
+<Tabs items={["in_place (Direct)", "worktree (Parallel)"]}>
+<Tab value="in_place (Direct)" id="in-place">
 
 The agent works directly in your directory, and runs execute one at a time. When two runs use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
 
@@ -218,13 +218,15 @@ multica project resource add <project-id> \
   --url https://github.com/multica-ai/multica \
   --ref main
 
-# Link a local directory on a specific daemon
+# Link a local directory on a specific daemon. Without --execution-mode a machine
+# that supports worktrees starts in worktree mode; pass --execution-mode in_place
+# to have runs edit the folder directly. A non-git folder needs that on such a machine.
 multica project resource add <project-id> \
   --type local_directory \
   --local-path /absolute/path/to/repo \
   --daemon-id <daemon-id>
 
-# Link a local git repo and let runs execute concurrently in their own worktrees
+# Link a local git repo and state the concurrent mode explicitly
 multica project resource add <project-id> \
   --type local_directory \
   --local-path /absolute/path/to/repo \
