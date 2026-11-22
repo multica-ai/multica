@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -163,6 +164,87 @@ func TestRunTaskWakeupConnectionRoutesTaskSupplementHint(t *testing.T) {
 	case <-errCh:
 	case <-time.After(time.Second):
 		t.Fatal("websocket reader did not release after cancellation")
+	}
+}
+
+func TestWSHeartbeatModelDiscoveryStopsOnDaemonShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	closePeer := make(chan struct{})
+	defer func() { close(closePeer) }()
+	ack := protocol.Message{
+		Type: protocol.EventDaemonHeartbeatAck,
+		Payload: marshalRaw(HeartbeatResponse{
+			RuntimeID:        "runtime-1",
+			PendingModelList: &PendingModelList{ID: "request-1"},
+		}),
+	}
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/ws" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade websocket: %v", err)
+			return
+		}
+		defer conn.Close()
+		if err := conn.WriteJSON(ack); err != nil {
+			t.Errorf("send heartbeat ack: %v", err)
+			return
+		}
+		<-closePeer
+	}))
+	t.Cleanup(srv.Close)
+
+	started := make(chan context.Context, 1)
+	releaseDiscovery := make(chan struct{})
+	defer close(releaseDiscovery)
+	origListModels := listModels
+	t.Cleanup(func() { listModels = origListModels })
+	listModels = func(callCtx context.Context, _ string, _ agent.Command) (agent.Catalog, error) {
+		started <- callCtx
+		select {
+		case <-callCtx.Done():
+			return agent.Catalog{}, callCtx.Err()
+		case <-releaseDiscovery:
+			return agent.Catalog{}, context.Canceled
+		}
+	}
+
+	d := New(Config{ServerBaseURL: srv.URL, HeartbeatInterval: time.Hour}, slog.Default())
+	d.rootCtx = ctx
+	d.runtimeIndex["runtime-1"] = Runtime{ID: "runtime-1", Provider: "hermes", ProfileID: "profile-1"}
+	d.profileLaunchSpecs["profile-1"] = profileLaunchSpec{path: fakeExecutable(t, "hermes")}
+	runtimeChange := make(chan struct{})
+	connectionDone := make(chan struct{})
+	go func() {
+		defer close(connectionDone)
+		_, _ = d.runTaskWakeupConnection(ctx, []string{"runtime-1"}, make(chan taskWakeup, 2), runtimeChange)
+	}()
+
+	var discoveryCtx context.Context
+	select {
+	case discoveryCtx = <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("model discovery did not start after the websocket heartbeat acknowledgement")
+	}
+
+	close(runtimeChange)
+	select {
+	case <-connectionDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("websocket did not stop after the runtime set changed")
+	}
+	if err := discoveryCtx.Err(); err != nil {
+		t.Fatalf("websocket reconnect canceled discovery: %v", err)
+	}
+
+	cancel()
+	if err := discoveryCtx.Err(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("daemon shutdown did not cancel discovery: %v", err)
 	}
 }
 
