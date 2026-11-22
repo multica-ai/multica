@@ -26,6 +26,24 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  describe("workspace order responses", () => {
+    it("preserves lists with missing or malformed positions", async () => {
+      const client = new ApiClient("https://api.example.test");
+      const ws = { id: "ws-1", name: "One", slug: "one", created_at: "2026-01-01" };
+      stubFetchJson([ws, { ...ws, id: "ws-2", workspace_position: "bad" }, { ...ws, id: "ws-3", workspace_position: 0 }]);
+      expect((await client.listWorkspaces()).map((item) => item.workspace_position)).toEqual([null, null, 0]);
+    });
+
+    it("submits the whole order and accepts an empty success response", async () => {
+      const client = new ApiClient("https://api.example.test");
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
+      await expect(client.setWorkspaceOrder(["one", "two"])).resolves.toBeUndefined();
+      expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({
+        method: "PUT", body: JSON.stringify({ workspace_ids: ["one", "two"] }),
+      });
+    });
+  });
+
   describe("workspace pin responses", () => {
     it("defaults missing or malformed pinned_at to null and falls back on malformed lists", async () => {
       const ws = { id: "ws-1", name: "One", slug: "one", description: null, context: null, settings: {}, repos: [], issue_prefix: "ONE", avatar_url: null, created_at: "2026-01-01", updated_at: "2026-01-01" };

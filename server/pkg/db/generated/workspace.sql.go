@@ -394,12 +394,13 @@ const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
        w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at,
-       m.role
+       m.role, m.workspace_position
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
   AND m.role IN ('owner', 'admin', 'member', 'guest')
-ORDER BY m.pinned_at DESC NULLS LAST, w.created_at ASC
+ORDER BY (m.pinned_at IS NOT NULL) DESC, m.workspace_position ASC NULLS LAST,
+         m.pinned_at DESC NULLS LAST, w.created_at ASC
 `
 
 type ListWorkspacesRow struct {
@@ -418,6 +419,7 @@ type ListWorkspacesRow struct {
 	AttributionFailClosed bool               `json:"attribution_fail_closed"`
 	PinnedAt              pgtype.Timestamptz `json:"pinned_at"`
 	Role                  string             `json:"role"`
+	WorkspacePosition     pgtype.Int4        `json:"workspace_position"`
 }
 
 // The role narrows what a guest is shown (workspaceResponseFor). A role this
@@ -447,6 +449,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Lis
 			&i.AttributionFailClosed,
 			&i.PinnedAt,
 			&i.Role,
+			&i.WorkspacePosition,
 		); err != nil {
 			return nil, err
 		}

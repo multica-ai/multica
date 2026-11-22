@@ -170,6 +170,22 @@ export function useRemoveAgentMcpServer(agentId: string) {
     api.removeAgentMcpServer(agentId, serverId));
 }
 
+export function useSetWorkspaceOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (workspaceIds: string[]) => api.setWorkspaceOrder(workspaceIds),
+    onSuccess: (_data, workspaceIds) => {
+      const positions = new Map(workspaceIds.map((id, index) => [id, index]));
+      qc.setQueryData<Workspace[]>(workspaceKeys.list(), (old) => old && sortWorkspaces(
+        old.map((ws) => positions.has(ws.id)
+          ? { ...ws, workspace_position: positions.get(ws.id) }
+          : ws),
+      ));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: workspaceKeys.list() }),
+  });
+}
+
 export function useSetWorkspacePinned() {
   const qc = useQueryClient();
   return useMutation({
