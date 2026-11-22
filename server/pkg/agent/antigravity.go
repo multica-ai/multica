@@ -36,6 +36,10 @@ import (
 // emitted on stdout; we capture it by routing `--log-file` to a temp file and
 // scanning its glog-formatted lines for the `conversation=<uuid>` token that
 // printmode.go logs at message-send time.
+//
+// Print mode reads no input after the prompt, so steering a running turn goes
+// through a PreInvocation workspace hook instead (see
+// antigravitySupplementSession).
 type antigravityBackend struct {
 	cfg Config
 }
@@ -191,9 +195,28 @@ type antigravityStepSummary struct {
 }
 
 type antigravityTurn struct {
-	start   *int
-	steps   map[int]antigravityStepSummary
-	invalid bool
+	start *int
+	// injected holds the user_input steps that steering guidance became.
+	injected map[int]bool
+	steps    map[int]antigravityStepSummary
+	invalid  bool
+}
+
+// observeUserInput classifies a user_input step. The first one opens the turn;
+// a later one is valid only as the receipt of injected steering guidance.
+func (t *antigravityTurn) observeUserInput(index int, supplements *antigravitySupplementSession) {
+	switch {
+	case t.start == nil:
+		t.start = &index
+	case *t.start == index || t.injected[index]:
+	case supplements.receipt():
+		if t.injected == nil {
+			t.injected = make(map[int]bool)
+		}
+		t.injected[index] = true
+	default:
+		t.invalid = true
+	}
 }
 
 func (t *antigravityTurn) settledResponse() int {
@@ -402,10 +425,23 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		_ = os.Remove(logPath)
 		return nil, fmt.Errorf("agy stdout pipe: %w", err)
 	}
+
+	var supplements *antigravitySupplementSession
+	var supplementErr error
+	if opts.EnableTaskSupplement {
+		supplements, supplementErr = startAntigravitySupplementSession(runCtx, opts.Cwd, opts.SupplementHookCommand, b.cfg.Logger)
+		if supplementErr != nil {
+			b.cfg.Logger.Warn("agy additional messages unavailable for this run", "error", supplementErr)
+			supplements = nil
+		} else {
+			cmd.Env = append(cmd.Env, supplements.env()...)
+		}
+	}
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[agy:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+		supplements.close()
 		cancel()
 		_ = os.Remove(logPath)
 		return nil, fmt.Errorf("start agy: %w", err)
@@ -426,6 +462,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		defer close(msgCh)
 		defer close(resCh)
 		defer os.Remove(logPath)
+		defer supplements.close()
 
 		startTime := time.Now()
 		var output strings.Builder
@@ -454,6 +491,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 				case "init":
 					streamSessionID = event.ConversationID
 					streamModel = event.Init.Model
+					supplements.activate(streamSessionID)
 				case "step_update":
 					if event.StepUpdate == nil {
 						turn.invalid = true
@@ -464,8 +502,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 						turn.invalid = true
 					} else {
 						if step.StepType == "user_input" {
-							turn.invalid = turn.invalid || turn.start != nil && *turn.start != *idx
-							turn.start = idx
+							turn.observeUserInput(*idx, supplements)
 						}
 						turn.steps[*idx] = antigravityStepSummary{
 							kind: step.StepType, state: strings.ToUpper(step.State),
@@ -474,6 +511,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					}
 					if event.StepUpdate.ConversationID != "" {
 						streamSessionID = event.StepUpdate.ConversationID
+						supplements.activate(streamSessionID)
 					}
 					for _, message := range antigravityToolMessages(event.StepUpdate, streamTools) {
 						// Tool lifecycle events also drive the daemon's in-flight
@@ -499,6 +537,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					if event.Result == nil {
 						continue
 					}
+					supplements.end()
 					if event.Result.ConversationID != "" {
 						streamSessionID = event.Result.ConversationID
 					}
@@ -533,8 +572,12 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			b.cfg.Logger.Warn("agy stdout scanner error", "err", err)
 		}
 
+		supplements.end()
 		waitErr := cmd.Wait()
 		releaseProcessGroup(cmd)
+		// Remove the managed hooks before the result is reported, so a
+		// follow-up run never observes them.
+		supplements.close()
 		duration := time.Since(startTime)
 
 		sessionID := streamSessionID
@@ -642,7 +685,21 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	session := &Session{Messages: msgCh, Result: resCh}
+	switch {
+	case supplements != nil:
+		session.Supplement = supplements.supplement
+		session.SupplementReady = supplements.ready
+	case supplementErr != nil:
+		// The daemon already offered steering for this run and there is no way
+		// to withdraw it, so settle each message as failed right away instead of
+		// leaving it pending until the turn ends.
+		session.Supplement = func(context.Context, string) error {
+			return fmt.Errorf("agy hooks unavailable: %w", supplementErr)
+		}
+		session.SupplementReady = func() bool { return runCtx.Err() == nil }
+	}
+	return session, nil
 }
 
 // antigravityConversationIDRe matches the glog line printmode.go writes when

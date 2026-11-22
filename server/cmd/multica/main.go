@@ -122,6 +122,10 @@ func main() {
 		agent.RunCursorHookRelay(os.Stdin, os.Stdout, os.Getenv)
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == agent.AntigravityHookHelperArg {
+		agent.RunAntigravityHookRelay(os.Stdin, os.Stdout, os.Getenv)
+		return
+	}
 	cli.CleanupStaleUpdateArtifacts()
 	if err := rootCmd.Execute(); err != nil {
 		if err != errSilent {
