@@ -59,9 +59,12 @@ import { sortTimelineEntriesAsc } from "./timeline-sort";
 import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
 import { configStore } from "../config";
 import {
+  addReactionToList,
   onIssueAuxiliaryRevision,
   invalidateIssueOwnerProjections,
+  patchIssueReactions,
   reconcileIssueFullSnapshotRevision,
+  removeReactionFromList,
 } from "./ws-updaters";
 
 // Shared mutation variable types — used by both mutation hooks and
@@ -1167,11 +1170,15 @@ export function useToggleIssueReaction(issueId: string) {
       }
       return api.addIssueReaction(issueId, emoji);
     },
-    onSuccess: (reaction) => {
-      onIssueAuxiliaryRevision(qc, wsId, issueId, reaction?.issue_revision);
+    onSuccess: (reaction, { existing }) => {
+      if (reaction) {
+        patchIssueReactions(qc, wsId, issueId, addReactionToList(reaction), reaction.issue_revision);
+      } else if (existing) {
+        patchIssueReactions(qc, wsId, issueId, removeReactionFromList(existing));
+      }
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
+    onError: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId), exact: true });
     },
   });
 }
@@ -1221,12 +1228,19 @@ export function useToggleIssueSubscriber(issueId: string) {
         qc.setQueryData<IssueSubscriber[]>(
           issueKeys.subscribers(issueId),
           (old) => {
+            // An explicit subscribe rewrites an existing row's reason to
+            // manual. The delivery tier is the server's to report, so it is
+            // dropped until onSettled refetches it.
             if (
               old?.some(
                 (s) => s.user_id === userId && s.user_type === userType,
               )
             )
-              return old;
+              return old.map((s) =>
+                s.user_id === userId && s.user_type === userType
+                  ? { ...s, reason: "manual" as const, delivery: undefined }
+                  : s,
+              );
             return [...(old ?? []), temp];
           },
         );

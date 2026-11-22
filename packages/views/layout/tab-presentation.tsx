@@ -1,5 +1,6 @@
 "use client";
 
+import { docDetailOptions, docTreeOptions } from "@multica/core/docs";
 import { useMemo } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { issueStatusListOptions, buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
@@ -23,8 +24,9 @@ import {
   squadListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import { runtimeDisplayName } from "@multica/core/runtimes";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { appCatalogOptions } from "@multica/core/connected-apps";
 import {
   inboxListOptions,
   archivedInboxPagesOptions,
@@ -70,6 +72,9 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "member",
   "squad",
   "skill",
+  "doc",
+  "docFolder",
+  "app",
   "machine",
   "runtime",
 ]);
@@ -138,6 +143,11 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     ),
     enabled: false,
   }).data;
+  const doc = useQuery({
+    ...docDetailOptions(wsId, subject.kind === "doc" ? subject.id : NONE),
+    enabled: false,
+  }).data;
+  const docTree = useQuery({ ...docTreeOptions(wsId), enabled: false }).data;
   const skill = useQuery({
     ...skillDetailOptions(wsId, subject.kind === "skill" ? subject.id : NONE),
     enabled: false,
@@ -148,6 +158,7 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
   const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
   const runtimes = useQuery({ ...runtimeListOptions(wsId), enabled: false }).data;
   const sessions = useQuery({ ...chatSessionsOptions(wsId), enabled: false }).data;
+  const appCatalog = useQuery({ ...appCatalogOptions(wsId), enabled: false }).data;
 
   const data: ResolvedTabEntityData = {};
   switch (subject.kind) {
@@ -168,9 +179,20 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     case "autopilot":
       if (autopilot) data.autopilot = { title: autopilot.autopilot.title };
       break;
+    case "doc":
+      if (doc) data.doc = { title: doc.title };
+      break;
+    case "docFolder":
+      data.docFolder = docTree?.folders.find((f) => f.id === subject.id);
+      break;
     case "skill":
       if (skill) data.skill = { name: skill.name };
       break;
+    case "app": {
+      const name = appCatalog?.apps.find((a) => a.slug === subject.slug)?.name;
+      if (name) data.app = { name };
+      break;
+    }
     case "actor": {
       const name =
         subject.actorType === "agent"
@@ -183,12 +205,12 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     }
     case "machine": {
       const rt = runtimes?.find((r) => r.id === subject.machineId);
-      if (rt) data.machine = { name: runtimeDisplayName(rt) };
+      if (rt) data.machine = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "runtime": {
       const rt = runtimes?.find((r) => r.id === subject.runtimeId);
-      if (rt) data.runtime = { name: runtimeDisplayName(rt) };
+      if (rt) data.runtime = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "chat":

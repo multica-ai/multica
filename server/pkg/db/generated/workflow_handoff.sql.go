@@ -97,13 +97,18 @@ func (q *Queries) ListAssigneeRunsForHandoff(ctx context.Context, arg ListAssign
 	return items, nil
 }
 
-const lockWorkflowSquadHandoff = `-- name: LockWorkflowSquadHandoff :exec
-SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text || ':workflow_squad_handoff', 0))
+const lockWorkflowSquadHandoff = `-- name: LockWorkflowSquadHandoff :one
+SELECT now()::timestamptz AS locked_at
+FROM (SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text || ':workflow_squad_handoff', 0))) AS handoff_lock
 `
 
 // Serialize admission for one issue without taking its owner-row locks out of
 // the order lock_task_owner_rows uses to fence workspace teardown.
-func (q *Queries) LockWorkflowSquadHandoff(ctx context.Context, issueID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, lockWorkflowSquadHandoff, issueID)
-	return err
+// Returns the database clock: the handoff row's fire_at must be due by the same
+// clock the promoter compares it against (fire_at <= now()).
+func (q *Queries) LockWorkflowSquadHandoff(ctx context.Context, issueID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, lockWorkflowSquadHandoff, issueID)
+	var locked_at pgtype.Timestamptz
+	err := row.Scan(&locked_at)
+	return locked_at, err
 }

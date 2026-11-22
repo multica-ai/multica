@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -78,6 +79,18 @@ func (h *Handler) invokeAgentDecision(ctx context.Context, agent db.Agent, actor
 		effectiveUser = originatorUserID
 	}
 
+	isWorkspaceMember := false
+	if effectiveUser != "" {
+		if m, err := h.getWorkspaceMember(ctx, effectiveUser, workspaceID); err == nil {
+			// Guests never run agents (MUL-9420), not even one they owned
+			// before becoming a guest.
+			if projectaccess.IsGuestRole(m.Role) {
+				return false
+			}
+			isWorkspaceMember = true
+		}
+	}
+
 	// The agent owner may always invoke their own agent.
 	if effectiveUser != "" && uuidToString(agent.OwnerID) == effectiveUser {
 		return true
@@ -105,12 +118,6 @@ func (h *Handler) invokeAgentDecision(ctx context.Context, agent db.Agent, actor
 	// member-/team-scoped private-ish allow-list and can never smuggle itself
 	// onto someone's specific-people grant.
 	workspaceBroad := actorType == "agent" || actorType == "system"
-	isWorkspaceMember := false
-	if effectiveUser != "" {
-		if _, err := h.getWorkspaceMember(ctx, effectiveUser, workspaceID); err == nil {
-			isWorkspaceMember = true
-		}
-	}
 
 	for _, t := range targets {
 		switch t.TargetType {

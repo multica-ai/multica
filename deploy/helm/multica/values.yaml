@@ -13,6 +13,12 @@ images:
     # Empty defaults to Chart.appVersion. Set explicitly to override.
     tag: ""
     pullPolicy: IfNotPresent
+  # Only pulled when collab.enabled=true.
+  collab:
+    repository: ghcr.io/multica-ai/multica-collab
+    # Empty defaults to Chart.appVersion. Set explicitly to override.
+    tag: ""
+    pullPolicy: IfNotPresent
   postgres:
     repository: pgvector/pgvector
     tag: pg17
@@ -179,6 +185,15 @@ backend:
     # Larger limits can slow browser previews.
     maxPreviewSize: 2MiB
     localUploadBaseUrl: http://api.multica.dev.lan
+    # Feature flags by flag key, each rendered as an FF_<KEY> variable
+    # (docs_v1 -> FF_DOCS_V1). An unlisted flag keeps its default; an empty
+    # value turns the flag off. Values: true, false, a percent like "25%", or
+    # a variant name. The flags documented in .env.example:
+    #   docs_v1: true                  # Workspace Docs, off until set
+    #   issue_description_live: true   # live issue descriptions, needs collab
+    #   local_search_index: false      # kill switch, on by default
+    #   dashboard_history_365d: false  # kill switch, on by default
+    featureFlags: {}
   resources:
     requests:
       cpu: 100m
@@ -223,6 +238,39 @@ frontend:
       cpu: 1000m
       memory: 1Gi
   # Standard Kubernetes scheduling constraints for the frontend Deployment.
+  affinity: {}
+  tolerations: []
+
+# -----------------------------------------------------------------------------
+# Collab (live co-editing for Workspace Docs, apps/collab)
+# -----------------------------------------------------------------------------
+# Off by default. When off, docs are edited one save at a time through the API.
+#
+# Before enabling, add COLLAB_SECRET to existingSecret. The backend and the
+# collab service sign editor tickets and authenticate each other with it:
+#   kubectl -n <namespace> patch secret multica-secrets --type merge \
+#     -p "{\"stringData\":{\"COLLAB_SECRET\":\"$(openssl rand -hex 32)\"}}"
+#
+# Editors connect to /collab on the backend, which forwards the WebSocket to
+# this service, so ingress needs nothing beyond what /ws already uses.
+collab:
+  enabled: false
+  config:
+    # Must match the CDN domain the backend reports, or links to uploaded files
+    # in a doc render differently in the live editor. Empty derives it the way
+    # the backend does: backend.config.cloudfrontDomain when s3Bucket is set,
+    # otherwise the host of backend.config.localUploadBaseUrl.
+    cdnDomain: ""
+  # Always one replica: every open doc lives in this process's memory, so a
+  # second replica would hold its own copy of the same doc.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  # Standard Kubernetes scheduling constraints for the collab Deployment.
   affinity: {}
   tolerations: []
 

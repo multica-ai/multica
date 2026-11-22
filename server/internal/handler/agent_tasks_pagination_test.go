@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -154,10 +155,14 @@ func TestListAgentTasksPageBoundaries(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			// Deliberately reverse UUID and time order: created_at must be the
 			// primary sort key, not UUID order or insertion order.
+			// The prefix is random per subtest: the Telegram tests seed fixed
+			// 00000000-0000-0000-0000-... ids in this shared table and run in
+			// parallel with this package.
+			prefix := uuid.NewString()[:24]
 			expected := make([]string, count)
 			for i := 0; i < count; i++ {
 				expected[i] = dbfx.Task(t, agentID, testutil.Cols{
-					"id":         fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1),
+					"id":         fmt.Sprintf("%s%012d", prefix, i+1),
 					"runtime_id": runtimeID, "status": "completed",
 					"created_at": now.Add(-time.Duration(i) * time.Microsecond),
 				})

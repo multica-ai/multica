@@ -87,6 +87,30 @@ describe("splitGithubUrlRef", () => {
     ).toEqual({ url: "https://github.com/multica-ai/multica", ref: "main" });
   });
 
+  it.each([
+    ["feature/%E4%B8%AD%E6%96%87", "feature/中文"],
+    ["release%2F2026-09", "release/2026-09"],
+    ["fix%23issue", "fix#issue"],
+    ["fix%252Fissue", "fix%2Fissue"],
+    ["feature+name", "feature+name"],
+    ["main?tab=readme-ov-file", "main"],
+    ["main#readme", "main"],
+    ["release%2F2026-09/?tab=readme-ov-file#readme", "release/2026-09"],
+  ])("extracts the branch from /tree/%s", (path, ref) => {
+    expect(splitGithubUrlRef(`https://github.com/owner/repo/tree/${path}`)).toEqual({
+      url: "https://github.com/owner/repo",
+      ref,
+    });
+  });
+
+  it.each(["bad%", "%E4%B8", "my%20branch", "%20main", "main%20", "main%3F", "main%2F", "main%00"])(
+    "leaves malformed or invalid encoded refs untouched: %s",
+    (ref) => {
+      const url = `https://github.com/owner/repo/tree/${ref}`;
+      expect(splitGithubUrlRef(url)).toEqual({ url });
+    },
+  );
+
   it("leaves a plain clone URL untouched", () => {
     for (const url of [
       "https://github.com/multica-ai/multica",

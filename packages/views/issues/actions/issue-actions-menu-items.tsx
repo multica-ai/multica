@@ -25,6 +25,7 @@ import {
   Plus,
   Square,
   Trash2,
+  Type,
   Unlink,
   UserMinus,
   Zap,
@@ -106,7 +107,7 @@ export function IssueActionsMenuItems({
   const locale = useLocale();
   const formatDate = (date: string) => formatDateOnly(date, { month: "short", day: "numeric" }, locale);
   const wsId = useWorkspaceId();
-  const { canDelete } = useIssueDeletion(wsId);
+  const { canDelete, offersDelete } = useIssueDeletion(wsId);
   const sidebar = variant === "sidebar";
   const statusLabel = useStatusLabel(wsId);
   // Only the statuses the issue's workflow allows; entering a step that hands
@@ -132,6 +133,7 @@ export function IssueActionsMenuItems({
     openInDesktop,
     togglePin,
     copyLink,
+    copyTitleAsLink,
     openCreateSubIssue,
     openRename,
     openSetParent,
@@ -435,6 +437,10 @@ export function IssueActionsMenuItems({
         <Link2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_link)}
       </P.Item>
+      <P.Item onClick={copyTitleAsLink}>
+        <Type className="h-3.5 w-3.5" />
+        {t(($) => $.actions.copy_title_as_link)}
+      </P.Item>
       {sidebar ? (
         <P.Item onClick={copyIdentifier}>
           <Hash className="h-3.5 w-3.5" />
@@ -501,17 +507,21 @@ export function IssueActionsMenuItems({
               person chose it, never on the plugin's own initiative. */}
           <PluginModalMenuItems issueId={issue.id} Item={P.Item} />
 
-          <P.Separator />
+          {offersDelete && (
+            <>
+              <P.Separator />
 
-          <P.Item
-            disabled={!canDelete(issue)}
-            title={!canDelete(issue) ? t(($) => $.batch.delete_restricted) : undefined}
-            variant="destructive"
-            onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            {t(($) => $.actions.delete_issue)}
-          </P.Item>
+              <P.Item
+                disabled={!canDelete(issue)}
+                title={!canDelete(issue) ? t(($) => $.batch.delete_restricted) : undefined}
+                variant="destructive"
+                onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t(($) => $.actions.delete_issue)}
+              </P.Item>
+            </>
+          )}
         </>
       )}
     </>

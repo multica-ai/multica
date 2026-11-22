@@ -9,8 +9,8 @@ import {
 } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 
-/** No stored width: the theme's, or 240px when it sets none. */
-const UNSTORED_SIDEBAR_WIDTH = "clamp(200px, var(--sidebar-panel-width, 240px), 320px)";
+/** No stored width: the theme's, or 280px when it sets none. */
+const UNSTORED_SIDEBAR_WIDTH = "clamp(200px, var(--sidebar-panel-width, 280px), 320px)";
 
 describe("left sidebar resizing", () => {
   beforeEach(() => {

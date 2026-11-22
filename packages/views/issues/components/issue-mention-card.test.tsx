@@ -15,6 +15,7 @@ import {
 } from "../surface/peek-context";
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/acme/issues/${id}`,
   }),
@@ -121,7 +122,7 @@ describe("IssueMentionCard", () => {
 
     const trigger = screen
       .getByTestId("issue-chip")
-      .closest('[data-slot="hover-card-trigger"]');
+      .closest('[data-trigger="hover-card"]');
     expect(trigger).toBeInTheDocument();
     // A span, not the trigger's default anchor: the link is inside it, and
     // nested anchors would break both the DOM and the assertions above.
@@ -135,7 +136,7 @@ describe("IssueMentionCard", () => {
     const anchor = screen.getByTestId("issue-chip").closest("a");
     expect(anchor).toHaveAttribute("href", "/acme/issues/issue-1");
     expect(
-      anchor?.closest('[data-slot="hover-card-trigger"]'),
+      anchor?.closest('[data-trigger="hover-card"]'),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("issue-chip"));

@@ -3,6 +3,7 @@
     ".github/actions/frontend-quality/**",
     "apps/web/**",
     "apps/desktop/**",
+    "apps/collab/**",
     "packages/**",
     "server/internal/handler/testdata/quick_action_bodies.json",
     "package.json",
@@ -16,9 +17,28 @@
     "scripts/ci-scope.mjs",
     "scripts/ci-scope.test.mjs"
   ],
+  "docs": [
+    "apps/docs/**",
+    "server/internal/daemon/agents_probe.go",
+    "server/internal/daemon/config.go",
+    "server/pkg/agent/builtin_runtimes.go",
+    "server/internal/featureflags/keys.go",
+    "packages/core/ai-traffic/**",
+    "SELF_HOSTING_AI.md",
+    "package.json",
+    ".npmrc",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "patches/**",
+    ".github/workflows/ci.yml",
+    ".github/ci-paths.json",
+    "scripts/ci-scope.mjs",
+    "scripts/ci-scope.test.mjs"
+  ],
   "backend": [
     "server/**",
     "packages/core/runtimes/cli-version.ts",
+    "packages/core/types/inbox.ts",
     ".multica/environments.toml",
     "examples/plugins/**",
     ".env.example",
@@ -36,6 +56,7 @@
   "sqlc": [
     "server/pkg/db/queries/**",
     "server/pkg/db/generated/**",
+    "server/ee/**",
     "server/migrations/**",
     "server/sqlc.yaml",
     "Makefile",
@@ -88,6 +109,11 @@
     ".github/ci-paths.json"
   ],
   "scripts": [
+    ".goreleaser.yml",
+    ".github/workflows/release.yml",
+    ".github/workflows/promote-release.yml",
+    "scripts/promote-release.mjs",
+    "scripts/promote-release.test.mjs",
     "scripts/generate-attachment-text-preview.mjs",
     "scripts/generate-reserved-slugs.mjs",
     "scripts/selfhost-config.test.sh",

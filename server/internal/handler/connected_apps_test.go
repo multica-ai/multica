@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
@@ -117,6 +118,7 @@ func newAppsFixture(t *testing.T) *appsFixture {
 	h.Composio = svc
 	apps, err := connectedapps.New(connectedapps.Config{
 		Queries:       h.Queries,
+		TxStarter:     testPool,
 		Composio:      svc,
 		TokenSecret:   connectedapps.DeriveTokenSecret([]byte("apps-test-secret")),
 		PublicBaseURL: "https://api.multica.test",
@@ -149,7 +151,7 @@ func newAppsFixture(t *testing.T) *appsFixture {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		testPool.Exec(ctx, `DELETE FROM user_composio_connection WHERE connected_account_id = $1`, account)
-		for _, table := range []string{"app_tool_call", "app_action_request", "app_action_rule", "agent_app", "workspace_app_setting", "app_tool_class_override"} {
+		for _, table := range []string{"app_tool_call", "app_action_request", "app_action_rule", "agent_app", "workspace_app_setting", "app_tool_class_override", "workspace_composio_connection"} {
 			testPool.Exec(ctx, `DELETE FROM `+table+` WHERE workspace_id = $1`, testWorkspaceID)
 		}
 		testPool.Exec(ctx, `DELETE FROM inbox_item WHERE workspace_id = $1 AND type LIKE 'app\_%'`, testWorkspaceID)
@@ -253,7 +255,7 @@ func (f *appsFixture) legacyRequest(t *testing.T, scope, slug, tool, class strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	return f.h.requestResponse(req, parseUUID(testUserID))
+	return f.h.requestResponse(req, parseUUID(testUserID), true)
 }
 
 func TestConnectedApps_LegacyApprovalResumes(t *testing.T) {
@@ -506,6 +508,31 @@ func TestConnectedApps_AdminOnlyTeamSurfaces(t *testing.T) {
 	}
 }
 
+func TestConnectedApps_TeamImpactListsLiveAgents(t *testing.T) {
+	f := newAppsFixture(t)
+	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "team"}}); w.Code != http.StatusOK {
+		t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+	}
+	archived := dbfx.Agent(t, fmt.Sprintf("apps-archived-%d", testSeq.Add(1)), handlerTestRuntimeID(t), testutil.Cols{
+		"owner_id": testUserID, "instructions": "", "archived_at": testutil.Raw("now()"),
+		"custom_env": testutil.Raw("'{}'::jsonb"), "custom_args": testutil.Raw("'[]'::jsonb"),
+	})
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, archived) })
+	deleted := uuid.NewString()
+	for _, agentID := range []string{archived, deleted} {
+		dbfx.Exec(t, `INSERT INTO agent_app (workspace_id, agent_id, toolkit_slug, account_scope, level) VALUES ($1, $2, 'gmail', 'team', 'write')`, testWorkspaceID, agentID)
+	}
+
+	var resp struct {
+		Agents []map[string]string `json:"agents"`
+	}
+	req := appsReqAs(t, testUserID, http.MethodGet, "/api/apps/team/impact?toolkit_slug=gmail", nil)
+	testutil.Call(t, f.h.GetTeamAppImpact, req).Want(http.StatusOK).JSON(&resp)
+	if len(resp.Agents) != 1 || resp.Agents[0]["id"] != f.agentID || resp.Agents[0]["name"] == "" {
+		t.Fatalf("impact agents = %+v, want only the live agent %s", resp.Agents, f.agentID)
+	}
+}
+
 func (f *appsFixture) inboxCount(t *testing.T, recipient, notifType string) int {
 	t.Helper()
 	var n int
@@ -604,7 +631,7 @@ func TestConnectedApps_ConnectRequestResolvesOnConnect(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM user_composio_connection WHERE connected_account_id = $1`, account)
 	})
-	f.h.ConnectedApps.ResolveConnectRequests(context.Background(), parseUUID(testUserID), "notion")
+	f.h.ConnectedApps.ResolveConnectRequests(context.Background(), parseUUID(testWorkspaceID), parseUUID(testUserID), "notion")
 
 	if reqs := f.listRequests(t, testUserID); len(reqs) != 1 || reqs[0].Status != "approved" {
 		t.Fatalf("connect request after connecting = %+v", reqs)

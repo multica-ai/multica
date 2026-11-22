@@ -2,6 +2,8 @@
 
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { spaceForPath, type AppSpaceId } from "@multica/core/paths";
+import { useFeatureEnabled } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 import { useNavigation } from "../navigation";
 
@@ -10,7 +12,7 @@ import { useNavigation } from "../navigation";
  * list-and-detail pages that already render their own list column in the
  * same card, so the shell adds no panel for them.
  */
-export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["work", "team", "autopilots"]);
+export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["work", "team", "autopilots", "docs"]);
 
 // Opening waits for the pointer to settle so sweeping across the rail does
 // not flash every panel; closing waits long enough to cross the gap between
@@ -73,7 +75,8 @@ export function AppShellProvider({
   // Keyed by `${workspaceSlug}/${space}`. The fragment is left out so a
   // comment deep link is not replayed on every return to the space.
   const [spaceUrls, setSpaceUrls] = useState<Record<string, string>>({});
-  const hasPanel = space !== null && PANEL_SPACES.has(space);
+  const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
+  const hasPanel = space !== null && PANEL_SPACES.has(space) && (space !== "docs" || docsEnabled);
   const [listCollapsed, setListCollapsed] = useState(false);
   const [peekSpace, setPeekSpace] = useState<AppSpaceId | null>(null);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

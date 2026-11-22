@@ -16,9 +16,7 @@ func rewriteFakeMuseServe(t *testing.T, path, old, replacement string) {
 	if !strings.Contains(string(script), old) {
 		t.Fatalf("fake server does not contain %q", old)
 	}
-	if err := os.WriteFile(path, []byte(strings.Replace(string(script), old, replacement, 1)), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeTestExecutable(t, path, []byte(strings.Replace(string(script), old, replacement, 1)))
 }
 
 func TestMuseHostExitAfterTurnStart(t *testing.T) {

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
@@ -69,6 +69,7 @@ const UNREAD_VIEW = {
 let listIssueUnread: ReturnType<typeof vi.fn>;
 let listIssueTableRows: ReturnType<typeof vi.fn>;
 let listIssueStatuses: ReturnType<typeof vi.fn>;
+let listIssueTableFacets: ReturnType<typeof vi.fn>;
 let getWorkspaceWorkingAgents: ReturnType<typeof vi.fn>;
 
 function renderSection({ activeIssueId = null }: { activeIssueId?: string | null } = {}) {
@@ -103,10 +104,12 @@ beforeEach(() => {
     parent_id: null,
   }));
   listIssueStatuses = vi.fn(async () => ({ statuses: [], categories: [], total: 0 }));
+  listIssueTableFacets = vi.fn(async () => ({ query_fingerprint: "fp", total: 0, facets: [] }));
   getWorkspaceWorkingAgents = vi.fn(async () => []);
   setApiInstance({
     listIssueUnread,
     listIssueTableRows,
+    listIssueTableFacets,
     listIssueStatuses,
     getWorkspaceWorkingAgents,
     listIssueViews: vi.fn(async () => []),
@@ -136,6 +139,26 @@ describe("ViewsSection saved view with the unread filter", () => {
         query: expect.objectContaining({
           filters: expect.objectContaining({ unread_issue_ids: ["issue-1"] }),
         }),
+      }),
+    );
+  });
+
+  it("counts the issues it lists, under the same filters", async () => {
+    listIssueUnread.mockResolvedValue([
+      { issue_id: "issue-1", outcome: "manual", agent_id: null, created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listIssueTableFacets.mockResolvedValue({ query_fingerprint: "fp", total: 7, facets: [] });
+    useSidebarTreeStore.setState({ viewsShowCount: true });
+    renderSection();
+
+    const link = await screen.findByRole("link", { name: /^Mine unread/ });
+    await waitFor(() => expect(link.closest("div")).toHaveTextContent(/^Mine unread7$/));
+    expect(listIssueTableFacets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.objectContaining({
+          filters: expect.objectContaining({ unread_issue_ids: ["issue-1"] }),
+        }),
+        include_total: true,
       }),
     );
   });
@@ -239,6 +262,25 @@ describe("ViewsSection built-in filtered views", () => {
         }),
       ),
     );
+  });
+
+  it("counts the issues each built-in lists, and stops once counts are off", async () => {
+    listIssueTableFacets.mockImplementation(async ({ query }) => {
+      const relations: string[] = query.filters.relations ?? [];
+      const total = relations.includes("subscribed") ? 3 : relations.length > 0 ? 4 : 12;
+      return { query_fingerprint: "fp", total, facets: [] };
+    });
+    useSidebarTreeStore.setState({ viewsShowCount: true });
+    renderSection();
+
+    const row = (name: string) => screen.getByRole("link", { name: new RegExp(`^${name}`) }).closest("div");
+    await waitFor(() => expect(row("All issues")).toHaveTextContent(/^All issues12$/));
+    await waitFor(() => expect(row("My work")).toHaveTextContent(/^My work4$/));
+    await waitFor(() => expect(row("Subscribed")).toHaveTextContent(/^Subscribed3$/));
+
+    act(() => useSidebarTreeStore.setState({ viewsShowCount: false }));
+    expect(row("All issues")).toHaveTextContent(/^All issues$/);
+    expect(row("Subscribed")).toHaveTextContent(/^Subscribed$/);
   });
 
   it("lights while its page is open, instead of All issues", async () => {

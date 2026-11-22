@@ -49,6 +49,7 @@ func TestRouterCORSContract(t *testing.T) {
 			handler.HeaderTimelineTruncated,
 			handler.HeaderActiveRunsTruncated,
 			handler.HeaderAgentTasksNextCursor,
+			handler.HeaderDashboardHistoryLimit,
 		} {
 			if !headerListContains(rec.Header().Get("Access-Control-Expose-Headers"), want) {
 				t.Errorf("Access-Control-Expose-Headers = %q, missing %q", rec.Header().Get("Access-Control-Expose-Headers"), want)

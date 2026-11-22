@@ -8,6 +8,8 @@ import { CSS } from "@dnd-kit/utilities";
 import type { Issue, IssueProperty, Project, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useModalStore } from "@multica/core/modals";
 import { propertyListOptions } from "@multica/core/properties";
 import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { descriptionPreview } from "./description-preview";
@@ -16,7 +18,7 @@ import { CalendarClock, CalendarDays } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { CardControl } from "../../common/card-control";
 import { PropertyIcon } from "../../common/property-icon";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -27,6 +29,7 @@ import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { ProgressRing } from "./progress-ring";
 import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
+import { runConfirmIntent } from "../actions/run-confirm-gate";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
@@ -82,13 +85,22 @@ export const BoardCardContent = memo(function BoardCardContent({
   const labels = issue.labels ?? [];
 
   const surfaceActions = useIssueSurfaceActionsOptional();
+  const { entryOf } = useIssueStatuses(cardWsId);
+  const openModal = useModalStore((s) => s.open);
+  // Card pickers are single-issue writes like the right-click menu on this same
+  // card, so handing the issue to an agent confirms first (MUL-6463).
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
+      const intent = runConfirmIntent(issue, updates, { entryOf });
+      if (intent) {
+        openModal("issue-run-confirm", intent);
+        return;
+      }
       surfaceActions?.updateIssue(issue.id, updates, {
         errorMessage: t(($) => $.card.update_failed),
       });
     },
-    [issue.id, surfaceActions, t],
+    [issue, entryOf, openModal, surfaceActions, t],
   );
   const canEdit = editable && !!surfaceActions;
 
@@ -362,7 +374,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
   const p = useWorkspacePaths();
   const peek = useIssuePeekActions();
   const peeked = useIsIssuePeeked(issue.id);
-  const peekLinkProps = useIssuePeekLinkProps(issue.id);
+  const peekLinkProps = useIssuePeekLinkProps(issue);
   const {
     attributes,
     listeners,
@@ -408,7 +420,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         }
       >
         <AppLink
-          href={p.issueDetail(issue.id)}
+          href={p.issueDetail(issueRouteRef(issue))}
           newTabTitle={issue.identifier}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
           {...peekLinkProps}

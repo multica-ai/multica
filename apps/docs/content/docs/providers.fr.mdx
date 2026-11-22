@@ -53,6 +53,8 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+Pour Claude Code, Multica liste et importe les compétences utilisateur et de plugins depuis le chemin absolu `CLAUDE_CONFIG_DIR` défini dans l’environnement du daemon. Le scanner ne voit pas les chemins définis uniquement dans un script de lancement.
+
 Pour Amp, le champ du modèle sélectionne un **mode** Amp, comme `high`, et non l’identifiant du modèle sous-jacent. Laissez-le vide pour utiliser le mode par défaut d’Amp.
 
 Amp exige aussi `AMP_API_KEY` dans l’environnement du daemon ou de l’agent ; une connexion interactive enregistrée ne suffit pas.
@@ -74,6 +76,8 @@ Lorsque vous créez un agent, la liste des modèles provient du runtime correspo
 Si vous ne choisissez pas de modèle, Multica utilise le modèle par défaut de l'outil. Si la liste est vide, vérifiez que le runtime est en ligne et que l'outil est connecté, puis actualisez la liste des modèles.
 
 QwenPaw, MiniMax Code et ZeroClaw font exception : ils n'acceptent pas de modèle choisi depuis Multica, donc le sélecteur est inactif et affiche « Géré par le runtime ». Choisissez plutôt le modèle dans la configuration propre à l'outil. Pour ces outils, une liste de modèles vide est normale et n'indique pas que le runtime est hors ligne.
+
+Antigravity affiche ses variantes de raisonnement comme des modèles distincts lorsqu’elles figurent dans `agy models`. Sélectionnez la variante exacte dans le sélecteur de modèle, suffixe compris. Multica ne propose pas de réglage du raisonnement séparé pour Antigravity. Si vous passez `--effort` dans les arguments personnalisés, Antigravity vérifie que cette option est compatible avec le modèle sélectionné.
 
 DeepSeek Harness publie son catalogue de modèles depuis le runtime lui-même (`dsh --profile multica --list-models`). Ses identifiants de modèle utilisent la forme `provider/model` (par exemple `deepseek-official/deepseek-chat`) ; sélectionnez donc l'identifiant complet dans la liste.
 

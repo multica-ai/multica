@@ -64,10 +64,10 @@ Quand le destinataire est en cours d'exécution, une étiquette sous la zone de 
 
 Après l'envoi, le commentaire affiche d'abord « En attente de lecture par … », puis « Lu par … » une fois le message lu. La liste des étapes du journal d'exécution indique aussi à quelle étape il a été lu. Si la remise échoue, vous pouvez réessayer ou l'envoyer comme nouvelle exécution.
 
-- Seul du texte peut rejoindre une exécution en cours. Un message avec des pièces jointes est traité après la fin de l'exécution.
+- Seul du texte sans lien de skill peut rejoindre une exécution en cours. Un message avec des pièces jointes ou des liens de skill est traité après la fin de l'exécution.
 - La réorientation doit être prise en charge par l'outil de codage IA de l'agent. Sinon, « Ajouter à l'exécution en cours » n'est pas proposé.
 - Le choix par défaut se règle dans **Paramètres → Préférences**, sous **En répondant à un agent en cours d'exécution**. Vous pouvez toujours le modifier pour chaque message avant l'envoi.
-- Dans le chat, **Réorienter** sur un message en file d'attente fonctionne autrement : la réponse en cours s'arrête d'abord ; voir [Chat](/chat#envoyer-des-messages-pendant-une-réponse).
+- Dans un Chat compatible, envoyer un texte sans lien de skill pendant une réponse l’ajoute à cette réponse sans l’arrêter. Les messages avec pièces jointes ou liens de skill, envoyés avant le début de la réponse ou à un runtime incompatible sont automatiquement mis en file ; voir [Chat](/chat#envoyer-des-messages-pendant-une-réponse).
 
 ## Regroupement des commentaires consécutifs
 
@@ -93,6 +93,8 @@ Si l'aperçu des déclenchements liste encore un agent, décochez-le avant l'env
 Une @mention ne peut pas contourner le réglage Accès d'un agent. Si vous n'avez pas la permission d'exécuter la cible, si la cible est archivée ou si elle n'a aucun runtime disponible, l'aperçu des déclenchements indique qu'elle ne démarrera pas ; le commentaire lui-même est publié normalement. Consultez [Agents](/agents#permissions-et-accès) pour les trois niveaux d'Accès.
 
 ## Agents qui se mentionnent entre eux
+
+Lorsqu'un agent se mentionne sur la tâche à laquelle appartient son exécution en cours, le commentaire est enregistré sans lancer une nouvelle exécution, même dans un autre fil. Une auto-mention sur une autre tâche peut toujours lancer une exécution, sous réserve des règles d'Accès.
 
 Les agents peuvent @mentionner d'autres agents dans leurs réponses. Lorsque A @mentionne B et que B @mentionne A en retour, le système fusionne les exécutions en double au même moment, mais il ne décide pas si la collaboration doit prendre fin. Indiquez dans les instructions de l'agent quand s'arrêter.
 

@@ -21,11 +21,14 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
+	"github.com/multica-ai/multica/server/internal/collab"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/inbox"
+	"github.com/multica-ai/multica/server/internal/inboxread"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
@@ -34,9 +37,11 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -218,6 +223,8 @@ type RuntimeRecoveryNotifier interface {
 }
 
 type Handler struct {
+	InboxReads             *inboxread.Guard
+	InboxTrimmer           *inbox.Trimmer // nil leaves inboxes untrimmed
 	Queries                *db.Queries
 	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor
@@ -235,6 +242,9 @@ type Handler struct {
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves self-hosted behavior without extra reads.
 	Entitlements entitlement.Provider
+	// Features restricts paid features (paid_feature.go). Nil leaves every
+	// feature usable, which is the self-hosted behavior.
+	Features entitlement.FeatureProvider
 	// SeatCapacity executes Cloud's pre-purchased human-seat protocol. Nil or
 	// disabled preserves self-hosted behavior.
 	SeatCapacity          seatcapacity.Executor
@@ -246,6 +256,9 @@ type Handler struct {
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	FeatureFlags          *featureflag.Service
+	// Collab is the live co-editing service for docs. Nil turns live editing
+	// off: docs save through the REST autosave path.
+	Collab *collab.Client
 	// ThemeStore serves the community theme registry. Nil only when
 	// MULTICA_THEME_REGISTRY_URL is invalid: its routes return 404 and
 	// /api/config omits it.
@@ -403,6 +416,9 @@ type Handler struct {
 	// enqueues EventChatDone work.
 	TelegramOutbound *telegram.Outbound
 
+	WeixinInstall  *weixin.InstallService
+	WeixinOutbound *weixin.Outbound
+
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the
 	// conversation. It answers the claim response's
@@ -520,6 +536,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		ReadSelector:                 dbreader.NewPrimaryOnly(queries),
 		DB:                           executor,
 		TxStarter:                    txStarter,
+		InboxReads:                   inboxread.New(inboxread.ConfigFromEnv()),
 		Hub:                          hub,
 		DaemonHub:                    daemonHub,
 		DaemonProfileRefresh:         daemonProfileRefresh,
@@ -978,6 +995,17 @@ func (h *Handler) workspaceMember(w http.ResponseWriter, r *http.Request, worksp
 	return h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
 }
 
+// cacheMembership records member in the membership cache, which callers
+// read as "a member who is not a guest": the cache holds no role, and a hit
+// skips the guest allowlist (MUL-9420). A guest is therefore never cached and
+// is looked up on every request.
+func (h *Handler) cacheMembership(ctx context.Context, member db.Member) {
+	if projectaccess.IsGuestRole(member.Role) {
+		return
+	}
+	h.MembershipCache.Set(ctx, uuidToString(member.UserID), uuidToString(member.WorkspaceID))
+}
+
 func roleAllowed(role string, roles ...string) bool {
 	for _, candidate := range roles {
 		if role == candidate {
@@ -1029,6 +1057,10 @@ func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request,
 			return db.Member{}, false
 		}
 		writeError(w, http.StatusNotFound, notFoundMsg)
+		return db.Member{}, false
+	}
+	if projectaccess.IsGuestRole(member.Role) && !middleware.GuestMayRequest(r) {
+		middleware.RefuseGuest(w, r)
 		return db.Member{}, false
 	}
 
@@ -1290,6 +1322,9 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 	if !ok {
 		return db.InboxItem{}, false
 	}
+	if !h.requireInboxOwnerAccess(w, r, userID, wsUUID) {
+		return db.InboxItem{}, false
+	}
 
 	item, err := h.Queries.GetInboxItemInWorkspace(r.Context(), db.GetInboxItemInWorkspaceParams{
 		ID:          itemUUID,
@@ -1307,6 +1342,11 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 	// An item on an issue in a private project the caller cannot see (never
 	// granted, or revoked since it was delivered) answers like a missing one.
 	if !h.requireIssueIDVisible(w, r, workspaceID, item.IssueID, http.StatusNotFound, "inbox item not found") {
+		return db.InboxItem{}, false
+	}
+	// An item without an issue (a doc comment) is outside any project, which
+	// a guest cannot see even when it was delivered before the demotion.
+	if !item.IssueID.Valid && !h.requireProjectVisible(w, r, workspaceID, pgtype.UUID{}, http.StatusNotFound, "inbox item not found") {
 		return db.InboxItem{}, false
 	}
 	return item, true

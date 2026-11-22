@@ -92,7 +92,7 @@ func TestHTTPErrorKind(t *testing.T) {
 func TestFormatErrorAllKinds(t *testing.T) {
 	withLang(t, "") // default English
 	allKinds := []ErrorKind{
-		KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkTLSHandshakeTimeout,
+		KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkTLSHandshakeTimeout, KindNetworkIncompleteResponse,
 		KindAuthRequired, KindTaskTokenRejected, KindForbidden, KindNotFound, KindConflict,
 		KindValidation, KindTooLarge, KindRateLimited, KindServerError, KindUnknown,
 	}
@@ -454,6 +454,7 @@ func TestErrorKindString(t *testing.T) {
 		KindNetworkTLS:                 "network_tls",
 		KindNetworkOffline:             "network_offline",
 		KindNetworkTLSHandshakeTimeout: "network_tls_handshake_timeout",
+		KindNetworkIncompleteResponse:  "network_incomplete_response",
 		KindAuthRequired:               "auth_required",
 		KindTaskTokenRejected:          "task_token_rejected",
 		KindForbidden:                  "forbidden",

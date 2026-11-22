@@ -18,14 +18,14 @@
     "headline_line2": "en",
     "headline_emphasis": "un solo espacio de trabajo.",
     "lede": "Asígnales trabajo como lo harías con un compañero: lo recogen, actualizan el estado y comentan cuando terminan.",
-    "lede_web": "Multica Desktop incluye el runtime: no hay nada que instalar. Continúa en la web para conectar tu propia CLI.",
+    "lede_web": "La app de escritorio incluye el runtime local, sin necesidad de configurar la CLI. Continúa en la web para conectar tu propia CLI.",
     "download_desktop": "Descargar Multica Desktop",
     "continue_on_web": "Continuar en la web",
     "start_exploring": "Empezar a explorar",
     "skip_existing": "Ya lo he hecho antes",
     "illustration": {
       "card1_actor_name": "Tú",
-      "card1_actor_initial": "N",
+      "card1_actor_initial": "T",
       "card1_body_prefix": " ¿puedes redactar una nota de lanzamiento corta? Inspírate en ",
       "card1_body_suffix": " y sus conclusiones de las entrevistas.",
       "card1_mention_content": "@Content Agent",
@@ -225,7 +225,7 @@
   "errors": {
     "skip_failed": "No se ha podido terminar la incorporación",
     "mika_setup_failed": "No se ha podido iniciar tu espacio de trabajo de Mika",
-    "guide_failed": "No se ha podido crear la guía del runtime. Inténtalo de nuevo."
+    "guide_failed": "No se pudo crear la guía de configuración. Inténtalo de nuevo."
   },
   "mika_intro": {
     "headline": "Conoce a Mika, tu primer compañero agente.",

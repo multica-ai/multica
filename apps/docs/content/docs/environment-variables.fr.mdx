@@ -47,6 +47,8 @@ Vous devez aussi choisir un service d'e-mail ; sinon, les codes de vérification
 | `LOG_LEVEL` | valeur par défaut de l'application | Niveau de journalisation |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | Délai d'attente, après un signal d'arrêt, avant le début de l'arrêt propre |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | Durée pendant laquelle un runtime hors ligne peut se reconnecter avant que ses exécutions en cours n'échouent ; les valeurs inférieures à `150s` sont relevées à ce plancher |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Le Web et le Desktop maintiennent un index de recherche local par espace de travail ; définissez `off` pour renvoyer les recherches vers le serveur |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | Active la plage de 365 jours sur la page Statistiques ; définissez `off` si les requêtes annuelles sont trop lentes pour votre base de données |
 
 Lorsque vous définissez un délai de maintien avant arrêt sur Kubernetes, `terminationGracePeriodSeconds` doit dépasser ce délai plus le temps nécessaire à l'arrêt proprement dit.
 
@@ -185,21 +187,17 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | Slug de la GitHub App |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Secret de signature HMAC des webhooks et de l'état de connexion |
-| GitHub | `GITHUB_APP_ID` | Nécessaire pour le statut CI et la possibilité de fusion sur les cartes de PR, ainsi que pour le sélecteur de dépôts « Choisir depuis GitHub » |
-| GitHub | `GITHUB_APP_PRIVATE_KEY` | Clé privée PEM complète associée à l'App ID ; mêmes usages que ci-dessus |
+| GitHub | `GITHUB_APP_CLIENT_ID` | Client ID de l’App, requis pour vérifier que l’utilisateur peut accéder à l’installation |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | Client secret associé au Client ID, requis pour les nouvelles connexions |
+| GitHub | `GITHUB_APP_ID` | Requis pour vérifier le contrôle de l’installation lors des nouvelles connexions ; aussi utilisé par les cartes de PR et la liste des dépôts |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | Requis pour vérifier le contrôle de l’installation lors des nouvelles connexions ; aussi utilisé par les cartes de PR et la liste des dépôts |
 | Lark | `MULTICA_LARK_SECRET_KEY` | Clé de chiffrement des identifiants de 32 octets, encodée en Base64 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Clé de chiffrement des jetons de 32 octets, encodée en Base64 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Clé de chiffrement du jeton du bot de 32 octets, encodée en Base64 |
+| WeChat | `MULTICA_WEIXIN_SECRET_KEY` | Clé de 32 octets encodée en Base64 pour chiffrer les identifiants WeChat et l’état du QR code |
 | Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | Étapes d'outils affichées dans la réponse diffusée : `auto` (par défaut : détails en conversation privée, type de travail dans les groupes), `off`, `summary` ou `detail` |
-| Composio | `COMPOSIO_API_KEY` | Active les connexions d'outils Composio |
-| Composio | `COMPOSIO_CALLBACK_BASE_URL` | URL de l'API de rappel ; peut se rabattre sur `MULTICA_PUBLIC_URL` |
-| Composio | `COMPOSIO_STATE_SECRET` | Secret de signature de l'état OAuth ; peut être dérivé de `JWT_SECRET` |
 | Git auto-hébergé | `MULTICA_VCS_INTEGRATION_ENABLED` | Interrupteur de l'intégration Forgejo/Gitea/GitLab ; activé par défaut dans compose |
 | Git auto-hébergé | `MULTICA_VCS_SECRET_KEY` | Clé de chiffrement de 32 octets, encodée en Base64 (`openssl rand -base64 32`) ; sans elle, la fonctionnalité est entièrement indisponible |
-| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | Clé de 32 octets, encodée en Base64, pour les secrets stockés et les URL de lancement de surface chiffrées |
-| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Origine navigateur dédiée, sans cookies, routée vers ce backend ; doit différer des origines de l'application et de l'API, et préserver `Host` |
-| Plugins | `MULTICA_PLUGIN_API_URL` | URL de base complète et versionnée de la Plugin Public API, comme `https://plugin-api.example.com/v1` ; se rabat sur `MULTICA_PUBLIC_URL` + `/v1` |
-| Plugins | `MULTICA_PLUGIN_DIR` | Répertoire absolu facultatif utilisé pour publier des bundles de plugins locaux pendant le développement |
 | Boutique de thèmes | `MULTICA_THEME_REGISTRY_URL` | L'`index.json` d'un autre registre, par exemple un fork de l'officiel ; voir [Thèmes et apparence](/themes#auto-hébergement) |
 
 Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et changent normalement le statut de la tâche lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
@@ -247,7 +245,7 @@ Les variables ci-dessous sont lues sur l'ordinateur qui exécute vos agents, et 
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Durée maximale de silence, sans sortie ni exécution d'outil ; `0` désactive entièrement le watchdog |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | identique à `MULTICA_AGENT_IDLE_WATCHDOG` | Durée maximale de silence pour un seul appel d'outil ; ne la définissez que pour laisser aux outils plus de marge qu'au modèle, `0` n'arrête jamais de force un appel d'outil. Les shells d'arrière-plan de Cursor restent en cours tant que les processus qui leur appartiennent ne se sont pas terminés ; à cette limite, le daemon arrête ces processus et accorde à Cursor un nouveau budget de watchdog pour produire son résultat final. Si l'appartenance des processus ou leur nettoyage ne peut pas être vérifié, la politique ordinaire d'annulation des exécutions s'applique |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | Seuil de silence propre à OpenCode |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | identique à `MULTICA_AGENT_IDLE_WATCHDOG` | Seuil de silence sémantique de Codex. Le minuteur propre à Codex ne peut pas voir qu'un outil est en cours d'exécution ; il suit donc le plus grand des budgets d'inactivité et d'outil au lieu de maintenir un plafond distinct et plus court |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | le plus grand des budgets d’inactivité et d’outil ; `10m` si le watchdog du daemon est désactivé | Seuil d’inactivité sémantique de Codex. Le minuteur de Codex ne sait pas si un outil est en cours d’exécution. Lorsque `MULTICA_AGENT_IDLE_WATCHDOG` vaut `0`, Codex conserve sa valeur par défaut de `10m` si cette variable n’est pas définie. |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Surcharge explicite du plafond d'absence de progression du premier tour de Codex ; `0` conserve la valeur par défaut. L'attente effective du premier tour reste bornée par `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` et par le délai d'exécution global — définissez `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictement au-dessus de cette valeur (avec une certaine marge), sinon l'attente est tronquée à cette valeur et la nouvelle tentative de démarrage du catalogue de modèles est ignorée. Des valeurs égales ne suffisent pas : le minuteur sémantique est armé en premier, donc à durées égales la nouvelle tentative peut quand même être perdue |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` ; `thread/start`, `thread/resume` : `60s` | Plafonds de la poignée de main au démarrage du Codex app-server. Une valeur explicite remplace globalement les deux budgets |
 | `MULTICA_CODEX_MEMORY` | désactivé | `1`, `true`, `yes` ou `on` conserve la mémoire native de Codex dans les exécutions Codex gérées par le daemon ; par défaut, elle est désactivée pour chaque exécution. Voir [Mémoire native et sous-agents de Codex](/daemon-runtimes#codex-memory) |
@@ -304,6 +302,7 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 
 | Outil | Préfixe | Variable de modèle |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓ (sélectionne un mode Amp, par exemple `high`) |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓ (le nom exact affiché par `agy models`) |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -312,7 +311,9 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓ (un ID du catalogue dsh, par exemple `deepseek-official/deepseek-chat`) |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓ (un ID du catalogue dim) |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -330,6 +331,7 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | — (le modèle est géré par le profil d'agent ZeroClaw) |
 
 </Accordion>
@@ -337,7 +339,7 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 
 QwenPaw et MiniMax Code n'ont pas de variable de modèle, car Multica ne leur envoie jamais de modèle ; consultez [Comparaison des outils de codage IA](/providers#sources-des-modèles). DeepSeek Harness a aussi `MULTICA_DSH_PROFILE_BUNDLE` et `MULTICA_DSH_PLUGIN_PATH`, décrits dans la section suivante.
 
-Les arguments par défaut à l'échelle de la machine via `MULTICA_<PREFIX>_ARGS` sont actuellement pris en charge pour cinq outils : Claude Code, Codex, CodeBuddy, Qwen Code et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
+Les arguments par défaut à l'échelle de la machine via `MULTICA_<PREFIX>_ARGS` sont actuellement pris en charge pour sept outils : Claude Code, Codex, CodeBuddy, Qwen Code, Amp, Factory Droid et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_AMP_ARGS`, `MULTICA_DROID_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

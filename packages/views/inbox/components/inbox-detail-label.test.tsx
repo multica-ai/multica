@@ -5,10 +5,8 @@ import en from "../../locales/en/inbox.json";
 import zhHansIssues from "../../locales/zh-Hans/issues.json";
 import { InboxDetailLabel } from "./inbox-detail-label";
 
-vi.mock("../../issues/components", () => ({
-  StatusIcon: () => null,
-  PriorityIcon: () => null,
-}));
+vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => null }));
+vi.mock("../../issues/components/priority-icon", () => ({ PriorityIcon: () => null }));
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Someone" }),
 }));
@@ -147,5 +145,22 @@ describe("InboxDetailLabel localized values", () => {
 
     expect(container.textContent).toContain("8月21日");
     expect(container.textContent).not.toContain("Aug");
+  });
+});
+
+describe("InboxDetailLabel in a truncated row", () => {
+  // MUL-9407: an inline-flex wrapper is one atomic box. In a one-line row with
+  // text-overflow: ellipsis the browser hides the whole box once it does not
+  // fit, so the row read "Fy …". The label must stay plain inline text that
+  // truncates character by character.
+  it.each([
+    ["status_changed", "in_progress"],
+    ["priority_changed", "high"],
+  ] as const)("renders %s as plain inline text with spaced words", (type, to) => {
+    const { container } = render(<InboxDetailLabel item={item({ type, details: { to } })} />);
+    const label = container.firstElementChild as HTMLElement;
+
+    expect(label.className).not.toMatch(/\b(inline-)?flex\b/);
+    expect(label.textContent).toMatch(/\S\s+\S/);
   });
 });

@@ -23,7 +23,7 @@ import {
   type Source,
 } from "@multica/core/onboarding";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { useSessionPromptStore } from "@multica/core/session-prompt";
+import { useDevPromptStore, useSessionPromptStore } from "@multica/core/session-prompt";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -75,13 +75,14 @@ export function SourceBackfillModal() {
   // owes an answer and we know which workspace to count in.
   const userEligible = needsSourceBackfill(user, dismissCount);
   const wsId = useCurrentWorkspace()?.id ?? null;
-  const { data: agentDoneCount } = useQuery({
+  const { data: agentDoneCount, status: agentDoneStatus } = useQuery({
     ...agentCompletedIssueCountOptions(wsId ?? ""),
     enabled: userEligible && wsId !== null,
   });
   const shouldPrompt =
     userEligible &&
     (agentDoneCount ?? 0) >= SOURCE_BACKFILL_MIN_AGENT_DONE_ISSUES;
+  const deciding = userEligible && wsId !== null && agentDoneStatus === "pending";
 
   // Decide once per (user, gate delta) whether the prompt should
   // open. After it opens we stop reconsulting the predicate so a
@@ -127,6 +128,24 @@ export function SourceBackfillModal() {
   useEffect(() => {
     if (open) useSessionPromptStore.getState().markPrompted();
   }, [open]);
+
+  // Other prompts wait while the survey is open or about to be.
+  useEffect(() => {
+    const aboutToOpen = shouldPrompt && openedForUserRef.current !== userId;
+    useSessionPromptStore.getState().setSurveyPending(open || deciding || aboutToOpen);
+  }, [open, deciding, shouldPrompt, userId]);
+  useEffect(() => () => useSessionPromptStore.getState().setSurveyPending(false), []);
+
+  useEffect(() => {
+    if (!userId) return;
+    const answer = () => {
+      if (!useDevPromptStore.getState().take("survey")) return;
+      openedForUserRef.current = userId;
+      setOpen(true);
+    };
+    answer();
+    return useDevPromptStore.subscribe(answer);
+  }, [userId]);
 
   return (
     <Dialog

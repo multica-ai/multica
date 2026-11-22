@@ -5,6 +5,7 @@ import { annotationsWithPending, type AnnotationComposerSlot } from "./annotatio
 import { ReplyAnnotations } from "./reply-annotations";
 import { useCallback, useRef, useState, useEffect, useImperativeHandle, useMemo, type Ref } from "react";
 import { toast } from "sonner";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
@@ -98,10 +99,6 @@ function ReplyInput({
   const composerRef = useRef<HTMLDivElement>(null);
   // See CommentInput — replying mid-upload posts without the file.
   const uploadGate = useUploadGate(editorRef);
-  // Quick actions in the `/` menu — same catalog and same insert-don't-run
-  // behavior as the top-level composer. A reply posts to the same issue, so
-  // `/` has to offer the same thing here (MUL-5588).
-  const quickActionMenu = useQuickActionMenu();
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
   const [initialDraft] = useState(() =>
@@ -116,14 +113,15 @@ function ReplyInput({
   const canSend = !targetMissing && (annotations.length ? hasReplyIntent(content, annotations) : !isEmpty);
   // Saving the first pending annotation will fix the target before submission.
   const previewParentId = annotations.length === 0 ? annotationComposer?.pending.sourceCommentId ?? parentId : parentId;
-  const triggerPreview = useCommentTriggerPreview({ issueId, parentId: previewParentId, content: !targetMissing && (canSend || annotationComposer?.pending.note.trim()) ? composedContent : "" });
+  const previewContent = !targetMissing && (canSend || annotationComposer?.pending.note.trim()) ? composedContent : "";
+  const triggerPreview = useCommentTriggerPreview({ issueId, parentId: previewParentId, content: previewContent });
   // Uploads for this reply session (MUL-5181) — owned by the coordinator. With
   // a draftKey they persist in the draft store so scroll-out/close no longer
   // drops an in-flight upload; without one (no persistence context) they fall
   // back to session-local state inside the hook.
   // `gate` widens the editor gate with coordinator-owned placeholders — see
   // CommentInput.
-  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate } =
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate, storageRefusal, dismissStorageRefusal } =
     useCommentUploads(draftKey, { issueId }, uploadGate, editorRef);
   const hasAttachments = useMemo(
     () => pendingAttachments.some((a) => contentReferencesAttachment(content, a)) || gate.uploading,
@@ -152,6 +150,13 @@ function ReplyInput({
       !!initialDraft?.trim() ||
       (draftKey ? useCommentDraftStore.getState().getUploads(draftKey).length > 0 : false),
     editorRef,
+  });
+  const quickActionMenu = useQuickActionMenu(issueId, {
+    enabled: lazy.active,
+    parentId: previewParentId,
+    targetMissing,
+    triggerPreview,
+    previewContent,
   });
   useImperativeHandle(handleRef, () => ({ focus: () => lazy.activate() }), [lazy]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
@@ -369,6 +374,9 @@ function ReplyInput({
         <VoiceHud voice={voice} />
         <VoiceSetupDialog voice={voice} />
         <VoiceErrorRow voice={voice} className="mt-1" />
+        {storageRefusal && (
+          <StorageLimitNotice refusal={storageRefusal} onDismiss={dismissStorageRefusal} className="mt-1" />
+        )}
         {expanded && <ComposerToolbar
           className="mt-1 animate-in fade-in slide-in-from-top-1 duration-150"
           voice={voice}
