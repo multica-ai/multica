@@ -53,7 +53,9 @@ export function identifyAiAgent(userAgent: string | null | undefined): AiAgent |
   return AI_AGENTS.find((agent) => agent.name.toLowerCase() === token) ?? null;
 }
 
-const MARKDOWN_MEDIA_TYPES = new Set(["text/markdown", "text/x-markdown", "text/plain"]);
+// Not `text/plain`: generic HTTP clients (axios sends
+// `application/json, text/plain, */*`) list it without wanting Markdown.
+const MARKDOWN_MEDIA_TYPES = new Set(["text/markdown", "text/x-markdown"]);
 const HTML_MEDIA_TYPES = new Set(["text/html", "text/*", "*/*"]);
 
 /**
@@ -282,12 +284,14 @@ export async function sendAiVisitToPostHog(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   try {
-    await fetchImpl(`${config.host}/batch/`, {
+    const response = await fetchImpl(`${config.host}/batch/`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ api_key: config.apiKey, batch: [aiVisitPostHogEvent(record, config.environment)] }),
       signal: AbortSignal.timeout(POSTHOG_TIMEOUT_MS),
     });
+    // Unread bodies hold their pooled connection open.
+    await response.body?.cancel();
   } catch {
     // Observability must not affect the response.
   }

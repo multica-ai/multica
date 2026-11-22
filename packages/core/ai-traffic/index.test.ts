@@ -56,7 +56,6 @@ describe("prefersMarkdown", () => {
     "text/markdown",
     "text/markdown, text/html;q=0.9, */*;q=0.8",
     "text/x-markdown",
-    "text/plain",
   ])("prefers Markdown for %s", (accept) => {
     expect(prefersMarkdown(accept)).toBe(true);
   });
@@ -68,6 +67,8 @@ describe("prefersMarkdown", () => {
     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "text/html, text/markdown;q=0.5",
     "text/markdown;q=0",
+    "text/plain",
+    "application/json, text/plain, */*",
   ])("keeps HTML for %s", (accept) => {
     expect(prefersMarkdown(accept)).toBe(false);
   });
