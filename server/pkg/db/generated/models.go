@@ -1905,6 +1905,7 @@ type Skill struct {
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	PluginInstallationID pgtype.UUID        `json:"plugin_installation_id"`
+	Revision             int64              `json:"revision"`
 }
 
 type SkillFile struct {
