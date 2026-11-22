@@ -123,9 +123,6 @@ func explicitContextOverflow(lower string) bool {
 func Classify(rawError string) Reason {
 	trimmed := strings.TrimSpace(WithoutCodebuddyProtocolSummary(rawError))
 	if IsInterruptedRunTimeout(trimmed) {
-		if trimmed == "workspace routing discovery timed out" {
-			return ReasonTimeout
-		}
 		return ReasonProcessCleanupUnconfirmed
 	}
 	if trimmed == "" {
@@ -729,7 +726,7 @@ var legacyTokenRateLimitReasons = map[string]bool{
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
 	rawError = WithoutCodebuddyProtocolSummary(rawError)
-	// Legacy handshake strings have no positive cleanup evidence. Current
+	// Legacy routing/handshake strings have no positive cleanup evidence. Current
 	// daemons report an explicit timeout only after the adapter confirms reap;
 	// preserve that structured reason instead of promoting unknown reports.
 	if (reason == "agent_error" || reason == ReasonAgentUnknown.String() || reason == "") && IsInterruptedRunTimeout(rawError) {

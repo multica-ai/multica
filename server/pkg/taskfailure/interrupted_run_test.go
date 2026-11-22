@@ -11,9 +11,6 @@ func TestInterruptedRunTimeoutRecoveryClassification(t *testing.T) {
 	for _, raw := range errors {
 		t.Run(raw, func(t *testing.T) {
 			want := ReasonProcessCleanupUnconfirmed
-			if raw == "workspace routing discovery timed out" {
-				want = ReasonTimeout
-			}
 			if got := Classify(raw); got != want {
 				t.Errorf("Classify = %s, want %s", got, want)
 			}

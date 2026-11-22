@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/redact"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -1842,6 +1843,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
 			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), b.cfg.commandAt(execPath), cmd.Env, b.cfg.Logger)
 			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, stderrTail)
+		}
+		if finalStatus == "failed" && taskfailure.IsInterruptedRunTimeout(finalError) {
+			if cleanupConfirmed {
+				finalStatus = "timeout"
+			} else {
+				finalStatus = "cleanup_unconfirmed"
+				finalError += "; retry suppressed: process cleanup/reap not confirmed"
+			}
 		}
 
 		// A first turn that produced no semantic progress because Codex could

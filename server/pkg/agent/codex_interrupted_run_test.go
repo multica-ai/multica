@@ -65,3 +65,47 @@ while read line; do :; done
 		}
 	}
 }
+
+func TestCodexInterruptedRunRoutingCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	t.Cleanup(func() { codexCleanupConfirmationOverride.Store(0) })
+	for _, confirmed := range []bool{true, false} {
+		codexCleanupConfirmationOverride.Store(0)
+		if !confirmed {
+			codexCleanupConfirmationOverride.Store(-1)
+		}
+		name := "confirmed"
+		if !confirmed {
+			name = "unconfirmed"
+		}
+		t.Run(name, func(t *testing.T) {
+			fake := writeFakeCodexAppServer(t, `read line
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read line
+read line
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-routing"}}}'
+read line
+echo '{"jsonrpc":"2.0","id":3,"result":{}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-routing","turn":{"id":"turn-routing","status":"failed","error":{"message":"workspace routing discovery timed out"}}}}'
+`)
+			work := t.TempDir()
+			marker := filepath.Join(work, "existing-work.txt")
+			if err := os.WriteFile(marker, []byte("retained work"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			result := executeFakeCodex(t, fake, ExecOptions{Cwd: work, Timeout: 15 * time.Second, HandshakeTimeout: 5 * time.Second})
+			want := "timeout"
+			if !confirmed {
+				want = "cleanup_unconfirmed"
+			}
+			if result.Status != want || !strings.HasPrefix(result.Error, "workspace routing discovery timed out") || result.SessionID != "thr-routing" {
+				t.Fatalf("routing cleanup evidence lost: %+v", result)
+			}
+			if data, err := os.ReadFile(marker); err != nil || string(data) != "retained work" {
+				t.Fatalf("existing work changed: %q %v", data, err)
+			}
+		})
+	}
+}

@@ -35,9 +35,6 @@ func TestInterruptedRunRecoveryPreservesEvidenceAndStops(t *testing.T) {
 			f.Cleanup(t, "DELETE FROM agent_task_queue WHERE parent_task_id=$1", parentID)
 			svc := f.svc.TaskSvc
 			reportedReason := "timeout" // Current adapter confirmed cleanup.
-			if raw == "workspace routing discovery timed out" {
-				reportedReason = "agent_error.unknown"
-			}
 			failed, err := svc.FailTask(ctx, parent.ID, raw, parent.SessionID.String, parent.WorkDir.String, "", reportedReason, false, "", "")
 			if err != nil {
 				t.Fatal(err)
@@ -89,7 +86,7 @@ func TestInterruptedRunDisabledRecoveryBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent := f.Task(t, agent, testutil.Cols{"issue_id": issue, "runtime_id": agentRow.RuntimeID, "status": "running", "attempt": 1, "max_attempts": 1})
-	if _, err := f.svc.TaskSvc.FailTask(ctx, parseTestUUID(t, parent), "workspace routing discovery timed out", "", "", "", "agent_error.unknown", false, "", ""); err != nil {
+	if _, err := f.svc.TaskSvc.FailTask(ctx, parseTestUUID(t, parent), "workspace routing discovery timed out", "", "", "", "timeout", false, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE parent_task_id=$1", parent); n != 0 {
@@ -98,7 +95,7 @@ func TestInterruptedRunDisabledRecoveryBudget(t *testing.T) {
 }
 
 func TestInterruptedRunUncertainCleanupNeverRetries(t *testing.T) {
-	for _, method := range []string{"thread/start", "thread/resume"} {
+	for _, method := range []string{"routing", "thread/start", "thread/resume"} {
 		for _, reason := range []string{"agent_error.unknown", "cleanup_unconfirmed"} {
 			t.Run(method+"/"+reason, func(t *testing.T) {
 				f, _, issue, agent := wakeFixture(t)
@@ -109,6 +106,9 @@ func TestInterruptedRunUncertainCleanupNeverRetries(t *testing.T) {
 				}
 				work := t.TempDir()
 				raw := "codex " + method + " failed: codex app-server handshake timeout: " + method + " did not respond after 1m0s"
+				if method == "routing" {
+					raw = "workspace routing discovery timed out"
+				}
 				if reason == "cleanup_unconfirmed" {
 					raw += "; retry suppressed: process cleanup/reap not confirmed"
 				}
