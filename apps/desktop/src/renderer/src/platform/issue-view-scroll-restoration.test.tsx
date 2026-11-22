@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createQueryClient } from "@multica/core/query-client";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { ScrollRestorationProvider, useRestoredScrollRef } from "@multica/views/platform";
 import { getActiveTab, useTabStore } from "@/stores/tab-store";
@@ -30,7 +32,9 @@ function Surface({ mode }: { mode: string }) {
 function Page({ mode }: { mode: string }) {
   const tabId = useTabStore(s => getActiveTab(s)!.id);
   const adapter = useMemo(() => createScrollRestorationAdapter(tabId), [tabId]);
-  return <DesktopNavigationProvider>
+  return (
+    <QueryClientProvider client={createQueryClient()}>
+    <DesktopNavigationProvider>
     <div ref={registerActiveHostElement}>
       <ScrollRestorationProvider adapter={adapter}>
         <IssueViewUrlSync scope={{ scope_type: "workspace" }}>
@@ -38,7 +42,9 @@ function Page({ mode }: { mode: string }) {
         </IssueViewUrlSync>
       </ScrollRestorationProvider>
     </div>
-  </DesktopNavigationProvider>;
+  </DesktopNavigationProvider>
+    </QueryClientProvider>
+  );
 }
 
 afterEach(() => {

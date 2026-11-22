@@ -212,7 +212,7 @@ export function RailWorkspaces() {
                         }
                       : undefined
                   }
-                  render={<AppLink href={paths.workspace(ws.slug).issues()} />}
+                  render={<AppLink href={paths.workspace(ws.slug).start()} />}
                 >
                   <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
                   <span className="min-w-0 flex-1 truncate">{ws.name}</span>

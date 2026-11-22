@@ -17,6 +17,7 @@ import {
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { autopilotDetailOptions } from "@multica/core/autopilots/queries";
+import { linkListOptions } from "@multica/core/links";
 import {
   skillDetailOptions,
   agentListOptions,
@@ -71,6 +72,7 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "member",
   "squad",
   "skill",
+  "link",
   "doc",
   "docFolder",
   "machine",
@@ -151,6 +153,11 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     enabled: false,
   }).data;
 
+  const links = useQuery({
+    ...linkListOptions(wsId, subject.kind === "link" ? subject.projectId ?? undefined : undefined),
+    enabled: false,
+  }).data;
+
   const agents = useQuery({ ...agentListOptions(wsId), enabled: false }).data;
   const members = useQuery({ ...memberListOptions(wsId), enabled: false }).data;
   const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
@@ -185,6 +192,11 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     case "skill":
       if (skill) data.skill = { name: skill.name };
       break;
+    case "link": {
+      const link = links?.find((l) => l.id === subject.id);
+      if (link) data.link = { name: link.name };
+      break;
+    }
     case "actor": {
       const name =
         subject.actorType === "agent"

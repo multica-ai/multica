@@ -8,6 +8,7 @@ describe("parseTabSubject", () => {
   // `unknown` — which the presentation layer renders neutrally, never as Issues.
   const cases: Array<[string, TabSubject]> = [
     // Collection / tool pages
+    ["/acme/start", { kind: "page", page: "issues" }],
     ["/acme/issues", { kind: "page", page: "issues" }],
     ["/acme/my-issues", { kind: "page", page: "myIssues" }],
     ["/acme/my-issues?scope=agents", { kind: "myAgents" }],
@@ -25,6 +26,8 @@ describe("parseTabSubject", () => {
     ["/acme/projects/p1", { kind: "project", id: "p1" }],
     ["/acme/autopilots/a1", { kind: "autopilot", id: "a1" }],
     ["/acme/skills/s1", { kind: "skill", id: "s1" }],
+    ["/acme/links/l1", { kind: "link", id: "l1", projectId: null }],
+    ["/acme/links/l1?project=p1", { kind: "link", id: "l1", projectId: "p1" }],
     ["/acme/attachments/att1/preview", { kind: "attachment", id: "att1", filename: null }],
     [
       "/acme/attachments/att1/preview?name=report.pdf",
@@ -59,6 +62,8 @@ describe("parseTabSubject", () => {
     ["/acme/chat?agent=ag-1", { kind: "chat", sessionId: null }],
     // Members list route does not exist
     ["/acme/members", { kind: "unknown" }],
+    // Links have no collection page
+    ["/acme/links", { kind: "unknown" }],
     // Unknown / too short
     ["/acme/nope", { kind: "unknown" }],
     ["/acme", { kind: "unknown" }],

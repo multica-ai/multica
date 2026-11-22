@@ -79,7 +79,7 @@ describe("resolveTabPresentation — direct resources", () => {
     });
   });
 
-  it("autopilot / skill / machine / runtime use a type icon + name", () => {
+  it("autopilot / skill / link / machine / runtime use a type icon + name", () => {
     expect(present("/acme/autopilots/a1", { autopilot: { title: "Nightly" } })).toEqual({
       visual: { kind: "icon", icon: "Zap" },
       title: { kind: "text", text: "Nightly" },
@@ -87,6 +87,14 @@ describe("resolveTabPresentation — direct resources", () => {
     expect(present("/acme/skills/s1", { skill: { name: "Deploy" } })).toEqual({
       visual: { kind: "icon", icon: "BookOpenText" },
       title: { kind: "text", text: "Deploy" },
+    });
+    expect(present("/acme/links/l1", { link: { name: "Grafana" } })).toEqual({
+      visual: { kind: "icon", icon: "Globe" },
+      title: { kind: "text", text: "Grafana" },
+    });
+    expect(present("/acme/links/l1?project=p1")).toEqual({
+      visual: { kind: "icon", icon: "Globe" },
+      title: { kind: "tab", tabKey: "link" },
     });
     expect(present("/acme/runtimes/m1", { machine: { name: "Mac Studio" } })).toEqual({
       visual: { kind: "icon", icon: "Monitor" },

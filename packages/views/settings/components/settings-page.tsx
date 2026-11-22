@@ -9,6 +9,7 @@ import {
   Keyboard,
   KeyRound,
   ListPlus,
+  Link,
   Lock,
   MessagesSquare,
   Mic,
@@ -51,6 +52,7 @@ import { LabelsTab } from "./labels-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
+import { LinksSection } from "../../links/components/links-section";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { localVoiceAPI } from "../../platform/local-voice";
 import { VoiceInputTab } from "./voice-input-tab";
@@ -242,6 +244,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               <QuickActionsTab />,
               { wide: true },
             ),
+            entry("links", t(($) => $.links.title), Link, <LinksSection />, { wide: true, adminOnly: true }),
           ],
         },
         {

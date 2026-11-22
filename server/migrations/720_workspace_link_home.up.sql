@@ -1,0 +1,1 @@
+ALTER TABLE workspace_link ADD COLUMN is_home BOOLEAN NOT NULL DEFAULT false;

@@ -173,7 +173,7 @@ describe("InvitationsPage", () => {
         completion_path: "invite_accept",
         workspace_id: "ws-2",
       });
-      expect(navigate).toHaveBeenCalledWith("/beta/issues");
+      expect(navigate).toHaveBeenCalledWith("/beta/start");
     });
     expect(acceptInvitation).toHaveBeenCalledTimes(1);
     expect(auth.user?.onboarded_at).toBe(ONBOARDED.onboarded_at);
@@ -190,7 +190,7 @@ describe("InvitationsPage", () => {
 
     fireEvent.click(within(row("Acme")).getByRole("button", { name: "Join" }));
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/acme/issues"));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/acme/start"));
     expect(auth.user?.onboarded_at).toBe(ONBOARDED.onboarded_at);
     expect(refreshMe).not.toHaveBeenCalled();
   });
@@ -204,7 +204,7 @@ describe("InvitationsPage", () => {
 
     fireEvent.click(within(row("Acme")).getByRole("button", { name: "Join" }));
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/acme/issues"));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/acme/start"));
     expect(refreshMe).toHaveBeenCalled();
     expect(auth.user?.onboarded_at).toBe(ONBOARDED.onboarded_at);
     expect(screen.queryByText("boom")).toBeNull();
@@ -280,7 +280,7 @@ describe("InvitationsPage", () => {
     expect(screen.queryByRole("link", { name: /skip/i })).toBeNull();
 
     fireEvent.click(within(items[0]!).getByRole("button", { name: "Join" }));
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/beta/issues"));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/beta/start"));
     expect(markOnboardingComplete).not.toHaveBeenCalled();
   });
 
@@ -308,7 +308,7 @@ describe("InvitationsPage", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Go to workspace" })).toHaveAttribute(
         "href",
-        "/home/issues",
+        "/home/start",
       ),
     );
   });
