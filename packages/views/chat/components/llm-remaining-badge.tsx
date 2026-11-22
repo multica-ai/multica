@@ -64,6 +64,16 @@ export function formatResetCountdown(resetAt: string | null | undefined, now: nu
   return `${days ? `D-${days} ` : ""}${time}`;
 }
 
+function limitingReset(
+  now: number,
+  ...windows: ReadonlyArray<readonly [number | null, string | null | undefined]>
+): string | null {
+  return windows
+    .map(([usage, reset]) => ({ usage: usage ?? -1, target: futureResetAt(reset, now) }))
+    .filter(({ target }) => target !== null)
+    .sort((a, b) => b.usage - a.usage)[0]?.target ?? null;
+}
+
 function ResetCountdown({ data }: { data: LlmLimitStatus }) {
   const { t } = useT("chat");
   const [now, setNow] = useState(Date.now);
@@ -71,9 +81,6 @@ function ResetCountdown({ data }: { data: LlmLimitStatus }) {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const sonnetLimits = remainingFromUsage(data.sonnet_pct) !== null &&
-    (remainingFromUsage(data.seven_day_pct) === null || data.sonnet_pct! > data.seven_day_pct!);
-  const claudeReset = sonnetLimits ? data.sonnet_resets_at : data.seven_day_resets_at;
   const compactTime = new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul", month: "numeric", day: "numeric",
     hour: "2-digit", minute: "2-digit", hourCycle: "h23",
@@ -82,19 +89,16 @@ function ResetCountdown({ data }: { data: LlmLimitStatus }) {
     timeZone: "Asia/Seoul", dateStyle: "full", timeStyle: "long",
   });
   const providers = [
-    ["C", data.five_hour_resets_at, claudeReset],
-    ["G", data.gpt_five_resets_at, data.gpt_seven_resets_at],
+    ["C", limitingReset(now, [data.seven_day_pct, data.seven_day_resets_at], [data.sonnet_pct, data.sonnet_resets_at], [data.five_hour_pct, data.five_hour_resets_at])],
+    ["G", limitingReset(now, [data.gpt_seven_day_pct, data.gpt_seven_resets_at], [data.gpt_five_hour_pct, data.gpt_five_resets_at])],
   ] as const;
-  return <div data-testid="chat-reset-countdown" className="grid gap-x-3 pb-0.5 text-[10px] leading-4 tabular-nums sm:grid-cols-2" aria-label={t($ => $.limit_reset.countdown_label)}>
-    {providers.map(([provider, five, seven]) => <div key={provider} className="flex flex-wrap gap-x-2">
-      {([["5h", five], ["7d", seven]] as const).map(([window, resetAt]) => {
-        const target = futureResetAt(resetAt, now);
-        const date = target ? new Date(target) : null;
-        return <span key={window} className="whitespace-nowrap" title={date ? t($ => $.limit_reset.at, { time: exactTime.format(date) }) : t($ => $.limit_reset.unknown)}>
-          {provider} {window} {t($ => $.limit_reset.label)} {target && date && <time dateTime={target}>{compactTime.format(date)} KST </time>}{formatResetCountdown(target, now)}
-        </span>;
-      })}
-    </div>)}
+  return <div data-testid="chat-reset-countdown" className="flex flex-col pb-0.5 text-[10px] leading-4 tabular-nums" aria-label={t($ => $.limit_reset.countdown_label)}>
+    {providers.map(([provider, target]) => {
+      const date = target ? new Date(target) : null;
+      return <div key={provider} title={date ? t($ => $.limit_reset.at, { time: exactTime.format(date) }) : t($ => $.limit_reset.unknown)}>
+        {provider} {t($ => $.limit_reset.label)} {target && date && <time dateTime={target}>{compactTime.format(date)} KST</time>}{date && " · "}{formatResetCountdown(target, now)}
+      </div>;
+    })}
   </div>;
 }
 
