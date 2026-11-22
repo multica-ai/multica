@@ -2817,7 +2817,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
-  const queueDescriptionSave = useIssueDescriptionSave(id, (err) => {
+  const persistDescriptionSave = useIssueDescriptionSave(id, (err) => {
     toast.error(
       errorCode(err) === "revision_conflict"
         ? t(($) => $.revision.conflict)
@@ -3193,6 +3193,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     issue.creator_type === "agent" && issue.requester_id
       ? getActorName("member", issue.requester_id)
       : undefined;
+
+  const queueDescriptionSave = (
+    draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
+  ) => {
+    persistDescriptionSave(draft);
+  };
 
   const canAddProperty = OPTIONAL_PROP_KEYS.some(
     (key) => !visibleOptionalProps.has(key) && (key !== "stage" || issue.parent_issue_id != null),
