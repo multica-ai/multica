@@ -25,13 +25,14 @@ interface GuestFixture {
 
 let fixture: GuestFixture;
 let slug: string;
+let owner: TestApiClient;
 
 // `scripts/dev-fixtures.mjs guest` builds the scenario, run against a
 // workspace of its own so the guest and its projects stay out of other specs.
 // The fixture reads an environment profile; this one holds the owner's token
 // and the guest's, signed in here so no fixed verification code is needed.
 test.beforeAll(async ({}, testInfo) => {
-  const owner = new TestApiClient();
+  owner = new TestApiClient();
   await owner.login(`e2e-guest-owner-${RUN}@multica.ai`, "E2E Guest Owner");
   const workspace = await owner.ensureWorkspace(`E2E Guest ${RUN}`, `e2e-guest-${RUN}`);
   await owner.markUserOnboarded();
@@ -66,6 +67,10 @@ test.beforeAll(async ({}, testInfo) => {
   } finally {
     rmSync(profiles, { recursive: true, force: true });
   }
+});
+
+test.afterAll(async () => {
+  await owner?.deleteWorkspace();
 });
 
 interface PageWatch {
@@ -128,11 +133,28 @@ async function expectClean(seen: PageWatch) {
   expect(seen.problems, "requests the guest was refused, and page errors").toEqual([]);
 }
 
-/** Write actions only a member has: creating issues and managing projects. */
+const PROJECT_ACTIONS = /(rename|archive|restore|delete) project/i;
+
+/**
+ * Write actions only a member has: creating issues and managing projects,
+ * including the archived-project banner's "Restore". Run after the page has
+ * settled, since `toHaveCount(0)` passes before late content mounts.
+ */
 async function expectNoMemberActions(page: Page) {
   await expect(page.getByRole("button", { name: /new issue|add issue|create issue/i })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /(rename|archive|restore|delete) project/i })).toHaveCount(0);
-  await expect(page.getByRole("menuitem", { name: /(rename|archive|restore|delete) project/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^restore$/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: PROJECT_ACTIONS })).toHaveCount(0);
+}
+
+/** The project title menu holds the project actions; they exist only while it is open. */
+async function expectGuestProjectMenu(page: Page, seen: PageWatch, title: string) {
+  await page.getByRole("heading", { level: 1 }).getByRole("button", { name: title }).click();
+  const menu = page.getByRole("menu");
+  await expect(menu.getByRole("menuitem", { name: "Copy link", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: PROJECT_ACTIONS })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expectClean(seen);
 }
 
 test.describe("as a guest", () => {
@@ -148,18 +170,18 @@ test.describe("as a guest", () => {
       await expect(inbox.getByText(fixture.issues[key].title, { exact: true })).toBeVisible();
     }
     await expect(page.getByText(fixture.issues.pricing.title)).toHaveCount(0);
-    await expectNoMemberActions(page);
     await expectClean(seen);
+    await expectNoMemberActions(page);
 
     await inbox.getByText(fixture.issues.review.title, { exact: true }).click();
     await expect(page.getByText("Guests can view and comment, but cannot change issue properties.")).toBeVisible();
-    await expectNoMemberActions(page);
     await expectClean(seen);
+    await expectNoMemberActions(page);
 
     await page.getByRole("link", { name: "Involved", exact: true }).click();
     await expect(page.getByText(fixture.issues.export.title).first()).toBeVisible();
-    await expectNoMemberActions(page);
     await expectClean(seen);
+    await expectNoMemberActions(page);
   });
 
   for (const [key, kind] of [["shared", "workspace-visible"], ["private", "private"], ["archived", "archived"]] as const) {
@@ -168,14 +190,17 @@ test.describe("as a guest", () => {
       const seen = await openAsGuest(page, `/${slug}/projects/${project.id}?tab=overview`);
       await expect(page.getByText(project.title).first()).toBeVisible({ timeout: 30_000 });
       await expect(page.getByText("Guests can view this project, but cannot change its properties.")).toBeVisible();
-      await expectNoMemberActions(page);
+      if (key === "archived") await expect(page.getByText("This project is archived.")).toBeVisible();
       await expectClean(seen);
+      await expectNoMemberActions(page);
+      await expectGuestProjectMenu(page, seen, project.title);
 
       for (const tab of ["Issues", "Activity", "Overview"]) {
         await page.getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
         await expect(page).toHaveURL(new RegExp(`tab=${tab.toLowerCase()}`));
-        await expectNoMemberActions(page);
         await expectClean(seen);
+        await expectNoMemberActions(page);
+        await expectGuestProjectMenu(page, seen, project.title);
       }
     });
   }
@@ -186,8 +211,8 @@ test.describe("as a guest", () => {
       const seen = await openAsGuest(page, `/${slug}/issues/${issue.identifier}`);
       await expect(page.getByText(issue.title).first()).toBeVisible({ timeout: 30_000 });
       await expect(page.getByText("Guests can view and comment, but cannot change issue properties.")).toBeVisible();
-      await expectNoMemberActions(page);
       await expectClean(seen);
+      await expectNoMemberActions(page);
     });
   }
 
