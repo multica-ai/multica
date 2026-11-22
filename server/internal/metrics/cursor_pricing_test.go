@@ -102,10 +102,10 @@ func TestPriceForRuntimeModelKeepsCursorParsingScopedToCursor(t *testing.T) {
 
 // TestPriceForRuntimeModelAntigravityClaudeEffort pins the Antigravity-scoped
 // Claude effort fallback: agy reports Claude models with a reasoning-effort
-// suffix or a display label (see readAntigravitySelectedModel in
-// server/pkg/agent/antigravity.go); effort selects reasoning, not a SKU, so
-// the id prices at the base Claude tier. Only the four levels Antigravity
-// supports are stripped, the version is a major or major.minor number, and
+// or Thinking suffix, or a display label (see readAntigravitySelectedModel in
+// server/pkg/agent/antigravity.go); both select reasoning, not a SKU, so the
+// id prices at the base Claude tier. Only the levels Antigravity offers for
+// Claude are stripped, the version is a major or major.minor number, and
 // only the antigravity provider gets the rewrite — the non-Antigravity rows
 // stay pinned unmapped by
 // TestPriceForRuntimeModelKeepsCursorParsingScopedToCursor. Mirrors the
@@ -126,7 +126,16 @@ func TestPriceForRuntimeModelAntigravityClaudeEffort(t *testing.T) {
 		{"antigravity:claude-opus-5-5-high", "anthropic:claude-opus-5-5"},
 		{"Claude Opus 5.5 (High)", "anthropic:claude-opus-5-5"},
 		{"Claude Opus 5.5", "anthropic:claude-opus-5-5"},
+		{"claude-opus-5-5-thinking", "anthropic:claude-opus-5-5"},
+		{"Claude Opus 5.5 (Thinking)", "anthropic:claude-opus-5-5"},
+		{"Claude Sonnet 5.5 (Thinking)", "anthropic:claude-sonnet-5-5"},
+		{"claude-sonnet-5-5-thinking", "anthropic:claude-sonnet-5-5"},
+		{"Claude Opus 4.6 (Thinking)", "anthropic:claude-opus-4.6"},
+		{"claude-opus-4-6-thinking", "anthropic:claude-opus-4.6"},
+		{"Claude Sonnet 4.6 (Thinking)", "anthropic:claude-sonnet-4.6"},
 		{"gemini-4-carbon-high", "google:gemini-4-carbon"},
+		{"gemini-4-neon-xhigh", "google:gemini-4-neon"},
+		{"Gemini 4 Hydrogen (Extra)", "google:gemini-4-hydrogen"},
 	} {
 		want := modelPrices[tc.key]
 		got, ok := PriceForRuntimeModel("antigravity", tc.model)
@@ -138,7 +147,8 @@ func TestPriceForRuntimeModelAntigravityClaudeEffort(t *testing.T) {
 		"claude-opus-5-5-fast",
 		"claude-opus-5-5-max",
 		"claude-opus-5-5-xhigh",
-		"claude-opus-5-5-thinking",
+		"claude-opus-5-5-thinking-high",
+		"Claude Opus 5.5 (Extra)",
 		"claude-opus-5-5-preview",
 		"claude-opus-5-5-99-high",
 		"claude-opus-5-5-20261001-high",
@@ -155,7 +165,49 @@ func TestPriceForRuntimeModelAntigravityClaudeEffort(t *testing.T) {
 	// The Claude effort fallback must not leak beyond the antigravity
 	// provider; provider="claude" is pinned by
 	// TestPriceForRuntimeModelKeepsCursorParsingScopedToCursor.
-	if got, ok := PriceForRuntimeModel("", "claude-opus-5-5-high"); ok {
-		t.Errorf("PriceForRuntimeModel(\"\", claude-opus-5-5-high) = %+v; want unmapped", got)
+	for _, model := range []string{"claude-opus-5-5-high", "Claude Opus 5.5 (Thinking)"} {
+		if got, ok := PriceForRuntimeModel("", model); ok {
+			t.Errorf("PriceForRuntimeModel(\"\", %q) = %+v; want unmapped", model, got)
+		}
+	}
+}
+
+// TestPriceForRuntimeModelAntigravityGPTOSS pins GPT-OSS 120B on Antigravity
+// to Vertex AI's rate, and keeps that rate from leaking to other runtimes,
+// which reach gpt-oss through hosts with different prices. Orchestrator
+// splits a turn across two models, so it stays unmapped.
+func TestPriceForRuntimeModelAntigravityGPTOSS(t *testing.T) {
+	want := ModelPrice{Provider: "google", Model: "gpt-oss-120b", InputPerM: 0.09, CacheReadPerM: 0.09, CacheWritePerM: 0.09, OutputPerM: 0.36}
+	for _, model := range []string{
+		"GPT-OSS 120B (Medium)",
+		"GPT-OSS 120B",
+		"gpt-oss-120b",
+		"gpt-oss-120b-medium",
+		"gpt-oss-120b-high[1m]",
+		"openai/gpt-oss-120b",
+	} {
+		if got, ok := PriceForRuntimeModel("antigravity", model); !ok || got != want {
+			t.Errorf("PriceForRuntimeModel(antigravity, %q) = %+v, %v; want %+v", model, got, ok, want)
+		}
+	}
+	for _, model := range []string{
+		"gpt-oss-20b",
+		"GPT-OSS 20B (Medium)",
+		"gpt-oss-120b-xhigh",
+		"gpt-oss-120b-preview",
+		"GPT-OSS 120B (Turbo)",
+		"gpt-oss-120b[1m][2m]",
+		"Orchestrator (Neon)",
+		"Orchestrator (Carbon)",
+		"gemini-pro-orchestrator",
+	} {
+		if got, ok := PriceForRuntimeModel("antigravity", model); ok {
+			t.Errorf("PriceForRuntimeModel(antigravity, %q) = %+v; want unmapped", model, got)
+		}
+	}
+	for _, provider := range []string{"", "opencode", "cursor"} {
+		if got, ok := PriceForRuntimeModel(provider, "gpt-oss-120b"); ok {
+			t.Errorf("PriceForRuntimeModel(%q, gpt-oss-120b) = %+v; want unmapped", provider, got)
+		}
 	}
 }
