@@ -1,4 +1,6 @@
-import type { AppAccountScope, AppConnection, AppTeamRequest, AppsOverview } from "@multica/core/types";
+import { canAssignAgentToIssue } from "@multica/core/permissions/rules";
+import type { PermissionContext } from "@multica/core/permissions";
+import type { Agent, AgentApp, AppAccountScope, AppConnection, AppTeamRequest, AppsOverview } from "@multica/core/types";
 
 /**
  * Where an account stands. Every Apps surface (the agent page, the app page,
@@ -93,4 +95,24 @@ export function viewerTeamAsk(
   if (!viewerId || !request) return null;
   if ((request.asked_by ?? request.requested_by).includes(viewerId)) return "asked";
   return request.requested_by.includes(viewerId) ? "waiting" : null;
+}
+
+/**
+ * The agent apps that involve the viewer's accounts: those of live agents,
+ * and for personal accounts only agents the viewer may run. An agent acts
+ * through the personal account of whoever starts its run, so another
+ * member's private agent never uses the viewer's account. Mirrors the
+ * server's personal disconnect impact.
+ */
+export function agentAppsForViewer(
+  agentApps: AgentApp[],
+  agents: Agent[],
+  viewer: PermissionContext,
+): AgentApp[] {
+  const byId = new Map(agents.map((agent) => [agent.id, agent]));
+  return agentApps.filter((app) => {
+    const agent = byId.get(app.agent_id);
+    if (!agent || agent.archived_at) return false;
+    return app.account_scope === "team" || canAssignAgentToIssue(agent, viewer).allowed;
+  });
 }

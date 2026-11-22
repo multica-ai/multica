@@ -10,7 +10,7 @@ import { renderWithI18n } from "../../test/i18n";
 import { AppsPage } from "./apps-page";
 
 vi.mock("@multica/core/api", () => ({ api: {
-  getAppsOverview: vi.fn(), listAppCatalog: vi.fn(), listAgents: vi.fn(),
+  getAppsOverview: vi.fn(), listAppCatalog: vi.fn(), listAgents: vi.fn(), listMembers: vi.fn(),
   updateAppSettings: vi.fn(), requestTeamApp: vi.fn(), connectApp: vi.fn(), listAppRequests: vi.fn(),
   getPersonalAppImpact: vi.fn(), getTeamAppImpact: vi.fn(), deleteComposioConnection: vi.fn(), dismissTeamAppRequests: vi.fn(),
 } }));
@@ -58,9 +58,10 @@ beforeEach(() => {
     { slug: "linear", name: "Linear", category: "Issues", curated: true },
   ] });
   vi.mocked(api.listAgents).mockResolvedValue([
-    { id: "a1", name: "Support", archived_at: null },
-    { id: "a2", name: "Triage", archived_at: null },
+    { id: "a1", name: "Support", owner_id: "me", permission_mode: "private", invocation_targets: [], archived_at: null },
+    { id: "a2", name: "Triage", owner_id: "u2", permission_mode: "private", invocation_targets: [], archived_at: null },
   ] as never);
+  vi.mocked(api.listMembers).mockResolvedValue([{ user_id: "me", role: "member" }] as never);
   vi.mocked(api.requestTeamApp).mockResolvedValue(undefined as never);
   vi.mocked(api.listAppRequests).mockResolvedValue({ requests: [] } as never);
   vi.mocked(api.dismissTeamAppRequests).mockResolvedValue(undefined);
@@ -250,6 +251,27 @@ describe("AppsPage › Accounts", () => {
     await waitFor(() => expect(row("personal", "linear")).toHaveTextContent("Name a1 needs it"));
     expect(within(row("personal", "linear")).getByRole("button", { name: "Connect" })).toBeInTheDocument();
     expect(within(yours).queryByText("Slack")).not.toBeInTheDocument();
+  });
+
+  it("names only agents that act through the viewer's account under Your accounts", async () => {
+    overview.agent_apps = [
+      ...overview.agent_apps,
+      { agent_id: "shared", toolkit_slug: "gmail", account_scope: "personal", level: "write" },
+      { agent_id: "others-private", toolkit_slug: "gmail", account_scope: "personal", level: "write" },
+      { agent_id: "archived", toolkit_slug: "youtube", account_scope: "personal", level: "write" },
+    ];
+    vi.mocked(api.listAgents).mockResolvedValue([
+      { id: "a1", owner_id: "me", permission_mode: "private", invocation_targets: [], archived_at: null },
+      { id: "a2", owner_id: "u2", permission_mode: "private", invocation_targets: [], archived_at: null },
+      { id: "shared", owner_id: "u2", permission_mode: "public_to", invocation_targets: [{ target_type: "workspace", target_id: "ws-1" }], archived_at: null },
+      { id: "others-private", owner_id: "u2", permission_mode: "private", invocation_targets: [], archived_at: null },
+      { id: "archived", owner_id: "u2", permission_mode: "private", invocation_targets: [], archived_at: "2026-11-01T00:00:00Z" },
+    ] as never);
+    renderPage();
+    await waitFor(() => expect(row("personal", "gmail")).toHaveTextContent("used by Name a1, Name shared"));
+    expect(row("personal", "gmail")).not.toHaveTextContent("others-private");
+    expect(row("personal", "youtube")).toBeNull();
+    expect(screen.getByRole("tab", { name: /Accounts/ })).toHaveTextContent("5");
   });
 
   it("gives an admin Connect and Decline on a requested team account", async () => {

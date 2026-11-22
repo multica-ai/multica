@@ -29,6 +29,7 @@ import { availabilityConfig } from "../../agents/presence";
 import { useT } from "../../i18n";
 import { buildAppDirectory } from "../../apps/lib/directory";
 import { useComposioAvailable } from "../../common/use-composio-available";
+import { useViewerAppsOverview } from "../../common/use-viewer-apps-overview";
 import { buildRuntimeMachines, runtimeMachineCounts } from "../../runtimes/components/runtime-machines";
 import {
   PanelBody,
@@ -246,17 +247,17 @@ function WorkingAgentRow({
 }
 
 /** The Apps link, counting the apps that need someone to act. */
-function AppsPanelLink({ wsId, agents }: { wsId: string; agents: Agent[] }) {
+function AppsPanelLink({ wsId }: { wsId: string }) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
   const { pathname } = useNavigation();
   const viewerId = useAuthStore((s) => s.user?.id ?? null);
-  const { data: overview } = useQuery({ ...appsOverviewOptions(wsId), enabled: !!wsId });
+  const { data } = useQuery({ ...appsOverviewOptions(wsId), enabled: !!wsId });
+  const overview = useViewerAppsOverview(wsId, data);
   const attention = useMemo(() => {
     if (!overview) return 0;
-    const agentIds = new Set(agents.map((agent) => agent.id));
-    return buildAppDirectory({ overview, catalog: [], viewerId, agentIds }).attention.length;
-  }, [overview, agents, viewerId]);
+    return buildAppDirectory({ overview, catalog: [], viewerId }).attention.length;
+  }, [overview, viewerId]);
   return (
     <PanelLink
       href={p.apps()}
@@ -453,7 +454,7 @@ export function TeamPanel() {
               active={isPathWithin(pathname, p.skills())}
               trailing={<PanelCount value={skills.length} />}
             />
-            {appsAvailable && <AppsPanelLink wsId={wsId} agents={agents} />}
+            {appsAvailable && <AppsPanelLink wsId={wsId} />}
             <PanelLink
               href={p.runtimes()}
               icon={<Monitor />}
