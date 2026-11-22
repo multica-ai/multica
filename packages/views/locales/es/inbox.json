@@ -71,6 +71,7 @@
     "autopilot_quota_exceeded_body": "Este espacio de trabajo alcanzó su límite de {{limit}} ejecuciones de autopilot del periodo actual. Las siguientes ejecuciones no se iniciarán hasta que la asignación se restablezca {{resetAt}}, o hasta que el espacio de trabajo mejore su plan o compre más ejecuciones.",
     "project_owner_joined_body": "{{name}} es propietario del espacio de trabajo y se ha añadido a este proyecto privado. Ahora puede ver sus tareas, comentarios y archivos adjuntos.",
     "open_project": "Abrir proyecto",
+    "open_app": "Abrir app",
     "autopilot_quota_upgrade": "Ver opciones",
     "archive": "Archivar",
     "unarchive": "Desarchivar",

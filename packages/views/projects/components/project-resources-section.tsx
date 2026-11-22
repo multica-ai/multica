@@ -127,10 +127,21 @@ function looksLikeRepoUrl(value: string): boolean {
   return at + 1 < colon;
 }
 
-const chipClassName =
-  "inline-flex h-5 max-w-full shrink-0 items-center gap-1 rounded-sm bg-muted px-1.5 text-micro text-muted-foreground transition-colors hover:bg-surface-selected hover:text-foreground data-[popup-open]:bg-surface-selected data-[popup-open]:text-foreground";
+const readOnlyChipClassName =
+  "inline-flex h-5 max-w-full shrink-0 items-center gap-1 rounded-sm bg-muted px-1.5 text-micro text-muted-foreground";
+const chipClassName = cn(
+  readOnlyChipClassName,
+  "transition-colors hover:bg-surface-selected hover:text-foreground data-[popup-open]:bg-surface-selected data-[popup-open]:text-foreground",
+);
 
-export function ProjectResourcesSection({ projectId }: { projectId: string }) {
+export function ProjectResourcesSection({
+  projectId,
+  readOnly = false,
+}: {
+  projectId: string;
+  /** Lists the resources without adding, editing or removing (a guest's view). */
+  readOnly?: boolean;
+}) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const { data: resources = [] } = useQuery(
@@ -151,22 +162,23 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     <ObjectSection collapsible title={t(($) => $.resources.section_header)}>
       <ObjectSectionCard>
         <div className="px-3 py-2.5">
-          <RepositoryGroup wsId={wsId} projectId={projectId} repos={repos} />
+          <RepositoryGroup wsId={wsId} projectId={projectId} repos={repos} readOnly={readOnly} />
         </div>
-        {(desktopMode || folders.length > 0) && (
+        {((desktopMode && !readOnly) || folders.length > 0) && (
           <div className="px-3 py-2.5">
             <LocalFolderGroup
               wsId={wsId}
               projectId={projectId}
               folders={folders}
               desktopMode={desktopMode}
+              readOnly={readOnly}
             />
           </div>
         )}
         {others.length > 0 && (
           <div className="space-y-1.5 px-3 py-2.5">
             {others.map((resource) => (
-              <UnknownResourceRow key={resource.id} resource={resource} />
+              <UnknownResourceRow key={resource.id} resource={resource} readOnly={readOnly} />
             ))}
           </div>
         )}
@@ -258,10 +270,12 @@ function RepositoryGroup({
   wsId,
   projectId,
   repos,
+  readOnly,
 }: {
   wsId: string;
   projectId: string;
   repos: GithubResource[];
+  readOnly: boolean;
 }) {
   const { t } = useT("projects");
   const workspace = useCurrentWorkspace();
@@ -289,26 +303,28 @@ function RepositoryGroup({
       <GroupHeader
         label={t(($) => $.resources.repos_group)}
         action={
-          <Popover open={addOpen} onOpenChange={setAddOpen}>
-            <PopoverTrigger
-              render={
-                <IconButton
-                  size="icon-xs"
-                  label={t(($) => $.resources.repos_add)}
-                >
-                  <Plus />
-                </IconButton>
-              }
-            />
-            <PopoverContent align="end" className="w-72 p-2">
-              <AddRepositoryPanel
-                workspaceRepos={workspace?.repos ?? []}
-                attachedUrls={attachedUrls}
-                busy={createResource.isPending}
-                onAttach={handleAttach}
+          readOnly ? undefined : (
+            <Popover open={addOpen} onOpenChange={setAddOpen}>
+              <PopoverTrigger
+                render={
+                  <IconButton
+                    size="icon-xs"
+                    label={t(($) => $.resources.repos_add)}
+                  >
+                    <Plus />
+                  </IconButton>
+                }
               />
-            </PopoverContent>
-          </Popover>
+              <PopoverContent align="end" className="w-72 p-2">
+                <AddRepositoryPanel
+                  workspaceRepos={workspace?.repos ?? []}
+                  attachedUrls={attachedUrls}
+                  busy={createResource.isPending}
+                  onAttach={handleAttach}
+                />
+              </PopoverContent>
+            </Popover>
+          )
         }
       />
       {repos.length === 0 ? (
@@ -324,6 +340,7 @@ function RepositoryGroup({
               workspace?.repos?.find((repo) => repo.url === resource.resource_ref.url)
                 ?.description
             }
+            readOnly={readOnly}
           />
         ))
       )}
@@ -493,9 +510,11 @@ function AddRepositoryPanel({
 function GithubRepoRow({
   resource,
   description,
+  readOnly,
 }: {
   resource: GithubResource;
   description?: string | null;
+  readOnly: boolean;
 }) {
   const { remove, removing } = useRemoveResource(resource);
   const ref = resource.resource_ref;
@@ -524,13 +543,13 @@ function GithubRepoRow({
           />
           <TooltipContent side="top">{ref.url}</TooltipContent>
         </Tooltip>
-        <RemoveButton onRemove={remove} removing={removing} />
+        {!readOnly && <RemoveButton onRemove={remove} removing={removing} />}
       </div>
       {/* The branch gets its own line rather than a badge beside the name: a
           custom label takes the name slot, and this panel is narrow enough
           that an inline badge truncates the repository away. */}
       <div className="flex min-w-0 items-center gap-1.5 pl-[1.375rem] pt-0.5">
-        <GithubRefChip resource={resource} />
+        <GithubRefChip resource={resource} readOnly={readOnly} />
         {liveDescription && (
           <span className="min-w-0 truncate text-micro text-muted-foreground">
             {liveDescription}
@@ -548,7 +567,7 @@ function GithubRepoRow({
  * it, clearing a branch makes the line vanish, which reads the same as the
  * setting never having existed.
  */
-function GithubRefChip({ resource }: { resource: GithubResource }) {
+function GithubRefChip({ resource, readOnly }: { resource: GithubResource; readOnly: boolean }) {
   const { t } = useT("projects");
   const updateResource = useUpdateProjectResource(
     resource.workspace_id,
@@ -603,6 +622,17 @@ function GithubRefChip({ resource }: { resource: GithubResource }) {
       setSaving(false);
     }
   };
+
+  if (readOnly) {
+    return (
+      <span className={cn(readOnlyChipClassName, current && "text-foreground")}>
+        <GitBranch className="size-3 shrink-0" />
+        <span className={cn("max-w-32 truncate", current && "font-mono")}>
+          {current || t(($) => $.resources.ref_default_label)}
+        </span>
+      </span>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -660,11 +690,13 @@ function LocalFolderGroup({
   projectId,
   folders,
   desktopMode,
+  readOnly,
 }: {
   wsId: string;
   projectId: string;
   folders: LocalDirectoryResource[];
   desktopMode: boolean;
+  readOnly: boolean;
 }) {
   const { t } = useT("projects");
   const daemonStatus = useLocalDaemonStatus();
@@ -711,7 +743,7 @@ function LocalFolderGroup({
       <p className="-mt-1 text-micro text-muted-foreground">
         {t(($) => $.resources.local_group_hint)}
       </p>
-      {desktopMode && (
+      {desktopMode && (!readOnly || currentFolders.length > 0) && (
         <MachineBlock
           current
           title={currentTitle ?? t(($) => $.resources.local_this_computer)}
@@ -724,6 +756,7 @@ function LocalFolderGroup({
                 resource={folder}
                 current
                 serverValidatesWorktree={serverValidatesWorktree}
+                readOnly={readOnly}
               />
             ))
           ) : (
@@ -751,6 +784,7 @@ function LocalFolderGroup({
                 resource={folder}
                 current={false}
                 serverValidatesWorktree={serverValidatesWorktree}
+                readOnly={readOnly}
               />
             ))}
           </MachineBlock>
@@ -796,10 +830,12 @@ function LocalFolderRow({
   resource,
   current,
   serverValidatesWorktree,
+  readOnly,
 }: {
   resource: LocalDirectoryResource;
   current: boolean;
   serverValidatesWorktree: boolean;
+  readOnly: boolean;
 }) {
   const { remove, removing } = useRemoveResource(resource);
   // The name is the folder's own (or whatever a label update stored); there is
@@ -821,12 +857,13 @@ function LocalFolderRow({
             <span className="font-mono text-micro">{resource.resource_ref.local_path}</span>
           </TooltipContent>
         </Tooltip>
-        <RemoveButton onRemove={remove} removing={removing} />
+        {!readOnly && <RemoveButton onRemove={remove} removing={removing} />}
       </div>
       <div className="pl-[1.375rem] pt-0.5">
         <ExecutionModeChip
           resource={resource}
           serverValidatesWorktree={serverValidatesWorktree}
+          readOnly={readOnly}
         />
       </div>
     </div>
@@ -841,9 +878,11 @@ function LocalFolderRow({
 function ExecutionModeChip({
   resource,
   serverValidatesWorktree,
+  readOnly,
 }: {
   resource: LocalDirectoryResource;
   serverValidatesWorktree: boolean;
+  readOnly: boolean;
 }) {
   const { t } = useT("projects");
   const updateResource = useUpdateProjectResource(
@@ -888,20 +927,30 @@ function ExecutionModeChip({
     }
   };
 
+  const badge = (
+    <>
+      {mode === "worktree" ? (
+        <GitBranch className="size-3 shrink-0" />
+      ) : (
+        <Pencil className="size-3 shrink-0" />
+      )}
+      {mode === "worktree"
+        ? t(($) => $.resources.mode_badge_worktree)
+        : t(($) => $.resources.mode_badge_in_place)}
+    </>
+  );
+
+  if (readOnly) {
+    return <span className={cn(readOnlyChipClassName, "text-foreground")}>{badge}</span>;
+  }
+
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <TooltipHint label={t(($) => $.resources.mode_edit_tooltip)}>
         <PopoverTrigger
           render={
             <button type="button" className={cn(chipClassName, "text-foreground")}>
-              {mode === "worktree" ? (
-                <GitBranch className="size-3 shrink-0" />
-              ) : (
-                <Pencil className="size-3 shrink-0" />
-              )}
-              {mode === "worktree"
-                ? t(($) => $.resources.mode_badge_worktree)
-                : t(($) => $.resources.mode_badge_in_place)}
+              {badge}
             </button>
           }
         />
@@ -1090,14 +1139,14 @@ function LocalFolderSlot({
   );
 }
 
-function UnknownResourceRow({ resource }: { resource: ProjectResource }) {
+function UnknownResourceRow({ resource, readOnly }: { resource: ProjectResource; readOnly: boolean }) {
   const { remove, removing } = useRemoveResource(resource);
   return (
     <div className="flex items-center gap-2 text-caption text-muted-foreground">
       <span className="truncate flex-1">
         {resource.label || resource.resource_type}
       </span>
-      <RemoveButton onRemove={remove} removing={removing} alwaysVisible />
+      {!readOnly && <RemoveButton onRemove={remove} removing={removing} alwaysVisible />}
     </div>
   );
 }

@@ -784,8 +784,8 @@ export function InboxPage() {
 
   // The archive is a second list of the same page, so the title doubles as
   // the switch between the two instead of costing a row of its own. Reused in
-  // the desktop empty-detail header so guests (whose sidebar has no Inbox menu)
-  // and collapsed-list layouts keep the same switcher.
+  // the desktop empty-detail header so collapsed-list layouts keep the same
+  // switcher.
   const viewSwitcher = (
     <DropdownMenu>
       <DropdownMenuTrigger className="-ml-1.5 mr-1.5 flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-accent/60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring aria-expanded:bg-accent/60">

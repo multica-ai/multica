@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   copyTextAndHtml: vi.fn(),
   deleteProject: vi.fn(),
   getProject: vi.fn(),
+  getProjectMembers: vi.fn(),
   getProjectSubscription: vi.fn(),
   setProjectSubscription: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
@@ -158,6 +159,7 @@ vi.mock("../../editor", () => ({
     <div>{defaultValue}</div>
   ),
   ContentEditor: () => null,
+  ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 
 vi.mock("../../common/actor-avatar", () => ({
@@ -169,15 +171,18 @@ vi.mock("../../issues/components/priority-icon", () => ({
 }));
 
 vi.mock("./project-resources-section", () => ({
-  ProjectResourcesSection: () => null,
+  ProjectResourcesSection: ({ readOnly }: { readOnly?: boolean }) => (
+    <div data-testid="project-resources" data-read-only={String(!!readOnly)} />
+  ),
 }));
 
 vi.mock("./project-insights", () => ({
-  ProjectInsights: ({ onFilter, onShowActivity }: {
+  ProjectInsights: ({ onFilter, onShowActivity, readOnly }: {
     onFilter: (filter: unknown) => void;
     onShowActivity: () => void;
+    readOnly?: boolean;
   }) => (
-    <div data-testid="project-insights">
+    <div data-testid="project-insights" data-read-only={String(!!readOnly)}>
       <button type="button" onClick={() => onFilter({ kind: "label", id: "label-1" })}>Filter by Design</button>
       <button type="button" onClick={onShowActivity}>View all activity</button>
     </div>
@@ -299,11 +304,13 @@ beforeEach(() => {
   mocks.copyTextAndHtml.mockReset().mockResolvedValue(true);
   mocks.deleteProject.mockReset().mockReturnValue(pending.promise);
   mocks.getProject.mockReset().mockResolvedValue(PROJECT);
+  mocks.getProjectMembers.mockReset().mockResolvedValue({ members: [], manager_id: null });
   mocks.getProjectSubscription.mockReset().mockResolvedValue(false);
   mocks.setProjectSubscription.mockReset().mockImplementation(async (_id: string, subscribed: boolean) => subscribed);
   setApiInstance({
     deleteProject: mocks.deleteProject,
     getProject: mocks.getProject,
+    getProjectMembers: mocks.getProjectMembers,
     getProjectSubscription: mocks.getProjectSubscription,
     setProjectSubscription: mocks.setProjectSubscription,
   } as unknown as ApiClient);
@@ -427,6 +434,72 @@ describe("ProjectDetail lead permissions", () => {
     expect(screen.getByRole("button", { name: "No lead" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "No lead" }));
     expect(screen.getByPlaceholderText("Assign lead...")).toBeInTheDocument();
+  });
+});
+
+describe("ProjectDetail for a guest", () => {
+  beforeEach(() => {
+    mocks.role = "guest";
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, description: "Ship the launch." });
+  });
+
+  it("keeps sharing, pinning and following, and drops every change to the project", async () => {
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+    for (const name of ["Rename project", "Archive project", "Delete project"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+  });
+
+  it("shows the overview as read-only, without the agent context", () => {
+    renderProjectDetail();
+    expect(screen.getByRole("heading", { name: "Launch Plan" })).toBeInTheDocument();
+    expect(screen.getByText("Ship the launch.")).toBeInTheDocument();
+    expect(screen.queryByText("Agent context")).not.toBeInTheDocument();
+    expect(screen.getByTestId("project-resources")).toHaveAttribute("data-read-only", "true");
+  });
+
+  it("locks the properties and passes read-only to the insights", () => {
+    renderProjectDetail();
+    const properties = screen.getByTestId("project-properties");
+    expect(within(properties).getByRole("button", { name: "No lead" }).closest("[inert]")).not.toBeNull();
+    expect(within(properties).getByText("Guests can view this project, but cannot change its properties.")).toBeInTheDocument();
+    expect(screen.getByTestId("project-insights")).toHaveAttribute("data-read-only", "true");
+  });
+
+  it("does not ask for the members of a private project it was shared", async () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });
+    renderProjectDetail();
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+    expect(mocks.getProjectMembers).not.toHaveBeenCalled();
+  });
+
+  it("says an archived project is archived without offering Restore", () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, archived_at: "2026-11-01T00:00:00Z" });
+    renderProjectDetail();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore project" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer deletion to a creator who is now a guest", () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), {
+      ...PROJECT,
+      creator_type: "member",
+      creator_id: "user-1",
+    });
+    renderProjectDetail();
+    expect(screen.queryByRole("button", { name: "Delete project" })).not.toBeInTheDocument();
+  });
+
+  it("leaves a member's page editable", () => {
+    mocks.role = "member";
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "Rename project" })).toBeInTheDocument();
+    expect(screen.getByText("Agent context")).toBeInTheDocument();
+    expect(screen.getByTestId("project-resources")).toHaveAttribute("data-read-only", "false");
+    expect(within(screen.getByTestId("project-properties")).getByRole("button", { name: "No lead" }).closest("[inert]")).toBeNull();
   });
 });
 

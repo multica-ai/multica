@@ -16,7 +16,7 @@ vi.mock("@tanstack/react-query", () => ({
   },
 }));
 
-import { useComposioAvailable } from "./connected-apps-tab";
+import { useComposioAvailable } from "./use-composio-available";
 
 beforeEach(() => {
   state.error = null;

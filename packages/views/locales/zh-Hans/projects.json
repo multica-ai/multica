@@ -79,6 +79,7 @@
     "toast_subscription_failed": "更新订阅失败",
     "sidebar_tooltip": "切换右侧边栏",
     "rename_action": "重命名项目",
+    "guest_readonly_note": "访客可以查看这个项目，不能修改项目属性。",
     "copy_link": "复制链接",
     "copy_title_as_link": "复制带标题的链接",
     "delete_action": "删除项目",

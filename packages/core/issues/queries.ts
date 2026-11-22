@@ -691,20 +691,22 @@ export async function fetchIssueByRef(qc: QueryClient, wsId: string, ref: string
  * parallel. With an `identifier`, the issue is fetched under the key an
  * identifier URL resolves through and mirrored to its UUID, so a link to that
  * URL warming the same issue shares the request. prefetchQuery honours each
- * query's staleTime: a warm entry costs nothing.
+ * query's staleTime: a warm entry costs nothing. `runs: false` leaves out the
+ * runs, for a viewer whose issue page shows none (a guest).
  */
 export async function prefetchIssuePage(
   qc: QueryClient,
   wsId: string,
   issueId: string,
   identifier?: string | null,
+  { runs = true }: { runs?: boolean } = {},
 ): Promise<void> {
   await Promise.all([
     identifier
       ? fetchIssueByRef(qc, wsId, identifier).catch(() => undefined)
       : qc.prefetchQuery(issueDetailOptions(wsId, issueId)),
     qc.prefetchQuery(issueTimelineOptions(issueId)),
-    qc.prefetchQuery(issueTasksOptions(issueId)),
+    runs && qc.prefetchQuery(issueTasksOptions(issueId)),
     qc.prefetchQuery(childIssuesOptions(wsId, issueId)),
   ]);
 }

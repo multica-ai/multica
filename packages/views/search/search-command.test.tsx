@@ -172,6 +172,9 @@ vi.mock("@multica/core/auth", async (importOriginal) => {
   };
 });
 
+const composio = vi.hoisted(() => ({ available: true }));
+vi.mock("../common/use-composio-available", () => ({ useComposioAvailable: () => composio.available }));
+
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
   useWorkspaceId: () => "ws-test",
@@ -368,6 +371,7 @@ const rowText = (text: string) =>
 
 describe("SearchCommand", () => {
   beforeEach(() => {
+    composio.available = true;
     queryData.clear();
     apiFns.clear();
     apiFns.set("getBaseUrl", vi.fn(() => "http://127.0.0.1:8080"));
@@ -445,14 +449,15 @@ describe("SearchCommand", () => {
       expect(renderedValues()).not.toContain("hand-to-agent");
     });
 
-    it("drops New issue from a project's context commands", () => {
+    it("drops Change status and New issue from a project's context commands", () => {
       registerContext({
         kind: "project",
         project: { id: "proj-1", title: "Shared project", archived_at: null },
       } as CommandBarContext);
       renderSearch();
 
-      expect(renderedValues()).toContain("command:context-project:project-status");
+      expect(renderedValues()).toContain("command:context-project:project-copy-link");
+      expect(renderedValues()).not.toContain("command:context-project:project-status");
       expect(renderedValues()).not.toContain("command:context-project:project-new-issue");
     });
   });
@@ -477,6 +482,17 @@ describe("SearchCommand", () => {
         await user.type(input(), enLayout.nav[page.navKey]);
         await waitFor(() => expect(renderedValues()).toContain(`page:${key}`));
       }
+    });
+
+    it("leaves Apps out when the server has no connected apps", async () => {
+      composio.available = false;
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), enLayout.nav.apps);
+      await waitFor(() => expect(renderedValues()).not.toContain("page:apps"));
+      await user.clear(input());
+      await user.type(input(), enLayout.nav.skills);
+      await waitFor(() => expect(renderedValues()).toContain("page:skills"));
     });
 
     it("does not surface a page on an incidental substring of a hidden keyword", async () => {

@@ -79,6 +79,7 @@
     "toast_subscription_failed": "Échec de la mise à jour de l'abonnement",
     "sidebar_tooltip": "Afficher ou masquer la barre latérale droite",
     "rename_action": "Renommer le projet",
+    "guest_readonly_note": "Les invités peuvent consulter ce projet, mais pas modifier ses propriétés.",
     "copy_link": "Copier le lien",
     "copy_title_as_link": "Copier le lien avec le titre",
     "delete_action": "Supprimer le projet",

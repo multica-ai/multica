@@ -31,6 +31,8 @@ describe("paths.workspace(slug)", () => {
     );
     expect(ws.skills()).toBe("/acme/skills");
     expect(ws.skillDetail("skl_123")).toBe("/acme/skills/skl_123");
+    expect(ws.apps()).toBe("/acme/apps");
+    expect(ws.appDetail("google_calendar")).toBe("/acme/apps/google_calendar");
     expect(ws.squads()).toBe("/acme/squads");
     expect(ws.squadDetail("sq_1")).toBe("/acme/squads/sq_1");
     expect(ws.settings()).toBe("/acme/settings");

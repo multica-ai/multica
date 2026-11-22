@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
 import { prefetchIssuePage } from "@multica/core/issues/queries";
+import { useIsGuest } from "@multica/core/permissions";
 import type { InboxItem } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 
@@ -25,15 +26,17 @@ export function useInboxIssuePrefetch(
 ) {
   const qc = useQueryClient();
   const { prefetch: prefetchRoute } = useNavigation();
+  // A guest's issue page shows no runs, and the server refuses it them.
+  const guest = useIsGuest(wsId);
 
   const prefetchRow = useCallback(
     (item: InboxItem) => {
       if (!wsId || !item.issue_id) return Promise.resolve();
-      return prefetchIssuePage(qc, wsId, item.issue_id, item.issue_identifier).catch(() => {
+      return prefetchIssuePage(qc, wsId, item.issue_id, item.issue_identifier, { runs: !guest }).catch(() => {
         // A failed warm-up is the page's own first request again, retried there.
       });
     },
-    [qc, wsId],
+    [qc, wsId, guest],
   );
 
   const idleTargets = useMemo(() => {

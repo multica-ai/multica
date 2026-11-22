@@ -705,6 +705,88 @@ describe("ChatMessageList quick actions skeleton", () => {
   });
 });
 
+describe("ChatMessageList reply timing caption", () => {
+  // Built from local components so the caption is stable in any host timezone;
+  // the matcher tolerates the hour's leading zero differing between Node and
+  // browser Intl ("2:32 PM" vs "02:32 PM").
+  const now = new Date();
+  const todayAt = (h: number, m: number) =>
+    new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).toISOString();
+
+  it("appends the wall-clock time to the elapsed caption", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "timed-reply",
+              chat_session_id: "s1",
+              role: "assistant",
+              content: "Done.",
+              task_id: null,
+              created_at: todayAt(14, 32),
+              elapsed_ms: 38000,
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/Replied in 38s · 0?2:32 PM/)).toBeInTheDocument();
+  });
+
+  it("shows the time alone for legacy replies without elapsed_ms", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "legacy-reply",
+              chat_session_id: "s1",
+              role: "assistant",
+              content: "Done.",
+              task_id: null,
+              created_at: todayAt(14, 32),
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/2:32 PM/)).toBeInTheDocument();
+    expect(screen.queryByText(/Replied in/)).not.toBeInTheDocument();
+  });
+
+  it("timestamps failed replies", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "failed-reply",
+              chat_session_id: "s1",
+              role: "assistant",
+              content: "boom",
+              task_id: null,
+              created_at: todayAt(14, 32),
+              elapsed_ms: 12000,
+              failure_reason: "manual",
+            }]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/Failed after 12s · 0?2:32 PM/)).toBeInTheDocument();
+  });
+});
+
 describe("ChatMessageList onboarding kickoff", () => {
   it("hides the product-authored kickoff while rendering Mika's reply", async () => {
     render(

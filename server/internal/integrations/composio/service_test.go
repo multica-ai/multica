@@ -154,6 +154,7 @@ func (s *fakeStore) UpsertUserComposioConnection(_ context.Context, arg db.Upser
 	row := db.UserComposioConnection{
 		ID:                 mintUUID(s.nextID),
 		UserID:             arg.UserID,
+		WorkspaceID:        arg.WorkspaceID,
 		ToolkitSlug:        arg.ToolkitSlug,
 		AuthConfigID:       arg.AuthConfigID,
 		ConnectedAccountID: arg.ConnectedAccountID,
@@ -166,7 +167,17 @@ func (s *fakeStore) UpsertUserComposioConnection(_ context.Context, arg db.Upser
 	return row, nil
 }
 
-func (s *fakeStore) ListActiveUserComposioConnections(_ context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error) {
+func (s *fakeStore) ListActiveUserComposioConnections(_ context.Context, arg db.ListActiveUserComposioConnectionsParams) ([]db.UserComposioConnection, error) {
+	out := []db.UserComposioConnection{}
+	for _, r := range s.rows {
+		if uuidEqual(r.UserID, arg.UserID) && r.Status == "active" && (!r.WorkspaceID.Valid || uuidEqual(r.WorkspaceID, arg.WorkspaceID)) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ListAllActiveUserComposioConnections(_ context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error) {
 	out := []db.UserComposioConnection{}
 	for _, r := range s.rows {
 		if uuidEqual(r.UserID, userID) && r.Status == "active" {
@@ -707,7 +718,7 @@ func TestCallbackRedirect(t *testing.T) {
 	}
 	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion", WorkspaceID: "w"}, true); got != "https://multica.ai/settings?connected=notion&scope=team&tab=apps" {
 		t.Errorf("team redirect = %q", got)
-	}	// A plan refusal keeps the ordinary failure fields, so older pages still
+	} // A plan refusal keeps the ordinary failure fields, so older pages still
 	// report a failure, and adds the reason for pages that show the upgrade.
 	if got := svc.CallbackRedirectFailure(CallbackResult{ToolkitSlug: "notion", WorkspaceID: "w"}, CallbackFeatureLockedReason); got != "https://multica.ai/settings?error=composio_connect_failed&reason=feature_locked&scope=team&tab=apps" {
 		t.Errorf("refused team redirect = %q", got)

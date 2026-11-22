@@ -1814,6 +1814,7 @@ type RemoteAppConnection struct {
 	LastUsedAt    pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 }
 
 type RemoteAppOauthClient struct {
@@ -1904,6 +1905,7 @@ type Skill struct {
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	PluginInstallationID pgtype.UUID        `json:"plugin_installation_id"`
+	Revision             int64              `json:"revision"`
 }
 
 type SkillFile struct {
@@ -2143,6 +2145,7 @@ type UserComposioConnection struct {
 	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
 }
 
 type VcsCommitStatus struct {

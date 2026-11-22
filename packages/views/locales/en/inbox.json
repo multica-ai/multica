@@ -71,6 +71,7 @@
     "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}, or until the workspace upgrades or buys more runs.",
     "project_owner_joined_body": "{{name}} is a workspace owner and added themselves to this private project. They can now see its issues, comments, and attachments.",
     "open_project": "Open project",
+    "open_app": "Open app",
     "autopilot_quota_upgrade": "View options",
     "archive": "Archive",
     "unarchive": "Unarchive",

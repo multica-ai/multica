@@ -133,6 +133,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
   const role = members.find((m) => m.user_id === userId)?.role ?? null;
+  // A guest (MUL-9420) reads the project, follows it and pins it; it changes
+  // nothing about it.
+  const guest = role === "guest";
   const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
@@ -331,9 +334,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         onUpdate={handleUpdateField}
         onStatusChange={handleStatusChange}
         onOpenWorkflow={openWorkflowSheet}
+        readOnly={guest}
       />
       <ProjectInsights
         project={project}
+        readOnly={guest}
         onFilter={showFilteredIssues}
         onShowActivity={() => {
           setMobileSidebarOpen(false);
@@ -345,16 +350,18 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   const projectMenu = (
     <>
-      <DropdownMenuItem
-        onClick={() =>
-          useModalStore
-            .getState()
-            .open("project-rename", { projectId: project.id, title: project.title })
-        }
-      >
-        <Pencil className="h-3.5 w-3.5" />
-        {t(($) => $.detail.rename_action)}
-      </DropdownMenuItem>
+      {!guest && (
+        <DropdownMenuItem
+          onClick={() =>
+            useModalStore
+              .getState()
+              .open("project-rename", { projectId: project.id, title: project.title })
+          }
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          {t(($) => $.detail.rename_action)}
+        </DropdownMenuItem>
+      )}
       <DropdownMenuItem onClick={() => {
         void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
           if (ok) toast.success(t(($) => $.detail.toast_link_copied));
@@ -396,18 +403,22 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         {isSubscribed ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
         {isSubscribed ? t(($) => $.detail.unsubscribe_action) : t(($) => $.detail.subscribe_action)}
       </DropdownMenuItem>
-      <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
-      <DropdownMenuSeparator />
-      {archived ? (
-        <DropdownMenuItem onClick={() => restore(project)}>
-          <ArchiveRestore className="h-3.5 w-3.5" />
-          {t(($) => $.detail.restore_action)}
-        </DropdownMenuItem>
-      ) : (
-        <DropdownMenuItem onClick={() => requestArchive([project])}>
-          <Archive className="h-3.5 w-3.5" />
-          {t(($) => $.detail.archive_action)}
-        </DropdownMenuItem>
+      {!guest && (
+        <>
+          <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
+          <DropdownMenuSeparator />
+          {archived ? (
+            <DropdownMenuItem onClick={() => restore(project)}>
+              <ArchiveRestore className="h-3.5 w-3.5" />
+              {t(($) => $.detail.restore_action)}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={() => requestArchive([project])}>
+              <Archive className="h-3.5 w-3.5" />
+              {t(($) => $.detail.archive_action)}
+            </DropdownMenuItem>
+          )}
+        </>
       )}
       {canDelete && (
         <DropdownMenuItem
@@ -469,11 +480,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               />
               {archived && (
                 <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
-                  <ArchivedProjectNotice project={project} />
+                  <ArchivedProjectNotice project={project} readOnly={guest} />
                 </div>
               )}
               {tab === "overview" ? (
-                <ProjectOverviewBody project={project} onUpdate={handleUpdateField} />
+                <ProjectOverviewBody project={project} onUpdate={handleUpdateField} readOnly={guest} />
               ) : (
                 <ProjectActivityPage projectId={project.id} />
               )}
@@ -496,7 +507,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   />
                   {archived && (
                     <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
-                      <ArchivedProjectNotice project={project} />
+                      <ArchivedProjectNotice project={project} readOnly={guest} />
                     </div>
                   )}
                 </>

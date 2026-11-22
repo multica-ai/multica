@@ -113,6 +113,8 @@ function workspaceScoped(slug: string) {
     docFolder: (id: string) => `${ws}/docs/folders/${encode(id)}`,
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
+    apps: () => `${ws}/apps`,
+    appDetail: (toolkitSlug: string) => `${ws}/apps/${encode(toolkitSlug)}`,
     settings: () => `${ws}/settings`,
     attachmentPreview: (id: string) => `${ws}/attachments/${encode(id)}/preview`,
   };

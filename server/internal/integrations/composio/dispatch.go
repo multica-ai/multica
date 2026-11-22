@@ -100,7 +100,9 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	// Resolve the OWNER's active connections and intersect with the allowlist.
 	// The intersection is the canonical input both for filtering the Composio
 	// CreateSession call AND for the early bail-out below.
-	rows, err := s.store.ListActiveUserComposioConnections(ctx, ownerUserID)
+	rows, err := s.store.ListActiveUserComposioConnections(ctx, db.ListActiveUserComposioConnectionsParams{
+		UserID: ownerUserID, WorkspaceID: agent.WorkspaceID,
+	})
 	if err != nil {
 		return runtimeapps.MCPOverlayResult{}, fmt.Errorf("composio: build task overlay: list connections: %w", err)
 	}

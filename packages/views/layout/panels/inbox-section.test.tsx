@@ -44,6 +44,10 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
 });
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/inbox/queries")>()),
   useInboxUnreadCount: () => state.unread,

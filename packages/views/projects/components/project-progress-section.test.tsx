@@ -108,6 +108,18 @@ describe("ProjectProgressSection", () => {
     expect(screen.queryByRole("button", { name: "New issue" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add existing issue" })).not.toBeInTheDocument();
   });
+
+  it("offers a guest no way to add issues to an empty project", () => {
+    getProjectProgressMock.mockReturnValue(new Promise(() => {}));
+    const empty = { ...detail.progress, scope: 0, completed: 0, started: 0, unstarted: 0, cancelled: 0, percent: 0 };
+    renderWithQueries(
+      <ProjectProgressSection project={{ ...baseProject, issue_count: 0, done_count: 0, progress: empty }} readOnly />,
+    );
+
+    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New issue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add existing issue" })).not.toBeInTheDocument();
+  });
 });
 
 describe("ProjectBreakdown", () => {

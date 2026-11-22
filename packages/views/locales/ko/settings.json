@@ -595,7 +595,6 @@
       "billing": "결제 및 요금제",
       "code": "코드",
       "channels": "메신저",
-      "apps": "연결된 앱",
       "workflows": "워크플로",
       "voice_input": "음성 입력"
     },
@@ -1743,6 +1742,7 @@
   "layout": {
     "scope": {
       "account": "계정 · 모든 기기에 동기화",
+      "all_workspaces": "내 모든 워크스페이스",
       "device": "이 기기에만",
       "device_workspace": "이 기기에만 · {{name}}",
       "workspace": "{{name}} 워크스페이스",
@@ -1832,21 +1832,8 @@
     "authorization_expired": "WeChat 인증이 만료되었습니다. 다시 스캔하여 연결하세요."
   },
   "connected_apps": {
-    "description": "에이전트가 외부 앱을 사용할 때 쓰는 계정입니다. 허용된 작업은 즉시 실행됩니다.",
     "loading": "앱을 불러오는 중…",
     "load_failed": "앱을 불러오지 못했습니다.",
-    "team_title": "팀 계정",
-    "team_description": "고객 지원 메일함이나 회사 GitHub처럼 워크스페이스가 소유한 공유 계정입니다. 관리자가 연결하며, 팀 계정을 받은 에이전트는 그 계정으로 작업합니다.",
-    "team_empty": "아직 팀 계정이 없습니다.",
-    "team_empty_member": "아직 팀 계정이 없습니다. 워크스페이스 관리자에게 연결을 요청하세요.",
-    "personal_title": "내 계정",
-    "personal_description": "내 계정입니다. 내가 실행을 시작하면 '실행한 사람의 계정'으로 설정된 앱이 이 계정을 사용합니다.",
-    "personal_empty": "아직 연결한 계정이 없습니다.",
-    "connected_by": "{{name}} 님이 연결",
-    "last_used": "마지막 사용 {{when}}",
-    "last_used_never": "사용한 적 없음",
-    "used_by_other": "에이전트 {{count}}개가 사용 중",
-    "expired": "다시 연결 필요",
     "reconnect": "다시 연결",
     "rules": "규칙",
     "activity": "활동",
@@ -1862,35 +1849,7 @@
     "toast_disconnected": "연결이 해제되었습니다",
     "toast_failed": "문제가 발생했습니다. 다시 시도하세요.",
     "add": {
-      "search": "앱 검색…",
-      "empty": "일치하는 앱이 없습니다.",
-      "curated": "엄선",
-      "recommended_team": "보통 팀 계정",
-      "recommended_personal": "보통 개인 계정",
-      "connect_team": "팀 계정 연결",
-      "connect_personal": "내 계정 연결",
-      "connecting": "연결 중…",
-      "connected": "연결됨",
-      "connect": "연결",
-      "team_description": "워크스페이스 공용 계정을 연결합니다. 사용할 에이전트는 각 에이전트의 앱 페이지에서 설정합니다.",
-      "personal_description": "실행을 시작할 때 직접 연결한 계정을 사용합니다."
-    },
-    "disconnect_team": {
-      "title": "팀 {{app}} 계정 연결을 해제할까요?",
-      "description": "팀 계정을 쓰는 에이전트는 즉시 접근 권한을 잃습니다.",
-      "agents": "사용 중인 에이전트",
-      "no_agents": "사용 중인 에이전트가 없습니다.",
-      "active_tasks": "진행 중인 실행: {{count}}",
-      "active_autopilots": "활성 오토파일럿: {{count}}",
-      "pending": "취소될 확인 요청: {{count}}",
-      "cancel": "취소",
-      "confirm": "연결 해제"
-    },
-    "disconnect_personal": {
-      "title": "내 {{app}} 계정 연결을 해제할까요?",
-      "description": "내가 시작한 실행에서 더 이상 사용할 수 없습니다. 나중에 다시 연결할 수 있습니다.",
-      "cancel": "취소",
-      "confirm": "연결 해제"
+      "empty": "일치하는 앱이 없습니다."
     },
     "detail": {
       "team_title": "{{app}} · 팀 계정",
@@ -1941,6 +1900,36 @@
       "team": "팀 계정",
       "personal": "실행 시작자의 계정"
     },
+    "status": {
+      "connected": "연결됨",
+      "not_connected": "연결 안 됨",
+      "needs_reconnecting": "다시 연결 필요",
+      "requested": "요청됨"
+    },
+    "owner": {
+      "team": "팀 계정",
+      "personal": "내 계정"
+    },
+    "account_row": {
+      "admins_notified": "관리자에게 알림",
+      "withdraw": "철회",
+      "decline": "거절",
+      "toast_declined": "요청을 거절했습니다. 기다리던 에이전트는 이 계정 없이 계속합니다.",
+      "toast_withdrawn": "요청을 철회했습니다"
+    },
+    "disclosure": {
+      "title": "{{app}} 연결",
+      "personal_subtitle": "내 계정입니다. 다음 화면에서 앱에 로그인합니다.",
+      "team_subtitle": "워크스페이스 전체가 공유하는 팀 계정입니다. 다음 화면에서 앱에 로그인합니다.",
+      "without_asking": "에이전트가 매번 묻지 않고 할 수 있는 작업",
+      "logged": "에이전트의 모든 호출은 해당 태스크나 채팅에 기록됩니다.",
+      "used_by": "{{agents}}이(가) {{app}}을(를) 사용하며 이 계정으로 작업합니다.",
+      "used_by_none": "아직 이 앱을 사용하는 에이전트가 없습니다. 에이전트 페이지에서 추가하세요.",
+      "visibility_personal": "내가 시작한 실행에서만 사용됩니다. 내 다른 워크스페이스에서도 사용할 수 있습니다.",
+      "visibility_team": "팀 계정을 부여받은 에이전트는 누가 실행을 시작하든 이 계정으로 작업합니다.",
+      "cancel": "취소",
+      "continue": "계속"
+    },
     "levels": {
       "read": "읽기 전용",
       "confirm_writes": "쓰기 전 확인",
@@ -1976,7 +1965,13 @@
       "connected_resumed": "{{app}} 연결됨. 에이전트가 멈춘 곳부터 이어서 진행합니다.",
       "rate_limited": "이 계정이 분당 호출 한도에 도달했습니다. 1분 후에 다시 승인하세요.",
       "rate_limited_some_other": "요청 {{count}}개가 분당 한도에 걸렸습니다. 1분 후에 다시 승인하세요.",
-      "withdrawn": "이 에이전트를 더 이상 사용할 수 없어 요청이 철회되었습니다."
+      "withdrawn": "이 에이전트를 더 이상 사용할 수 없어 요청이 철회되었습니다.",
+      "title_connect_team": "{{agent}}에 {{app}} 계정이 필요합니다",
+      "title_member_ask": "{{name}} 님이 {{app}} 팀 계정을 요청했습니다",
+      "waiting_for_admin": "관리자를 기다리는 중",
+      "team_note": "팀 계정으로 동작하는 모든 에이전트가 사용할 수 있습니다.",
+      "admins_notified": "워크스페이스 관리자에게 받은 편지함으로 알렸습니다.",
+      "connect_team": "팀용으로 연결"
     },
     "tools": {
       "tab": "도구",
@@ -2010,6 +2005,92 @@
       "cancel": "취소",
       "admin_required": "워크스페이스 관리자가 제한을 해제할 수 있습니다.",
       "account_link": "이 계정에 저장된 작업 제한이 있습니다. 연결된 앱에서 해제하세요."
+    },
+    "hub": {
+      "description": "{{workspace}}의 에이전트가 사용할 수 있는 모든 앱과 각 앱에서 사용하는 계정입니다.",
+      "tabs": {
+        "in_use": "사용 중",
+        "attention": "확인 필요",
+        "accounts": "계정",
+        "all": "모든 앱"
+      },
+      "search": "앱 검색",
+      "popular": "{{workspace}}에서 인기",
+      "scope_team": "팀 계정",
+      "scope_personal": "개인 계정",
+      "scope_both": "팀 계정 및 개인 계정",
+      "used_by": "{{agents}} 사용 중",
+      "wanted_by": "{{agents}}이(가) 사용 희망",
+      "members_asked_other": "멤버 {{count}}명이 요청함",
+      "connect": "연결",
+      "reconnect": "다시 연결",
+      "ask_admin": "관리자에게 요청",
+      "toast_requested": "워크스페이스 관리자에게 {{app}} 연결을 요청했습니다.",
+      "empty_in_use": "아직 사용 중인 앱이 없습니다. 앱을 설정하면 에이전트가 사용할 수 있습니다.",
+      "empty_attention": "확인할 항목이 없습니다.",
+      "no_matches": "검색과 일치하는 앱이 없습니다.",
+      "unavailable": "이 서버에서는 앱을 사용할 수 없습니다.",
+      "retry": "다시 시도"
+    },
+    "app_page": {
+      "agents_title": "에이전트",
+      "agents_empty": "이 워크스페이스에 아직 에이전트가 없습니다.",
+      "source_label": "{{agent}}이(가) {{app}}에 사용하는 계정",
+      "source_team": "팀 계정",
+      "source_personal": "실행을 시작한 사람",
+      "not_using": "{{app}} 사용 안 함",
+      "enable": "{{agent}}이(가) {{app}}을(를) 사용하도록 허용",
+      "team_admin_only": "팀 계정 접근 권한은 워크스페이스 관리자만 변경할 수 있습니다.",
+      "save_failed": "에이전트를 업데이트하지 못했습니다.",
+      "activity_title": "최근 활동",
+      "activity_empty": "아직 {{app}}을(를) 사용한 에이전트가 없습니다.",
+      "as_team": "팀 계정으로",
+      "as_you": "내 계정으로",
+      "in_chat": "채팅",
+      "accounts_title": "계정",
+      "account_actions": "{{account}} 작업",
+      "capabilities_title": "에이전트가 할 수 있는 작업",
+      "capabilities_note": "매번 묻지 않고 실행합니다.",
+      "accounts_description": "{{workspace}}에서 에이전트가 사용할 수 있는 {{app}} 계정입니다.",
+      "team_account_hint": "{{workspace}} 전체가 공유 · 관리자가 연결",
+      "your_account_hint": "내가 시작한 실행에서만 사용",
+      "agents_description": "에이전트마다 어떤 계정으로 동작할지 고릅니다.",
+      "ready_team": "팀 계정으로 사용 가능",
+      "needs_team": "팀 계정 필요",
+      "ready_yours": "내 계정으로 사용 가능",
+      "needs_yours": "내 계정 필요"
+    },
+    "accounts_page": {
+      "empty": "이 워크스페이스에서 연결한 계정이 없습니다.",
+      "used_by": "{{agents}} 사용 중",
+      "team_title": "팀 계정",
+      "team_description_admin": "워크스페이스 전체가 공유합니다. 관리자만 연결할 수 있습니다.",
+      "team_description_member": "관리자가 연결합니다. 확인하고 요청할 수 있습니다.",
+      "team_empty": "아직 팀 계정이 없습니다.",
+      "yours_title": "내 계정",
+      "yours_description": "나만 사용할 수 있으며, 에이전트는 내가 시작한 실행에서 사용합니다.",
+      "needed_by": "{{agents}}에 필요"
+    },
+    "disconnect_dialog": {
+      "title": "{{app}} 연결을 해제할까요?",
+      "team_body": "이 에이전트들은 이 계정으로 동작합니다. 다음 {{app}} 작업에서는 일하는 대신 관리자에게 요청합니다.",
+      "personal_body": "이 에이전트들은 내가 시작한 실행에서 이 계정을 씁니다. 다음에 실행을 시작하면 다시 연결하라고 요청합니다.",
+      "agents": "사용 중인 에이전트",
+      "no_agents": "사용 중인 에이전트가 없습니다.",
+      "running": "실행 중 — 중지됩니다",
+      "active_runs_other": "진행 중인 실행 {{count}}개가 지금 중지됩니다.",
+      "impact_failed": "사용 중인 에이전트를 확인하지 못했습니다.",
+      "cancel": "취소",
+      "confirm": "연결 해제"
+    },
+    "team_requests": {
+      "title": "{{app}} 팀 계정이 필요합니다",
+      "run_waiting": "실행 대기 중",
+      "asked": "요청함",
+      "summary": " · “{{summary}}”",
+      "resumes": "한 번 연결하면 여기 있는 모든 요청이 해결되고, 대기 중인 실행은 멈춘 곳에서 이어집니다.",
+      "decline_all": "모두 거절",
+      "open_app": "앱 열기"
     }
   },
   "voice_input": {

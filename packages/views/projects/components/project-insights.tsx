@@ -17,17 +17,19 @@ export function ProjectInsights({
   project,
   onFilter,
   onShowActivity,
+  readOnly = false,
 }: {
   project: Project;
   onFilter: (filter: BreakdownFilter) => void;
   onShowActivity: () => void;
+  readOnly?: boolean;
 }) {
   const { t } = useT("projects");
 
   return (
     <div className="space-y-5" data-testid="project-insights">
       <ObjectPanelSection title={t(($) => $.detail.section_progress)}>
-        <ProjectProgressSection project={project} />
+        <ProjectProgressSection project={project} readOnly={readOnly} />
       </ObjectPanelSection>
 
       {getProjectProgress(project).scope > 0 && (

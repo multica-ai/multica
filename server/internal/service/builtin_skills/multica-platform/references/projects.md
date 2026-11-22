@@ -41,6 +41,10 @@ quick-create task) is bound to a project, the project description is injected
 into the agent's brief under `## Project Context` and written to
 `.multica/project/resources.json` as `project_description`. Use it for
 project-wide rules/context that should apply to every task in the project.
+Point at docs, issues and projects with mention links
+(`[Doc Title](mention://doc/<doc-id>)`, `[MUL-123](mention://issue/<uuid>)`),
+not bare IDs: the project page renders them as links, and agents read the same
+ID out of the link.
 
 Common resource types:
 

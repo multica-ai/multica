@@ -79,6 +79,7 @@
     "toast_subscription_failed": "구독을 업데이트하지 못했습니다",
     "sidebar_tooltip": "오른쪽 사이드바 열기/닫기",
     "rename_action": "프로젝트 이름 변경",
+    "guest_readonly_note": "게스트는 이 프로젝트를 볼 수 있지만 속성은 바꿀 수 없습니다.",
     "copy_link": "링크 복사",
     "copy_title_as_link": "제목이 포함된 링크 복사",
     "delete_action": "프로젝트 삭제",

@@ -23,18 +23,27 @@ func (q *Queries) DeleteRemoteAppOAuthClient(ctx context.Context, id pgtype.UUID
 }
 
 const getActiveRemoteAppConnection = `-- name: GetActiveRemoteAppConnection :one
-SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at FROM remote_app_connection
+SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at, workspace_id FROM remote_app_connection
 WHERE app_slug = $1 AND scope = $2 AND owner_id = $3 AND status = 'active'
+  AND (workspace_id = $4::uuid OR workspace_id IS NULL)
+ORDER BY (workspace_id IS NULL)
+LIMIT 1
 `
 
 type GetActiveRemoteAppConnectionParams struct {
-	AppSlug string      `json:"app_slug"`
-	Scope   string      `json:"scope"`
-	OwnerID pgtype.UUID `json:"owner_id"`
+	AppSlug     string      `json:"app_slug"`
+	Scope       string      `json:"scope"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
 func (q *Queries) GetActiveRemoteAppConnection(ctx context.Context, arg GetActiveRemoteAppConnectionParams) (RemoteAppConnection, error) {
-	row := q.db.QueryRow(ctx, getActiveRemoteAppConnection, arg.AppSlug, arg.Scope, arg.OwnerID)
+	row := q.db.QueryRow(ctx, getActiveRemoteAppConnection,
+		arg.AppSlug,
+		arg.Scope,
+		arg.OwnerID,
+		arg.WorkspaceID,
+	)
 	var i RemoteAppConnection
 	err := row.Scan(
 		&i.ID,
@@ -51,12 +60,13 @@ func (q *Queries) GetActiveRemoteAppConnection(ctx context.Context, arg GetActiv
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }
 
 const getRemoteAppConnection = `-- name: GetRemoteAppConnection :one
-SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at FROM remote_app_connection
+SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at, workspace_id FROM remote_app_connection
 WHERE id = $1
 `
 
@@ -78,12 +88,13 @@ func (q *Queries) GetRemoteAppConnection(ctx context.Context, id pgtype.UUID) (R
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }
 
 const getRemoteAppConnectionForOwner = `-- name: GetRemoteAppConnectionForOwner :one
-SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at FROM remote_app_connection
+SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at, workspace_id FROM remote_app_connection
 WHERE id = $1 AND scope = $2 AND owner_id = $3
 `
 
@@ -112,6 +123,7 @@ func (q *Queries) GetRemoteAppConnectionForOwner(ctx context.Context, arg GetRem
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }
@@ -223,19 +235,23 @@ func (q *Queries) InsertRemoteAppOAuthClient(ctx context.Context, arg InsertRemo
 }
 
 const listRemoteAppConnectionsForOwner = `-- name: ListRemoteAppConnectionsForOwner :many
-SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at FROM remote_app_connection
+SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at, workspace_id FROM remote_app_connection
 WHERE scope = $1 AND owner_id = $2 AND status <> 'revoked'
-ORDER BY connected_at DESC
+  AND (workspace_id = $3::uuid OR workspace_id IS NULL)
+ORDER BY (workspace_id IS NULL), connected_at DESC
 `
 
 type ListRemoteAppConnectionsForOwnerParams struct {
-	Scope   string      `json:"scope"`
-	OwnerID pgtype.UUID `json:"owner_id"`
+	Scope       string      `json:"scope"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Every account the owner still sees: active and expired, not disconnected.
+// Every account the owner still sees in one workspace: active and expired,
+// not disconnected. Accounts made before they belonged to a workspace count
+// in every workspace.
 func (q *Queries) ListRemoteAppConnectionsForOwner(ctx context.Context, arg ListRemoteAppConnectionsForOwnerParams) ([]RemoteAppConnection, error) {
-	rows, err := q.db.Query(ctx, listRemoteAppConnectionsForOwner, arg.Scope, arg.OwnerID)
+	rows, err := q.db.Query(ctx, listRemoteAppConnectionsForOwner, arg.Scope, arg.OwnerID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +274,7 @@ func (q *Queries) ListRemoteAppConnectionsForOwner(ctx context.Context, arg List
 			&i.LastUsedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.WorkspaceID,
 		); err != nil {
 			return nil, err
 		}
@@ -270,7 +287,7 @@ func (q *Queries) ListRemoteAppConnectionsForOwner(ctx context.Context, arg List
 }
 
 const lockRemoteAppConnection = `-- name: LockRemoteAppConnection :one
-SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at FROM remote_app_connection
+SELECT id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at, workspace_id FROM remote_app_connection
 WHERE id = $1
 FOR UPDATE
 `
@@ -295,6 +312,7 @@ func (q *Queries) LockRemoteAppConnection(ctx context.Context, id pgtype.UUID) (
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }
@@ -358,11 +376,11 @@ const upsertRemoteAppConnection = `-- name: UpsertRemoteAppConnection :one
 
 INSERT INTO remote_app_connection (
     app_slug, scope, owner_id, connected_by, oauth_client_id,
-    access_token, refresh_token, expires_at, status
+    access_token, refresh_token, expires_at, status, workspace_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, 'active'
+    $1, $2, $3, $4, $5, $6, $7, $8, 'active', $9
 )
-ON CONFLICT (scope, owner_id, app_slug) DO UPDATE SET
+ON CONFLICT (scope, owner_id, app_slug, workspace_id) DO UPDATE SET
     connected_by    = EXCLUDED.connected_by,
     oauth_client_id = EXCLUDED.oauth_client_id,
     access_token    = EXCLUDED.access_token,
@@ -371,7 +389,7 @@ ON CONFLICT (scope, owner_id, app_slug) DO UPDATE SET
     status          = 'active',
     connected_at    = now(),
     updated_at      = now()
-RETURNING id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at
+RETURNING id, app_slug, scope, owner_id, connected_by, oauth_client_id, access_token, refresh_token, expires_at, status, connected_at, last_used_at, created_at, updated_at, workspace_id
 `
 
 type UpsertRemoteAppConnectionParams struct {
@@ -383,6 +401,7 @@ type UpsertRemoteAppConnectionParams struct {
 	AccessToken   []byte             `json:"access_token"`
 	RefreshToken  []byte             `json:"refresh_token"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 }
 
 // =====================
@@ -398,6 +417,7 @@ func (q *Queries) UpsertRemoteAppConnection(ctx context.Context, arg UpsertRemot
 		arg.AccessToken,
 		arg.RefreshToken,
 		arg.ExpiresAt,
+		arg.WorkspaceID,
 	)
 	var i RemoteAppConnection
 	err := row.Scan(
@@ -415,6 +435,7 @@ func (q *Queries) UpsertRemoteAppConnection(ctx context.Context, arg UpsertRemot
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }

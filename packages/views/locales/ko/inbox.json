@@ -69,6 +69,7 @@
     "autopilot_quota_exceeded_body": "이 워크스페이스는 현재 기간의 오토파일럿 실행 한도 {{limit}}회에 도달했습니다. 한도가 {{resetAt}}에 초기화되거나 업그레이드 또는 실행 횟수를 추가 구매할 때까지 이후 오토파일럿 실행은 시작되지 않습니다.",
     "project_owner_joined_body": "{{name}} 님은 워크스페이스 소유자이며 이 비공개 프로젝트에 자신을 추가했습니다. 이제 태스크, 댓글, 첨부 파일을 볼 수 있습니다.",
     "open_project": "프로젝트 열기",
+    "open_app": "앱 열기",
     "autopilot_quota_upgrade": "옵션 보기",
     "archive": "보관",
     "unarchive": "보관 해제",
