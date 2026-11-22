@@ -23,6 +23,10 @@ var issueMoveFields = map[string]struct{}{
 	"before_id":         {},
 	"after_id":          {},
 	"expected_revision": {},
+	// UI source admission applies to moves that start a run too. Pass these
+	// request-only controls to UpdateIssue, which owns validation and consent.
+	"source_decision":  {},
+	"source_decisions": {},
 	// A drag onto a workflow handoff step can stop the previous agent's run,
 	// exactly as the same status change through UpdateIssue can. (MUL-7420)
 	"stop_previous_assignee_runs": {},

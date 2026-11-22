@@ -159,6 +159,8 @@ export interface MoveIssueRequest
     | "parent_issue_id"
     | "project_id"
     | "stop_previous_assignee_runs"
+    | "source_decision"
+    | "source_decisions"
   > {
   before_id: string | null;
   after_id: string | null;
