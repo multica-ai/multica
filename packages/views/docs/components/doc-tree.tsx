@@ -12,6 +12,8 @@ import {
   Trash2,
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -53,6 +55,15 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import type { DocSummary, DocFolder } from "@multica/core/types";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import {
+  PANEL_ROW_CLASS,
+  PanelBody,
+  PanelHeader,
+  PanelList,
+  panelRowAnchor,
+  panelRowStateClass,
+} from "../../layout/panel-nav";
+import { TREE_ROW_BUTTON_CLASS } from "../../layout/panels/sidebar-tree";
 import { MoveDialog, type MoveTarget } from "./move-dialog";
 import { useCanDeleteDoc } from "./use-can-delete-doc";
 import { usePrefetchDoc, useWarmDocPage } from "./use-prefetch-doc";
@@ -60,6 +71,12 @@ import { usePrefetchDoc, useWarmDocPage } from "./use-prefetch-doc";
 type Item =
   | { kind: "doc"; item: DocSummary }
   | { kind: "folder"; item: DocFolder };
+
+/** A row's actions show on hover or focus, as on the other panels' rows. */
+const ROW_ACTION_CLASS = cn(
+  TREE_ROW_BUTTON_CLASS,
+  "text-muted-foreground opacity-0 group-hover/row:opacity-100 data-popup-open:bg-surface-selected data-popup-open:text-foreground data-popup-open:opacity-100 disabled:pointer-events-none [@media(pointer:coarse)]:opacity-100",
+);
 
 /** Folders a folder cannot move into: itself and everything beneath it. */
 export function folderAndDescendants(
@@ -304,10 +321,10 @@ export function DocTree() {
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button
-            variant="ghost"
-            size="icon-xs"
+          <button
+            type="button"
             aria-label={t(($) => $.tree.more, { title: target.item.title })}
+            className={ROW_ACTION_CLASS}
           />
         }
       >
@@ -356,11 +373,15 @@ export function DocTree() {
       </DropdownMenuContent>
     </DropdownMenu>
   );
+  // Nested rows hang off a connector on the folder icon's centre line
+  // (`ml-5`), with their icons on the folder's label column: 1px border + 5px
+  // + the row's 12px padding reaches the folder row's 12px + 16px icon + 10px
+  // gap.
   const branch = (
     parent: string | null,
     ancestors: Set<string>,
   ): React.ReactNode => (
-    <ul className="space-y-0.5">
+    <PanelList>
       {tree.data?.folders
         .filter((f) => f.parentId === parent && !ancestors.has(f.id))
         .map((folder) => (
@@ -369,18 +390,22 @@ export function DocTree() {
               <summary
                 {...dragProps({ kind: "folder", item: folder })}
                 {...dropProps(folder.id)}
-                className={`group flex cursor-pointer items-center gap-1 rounded-md px-1 py-1 text-body hover:bg-surface-hover ${dropTarget === folder.id ? "bg-surface-hover ring-1 ring-ring" : ""}`}
+                className={cn(
+                  PANEL_ROW_CLASS,
+                  panelRowStateClass(false),
+                  "group/row cursor-pointer",
+                  dropTarget === folder.id && "bg-nav-item-hover ring-1 ring-ring",
+                )}
               >
-                <Folder className="size-4 shrink-0 text-muted-foreground" />
+                <Folder className="size-4 shrink-0" />
                 <TruncatedTooltip content={folder.title} side="right">
                   <span className="min-w-0 flex-1 truncate">{folder.title}</span>
                 </TruncatedTooltip>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
+                <button
+                  type="button"
                   aria-label={t(($) => $.tree.new_doc_in, { title: folder.title })}
                   title={t(($) => $.actions.new_doc)}
-                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                  className={ROW_ACTION_CLASS}
                   disabled={createDoc.isPending}
                   onClick={(event) => {
                     // Inside <summary>: a click would also fold the folder.
@@ -389,10 +414,13 @@ export function DocTree() {
                   }}
                 >
                   <Plus className="size-3.5" />
-                </Button>
+                </button>
                 {menu({ kind: "folder", item: folder })}
               </summary>
-              <div className="ml-3 border-l pl-2" {...dropProps(folder.id)}>
+              <div
+                className="ml-5 border-l border-surface-border pl-[5px]"
+                {...dropProps(folder.id)}
+              >
                 {branch(folder.id, new Set([...ancestors, folder.id]))}
               </div>
             </details>
@@ -400,47 +428,65 @@ export function DocTree() {
         ))}
       {tree.data?.docs
         .filter((d) => d.folderId === parent)
-        .map((doc) => (
-          <li
-            key={doc.id}
-            {...dragProps({ kind: "doc", item: doc })}
-            {...dropProps(doc.folderId)}
-            className={`flex items-center gap-1 rounded-md px-1 py-1 text-body ${pathname === p.docDetail(doc.id) ? "bg-surface-selected text-surface-selected-foreground" : "hover:bg-surface-hover"}`}
-          >
-            <FileText className="size-4 shrink-0 text-muted-foreground" />
-            <TruncatedTooltip content={doc.title || t(($) => $.untitled)} side="right">
-              <AppLink
-                href={p.docDetail(doc.id)}
-                {...prefetchDoc(doc.id)}
-                className="min-w-0 flex-1 truncate"
-              >
-                {doc.title || t(($) => $.untitled)}
-              </AppLink>
-            </TruncatedTooltip>
-            {menu({ kind: "doc", item: doc })}
-          </li>
-        ))}
-    </ul>
+        .map((doc) => {
+          const active = pathname === p.docDetail(doc.id);
+          const title = doc.title || t(($) => $.untitled);
+          return (
+            <li
+              key={doc.id}
+              {...dragProps({ kind: "doc", item: doc })}
+              {...dropProps(doc.folderId)}
+              {...panelRowAnchor(active)}
+              className={cn(
+                PANEL_ROW_CLASS,
+                panelRowStateClass(active),
+                "group/row relative",
+              )}
+            >
+              <FileText className="size-4 shrink-0" />
+              <TruncatedTooltip content={title} side="right">
+                {/* Stretched over the row, under its actions, so the whole
+                    row opens the doc. */}
+                <AppLink
+                  href={p.docDetail(doc.id)}
+                  aria-current={active ? "page" : undefined}
+                  {...prefetchDoc(doc.id)}
+                  className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 after:rounded-nav-item focus-visible:after:outline-2 focus-visible:after:outline-ring"
+                >
+                  {title}
+                </AppLink>
+              </TruncatedTooltip>
+              {menu({ kind: "doc", item: doc })}
+            </li>
+          );
+        })}
+    </PanelList>
   );
   return (
     <>
-      <div className="flex h-12 shrink-0 items-center justify-between px-3">
-        <AppLink href={p.docs()} className="text-body font-medium">
-          {t(($) => $.kb)}
-        </AppLink>
+      <PanelHeader
+        title={
+          <AppLink
+            href={p.docs()}
+            className="min-w-0 truncate rounded-md outline-none focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {t(($) => $.kb)}
+          </AppLink>
+        }
+      >
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t(($) => $.actions.new)}
-              />
+              <IconButton
+                label={t(($) => $.actions.new)}
+                tooltipSide="bottom"
+                className="text-muted-foreground"
+              >
+                <Plus />
+              </IconButton>
             }
-          >
-            <Plus className="size-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
+          />
+          <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => void newDoc(null)}>
               {t(($) => $.actions.new_doc)}
             </DropdownMenuItem>
@@ -449,28 +495,34 @@ export function DocTree() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
-      <div
-        {...dropProps(null)}
-        className={`min-h-0 flex-1 overflow-auto px-2 pb-3 ${dropTarget === null ? "bg-surface-hover/50" : ""}`}
-      >
-        {tree.isError ? (
-          <Button variant="ghost" onClick={() => void tree.refetch()}>
-            {t(($) => $.editor.retry)}
-          </Button>
-        ) : tree.isPending ? (
-          <span className="text-caption text-muted-foreground">
-            {t(($) => $.history.loading)}
-          </span>
-        ) : (
-          branch(null, new Set())
-        )}
-        {tree.data && !tree.data.docs.length && !tree.data.folders.length && (
-          <p className="p-2 text-caption text-muted-foreground">
-            {t(($) => $.tree.empty)}
-          </p>
-        )}
-      </div>
+      </PanelHeader>
+      <PanelBody>
+        {/* The blank space under the tree is the top-level drop zone. */}
+        <div
+          {...dropProps(null)}
+          className={cn(
+            "min-h-full rounded-nav-item",
+            dropTarget === null && "bg-nav-item-hover/50",
+          )}
+        >
+          {tree.isError ? (
+            <Button variant="ghost" onClick={() => void tree.refetch()}>
+              {t(($) => $.editor.retry)}
+            </Button>
+          ) : tree.isPending ? (
+            <p className="px-3 py-1.5 text-caption text-muted-foreground">
+              {t(($) => $.history.loading)}
+            </p>
+          ) : (
+            branch(null, new Set())
+          )}
+          {tree.data && !tree.data.docs.length && !tree.data.folders.length && (
+            <p className="px-3 py-1.5 text-caption text-muted-foreground">
+              {t(($) => $.tree.empty)}
+            </p>
+          )}
+        </div>
+      </PanelBody>
       <Dialog
         open={!!form}
         onOpenChange={(open) => {

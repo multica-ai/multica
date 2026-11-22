@@ -4,7 +4,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   type ReactNode,
 } from "react";
 
@@ -222,19 +224,37 @@ function restoreOffsets(
  */
 export function useRestoredScrollRef(
   containerKey: string,
+  options?: {
+    /** Skip applying the saved pixel offset while keeping unmount capture active
+     *  (e.g. when semantic anchor restoration or a deep-link landing owns scroll). */
+    disabled?: boolean;
+  },
 ): (el: HTMLElement | null) => void {
   const adapter = useContext(ScrollRestorationContext);
+  const disabled = options?.disabled ?? false;
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
+  const cancelRestoreRef = useRef<(() => void) | undefined>(undefined);
+
+  useEffect(() => {
+    if (disabled) {
+      cancelRestoreRef.current?.();
+      cancelRestoreRef.current = undefined;
+    }
+  }, [disabled]);
+
   return useMemo(() => {
     let capture: (() => void) | undefined;
-    let cancelRestore: (() => void) | undefined;
     return (el: HTMLElement | null) => {
-      cancelRestore?.();
-      cancelRestore = undefined;
+      cancelRestoreRef.current?.();
+      cancelRestoreRef.current = undefined;
       capture?.();
       capture = undefined;
       if (!el) return;
-      const saved = adapter?.get(containerKey);
-      if (saved) cancelRestore = restoreOffsets(el, saved);
+      if (!disabledRef.current) {
+        const saved = adapter?.get(containerKey);
+        if (saved) cancelRestoreRef.current = restoreOffsets(el, saved);
+      }
       capture = adapter?.registerScrollRoot?.(containerKey, el);
     };
   }, [adapter, containerKey]);

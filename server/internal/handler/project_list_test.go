@@ -95,6 +95,25 @@ func TestSortProjectResponsesKeepsUndatedLast(t *testing.T) {
 	}
 }
 
+func TestSortProjectResponsesByProgressLeavesCancelledOut(t *testing.T) {
+	projects := []ProjectResponse{
+		// 5 cancelled + 5 todo shows 0/5; done_count counts the cancelled.
+		{ID: "cancelled-heavy", IssueCount: 10, DoneCount: 5, Progress: newProjectProgress(10, 5, 0, 0)},
+		{ID: "forty", IssueCount: 10, DoneCount: 4, Progress: newProjectProgress(10, 4, 4, 0)},
+		// Everything cancelled leaves nothing in scope.
+		{ID: "all-cancelled", IssueCount: 3, DoneCount: 3, Progress: newProjectProgress(3, 3, 0, 0)},
+		{ID: "empty"},
+	}
+	sortProjectResponses(projects, "progress", true)
+	got := make([]string, len(projects))
+	for i, p := range projects {
+		got[i] = p.ID
+	}
+	if want := []string{"forty", "cancelled-heavy", "all-cancelled", "empty"}; !slices.Equal(got[:2], want[:2]) {
+		t.Fatalf("desc = %v, want %v first", got, want[:2])
+	}
+}
+
 func listProjectsForTest(t *testing.T, query string) (titles []string, total int, hasMore bool) {
 	t.Helper()
 	w := httptest.NewRecorder()

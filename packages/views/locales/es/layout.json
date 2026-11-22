@@ -11,6 +11,7 @@
     "usage": "Analítica",
     "runtimes": "Runtimes",
     "skills": "Skills",
+    "apps": "Apps",
     "settings": "Ajustes",
     "views": "Vistas",
     "docs": "Documentos"
@@ -23,6 +24,7 @@
     "member": "Miembro",
     "squad": "Squad",
     "skill": "Skill",
+    "app": "App",
     "machine": "Máquina",
     "runtime": "Runtime",
     "attachment": "Adjunto",

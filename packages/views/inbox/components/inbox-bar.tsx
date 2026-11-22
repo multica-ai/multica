@@ -3,6 +3,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { Archive } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 import type { ShortcutActionId } from "@multica/core/shortcuts";
@@ -30,13 +31,38 @@ export function InboxBar({ settled = false, children }: { settled?: boolean; chi
       role={settled ? "status" : undefined}
       data-inbox-bar={settled ? "settled" : "open"}
       className={cn(
-        "@container/inbox-bar flex h-10 shrink-0 items-center gap-1 border-b",
+        "@container/inbox-bar relative flex h-10 shrink-0 items-center gap-1 border-b",
         settled && "bg-muted/40",
         PAGE_GUTTER,
       )}
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * Reserves the 40px InboxBar slot while a cold issue opened from the Inbox
+ * loads, so the reading column below never shifts 40px when the issue lands.
+ * When the Inbox list already holds the notification row, renders its real
+ * actor and reason immediately.
+ */
+export function InboxBarSkeleton({ item }: { item?: InboxItem | null }) {
+  return (
+    <InboxBar>
+      {item ? (
+        <InboxBarReason item={item} />
+      ) : (
+        <span className="mr-1 flex min-w-0 flex-1 items-center gap-1.5">
+          <Skeleton className="size-4 shrink-0 rounded-full" />
+          <Skeleton className="h-3.5 w-40" />
+        </span>
+      )}
+      <div className="flex shrink-0 items-center gap-1.5">
+        <Skeleton className="h-6 w-14 rounded-md" />
+        <Skeleton className="h-6 w-14 rounded-md" />
+      </div>
+    </InboxBar>
   );
 }
 

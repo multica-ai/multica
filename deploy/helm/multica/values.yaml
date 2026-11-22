@@ -190,6 +190,7 @@ backend:
     # value turns the flag off. Values: true, false, a percent like "25%", or
     # a variant name. The flags documented in .env.example:
     #   docs_v1: true                  # Workspace Docs, off until set
+    #   issue_description_live: true   # live issue descriptions, needs collab
     #   local_search_index: false      # kill switch, on by default
     #   dashboard_history_365d: false  # kill switch, on by default
     featureFlags: {}

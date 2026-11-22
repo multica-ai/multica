@@ -15,16 +15,17 @@ import { toastInboxUndo } from "./inbox-undo-toast";
 import { useRestoreInbox } from "./use-leave-inbox-row";
 
 /**
- * Opens the next notification once the open one is archived because the user
- * handled its issue (`takeInboxAutoArchive`), when their `after_auto_archive`
- * preference says "next", and confirms it with a toast that can undo it.
- * Otherwise the row stays in place, settled, as `keepOpenInboxRow` keeps it.
+ * Opens the next notification right away once the open one is archived because
+ * the user handled its issue (`takeInboxAutoArchive`), when their
+ * `after_auto_archive` preference says "next", and confirms it with a toast
+ * that can undo it. Otherwise the row stays in place, settled, as
+ * `keepOpenInboxRow` keeps it.
  *
  * Only the focused window moves on: acting in another window or tab must not
  * pull this one away from what it shows.
  *
- * Returns the Inbox bar action that archived the settled row, when it was
- * taken in this window, so the bar can say what the user did.
+ * Returns the Inbox bar action that archived the settled row, when taken in
+ * this window.
  */
 export function useMoveOnAfterAutoArchive({
   settled,
@@ -49,7 +50,7 @@ export function useMoveOnAfterAutoArchive({
     latest.current = { settled, next, onNext, movesOn };
   });
 
-  // Before paint, so the settled bar never shows the plain archive first.
+  // Before paint, so the settled bar never flashes before the next issue opens.
   useLayoutEffect(() => {
     if (!archivedKey) return;
     const { settled: row, onNext: moveOn, movesOn: moves } = latest.current;
@@ -68,7 +69,7 @@ export function useMoveOnAfterAutoArchive({
         void restore(row.item.id, { quiet: true });
       },
     });
-  }, [archivedKey, wsId, qc, restore, t]);
+  }, [archivedKey, wsId, restore, t, qc]);
 
   return cause && cause.key === archivedKey ? cause.action : null;
 }

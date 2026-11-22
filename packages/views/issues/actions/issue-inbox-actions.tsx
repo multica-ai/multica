@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, type ReactNode, useState } from "react";
+import { useMemo, useRef, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, ChevronDown } from "@multica/ui/icons";
+import { AlarmClock, Archive, ChevronDown } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
@@ -56,7 +56,7 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
   const { push } = useNavigation();
   const builtinNav = useBuiltinViewNavigation();
   const guest = useIsGuest(wsId);
-  const { fromInbox } = useSidebarInboxIssue(wsId, issueId);
+  const { fromInbox, movingOn } = useSidebarInboxIssue(wsId, issueId);
   const { rows, kept, filtered } = useFilteredInboxRows(wsId, issueId, fromInbox);
   const index = fromInbox ? rows.findIndex((row) => row.issue_id === issueId) : -1;
   const row = index >= 0 ? rows[index]! : null;
@@ -64,6 +64,12 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
   const settled = kept && kept.reason !== "filtered" ? kept : null;
   const item = settled ? null : row;
   const next = row ? nextInboxRow(rows, issueId) : null;
+  // Remember that this issue mounted an InboxBar so while the router is still
+  // handing off to the next notification (`movingOn`), the 40px bar holds its
+  // slot instead of unmounting and shifting the old issue up by 40px.
+  const hadBarForIssueRef = useRef<string | null>(null);
+  if (item || settled) hadBarForIssueRef.current = issueId;
+  else if (!movingOn && hadBarForIssueRef.current === issueId) hadBarForIssueRef.current = null;
   const leave = useLeaveInboxRow();
   const archiveWithUndo = useArchiveInboxWithUndo();
   const restore = useRestoreInbox();
@@ -168,7 +174,16 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
         />
       );
     }
-    if (!settled) return null;
+    if (!settled) {
+      if (fromInbox && movingOn && hadBarForIssueRef.current === issueId) {
+        return (
+          <InboxBar settled>
+            <InboxBarStatus icon={<Archive />} label={t(($) => $.kept.notification_archived)} />
+          </InboxBar>
+        );
+      }
+      return null;
+    }
     const inboxCleared = !next && !filtered;
     return (
       <InboxKeptActions

@@ -45,12 +45,34 @@ export type LastInboxCleared =
       clearedAt: number;
     };
 
+export type InboxTransitionDirection = "next" | "prev";
+
+/**
+ * Directional hint recorded right before the Inbox advances to the next item
+ * (`"next"`) or undoes back to a cleared one (`"prev"`), so the arriving
+ * detail can play a subtle 12px glide aligned with list order.
+ */
+export interface InboxTransition {
+  targetKey: string;
+  direction: InboxTransitionDirection;
+  at: number;
+}
+
+const INBOX_TRANSITION_TTL_MS = 3_000;
+
 interface InboxSelectionState {
   lastResolvedKeyByWorkspace: Record<string, string>;
   rememberResolvedKey: (wsId: string, key: string) => void;
   /** The issue last opened from the Work panel's Inbox section. */
   sidebarIssueByWorkspace: Record<string, string | null>;
   rememberSidebarIssue: (wsId: string, issueId: string | null) => void;
+  /**
+   * Pending directional transition into the next (or undone) Inbox item.
+   * Consumed once when that destination mounts; stale entries expire.
+   */
+  transitionByWorkspace: Record<string, InboxTransition>;
+  recordTransition: (wsId: string, targetKey: string, direction: InboxTransitionDirection) => void;
+  consumeTransition: (wsId: string, key: string) => InboxTransitionDirection | null;
   /**
    * Issues the Inbox section opened in another tab of this window. Desktop
    * tabs share this store, so each of these keeps counting as opened from
@@ -104,7 +126,7 @@ const heldRowId = (wsId: string, list: string) => `${wsId}:${list}`;
 
 // Keep only the last resolved pointer per workspace, for this client run.
 // Notification data and its cache lifetime remain owned by TanStack Query.
-export const useInboxSelectionStore = create<InboxSelectionState>()((set) => ({
+export const useInboxSelectionStore = create<InboxSelectionState>()((set, get) => ({
   lastResolvedKeyByWorkspace: {},
   rememberResolvedKey: (wsId, key) =>
     set((state) => state.lastResolvedKeyByWorkspace[wsId] === key ? state : {
@@ -115,6 +137,25 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set) => ({
     set((state) => (state.sidebarIssueByWorkspace[wsId] ?? null) === issueId ? state : {
       sidebarIssueByWorkspace: { ...state.sidebarIssueByWorkspace, [wsId]: issueId },
     }),
+  transitionByWorkspace: {},
+  recordTransition: (wsId, targetKey, direction) =>
+    set((state) => ({
+      transitionByWorkspace: {
+        ...state.transitionByWorkspace,
+        [wsId]: { targetKey, direction, at: Date.now() },
+      },
+    })),
+  consumeTransition: (wsId, key) => {
+    const entry = get().transitionByWorkspace[wsId];
+    if (!entry || entry.targetKey !== key) return null;
+    const fresh = Date.now() - entry.at <= INBOX_TRANSITION_TTL_MS;
+    set((state) => {
+      if (state.transitionByWorkspace[wsId] !== entry) return state;
+      const { [wsId]: _consumed, ...transitionByWorkspace } = state.transitionByWorkspace;
+      return { transitionByWorkspace };
+    });
+    return fresh ? entry.direction : null;
+  },
   sidebarTabIssuesByWorkspace: {},
   rememberSidebarTabIssue: (wsId, issueId) =>
     set((state) => {

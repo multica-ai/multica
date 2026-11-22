@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/entitlement"
@@ -45,14 +46,28 @@ type AgentAppResponse struct {
 	Level        string `json:"level"`
 }
 
+// AppTeamRequestResponse is one app members asked the admins to connect a
+// team account for.
+type AppTeamRequestResponse struct {
+	ToolkitSlug string `json:"toolkit_slug"`
+	// RequestedBy lists everyone waiting, oldest first: whoever started each
+	// waiting run, and members who asked.
+	RequestedBy []string `json:"requested_by"`
+	// AskedBy is the members who asked themselves, which they can withdraw.
+	AskedBy         []string `json:"asked_by"`
+	AgentIDs        []string `json:"agent_ids"`
+	LastRequestedAt string   `json:"last_requested_at"`
+}
+
 // AppsOverviewResponse backs Settings › Apps.
 type AppsOverviewResponse struct {
-	CatalogMode     string                  `json:"catalog_mode"`
-	AllowedToolkits []string                `json:"allowed_toolkits"`
-	CanManage       bool                    `json:"can_manage"`
-	Team            []AppConnectionResponse `json:"team"`
-	Personal        []AppConnectionResponse `json:"personal"`
-	AgentApps       []AgentAppResponse      `json:"agent_apps"`
+	CatalogMode     string                   `json:"catalog_mode"`
+	AllowedToolkits []string                 `json:"allowed_toolkits"`
+	CanManage       bool                     `json:"can_manage"`
+	Team            []AppConnectionResponse  `json:"team"`
+	Personal        []AppConnectionResponse  `json:"personal"`
+	AgentApps       []AgentAppResponse       `json:"agent_apps"`
+	TeamRequests    []AppTeamRequestResponse `json:"team_requests"`
 }
 
 // AppCatalogEntry is one app in the add-app dialog.
@@ -119,7 +134,8 @@ type AppToolCallResponse struct {
 
 // AppRequestResponse is one confirmation or connection request. Arguments and
 // results are shown only to the approver: a personal account's draft email is
-// not for everyone who can open the issue.
+// not for everyone who can open the issue. AddsApp marks a pending connection
+// request whose approval also adds the app to the agent.
 type AppRequestResponse struct {
 	ID                string          `json:"id"`
 	Kind              string          `json:"kind"`
@@ -139,10 +155,15 @@ type AppRequestResponse struct {
 	Error             *string         `json:"error"`
 	Reason            *string         `json:"reason"`
 	Redacted          bool            `json:"redacted"`
-	ExpiresAt         string          `json:"expires_at"`
-	DecidedBy         *string         `json:"decided_by"`
-	DecidedAt         *string         `json:"decided_at"`
-	CreatedAt         string          `json:"created_at"`
+	AddsApp           bool            `json:"adds_app"`
+	// CanDecide is whether the viewer may answer the request: any admin for a
+	// team account request, otherwise its approver. The member waiting on a
+	// team account request can still withdraw it.
+	CanDecide bool    `json:"can_decide"`
+	ExpiresAt string  `json:"expires_at"`
+	DecidedBy *string `json:"decided_by"`
+	DecidedAt *string `json:"decided_at"`
+	CreatedAt string  `json:"created_at"`
 }
 
 func (h *Handler) appsReady(w http.ResponseWriter, r *http.Request) bool {
@@ -217,17 +238,17 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list team accounts")
 		return
 	}
-	personal, err := h.Queries.ListUserComposioConnectionsAnyStatus(ctx, member.UserID)
+	personal, err := h.Queries.ListUserComposioConnectionsAnyStatus(ctx, db.ListUserComposioConnectionsAnyStatusParams{UserID: member.UserID, WorkspaceID: workspaceID})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list personal accounts")
 		return
 	}
-	remoteTeam, err := h.remoteConnections(r, connectedapps.ScopeTeam, workspaceID)
+	remoteTeam, err := h.remoteConnections(r, connectedapps.ScopeTeam, workspaceID, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list team accounts")
 		return
 	}
-	remotePersonal, err := h.remoteConnections(r, connectedapps.ScopePersonal, member.UserID)
+	remotePersonal, err := h.remoteConnections(r, connectedapps.ScopePersonal, workspaceID, member.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list personal accounts")
 		return
@@ -235,6 +256,11 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 	agentApps, err := h.Queries.ListAgentAppsInWorkspace(ctx, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent apps")
+		return
+	}
+	teamRequests, err := h.Queries.ListTeamAccountRequestSummaries(ctx, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list team account requests")
 		return
 	}
 	teamRows := make([]AppConnectionResponse, 0, len(team)+len(remoteTeam))
@@ -279,10 +305,27 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		Team:            make([]AppConnectionResponse, 0, len(teamRows)),
 		Personal:        make([]AppConnectionResponse, 0, len(personalRows)),
 		AgentApps:       make([]AgentAppResponse, 0, len(agentApps)),
+		TeamRequests:    make([]AppTeamRequestResponse, 0, len(teamRequests)),
 	}
+	activeTeam := map[string]bool{}
 	for _, connection := range teamRows {
 		connection.ActionsBlocked = blocked[uuidToString(pgtype.UUID{})+":"+connection.ToolkitSlug]
 		resp.Team = append(resp.Team, connection)
+		if connection.Status == "active" {
+			activeTeam[connectedapps.NormalizeSlug(connection.ToolkitSlug)] = true
+		}
+	}
+	for _, row := range teamRequests {
+		if activeTeam[row.ToolkitSlug] {
+			continue
+		}
+		resp.TeamRequests = append(resp.TeamRequests, AppTeamRequestResponse{
+			ToolkitSlug:     row.ToolkitSlug,
+			RequestedBy:     uniqueStrings(uuidStringsOrEmpty(row.RequestedBy)),
+			AskedBy:         uniqueStrings(uuidStringsOrEmpty(row.AskedBy)),
+			AgentIDs:        uniqueStrings(uuidStringsOrEmpty(row.AgentIds)),
+			LastRequestedAt: timestampToString(row.LastRequestedAt),
+		})
 	}
 	for _, connection := range personalRows {
 		connection.ActionsBlocked = blocked[uuidToString(member.UserID)+":"+connection.ToolkitSlug]
@@ -292,6 +335,19 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		resp.AgentApps = append(resp.AgentApps, agentAppResponse(row))
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// uniqueStrings drops repeats, keeping the first of each.
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := in[:0]
+	for _, v := range in {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // ListAppCatalog (GET /api/apps/catalog) is every app the workspace may add.
@@ -418,7 +474,7 @@ func (h *Handler) ConnectTeamApp(w http.ResponseWriter, r *http.Request) {
 	var url string
 	var err error
 	if _, remote := h.ConnectedApps.RemoteApp(req.ToolkitSlug); remote {
-		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopeTeam, workspaceID, member.UserID, req.ReturnTo)
+		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopeTeam, workspaceID, workspaceID, member.UserID, req.ReturnTo)
 	} else {
 		url, err = h.Composio.BeginTeamConnect(r.Context(), workspaceID, member.UserID, req.ToolkitSlug, req.ReturnTo)
 	}
@@ -446,9 +502,9 @@ func (h *Handler) ConnectPersonalApp(w http.ResponseWriter, r *http.Request) {
 	var url string
 	var err error
 	if _, remote := h.ConnectedApps.RemoteApp(req.ToolkitSlug); remote {
-		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopePersonal, member.UserID, member.UserID, req.ReturnTo)
+		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopePersonal, workspaceID, member.UserID, member.UserID, req.ReturnTo)
 	} else {
-		url, err = h.Composio.BeginConnectReturning(r.Context(), member.UserID, req.ToolkitSlug, req.ReturnTo)
+		url, err = h.Composio.BeginConnectReturning(r.Context(), member.UserID, workspaceID, req.ToolkitSlug, req.ReturnTo)
 	}
 	if err != nil {
 		writeConnectError(w, r, err)
@@ -498,7 +554,8 @@ func (h *Handler) DisconnectTeamApp(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetTeamAppImpact (GET /api/apps/team/impact?toolkit_slug=) is what
-// disconnecting a team account would stop. Admins only.
+// disconnecting a team account would stop: the live agents that act as it.
+// Admins only.
 func (h *Handler) GetTeamAppImpact(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
@@ -524,12 +581,19 @@ func (h *Handler) GetTeamAppImpact(w http.ResponseWriter, r *http.Request) {
 		if app.ToolkitSlug != slug || app.AccountScope != connectedapps.ScopeTeam {
 			continue
 		}
-		agentIDs = append(agentIDs, app.AgentID)
-		name := ""
-		if agent, err := h.Queries.GetAgent(ctx, app.AgentID); err == nil {
-			name = agent.Name
+		agent, err := h.Queries.GetAgent(ctx, app.AgentID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
 		}
-		agents = append(agents, map[string]string{"id": uuidToString(app.AgentID), "name": name})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load agents")
+			return
+		}
+		if agent.ArchivedAt.Valid {
+			continue
+		}
+		agentIDs = append(agentIDs, app.AgentID)
+		agents = append(agents, map[string]string{"id": uuidToString(app.AgentID), "name": agent.Name})
 	}
 	var tasks, autopilots int64
 	if len(agentIDs) > 0 {
@@ -543,6 +607,109 @@ func (h *Handler) GetTeamAppImpact(w http.ResponseWriter, r *http.Request) {
 		"active_autopilots": autopilots,
 		"pending_requests":  pending,
 	})
+}
+
+// RequestTeamApp (POST /api/apps/team/requests) asks the workspace's admins
+// to connect a team account for an app. Asking again refreshes the ask
+// without notifying the admins again.
+func (h *Handler) RequestTeamApp(w http.ResponseWriter, r *http.Request) {
+	if !h.appsReady(w, r) {
+		return
+	}
+	member, workspaceID, _, ok := h.appsMember(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		ToolkitSlug string `json:"toolkit_slug"`
+		AgentID     string `json:"agent_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	slug := connectedapps.NormalizeSlug(req.ToolkitSlug)
+	if slug == "" {
+		writeError(w, http.StatusBadRequest, "toolkit_slug is required")
+		return
+	}
+	ctx := r.Context()
+	if !h.ConnectedApps.Catalog(ctx, workspaceID).Allows(slug) {
+		writeError(w, http.StatusForbidden, "this workspace does not allow this app")
+		return
+	}
+	var agentID pgtype.UUID
+	if req.AgentID != "" {
+		id, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
+		if !ok {
+			return
+		}
+		agent, err := h.Queries.GetAgent(ctx, id)
+		if err != nil || agent.WorkspaceID != workspaceID || agent.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "agent not found")
+			return
+		}
+		agentID = agent.ID
+	}
+	team, err := h.Queries.ListWorkspaceComposioConnections(ctx, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list team accounts")
+		return
+	}
+	for _, row := range team {
+		if row.Status == "active" && connectedapps.NormalizeSlug(row.ToolkitSlug) == slug {
+			writeError(w, http.StatusConflict, "the workspace already has a team account for this app")
+			return
+		}
+	}
+	remoteTeam, err := h.remoteConnections(r, connectedapps.ScopeTeam, workspaceID, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list team accounts")
+		return
+	}
+	for _, row := range remoteTeam {
+		if row.Status == "active" && row.AppSlug == slug {
+			writeError(w, http.StatusConflict, "the workspace already has a team account for this app")
+			return
+		}
+	}
+	if _, err := h.ConnectedApps.AskTeamAccount(ctx, workspaceID, member.UserID, slug, agentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save the request")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DismissTeamAppRequests (DELETE /api/apps/team/requests?toolkit_slug=).
+// An admin declines everything waiting for an app's team account: agents
+// resume without it and members who asked are told. A member withdraws
+// their own ask.
+func (h *Handler) DismissTeamAppRequests(w http.ResponseWriter, r *http.Request) {
+	if !h.appsReady(w, r) {
+		return
+	}
+	member, workspaceID, isAdmin, ok := h.appsMember(w, r)
+	if !ok {
+		return
+	}
+	slug := connectedapps.NormalizeSlug(r.URL.Query().Get("toolkit_slug"))
+	if slug == "" {
+		writeError(w, http.StatusBadRequest, "toolkit_slug is required")
+		return
+	}
+	if !isAdmin {
+		if err := h.ConnectedApps.WithdrawTeamAsk(r.Context(), workspaceID, member.UserID, slug); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to withdraw the request")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := h.ConnectedApps.DeclineTeamConnectRequests(r.Context(), workspaceID, member.UserID, slug); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to decline the requests")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // maxAllowedToolkits bounds a custom catalog.
@@ -1092,7 +1259,7 @@ func syncAgentAppsFromAllowlist(ctx context.Context, q *db.Queries, agent db.Age
 	return q.DeleteAgentAppsExcept(ctx, db.DeleteAgentAppsExceptParams{AgentID: agent.ID, Keep: keep})
 }
 
-func (h *Handler) requestResponse(req db.AppActionRequest, viewer pgtype.UUID) AppRequestResponse {
+func (h *Handler) requestResponse(req db.AppActionRequest, viewer pgtype.UUID, viewerIsAdmin bool) AppRequestResponse {
 	out := AppRequestResponse{
 		ID: uuidToString(req.ID), Kind: req.Kind, Status: req.Status, AgentID: uuidToString(req.AgentID),
 		IssueID: uuidToPtr(req.IssueID), ChatSessionID: uuidToPtr(req.ChatSessionID),
@@ -1101,6 +1268,11 @@ func (h *Handler) requestResponse(req db.AppActionRequest, viewer pgtype.UUID) A
 		Error: textToPtr(req.Error), Reason: textToPtr(req.Reason),
 		ExpiresAt: timestampToString(req.ExpiresAt), DecidedBy: uuidToPtr(req.DecidedBy),
 		DecidedAt: timestampToPtr(req.DecidedAt), CreatedAt: timestampToString(req.CreatedAt),
+	}
+	if req.Kind == connectedapps.KindConnect && req.AccountScope == connectedapps.ScopeTeam {
+		out.CanDecide = viewerIsAdmin
+	} else {
+		out.CanDecide = req.ApproverUserID == viewer
 	}
 	if req.ApproverUserID == viewer {
 		out.Arguments = json.RawMessage(req.Arguments)
@@ -1124,7 +1296,7 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
 	}
-	member, workspaceID, _, ok := h.appsMember(w, r)
+	member, workspaceID, isAdmin, ok := h.appsMember(w, r)
 	if !ok {
 		return
 	}
@@ -1177,7 +1349,7 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	default:
-		pending, err = h.Queries.ListPendingAppActionRequestsForApprover(ctx, db.ListPendingAppActionRequestsForApproverParams{WorkspaceID: workspaceID, ApproverUserID: member.UserID})
+		pending, err = h.Queries.ListPendingAppActionRequestsForApprover(ctx, db.ListPendingAppActionRequestsForApproverParams{WorkspaceID: workspaceID, ApproverUserID: member.UserID, AsAdmin: isAdmin})
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list requests")
@@ -1188,15 +1360,48 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 		cursor := decided[len(decided)-1].CreatedAt.Time.UTC().Format(time.RFC3339Nano)
 		nextBefore = &cursor
 	}
+	agentSlugs, err := h.pendingConnectAgentApps(ctx, pending)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list requests")
+		return
+	}
 	out := make([]AppRequestResponse, 0, len(pending)+len(decided))
 	// Decided rows arrive newest first; the list reads oldest first.
 	for i := len(decided) - 1; i >= 0; i-- {
-		out = append(out, h.requestResponse(decided[i], member.UserID))
+		out = append(out, h.requestResponse(decided[i], member.UserID, isAdmin))
 	}
 	for _, row := range pending {
-		out = append(out, h.requestResponse(row, member.UserID))
+		resp := h.requestResponse(row, member.UserID, isAdmin)
+		if slugs, ok := agentSlugs[row.AgentID]; ok {
+			resp.AddsApp = !slugs[connectedapps.NormalizeSlug(row.ToolkitSlug)]
+		}
+		out = append(out, resp)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": out, "next_before": nextBefore})
+}
+
+// pendingConnectAgentApps loads, once per agent, the apps of the agents behind
+// pending connect requests.
+func (h *Handler) pendingConnectAgentApps(ctx context.Context, rows []db.AppActionRequest) (map[pgtype.UUID]map[string]bool, error) {
+	out := map[pgtype.UUID]map[string]bool{}
+	for _, row := range rows {
+		if row.Kind != connectedapps.KindConnect || row.Status != "pending" || !row.TaskID.Valid {
+			continue
+		}
+		if _, done := out[row.AgentID]; done {
+			continue
+		}
+		apps, err := h.Queries.ListAgentApps(ctx, row.AgentID)
+		if err != nil {
+			return nil, err
+		}
+		slugs := map[string]bool{}
+		for _, app := range apps {
+			slugs[connectedapps.NormalizeSlug(app.ToolkitSlug)] = true
+		}
+		out[row.AgentID] = slugs
+	}
+	return out, nil
 }
 
 // appRequestPageSize is how many decided requests one list page carries.
@@ -1214,6 +1419,8 @@ func writeDecisionError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "connect the account first")
 	case errors.Is(err, connectedapps.ErrNoLongerAllowed):
 		writeError(w, http.StatusForbidden, "you can no longer use this agent; the request was withdrawn")
+	case errors.Is(err, connectedapps.ErrCannotAddApp):
+		writeError(w, http.StatusForbidden, "you cannot add this app to the agent; the request was withdrawn")
 	case errors.Is(err, connectedapps.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "this account reached its per-minute call limit; approve again in a minute")
 	default:
@@ -1227,7 +1434,7 @@ func (h *Handler) ApproveAppRequest(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
 	}
-	member, workspaceID, _, ok := h.appsMember(w, r)
+	member, workspaceID, isAdmin, ok := h.appsMember(w, r)
 	if !ok {
 		return
 	}
@@ -1249,7 +1456,7 @@ func (h *Handler) ApproveAppRequest(w http.ResponseWriter, r *http.Request) {
 		writeDecisionError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.requestResponse(row, member.UserID))
+	writeJSON(w, http.StatusOK, h.requestResponse(row, member.UserID, isAdmin))
 }
 
 // RejectAppRequest (POST /api/app-requests/{id}/reject).
@@ -1257,7 +1464,7 @@ func (h *Handler) RejectAppRequest(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
 	}
-	member, workspaceID, _, ok := h.appsMember(w, r)
+	member, workspaceID, isAdmin, ok := h.appsMember(w, r)
 	if !ok {
 		return
 	}
@@ -1279,7 +1486,7 @@ func (h *Handler) RejectAppRequest(w http.ResponseWriter, r *http.Request) {
 		writeDecisionError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.requestResponse(row, member.UserID))
+	writeJSON(w, http.StatusOK, h.requestResponse(row, member.UserID, isAdmin))
 }
 
 // AppsGateway (POST /api/apps/mcp) is the MCP endpoint runs reach their apps
@@ -1304,6 +1511,23 @@ func (h *Handler) CanActFor(ctx context.Context, workspaceID, agentID, userID pg
 	}
 	uid := uuidToString(userID)
 	return h.canInvokeAgent(ctx, agent, "member", uid, uid, uuidToString(workspaceID))
+}
+
+// CanManageAgent applies canManageAgent's rule outside a request: the agent's
+// owner or a workspace owner/admin may edit it.
+func (h *Handler) CanManageAgent(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool {
+	if !userID.Valid {
+		return false
+	}
+	agent, err := h.Queries.GetAgent(ctx, agentID)
+	if err != nil || agent.WorkspaceID != workspaceID || agent.ArchivedAt.Valid {
+		return false
+	}
+	member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: userID, WorkspaceID: workspaceID})
+	if err != nil || !roleAllowed(member.Role, "owner", "admin", "member") {
+		return false
+	}
+	return roleAllowed(member.Role, "owner", "admin") || agent.OwnerID == userID
 }
 
 // ResumeAfterDecision implements connectedapps.Resumer: a run on the issue,

@@ -166,87 +166,82 @@ function ActiveChip({
       );
 
   return (
-    <div className="flex items-center gap-1">
-      <Popover open={open} onOpenChange={setOpen}>
-        {/* Hover opens the card so the live activity reads as a glanceable
-            status surface, not a click target. In Base UI the hover config
-            lives on the Trigger (a popover can have multiple triggers), not
-            the Root. The trigger stays a real button, so click and keyboard
-            (Enter/Space) still toggle it for touch and a11y. A short open
-            delay avoids flicker when the pointer merely passes over the chip;
-            the close delay keeps it open while the pointer travels across the
-            hover bridge into the interactive rows. */}
-        <PopoverTrigger
-          openOnHover
-          delay={150}
-          closeDelay={200}
-          render={
-            <button
-              type="button"
-              aria-label={label}
-              // While an agent is actively running, the chip wears the
-              // brand border beam — a highlight sweeping around its rounded
-              // edge — so a triggered run is unmistakably "alive" in the
-              // header. Queued-only state stays calm (no beam) to reserve the
-              // motion for work that is genuinely in flight.
-              className={cn(
-                "flex h-9 min-w-9 max-w-[11rem] items-center justify-center gap-1.5 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring md:h-7 md:min-w-0 md:justify-start md:px-1.5",
-                anyRunning && "relative bg-brand/5",
-              )}
-            />
-          }
-        >
-          <AgentAvatarStack
-            agentIds={agentIds}
-            size="sm"
-            max={3}
-            opacity={anyRunning ? "full" : "half"}
-          />
-          <span
+    <Popover open={open} onOpenChange={setOpen}>
+      {/* Hover opens the card so the live activity reads as a glanceable
+          status surface, not a click target. In Base UI the hover config
+          lives on the Trigger (a popover can have multiple triggers), not
+          the Root. The trigger stays a real button, so click and keyboard
+          (Enter/Space) still toggle it for touch and a11y. A short open
+          delay avoids flicker when the pointer merely passes over the chip;
+          the close delay keeps it open while the pointer travels across the
+          hover bridge into the interactive rows. */}
+      <PopoverTrigger
+        openOnHover
+        delay={150}
+        closeDelay={200}
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            // While an agent is actively running, the chip wears the
+            // brand border beam — a highlight sweeping around its rounded
+            // edge — so a triggered run is unmistakably "alive" in the
+            // header. Queued-only state stays calm (no beam) to reserve the
+            // motion for work that is genuinely in flight.
             className={cn(
-              "hidden min-w-0 truncate text-caption md:inline",
-              anyRunning ? "text-info" : "text-muted-foreground",
+              "flex h-9 min-w-9 max-w-[11rem] items-center justify-center gap-1.5 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring md:h-7 md:min-w-0 md:justify-start md:px-1.5",
+              anyRunning && "relative bg-brand/5",
             )}
-          >
-            {label}
-          </span>
-          {anyRunning && <BorderBeam />}
-        </PopoverTrigger>
-        <PopoverContent align="end" keepMounted className="w-80">
-          <div className="text-caption font-medium text-muted-foreground">
-            {t(
-              ($) =>
-                anyRunning
-                  ? $.agent_activity.hover_header
-                  : $.agent_activity.hover_header_queued,
-              { count: agentIds.length },
-            )}
-          </div>
-          <div className="flex flex-col gap-0.5">
-            {activeTasks.map((task) => (
-              <ActiveTaskRow
-                key={task.id}
-                task={task}
-                issueId={issueId}
-                onJump={
-                  onJumpToRun
-                    ? () => {
-                        setOpen(false);
-                        onJumpToRun(task.id);
-                      }
-                    : undefined
-                }
-                onTranscriptOpenChange={(open, fromKeyboard) => {
-                  onTranscriptOpenChange(task, open, fromKeyboard === true);
-                }}
-              />
-            ))}
-          </div>
-        </PopoverContent>
-      </Popover>
-      {/* Separator from the action buttons — the chip is a status segment,
-          not another button, so a hairline keeps the two groups legible. */}
-      <span className="h-4 w-px bg-border" aria-hidden="true" />
-    </div>
+          />
+        }
+      >
+        <AgentAvatarStack
+          agentIds={agentIds}
+          size="sm"
+          max={3}
+          opacity={anyRunning ? "full" : "half"}
+        />
+        <span
+          className={cn(
+            "hidden min-w-0 truncate text-caption md:inline",
+            anyRunning ? "text-info" : "text-muted-foreground",
+          )}
+        >
+          {label}
+        </span>
+        {anyRunning && <BorderBeam />}
+      </PopoverTrigger>
+      <PopoverContent align="end" keepMounted className="w-80">
+        <div className="text-caption font-medium text-muted-foreground">
+          {t(
+            ($) =>
+              anyRunning
+                ? $.agent_activity.hover_header
+                : $.agent_activity.hover_header_queued,
+            { count: agentIds.length },
+          )}
+        </div>
+        <div className="flex flex-col gap-0.5">
+          {activeTasks.map((task) => (
+            <ActiveTaskRow
+              key={task.id}
+              task={task}
+              issueId={issueId}
+              onJump={
+                onJumpToRun
+                  ? () => {
+                      setOpen(false);
+                      onJumpToRun(task.id);
+                    }
+                  : undefined
+              }
+              onTranscriptOpenChange={(open, fromKeyboard) => {
+                onTranscriptOpenChange(task, open, fromKeyboard === true);
+              }}
+            />
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

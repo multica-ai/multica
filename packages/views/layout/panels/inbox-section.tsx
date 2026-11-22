@@ -1,11 +1,14 @@
 "use client";
 
 import { memo, type ReactNode, type Ref, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useReducedMotion } from "@multica/core/appearance";
 import { AlarmClock, Archive, BellOff, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -170,7 +173,7 @@ export function InboxSection({
     const key = inboxRowKey(item);
     if (key === openRowKey) leave(key, nextInboxRow(all, key), cleared);
   };
-  const prefetchRow = useInboxIssuePrefetch(wsId, collapsed ? [] : displayed, (item) => inboxRowHref(p, item));
+  const prefetchRow = useInboxIssuePrefetch(wsId, collapsed ? [] : all, (item) => inboxRowHref(p, item), openRowKey);
   // What arrived on each issue while it was snoozed, for the rows back from one.
   const updatesWhileSnoozed = useMemo(() => {
     const counts = new Map<string, number>();
@@ -296,7 +299,9 @@ export function InboxSection({
           <VirtualInboxList items={displayed} compact={compact} renderRow={renderRow} />
         ) : (
           <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
-            {displayed.map((item) => renderRow(item))}
+            <AnimatePresence initial={false}>
+              {displayed.map((item) => renderRow(item))}
+            </AnimatePresence>
           </PanelList>
         )
       ) : list.load === "failed" ? (
@@ -717,16 +722,10 @@ const InboxRow = memo(function InboxRow({
     </ShimmerText>
   );
 
-  return (
-    <li
-      ref={measureRef}
-      data-index={measureIndex}
-      data-inbox-row
-      data-read={unread ? "false" : "true"}
-      className="group/inbox relative"
-      onPointerEnter={onPrefetch}
-      onFocus={onPrefetch}
-    >
+  const isPresent = useIsPresent();
+  const reduceMotion = useReducedMotion();
+  const rowChildren = (
+    <>
       <HoverCard
         open={cardOpen && !snoozeOpen}
         onOpenChange={(open) => {
@@ -890,7 +889,45 @@ const InboxRow = memo(function InboxRow({
           </button>
         </TooltipHint>
       )}
-    </li>
+    </>
+  );
+
+  if (measureRef) {
+    return (
+      <li
+        ref={measureRef}
+        data-index={measureIndex}
+        data-inbox-row
+        data-read={unread ? "false" : "true"}
+        className="group/inbox relative"
+        onPointerEnter={onPrefetch}
+        onFocus={onPrefetch}
+      >
+        {rowChildren}
+      </li>
+    );
+  }
+
+  return (
+    <motion.li
+      data-inbox-row={isPresent ? "" : undefined}
+      data-read={unread ? "false" : "true"}
+      aria-hidden={!isPresent || undefined}
+      initial={false}
+      exit={{
+        opacity: 0,
+        height: 0,
+        marginTop: 0,
+        marginBottom: 0,
+        overflow: "hidden",
+        transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      className={cn("group/inbox relative", !isPresent && "pointer-events-none")}
+      onPointerEnter={onPrefetch}
+      onFocus={onPrefetch}
+    >
+      {rowChildren}
+    </motion.li>
   );
 });
 

@@ -57,7 +57,7 @@ const preview: Preview = {
   parameters: {
     layout: "centered",
     options: {
-      storySort: { order: ["Kbd", ["Compare all", "Specimen wall", "Real surfaces", "Glyph anatomy", "*"], "Comment box", ["Compare all", "*"], "Voice input", ["Composer (A + C)", "Waveform", ["Compare all", "*"], "Settings", "First use", "Edge cases", "Explored", ["All directions", "*"]]] },
+      storySort: { order: ["Inbox transition", ["Compare all", "*"], "Kbd", ["Compare all", "Specimen wall", "Real surfaces", "Glyph anatomy", "*"], "Comment box", ["Compare all", "*"], "Voice input", ["Composer (A + C)", "Waveform", ["Compare all", "*"], "Settings", "First use", "Edge cases", "Explored", ["All directions", "*"]]] },
     },
     controls: { disable: true },
     actions: { disable: true },

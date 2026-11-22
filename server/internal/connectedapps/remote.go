@@ -215,27 +215,31 @@ type remoteState struct {
 	Client   string `json:"c"`
 	Verifier string `json:"v"`
 	ReturnTo string `json:"r,omitempty"`
-	Exp      int64  `json:"e"`
+	// Workspace is the workspace the account belongs to.
+	Workspace string `json:"w,omitempty"`
+	Exp       int64  `json:"e"`
 }
 
 // RemoteConnectResult is what a completed (or failed) handshake was for.
 type RemoteConnectResult struct {
-	Slug     string
-	Scope    string
-	Owner    pgtype.UUID
-	Actor    pgtype.UUID
-	ReturnTo string
+	Slug      string
+	Scope     string
+	Owner     pgtype.UUID
+	Actor     pgtype.UUID
+	Workspace pgtype.UUID
+	ReturnTo  string
 }
 
 // BeginRemoteConnect returns the authorization URL that connects an account
-// for a remote app. owner is the workspace for a team account and the actor
-// for a personal one; the caller has already checked the actor may do this.
-func (s *Service) BeginRemoteConnect(ctx context.Context, slug, scope string, owner, actor pgtype.UUID, returnTo string) (string, error) {
+// for a remote app in workspaceID. owner is the workspace for a team account
+// and the actor for a personal one; the caller has already checked the actor
+// may do this.
+func (s *Service) BeginRemoteConnect(ctx context.Context, slug, scope string, workspaceID, owner, actor pgtype.UUID, returnTo string) (string, error) {
 	app, ok := s.RemoteApp(slug)
 	if !ok {
 		return "", composiointeg.ErrToolkitNotSupported
 	}
-	if !ValidScope(scope) || !owner.Valid || !actor.Valid {
+	if !ValidScope(scope) || !owner.Valid || !actor.Valid || !workspaceID.Valid {
 		return "", errors.New("connectedapps: invalid remote connect owner")
 	}
 	if !composiointeg.SafeReturnPath(returnTo) {
@@ -252,7 +256,7 @@ func (s *Service) BeginRemoteConnect(ctx context.Context, slug, scope string, ow
 	state, err := s.sealState(remoteState{
 		App: app.Slug, Scope: scope, Owner: util.UUIDToString(owner), Actor: util.UUIDToString(actor),
 		Client: util.UUIDToString(client.ID), Verifier: verifier, ReturnTo: returnTo,
-		Exp: s.now().Add(remoteStateTTL).Unix(),
+		Workspace: util.UUIDToString(workspaceID), Exp: s.now().Add(remoteStateTTL).Unix(),
 	})
 	if err != nil {
 		return "", err
@@ -283,7 +287,14 @@ func (s *Service) CompleteRemoteConnect(ctx context.Context, rawState, code, oau
 	if err1 != nil || err2 != nil || err3 != nil || !ok || !ValidScope(st.Scope) {
 		return RemoteConnectResult{}, ErrRemoteState
 	}
-	result := RemoteConnectResult{Slug: app.Slug, Scope: st.Scope, Owner: owner, Actor: actor, ReturnTo: st.ReturnTo}
+	workspace := owner
+	if st.Scope != ScopeTeam {
+		var err4 error
+		if workspace, err4 = util.ParseUUID(st.Workspace); err4 != nil {
+			return RemoteConnectResult{}, ErrRemoteState
+		}
+	}
+	result := RemoteConnectResult{Slug: app.Slug, Scope: st.Scope, Owner: owner, Actor: actor, Workspace: workspace, ReturnTo: st.ReturnTo}
 	if oauthError != "" || code == "" {
 		return result, fmt.Errorf("connectedapps: authorization not granted")
 	}
@@ -323,6 +334,7 @@ func (s *Service) CompleteRemoteConnect(ctx context.Context, rawState, code, oau
 	row, err := s.q.UpsertRemoteAppConnection(ctx, db.UpsertRemoteAppConnectionParams{
 		AppSlug: app.Slug, Scope: st.Scope, OwnerID: owner, ConnectedBy: actor, OauthClientID: client.ID,
 		AccessToken: access, RefreshToken: refresh, ExpiresAt: expiry(s.now(), tokens.ExpiresIn),
+		WorkspaceID: workspace,
 	})
 	if err != nil {
 		return result, fmt.Errorf("connectedapps: save remote account: %w", err)
@@ -614,7 +626,7 @@ func (s *Service) resolveRemoteAccount(ctx context.Context, workspaceID, trigger
 		}
 		owner = triggeredBy
 	}
-	row, err := s.q.GetActiveRemoteAppConnection(ctx, db.GetActiveRemoteAppConnectionParams{AppSlug: slug, Scope: scope, OwnerID: owner})
+	row, err := s.q.GetActiveRemoteAppConnection(ctx, db.GetActiveRemoteAppConnectionParams{AppSlug: slug, Scope: scope, OwnerID: owner, WorkspaceID: workspaceID})
 	if isNoRows(err) {
 		return account{}, ErrAccountMissing
 	}

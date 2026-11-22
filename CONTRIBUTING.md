@@ -756,7 +756,7 @@ fixtures:
 
 ```bash
 make up C=api,web ARGS="--ephemeral"
-make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task sidebar, --json
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task sidebar guest, --json
 make destroy ARGS="--yes"
 ```
 
@@ -777,6 +777,22 @@ notifications are then backdated with `psql` to read from minutes to days old;
 without `psql` they keep their real times. `all` leaves `sidebar` out. Running
 it again adds new issues and notifications and reuses the agents, projects and
 views.
+
+`guest` is for checking a change as a guest. It signs `guest@localhost` in
+with the dev verification code, invites it as a guest of three projects and
+accepts: Client portal (visible to the workspace), Client contracts (private)
+and Client portal v1 (archived), each with an issue. The guest sees those and
+nothing else; the Internal planning project and its issue stay hidden from it.
+In Client portal, `dev@localhost` mentions the guest on one issue, replies to
+the guest's comment on its sub-issue and assigns it a third, which leaves three
+unread issues in the guest's Inbox. `--json` prints `guest_token` and
+`guest_user_id` with the project and issue URLs; set the token as
+`multica_token` to open the app as the guest. The token is kept in the
+environment's profile directory, so running it again signs in only when that
+token stopped working, keeps the membership and adds new issues and
+notifications. `--guest-email` signs in someone else as the guest, which is
+how `e2e/guest.spec.ts` gets a fresh guest on every run. `all` leaves `guest`
+out.
 
 `task` is for UI and CLI work that needs an agent mid-run: agent status,
 the issue's execution log, Working / Idle filters, task panels. It assigns a new

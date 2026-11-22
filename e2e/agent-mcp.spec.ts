@@ -2,15 +2,13 @@ import { test, expect, type Page } from "@playwright/test";
 import { TestApiClient } from "./fixtures";
 import { waitForPageText } from "./helpers";
 
-// Stage 3.2 (MUL-3870): the creator-only MCP tab on the agent detail page.
+// Agent Apps section and Advanced Settings Apps management (MUL-8990):
 //
 // Auth + workspace bootstrap go through the real backend (same as every other
-// spec), but the agent list and the Composio connection/catalog endpoints are
-// mocked at the network boundary so the test runs without a configured
-// COMPOSIO_API_KEY or a live runtime to bind an agent to. The PUT /api/agents
-// write is intercepted so we can assert the exact allowlist body the toggle
-// produces — the heart of the data contract — instead of depending on the
-// backend persisting it.
+// spec), while the agent list and connected-apps endpoints are mocked at the
+// network boundary so the test runs without a configured COMPOSIO_API_KEY or a
+// live runtime. The PUT /api/agents/<id>/apps write is intercepted so we can
+// assert the exact payload the toggle produces.
 
 const E2E_WORKER =
   process.env.TEST_PARALLEL_INDEX ?? process.env.TEST_WORKER_INDEX ?? "0";
@@ -75,119 +73,172 @@ function mockAgent(ownerId: string, workspaceId: string) {
   };
 }
 
-/** Mock the Composio catalog + the current user's active connections (Notion +
- *  Slack), the agent list (owned by `ownerId`), and capture any PUT
- *  /api/agents/<id> body. Returns a getter for the last captured allowlist. */
-async function mockApis(page: Page, ownerId: string) {
-  const captured: { allowlist?: unknown } = {};
+/** Mock the connected apps overview/catalog + agent list + agent apps write.
+ *  When `viewerRole` is `"member"`, the logged-in user is mocked as a plain
+ *  member so `canEdit` is false for an agent owned by someone else. */
+async function mockApis(
+  page: Page,
+  ownerId: string,
+  viewerUserId: string,
+  viewerRole: "owner" | "member" = "owner",
+) {
+  let agentApps: Array<{ agent_id: string; toolkit_slug: string; account_scope: string; level: string }> = [];
+  const captured: { apps?: unknown } = {};
 
-  await page.route("**/api/integrations/composio/toolkits", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify([
-        { slug: "notion", name: "Notion", connectable: true },
-        { slug: "slack", name: "Slack", connectable: true },
-      ]),
-    }),
+  await page.route(
+    (url) => url.pathname === "/api/config",
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({
+        response,
+        json: { ...body, feature_flags: { ...body.feature_flags, composio_mcp_apps: true } },
+      });
+    },
   );
 
-  await page.route("**/api/integrations/composio/connections", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify([
-        {
-          id: "conn-notion",
-          toolkit_slug: "notion",
-          status: "active",
-          connected_at: "2026-06-30T00:00:00Z",
-          last_used_at: null,
+  if (viewerRole === "member") {
+    await page.route(
+      (url) => /^\/api\/workspaces\/[^/]+\/members$/.test(url.pathname),
+      async (route) => {
+        const response = await route.fetch();
+        const members = (await response.json()) as Array<{ user_id: string; role: string }>;
+        await route.fulfill({
+          response,
+          json: members.map((m) => (m.user_id === viewerUserId ? { ...m, role: "member" } : m)),
+        });
+      },
+    );
+  }
+
+  await page.route(
+    (url) => url.pathname === "/api/apps",
+    (route) =>
+      route.fulfill({
+        json: {
+          catalog_mode: "all",
+          can_manage: viewerRole === "owner",
+          team: [],
+          personal: [
+            {
+              id: "conn-notion",
+              toolkit_slug: "notion",
+              status: "active",
+              connected_at: "2026-06-30T00:00:00Z",
+              last_used_at: null,
+            },
+            {
+              id: "conn-slack",
+              toolkit_slug: "slack",
+              status: "active",
+              connected_at: "2026-06-30T00:00:00Z",
+              last_used_at: null,
+            },
+          ],
+          agent_apps: agentApps,
         },
-        {
-          id: "conn-slack",
-          toolkit_slug: "slack",
-          status: "active",
-          connected_at: "2026-06-30T00:00:00Z",
-          last_used_at: null,
-        },
-      ]),
-    }),
+      }),
   );
 
-  // One handler for both the list (GET, query string) and the write
-  // (PUT /api/agents/<id>). Other agent sub-routes fall through.
+  await page.route(
+    (url) => url.pathname === "/api/apps/catalog",
+    (route) =>
+      route.fulfill({
+        json: {
+          catalog_mode: "all",
+          apps: [
+            { slug: "notion", name: "Notion", curated: true, recommended_scope: "personal" },
+            { slug: "slack", name: "Slack", curated: true, recommended_scope: "personal" },
+          ],
+        },
+      }),
+  );
+
+  await page.route(
+    (url) => url.pathname === `/api/agents/${AGENT_ID}/apps`,
+    (route) => {
+      const req = route.request();
+      if (req.method() === "PUT") {
+        const body = (req.postDataJSON?.() ?? {}) as {
+          apps?: Array<{ toolkit_slug: string; account_scope: string; level: string }>;
+        };
+        captured.apps = body.apps;
+        agentApps = (body.apps ?? []).map((app) => ({ ...app, agent_id: AGENT_ID }));
+        return route.fulfill({ json: { apps: agentApps } });
+      }
+      return route.fulfill({ json: { apps: agentApps } });
+    },
+  );
+
   await page.route("**/api/agents**", (route) => {
     const req = route.request();
     const url = new URL(req.url());
     const workspaceId = url.searchParams.get("workspace_id") ?? "ws-mock";
 
-    if (req.method() === "PUT" && url.pathname.endsWith(`/api/agents/${AGENT_ID}`)) {
-      const body = req.postDataJSON?.() ?? {};
-      captured.allowlist = body.composio_toolkit_allowlist;
+    if (req.method() === "GET" && url.pathname.endsWith("/api/agents")) {
       return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          ...mockAgent(ownerId, workspaceId),
-          composio_toolkit_allowlist: body.composio_toolkit_allowlist ?? [],
-        }),
+        json: [mockAgent(ownerId, workspaceId)],
       });
     }
 
-    if (req.method() === "GET" && url.pathname.endsWith("/api/agents")) {
+    if (req.method() === "GET" && url.pathname.endsWith(`/api/agents/${AGENT_ID}`)) {
       return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([mockAgent(ownerId, workspaceId)]),
+        json: mockAgent(ownerId, workspaceId),
       });
     }
 
     return route.fallback();
   });
 
-  return () => captured.allowlist;
+  return () => captured.apps;
 }
 
-test.describe("Agent MCP tab (creator-only)", () => {
-  test("creator sees the MCP Apps tab and toggling a toolkit writes the allowlist", async ({
+test.describe("Agent Apps management (editor-only)", () => {
+  test("creator can manage agent apps and toggling an app writes the config", async ({
     page,
   }) => {
     const { slug, userId } = await loginCapturingUser(page);
-    const getAllowlist = await mockApis(page, userId);
+    const getApps = await mockApis(page, userId, userId, "owner");
 
     await page.goto(`/${slug}/agents/${AGENT_ID}`, {
       waitUntil: "domcontentloaded",
     });
     await waitForPageText(page, "MCP Test Agent");
 
-    // The creator-only tab entry is present and opens the connection list.
-    const tab = page.getByRole("button", { name: "MCP Apps" });
-    await expect(tab).toBeVisible({ timeout: 15000 });
-    await tab.click();
+    const appsSection = page.locator(`#agent-apps-${AGENT_ID}`);
+    await expect(appsSection).toBeVisible({ timeout: 15000 });
+    await appsSection.getByRole("button", { name: "Manage" }).click();
 
-    await expect(page.getByText("Notion")).toBeVisible();
-    await expect(page.getByText("Slack")).toBeVisible();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Notion")).toBeVisible();
+    await expect(dialog.getByText("Slack")).toBeVisible();
 
-    // Allow Notion → the PUT body carries exactly ["notion"].
-    await page.getByLabel(/Allow Notion for this agent/i).click();
-    await expect.poll(() => getAllowlist()).toEqual(["notion"]);
+    // Enable Notion → PUT /api/agents/<id>/apps carries the new app entry.
+    await dialog.getByRole("switch", { name: "Enable Notion" }).click();
+    await expect.poll(() => getApps()).toEqual([
+      { toolkit_slug: "notion", account_scope: "personal", level: "write" },
+    ]);
   });
 
-  test("a non-creator viewer does not see the MCP Apps tab", async ({ page }) => {
-    const { slug } = await loginCapturingUser(page);
-    // Agent owned by someone else → the creator gate hides the tab entry.
-    await mockApis(page, OTHER_USER_ID);
+  test("a non-editor viewer sees Apps read-only and cannot open Apps settings", async ({ page }) => {
+    const { slug, userId } = await loginCapturingUser(page);
+    // Agent owned by someone else and viewer is a plain member → read-only Apps section.
+    await mockApis(page, OTHER_USER_ID, userId, "member");
 
     await page.goto(`/${slug}/agents/${AGENT_ID}`, {
       waitUntil: "domcontentloaded",
     });
     await waitForPageText(page, "MCP Test Agent");
 
-    // Other tabs render, but the creator-only MCP Apps entry must not.
-    await expect(page.getByRole("button", { name: "Activity" })).toBeVisible({
-      timeout: 15000,
-    });
-    await expect(page.getByRole("button", { name: "MCP Apps" })).toHaveCount(0);
+    const appsSection = page.locator(`#agent-apps-${AGENT_ID}`);
+    await expect(appsSection).toBeVisible({ timeout: 15000 });
+    await expect(appsSection.getByRole("button", { name: "Manage" })).toHaveCount(0);
+    await expect(appsSection.getByRole("button", { name: "Add" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Settings" }).first().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Apps", exact: true })).toHaveCount(0);
   });
 });

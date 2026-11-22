@@ -820,6 +820,15 @@
     "unread_title": "沒有未讀任務",
     "clear_button": "清除篩選"
   },
+  "presence": {
+    "viewing_other": "{{count}} 人在看",
+    "editing": "正在編輯",
+    "watching": "在看",
+    "where": "在改「{{section}}」",
+    "more_other": "還有 {{count}} 人：{{names}}",
+    "name_separator": "、",
+    "jump_hint": "點名字跳到對方的游標"
+  },
   "agent_live": {
     "is_working": "{{name}} 在工作",
     "is_queued": "{{name}} 排隊中",

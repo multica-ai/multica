@@ -11,6 +11,7 @@
     "usage": "統計",
     "runtimes": "執行時",
     "skills": "Skills",
+    "apps": "應用程式",
     "settings": "設定",
     "views": "檢視",
     "docs": "知識庫"
@@ -23,6 +24,7 @@
     "member": "成員",
     "squad": "小隊",
     "skill": "Skill",
+    "app": "應用程式",
     "machine": "機器",
     "runtime": "執行時",
     "attachment": "附件",

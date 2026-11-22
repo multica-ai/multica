@@ -820,6 +820,15 @@
     "unread_title": "未読のタスクはありません",
     "clear_button": "フィルターを解除"
   },
+  "presence": {
+    "viewing_other": "{{count}} 人が閲覧中",
+    "editing": "編集中",
+    "watching": "閲覧中",
+    "where": "「{{section}}」を編集中",
+    "more_other": "ほか {{count}} 人：{{names}}",
+    "name_separator": "、",
+    "jump_hint": "名前をクリックすると、その人のカーソルへ移動します"
+  },
   "agent_live": {
     "is_working": "{{name}} が作業中",
     "is_queued": "{{name}} が待機中",

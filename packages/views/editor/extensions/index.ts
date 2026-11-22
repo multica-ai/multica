@@ -291,6 +291,7 @@ function renderCaret(user: Record<string, string>): HTMLElement {
   const caret = document.createElement("span");
   caret.classList.add("collaboration-carets__caret");
   caret.setAttribute("aria-hidden", "true");
+  if (user.id) caret.dataset.collaborator = `${user.kind ?? "member"}:${user.id}`;
   caret.style.borderColor = user.color ?? "";
   const label = document.createElement("div");
   label.classList.add("collaboration-carets__label");

@@ -82,7 +82,7 @@ afterEach(() => {
 });
 
 describe("useMoveOnAfterAutoArchive", () => {
-  it("opens the next notification when your action archived the open one", () => {
+  it("opens the next notification right away when your action archived the open one", () => {
     const { onNext, settle } = setup({ after_auto_archive: "next" });
     noteInboxAutoArchive({ issue_id: "issue-a", reason: "actor_acted" });
     settle(archived("issue-a"));

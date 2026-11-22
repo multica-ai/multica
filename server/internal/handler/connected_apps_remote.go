@@ -57,7 +57,9 @@ func (h *Handler) AppsOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.Scope == connectedapps.ScopePersonal {
-		h.ConnectedApps.ResolveConnectRequests(r.Context(), result.Owner, result.Slug)
+		h.ConnectedApps.ResolveConnectRequests(r.Context(), result.Workspace, result.Owner, result.Slug)
+	} else {
+		h.ConnectedApps.ResolveTeamConnectRequests(r.Context(), result.Owner, result.Actor, result.Slug)
 	}
 	http.Redirect(w, r, h.Composio.CallbackRedirect(redirect, true), http.StatusFound)
 }
@@ -108,9 +110,9 @@ func connectionFromRemote(row db.RemoteAppConnection) AppConnectionResponse {
 
 // remoteConnections lists an owner's remote app accounts, or none when remote
 // apps are off.
-func (h *Handler) remoteConnections(r *http.Request, scope string, owner pgtype.UUID) ([]db.RemoteAppConnection, error) {
+func (h *Handler) remoteConnections(r *http.Request, scope string, workspaceID, owner pgtype.UUID) ([]db.RemoteAppConnection, error) {
 	if len(h.ConnectedApps.RemoteApps()) == 0 {
 		return nil, nil
 	}
-	return h.Queries.ListRemoteAppConnectionsForOwner(r.Context(), db.ListRemoteAppConnectionsForOwnerParams{Scope: scope, OwnerID: owner})
+	return h.Queries.ListRemoteAppConnectionsForOwner(r.Context(), db.ListRemoteAppConnectionsForOwnerParams{Scope: scope, OwnerID: owner, WorkspaceID: workspaceID})
 }

@@ -48,13 +48,32 @@ test("Inbox restores the current reply after leaving a virtualized long thread",
     await notification.click();
     const target = page.locator(`#comment-${targetId}`);
     await expect(target).toBeVisible();
-    await expect.poll(() => readingPosition(page, targetId).then((p) => p?.mounted)).toBe(true);
-    await expect.poll(() => readingPosition(page, targetId).then((p) => p?.visible)).toBe(true);
-    const before = (await readingPosition(page, targetId))!;
+    const waitForSettledPosition = async (commentId?: string) => {
+      let last: { id: string; offset: number } | null = null;
+      let stable = 0;
+      await expect.poll(async () => {
+        const current = await readingPosition(page, commentId);
+        if (!current?.mounted || !current.visible) {
+          last = null;
+          stable = 0;
+          return 0;
+        }
+        if (last && last.id === current.id && Math.abs(current.offset - last.offset) < 2) {
+          stable += 1;
+        } else {
+          stable = 1;
+        }
+        last = { id: current.id, offset: current.offset };
+        return stable;
+      }, { timeout: 10_000, intervals: [100] }).toBeGreaterThanOrEqual(3);
+      return last!;
+    };
+    const before = await waitForSettledPosition(targetId);
 
     const leaveAndReturn = async () => {
       await page.locator(`a[href="/${slug}/issues"]`).first().click();
       await expect(page).toHaveURL((url) => url.pathname === `/${slug}/issues`);
+      await expect(page.getByRole("heading", { name: "All issues" })).toBeVisible();
       await page.goBack();
     };
     const expectRestored = async (position: { id: string; offset: number }) => {
@@ -76,12 +95,13 @@ test("Inbox restores the current reply after leaving a virtualized long thread",
     await container.hover();
     await page.mouse.wheel(0, -1800);
     await expect.poll(async () => (await readingPosition(page))?.id).not.toBe(targetId);
-    const reading = (await readingPosition(page))!;
+    const reading = await waitForSettledPosition();
     expect(reading).not.toBeNull();
     await leaveAndReturn();
     await expectRestored(reading);
     await page.locator(`a[href="/${slug}/issues"]`).first().click();
     await expect(page).toHaveURL((url) => url.pathname === `/${slug}/issues`);
+    await expect(page.getByRole("heading", { name: "All issues" })).toBeVisible();
     await page.setViewportSize({ width: 1200, height: 900 });
     await page.goBack();
     await expectRestored(reading);
@@ -157,14 +177,14 @@ test("scrolling up a virtualized long thread keeps the reading position steady",
     await page.goto(`/${slug}/inbox`);
     await page.getByText(title, { exact: true }).first().click();
     await expect(page.locator(`#comment-${targetId}`)).toBeVisible();
-    await expect.poll(() => readingPosition(page, targetId).then((p) => p?.mounted && p.visible)).toBe(true);
+    await expect.poll(() => readingPosition(page, targetId).then((p) => p?.mounted && p.visible), { timeout: 10_000 }).toBe(true);
     await page.waitForTimeout(1000);
     const fromInbox = await scrollUpShifts(page, 40);
     expect(fromInbox.length).toBeGreaterThan(30);
     expect.soft(fromInbox.filter((s) => Math.abs(s) > 2), `Inbox landing shifts: ${fromInbox}`).toEqual([]);
 
     // 2. Open the issue normally, go to the end of the discussion, read upward.
-    await page.goto(`/${slug}/issues/${mixed.issue.id}`);
+    await page.goto(`/${slug}/issues/${mixed.issue.identifier}`);
     await expect(page.getByText("Long discussion root")).toBeVisible();
     const toEnd = () => page.evaluate(() => {
       const c = document.querySelector<HTMLElement>('[data-tab-scroll-root^="main:"]')!;

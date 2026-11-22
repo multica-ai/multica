@@ -40,6 +40,51 @@ var projectGetCmd = &cobra.Command{
 	RunE:  runProjectGet,
 }
 
+var projectProgressCmd = &cobra.Command{
+	Use:   "progress <id>",
+	Short: "Show project progress: completed vs. scope, weekly trend and forecast",
+	Long: `Show project progress.
+
+Scope is every issue in the project except cancelled ones (closed category).
+Completed counts issues in the done category; started issues are tracked but
+do not add to the percentage. Each issue counts as one.
+
+--history prints the weekly trend (scope, started, completed per week).
+--by assignee breaks scope and completion down per assignee; --by label does
+the same per label, where an issue with several labels counts under each.
+JSON output always carries the full response.`,
+	Args: exactArgs(1),
+	RunE: runProjectProgress,
+}
+
+var projectOverviewCmd = &cobra.Command{
+	Use:   "overview <id>",
+	Short: "Show everything on a project's Overview in one read",
+	Long: `Show a project's Overview: the project itself (description included),
+its progress with weekly history, forecast and breakdowns by assignee and
+label, its attached resources, the agents running on its issues now and its
+most recent activity.
+
+The JSON shape is {"project": ..., "progress": ..., "resources": [...],
+"working_agents": [...], "activity": [...]}; new Overview sections are added
+as new top-level keys.`,
+	Args: exactArgs(1),
+	RunE: runProjectOverview,
+}
+
+var projectActivityCmd = &cobra.Command{
+	Use:   "activity <id>",
+	Short: "List recent activity on a project's issues, newest first",
+	Long: `List recent activity on a project's issues, newest first: issues created,
+and changes to status, assignee, priority, dates and title. Description edits
+and run bookkeeping stay on each issue's own timeline.
+
+When more entries exist, the cursor for the next page goes to stderr; pass it
+back with --before. --output json prints {"entries": [...], "next_cursor": ...}.`,
+	Args: exactArgs(1),
+	RunE: runProjectActivity,
+}
+
 var projectCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new project",
@@ -174,6 +219,9 @@ func validateProjectStatus(status string) error {
 func init() {
 	projectCmd.AddCommand(projectListCmd)
 	projectCmd.AddCommand(projectGetCmd)
+	projectCmd.AddCommand(projectProgressCmd)
+	projectCmd.AddCommand(projectOverviewCmd)
+	projectCmd.AddCommand(projectActivityCmd)
 	projectCmd.AddCommand(projectCreateCmd)
 	projectCmd.AddCommand(projectUpdateCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
@@ -199,6 +247,14 @@ func init() {
 
 	// project get
 	projectGetCmd.Flags().String("output", "json", "Output format: table or json")
+
+	projectProgressCmd.Flags().String("output", "table", "Output format: table or json")
+	projectOverviewCmd.Flags().String("output", "json", "Output format: table or json")
+	projectProgressCmd.Flags().Bool("history", false, "Print the weekly trend")
+	projectProgressCmd.Flags().String("by", "", "Break progress down by: assignee or label")
+	projectActivityCmd.Flags().String("output", "table", "Output format: table or json")
+	projectActivityCmd.Flags().Int("limit", 30, "Entries per page (max 100)")
+	projectActivityCmd.Flags().String("before", "", "Cursor from a previous page, to read older entries")
 
 	// project create
 	projectCreateCmd.Flags().String("title", "", "Project title (required)")
@@ -389,7 +445,7 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 			strVal(p, "title"),
 			strVal(p, "status"),
 			strVal(p, "priority"),
-			formatProjectProgress(p),
+			formatProjectProgress(p["progress"]),
 			formatLead(p, actors),
 			strVal(p, "due_date"),
 			dayOf(strVal(p, "last_activity_at")),
@@ -406,15 +462,6 @@ func dayOf(ts string) string {
 		return ts[:10]
 	}
 	return ts
-}
-
-func formatProjectProgress(p map[string]any) string {
-	total, _ := p["issue_count"].(float64)
-	if total == 0 {
-		return ""
-	}
-	done, _ := p["done_count"].(float64)
-	return fmt.Sprintf("%d/%d", int(done), int(total))
 }
 
 // resolveProjectLeadFilters turns --lead values into the API's lead refs:
@@ -475,12 +522,13 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
 		lead := formatLead(project, actors)
-		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "ARCHIVED", "DESCRIPTION"}
+		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "PROGRESS", "ARCHIVED", "DESCRIPTION"}
 		rows := [][]string{{
 			strVal(project, "id"),
 			strVal(project, "title"),
 			strVal(project, "status"),
 			lead,
+			formatProjectProgress(project["progress"]),
 			formatProjectArchived(project),
 			strVal(project, "description"),
 		}}
@@ -1263,6 +1311,328 @@ func summarizeResourceRef(raw any) string {
 }
 
 // Helpers
+
+func runProjectProgress(cmd *cobra.Command, args []string) error {
+	by, _ := cmd.Flags().GetString("by")
+	if by != "" && by != "assignee" && by != "label" {
+		return fmt.Errorf("invalid --by %q; valid values: assignee, label", by)
+	}
+	history, _ := cmd.Flags().GetBool("history")
+	if history && by != "" {
+		return fmt.Errorf("--history and --by cannot be combined")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	var resp map[string]any
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/progress", &resp); err != nil {
+		return fmt.Errorf("get project progress: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output != "table" {
+		return cli.PrintJSON(os.Stdout, resp)
+	}
+	switch {
+	case history:
+		headers, rows := projectProgressHistoryTable(resp)
+		cli.PrintTable(os.Stdout, headers, rows)
+	case by == "assignee":
+		headers, rows := projectProgressAssigneeTable(resp, loadActorDisplayLookup(ctx, client))
+		cli.PrintTable(os.Stdout, headers, rows)
+	case by == "label":
+		headers, rows := projectProgressLabelTable(resp, loadLabelNames(ctx, client))
+		cli.PrintTable(os.Stdout, headers, rows)
+	default:
+		headers, rows := projectProgressSummaryTable(resp)
+		cli.PrintTable(os.Stdout, headers, rows)
+	}
+	return nil
+}
+
+func runProjectOverview(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	base := "/api/projects/" + projectRef.ID
+	var project, progress, resources, activity map[string]any
+	var workingAgents []any
+	if err := client.GetJSON(ctx, base, &project); err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+	if err := client.GetJSON(ctx, base+"/progress", &progress); err != nil {
+		return fmt.Errorf("get project progress: %w", err)
+	}
+	if err := client.GetJSON(ctx, base+"/resources", &resources); err != nil {
+		return fmt.Errorf("list project resources: %w", err)
+	}
+	if err := client.GetJSON(ctx, "/api/working-agents?type=issue&project="+url.QueryEscape(projectRef.ID), &workingAgents); err != nil {
+		return fmt.Errorf("list working agents: %w", err)
+	}
+	if err := client.GetJSON(ctx, base+"/activity?limit=10", &activity); err != nil {
+		return fmt.Errorf("list project activity: %w", err)
+	}
+	overview := map[string]any{
+		"project":        project,
+		"progress":       progress,
+		"resources":      resources["resources"],
+		"working_agents": workingAgents,
+		"activity":       activity["entries"],
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output != "table" {
+		return cli.PrintJSON(os.Stdout, overview)
+	}
+	headers, rows := projectOverviewTable(overview, loadActorDisplayLookup(ctx, client))
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+// projectOverviewTable lays the overview out as FIELD / VALUE rows.
+func projectOverviewTable(overview map[string]any, actors actorDisplayLookup) ([]string, [][]string) {
+	project, _ := overview["project"].(map[string]any)
+	progress, _ := overview["progress"].(map[string]any)
+	resources, _ := overview["resources"].([]any)
+	workingAgents, _ := overview["working_agents"].([]any)
+	var working []string
+	for _, raw := range workingAgents {
+		if a, ok := raw.(map[string]any); ok {
+			working = append(working, fmt.Sprintf("%s (%d)", strVal(a, "name"), progressInt(a, "running_task_count")))
+		}
+	}
+	_, summary := projectProgressSummaryTable(progress)
+	forecast := ""
+	if len(summary) == 1 {
+		forecast = summary[0][len(summary[0])-1]
+	}
+	rows := [][]string{
+		{"TITLE", strVal(project, "title")},
+		{"STATUS", strVal(project, "status")},
+		{"LEAD", formatLead(project, actors)},
+		{"START", strVal(project, "start_date")},
+		{"DUE", strVal(project, "due_date")},
+		{"PROGRESS", formatProjectProgress(progress["progress"])},
+		{"FORECAST", forecast},
+		{"RESOURCES", fmt.Sprint(len(resources))},
+		{"WORKING", strings.Join(working, ", ")},
+		{"DESCRIPTION", strVal(project, "description")},
+	}
+	return []string{"FIELD", "VALUE"}, rows
+}
+
+func progressInt(m map[string]any, key string) int64 {
+	n, _ := m[key].(float64)
+	return int64(n)
+}
+
+// formatProjectProgress renders a progress object as "completed/scope (pct%)".
+func formatProjectProgress(v any) string {
+	p, ok := v.(map[string]any)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d (%d%%)", progressInt(p, "completed"), progressInt(p, "scope"), progressInt(p, "percent"))
+}
+
+func projectProgressSummaryTable(resp map[string]any) ([]string, [][]string) {
+	p, _ := resp["progress"].(map[string]any)
+	forecast := ""
+	if f, ok := resp["forecast"].(map[string]any); ok {
+		forecast = fmt.Sprintf("%s (%.2f/week)", strVal(f, "completion_date"), f["weekly_velocity"])
+	}
+	headers := []string{"PROGRESS", "SCOPE", "COMPLETED", "STARTED", "UNSTARTED", "CANCELLED", "FORECAST"}
+	rows := [][]string{{
+		formatProjectProgress(p),
+		fmt.Sprint(progressInt(p, "scope")),
+		fmt.Sprint(progressInt(p, "completed")),
+		fmt.Sprint(progressInt(p, "started")),
+		fmt.Sprint(progressInt(p, "unstarted")),
+		fmt.Sprint(progressInt(p, "cancelled")),
+		forecast,
+	}}
+	return headers, rows
+}
+
+func projectProgressHistoryTable(resp map[string]any) ([]string, [][]string) {
+	points, _ := resp["history"].([]any)
+	rows := make([][]string, 0, len(points))
+	for _, raw := range points {
+		p, _ := raw.(map[string]any)
+		rows = append(rows, []string{
+			strVal(p, "date"),
+			fmt.Sprint(progressInt(p, "scope")),
+			fmt.Sprint(progressInt(p, "started")),
+			fmt.Sprint(progressInt(p, "completed")),
+		})
+	}
+	return []string{"WEEK", "SCOPE", "STARTED", "COMPLETED"}, rows
+}
+
+func projectProgressAssigneeTable(resp map[string]any, actors actorDisplayLookup) ([]string, [][]string) {
+	entries, _ := resp["by_assignee"].([]any)
+	rows := make([][]string, 0, len(entries))
+	for _, raw := range entries {
+		e, _ := raw.(map[string]any)
+		name := actors.actor(strVal(e, "assignee_type"), strVal(e, "assignee_id"))
+		if name == "" {
+			name = "unassigned"
+		}
+		scope, completed := progressInt(e, "scope"), progressInt(e, "completed")
+		percent := int64(0)
+		if scope > 0 {
+			percent = completed * 100 / scope
+		}
+		rows = append(rows, []string{
+			name,
+			fmt.Sprintf("%d/%d (%d%%)", completed, scope, percent),
+			fmt.Sprint(progressInt(e, "started")),
+		})
+	}
+	return []string{"ASSIGNEE", "COMPLETED", "STARTED"}, rows
+}
+
+func projectProgressLabelTable(resp map[string]any, labels map[string]string) ([]string, [][]string) {
+	entries, _ := resp["by_label"].([]any)
+	rows := make([][]string, 0, len(entries))
+	for _, raw := range entries {
+		e, _ := raw.(map[string]any)
+		name := "no label"
+		if id := strVal(e, "label_id"); id != "" {
+			name = labels[id]
+			if name == "" {
+				name = id
+			}
+		}
+		scope, completed := progressInt(e, "scope"), progressInt(e, "completed")
+		percent := int64(0)
+		if scope > 0 {
+			percent = completed * 100 / scope
+		}
+		rows = append(rows, []string{
+			name,
+			fmt.Sprintf("%d/%d (%d%%)", completed, scope, percent),
+			fmt.Sprint(progressInt(e, "started")),
+		})
+	}
+	return []string{"LABEL", "COMPLETED", "STARTED"}, rows
+}
+
+// loadLabelNames maps issue label ids to names. A failed read leaves the map
+// empty, and rows fall back to the id.
+func loadLabelNames(ctx context.Context, client *cli.APIClient) map[string]string {
+	params := url.Values{"resource_type": {"issue"}}
+	if client.WorkspaceID != "" {
+		params.Set("workspace_id", client.WorkspaceID)
+	}
+	var result map[string]any
+	names := map[string]string{}
+	if err := client.GetJSON(ctx, "/api/labels?"+params.Encode(), &result); err != nil {
+		return names
+	}
+	labels, _ := result["labels"].([]any)
+	for _, raw := range labels {
+		if l, ok := raw.(map[string]any); ok {
+			names[strVal(l, "id")] = strVal(l, "name")
+		}
+	}
+	return names
+}
+
+func runProjectActivity(cmd *cobra.Command, args []string) error {
+	limit, _ := cmd.Flags().GetInt("limit")
+	if limit < 1 {
+		return fmt.Errorf("--limit must be at least 1")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	params := url.Values{"limit": {strconv.Itoa(limit)}}
+	if before, _ := cmd.Flags().GetString("before"); before != "" {
+		params.Set("before", before)
+	}
+	var resp map[string]any
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/activity?"+params.Encode(), &resp); err != nil {
+		return fmt.Errorf("list project activity: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output != "table" {
+		return cli.PrintJSON(os.Stdout, resp)
+	}
+	headers, rows := projectActivityTable(resp, loadActorDisplayLookup(ctx, client))
+	cli.PrintTable(os.Stdout, headers, rows)
+	if next := strVal(resp, "next_cursor"); next != "" {
+		fmt.Fprintf(os.Stderr, "More activity: --before %q\n", next)
+	}
+	return nil
+}
+
+func projectActivityTable(resp map[string]any, actors actorDisplayLookup) ([]string, [][]string) {
+	entries, _ := resp["entries"].([]any)
+	rows := make([][]string, 0, len(entries))
+	for _, raw := range entries {
+		e, _ := raw.(map[string]any)
+		actor := actors.actor(strVal(e, "actor_type"), strVal(e, "actor_id"))
+		if actor == "" {
+			actor = strVal(e, "actor_type")
+		}
+		rows = append(rows, []string{
+			strVal(e, "created_at"),
+			strVal(e, "issue_identifier"),
+			strVal(e, "issue_title"),
+			actor,
+			strVal(e, "action"),
+			projectActivityChange(e, actors),
+		})
+	}
+	return []string{"TIME", "ISSUE", "TITLE", "ACTOR", "ACTION", "CHANGE"}, rows
+}
+
+// projectActivityChange renders an activity's from → to, when it has one.
+func projectActivityChange(entry map[string]any, actors actorDisplayLookup) string {
+	details, _ := entry["details"].(map[string]any)
+	from, to := strVal(details, "from"), strVal(details, "to")
+	if strVal(entry, "action") == "assignee_changed" {
+		from = actors.actor(strVal(details, "from_type"), strVal(details, "from_id"))
+		to = actors.actor(strVal(details, "to_type"), strVal(details, "to_id"))
+	}
+	switch {
+	case from == "" && to == "":
+		return ""
+	case from == "":
+		return "→ " + to
+	case to == "":
+		return from + " →"
+	default:
+		return from + " → " + to
+	}
+}
 
 func formatLead(project map[string]any, actors actorDisplayLookup) string {
 	lType := strVal(project, "lead_type")
