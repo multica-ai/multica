@@ -101,7 +101,7 @@ export const IssuePresenceHeaderChip = memo(function IssuePresenceHeaderChip({
           {collaborators.length}
         </span>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72">
+      <PopoverContent align="end" className="max-h-(--available-height) w-72 overflow-y-auto">
         {editing.length > 0 && (
           <PresenceGroup title={t(($) => $.presence.editing)} count={editing.length}>
             {editing.map((c) => {
