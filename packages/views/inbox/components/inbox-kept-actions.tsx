@@ -1,20 +1,12 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 import { Archive, ArrowDown, ArrowRight, CheckCircle2, Undo2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { InboxBarAction } from "@multica/core/inbox/auto-archive";
 import type { KeptInboxRow } from "@multica/core/inbox/open-row";
-import { useModalStore } from "@multica/core/modals";
-import {
-  getShortcut,
-  isEditableShortcutTarget,
-  isPortalLayerShortcutTarget,
-  shortcutMatchesEvent,
-} from "@multica/core/shortcuts";
-import { isImeComposing } from "@multica/core/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxItem } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
@@ -23,7 +15,7 @@ import { useStatusLabel } from "../../issues/utils/status-label";
 import { formatSnoozeTime } from "./inbox-snooze-time";
 import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "./inbox-display";
 import { InboxBar, InboxBarSeparator, InboxBarStatus } from "./inbox-bar";
-import { hasInboxUndo } from "./inbox-undo-toast";
+import { useInboxUndoShortcut } from "./use-inbox-shortcut";
 
 /**
  * How a kept row (`keepOpenInboxRow`) says why it is settled: `line` in its
@@ -108,27 +100,7 @@ export function InboxKeptActions({
   onGoToMyWork?: () => void;
 }) {
   const { t } = useT("inbox");
-  const undoRef = useRef(onUndo);
-  useEffect(() => {
-    undoRef.current = onUndo;
-  });
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      // A showing undo toast is the latest action, and the shortcut is its.
-      if (hasInboxUndo()) return;
-      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
-      if (isEditableShortcutTarget(event.target)) return;
-      if (isPortalLayerShortcutTarget(event.target)) return;
-      if (useModalStore.getState().modal) return;
-      if (!shortcutMatchesEvent(getShortcut("undoInboxAction"), event)) return;
-      const undo = undoRef.current;
-      if (!undo) return;
-      event.preventDefault();
-      undo();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useInboxUndoShortcut(onUndo ?? null);
   const statusIcon =
     icon ?? (inboxCleared ? <CheckCircle2 className="text-success" /> : <Archive />);
   const statusLabel = inboxCleared ? (

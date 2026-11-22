@@ -14,13 +14,6 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { ApiError, errorCode } from "@multica/core/api";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
-import {
-  getShortcut,
-  isEditableShortcutTarget,
-  isPortalLayerShortcutTarget,
-  shortcutMatchesEvent,
-} from "@multica/core/shortcuts";
-import { isImeComposing } from "@multica/core/utils";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { cachedIssueRouteRef } from "@multica/core/issues/canonical-id";
 import { useInboxSelectionStore, type LastInboxCleared } from "@multica/core/inbox/selection-store";
@@ -133,6 +126,7 @@ import {
   useRestoreInbox,
 } from "./use-leave-inbox-row";
 import { useInboxSnooze } from "./use-inbox-snooze";
+import { useInboxShortcut } from "./use-inbox-shortcut";
 import { InboxAppRequest } from "../../common/app-requests";
 import { useT } from "../../i18n";
 import { useLimitRecoveryPrompt } from "../../modals/use-limit-recovery-prompt";
@@ -706,29 +700,10 @@ export function InboxPage() {
     unsubscribeArchive({ id, issueId: item.issue_id }, scope);
   };
 
-  // Keep the listener stable while using the latest selected-item action.
-  const actionOnSelectedRef = useRef<(() => void) | null>(null);
-  useEffect(() => {
-    actionOnSelectedRef.current = selected
-      ? () => (isArchivedView ? handleUnarchive(selected.id) : handleArchive(selected.id))
-      : null;
-  });
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
-      if (isEditableShortcutTarget(event.target)) return;
-      if (isPortalLayerShortcutTarget(event.target)) return;
-      if (useModalStore.getState().modal) return;
-      if (!shortcutMatchesEvent(getShortcut("archiveInboxItem"), event)) return;
-      const run = actionOnSelectedRef.current;
-      if (!run) return;
-      event.preventDefault();
-      run();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useInboxShortcut(
+    "archiveInboxItem",
+    selected ? () => (isArchivedView ? handleUnarchive(selected.id) : handleArchive(selected.id)) : null,
+  );
 
   // Batch operations
   const handleMarkAllRead = () => {

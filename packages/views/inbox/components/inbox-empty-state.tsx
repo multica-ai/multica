@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -28,22 +28,14 @@ import {
   type LastInboxCleared,
 } from "@multica/core/inbox/selection-store";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
-import { useModalStore } from "@multica/core/modals";
 import { useIsGuest } from "@multica/core/permissions";
-import {
-  getShortcut,
-  isEditableShortcutTarget,
-  isPortalLayerShortcutTarget,
-  shortcutMatchesEvent,
-} from "@multica/core/shortcuts";
 import type { SnoozedInboxIssue, WorkspaceWorkingAgent } from "@multica/core/types";
-import { isImeComposing } from "@multica/core/utils";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useLocale, useT } from "../../i18n";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
 import { formatSnoozeTime } from "./inbox-snooze-time";
-import { hasInboxUndo } from "./inbox-undo-toast";
+import { useInboxUndoShortcut } from "./use-inbox-shortcut";
 import { useRestoreInbox } from "./use-leave-inbox-row";
 
 const NO_SNOOZED: SnoozedInboxIssue[] = [];
@@ -190,27 +182,7 @@ export function InboxEmptyState({
 
   // Z undoes what the inline undo shows, once its toast is gone.
   const showsUndo = !isArchivedView && visibleCount === 0 && !!lastCleared && canUndoCleared(lastCleared);
-  const undoShortcutRef = useRef<(() => void) | null>(null);
-  useEffect(() => {
-    undoShortcutRef.current = showsUndo && lastCleared ? () => void handleUndoCleared(lastCleared) : null;
-  });
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      // A showing undo toast is the latest action, and the shortcut is its.
-      if (hasInboxUndo()) return;
-      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
-      if (isEditableShortcutTarget(event.target)) return;
-      if (isPortalLayerShortcutTarget(event.target)) return;
-      if (useModalStore.getState().modal) return;
-      if (!shortcutMatchesEvent(getShortcut("undoInboxAction"), event)) return;
-      const undo = undoShortcutRef.current;
-      if (!undo) return;
-      event.preventDefault();
-      undo();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useInboxUndoShortcut(showsUndo && lastCleared ? () => void handleUndoCleared(lastCleared) : null);
   const undoKeycaps = !isCompact && <ActionShortcutKeycaps action="undoInboxAction" />;
 
   // Desktop prompt when active notifications exist in the Work panel.
