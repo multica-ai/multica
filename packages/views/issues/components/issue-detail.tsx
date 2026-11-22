@@ -1290,6 +1290,7 @@ export function IssueLoadError({
 // Loading skeleton
 
 const ISSUE_DETAIL_LAYOUT_ID = "multica_issue_detail_layout";
+const ISSUE_PAGE_TITLE_CLASS = "text-display-sm font-semibold";
 /**
  * Exported so `IssueDetailRoute` can show the identical frame while it resolves
  * an identifier URL to its issue — the two waits are indistinguishable to the
@@ -1363,7 +1364,7 @@ export function IssueDetailSkeleton({
               content mounts. */}
           <div className={cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] space-y-6 md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]")}>
             {inboxItem?.title ? (
-              <div className="text-xl font-semibold tracking-tight text-foreground leading-snug">
+              <div className={cn("w-full leading-snug text-foreground", ISSUE_PAGE_TITLE_CLASS)}>
                 {inboxItem.title}
               </div>
             ) : (
@@ -3801,7 +3802,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
         ]
       : [];
 
-  const titleSizeClass = isPeek ? "text-title-lg font-semibold" : "text-display-sm font-semibold";
+  const titleSizeClass = isPeek ? "text-title-lg font-semibold" : ISSUE_PAGE_TITLE_CLASS;
 
   // What the header names the issue: the identifier only in a peek, where the
   // title is right below it; identifier and title on the page.

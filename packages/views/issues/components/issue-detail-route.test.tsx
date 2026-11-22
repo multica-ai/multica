@@ -310,7 +310,7 @@ describe("IssueDetailSkeleton embedded layouts", () => {
 
     expect(view.container.querySelector("[data-inbox-bar]")).not.toBeNull();
     expect(view.getByText("MUL-42")).toBeInTheDocument();
-    expect(view.getByText("Keep Inbox chrome steady")).toBeInTheDocument();
+    expect(view.getByText("Keep Inbox chrome steady")).toHaveClass("text-display-sm", "font-semibold");
 
     view.unmount();
     qc.clear();
