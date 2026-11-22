@@ -62,12 +62,6 @@ export function InboxBarSkeleton({ item }: { item?: InboxItem | null }) {
         <Skeleton className="h-6 w-14 rounded-md" />
         <Skeleton className="h-6 w-14 rounded-md" />
       </div>
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-muted"
-      >
-        <span className="block h-full w-2/3 animate-pulse bg-brand/70" />
-      </span>
     </InboxBar>
   );
 }
