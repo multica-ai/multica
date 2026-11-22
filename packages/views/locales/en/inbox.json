@@ -225,7 +225,7 @@
     "title": "Archive notifications once you've handled them",
     "description": "The Inbox can now archive an issue's notifications when you act on it. Only your own actions count, and a later notification brings the issue back.",
     "options": {
-      "handled": "Issues you've dealt with leave your Inbox",
+      "handled": "Completing an issue or starting an agent archives it; organizing or commenting without waking an agent leaves it in place",
       "completed": "Only completing or cancelling an issue archives it",
       "never": "You archive notifications yourself"
     },

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -20,31 +21,32 @@ import (
 // preferences map so a single endpoint covers all user notification
 // preferences. The `auto_archive_*` keys are not event groups either: each
 // says whether one action you take on an issue archives your notifications on
-// it. Completing, commenting, other status changes and reassigning archive
-// unless "muted"; priority, project, date and label edits only with "all".
-// `after_auto_archive` is where the client goes when the notification you are
-// reading is archived that way.
+// it. Completing and triggering an agent archive unless "muted"; commenting,
+// status changes, reassigning, priority, project, date and label edits archive
+// only with "all". `after_auto_archive` is where the client goes when the
+// notification you are reading is archived that way.
 var validNotifGroups = map[string]bool{
-	"assignments":              true,
-	"status_changes":           true,
-	"comments":                 true,
-	"chat_replies":             true,
-	"mentions":                 true,
-	"reactions":                true,
-	"updates":                  true,
-	"agent_activity":           true,
-	"new_issues":               true,
-	"system_notifications":     true,
-	"auto_archive_completed":   true,
-	"auto_archive_on_comment":  true,
-	"auto_archive_on_status":   true,
-	"auto_archive_on_assignee": true,
-	"auto_archive_on_priority": true,
-	"auto_archive_on_project":  true,
-	"auto_archive_on_dates":    true,
-	"auto_archive_on_labels":   true,
-	"after_auto_archive":       true,
-	"others_issues":            true,
+	"assignments":                   true,
+	"status_changes":                true,
+	"comments":                      true,
+	"chat_replies":                  true,
+	"mentions":                      true,
+	"reactions":                     true,
+	"updates":                       true,
+	"agent_activity":                true,
+	"new_issues":                    true,
+	"system_notifications":          true,
+	"auto_archive_completed":        true,
+	"auto_archive_on_agent_trigger": true,
+	"auto_archive_on_comment":       true,
+	"auto_archive_on_status":        true,
+	"auto_archive_on_assignee":      true,
+	"auto_archive_on_priority":      true,
+	"auto_archive_on_project":       true,
+	"auto_archive_on_dates":         true,
+	"auto_archive_on_labels":        true,
+	"after_auto_archive":            true,
+	"others_issues":                 true,
 }
 
 // validNotifValues is the set of allowed preference values for a group not
@@ -266,4 +268,29 @@ func (h *Handler) ResolveAutoArchivePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.GetNotificationPreferences(w, r)
+}
+
+func (h *Handler) archiveActorInboxOnAgentTrigger(ctx context.Context, workspaceID, issueID, actorType, actorID string) {
+	inbox.ArchiveActorIssueInbox(ctx, h.Queries, h.Bus, workspaceID, issueID, actorType, actorID, inbox.AutoArchiveAgentTriggerPref)
+}
+
+// issueRunTriggeredAgent reports whether an issue write actually handed work to
+// an agent (queued a fresh run or coalesced into a pending one). Deferred
+// (backlog parking, suppress_run, self-loop) and blocked outcomes do not count.
+func issueRunTriggeredAgent(outcome *IssueRunOutcome) bool {
+	return outcome != nil && (outcome.Status == DispatchQueued || outcome.Status == DispatchCoalesced)
+}
+
+// commentResultsTriggeredAgent reports whether a comment actually reached at
+// least one agent (queued, coalesced into a pending run, deferred to an active
+// run's completion reconcile, or steered into a running turn). Blocked targets
+// do not count.
+func commentResultsTriggeredAgent(results map[string]commentEnqueueResult) bool {
+	for _, res := range results {
+		switch res.status {
+		case DispatchQueued, DispatchCoalesced, DispatchDeferred, DispatchSteered:
+			return true
+		}
+	}
+	return false
 }

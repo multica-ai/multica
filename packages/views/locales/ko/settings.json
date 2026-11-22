@@ -859,7 +859,7 @@
       "auto_presets": {
         "never": "안 함",
         "completed": "완료했을 때",
-        "handled": "답글, 상태 진행, 담당자 변경 후",
+        "handled": "완료하거나 에이전트를 실행했을 때",
         "custom": "사용자 지정",
         "custom_item": "사용자 지정..."
       },
@@ -870,6 +870,7 @@
       },
       "auto_actions": {
         "completed": "완료",
+        "agent_trigger": "에이전트 실행",
         "comment": "답글",
         "status": "상태 진행",
         "assignee": "담당자 변경",

@@ -859,7 +859,7 @@
       "auto_presets": {
         "never": "從不",
         "completed": "完成任務時",
-        "handled": "回覆、推進狀態或轉交後",
+        "handled": "完成或觸發 AI 代理時",
         "custom": "自訂",
         "custom_item": "自訂..."
       },
@@ -870,6 +870,7 @@
       },
       "auto_actions": {
         "completed": "完成",
+        "agent_trigger": "觸發 AI 代理",
         "comment": "回覆",
         "status": "推進狀態",
         "assignee": "轉交",

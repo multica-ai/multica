@@ -225,7 +225,7 @@
     "title": "Archiva las notificaciones cuando ya las has gestionado",
     "description": "La bandeja de entrada ya puede archivar las notificaciones de una tarea cuando actúas sobre ella. Solo cuentan tus propias acciones, y una notificación posterior devuelve la tarea.",
     "options": {
-      "handled": "Las tareas que ya gestionaste salen de tu bandeja",
+      "handled": "Completar una tarea o iniciar un agente la archiva; organizarla o comentar sin activar un agente la deja en su sitio",
       "completed": "Solo completar o cancelar una tarea la archiva",
       "never": "Archivas las notificaciones tú mismo"
     },

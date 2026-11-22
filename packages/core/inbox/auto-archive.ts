@@ -2,8 +2,8 @@ import type { IssueAssigneeType } from "../types";
 
 /**
  * Issues whose notifications the server just archived because the user
- * handled them: completed the issue, commented on it, changed its status or reassigned it
- * (`inbox:batch-archived` with one of these reasons). The Inbox reads this to
+ * handled them (e.g. completed the issue or triggered an agent,
+ * `inbox:batch-archived` with one of these reasons). The Inbox reads this to
  * tell such an archive apart from any other way the open notification left,
  * such as another window archiving it.
  */

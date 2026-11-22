@@ -869,7 +869,7 @@
       "auto_presets": {
         "never": "Never",
         "completed": "When you complete it",
-        "handled": "After you reply, move it forward or reassign",
+        "handled": "When you complete it or trigger an agent",
         "custom": "Custom",
         "custom_item": "Custom..."
       },
@@ -880,6 +880,7 @@
       },
       "auto_actions": {
         "completed": "Complete",
+        "agent_trigger": "Trigger an agent",
         "comment": "Reply",
         "status": "Move it forward",
         "assignee": "Reassign",

@@ -448,7 +448,7 @@ func TestAutoArchivePromptResolvesEveryPendingWorkspace(t *testing.T) {
 	otherUserID := dbfx.User(t, "Auto-archive teammate", strings.ToLower(suffix)+"@multica.test")
 	dbfx.Member(t, testWorkspaceID, otherUserID, "member")
 
-	pending := `{"auto_archive_on_comment": "muted", "auto_archive_on_status": "muted",
+	pending := `{"auto_archive_on_agent_trigger": "muted", "auto_archive_on_comment": "muted", "auto_archive_on_status": "muted",
 		"auto_archive_on_assignee": "muted", "auto_archive_prompt": "pending", "updates": "muted"}`
 	rows := [][2]string{{testWorkspaceID, testUserID}, {otherWorkspaceID, testUserID}, {testWorkspaceID, otherUserID}}
 	for _, row := range rows {
@@ -522,27 +522,28 @@ func TestAutoArchivePromptResolvesEveryPendingWorkspace(t *testing.T) {
 
 	resolve := httptest.NewRecorder()
 	testHandler.ResolveAutoArchivePrompt(resolve, notificationPreferenceRequest(t, http.MethodPost, map[string]string{
-		"auto_archive_completed":   "all",
-		"auto_archive_on_comment":  "all",
-		"auto_archive_on_status":   "all",
-		"auto_archive_on_assignee": "all",
+		"auto_archive_completed":        "all",
+		"auto_archive_on_agent_trigger": "all",
+		"auto_archive_on_comment":       "muted",
+		"auto_archive_on_status":        "muted",
+		"auto_archive_on_assignee":      "muted",
 	}))
 	after := decode(resolve)
 	if after.AutoArchivePrompt {
 		t.Fatal("auto_archive_prompt still true after resolving")
 	}
-	if after.Preferences["auto_archive_on_comment"] != "all" || after.Preferences["updates"] != "muted" {
+	if after.Preferences["auto_archive_on_agent_trigger"] != "all" || after.Preferences["updates"] != "muted" {
 		t.Fatalf("resolved preferences = %#v", after.Preferences)
 	}
 
 	for _, workspaceID := range []string{testWorkspaceID, otherWorkspaceID} {
 		prefs := stored(workspaceID, testUserID)
-		if _, ok := prefs[autoArchivePromptKey]; ok || prefs["auto_archive_on_status"] != "all" {
+		if _, ok := prefs[autoArchivePromptKey]; ok || prefs["auto_archive_on_agent_trigger"] != "all" {
 			t.Errorf("workspace %s not resolved: %#v", workspaceID, prefs)
 		}
 	}
 	if prefs := stored(testWorkspaceID, otherUserID); prefs[autoArchivePromptKey] != "pending" ||
-		prefs["auto_archive_on_status"] != "muted" {
+		prefs["auto_archive_on_agent_trigger"] != "muted" {
 		t.Errorf("another member's prompt changed: %#v", prefs)
 	}
 }
