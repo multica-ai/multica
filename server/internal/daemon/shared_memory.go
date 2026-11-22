@@ -121,6 +121,9 @@ func sharedMemoryQuery(task Task) string {
 	// Including the full issue description here lets its repeated/background
 	// terms drown out a short, specific question in BM25 fallback retrieval.
 	if comment := strings.TrimSpace(task.TriggerCommentContent); comment != "" {
+		if question := quotedMemoryQuestion(comment); question != "" {
+			return truncateMemoryQuery(question, 12000)
+		}
 		return truncateMemoryQuery(comment, 12000)
 	}
 	parts := []string{
@@ -145,6 +148,34 @@ func sharedMemoryQuery(task Task) string {
 		}
 	}
 	return b.String()
+}
+
+// A single question in an inline code span can be the actual search request
+// inside a routing comment. Keep the full comment when the intent is ambiguous.
+func quotedMemoryQuestion(comment string) string {
+	if strings.Contains(comment, "``") {
+		return ""
+	}
+	parts := strings.Split(comment, "`")
+	if len(parts)%2 == 0 {
+		return ""
+	}
+	var question string
+	for i := 1; i < len(parts); i += 2 {
+		span := strings.TrimSpace(parts[i])
+		if strings.Count(span, "?")+strings.Count(span, "？") > 1 {
+			return ""
+		}
+		if strings.ContainsAny(span, "\r\n") ||
+			(!strings.HasSuffix(span, "?") && !strings.HasSuffix(span, "？")) {
+			continue
+		}
+		if question != "" {
+			return ""
+		}
+		question = span
+	}
+	return question
 }
 
 func truncateMemoryQuery(query string, maxBytes int) string {
