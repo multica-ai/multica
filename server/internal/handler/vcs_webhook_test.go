@@ -512,6 +512,10 @@ func configureGitlabSystemHook(t *testing.T, instance, mergeStatus string) {
 }
 
 func TestVCSWebhook_SystemHookAuthorizationFailure(t *testing.T) {
+	// System hooks confirm repository access against the stored instance URL.
+	// These tests use an httptest server on loopback; production still rejects
+	// loopback/metadata instance addresses (GH #9439).
+	t.Cleanup(allowLoopbackVCSInstances(t))
 	for _, tc := range []struct {
 		name         string
 		status, want int
@@ -589,6 +593,7 @@ func TestVCSWebhook_SystemHookAuthorizationFailure(t *testing.T) {
 }
 
 func TestVCSWebhook_ProjectAndSystemHookDuplicateDelivery(t *testing.T) {
+	t.Cleanup(allowLoopbackVCSInstances(t))
 	for _, order := range [][]string{{"Merge Request Hook", "System Hook"}, {"System Hook", "Merge Request Hook"}} {
 		for _, target := range []string{"done", "none"} {
 			t.Run(order[0]+"/"+target, func(t *testing.T) {
@@ -649,6 +654,7 @@ func TestVCSWebhook_ProjectAndSystemHookDuplicateDelivery(t *testing.T) {
 }
 
 func TestVCSWebhook_SystemHookOnlyMirrorsConfiguredRepos(t *testing.T) {
+	t.Cleanup(allowLoopbackVCSInstances(t))
 	ctx := context.Background()
 	box := withVCSBox(t)
 	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
