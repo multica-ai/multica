@@ -18,6 +18,10 @@ const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
   useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: true }),
 }));
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: (selector: (s: typeof selection) => unknown) => selector(selection),

@@ -28,7 +28,14 @@ function issue(id: string, notes?: string): Issue {
   return { id, identifier: id, properties: notes === undefined ? {} : { notes } } as Issue;
 }
 
-function renderMenu(issues: Issue[], { offersDelete = true } = {}) {
+function renderMenu(
+  issues: Issue[],
+  {
+    offersDelete = true,
+    editable = true,
+    variant = "more",
+  }: { offersDelete?: boolean; editable?: boolean; variant?: "more" | "context" } = {},
+) {
   const onProperties = vi.fn();
   const onEditor = vi.fn();
   renderWithI18n(
@@ -36,12 +43,13 @@ function renderMenu(issues: Issue[], { offersDelete = true } = {}) {
       <DropdownMenuContent>
         <BatchMenuItems
           primitives={dropdownPrimitives}
-          variant="more"
+          variant={variant}
           issues={issues}
           common={commonIssueFields(issues)}
           projectId={null}
           allowedStatuses={null}
           disabled={false}
+          editable={editable}
           offersDelete={offersDelete}
           canDelete
           onStatus={vi.fn()}
@@ -51,13 +59,14 @@ function renderMenu(issues: Issue[], { offersDelete = true } = {}) {
           onProperties={onProperties}
           onEditor={onEditor}
           onSetParent={vi.fn()}
+          onClearSelection={variant === "context" || !editable ? vi.fn() : undefined}
           onDelete={vi.fn()}
           onClose={vi.fn()}
         />
       </DropdownMenuContent>
     </DropdownMenu>,
   );
-  fireEvent.click(screen.getByRole("menuitem", { name: "Custom properties" }));
+  if (editable) fireEvent.click(screen.getByRole("menuitem", { name: "Custom properties" }));
   return { onProperties, onEditor };
 }
 
@@ -94,5 +103,15 @@ describe("BatchMenuItems delete", () => {
     renderMenu([issue("a"), issue("b")], { offersDelete: false });
     expect(screen.getByRole("menuitem", { name: "Copy links" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /Delete/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("BatchMenuItems for a guest (MUL-9883)", () => {
+  it.each(["more", "context"] as const)("keeps only Copy links and Clear selection in the %s menu", (variant) => {
+    renderMenu([issue("a"), issue("b")], { editable: false, offersDelete: false, variant });
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim())).toEqual([
+      "Copy links",
+      "Clear selection",
+    ]);
   });
 });

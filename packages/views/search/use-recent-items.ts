@@ -7,6 +7,7 @@ import { selectRecentVisits, useRecentVisitsStore } from "@multica/core/command-
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { selectRecentIssues, useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useIsGuest } from "@multica/core/permissions";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import type { Agent, Autopilot, Issue, Project } from "@multica/core/types";
@@ -37,10 +38,13 @@ export function useRecentItems(open: boolean): RecentItem[] {
   const issueQueries = useQueries({
     queries: open ? recentIssues.map((item) => issueDetailOptions(wsId, item.id)) : [],
   });
+  // Visits from before the user became a guest (MUL-9420) can name autopilots,
+  // which a guest cannot list.
+  const guest = useIsGuest(wsId);
   const wants = (type: string) => open && recentVisits.some((v) => v.type === type);
   const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: wants("project") });
   const { data: agents } = useQuery({ ...agentListOptions(wsId), enabled: wants("agent") });
-  const { data: autopilots } = useQuery({ ...autopilotListOptions(wsId), enabled: wants("autopilot") });
+  const { data: autopilots } = useQuery({ ...autopilotListOptions(wsId), enabled: wants("autopilot") && !guest });
 
   return useMemo(() => {
     if (!open) return [];
