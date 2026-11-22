@@ -53,7 +53,7 @@ function setup(initialLimit: number | null) {
 function useDashboard(wsId: string) {
   const history = useDashboardHistoryLimit(wsId);
   const query = useQuery(
-    dashboardUsageByAgentOptions(wsId, 30, null, "UTC", history.ready ? history.maxDays : undefined),
+    dashboardUsageByAgentOptions(wsId, 30, null, null, "UTC", history.ready ? history.maxDays : undefined),
   );
   return { history, query };
 }
@@ -209,7 +209,7 @@ describe("useDashboardHistoryLimit", () => {
     });
     await act(() => qc.refetchQueries({ queryKey: ["dashboard", "ws-1"], type: "active" }));
     await waitFor(() => expect(result.current.history.maxDays).toBe(30));
-    const ninetyKey = dashboardUsageByAgentOptions("ws-1", 30, null, "UTC", 90).queryKey;
+    const ninetyKey = dashboardUsageByAgentOptions("ws-1", 30, null, null, "UTC", 90).queryKey;
     expect(qc.getQueryData(ninetyKey)).not.toEqual([{ sentinel: "cut-to-30" }]);
 
     // Upgrading back must fetch the 90-day key again, not reuse the cut rows.

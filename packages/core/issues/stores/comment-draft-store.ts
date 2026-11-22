@@ -34,6 +34,18 @@ import type { Attachment } from "../../types";
  * thread replies open in adjacent desktop tabs would collide.
  */
 
+/**
+ * The runtime routing a composer's @ popup recorded for its mentions: a
+ * "current task" pick (agent id → the run it continues) and/or a "my runtime"
+ * requester override (agent ids). Persisted with the draft so a reload keeps
+ * the member's explicit choice instead of silently re-resolving sticky
+ * routing to whatever run is newest at send time.
+ */
+export interface CommentRuntimeRouting {
+  requesterAgentIds: string[];
+  sourceTaskIds: Record<string, string>;
+}
+
 export type CommentDraftKey =
   | `new:${string}`              // top-level CommentInput, key = `new:${issueId}`
   | `reply:${string}:${string}`  // ReplyInput inside a thread, key = `reply:${issueId}:${rootCommentId}`
@@ -53,6 +65,8 @@ interface CommentDraft {
   /** Unconfirmed selection-annotation note kept across virtualization unmount / tab switches. */
   pendingAnnotation?: PendingAnnotationDraft;
   replyTarget?: { commentId: string; actorName: string };
+  /** Explicit runtime routing recorded from the @ popup (see {@link CommentRuntimeRouting}). */
+  runtimeRouting?: CommentRuntimeRouting;
   updatedAt: number;
 }
 
@@ -82,6 +96,8 @@ interface CommentDraftStore {
   /** Drop a placeholder (e.g. a dismissed failure). */
   removeUpload: (key: CommentDraftKey, clientUploadId: string) => void;
   getAnnotations: (key: CommentDraftKey) => ReplyAnnotation[];
+  getRuntimeRouting: (key: CommentDraftKey) => CommentRuntimeRouting | undefined;
+  setRuntimeRouting: (key: CommentDraftKey, routing: CommentRuntimeRouting | undefined) => void;
   addAnnotation: (key: CommentDraftKey, annotation: ReplyAnnotation) => string | undefined;
   updateAnnotation: (key: CommentDraftKey, id: string, note: string) => void;
   removeAnnotation: (key: CommentDraftKey, id: string) => void;
@@ -125,8 +141,15 @@ function isMeaningful(
   uploads: DraftUpload[],
   annotations: ReplyAnnotation[] = EMPTY_REPLY_ANNOTATIONS,
   pendingAnnotation?: PendingAnnotationDraft,
+  routing?: CommentRuntimeRouting,
 ): boolean {
-  return content.trim().length > 0 || uploads.length > 0 || annotations.length > 0 || !!pendingAnnotation;
+  return (
+    content.trim().length > 0 ||
+    uploads.length > 0 ||
+    annotations.length > 0 ||
+    !!pendingAnnotation ||
+    (routing !== undefined && (routing.requesterAgentIds.length > 0 || Object.keys(routing.sourceTaskIds).length > 0))
+  );
 }
 
 function normalizePendingAnnotation(value: unknown): PendingAnnotationDraft | undefined {
@@ -154,6 +177,22 @@ function samePendingAnnotation(a?: PendingAnnotationDraft, b?: PendingAnnotation
   );
 }
 
+function sameRouting(a: CommentRuntimeRouting | undefined, b: CommentRuntimeRouting | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.requesterAgentIds.length !== b.requesterAgentIds.length) return false;
+  for (let i = 0; i < a.requesterAgentIds.length; i++) {
+    if (a.requesterAgentIds[i] !== b.requesterAgentIds[i]) return false;
+  }
+  const aKeys = Object.keys(a.sourceTaskIds);
+  const bKeys = Object.keys(b.sourceTaskIds);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a.sourceTaskIds[key] !== b.sourceTaskIds[key]) return false;
+  }
+  return true;
+}
+
 // Shared writer for setDraft/setAttachments/upload mutations: an entry with
 // neither text nor uploads carries nothing to recover, so drop it instead of
 // leaving a blank record behind (parity with the old onUpdate "clear on empty
@@ -167,10 +206,11 @@ function writeDraft(
   annotations = drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS,
   replyTarget = key.startsWith("reply:") && annotations.length ? drafts[key]?.replyTarget : undefined,
   pendingArg?: PendingAnnotationDraft | null,
+  routing = drafts[key]?.runtimeRouting,
 ): Record<string, CommentDraft> {
   const pendingAnnotation =
     pendingArg === undefined ? drafts[key]?.pendingAnnotation : (pendingArg ?? undefined);
-  if (!isMeaningful(content, uploads, annotations, pendingAnnotation)) {
+  if (!isMeaningful(content, uploads, annotations, pendingAnnotation, routing)) {
     if (!(key in drafts)) return drafts;
     const next = { ...drafts };
     delete next[key];
@@ -187,13 +227,14 @@ function writeDraft(
     existing.replyTarget === replyTarget &&
     (existing.annotations ?? EMPTY_REPLY_ANNOTATIONS) === annotations &&
     existing.attachments === uploads &&
-    samePendingAnnotation(existing.pendingAnnotation, pendingAnnotation)
+    samePendingAnnotation(existing.pendingAnnotation, pendingAnnotation) &&
+    sameRouting(existing.runtimeRouting, routing)
   ) {
     return drafts;
   }
   return {
     ...drafts,
-    [key]: { content, attachments: uploads, annotations, pendingAnnotation, replyTarget, updatedAt: Date.now() },
+    [key]: { content, attachments: uploads, annotations, pendingAnnotation, replyTarget, runtimeRouting: routing, updatedAt: Date.now() },
   };
 }
 
@@ -298,6 +339,16 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
           };
         }),
       getAnnotations: (key) => get().drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS,
+      getRuntimeRouting: (key) => get().drafts[key]?.runtimeRouting,
+      setRuntimeRouting: (key, routing) =>
+        set((s) => {
+          const draft = s.drafts[key];
+          if (!draft || !routing) return s;
+          // Empty picks normalize to undefined; updatedAt is preserved so the
+          // stale-submit guard's reference comparison stays meaningful.
+          const isEmpty = routing.requesterAgentIds.length === 0 && Object.keys(routing.sourceTaskIds).length === 0;
+          return { drafts: { ...s.drafts, [key]: { ...draft, runtimeRouting: isEmpty ? undefined : routing, updatedAt: draft.updatedAt } } };
+        }),
       addAnnotation: (key, annotation) => {
         if ((!key.startsWith("reply:") && !key.startsWith("new:") && !key.startsWith("chat:")) || !annotation.note.trim() || !annotation.quote.trim() || annotation.quote.length > MAX_ANNOTATION_QUOTE_LENGTH) return undefined;
         const current = get().getAnnotations(key);

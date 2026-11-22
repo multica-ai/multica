@@ -9,6 +9,7 @@ import {
   buildPresenceMap,
   deriveAgentPresenceDetail,
 } from "./derive-presence";
+import { agentEffectiveRuntimeId } from "./effective-runtime";
 import type { AgentPresenceDetail } from "./types";
 
 // 30s tick, mirroring useRuntimeHealth. Presence depends on wall-clock time
@@ -152,8 +153,12 @@ export function useAgentPresenceDetail(
     // instead of looping in "loading".
     if (!agent) return MISSING_AGENT_DETAIL;
     // Missing runtime is a legitimate state (offline) — pass null and let
-    // derive handle it.
-    const runtime = safeRuntimes.find((r) => r.id === agent.runtime_id) ?? null;
+    // derive handle it. Smart runtime: resolve the viewer's current runtime
+    // config, not the recommended runtime.
+    const runtimeId = agentEffectiveRuntimeId(agent);
+    const runtime = runtimeId
+      ? safeRuntimes.find((r) => r.id === runtimeId) ?? null
+      : null;
 
     const tasks = safeSnapshot.filter((t) => t.agent_id === agentId);
     return deriveAgentPresenceDetail({ agent, runtime, tasks, now: Date.now() });

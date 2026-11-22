@@ -28,7 +28,7 @@ import type {
   UpdateDocRequest,
   CreateDocFolderRequest,
 } from "../types/doc";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -73,6 +73,12 @@ import type {
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
+  AgentRuntimeConfigSummary,
+  UpdateAgentRuntimeCurrentConfigRequest,
+  MigrateAgentsToRuntimeRequest,
+  MigrateAgentsToRuntimeResponse,
+  RecentAgentSelectionResponse,
+  RuntimeConfigHint,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
@@ -646,6 +652,15 @@ import {
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
   WorkspaceListItemSchema,
   WorkspacePinnedSchema,
+  RecentAgentSelectionResponseSchema,
+  EMPTY_RECENT_AGENT_SELECTION_RESPONSE,
+  AgentSchema,
+  AgentListSchema,
+  AgentRuntimeConfigSummarySchema,
+  RuntimeConfigHintSchema,
+  MALFORMED_AGENT_RUNTIME_CONFIG_SUMMARY,
+  MigrateAgentsToRuntimeResponseSchema,
+  MALFORMED_MIGRATE_AGENTS_TO_RUNTIME_RESPONSE,
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
@@ -715,6 +730,8 @@ export interface DashboardRequestParams {
   days?: number;
   project_id?: string | null;
   squad_id?: string | null;
+  /** Keep only runs triggered by this member; absent means every caller. */
+  originator_user_id?: string | null;
   tz?: string;
   onHistoryLimit?: (limitDays: number | null) => void;
 }
@@ -1919,11 +1936,17 @@ export class ApiClient {
     project_id?: string | null;
     parent_issue_id?: string | null;
     attachment_ids?: string[];
-  }): Promise<{ task_id: string }> {
-    return this.fetch("/api/issues/quick-create", {
+  }): Promise<{ task_id: string; runtime_config_hint?: RuntimeConfigHint }> {
+    const raw = await this.fetch<unknown>("/api/issues/quick-create", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    const response = parseWithFallback(raw, z.object({
+      task_id: z.string().min(1),
+      runtime_config_hint: RuntimeConfigHintSchema.optional().catch(undefined),
+    }), null, { endpoint: "POST /api/issues/quick-create" });
+    if (!response) throw new Error("Invalid quick-create response");
+    return response;
   }
 
   async getCommentSubIssuePreview(anchorCommentId: string): Promise<SourceContextPreview> {
@@ -2122,7 +2145,11 @@ export class ApiClient {
     attachmentIds?: string[],
     suppressAgentIds?: string[],
     steerTaskIds?: string[],
+    requesterRuntimeAgentIds?: string[],
+    /** Pins a sticky "current task" continuation per agent to the run the member picked. */
+    runtimeSourceTaskIds?: Record<string, string>,
   ): Promise<Comment> {
+    const sourceTaskEntries = Object.entries(runtimeSourceTaskIds ?? {});
     return this.fetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
       body: JSON.stringify({
@@ -2132,6 +2159,8 @@ export class ApiClient {
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
         ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
+        ...(requesterRuntimeAgentIds?.length ? { runtime_originator_mode: "requester", runtime_originator_agent_ids: requesterRuntimeAgentIds } : {}),
+        ...(sourceTaskEntries.length ? { runtime_source_task_ids: runtimeSourceTaskIds } : {}),
       }),
     });
   }
@@ -2181,7 +2210,7 @@ export class ApiClient {
     });
   }
 
-  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number): Promise<Comment> {
+  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number, requesterRuntimeAgentIds?: string[], runtimeSourceTaskIds?: Record<string, string>): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}`, {
       method: "PUT",
       body: JSON.stringify({
@@ -2190,6 +2219,8 @@ export class ApiClient {
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
         ...(contentBase !== undefined ? { content_base: contentBase } : {}),
         ...(expectedRevision !== undefined ? { expected_revision: expectedRevision } : {}),
+        ...(requesterRuntimeAgentIds?.length ? { runtime_originator_mode: "requester", runtime_originator_agent_ids: requesterRuntimeAgentIds } : {}),
+        ...(runtimeSourceTaskIds && Object.keys(runtimeSourceTaskIds).length ? { runtime_source_task_ids: runtimeSourceTaskIds } : {}),
       }),
     });
   }
@@ -2309,19 +2340,22 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
-    return this.fetch(`/api/agents?${search}`);
+    const raw = await this.fetch<unknown>(`/api/agents?${search}`);
+    return parseWithFallback(raw, AgentListSchema, [], { endpoint: "GET /api/agents" });
   }
 
   async getAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}`);
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`);
+    return this.parseAgentResponse(raw, "GET /api/agents/{id}");
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
     assertAgentConversationStartersWriteSupported(data);
-    return this.fetch("/api/agents", {
+    const raw = await this.fetch<unknown>("/api/agents", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return this.parseAgentResponse(raw, "POST /api/agents");
   }
 
   /**
@@ -2434,10 +2468,131 @@ export class ApiClient {
 
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
     assertAgentConversationStartersWriteSupported(data);
-    return this.fetch(`/api/agents/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return this.parseAgentResponse(raw, "PUT /api/agents/{id}");
+  }
+
+  private parseAgentResponse(raw: unknown, endpoint: string): Agent {
+    const agent = parseWithFallback(raw, AgentSchema, null, { endpoint });
+    if (!agent) throw new Error("Invalid agent response");
+    return agent;
+  }
+
+  /** The current user's recently used agents in one workspace. */
+  async getRecentAgentSelections(
+    workspaceId: string,
+  ): Promise<RecentAgentSelectionResponse> {
+    const raw = await this.fetch<unknown>("/api/agents/recent", {
+      headers: workspaceHeader({ workspaceId }),
+    });
+    return parseWithFallback(
+      raw,
+      RecentAgentSelectionResponseSchema,
+      EMPTY_RECENT_AGENT_SELECTION_RESPONSE,
+      { endpoint: "GET /api/agents/recent" },
+    );
+  }
+
+  /** Records an agent as just used and returns the updated recent list. */
+  async recordRecentAgentSelection(
+    agentId: string,
+    workspaceId: string,
+  ): Promise<RecentAgentSelectionResponse> {
+    const raw = await this.fetch<unknown>("/api/agents/recent", {
+      method: "POST",
+      headers: workspaceHeader({ workspaceId }),
+      body: JSON.stringify({ agent_id: agentId }),
+    });
+    return parseWithFallback(
+      raw,
+      RecentAgentSelectionResponseSchema,
+      EMPTY_RECENT_AGENT_SELECTION_RESPONSE,
+      { endpoint: "POST /api/agents/recent" },
+    );
+  }
+
+  /** The caller's resolved (current) runtime configuration for one agent. */
+  async getAgentRuntimeCurrentConfig(
+    id: string,
+  ): Promise<AgentRuntimeConfigSummary> {
+    const raw = await this.fetch<unknown>(
+      `/api/agents/${id}/runtime-config/current`,
+    );
+    return parseWithFallback(
+      raw,
+      AgentRuntimeConfigSummarySchema,
+      MALFORMED_AGENT_RUNTIME_CONFIG_SUMMARY,
+      { endpoint: "GET /api/agents/{id}/runtime-config/current" },
+    );
+  }
+
+  /** Saves the caller's personal runtime configuration for one agent. */
+  async updateAgentRuntimeCurrentConfig(
+    id: string,
+    data: UpdateAgentRuntimeCurrentConfigRequest,
+  ): Promise<AgentRuntimeConfigSummary> {
+    const raw = await this.fetch<unknown>(
+      `/api/agents/${id}/runtime-config/current`,
+      {
+        method: "PUT",
+        body: JSON.stringify(data),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      AgentRuntimeConfigSummarySchema,
+      MALFORMED_AGENT_RUNTIME_CONFIG_SUMMARY,
+      { endpoint: "PUT /api/agents/{id}/runtime-config/current" },
+    );
+  }
+
+  /** Marks the caller's personal-config migration notice as seen. */
+  async markAgentRuntimeConfigNoticeSeen(
+    id: string,
+  ): Promise<AgentRuntimeConfigSummary> {
+    const raw = await this.fetch<unknown>(
+      `/api/agents/${id}/runtime-config/notice-seen`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      AgentRuntimeConfigSummarySchema,
+      MALFORMED_AGENT_RUNTIME_CONFIG_SUMMARY,
+      { endpoint: "POST /api/agents/{id}/runtime-config/notice-seen" },
+    );
+  }
+
+  /** Previews or applies one uniform configuration to eligible agents. */
+  async migrateAgentsToRuntime(
+    runtimeId: string,
+    data: MigrateAgentsToRuntimeRequest,
+  ): Promise<MigrateAgentsToRuntimeResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/migrate-agents`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          agent_ids: data.agentIds,
+          dry_run: data.dryRun,
+          model: data.model,
+          thinking_level: data.thinkingLevel,
+          service_tier: data.serviceTier,
+          max_concurrent_tasks: data.maxConcurrentTasks,
+          ...(data.runtimeConfig === undefined
+            ? {}
+            : { runtime_config: data.runtimeConfig }),
+        }),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      MigrateAgentsToRuntimeResponseSchema,
+      MALFORMED_MIGRATE_AGENTS_TO_RUNTIME_RESPONSE,
+      { endpoint: "POST /api/runtimes/{id}/migrate-agents" },
+    );
   }
 
   async archiveAgent(id: string): Promise<Agent> {
@@ -3195,6 +3350,7 @@ export class ApiClient {
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.squad_id) search.set("squad_id", params.squad_id);
+    if (params.originator_user_id) search.set("originator_user_id", params.originator_user_id);
     if (params.tz) search.set("tz", params.tz);
     const res = await this.fetchRaw(`${path}?${search}`, {
       extraHeaders: { "Content-Type": "application/json" },
@@ -3458,8 +3614,9 @@ export class ApiClient {
   // completed_at. One workspace-wide fetch backs both the Agents-list
   // sparkline (uses trailing 7 buckets) and the agent detail "Last 30
   // days" panel (uses all 30).
-  async getWorkspaceAgentActivity30d(): Promise<AgentActivityBucket[]> {
-    const raw = await this.fetch<unknown>(`/api/agent-activity-30d`);
+  async getWorkspaceAgentActivity30d(originatorUserId?: string | null): Promise<AgentActivityBucket[]> {
+    const search = originatorUserId ? `?originator_user_id=${encodeURIComponent(originatorUserId)}` : "";
+    const raw = await this.fetch<unknown>(`/api/agent-activity-30d${search}`);
     return parseWithFallback<AgentActivityBucket[]>(raw, AgentActivityBucketListSchema, [], {
       endpoint: "GET /api/agent-activity-30d",
     });
