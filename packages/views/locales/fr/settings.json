@@ -588,7 +588,6 @@
       "issue": "Tâche",
       "notifications": "Notifications",
       "tokens": "Jetons d'API",
-      "connected_accounts": "Comptes connectés",
       "general": "Général",
       "github": "GitHub",
       "labs": "Labo",
@@ -603,7 +602,8 @@
       "code": "Code",
       "channels": "Messagerie",
       "workflows": "Workflows",
-      "voice_input": "Saisie vocale"
+      "voice_input": "Saisie vocale",
+      "accounts": "Comptes"
     },
     "groups": {
       "personal": "Personnel",
@@ -1879,28 +1879,6 @@
       "team_description": "Connectez un compte partagé de l’espace de travail. Autorisez son utilisation sur la page Apps de chaque agent.",
       "personal_description": "Utilisez votre propre compte connecté lorsque vous lancez une exécution."
     },
-    "disconnect_team": {
-      "title": "Déconnecter le compte {{app}} de l'équipe ?",
-      "description": "Les agents qui utilisent le compte d'équipe perdent l'accès immédiatement.",
-      "agents": "Agents qui l'utilisent",
-      "no_agents": "Aucun agent ne l'utilise.",
-      "active_tasks": "Exécutions en cours : {{count}}",
-      "active_autopilots": "Autopilotes actifs : {{count}}",
-      "pending": "Confirmations qui seront annulées : {{count}}",
-      "cancel": "Annuler",
-      "confirm": "Déconnecter"
-    },
-    "disconnect_personal": {
-      "title": "Déconnecter votre compte {{app}} ?",
-      "description": "Il sera retiré de tous vos espaces de travail.",
-      "agents": "Ces agents vous demanderont de vous reconnecter",
-      "no_agents": "Aucun agent ne l'utilise.",
-      "uses_it": "l'utilise dans les exécutions que vous lancez",
-      "running": "a une exécution en cours, qui s'arrêtera",
-      "impact_failed": "Impossible de vérifier quels agents l'utilisent.",
-      "cancel": "Annuler",
-      "confirm": "Déconnecter partout"
-    },
     "detail": {
       "team_title": "{{app}} · compte d'équipe",
       "personal_title": "{{app}} · mon compte",
@@ -1952,9 +1930,20 @@
     },
     "status": {
       "connected": "Connecté",
-      "expired": "Connexion expirée",
-      "needs_your_account": "Votre compte est requis",
-      "no_team_account": "Pas encore de compte d'équipe"
+      "not_connected": "Non connecté",
+      "needs_reconnecting": "À reconnecter",
+      "requested": "Demandé"
+    },
+    "owner": {
+      "team": "Compte d'équipe",
+      "personal": "Votre compte"
+    },
+    "account_row": {
+      "admins_notified": "admins prévenus",
+      "withdraw": "Retirer",
+      "decline": "Refuser",
+      "toast_declined": "Demandes refusées. Les agents en attente continuent sans.",
+      "toast_withdrawn": "Demande retirée"
     },
     "disclosure": {
       "title": "Connecter {{app}}",
@@ -2006,7 +1995,13 @@
       "rate_limited": "Ce compte a atteint sa limite d'appels par minute. Approuvez à nouveau dans une minute.",
       "rate_limited_some_one": "{{count}} demande a atteint la limite par minute. Approuvez-la à nouveau dans une minute.",
       "rate_limited_some_other": "{{count}} demandes ont atteint la limite par minute. Approuvez-les à nouveau dans une minute.",
-      "withdrawn": "Vous ne pouvez plus utiliser cet agent ; la demande a été retirée."
+      "withdrawn": "Vous ne pouvez plus utiliser cet agent ; la demande a été retirée.",
+      "title_connect_team": "{{agent}} a besoin d'un compte {{app}}",
+      "title_member_ask": "{{name}} a demandé un compte d'équipe {{app}}",
+      "waiting_for_admin": "En attente d'un admin",
+      "team_note": "Tous les agents qui agissent avec le compte d'équipe pourront l'utiliser.",
+      "admins_notified": "Les admins de l'espace de travail ont été prévenus dans la boîte de réception.",
+      "connect_team": "Connecter pour l'équipe"
     },
     "tools": {
       "tab": "Outils",
@@ -2064,7 +2059,6 @@
       "connect": "Connecter",
       "reconnect": "Reconnecter",
       "ask_admin": "Demander à un admin",
-      "requested": "Demandée",
       "toast_requested": "Les admins de l'espace ont reçu une demande pour connecter {{app}}.",
       "empty_in_use": "Aucune app utilisée pour l'instant. Configurez-en une pour que les agents puissent l'utiliser.",
       "empty_attention": "Rien ne nécessite votre attention.",
@@ -2077,7 +2071,7 @@
       "agents_empty": "Cet espace de travail n'a pas encore d'agents.",
       "source_label": "Compte que {{agent}} utilise pour {{app}}",
       "source_team": "Compte d'équipe",
-      "source_personal": "Compte personnel de la personne qui lance l'exécution",
+      "source_personal": "La personne qui lance l'exécution",
       "not_using": "N'utilise pas {{app}}",
       "enable": "Autoriser {{agent}} à utiliser {{app}}",
       "team_admin_only": "Seuls les admins de l'espace peuvent modifier l'accès au compte d'équipe.",
@@ -2088,32 +2082,53 @@
       "as_you": "en votre nom",
       "in_chat": "discussion",
       "accounts_title": "Comptes",
-      "your_account": "Votre compte",
-      "team_account": "Compte d'équipe",
-      "not_connected": "Non connecté",
       "account_actions": "Actions : {{account}}",
-      "dismiss": "Ignorer",
-      "toast_dismissed": "Demandes ignorées",
       "capabilities_title": "Ce que les agents peuvent faire",
-      "capabilities_note": "Sans demander à chaque fois."
+      "capabilities_note": "Sans demander à chaque fois.",
+      "accounts_description": "Les comptes {{app}} que les agents peuvent utiliser dans {{workspace}}.",
+      "team_account_hint": "Partagé par tout {{workspace}} · connecté par les admins",
+      "your_account_hint": "Utilisé uniquement dans les exécutions que vous lancez",
+      "agents_description": "Chaque agent choisit le compte avec lequel il agit.",
+      "ready_team": "Prêt avec le compte d'équipe",
+      "needs_team": "Il faut le compte d'équipe",
+      "ready_yours": "Prêt avec votre compte",
+      "needs_yours": "Il faut votre compte"
     },
     "accounts_page": {
-      "description": "Vos comptes personnels dans d'autres apps. Ils vous suivent dans chaque espace de travail dont vous faites partie. Les agents ne les utilisent que dans les exécutions que vous lancez, et personne d'autre ne peut les utiliser.",
-      "waiting_title": "En attente de votre action",
-      "waiting_description": "Agents arrêtés parce qu'ils ont besoin d'un de vos comptes.",
-      "needs_on_issue": "{{agent}} a besoin de votre compte {{app}} sur {{issue}}",
-      "needs_in_chat": "{{agent}} a besoin de votre compte {{app}} dans une discussion",
-      "open_issue": "Ouvrir la tâche",
-      "open_chat": "Ouvrir la discussion",
-      "connect_app": "Connecter {{app}}",
-      "reconnect_app": "Reconnecter {{app}}",
-      "accounts_title": "Comptes",
-      "accounts_description": "Connectez un compte avant qu'un agent le demande, ou quand il le demande sur une tâche.",
+      "description": "Les comptes avec lesquels les agents travaillent dans d'autres apps. Les comptes d'équipe sont partagés par tout {{workspace}} et connectés par les admins. Vos comptes ne servent que dans les exécutions que vous lancez.",
       "connect_account": "Connecter un compte",
-      "empty": "Vous n'avez connecté aucun compte.",
-      "used_by": "Utilisé par {{agents}}",
-      "actions": "Actions : {{app}}",
-      "footer": "Déconnecter un compte le retire de tous les espaces de travail. Les agents le redemanderont la prochaine fois qu'ils en auront besoin."
+      "empty": "Vous n'avez connecté aucun compte dans cet espace de travail.",
+      "used_by": "utilisé par {{agents}}",
+      "search_description": "Comptes d'équipe et vos propres comptes que les agents utilisent dans d'autres apps.",
+      "team_title": "Comptes d'équipe",
+      "team_description_admin": "Partagés par tout l'espace de travail. Seuls les admins les connectent.",
+      "team_description_member": "Les admins les connectent. Vous pouvez les voir et en demander un.",
+      "connect_team_account": "Connecter un compte d'équipe",
+      "team_empty": "Aucun compte d'équipe pour l'instant.",
+      "yours_title": "Vos comptes",
+      "yours_description": "Vous seul pouvez les utiliser ; les agents s'en servent dans les exécutions que vous lancez.",
+      "needed_by": "{{agents}} en a besoin"
+    },
+    "disconnect_dialog": {
+      "title": "Déconnecter {{app}} ?",
+      "team_body": "Ces agents agissent avec ce compte. À leur prochaine étape dans {{app}}, ils solliciteront les admins au lieu de travailler.",
+      "personal_body": "Ces agents l'utilisent dans les exécutions que vous lancez. À la prochaine, ils vous demanderont de le reconnecter.",
+      "agents": "Agents qui l'utilisent",
+      "no_agents": "Aucun agent ne l'utilise.",
+      "running": "Exécution en cours — elle s'arrête",
+      "active_runs_one": "{{count}} exécution en cours s'arrête maintenant.",
+      "active_runs_other": "{{count}} exécutions en cours s'arrêtent maintenant.",
+      "impact_failed": "Impossible de vérifier quels agents l'utilisent.",
+      "cancel": "Annuler",
+      "confirm": "Déconnecter"
+    },
+    "team_requests": {
+      "title": "Compte d'équipe {{app}} requis",
+      "run_waiting": "Exécution en attente",
+      "asked": "Demandé",
+      "resumes": "Le connecter une fois répond à toutes ces demandes, et les exécutions en attente reprennent là où elles se sont arrêtées.",
+      "decline_all": "Tout refuser",
+      "open_app": "Ouvrir l'app"
     }
   },
   "voice_input": {

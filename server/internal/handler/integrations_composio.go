@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -139,17 +138,17 @@ func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.ConnectedApps != nil && !result.Team() {
-		if userID, perr := parseUUIDStrict(result.UserID); perr == nil {
-			h.ConnectedApps.ResolveConnectRequests(r.Context(), userID, result.ToolkitSlug)
+		userID, uerr := parseUUIDStrict(result.UserID)
+		workspaceID, werr := parseUUIDStrict(result.PersonalWorkspaceID)
+		if uerr == nil && werr == nil {
+			h.ConnectedApps.ResolveConnectRequests(r.Context(), workspaceID, userID, result.ToolkitSlug)
 		}
 	}
-	if result.Team() {
-		if workspaceID, perr := parseUUIDStrict(result.WorkspaceID); perr == nil {
-			if err := h.Queries.DeleteAppTeamRequestsForToolkit(r.Context(), db.DeleteAppTeamRequestsForToolkitParams{
-				WorkspaceID: workspaceID, ToolkitSlug: connectedapps.NormalizeSlug(result.ToolkitSlug),
-			}); err != nil {
-				slog.Warn("apps: clear team account requests failed", "workspace_id", result.WorkspaceID, "toolkit", result.ToolkitSlug, "error", err)
-			}
+	if h.ConnectedApps != nil && result.Team() {
+		workspaceID, werr := parseUUIDStrict(result.WorkspaceID)
+		adminID, aerr := parseUUIDStrict(result.ConnectedBy)
+		if werr == nil && aerr == nil {
+			h.ConnectedApps.ResolveTeamConnectRequests(r.Context(), workspaceID, adminID, result.ToolkitSlug)
 		}
 	}
 	http.Redirect(w, r, h.Composio.CallbackRedirect(result, true), http.StatusFound)
@@ -167,8 +166,9 @@ type ComposioImpactAgent struct {
 
 // GetComposioConnectionImpact (GET
 // /api/integrations/composio/connections/{id}/impact) is what disconnecting
-// one of the caller's personal accounts would stop: the agents, across the
-// caller's workspaces, that act through it when the caller runs them.
+// one of the caller's personal accounts would stop: the agents in the
+// account's workspace (every workspace, for an account made before accounts
+// belonged to one) that act through it when the caller runs them.
 func (h *Handler) GetComposioConnectionImpact(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
 		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
@@ -202,6 +202,9 @@ func (h *Handler) GetComposioConnectionImpact(w http.ResponseWriter, r *http.Req
 	agents := make([]ComposioImpactAgent, 0, len(rows))
 	ids := make([]pgtype.UUID, 0, len(rows))
 	for _, row := range rows {
+		if conn.WorkspaceID.Valid && row.WorkspaceID != conn.WorkspaceID {
+			continue
+		}
 		if !h.CanActFor(ctx, row.WorkspaceID, row.ID, userUUID) {
 			continue
 		}

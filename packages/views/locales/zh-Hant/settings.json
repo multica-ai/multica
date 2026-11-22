@@ -582,7 +582,6 @@
       "issue": "任務",
       "notifications": "通知",
       "tokens": "API Token",
-      "connected_accounts": "已連線帳號",
       "general": "常規",
       "github": "GitHub",
       "labs": "實驗室",
@@ -597,7 +596,8 @@
       "code": "程式碼",
       "channels": "訊息渠道",
       "workflows": "工作流",
-      "voice_input": "語音輸入"
+      "voice_input": "語音輸入",
+      "accounts": "帳號"
     },
     "groups": {
       "personal": "個人",
@@ -1862,28 +1862,6 @@
       "team_description": "連線工作區共用的帳號。哪些 AI 代理可以使用，請在各 AI 代理的「應用程式」頁設定。",
       "personal_description": "當你觸發執行時，使用你自己連線的帳號。"
     },
-    "disconnect_team": {
-      "title": "中斷團隊的 {{app}} 帳號？",
-      "description": "使用團隊帳號的 AI 代理會立即失去存取權限。",
-      "agents": "正在使用的 AI 代理",
-      "no_agents": "沒有 AI 代理在用。",
-      "active_tasks": "進行中的執行：{{count}}",
-      "active_autopilots": "啟用中的自動化：{{count}}",
-      "pending": "將被取消的待確認請求：{{count}}",
-      "cancel": "取消",
-      "confirm": "中斷連線"
-    },
-    "disconnect_personal": {
-      "title": "中斷你的 {{app}} 帳號？",
-      "description": "它會從你所在的每個工作區中移除。",
-      "agents": "這些 AI 代理會再次請你連線",
-      "no_agents": "沒有 AI 代理在用。",
-      "uses_it": "在你發起的執行中使用",
-      "running": "有進行中的執行，將被停止",
-      "impact_failed": "無法確認哪些 AI 代理在用。",
-      "cancel": "取消",
-      "confirm": "在所有工作區中斷連線"
-    },
     "detail": {
       "team_title": "{{app}} · 團隊帳號",
       "personal_title": "{{app}} · 我的帳號",
@@ -1935,9 +1913,20 @@
     },
     "status": {
       "connected": "已連線",
-      "expired": "登入已過期",
-      "needs_your_account": "需要你的帳號",
-      "no_team_account": "尚無團隊帳號"
+      "not_connected": "未連線",
+      "needs_reconnecting": "需要重新連線",
+      "requested": "已請求"
+    },
+    "owner": {
+      "team": "團隊帳號",
+      "personal": "你的帳號"
+    },
+    "account_row": {
+      "admins_notified": "已通知管理員",
+      "withdraw": "撤回",
+      "decline": "拒絕",
+      "toast_declined": "已拒絕請求，等待中的智慧體會在沒有該帳號的情況下繼續。",
+      "toast_withdrawn": "已撤回請求"
     },
     "disclosure": {
       "title": "連線 {{app}}",
@@ -1987,7 +1976,13 @@
       "connected_resumed": "{{app}} 已連線，代理會從中斷處繼續。",
       "rate_limited": "這個帳號已達到每分鐘呼叫上限，請一分鐘後再核准。",
       "rate_limited_some_other": "有 {{count}} 個請求觸發了每分鐘上限，請一分鐘後再核准。",
-      "withdrawn": "你已無法使用這個代理，請求已撤回。"
+      "withdrawn": "你已無法使用這個代理，請求已撤回。",
+      "title_connect_team": "{{agent}} 需要 {{app}} 帳號",
+      "title_member_ask": "{{name}} 申請了 {{app}} 團隊帳號",
+      "waiting_for_admin": "等待管理員",
+      "team_note": "所有以團隊帳號行動的智慧體都可以使用它。",
+      "admins_notified": "已在收件匣通知工作區管理員。",
+      "connect_team": "為團隊連線"
     },
     "tools": {
       "tab": "工具",
@@ -2042,7 +2037,6 @@
       "connect": "連線",
       "reconnect": "重新連線",
       "ask_admin": "請管理員連線",
-      "requested": "已請求",
       "toast_requested": "已請工作區管理員連線 {{app}}。",
       "empty_in_use": "還沒有使用中的應用。設定一個，讓 AI 代理可以使用它。",
       "empty_attention": "沒有需要你處理的事項。",
@@ -2055,7 +2049,7 @@
       "agents_empty": "此工作區還沒有 AI 代理。",
       "source_label": "{{agent}} 使用 {{app}} 時用的帳號",
       "source_team": "團隊帳號",
-      "source_personal": "發起執行者的個人帳號",
+      "source_personal": "發起執行的人",
       "not_using": "不使用 {{app}}",
       "enable": "允許 {{agent}} 使用 {{app}}",
       "team_admin_only": "只有工作區管理員可以修改團隊帳號的使用權限。",
@@ -2066,32 +2060,52 @@
       "as_you": "以你的身分",
       "in_chat": "聊天",
       "accounts_title": "帳號",
-      "your_account": "你的帳號",
-      "team_account": "團隊帳號",
-      "not_connected": "未連線",
       "account_actions": "{{account}}操作",
-      "dismiss": "忽略",
-      "toast_dismissed": "已忽略請求",
       "capabilities_title": "AI 代理可以做什麼",
-      "capabilities_note": "無需每次徵求同意。"
+      "capabilities_note": "無需每次徵求同意。",
+      "accounts_description": "{{workspace}} 中智慧體可以使用的 {{app}} 帳號。",
+      "team_account_hint": "{{workspace}} 所有人共用 · 由管理員連線",
+      "your_account_hint": "只在你發起的執行中使用",
+      "agents_description": "每個智慧體選擇以誰的帳號行動。",
+      "ready_team": "團隊帳號已就緒",
+      "needs_team": "需要團隊帳號",
+      "ready_yours": "你的帳號已就緒",
+      "needs_yours": "需要你的帳號"
     },
     "accounts_page": {
-      "description": "你在其他應用中的個人帳號。它們會跟著你進入你所在的每個工作區。AI 代理只在你發起的執行中使用它們，其他人都無法使用。",
-      "waiting_title": "等你處理",
-      "waiting_description": "因為需要你的某個帳號而暫停的 AI 代理。",
-      "needs_on_issue": "{{agent}} 在 {{issue}} 中需要你的 {{app}}",
-      "needs_in_chat": "{{agent}} 在聊天中需要你的 {{app}}",
-      "open_issue": "開啟任務",
-      "open_chat": "開啟聊天",
-      "connect_app": "連線 {{app}}",
-      "reconnect_app": "重新連線 {{app}}",
-      "accounts_title": "帳號",
-      "accounts_description": "可以在 AI 代理請求之前先連線帳號，也可以等它在任務中請求時再連線。",
+      "description": "智慧體在其他應用程式中工作時使用的帳號。團隊帳號由 {{workspace}} 所有人共用，由管理員連線；你的帳號只在你發起的執行中使用。",
       "connect_account": "連線帳號",
-      "empty": "你還沒有連線任何帳號。",
+      "empty": "你還沒有在這個工作區連線任何帳號。",
       "used_by": "{{agents}} 在用",
-      "actions": "{{app}} 操作",
-      "footer": "中斷帳號連線會將它從所有工作區移除。AI 代理下次需要時會再次請求。"
+      "search_description": "智慧體在其他應用程式中使用的團隊帳號和你自己的帳號。",
+      "team_title": "團隊帳號",
+      "team_description_admin": "整個工作區共用，只有管理員可以連線。",
+      "team_description_member": "由管理員連線。你可以查看，也可以申請。",
+      "connect_team_account": "連線團隊帳號",
+      "team_empty": "還沒有團隊帳號。",
+      "yours_title": "你的帳號",
+      "yours_description": "只有你能使用；智慧體會在你發起的執行中使用它們。",
+      "needed_by": "{{agents}} 需要它"
+    },
+    "disconnect_dialog": {
+      "title": "中斷 {{app}}？",
+      "team_body": "這些智慧體以這個帳號行動。下次用到 {{app}} 時，它們會向管理員發出請求，而不是繼續工作。",
+      "personal_body": "這些智慧體會在你發起的執行中使用它。你下次發起執行時，會被要求重新連線。",
+      "agents": "使用它的智慧體",
+      "no_agents": "沒有智慧體在用。",
+      "running": "執行中 — 將會停止",
+      "active_runs_other": "{{count}} 個進行中的執行會立即停止。",
+      "impact_failed": "無法確認哪些智慧體在用它。",
+      "cancel": "取消",
+      "confirm": "中斷"
+    },
+    "team_requests": {
+      "title": "需要 {{app}} 團隊帳號",
+      "run_waiting": "執行等待中",
+      "asked": "已申請",
+      "resumes": "連線一次即可回應這裡的所有請求，等待中的執行會從中斷處繼續。",
+      "decline_all": "全部拒絕",
+      "open_app": "開啟應用程式"
     }
   },
   "voice_input": {

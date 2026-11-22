@@ -176,7 +176,7 @@ describe("AppDetailPage", () => {
     await waitFor(() => expect(api.requestTeamApp).toHaveBeenCalledWith("notion", undefined));
   });
 
-  it("shows admins who asked for the team account and lets them dismiss it", async () => {
+  it("shows admins who asked for the team account and lets them decline it", async () => {
     overview = {
       ...overview, can_manage: true, team: [],
       team_requests: [{ toolkit_slug: "notion", requested_by: ["u2", "u3"], agent_ids: [], last_requested_at: "" }],
@@ -184,10 +184,10 @@ describe("AppDetailPage", () => {
     vi.mocked(api.dismissTeamAppRequests).mockResolvedValue(undefined as never);
     const user = userEvent.setup();
     renderPage();
-    expect(await screen.findByText("Asked for by Name u2, Name u3")).toBeInTheDocument();
-    const accounts = screen.getByText("Team account", { selector: "p" }).closest("div.space-y-2")!;
-    expect(within(accounts as HTMLElement).getByRole("button", { name: "Connect" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    await screen.findAllByText("Requested · Name u2, Name u3");
+    const team = document.querySelector('[data-account-row="team:notion"]') as HTMLElement;
+    expect(within(team).getByRole("button", { name: "Connect" })).toBeInTheDocument();
+    await user.click(within(team).getByRole("button", { name: "Decline" }));
     await waitFor(() => expect(api.dismissTeamAppRequests).toHaveBeenCalledWith("notion"));
   });
 });

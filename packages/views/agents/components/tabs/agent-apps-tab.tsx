@@ -157,7 +157,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
             const lockedTeam = scope === "team" && !canManageTeam;
             const canEnable = catalog.isSuccess && !!entry && entry.allowed !== false;
             const canRaiseLevel = scope !== "team" || canAddTeam;
-            const canConnect = !!app && !isConnected && (scope === "personal" || (canManageTeam && (canAddTeam || accountStatus === "expired")));
+            const canConnect = !!app && !isConnected && (scope === "personal" || (canManageTeam && (canAddTeam || accountStatus === "needs_reconnecting")));
             const AccountIcon = scope === "team" ? Users : User;
             return (
               <li key={slug} className="space-y-2 p-3">
@@ -192,10 +192,10 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                   {canConnect && (
                     <Button
                       size="xs"
-                      variant={accountStatus === "needs_your_account" ? "default" : "outline"}
+                      variant={scope === "personal" && accountStatus === "not_connected" ? "default" : "outline"}
                       onClick={() => setConnect({ scope, slug, name, logo: entry?.logo })}
                     >
-                      {accountStatus === "expired"
+                      {accountStatus === "needs_reconnecting"
                         ? t(($) => $.apps_section.reconnect)
                         : scope === "team"
                           ? t(($) => $.apps_section.connect_team)

@@ -1076,17 +1076,11 @@
   "apps_section": {
     "title": "アプリ",
     "empty": "このエージェントはまだアプリを使用していません。",
-    "scopes": {
-      "personal": "個人アカウント",
-      "team": "チームアカウント"
-    },
     "connect_yours": "自分のアカウントを接続",
     "reconnect": "再接続",
     "connect_team": "チームアカウントを接続",
-    "ask_admin": "管理者に依頼",
-    "requested": "依頼済み",
-    "asked_toast": "{{app}} のチームアカウントの接続を管理者に依頼しました。",
-    "ask_failed_toast": "依頼を送信できませんでした。"
+    "acts_as_team": "チームアカウントとして動作",
+    "acts_as_starter": "実行を開始した人のアカウントとして動作"
   },
   "add_app_dialog": {
     "title": "{{agent}} にアプリを追加",

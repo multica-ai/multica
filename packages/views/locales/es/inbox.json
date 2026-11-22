@@ -113,8 +113,7 @@
     "app_connect_requested": "Conectar una aplicación",
     "app_action_result": "Resultado de la acción de la aplicación",
     "doc_comment": "Nuevo comentario en un documento",
-    "doc_mentioned": "Te mencionaron en un documento",
-    "app_team_requested": "Cuenta del equipo solicitada"
+    "doc_mentioned": "Te mencionaron en un documento"
   },
   "labels": {
     "set_status_to": "Establecer estado en",

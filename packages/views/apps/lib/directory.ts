@@ -4,14 +4,21 @@ import type {
   AppTeamRequest,
   AppsOverview,
 } from "@multica/core/types";
-import { accountFor, appAccountStatus, type AppAccountStatus } from "../../common/app-status";
+import {
+  accountAction,
+  accountFor,
+  appAccountStatus,
+  teamRequestFor,
+  viewerTeamAsk,
+  type AppAccountStatus,
+} from "../../common/app-status";
 
 /** The one thing a card offers. Connecting always goes through the connect
  * dialog; "set up" opens the app's page. */
 export type AppCardAction =
   | { kind: "connect"; scope: AppAccountScope; reconnect: boolean }
   | { kind: "ask_admin" }
-  | { kind: "requested" }
+  | { kind: "withdraw" }
   | { kind: "set_up" };
 
 export interface DirectoryApp {
@@ -40,9 +47,9 @@ export interface AppDirectory {
 }
 
 const SEVERITY: Record<AppAccountStatus, number> = {
-  expired: 3,
-  needs_your_account: 2,
-  no_team_account: 1,
+  needs_reconnecting: 3,
+  not_connected: 2,
+  requested: 1,
   connected: 0,
 };
 
@@ -101,9 +108,7 @@ function describeApp(
 ): DirectoryApp {
   const uses = agentApps.filter((a) => a.toolkit_slug === slug);
   const usedScopes = new Set(uses.map((a) => a.account_scope));
-  const request = overview.team_requests?.find(
-    (r) => r.toolkit_slug === slug && r.requested_by.length > 0,
-  );
+  const request = teamRequestFor(overview, slug);
   const hasTeam = !!accountFor(overview, "team", slug);
   const hasPersonal = !!accountFor(overview, "personal", slug);
   const scopes: AppAccountScope[] = [];
@@ -125,8 +130,8 @@ function describeApp(
   const needsAttention =
     blocked("team") ||
     blocked("personal") ||
-    appAccountStatus(overview, "team", slug) === "expired" ||
-    appAccountStatus(overview, "personal", slug) === "expired" ||
+    appAccountStatus(overview, "team", slug) === "needs_reconnecting" ||
+    appAccountStatus(overview, "personal", slug) === "needs_reconnecting" ||
     (overview.can_manage && !!request && !hasTeam);
 
   return {
@@ -140,32 +145,38 @@ function describeApp(
     request: hasTeam ? undefined : request,
     inUse: hasTeam || hasPersonal || uses.length > 0,
     needsAttention,
-    action: cardAction(status, statusScope, overview.can_manage, request, viewerId),
+    action: cardAction(slug, status, statusScope, overview, viewerId),
   };
 }
 
 function cardAction(
+  slug: string,
   status: AppAccountStatus | null,
   scope: AppAccountScope | null,
-  canManage: boolean,
-  request: AppTeamRequest | undefined,
+  overview: AppsOverview,
   viewerId: string | null,
 ): AppCardAction | null {
   if (status === null || scope === null) return { kind: "set_up" };
-  switch (status) {
-    case "connected":
+  const action = accountAction({
+    scope,
+    status,
+    canManage: overview.can_manage,
+    // The card swaps Connect for the upgrade link itself.
+    needsUpgrade: false,
+    viewerAsk: scope === "team" ? viewerTeamAsk(overview, slug, viewerId) : null,
+  });
+  switch (action) {
+    case "connect":
+    case "upgrade":
+      return { kind: "connect", scope, reconnect: false };
+    case "reconnect":
+      return { kind: "connect", scope, reconnect: true };
+    case "ask_admin":
+      return { kind: "ask_admin" };
+    case "withdraw":
+      return { kind: "withdraw" };
+    case null:
       return null;
-    case "expired":
-      return scope === "personal" || canManage
-        ? { kind: "connect", scope, reconnect: true }
-        : null;
-    case "needs_your_account":
-      return { kind: "connect", scope: "personal", reconnect: false };
-    case "no_team_account":
-      if (canManage) return { kind: "connect", scope: "team", reconnect: false };
-      return viewerId && request?.requested_by.includes(viewerId)
-        ? { kind: "requested" }
-        : { kind: "ask_admin" };
   }
 }
 

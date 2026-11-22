@@ -27,6 +27,21 @@ func (f *appsFixture) requestTeamApp(t *testing.T, userID string, body map[strin
 	return testutil.Call(t, f.h.RequestTeamApp, appsReqAs(t, userID, http.MethodPost, "/api/apps/team/requests", body)).Code
 }
 
+func (f *appsFixture) dismissTeamRequests(t *testing.T, userID, slug string) int {
+	t.Helper()
+	return testutil.Call(t, f.h.DismissTeamAppRequests, appsReqAs(t, userID, http.MethodDelete, "/api/apps/team/requests?toolkit_slug="+slug, nil)).Code
+}
+
+func (f *appsFixture) teamAccount(t *testing.T, slug string) {
+	t.Helper()
+	dbfx.Insert(t, "workspace_composio_connection", testutil.Cols{
+		"workspace_id": testWorkspaceID, "toolkit_slug": slug, "auth_config_id": "ac_" + slug,
+		"connected_account_id": fmt.Sprintf("ca_team_%s_%d", slug, testSeq.Add(1)), "composio_user_id": "team", "connected_by": testUserID,
+	})
+}
+
+// A member asking for a team account files the same request an agent does:
+// the admins get one inbox item per app, and deciding it answers everyone.
 func TestConnectedApps_TeamAccountRequests(t *testing.T) {
 	f := newAppsFixture(t)
 
@@ -41,15 +56,18 @@ func TestConnectedApps_TeamAccountRequests(t *testing.T) {
 	if code := f.requestTeamApp(t, f.member, map[string]any{"toolkit_slug": "slack"}); code != http.StatusNoContent {
 		t.Fatalf("member asks again: %d", code)
 	}
-	if n := f.inboxCount(t, testUserID, connectedapps.NotifTeamRequested); n != 1 {
+	if n := dbfx.Count(t, `SELECT count(*) FROM app_action_request WHERE workspace_id=$1 AND approver_user_id=$2 AND status='pending'`, testWorkspaceID, f.member); n != 1 {
+		t.Fatalf("pending asks after asking twice = %d, want 1", n)
+	}
+	if n := f.inboxCount(t, testUserID, connectedapps.NotifConnectRequested); n != 1 {
 		t.Fatalf("admin notifications = %d, want 1 for a repeated ask", n)
 	}
-	if n := f.inboxCount(t, f.member, connectedapps.NotifTeamRequested); n != 0 {
+	if n := f.inboxCount(t, f.member, connectedapps.NotifConnectRequested); n != 0 {
 		t.Fatalf("requester notified %d times", n)
 	}
 	var body, actor string
 	dbfx.QueryRow(t, `SELECT body, actor_id FROM inbox_item WHERE workspace_id=$1 AND recipient_id=$2 AND type=$3`,
-		testWorkspaceID, testUserID, connectedapps.NotifTeamRequested).Scan(&body, &actor)
+		testWorkspaceID, testUserID, connectedapps.NotifConnectRequested).Scan(&body, &actor)
 	if !strings.Contains(body, "asks for a team Slack account") || actor != f.member {
 		t.Fatalf("notification body %q actor %s", body, actor)
 	}
@@ -58,8 +76,8 @@ func TestConnectedApps_TeamAccountRequests(t *testing.T) {
 	if code := f.requestTeamApp(t, testUserID, map[string]any{"toolkit_slug": "slack", "agent_id": f.agentID}); code != http.StatusNoContent {
 		t.Fatalf("admin asks: %d", code)
 	}
-	if n := f.inboxCount(t, testUserID, connectedapps.NotifTeamRequested); n != 1 {
-		t.Fatalf("admin notified about their own ask: %d", n)
+	if n := f.inboxCount(t, testUserID, connectedapps.NotifConnectRequested); n != 1 {
+		t.Fatalf("admin notified again: %d", n)
 	}
 	got, _ := f.overview(t, f.member)
 	if len(got.TeamRequests) != 1 {
@@ -67,7 +85,7 @@ func TestConnectedApps_TeamAccountRequests(t *testing.T) {
 	}
 	tr := got.TeamRequests[0]
 	if tr.ToolkitSlug != "slack" || len(tr.RequestedBy) != 2 || tr.RequestedBy[0] != f.member || tr.RequestedBy[1] != testUserID ||
-		len(tr.AgentIDs) != 1 || tr.AgentIDs[0] != f.agentID || tr.LastRequestedAt == "" {
+		len(tr.AskedBy) != 2 || len(tr.AgentIDs) != 1 || tr.AgentIDs[0] != f.agentID || tr.LastRequestedAt == "" {
 		t.Fatalf("team request = %+v", tr)
 	}
 
@@ -81,29 +99,40 @@ func TestConnectedApps_TeamAccountRequests(t *testing.T) {
 		}
 	}
 
-	dismiss := func(userID, slug string) int {
-		return testutil.Call(t, f.h.DismissTeamAppRequests, appsReqAs(t, userID, http.MethodDelete, "/api/apps/team/requests?toolkit_slug="+slug, nil)).Code
+	// A member's DELETE only withdraws their own ask.
+	if code := f.dismissTeamRequests(t, f.member, "slack"); code != http.StatusNoContent {
+		t.Fatalf("member withdraws: %d", code)
 	}
-	if code := dismiss(f.member, "slack"); code != http.StatusForbidden {
-		t.Fatalf("member dismisses: %d, want 403", code)
+	if got, _ := f.overview(t, f.member); len(got.TeamRequests) != 1 || len(got.TeamRequests[0].RequestedBy) != 1 || got.TeamRequests[0].RequestedBy[0] != testUserID {
+		t.Fatalf("team requests after the member withdrew = %+v", got.TeamRequests)
 	}
-	if code := dismiss(testUserID, "slack"); code != http.StatusNoContent {
-		t.Fatalf("admin dismisses: %d", code)
+	if code := f.requestTeamApp(t, f.member, map[string]any{"toolkit_slug": "slack"}); code != http.StatusNoContent {
+		t.Fatalf("member asks again: %d", code)
+	}
+	if code := f.dismissTeamRequests(t, testUserID, "slack"); code != http.StatusNoContent {
+		t.Fatalf("admin declines: %d", code)
 	}
 	if got, _ := f.overview(t, f.member); len(got.TeamRequests) != 0 {
-		t.Fatalf("team requests after dismiss = %+v", got.TeamRequests)
+		t.Fatalf("team requests after decline = %+v", got.TeamRequests)
+	}
+	if n := f.inboxCount(t, f.member, connectedapps.NotifActionResult); n != 1 {
+		t.Fatalf("member told about the decline %d times, want 1", n)
+	}
+	if n := f.inboxCount(t, testUserID, connectedapps.NotifActionResult); n != 0 {
+		t.Fatalf("admin told about their own decline %d times", n)
 	}
 
-	// An active team account answers the ask, and hides asks made before it.
-	if code := f.requestTeamApp(t, f.member, map[string]any{"toolkit_slug": "gmail"}); code != http.StatusNoContent {
-		t.Fatalf("ask for gmail: %d", code)
+	// Connecting the team account answers every ask for it.
+	if code := f.requestTeamApp(t, f.member, map[string]any{"toolkit_slug": "notion"}); code != http.StatusNoContent {
+		t.Fatalf("ask for notion: %d", code)
 	}
-	f.executionAccount(t, "team")
-	if code := f.requestTeamApp(t, f.member, map[string]any{"toolkit_slug": "gmail"}); code != http.StatusConflict {
+	f.teamAccount(t, "notion")
+	f.h.ConnectedApps.ResolveTeamConnectRequests(context.Background(), parseUUID(testWorkspaceID), parseUUID(testUserID), "notion")
+	if n := dbfx.Count(t, `SELECT count(*) FROM app_action_request WHERE workspace_id=$1 AND toolkit_slug='notion' AND status='approved' AND decided_by=$2`, testWorkspaceID, testUserID); n != 1 {
+		t.Fatalf("approved notion asks = %d, want 1", n)
+	}
+	if code := f.requestTeamApp(t, f.member, map[string]any{"toolkit_slug": "notion"}); code != http.StatusConflict {
 		t.Fatalf("ask with an active team account: %d, want 409", code)
-	}
-	if got, _ := f.overview(t, f.member); len(got.TeamRequests) != 0 {
-		t.Fatalf("team requests with an active team account = %+v", got.TeamRequests)
 	}
 
 	testutil.Call(t, f.h.UpdateAppSettings, appsReqAs(t, testUserID, http.MethodPut, "/api/apps/settings", map[string]any{"catalog_mode": "curated"})).Want(http.StatusOK)
@@ -112,7 +141,7 @@ func TestConnectedApps_TeamAccountRequests(t *testing.T) {
 	}
 
 	// Leaving the workspace withdraws the member's asks.
-	f.requestTeamApp(t, f.member, map[string]any{"toolkit_slug": "notion"})
+	f.requestTeamApp(t, f.member, map[string]any{"toolkit_slug": "linear"})
 	member, err := f.h.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
 		UserID: parseUUID(f.member), WorkspaceID: parseUUID(testWorkspaceID),
 	})
@@ -122,8 +151,53 @@ func TestConnectedApps_TeamAccountRequests(t *testing.T) {
 	if _, err := f.h.revokeAndRemoveMember(context.Background(), member.WorkspaceID, member.UserID, member.ID, parseUUID(testUserID)); err != nil {
 		t.Fatal(err)
 	}
-	if n := dbfx.Count(t, `SELECT count(*) FROM app_team_request WHERE workspace_id=$1 AND requested_by=$2`, testWorkspaceID, f.member); n != 0 {
+	if n := dbfx.Count(t, `SELECT count(*) FROM app_action_request WHERE workspace_id=$1 AND approver_user_id=$2 AND status='pending'`, testWorkspaceID, f.member); n != 0 {
 		t.Fatalf("asks of a departed member = %d", n)
+	}
+}
+
+// An agent missing a team account asks the admins, not the person who
+// started the run; any admin connecting it resumes the run as that person.
+func TestConnectedApps_AgentTeamConnectRequestGoesToAdmins(t *testing.T) {
+	f := newAppsFixture(t)
+	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "notion", "account_scope": "team", "level": "write"}}); w.Code != http.StatusOK {
+		t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+	}
+	dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id=$1, accountable_user_id=$1 WHERE id=$2`, f.member, f.taskID)
+
+	_, text, isErr := f.gateway(t, f.token(t), "apps_request_connection", map[string]any{"app": "notion", "summary": "Read the spec"})
+	if isErr || !strings.Contains(text, "workspace admins") {
+		t.Fatalf("request connection = %s (error %v)", text, isErr)
+	}
+	if n := f.inboxCount(t, testUserID, connectedapps.NotifConnectRequested); n != 1 {
+		t.Fatalf("admin notifications = %d, want 1", n)
+	}
+	if n := f.inboxCount(t, f.member, connectedapps.NotifConnectRequested); n != 0 {
+		t.Fatalf("run starter notified %d times", n)
+	}
+
+	adminView := f.listRequests(t, testUserID)
+	memberView := f.listRequests(t, f.member)
+	if len(adminView) != 1 || !adminView[0].CanDecide || adminView[0].AccountScope != "team" {
+		t.Fatalf("admin view = %+v", adminView)
+	}
+	if len(memberView) != 1 || memberView[0].CanDecide {
+		t.Fatalf("member view = %+v", memberView)
+	}
+	if code := testutil.Call(t, f.h.ApproveAppRequest, withURLParam(appsReqAs(t, f.member, http.MethodPost, "/api/app-requests/"+adminView[0].ID+"/approve", nil), "id", adminView[0].ID)).Code; code == http.StatusOK {
+		t.Fatal("member approved a team account request")
+	}
+
+	f.teamAccount(t, "notion")
+	f.h.ConnectedApps.ResolveTeamConnectRequests(context.Background(), parseUUID(testWorkspaceID), parseUUID(testUserID), "notion")
+	if got := f.requestStatus(t, adminView[0].ID); got != "approved" {
+		t.Fatalf("request after the admin connected = %s", got)
+	}
+	var note, originator string
+	dbfx.QueryRow(t, `SELECT handoff_note, originator_user_id FROM agent_task_queue
+		WHERE agent_id=$1 AND issue_id=$2 AND status='queued' AND trigger_evidence_kind='app_action_request'`, f.agentID, f.issueID).Scan(&note, &originator)
+	if !strings.Contains(note, "admin connected the team Notion account") || originator != f.member {
+		t.Fatalf("resume run note %q originator %s, want the run starter", note, originator)
 	}
 }
 

@@ -111,8 +111,7 @@
     "app_connect_requested": "アプリの接続依頼",
     "app_action_result": "アプリ操作の結果",
     "doc_comment": "ドキュメントへの新しいコメント",
-    "doc_mentioned": "ドキュメントでメンションされました",
-    "app_team_requested": "チームアカウントの依頼"
+    "doc_mentioned": "ドキュメントでメンションされました"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",

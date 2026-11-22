@@ -36,6 +36,10 @@ const RequestTTL = 24 * time.Hour
 // waits longer than a confirmation.
 const ConnectRequestTTL = 7 * 24 * time.Hour
 
+// TeamAskTTL is how long a member's ask for a team account stays open. No
+// run waits on it, so it lasts until an admin gets to it.
+const TeamAskTTL = 30 * 24 * time.Hour
+
 // DefaultCallsPerMinute caps the calls one account runs per minute.
 const DefaultCallsPerMinute = 30
 
@@ -237,13 +241,15 @@ type gatewayOverlay struct {
 // BuildTaskOverlay is the enqueue-time overlay for a run of agent. It carries
 // no credential: only the gateway address and which apps the agent has. The
 // claim handler adds the run's token (AuthorizeOverlay) once the task id is
-// final. A zero result means the agent has no apps.
+// final. A run a person started gets the gateway even when the agent has no
+// apps, so it can ask that person for its first one. A zero result means
+// there is nothing to mount.
 func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.UUID, agent db.Agent) (runtimeapps.MCPOverlayResult, error) {
 	apps, err := s.q.ListAgentApps(ctx, agent.ID)
 	if err != nil {
 		return runtimeapps.MCPOverlayResult{}, fmt.Errorf("connectedapps: list agent apps: %w", err)
 	}
-	if len(apps) == 0 {
+	if len(apps) == 0 && !originatorUserID.Valid {
 		return runtimeapps.MCPOverlayResult{}, nil
 	}
 	catalog := s.Catalog(ctx, agent.WorkspaceID)
@@ -253,7 +259,7 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	}
 	personal := map[string]db.UserComposioConnection{}
 	if originatorUserID.Valid {
-		if personal, err = s.activePersonalAccounts(ctx, originatorUserID); err != nil {
+		if personal, err = s.activePersonalAccounts(ctx, agent.WorkspaceID, originatorUserID); err != nil {
 			return runtimeapps.MCPOverlayResult{}, err
 		}
 	}
@@ -297,7 +303,7 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 			AccountStatus: status,
 		})
 	}
-	if len(meta) == 0 {
+	if len(meta) == 0 && !originatorUserID.Valid {
 		return runtimeapps.MCPOverlayResult{}, nil
 	}
 	raw, err := json.Marshal(gatewayOverlay{MCPServers: servers})
@@ -366,8 +372,8 @@ func (s *Service) activeTeamAccounts(ctx context.Context, workspaceID pgtype.UUI
 	return out, nil
 }
 
-func (s *Service) activePersonalAccounts(ctx context.Context, userID pgtype.UUID) (map[string]db.UserComposioConnection, error) {
-	rows, err := s.q.ListActiveUserComposioConnections(ctx, userID)
+func (s *Service) activePersonalAccounts(ctx context.Context, workspaceID, userID pgtype.UUID) (map[string]db.UserComposioConnection, error) {
+	rows, err := s.q.ListActiveUserComposioConnections(ctx, db.ListActiveUserComposioConnectionsParams{UserID: userID, WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, fmt.Errorf("connectedapps: list personal accounts: %w", err)
 	}
@@ -414,7 +420,7 @@ func (s *Service) resolveAccount(ctx context.Context, workspaceID, triggeredBy p
 	if !triggeredBy.Valid {
 		return account{}, ErrAccountMissing
 	}
-	personal, err := s.activePersonalAccounts(ctx, triggeredBy)
+	personal, err := s.activePersonalAccounts(ctx, workspaceID, triggeredBy)
 	if err != nil {
 		return account{}, err
 	}

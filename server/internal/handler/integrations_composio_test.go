@@ -109,7 +109,16 @@ func (s *composioFakeStore) UpsertUserComposioConnection(_ context.Context, arg 
 	s.rows = append(s.rows, row)
 	return row, nil
 }
-func (s *composioFakeStore) ListActiveUserComposioConnections(_ context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error) {
+func (s *composioFakeStore) ListActiveUserComposioConnections(_ context.Context, arg db.ListActiveUserComposioConnectionsParams) ([]db.UserComposioConnection, error) {
+	out := []db.UserComposioConnection{}
+	for _, r := range s.rows {
+		if r.UserID.Bytes == arg.UserID.Bytes && r.Status == "active" && (!r.WorkspaceID.Valid || r.WorkspaceID.Bytes == arg.WorkspaceID.Bytes) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+func (s *composioFakeStore) ListAllActiveUserComposioConnections(_ context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error) {
 	out := []db.UserComposioConnection{}
 	for _, r := range s.rows {
 		if r.UserID.Bytes == userID.Bytes && r.Status == "active" {

@@ -111,8 +111,7 @@
     "app_connect_requested": "請連線應用",
     "app_action_result": "應用操作結果",
     "doc_comment": "文件有新評論",
-    "doc_mentioned": "在文件中提到了你",
-    "app_team_requested": "請求團隊帳號"
+    "doc_mentioned": "在文件中提到了你"
   },
   "labels": {
     "set_status_to": "狀態設為",

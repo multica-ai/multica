@@ -28,7 +28,7 @@ vi.mock("../../navigation", async (importOriginal) => ({
   AppLink: ({ href, children, ...props }: React.ComponentProps<"a"> & { href: string }) => <a href={href} {...props}>{children}</a>,
   useNavigation: () => ({
     pathname: "/acme/settings",
-    searchParams: new URLSearchParams("tab=connected-accounts"),
+    searchParams: new URLSearchParams("tab=accounts"),
     hash: "",
   }),
 }));
@@ -80,7 +80,7 @@ describe("AddAppDialog", () => {
     const disclosure = await screen.findByRole("dialog", { name: /Notion/ });
     await user.click(within(disclosure).getByRole("button", { name: "Continue" }));
     await waitFor(() =>
-      expect(api.connectApp).toHaveBeenCalledWith("team", "notion", "/acme/settings?tab=connected-accounts"),
+      expect(api.connectApp).toHaveBeenCalledWith("team", "notion", "/acme/settings?tab=accounts"),
     );
   });
 

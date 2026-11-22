@@ -47,16 +47,18 @@ export function useRequestTeamApp() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (input: { slug: string; agentId?: string }) => api.requestTeamApp(input.slug, input.agentId),
-    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.overview(wsId) }),
+    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
   });
 }
 
+/** An admin declines everything waiting for an app's team account; a member
+ * withdraws their own ask. */
 export function useDismissTeamAppRequests() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (slug: string) => api.dismissTeamAppRequests(slug),
-    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.overview(wsId) }),
+    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
   });
 }
 

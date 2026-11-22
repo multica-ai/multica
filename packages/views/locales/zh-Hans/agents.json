@@ -1076,17 +1076,11 @@
   "apps_section": {
     "title": "应用",
     "empty": "这个智能体还没有使用任何应用。",
-    "scopes": {
-      "personal": "个人账号",
-      "team": "团队账号"
-    },
     "connect_yours": "连接我的账号",
     "reconnect": "重新连接",
     "connect_team": "连接团队账号",
-    "ask_admin": "请管理员连接",
-    "requested": "已请求",
-    "asked_toast": "已请管理员为 {{app}} 连接团队账号。",
-    "ask_failed_toast": "请求发送失败。"
+    "acts_as_team": "以团队账号行动",
+    "acts_as_starter": "以发起运行的人的账号行动"
   },
   "add_app_dialog": {
     "title": "为 {{agent}} 添加应用",

@@ -13,6 +13,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   appCatalogOptions,
   appsOverviewOptions,
+  useDismissTeamAppRequests,
   useRequestTeamApp,
   useRestoreAppAccess,
 } from "@multica/core/connected-apps";
@@ -68,6 +69,7 @@ function AppsDirectory() {
   const agents = useQuery(agentListOptions(wsId));
   const restore = useRestoreAppAccess();
   const requestTeam = useRequestTeamApp();
+  const withdrawTeam = useDismissTeamAppRequests();
   const [tab, setTab] = useState<DirectoryTab>("in_use");
   const [query, setQuery] = useState("");
   const [connecting, setConnecting] = useState<ConnectTarget | null>(null);
@@ -95,6 +97,13 @@ function AppsDirectory() {
       setAsking(app.slug);
       requestTeam.mutateAsync({ slug: app.slug }).then(
         () => toast.success(t(($) => $.connected_apps.hub.toast_requested, { app: app.name })),
+        (e: unknown) => toast.error(e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.toast_failed)),
+      ).finally(() => setAsking(null));
+    },
+    onWithdraw: (app) => {
+      setAsking(app.slug);
+      withdrawTeam.mutateAsync(app.slug).then(
+        () => toast.success(t(($) => $.connected_apps.account_row.toast_withdrawn)),
         (e: unknown) => toast.error(e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.toast_failed)),
       ).finally(() => setAsking(null));
     },

@@ -82,41 +82,45 @@ function renderSection({ canEdit = true }: { canEdit?: boolean } = {}) {
   return { onManage };
 }
 
-const row = (name: string) => screen.getByText(name).closest("li")!;
+const row = (scope: "team" | "personal", slug: string) =>
+  document.querySelector(`[data-account-row="${scope}:${slug}"]`) as HTMLElement;
 
 describe("AgentAppsSection", () => {
-  it("says where each app stands for the viewer, with one action each", async () => {
+  it("says whose account each app acts as and where it stands, with one action each", async () => {
     renderSection();
     await screen.findByText("Google Calendar");
-    expect(row("Gmail")).toHaveTextContent("Personal account");
-    expect(row("Gmail")).toHaveTextContent("Connected");
-    expect(within(row("Gmail")).queryByRole("button")).not.toBeInTheDocument();
-    expect(row("Google Calendar")).toHaveTextContent("Needs your account");
-    expect(within(row("Google Calendar")).getByRole("button", { name: "Connect yours" })).toBeVisible();
-    expect(row("Sentry")).toHaveTextContent("Team account");
-    expect(within(row("Sentry")).queryByRole("button")).not.toBeInTheDocument();
-    expect(row("PostHog")).toHaveTextContent("No team account yet");
-    expect(within(row("PostHog")).getByRole("button", { name: "Ask an admin" })).toBeVisible();
+    expect(row("personal", "gmail")).toHaveTextContent("Acts as whoever starts the run");
+    expect(row("personal", "gmail")).toHaveTextContent("Connected");
+    expect(within(row("personal", "gmail")).queryByRole("button", { name: /Connect|Reconnect/ })).not.toBeInTheDocument();
+    expect(row("personal", "googlecalendar")).toHaveTextContent("Not connected");
+    expect(within(row("personal", "googlecalendar")).getByRole("button", { name: "Connect" })).toBeVisible();
+    expect(row("team", "sentry")).toHaveTextContent("Acts as the team account");
+    expect(within(row("team", "sentry")).queryByRole("button")).not.toBeInTheDocument();
+    expect(row("team", "posthog")).toHaveTextContent("Not connected");
+    expect(within(row("team", "posthog")).getByRole("button", { name: "Ask an admin" })).toBeVisible();
   });
 
   it("opens the pre-connect notice for the viewer's own account", async () => {
     const user = userEvent.setup();
     renderSection();
-    await user.click(await screen.findByRole("button", { name: "Connect yours" }));
+    await screen.findByText("Google Calendar");
+    await user.click(within(row("personal", "googlecalendar")).getByRole("button", { name: "Connect" }));
     const dialog = await screen.findByRole("dialog", { name: "Connect Google Calendar" });
     expect(dialog).toHaveTextContent("Your own account");
     expect(api.requestTeamApp).not.toHaveBeenCalled();
   });
 
-  it("asks an admin for a team account on behalf of this agent, then shows it as requested", async () => {
+  it("asks an admin for a team account on behalf of this agent, then lets the asker withdraw", async () => {
     vi.mocked(api.requestTeamApp).mockImplementation(async () => {
-      overview.team_requests = [{ toolkit_slug: "posthog", requested_by: ["me"], agent_ids: ["a1"], last_requested_at: "" }];
+      overview.team_requests = [{ toolkit_slug: "posthog", requested_by: ["me"], asked_by: ["me"], agent_ids: ["a1"], last_requested_at: "" }];
     });
     const user = userEvent.setup();
     renderSection();
-    await user.click(await screen.findByRole("button", { name: "Ask an admin" }));
+    await screen.findByText("PostHog");
+    await user.click(within(row("team", "posthog")).getByRole("button", { name: "Ask an admin" }));
     expect(api.requestTeamApp).toHaveBeenCalledWith("posthog", "a1");
-    expect(await within(row("PostHog")).findByText("Requested")).toBeVisible();
+    await waitFor(() => expect(row("team", "posthog")).toHaveTextContent("Requested · admins notified"));
+    expect(within(row("team", "posthog")).getByRole("button", { name: "Withdraw" })).toBeVisible();
     expect(toast.success).toHaveBeenCalled();
   });
 
@@ -125,16 +129,16 @@ describe("AgentAppsSection", () => {
     const user = userEvent.setup();
     renderSection();
     await screen.findByText("PostHog");
-    await user.click(within(row("PostHog")).getByRole("button", { name: "Connect team account" }));
+    await user.click(within(row("team", "posthog")).getByRole("button", { name: "Connect" }));
     expect(await screen.findByRole("dialog", { name: "Connect PostHog" })).toHaveTextContent("A team account the whole workspace shares");
   });
 
   it("is read-only for someone who cannot edit the agent", async () => {
     renderSection({ canEdit: false });
-    await screen.findByText("Gmail");
+    await screen.findByText("Google Calendar");
     expect(screen.queryByRole("button", { name: "Manage" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect yours" })).toBeVisible();
+    expect(within(row("personal", "googlecalendar")).getByRole("button", { name: "Connect" })).toBeVisible();
   });
 
   it("offers Add from the empty state", async () => {
@@ -163,7 +167,7 @@ describe("AddAgentAppDialog", () => {
     expect(within(dialog).getByPlaceholderText("Search 2 apps")).toBeVisible();
     expect(within(dialog).queryByText("Gmail")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("Hidden")).not.toBeInTheDocument();
-    expect(within(dialog).getByText("Linear").closest("li")).toHaveTextContent("Issues · Needs your account");
+    expect(within(dialog).getByText("Linear").closest("li")).toHaveTextContent("Issues · Not connected");
 
     await user.click(within(dialog).getByRole("button", { name: "Add Linear" }));
     await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", {

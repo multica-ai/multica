@@ -1107,17 +1107,11 @@
   "apps_section": {
     "title": "Apps",
     "empty": "This agent doesn't use any apps yet.",
-    "scopes": {
-      "personal": "Personal account",
-      "team": "Team account"
-    },
     "connect_yours": "Connect yours",
     "reconnect": "Reconnect",
     "connect_team": "Connect team account",
-    "ask_admin": "Ask an admin",
-    "requested": "Requested",
-    "asked_toast": "Asked your admins to connect a team account for {{app}}.",
-    "ask_failed_toast": "Couldn't send the request."
+    "acts_as_team": "Acts as the team account",
+    "acts_as_starter": "Acts as whoever starts the run"
   },
   "add_app_dialog": {
     "title": "Add an app to {{agent}}",

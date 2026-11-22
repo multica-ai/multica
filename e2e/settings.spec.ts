@@ -97,14 +97,14 @@ test.describe("Settings", () => {
     );
   }
 
-  test("connecting a personal account returns to Connected accounts and refreshes it", async ({
+  test("connecting a personal account returns to Accounts and refreshes it", async ({
     page,
   }) => {
     await mockConnectedApps(page);
     const workspaceSlug = await loginAsDefault(page);
 
-    await page.goto(`/${workspaceSlug}/settings?tab=connected-accounts`, { waitUntil: "domcontentloaded" });
-    await waitForPageText(page, "Connected accounts");
+    await page.goto(`/${workspaceSlug}/settings?tab=accounts`, { waitUntil: "domcontentloaded" });
+    await waitForPageText(page, "Your accounts");
 
     await page.getByRole("button", { name: "Connect account" }).click();
     const picker = page.getByRole("dialog", { name: "Connect my account" });
@@ -114,7 +114,7 @@ test.describe("Settings", () => {
 
     await expect(page.getByText("Account connected").first()).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("button", { name: "Notion actions" })).toBeVisible({ timeout: 10000 });
-    await expect(page).toHaveURL(/tab=connected-accounts/);
+    await expect(page).toHaveURL(/tab=accounts/);
     await expect(page).not.toHaveURL(/connected=notion/);
   });
 

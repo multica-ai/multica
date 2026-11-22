@@ -273,7 +273,7 @@ func gatewayTools() []map[string]any {
 		},
 		{
 			"name":        toolRequestConnection,
-			"description": "Ask the person who triggered this run to connect their account for an app that shows not_connected, or to add an app you do not have yet and connect it. End your turn after calling it.",
+			"description": "Ask for an app account that shows not_connected: your own account goes to the person who triggered this run, a team account to the workspace admins. Also adds an app you do not have yet. End your turn after calling it.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -568,17 +568,21 @@ func (s *Service) toolRequestConnection(ctx context.Context, rn *run, slug, summ
 	if _, err := s.resolveAccount(ctx, rn.workspaceID, rn.triggeredBy, slug, app.AccountScope); err == nil {
 		return textResult("the account is already connected; use the app directly", false)
 	}
-	if app.AccountScope == ScopeTeam {
-		return textResult("this app uses the team account, which a workspace admin connects in Settings › Apps. Tell the person in your reply and end your turn.", true)
-	}
 	if !rn.triggeredBy.Valid {
+		if app.AccountScope == ScopeTeam {
+			return textResult("no person started this run, so the request cannot wait on it. A workspace admin connects the team account in Settings › Accounts; say so in your reply and end your turn.", true)
+		}
 		return textResult("no person triggered this run, so nobody can be asked to connect an account", true)
 	}
-	req, err := s.createRequest(ctx, rn, "connect", app, "", "", map[string]any{}, summary)
+	req, err := s.createRequest(ctx, rn, KindConnect, app, "", "", map[string]any{}, summary)
 	if err != nil {
 		return textResult("could not send the connection request", true)
 	}
-	return textResult(fmt.Sprintf("requested: %s is asked to connect %s (request %s). End your turn now; you will be resumed after they connect.", "the person who triggered this run", slug, util.UUIDToString(req.ID)), false)
+	who := "the person who triggered this run is"
+	if app.AccountScope == ScopeTeam {
+		who = "the workspace admins are"
+	}
+	return textResult(fmt.Sprintf("requested: %s asked to connect %s (request %s). End your turn now; you will be resumed after it is connected.", who, slug, util.UUIDToString(req.ID)), false)
 }
 
 // requestNewApp asks the person who triggered the run to add an app the agent

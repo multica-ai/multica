@@ -1076,17 +1076,11 @@
   "apps_section": {
     "title": "앱",
     "empty": "이 에이전트는 아직 앱을 사용하지 않습니다.",
-    "scopes": {
-      "personal": "개인 계정",
-      "team": "팀 계정"
-    },
     "connect_yours": "내 계정 연결",
     "reconnect": "다시 연결",
     "connect_team": "팀 계정 연결",
-    "ask_admin": "관리자에게 요청",
-    "requested": "요청됨",
-    "asked_toast": "관리자에게 {{app}} 팀 계정 연결을 요청했습니다.",
-    "ask_failed_toast": "요청을 보내지 못했습니다."
+    "acts_as_team": "팀 계정으로 동작",
+    "acts_as_starter": "실행을 시작한 사람의 계정으로 동작"
   },
   "add_app_dialog": {
     "title": "{{agent}}에 앱 추가",

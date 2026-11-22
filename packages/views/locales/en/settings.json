@@ -603,7 +603,7 @@
       "channels": "Messaging",
       "workflows": "Workflows",
       "voice_input": "Voice input",
-      "connected_accounts": "Connected accounts"
+      "accounts": "Accounts"
     },
     "groups": {
       "personal": "Personal",
@@ -1879,28 +1879,6 @@
       "team_description": "A shared workspace account. Choose which agents can use it on each agent’s Apps page.",
       "personal_description": "Use your own connected account when you start a run."
     },
-    "disconnect_team": {
-      "title": "Disconnect the team {{app}} account?",
-      "description": "Agents using the team account lose access right away.",
-      "agents": "Agents using it",
-      "no_agents": "No agent uses it.",
-      "active_tasks": "Runs in progress: {{count}}",
-      "active_autopilots": "Active autopilots: {{count}}",
-      "pending": "Confirmations that will be cancelled: {{count}}",
-      "cancel": "Cancel",
-      "confirm": "Disconnect"
-    },
-    "disconnect_personal": {
-      "title": "Disconnect {{app}}?",
-      "description": "It's removed from every workspace you're in.",
-      "agents": "These agents will ask you to connect again",
-      "no_agents": "No agent uses it.",
-      "uses_it": "uses it in runs you start",
-      "running": "has a run in progress — it stops",
-      "impact_failed": "Couldn't check which agents use it.",
-      "cancel": "Cancel",
-      "confirm": "Disconnect everywhere"
-    },
     "detail": {
       "team_title": "{{app}} · team account",
       "personal_title": "{{app}} · my account",
@@ -1987,7 +1965,13 @@
       "rate_limited": "This account reached its limit of calls per minute. Approve again in a minute.",
       "rate_limited_some_one": "{{count}} request hit the per-minute limit. Approve it again in a minute.",
       "rate_limited_some_other": "{{count}} requests hit the per-minute limit. Approve them again in a minute.",
-      "withdrawn": "You can no longer use this agent, so the request was withdrawn."
+      "withdrawn": "You can no longer use this agent, so the request was withdrawn.",
+      "title_connect_team": "{{agent}} needs a {{app}} account",
+      "title_member_ask": "{{name}} asked for a team {{app}} account",
+      "waiting_for_admin": "Waiting for an admin",
+      "team_note": "Every agent that acts as the team account can use it.",
+      "admins_notified": "Workspace admins were notified in Inbox.",
+      "connect_team": "Connect for the team"
     },
     "tools": {
       "tab": "Tools",
@@ -2026,9 +2010,20 @@
     },
     "status": {
       "connected": "Connected",
-      "expired": "Sign-in expired",
-      "needs_your_account": "Needs your account",
-      "no_team_account": "No team account yet"
+      "not_connected": "Not connected",
+      "needs_reconnecting": "Needs reconnecting",
+      "requested": "Requested"
+    },
+    "owner": {
+      "team": "Team account",
+      "personal": "Your account"
+    },
+    "account_row": {
+      "admins_notified": "admins notified",
+      "withdraw": "Withdraw",
+      "decline": "Decline",
+      "toast_declined": "Requests declined. Waiting agents continue without it.",
+      "toast_withdrawn": "Request withdrawn"
     },
     "disclosure": {
       "title": "Connect {{app}}",
@@ -2064,7 +2059,6 @@
       "connect": "Connect",
       "reconnect": "Reconnect",
       "ask_admin": "Ask an admin",
-      "requested": "Requested",
       "toast_requested": "Workspace admins were asked to connect {{app}}.",
       "empty_in_use": "No apps in use yet. Set one up to let agents work in it.",
       "empty_attention": "Nothing needs your attention.",
@@ -2077,7 +2071,7 @@
       "agents_empty": "This workspace has no agents yet.",
       "source_label": "Account {{agent}} uses for {{app}}",
       "source_team": "Team account",
-      "source_personal": "Personal account of whoever starts the run",
+      "source_personal": "Whoever starts the run",
       "not_using": "Not using {{app}}",
       "enable": "Let {{agent}} use {{app}}",
       "team_admin_only": "Only workspace admins can change team account access.",
@@ -2088,32 +2082,53 @@
       "as_you": "as you",
       "in_chat": "chat",
       "accounts_title": "Accounts",
-      "your_account": "Your account",
-      "team_account": "Team account",
-      "not_connected": "Not connected",
       "account_actions": "{{account}} actions",
-      "dismiss": "Dismiss",
-      "toast_dismissed": "Requests dismissed",
       "capabilities_title": "What agents can do",
-      "capabilities_note": "Without asking each time."
+      "capabilities_note": "Without asking each time.",
+      "accounts_description": "Which {{app}} sign-ins agents can use in {{workspace}}.",
+      "team_account_hint": "Shared by everyone in {{workspace}} · admins connect it",
+      "your_account_hint": "Used only in runs you start",
+      "agents_description": "Each agent picks whose account it acts as.",
+      "ready_team": "Ready with the team account",
+      "needs_team": "Needs the team account",
+      "ready_yours": "Ready with your account",
+      "needs_yours": "Needs your account"
     },
     "accounts_page": {
-      "description": "Your own accounts in other apps. They come with you into every workspace you're in. Agents use them only in runs you start, and nobody else can use them.",
-      "waiting_title": "Waiting for you",
-      "waiting_description": "Agents that stopped because they need one of your accounts.",
-      "needs_on_issue": "{{agent}} needs your {{app}} on {{issue}}",
-      "needs_in_chat": "{{agent}} needs your {{app}} in a chat",
-      "open_issue": "Open issue",
-      "open_chat": "Open chat",
-      "connect_app": "Connect {{app}}",
-      "reconnect_app": "Reconnect {{app}}",
-      "accounts_title": "Accounts",
-      "accounts_description": "Connect an account before an agent asks, or when it asks on an issue.",
+      "description": "Sign-ins agents use to work in other apps. Team accounts are shared by everyone in {{workspace}} and connected by admins. Your accounts are used only in runs you start.",
       "connect_account": "Connect account",
-      "empty": "You haven't connected any accounts.",
-      "used_by": "Used by {{agents}}",
-      "actions": "{{app}} actions",
-      "footer": "Disconnecting an account removes it from every workspace. Agents ask again next time they need it."
+      "empty": "You haven't connected any accounts in this workspace.",
+      "used_by": "used by {{agents}}",
+      "search_description": "Team accounts and your own accounts that agents use in other apps.",
+      "team_title": "Team accounts",
+      "team_description_admin": "Shared by everyone in the workspace. Only admins connect them.",
+      "team_description_member": "Admins connect these. You can see them and ask for one.",
+      "connect_team_account": "Connect team account",
+      "team_empty": "No team accounts yet.",
+      "yours_title": "Your accounts",
+      "yours_description": "Only you can use these; agents use them in runs you start.",
+      "needed_by": "{{agents}} needs it"
+    },
+    "disconnect_dialog": {
+      "title": "Disconnect {{app}}?",
+      "team_body": "These agents act as this account. Their next {{app}} step will ask the admins instead of working.",
+      "personal_body": "These agents use it in runs you start. The next run you start will ask you to connect it again.",
+      "agents": "Agents that use it",
+      "no_agents": "No agent uses it.",
+      "running": "Run in progress — it stops",
+      "active_runs_one": "{{count}} run in progress stops now.",
+      "active_runs_other": "{{count}} runs in progress stop now.",
+      "impact_failed": "Couldn't check which agents use it.",
+      "cancel": "Cancel",
+      "confirm": "Disconnect"
+    },
+    "team_requests": {
+      "title": "{{app}} team account needed",
+      "run_waiting": "Run waiting",
+      "asked": "Asked",
+      "resumes": "Connecting it once answers every request here, and waiting runs pick up where they stopped.",
+      "decline_all": "Decline all",
+      "open_app": "Open app"
     }
   },
   "voice_input": {

@@ -61,9 +61,9 @@ describe("settings location", () => {
   });
 
   it.each(["connected=notion", "error=composio_connect_failed"])(
-    "sends the legacy personal Composio callback (%s) to Connected accounts",
+    "sends the legacy personal Composio callback (%s) to Accounts",
     (callback) => {
-      expect(resolve(`tab=integrations&${callback}`).tab).toBe("connected-accounts");
+      expect(resolve(`tab=integrations&${callback}`).tab).toBe("accounts");
     },
   );
 
@@ -78,8 +78,8 @@ describe("settings location", () => {
 
   it.each([
     ["tab=apps", "apps"],
-    ["tab=apps&connected=gmail", "connected-accounts"],
-    ["tab=apps&error=composio_connect_failed", "connected-accounts"],
+    ["tab=apps&connected=gmail", "accounts"],
+    ["tab=apps&error=composio_connect_failed", "accounts"],
     ["tab=apps&connected=gmail&scope=team", "apps"],
     ["tab=apps&error=composio_connect_failed&scope=team", "apps"],
     ["tab=apps&error=something_else", "apps"],

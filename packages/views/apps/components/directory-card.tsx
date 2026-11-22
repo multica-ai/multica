@@ -14,7 +14,8 @@ import { AppStatusLabel } from "./app-status-label";
 export interface DirectoryCardHandlers {
   onConnect: (app: DirectoryApp, scope: AppAccountScope) => void;
   onAsk: (app: DirectoryApp) => void;
-  /** Slug whose admin request is being sent. */
+  onWithdraw: (app: DirectoryApp) => void;
+  /** Slug whose admin request is being sent or withdrawn. */
   asking: string | null;
   /** Whether a team account for this app is one the plan does not include. */
   needsUpgrade: (slug: string) => boolean;
@@ -34,7 +35,7 @@ export function DirectoryCard({ app, handlers }: { app: DirectoryApp; handlers: 
       : app.scopes[0] === "team"
         ? t(($) => $.connected_apps.hub.scope_team)
         : t(($) => $.connected_apps.hub.scope_personal);
-  const asked = app.request && app.status === "no_team_account"
+  const asked = app.request && app.status === "requested"
     ? t(($) => $.connected_apps.hub.members_asked, { count: app.request.requested_by.length })
     : undefined;
   const usage =
@@ -97,14 +98,21 @@ function DirectoryAction({ app, handlers }: { app: DirectoryApp; handlers: Direc
       </Button>
     );
   }
-  if (action.kind === "requested") {
+  const asking = handlers.asking === app.slug;
+  if (action.kind === "withdraw") {
     return (
-      <Button size="xs" variant="outline" disabled>
-        {t(($) => $.connected_apps.hub.requested)}
+      <Button
+        size="xs"
+        variant="ghost"
+        disabled={handlers.asking !== null}
+        aria-busy={asking}
+        onClick={() => handlers.onWithdraw(app)}
+      >
+        {asking && <Loader2 className="animate-spin" />}
+        {t(($) => $.connected_apps.account_row.withdraw)}
       </Button>
     );
   }
-  const asking = handlers.asking === app.slug;
   return (
     <Button
       size="xs"

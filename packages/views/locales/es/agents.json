@@ -1107,17 +1107,11 @@
   "apps_section": {
     "title": "Apps",
     "empty": "Este agente aún no usa ninguna aplicación.",
-    "scopes": {
-      "personal": "Cuenta personal",
-      "team": "Cuenta del equipo"
-    },
     "connect_yours": "Conectar la tuya",
     "reconnect": "Volver a conectar",
     "connect_team": "Conectar cuenta del equipo",
-    "ask_admin": "Pedir a un administrador",
-    "requested": "Solicitada",
-    "asked_toast": "Se pidió a tus administradores que conecten una cuenta del equipo para {{app}}.",
-    "ask_failed_toast": "No se pudo enviar la solicitud."
+    "acts_as_team": "Actúa con la cuenta del equipo",
+    "acts_as_starter": "Actúa con la cuenta de quien inicia la ejecución"
   },
   "add_app_dialog": {
     "title": "Añadir una aplicación a {{agent}}",

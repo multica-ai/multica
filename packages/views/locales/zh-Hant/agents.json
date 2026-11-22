@@ -1076,17 +1076,11 @@
   "apps_section": {
     "title": "應用程式",
     "empty": "這個 AI 代理還沒有使用任何應用。",
-    "scopes": {
-      "personal": "個人帳號",
-      "team": "團隊帳號"
-    },
     "connect_yours": "連線我的帳號",
     "reconnect": "重新連線",
     "connect_team": "連線團隊帳號",
-    "ask_admin": "請管理員連線",
-    "requested": "已請求",
-    "asked_toast": "已請管理員為 {{app}} 連線團隊帳號。",
-    "ask_failed_toast": "請求傳送失敗。"
+    "acts_as_team": "以團隊帳號行動",
+    "acts_as_starter": "以發起執行的人的帳號行動"
   },
   "add_app_dialog": {
     "title": "為 {{agent}} 新增應用",

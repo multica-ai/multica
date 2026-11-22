@@ -23,6 +23,8 @@ import { agentAppsWith } from "../lib/agent-apps";
 import { scopeForNewApp } from "../../agents/components/agent-app-status";
 import { useTeamAppAccess } from "../../common/use-team-app-access";
 import { usePaidFeatureErrorMessage } from "../../billing";
+import { appAccountStatus } from "../../common/app-status";
+import { AppStatusLabel } from "./app-status-label";
 import { ObjectSection, ObjectSectionCard, ObjectSectionEmpty } from "../../layout/object-page";
 
 /** Every agent in the workspace, whether it uses this app, and whose account. */
@@ -47,6 +49,7 @@ export function AppAgentsCard({
 
   return (
     <ObjectSection title={t(($) => $.connected_apps.app_page.agents_title)} count={agents.data ? live.length : undefined}>
+      <p className="-mt-1 text-caption text-muted-foreground">{t(($) => $.connected_apps.app_page.agents_description)}</p>
       {agents.isLoading ? (
         <ObjectSectionEmpty description={t(($) => $.connected_apps.loading)} />
       ) : live.length === 0 ? (
@@ -95,6 +98,16 @@ function AgentAppRow({
   const current = overview.agent_apps.find((a) => a.agent_id === agent.id && a.toolkit_slug === slug);
   const teamLocked = current?.account_scope === "team" && !overview.can_manage;
   const disabled = !canEdit || saving || teamLocked;
+  const status = current ? appAccountStatus(overview, current.account_scope, slug) : null;
+  const readiness = !current || !status
+    ? undefined
+    : current.account_scope === "team"
+      ? status === "connected"
+        ? t(($) => $.connected_apps.app_page.ready_team)
+        : t(($) => $.connected_apps.app_page.needs_team)
+      : status === "connected"
+        ? t(($) => $.connected_apps.app_page.ready_yours)
+        : t(($) => $.connected_apps.app_page.needs_yours);
   const sourceItems = {
     team: t(($) => $.connected_apps.app_page.source_team),
     personal: t(($) => $.connected_apps.app_page.source_personal),
@@ -148,6 +161,9 @@ function AgentAppRow({
           </span>
         )}
       </div>
+      {status && readiness && (
+        <AppStatusLabel status={status} label={readiness} className="hidden max-w-48 shrink-0 text-caption md:inline-flex" />
+      )}
       <Switch
         checked={!!current}
         disabled={disabled}

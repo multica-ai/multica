@@ -37,11 +37,15 @@ export interface AgentApp {
   level: AppAccessLevel;
 }
 
-/** Members asking an admin to connect a team account for one app. */
+/** Everything waiting for a team account for one app: agents' runs and
+ * members' asks. */
 export interface AppTeamRequest {
   toolkit_slug: string;
+  /** People waiting: whoever started each run, and members who asked. */
   requested_by: string[];
-  /** Agents the members wanted the account for; may be empty. */
+  /** Members who asked themselves; they can withdraw it. */
+  asked_by?: string[];
+  /** Agents waiting on it, or that members wanted it for; may be empty. */
   agent_ids: string[];
   last_requested_at: string;
 }
@@ -59,8 +63,7 @@ export interface AppsOverview {
   team_requests?: AppTeamRequest[];
 }
 
-/** What disconnecting a personal account stops, across every workspace the
- * caller belongs to. */
+/** What disconnecting one of the caller's accounts stops in its workspace. */
 export interface PersonalAppImpact {
   agents: {
     id: string;
@@ -183,6 +186,9 @@ export interface AppRequest {
   /** A connect request for an app the agent does not have yet; answering it
    * adds the app to the agent. */
   adds_app?: boolean;
+  /** Whether the viewer may answer it: any admin for a team account request,
+   * otherwise the approver. Older servers omit it. */
+  can_decide?: boolean;
   expires_at: string;
   decided_by: string | null;
   decided_at: string | null;

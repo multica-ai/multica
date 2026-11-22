@@ -111,8 +111,7 @@
     "app_connect_requested": "请连接应用",
     "app_action_result": "应用操作结果",
     "doc_comment": "文档有新评论",
-    "doc_mentioned": "在文档中提到了你",
-    "app_team_requested": "请求团队账号"
+    "doc_mentioned": "在文档中提到了你"
   },
   "labels": {
     "set_status_to": "状态设为",

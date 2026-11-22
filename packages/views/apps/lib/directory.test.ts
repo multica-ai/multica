@@ -48,12 +48,12 @@ describe("buildAppDirectory", () => {
     const byslug = Object.fromEntries(dir.all.map((a) => [a.slug, a]));
     expect(slugs(dir.attention)).toEqual(["gmail", "notion", "slack"]);
     expect(byslug.gmail).toMatchObject({
-      status: "needs_your_account",
+      status: "not_connected",
       action: { kind: "connect", scope: "personal", reconnect: false },
     });
-    expect(byslug.slack).toMatchObject({ status: "no_team_account", action: { kind: "ask_admin" } });
-    // Members cannot reconnect a team account.
-    expect(byslug.notion).toMatchObject({ status: "expired", action: null });
+    expect(byslug.slack).toMatchObject({ status: "not_connected", action: { kind: "ask_admin" } });
+    // Members cannot reconnect a team account; they ask an admin to.
+    expect(byslug.notion).toMatchObject({ status: "needs_reconnecting", action: { kind: "ask_admin" } });
   });
 
   it("lets an admin connect or reconnect the team account", () => {
@@ -76,7 +76,7 @@ describe("buildAppDirectory", () => {
     const gmail = dir.all.find((a) => a.slug === "gmail")!;
     expect(gmail.scopes).toEqual(["team", "personal"]);
     expect(gmail).toMatchObject({
-      status: "expired",
+      status: "needs_reconnecting",
       statusScope: "personal",
       needsAttention: true,
       action: { kind: "connect", scope: "personal", reconnect: true },
@@ -101,10 +101,10 @@ describe("buildAppDirectory", () => {
   });
 
   it("puts open team requests in front of admins only, and marks the viewer's own", () => {
-    const requests = [{ toolkit_slug: "slack", requested_by: ["me", "u2"], agent_ids: [], last_requested_at: "" }];
+    const requests = [{ toolkit_slug: "slack", requested_by: ["me", "u2"], asked_by: ["me", "u2"], agent_ids: [], last_requested_at: "" }];
     const member = build(overview({ team_requests: requests }));
     const slack = member.all.find((a) => a.slug === "slack")!;
-    expect(slack).toMatchObject({ inUse: false, needsAttention: false, scopes: ["team"], action: { kind: "requested" } });
+    expect(slack).toMatchObject({ inUse: false, needsAttention: false, scopes: ["team"], action: { kind: "withdraw" } });
     expect(slugs(member.popular)).not.toContain("slack");
 
     const other = build(overview({ team_requests: requests }), { viewerId: "u3" });

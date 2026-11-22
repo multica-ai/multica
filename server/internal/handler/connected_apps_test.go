@@ -150,7 +150,7 @@ func newAppsFixture(t *testing.T) *appsFixture {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		testPool.Exec(ctx, `DELETE FROM user_composio_connection WHERE connected_account_id = $1`, account)
-		for _, table := range []string{"app_tool_call", "app_action_request", "app_action_rule", "agent_app", "workspace_app_setting", "app_tool_class_override", "app_team_request"} {
+		for _, table := range []string{"app_tool_call", "app_action_request", "app_action_rule", "agent_app", "workspace_app_setting", "app_tool_class_override", "workspace_composio_connection"} {
 			testPool.Exec(ctx, `DELETE FROM `+table+` WHERE workspace_id = $1`, testWorkspaceID)
 		}
 		testPool.Exec(ctx, `DELETE FROM inbox_item WHERE workspace_id = $1 AND type LIKE 'app\_%'`, testWorkspaceID)
@@ -254,7 +254,7 @@ func (f *appsFixture) legacyRequest(t *testing.T, scope, slug, tool, class strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	return f.h.requestResponse(req, parseUUID(testUserID))
+	return f.h.requestResponse(req, parseUUID(testUserID), true)
 }
 
 func TestConnectedApps_LegacyApprovalResumes(t *testing.T) {
@@ -605,7 +605,7 @@ func TestConnectedApps_ConnectRequestResolvesOnConnect(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM user_composio_connection WHERE connected_account_id = $1`, account)
 	})
-	f.h.ConnectedApps.ResolveConnectRequests(context.Background(), parseUUID(testUserID), "notion")
+	f.h.ConnectedApps.ResolveConnectRequests(context.Background(), parseUUID(testWorkspaceID), parseUUID(testUserID), "notion")
 
 	if reqs := f.listRequests(t, testUserID); len(reqs) != 1 || reqs[0].Status != "approved" {
 		t.Fatalf("connect request after connecting = %+v", reqs)

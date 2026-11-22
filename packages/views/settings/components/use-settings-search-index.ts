@@ -298,11 +298,6 @@ export function useSettingsSearchIndex(
         title: t(($) => $.voice_input.history.title),
         description: t(($) => $.voice_input.history.description),
       },
-      {
-        tab: "connected-accounts",
-        title: t(($) => $.page.tabs.connected_accounts),
-        description: t(($) => $.connected_apps.accounts_page.description),
-      },
       // Workspace
       { tab: "workspace", anchor: "name", title: t(($) => $.workspace.name_label) },
       { tab: "workspace", anchor: "description", title: t(($) => $.workspace.description_label) },
@@ -341,6 +336,11 @@ export function useSettingsSearchIndex(
         tab: "quick-actions",
         title: t(($) => $.page.tabs.quick_actions),
         description: t(($) => $.quick_actions.description),
+      },
+      {
+        tab: "accounts",
+        title: t(($) => $.page.tabs.accounts),
+        description: t(($) => $.connected_apps.accounts_page.search_description),
       },
       { tab: "code", anchor: "code-hosting", title: t(($) => $.code.hosting_title) },
       { tab: "code", anchor: "github", title: t(($) => $.page.tabs.github) },

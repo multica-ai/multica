@@ -113,8 +113,7 @@
     "app_connect_requested": "Connect an app",
     "app_action_result": "App action result",
     "doc_comment": "New comment on a doc",
-    "doc_mentioned": "Mentioned in a doc",
-    "app_team_requested": "Team account requested"
+    "doc_mentioned": "Mentioned in a doc"
   },
   "labels": {
     "set_status_to": "Set status to",

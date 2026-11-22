@@ -5057,6 +5057,7 @@ export const AppsOverviewSchema = z.object({
   team_requests: z.array(z.object({
     toolkit_slug: z.string(),
     requested_by: z.array(z.string()).default([]).catch([]),
+    asked_by: z.array(z.string()).optional().catch(undefined),
     agent_ids: z.array(z.string()).default([]).catch([]),
     last_requested_at: z.string().default(""),
   }).loose()).default([]).catch([]),
@@ -5148,6 +5149,7 @@ export const AppRequestSchema = z.object({
   // Withhold the details unless the server said otherwise.
   redacted: z.boolean().default(true).catch(true),
   adds_app: z.boolean().default(false).catch(false),
+  can_decide: z.boolean().optional().catch(undefined),
   expires_at: z.string(),
   decided_by: appNullableString,
   decided_at: appNullableString,

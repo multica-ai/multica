@@ -49,8 +49,11 @@ type AgentAppResponse struct {
 // team account for.
 type AppTeamRequestResponse struct {
 	ToolkitSlug string `json:"toolkit_slug"`
-	// RequestedBy lists the members who asked, oldest first.
-	RequestedBy     []string `json:"requested_by"`
+	// RequestedBy lists everyone waiting, oldest first: whoever started each
+	// waiting run, and members who asked.
+	RequestedBy []string `json:"requested_by"`
+	// AskedBy is the members who asked themselves, which they can withdraw.
+	AskedBy         []string `json:"asked_by"`
 	AgentIDs        []string `json:"agent_ids"`
 	LastRequestedAt string   `json:"last_requested_at"`
 }
@@ -152,10 +155,14 @@ type AppRequestResponse struct {
 	Reason            *string         `json:"reason"`
 	Redacted          bool            `json:"redacted"`
 	AddsApp           bool            `json:"adds_app"`
-	ExpiresAt         string          `json:"expires_at"`
-	DecidedBy         *string         `json:"decided_by"`
-	DecidedAt         *string         `json:"decided_at"`
-	CreatedAt         string          `json:"created_at"`
+	// CanDecide is whether the viewer may answer the request: any admin for a
+	// team account request, otherwise its approver. The member waiting on a
+	// team account request can still withdraw it.
+	CanDecide bool    `json:"can_decide"`
+	ExpiresAt string  `json:"expires_at"`
+	DecidedBy *string `json:"decided_by"`
+	DecidedAt *string `json:"decided_at"`
+	CreatedAt string  `json:"created_at"`
 }
 
 func (h *Handler) appsReady(w http.ResponseWriter, r *http.Request) bool {
@@ -230,17 +237,17 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list team accounts")
 		return
 	}
-	personal, err := h.Queries.ListUserComposioConnectionsAnyStatus(ctx, member.UserID)
+	personal, err := h.Queries.ListUserComposioConnectionsAnyStatus(ctx, db.ListUserComposioConnectionsAnyStatusParams{UserID: member.UserID, WorkspaceID: workspaceID})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list personal accounts")
 		return
 	}
-	remoteTeam, err := h.remoteConnections(r, connectedapps.ScopeTeam, workspaceID)
+	remoteTeam, err := h.remoteConnections(r, connectedapps.ScopeTeam, workspaceID, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list team accounts")
 		return
 	}
-	remotePersonal, err := h.remoteConnections(r, connectedapps.ScopePersonal, member.UserID)
+	remotePersonal, err := h.remoteConnections(r, connectedapps.ScopePersonal, workspaceID, member.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list personal accounts")
 		return
@@ -250,7 +257,7 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list agent apps")
 		return
 	}
-	teamRequests, err := h.Queries.ListAppTeamRequestSummaries(ctx, workspaceID)
+	teamRequests, err := h.Queries.ListTeamAccountRequestSummaries(ctx, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list team account requests")
 		return
@@ -313,8 +320,9 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.TeamRequests = append(resp.TeamRequests, AppTeamRequestResponse{
 			ToolkitSlug:     row.ToolkitSlug,
-			RequestedBy:     uuidStringsOrEmpty(row.RequestedBy),
-			AgentIDs:        uuidStringsOrEmpty(row.AgentIds),
+			RequestedBy:     uniqueStrings(uuidStringsOrEmpty(row.RequestedBy)),
+			AskedBy:         uniqueStrings(uuidStringsOrEmpty(row.AskedBy)),
+			AgentIDs:        uniqueStrings(uuidStringsOrEmpty(row.AgentIds)),
 			LastRequestedAt: timestampToString(row.LastRequestedAt),
 		})
 	}
@@ -326,6 +334,19 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		resp.AgentApps = append(resp.AgentApps, agentAppResponse(row))
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// uniqueStrings drops repeats, keeping the first of each.
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := in[:0]
+	for _, v := range in {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // ListAppCatalog (GET /api/apps/catalog) is every app the workspace may add.
@@ -452,7 +473,7 @@ func (h *Handler) ConnectTeamApp(w http.ResponseWriter, r *http.Request) {
 	var url string
 	var err error
 	if _, remote := h.ConnectedApps.RemoteApp(req.ToolkitSlug); remote {
-		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopeTeam, workspaceID, member.UserID, req.ReturnTo)
+		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopeTeam, workspaceID, workspaceID, member.UserID, req.ReturnTo)
 	} else {
 		url, err = h.Composio.BeginTeamConnect(r.Context(), workspaceID, member.UserID, req.ToolkitSlug, req.ReturnTo)
 	}
@@ -480,9 +501,9 @@ func (h *Handler) ConnectPersonalApp(w http.ResponseWriter, r *http.Request) {
 	var url string
 	var err error
 	if _, remote := h.ConnectedApps.RemoteApp(req.ToolkitSlug); remote {
-		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopePersonal, member.UserID, member.UserID, req.ReturnTo)
+		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopePersonal, workspaceID, member.UserID, member.UserID, req.ReturnTo)
 	} else {
-		url, err = h.Composio.BeginConnectReturning(r.Context(), member.UserID, req.ToolkitSlug, req.ReturnTo)
+		url, err = h.Composio.BeginConnectReturning(r.Context(), member.UserID, workspaceID, req.ToolkitSlug, req.ReturnTo)
 	}
 	if err != nil {
 		writeConnectError(w, r, err)
@@ -632,31 +653,23 @@ func (h *Handler) RequestTeamApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	inserted, err := h.Queries.UpsertAppTeamRequest(ctx, db.UpsertAppTeamRequestParams{
-		WorkspaceID: workspaceID, ToolkitSlug: slug, RequestedBy: member.UserID, AgentID: agentID,
-	})
-	if err != nil {
+	if _, err := h.ConnectedApps.AskTeamAccount(ctx, workspaceID, member.UserID, slug, agentID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save the request")
 		return
-	}
-	if inserted {
-		h.ConnectedApps.NotifyTeamRequest(ctx, workspaceID, member.UserID, slug, agentID)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DismissTeamAppRequests (DELETE /api/apps/team/requests?toolkit_slug=)
-// clears every member's ask for an app's team account. Admins only.
+// DismissTeamAppRequests (DELETE /api/apps/team/requests?toolkit_slug=).
+// An admin declines everything waiting for an app's team account: agents
+// resume without it and members who asked are told. A member withdraws
+// their own ask.
 func (h *Handler) DismissTeamAppRequests(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
 	}
-	_, workspaceID, isAdmin, ok := h.appsMember(w, r)
+	member, workspaceID, isAdmin, ok := h.appsMember(w, r)
 	if !ok {
-		return
-	}
-	if !isAdmin {
-		writeError(w, http.StatusForbidden, "only workspace admins can dismiss team account requests")
 		return
 	}
 	slug := connectedapps.NormalizeSlug(r.URL.Query().Get("toolkit_slug"))
@@ -664,10 +677,16 @@ func (h *Handler) DismissTeamAppRequests(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "toolkit_slug is required")
 		return
 	}
-	if err := h.Queries.DeleteAppTeamRequestsForToolkit(r.Context(), db.DeleteAppTeamRequestsForToolkitParams{
-		WorkspaceID: workspaceID, ToolkitSlug: slug,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to dismiss the requests")
+	if !isAdmin {
+		if err := h.ConnectedApps.WithdrawTeamAsk(r.Context(), workspaceID, member.UserID, slug); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to withdraw the request")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := h.ConnectedApps.DeclineTeamConnectRequests(r.Context(), workspaceID, member.UserID, slug); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to decline the requests")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1220,7 +1239,7 @@ func syncAgentAppsFromAllowlist(ctx context.Context, q *db.Queries, agent db.Age
 	return q.DeleteAgentAppsExcept(ctx, db.DeleteAgentAppsExceptParams{AgentID: agent.ID, Keep: keep})
 }
 
-func (h *Handler) requestResponse(req db.AppActionRequest, viewer pgtype.UUID) AppRequestResponse {
+func (h *Handler) requestResponse(req db.AppActionRequest, viewer pgtype.UUID, viewerIsAdmin bool) AppRequestResponse {
 	out := AppRequestResponse{
 		ID: uuidToString(req.ID), Kind: req.Kind, Status: req.Status, AgentID: uuidToString(req.AgentID),
 		IssueID: uuidToPtr(req.IssueID), ChatSessionID: uuidToPtr(req.ChatSessionID),
@@ -1229,6 +1248,11 @@ func (h *Handler) requestResponse(req db.AppActionRequest, viewer pgtype.UUID) A
 		Error: textToPtr(req.Error), Reason: textToPtr(req.Reason),
 		ExpiresAt: timestampToString(req.ExpiresAt), DecidedBy: uuidToPtr(req.DecidedBy),
 		DecidedAt: timestampToPtr(req.DecidedAt), CreatedAt: timestampToString(req.CreatedAt),
+	}
+	if req.Kind == connectedapps.KindConnect && req.AccountScope == connectedapps.ScopeTeam {
+		out.CanDecide = viewerIsAdmin
+	} else {
+		out.CanDecide = req.ApproverUserID == viewer
 	}
 	if req.ApproverUserID == viewer {
 		out.Arguments = json.RawMessage(req.Arguments)
@@ -1252,7 +1276,7 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
 	}
-	member, workspaceID, _, ok := h.appsMember(w, r)
+	member, workspaceID, isAdmin, ok := h.appsMember(w, r)
 	if !ok {
 		return
 	}
@@ -1305,7 +1329,7 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	default:
-		pending, err = h.Queries.ListPendingAppActionRequestsForApprover(ctx, db.ListPendingAppActionRequestsForApproverParams{WorkspaceID: workspaceID, ApproverUserID: member.UserID})
+		pending, err = h.Queries.ListPendingAppActionRequestsForApprover(ctx, db.ListPendingAppActionRequestsForApproverParams{WorkspaceID: workspaceID, ApproverUserID: member.UserID, AsAdmin: isAdmin})
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list requests")
@@ -1324,10 +1348,10 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 	out := make([]AppRequestResponse, 0, len(pending)+len(decided))
 	// Decided rows arrive newest first; the list reads oldest first.
 	for i := len(decided) - 1; i >= 0; i-- {
-		out = append(out, h.requestResponse(decided[i], member.UserID))
+		out = append(out, h.requestResponse(decided[i], member.UserID, isAdmin))
 	}
 	for _, row := range pending {
-		resp := h.requestResponse(row, member.UserID)
+		resp := h.requestResponse(row, member.UserID, isAdmin)
 		if slugs, ok := agentSlugs[row.AgentID]; ok {
 			resp.AddsApp = !slugs[connectedapps.NormalizeSlug(row.ToolkitSlug)]
 		}
@@ -1341,7 +1365,7 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) pendingConnectAgentApps(ctx context.Context, rows []db.AppActionRequest) (map[pgtype.UUID]map[string]bool, error) {
 	out := map[pgtype.UUID]map[string]bool{}
 	for _, row := range rows {
-		if row.Kind != connectedapps.KindConnect || row.Status != "pending" {
+		if row.Kind != connectedapps.KindConnect || row.Status != "pending" || !row.TaskID.Valid {
 			continue
 		}
 		if _, done := out[row.AgentID]; done {
@@ -1390,7 +1414,7 @@ func (h *Handler) ApproveAppRequest(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
 	}
-	member, workspaceID, _, ok := h.appsMember(w, r)
+	member, workspaceID, isAdmin, ok := h.appsMember(w, r)
 	if !ok {
 		return
 	}
@@ -1412,7 +1436,7 @@ func (h *Handler) ApproveAppRequest(w http.ResponseWriter, r *http.Request) {
 		writeDecisionError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.requestResponse(row, member.UserID))
+	writeJSON(w, http.StatusOK, h.requestResponse(row, member.UserID, isAdmin))
 }
 
 // RejectAppRequest (POST /api/app-requests/{id}/reject).
@@ -1420,7 +1444,7 @@ func (h *Handler) RejectAppRequest(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
 	}
-	member, workspaceID, _, ok := h.appsMember(w, r)
+	member, workspaceID, isAdmin, ok := h.appsMember(w, r)
 	if !ok {
 		return
 	}
@@ -1442,7 +1466,7 @@ func (h *Handler) RejectAppRequest(w http.ResponseWriter, r *http.Request) {
 		writeDecisionError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.requestResponse(row, member.UserID))
+	writeJSON(w, http.StatusOK, h.requestResponse(row, member.UserID, isAdmin))
 }
 
 // AppsGateway (POST /api/apps/mcp) is the MCP endpoint runs reach their apps

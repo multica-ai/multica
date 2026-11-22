@@ -61,8 +61,13 @@ type CallbackResult struct {
 	ToolkitSlug string
 	// WorkspaceID is set for a team account.
 	WorkspaceID string
-	// UserID is the member who connected a personal account.
-	UserID string
+	// UserID is the member who connected a personal account, and
+	// PersonalWorkspaceID the workspace it belongs to (empty for a legacy
+	// account).
+	UserID              string
+	PersonalWorkspaceID string
+	// ConnectedBy is the admin who connected a team account.
+	ConnectedBy string
 	// ReturnTo is the app path the flow started from, if any.
 	ReturnTo string
 }

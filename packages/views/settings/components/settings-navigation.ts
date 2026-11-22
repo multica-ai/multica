@@ -52,7 +52,8 @@ function isPersonalComposioCallback(params: URLSearchParams) {
  * — so these mappings are part of the URL contract, not bookmarks we can drop.
  *
  * The workspace's apps left settings for their own page: `apps` here means
- * "redirect to it". A personal connection returns to Connected accounts.
+ * "redirect to it". A personal connection returns to Accounts, which was
+ * `connected-accounts` before it held team accounts too.
  */
 export function resolveSettingsLocation(
   params: URLSearchParams,
@@ -79,14 +80,16 @@ export function resolveSettingsLocation(
       return { tab: "code", section: section ?? "repositories", integration: null };
     case "channels":
       return { tab: "channels", section, integration: null };
+    case "connected-accounts":
+      return { tab: "accounts", section, integration: null };
     case "apps":
       if (isPersonalComposioCallback(params)) {
-        return { tab: "connected-accounts", section: null, integration: null };
+        return { tab: "accounts", section: null, integration: null };
       }
       return { tab: "apps", section: null, integration: null };
     case "integrations": {
       if (isPersonalComposioCallback(params)) {
-        return { tab: "connected-accounts", section: null, integration: null };
+        return { tab: "accounts", section: null, integration: null };
       }
       if (isComposioCallback(params) || integration === "composio") {
         return { tab: "apps", section: null, integration: null };

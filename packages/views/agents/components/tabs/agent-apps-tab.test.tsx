@@ -77,7 +77,7 @@ describe("AgentAppsTab", () => {
     overview.personal = [{ id: "expired-calendar", toolkit_slug: "googlecalendar", status: "expired", connected_at: "", last_used_at: null }];
     renderApps();
     await screen.findByText("Gmail");
-    expect(screen.getByText(/Needs your account/)).toBeVisible();
+    expect(screen.getByText(/Not connected/)).toBeVisible();
     expect(screen.getByRole("switch", { name: "Enable Gmail" })).toBeChecked();
     expect(screen.getByRole("switch", { name: "Enable Notion" })).not.toBeChecked();
     expect(screen.getByText("Notion").closest("li")?.querySelector("img")).toHaveAttribute("src", expect.stringContaining("notion"));

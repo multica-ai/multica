@@ -45,7 +45,7 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
 import { ChannelsTab } from "./channels-tab";
-import { ConnectedAccountsTab } from "./connected-accounts-tab";
+import { AccountsTab } from "./accounts-tab";
 import { useComposioAvailable } from "../../common/use-composio-available";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
@@ -189,16 +189,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               ? [entry("voice-input", t(($) => $.page.tabs.voice_input), Mic, <VoiceInputTab />)]
               : []),
             entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
-            ...(appsAvailable
-              ? [
-                  entry(
-                    "connected-accounts",
-                    t(($) => $.page.tabs.connected_accounts),
-                    Plug,
-                    <ConnectedAccountsTab />,
-                  ),
-                ]
-              : []),
           ],
         },
       ],
@@ -259,6 +249,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           key: "connections",
           label: t(($) => $.page.groups.connections),
           entries: [
+            ...(appsAvailable
+              ? [entry("accounts", t(($) => $.page.tabs.accounts), Plug, <AccountsTab />)]
+              : []),
             entry("code", t(($) => $.page.tabs.code), FolderGit2, <CodeTab />, {
               adminOnly: true,
             }),

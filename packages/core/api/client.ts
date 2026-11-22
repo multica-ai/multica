@@ -6274,13 +6274,14 @@ export class ApiClient {
     });
   }
 
-  /** Clears every open team-account request for an app. Admins only. */
+  /** An admin declines every open team-account request for an app; a member
+   * withdraws their own. */
   async dismissTeamAppRequests(toolkitSlug: string): Promise<void> {
     await this.fetch(`/api/apps/team/requests?toolkit_slug=${encodeURIComponent(toolkitSlug)}`, { method: "DELETE" });
   }
 
-  /** What disconnecting one of the caller's personal accounts would stop,
-   * in every workspace they belong to. */
+  /** What disconnecting one of the caller's personal accounts would stop in
+   * its workspace. */
   async getPersonalAppImpact(connectionId: string): Promise<PersonalAppImpact> {
     const raw = await this.fetch<unknown>(`/api/integrations/composio/connections/${connectionId}/impact`);
     return parseWithFallback(raw, PersonalAppImpactSchema, { agents: [] }, {

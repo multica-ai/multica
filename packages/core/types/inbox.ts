@@ -49,10 +49,7 @@ export type InboxItemType =
   | "app_action_requested"
   | "app_action_reminder"
   | "app_connect_requested"
-  | "app_action_result"
-  // A member asks the workspace admins for a team account. Issue-less:
-  // details carry toolkit_slug, agent_id and requested_by.
-  | "app_team_requested";
+  | "app_action_result";
 
 /**
  * One workspace's unread inbox count in the cross-workspace summary

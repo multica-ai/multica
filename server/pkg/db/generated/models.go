@@ -240,15 +240,6 @@ type AppActionRule struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-type AppTeamRequest struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	ToolkitSlug string             `json:"toolkit_slug"`
-	RequestedBy pgtype.UUID        `json:"requested_by"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type AppToolCall struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
@@ -1823,6 +1814,7 @@ type RemoteAppConnection struct {
 	LastUsedAt    pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 }
 
 type RemoteAppOauthClient struct {
@@ -2152,6 +2144,7 @@ type UserComposioConnection struct {
 	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
 }
 
 type VcsCommitStatus struct {

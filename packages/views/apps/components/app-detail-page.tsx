@@ -13,14 +13,14 @@ import { CollectionPageState } from "../../layout/collection-page";
 import { OBJECT_PAGE_BODY, ObjectIdentity, ObjectPage } from "../../layout/object-page";
 import { useT } from "../../i18n";
 import { useAppConnectReturn } from "../hooks/use-app-connect-return";
-import { AppAccountsCard } from "./app-accounts-card";
+import { AppAccountsSection } from "./app-accounts-card";
 import { AppActivityCard } from "./app-activity-card";
 import { AppAgentsCard } from "./app-agents-card";
 import { AppCapabilitiesCard } from "./app-capabilities-card";
 
 const LAYOUT_ID = "multica_app_detail_layout";
 
-/** One app: which agents use it and as whom, what they did, and its accounts. */
+/** One app: its accounts, which agents use it and as whom, and what they did. */
 export function AppDetailPage({ toolkitSlug }: { toolkitSlug: string }) {
   const { t } = useT("settings");
   const { t: tl } = useT("layout");
@@ -72,12 +72,7 @@ export function AppDetailPage({ toolkitSlug }: { toolkitSlug: string }) {
       segments={[listSegment]}
       leaf={leaf}
       panel={
-        data ? (
-          <div className="space-y-4">
-            <AppAccountsCard slug={toolkitSlug} name={name} logo={entry?.logo} overview={data} />
-            <AppCapabilitiesCard />
-          </div>
-        ) : undefined
+        data ? <AppCapabilitiesCard /> : undefined
       }
     >
       <div className={`${OBJECT_PAGE_BODY} space-y-8`}>
@@ -95,6 +90,7 @@ export function AppDetailPage({ toolkitSlug }: { toolkitSlug: string }) {
         />
         {data ? (
           <>
+            <AppAccountsSection slug={toolkitSlug} name={name} logo={entry?.logo} overview={data} />
             <AppAgentsCard slug={toolkitSlug} name={name} entry={entry} overview={data} />
             <AppActivityCard slug={toolkitSlug} name={name} canManage={data.can_manage} />
           </>

@@ -111,8 +111,7 @@
     "app_connect_requested": "앱 연결 요청",
     "app_action_result": "앱 작업 결과",
     "doc_comment": "문서에 새 댓글",
-    "doc_mentioned": "문서에서 멘션됨",
-    "app_team_requested": "팀 계정 요청"
+    "doc_mentioned": "문서에서 멘션됨"
   },
   "labels": {
     "set_status_to": "상태 변경:",

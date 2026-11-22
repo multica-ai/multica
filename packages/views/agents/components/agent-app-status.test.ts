@@ -50,9 +50,9 @@ describe("scopeForNewApp", () => {
 
 describe("needsViewerAccount", () => {
   it("flags personal-account apps the viewer has not connected or must reconnect", () => {
-    expect(needsViewerAccount("personal", "needs_your_account")).toBe(true);
-    expect(needsViewerAccount("personal", "expired")).toBe(true);
+    expect(needsViewerAccount("personal", "not_connected")).toBe(true);
+    expect(needsViewerAccount("personal", "needs_reconnecting")).toBe(true);
     expect(needsViewerAccount("personal", "connected")).toBe(false);
-    expect(needsViewerAccount("team", "no_team_account")).toBe(false);
+    expect(needsViewerAccount("team", "not_connected")).toBe(false);
   });
 });

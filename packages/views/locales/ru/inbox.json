@@ -117,8 +117,7 @@
     "app_connect_requested": "Подключить приложение",
     "app_action_result": "Результат действия приложения",
     "doc_comment": "Новый комментарий в документе",
-    "doc_mentioned": "Вас упомянули в документе",
-    "app_team_requested": "Запрошен аккаунт команды"
+    "doc_mentioned": "Вас упомянули в документе"
   },
   "labels": {
     "set_status_to": "Установлен статус",
