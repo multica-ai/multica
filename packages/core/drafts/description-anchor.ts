@@ -19,7 +19,9 @@ export interface DescriptionAnchor {
 export function descriptionAnchorsForSend(issueId: string, annotations: readonly ReplyAnnotation[]): DescriptionAnchor[] {
   return annotations.flatMap((a) => a.sourceCommentId === `description:${issueId}` && a.note.trim()
     ? [{ version: 1 as const, id: a.id, issue_id: issueId, quote: a.quote, start: a.start,
-      prefix: a.prefix, suffix: a.suffix, source_text: a.sourceText ?? "" }] : []);
+      // A 32-unit context can cut a surrogate pair at its outer edge.
+      // JSON/Go replace lone surrogates, so keep only complete code points.
+      prefix: a.prefix.replace(/^[\uDC00-\uDFFF]/, ""), suffix: a.suffix.replace(/[\uD800-\uDBFF]$/, ""), source_text: a.sourceText ?? "" }] : []);
 }
 
 function occurrences(text: string, quote: string): number[] {

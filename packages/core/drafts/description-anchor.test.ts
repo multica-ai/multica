@@ -31,6 +31,15 @@ describe("published description anchors", () => {
     expect(locateDescriptionAnchor("before original after before original after", a)).toBeNull();
     expect(a.quote).toBe("original");
   });
+  it("does not publish split surrogate pairs at the 32-unit context boundaries", () => {
+    const sourceText = "🐟" + "a".repeat(31) + "quote" + "b".repeat(31) + "🐟";
+    const start = sourceText.indexOf("quote");
+    const [anchor] = descriptionAnchorsForSend("issue", [{ id: "a", sourceCommentId: "description:issue", sourceActorName: "Description", note: "Keep", sourceText, quote: "quote", start, prefix: sourceText.slice(start - 32, start), suffix: sourceText.slice(start + 5, start + 37) }]);
+    expect(anchor?.prefix).toBe("a".repeat(31));
+    expect(anchor?.suffix).toBe("b".repeat(31));
+    expect(locateDescriptionAnchor(sourceText, anchor!)).toBe(start);
+    expect(new TextDecoder().decode(new TextEncoder().encode(anchor!.prefix))).toBe(anchor!.prefix);
+  });
   it("keeps legacy draft metadata explicitly outdated when its snapshot is unavailable", () => {
     expect(locateDescriptionAnchor("quote", { ...make("quote", "quote"), source_text: "" })).toBeNull();
   });
