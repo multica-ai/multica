@@ -411,10 +411,8 @@ For HTML that follows light / dark mode, style it with `var(--background)`,
 `var(--foreground)`, `var(--muted)`, `var(--muted-foreground)`, `var(--border)`,
 `var(--primary)`, `var(--chart-1)` … `var(--chart-5)`, `var(--font-sans)`. Any
 of them opts the block into the app's color scheme, so set the page background
-(`body { background: var(--background); color: var(--foreground) }`). Never put
-token text on a fixed light fill: it is near-white in dark mode, so a pastel
-`background:#fde2e4` needs a fixed dark `color`. HTML that uses no token keeps
-its own look. Size to the content: `100vh` has no fixed viewport to fill here.
+(`body { background: var(--background); color: var(--foreground) }`). HTML that
+uses no token keeps its own look.
 
 ````markdown
 ```html title="p95 latency, last 7 days"
