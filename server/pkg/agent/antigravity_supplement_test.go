@@ -123,6 +123,20 @@ func antigravitySupplementAsync(t *testing.T, s *antigravitySupplementSession, c
 	}
 }
 
+// assertAntigravityDelivered expects a receipt the caller has just processed
+// to have settled the supplement.
+func assertAntigravityDelivered(t *testing.T, done <-chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("supplement = %v, want delivered", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("supplement was not delivered")
+	}
+}
+
 func assertAntigravitySupplementWaiting(t *testing.T, done <-chan error) {
 	t.Helper()
 	select {
@@ -573,7 +587,46 @@ func TestAntigravityTranscriptMatchesTruncatedContent(t *testing.T) {
 	turn.observeUserInput(0, s)
 	turn.observeUserInput(3, s)
 	turn.confirmInjected(s, transcript, "conv-main")
-	if err := <-done; err != nil {
-		t.Fatalf("supplement = %v, want delivered", err)
+	assertAntigravityDelivered(t, done)
+}
+
+// A compaction can rewrite the transcript in place and grow it past the
+// remembered offset before the next check, so the offset lands inside the
+// receipt's line. A new injected step must read the file from the start.
+func TestAntigravityTranscriptFindsReceiptAfterInPlaceRewrite(t *testing.T) {
+	s, _ := startTestAntigravitySupplements(t, t.Context())
+	s.activate("conv-main")
+	transcript, appDataDir := newTestAntigravityTranscript(t)
+	turn := antigravityTurn{steps: map[int]antigravityStepSummary{}}
+	turn.observeUserInput(0, s)
+
+	first := antigravitySupplementAsync(t, s, t.Context(), "first")
+	relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))
+	history := []string{antigravityUserInputRecord(t, 0, "goal")}
+	for i := 1; i < 200; i++ {
+		history = append(history, `{"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","step_index":`+strconv.Itoa(i)+`,"content":"`+strings.Repeat("work ", 30)+`"}`)
 	}
+	history = append(history, antigravityUserInputRecord(t, 200, onlyInflightMarker(t, s)+"\nfirst"))
+	seedAntigravityTranscript(t, appDataDir, "conv-main", history)
+	turn.observeUserInput(200, s)
+	turn.confirmInjected(s, transcript, "conv-main")
+	if err := <-first; err != nil {
+		t.Fatalf("first = %v", err)
+	}
+	oldOffset := int(transcript.offset)
+
+	second := antigravitySupplementAsync(t, s, t.Context(), "second")
+	relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))
+	receipt := antigravityUserInputRecord(t, 4, onlyInflightMarker(t, s)+"\nsecond "+strings.Repeat("y", 2000))
+	padding := `{"type":"CONVERSATION_HISTORY","content":"` + strings.Repeat("s", oldOffset-500) + `"}`
+	if len(padding)+1 >= oldOffset || len(padding)+1+len(receipt)+1 <= oldOffset {
+		t.Fatal("fixture: the receipt line must straddle the old offset")
+	}
+	path := filepath.Join(appDataDir, "brain", "conv-main", ".system_generated", "logs", "transcript.jsonl")
+	if err := os.WriteFile(path, []byte(padding+"\n"+receipt+"\n"), 0o644); err != nil { // same inode
+		t.Fatal(err)
+	}
+	turn.observeUserInput(4, s)
+	turn.confirmInjected(s, transcript, "conv-main")
+	assertAntigravityDelivered(t, second)
 }

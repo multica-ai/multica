@@ -202,11 +202,13 @@ type antigravityTurn struct {
 	start *int
 	// injected holds the user_input steps that appeared while steering
 	// guidance was in flight; checkTranscript is set until the transcript
-	// shows which guidance they carried.
-	injected        map[int]bool
-	checkTranscript bool
-	steps           map[int]antigravityStepSummary
-	invalid         bool
+	// shows which guidance they carried, and rescanTranscript until the next
+	// check has read it from the start.
+	injected         map[int]bool
+	checkTranscript  bool
+	rescanTranscript bool
+	steps            map[int]antigravityStepSummary
+	invalid          bool
 }
 
 // observeUserInput classifies a user_input step. The first one opens the turn;
@@ -221,7 +223,7 @@ func (t *antigravityTurn) observeUserInput(index int, supplements *antigravitySu
 			t.injected = make(map[int]bool)
 		}
 		t.injected[index] = true
-		t.checkTranscript = true
+		t.checkTranscript, t.rescanTranscript = true, true
 	default:
 		t.invalid = true
 	}
@@ -234,6 +236,12 @@ func (t *antigravityTurn) observeUserInput(index int, supplements *antigravitySu
 func (t *antigravityTurn) confirmInjected(supplements *antigravitySupplementSession, transcript *antigravityTranscript, conversationID string) {
 	if !t.checkTranscript {
 		return
+	}
+	// agy can rewrite the transcript in place when it compacts, leaving the
+	// remembered offset inside an unrelated line. A new step is rare, so read
+	// the whole file once for it; later checks only read what was added.
+	if t.rescanTranscript {
+		transcript.offset, t.rescanTranscript = 0, false
 	}
 	transcript.scan(conversationID, supplements.inflightMarkers(), supplements.receipt)
 	t.checkTranscript = supplements.awaitingReceipt()
@@ -906,7 +914,8 @@ const antigravityTranscriptLineLimit = 1 << 20
 // reads only what was added since the previous one, through one bounded
 // buffer, and decodes only lines that carry an in-flight marker. agy rewrites
 // the file when it compacts the conversation, so a replaced or shrunken file
-// is read again from the start.
+// is read again from the start, and so is the file at each new injected step
+// (see confirmInjected), which catches a rewrite in place.
 type antigravityTranscript struct {
 	logPath string
 	path    string
