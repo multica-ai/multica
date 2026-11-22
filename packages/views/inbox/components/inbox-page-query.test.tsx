@@ -15,6 +15,7 @@ import { InboxPage } from "./inbox-page";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 let workspaceId = "workspace-1";
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => workspaceId }));
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => false }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
