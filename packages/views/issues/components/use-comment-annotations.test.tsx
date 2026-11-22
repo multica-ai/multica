@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useCommentDraftStore } from "@multica/core/issues/stores";
+import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import type { TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { useCommentAnnotations } from "./use-comment-annotations";
@@ -42,17 +42,17 @@ vi.mock("../../editor/content-editor", async () => {
 const entry: TimelineEntry = { type: "comment", id: "root", actor_type: "agent", actor_id: "emacs", content: "Selected text", created_at: "2026-09-10T00:00:00Z" };
 const key = "reply:issue:root" as const;
 
-function Fixture({ actorType = "agent", sourceKey = "initial", child = false, deleted = false }: {
-  actorType?: string; sourceKey?: string; child?: boolean; deleted?: boolean;
+function Fixture({ actorType = "agent", sourceKey = "initial", child = false, deleted = false, draftKey = key }: {
+  actorType?: string; sourceKey?: string; child?: boolean; deleted?: boolean; draftKey?: CommentDraftKey;
 }) {
   const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   const annotation = useCommentAnnotations({
-    issueId: "issue", draftKey: key,
+    issueId: "issue", draftKey,
     sources: [{ id: entry.id, name: actorType }, ...(child && !deleted ? [{ id: "child", name: "Child author" }] : [])], enabled: true,
   });
   return <QueryClientProvider client={client}><div ref={annotation.cardRef} {...annotation.captureProps}>
     {annotation.popup}
-    {annotation.composer?.render()}
+    {annotation.composer?.render(undefined, draftKey.startsWith("chat:"))}
     <div key={sourceKey} data-comment-content="root" tabIndex={0}>Selected text</div>
     {child && !deleted && <div data-comment-content="child" tabIndex={0}>Other text</div>}
   </div></QueryClientProvider>;
@@ -113,6 +113,35 @@ beforeEach(() => {
 });
 
 describe("selection to reply", () => {
+  it("restores a removed last attachment on Escape and applies its removal on Save", async () => {
+    const chatKey = "chat:attachment-only" as const;
+    const store = useCommentDraftStore.getState();
+    store.setAttachments(chatKey, [{
+      id: "file", filename: "note.txt", size_bytes: 4, content_type: "text/plain",
+      url: "/api/attachments/file/download", download_url: "", markdown_url: "/api/attachments/file/download",
+      workspace_id: "workspace", issue_id: null, comment_id: null, chat_session_id: "attachment-only",
+      chat_message_id: null, uploader_type: "member", uploader_id: "member", created_at: new Date(0).toISOString(),
+    }]);
+    store.addAnnotation(chatKey, {
+      id: "saved", sourceCommentId: "root", sourceActorName: "Agent", quote: "Selected text",
+      start: 0, prefix: "", suffix: "", note: "", attachmentUploadIds: ["file"],
+    });
+    renderWithI18n(<Fixture draftKey={chatKey} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+    const remove = async () => fireEvent.click(await screen.findByRole("button", { name: "Remove attachment (note.txt)" }));
+    await remove();
+    expect(screen.queryByText("note.txt")).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Escape" });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+    expect(await screen.findByText("note.txt")).toBeInTheDocument();
+    await remove();
+    const save = screen.getByRole("button", { name: "Save annotation" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    expect(store.getAnnotations(chatKey)).toEqual([]);
+    expect(store.getUploads(chatKey)).toEqual([]);
+  });
+
   it("keeps owned portal controls open and lets their first Escape close only the nested control", async () => {
     const { container } = renderWithI18n(<Fixture />);
     selectText(container);

@@ -23,7 +23,8 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
-import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
+import { attachmentToDraftUpload, hasUploadingDraft, type DraftUpload } from "@multica/core/drafts";
+import { toUploadResult } from "@multica/core/hooks/use-file-upload";
 import { createLogger } from "@multica/core/logger";
 import { useShortcut, type ShortcutChord } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
@@ -267,7 +268,9 @@ export function ChatInput({
   const annotationDraftKey = annotationSlot?.draftKey;
   const annotations = useCommentDraftStore((s) =>
     annotationDraftKey ? s.getAnnotations(annotationDraftKey) : EMPTY_REPLY_ANNOTATIONS);
-  // Saved annotations always carry a note, so they are sendable on their own.
+  const annotationUploads = useCommentDraftStore((s) =>
+    annotationDraftKey ? s.getUploads(annotationDraftKey) : EMPTY_UPLOADS);
+  // Saved annotations carry a note or attachments and can be sent on their own.
   const hasNothingToSend = isEmpty && !inputDraft.trim() && annotations.length === 0;
   const appliedRestoreIdRef = useRef<string | null>(null);
   const appliedConversationStarterIdRef = useRef<number | null>(null);
@@ -366,13 +369,21 @@ export function ChatInput({
     uploads: draftUploads,
     attachments: draftAttachments,
     handleUpload,
-    gate,
+    gate: bodyUploadGate,
     storageRefusal,
     dismissStorageRefusal,
   } = useCoordinatedUploads(uploadBinding, storeUploads, {}, uploadGate, editorRef, {
     resolveUploadTarget: () => makeUploadBinding(editorDraftKeyRef.current),
     liveRegistryKey: `chat:${loadedDraftKey}`,
   });
+  const gate = {
+    ...bodyUploadGate,
+    uploading: bodyUploadGate.uploading || hasUploadingDraft(annotationUploads),
+    isBlocked: () => bodyUploadGate.isBlocked() || (!!annotationDraftKey &&
+      hasUploadingDraft(useCommentDraftStore.getState().getUploads(annotationDraftKey))),
+  };
+  const gateRef = useRef(gate);
+  gateRef.current = gate;
 
   // Move the editor from the draft it holds to the draft that is selected.
   //
@@ -509,9 +520,20 @@ export function ChatInput({
     // `editorScrubbedRef`.
     afterAccepted: () => (editorScrubbedRef.current ? "refocus" : "none"),
     normalize: (raw) => {
-      const current = annotationDraftKey
-        ? useCommentDraftStore.getState().getAnnotations(annotationDraftKey)
-        : EMPTY_REPLY_ANNOTATIONS;
+      if (!annotationDraftKey) return raw.trim();
+      const store = useCommentDraftStore.getState();
+      const uploads = store.getUploads(annotationDraftKey);
+      const current = store.getAnnotations(annotationDraftKey).map((annotation) => {
+        if (!annotation.attachmentUploadIds?.length) return annotation;
+        const ids = new Set(annotation.attachmentUploadIds);
+        const links = uploads.flatMap((upload) => {
+          if (upload.status !== "uploaded" || !ids.has(upload.clientUploadId)) return [];
+          const { content_type, filename, markdownLink } = toUploadResult(upload.attachment);
+          const marker = content_type?.startsWith("image/") ? "!" : "!file";
+          return `${marker}[${escapeMarkdownLabel(filename)}](${markdownLink})`;
+        });
+        return { ...annotation, note: [annotation.note.trim(), ...links].filter(Boolean).join("\n\n") };
+      });
       return hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
     },
     onSubmit: async (content: string): Promise<boolean> => {
@@ -548,11 +570,14 @@ export function ChatInput({
       }
       // Only send attachment IDs for uploads still present in the content.
       // Edits / deletions that remove the markdown URL also drop the binding.
-      const activeIds: string[] = [];
-      for (const attachment of draftAttachments) {
-        if (isAttachmentReferenced(content, attachment)) activeIds.push(attachment.id);
+      const annotationAttachments = annotationKeyAtSend
+        ? useCommentDraftStore.getState().getAttachments(annotationKeyAtSend)
+        : [];
+      const activeAttachments = new Map<string, Attachment>();
+      for (const attachment of [...draftAttachments, ...annotationAttachments]) {
+        if (isAttachmentReferenced(content, attachment)) activeAttachments.set(attachment.id, attachment);
       }
-      const uniqueActiveIds = Array.from(new Set(activeIds));
+      const uniqueActiveIds = Array.from(activeAttachments.keys());
       // Capture draft key BEFORE onSend — creating a new session mutates
       // activeSessionId synchronously, so reading it after onSend would point
       // at the new session and leave the old draft orphaned.
@@ -627,7 +652,7 @@ export function ChatInput({
         sent,
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
         commitInput,
-        draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
+        Array.from(activeAttachments.values()),
       ] as const;
       const accepted = await onSend(...sendArgs);
       // Owner rejected the send (or threw, which useComposerSubmit also treats
@@ -654,7 +679,7 @@ export function ChatInput({
       (isRunning && !allowSubmitWhileRunning) ||
       editorDraftKeyRef.current !== draftKey
     ) return;
-    if (gate.isBlocked()) {
+    if (gateRef.current.isBlocked()) {
       toast.info(t(($) => $.conversation_starters.uploading));
       return;
     }
@@ -680,7 +705,6 @@ export function ChatInput({
     conversationStarterRequest,
     disabled,
     draftKey,
-    gate,
     isRunning,
     noAgent,
     onConversationStarterApplied,
@@ -717,7 +741,7 @@ export function ChatInput({
   const canSubmitNow = !disabled && !noAgent && (!isRunning || !!allowSubmitWhileRunning);
   const showRunHint = isRunning && allowSubmitWhileRunning && canSteerWhileRunning !== undefined
     && !hasNothingToSend && !disabled && !noAgent;
-  const willSteer = canSteerWhileRunning && draftUploads.length === 0
+  const willSteer = canSteerWhileRunning && draftUploads.length === 0 && annotationUploads.length === 0
     && !inputDraft.includes("](slash://skill/");
   const voice = useComposerVoice({
     insert: (text) => editorRef.current?.insertText(text) ?? false,
@@ -734,7 +758,7 @@ export function ChatInput({
     {annotationSlot?.composer?.render(canSubmitNow ? {
       submit, submitting, uploading: gate.uploading, restart: false,
       recipients: null, draftContent: inputDraft, annotations,
-    } : undefined)}
+    } : undefined, uploadEnabled)}
     <div
       ref={composerRef}
       className={cn(
