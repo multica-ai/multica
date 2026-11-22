@@ -3297,6 +3297,16 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		if !ok {
 			return
 		}
+		// A private project the caller cannot see (MUL-8472) is answered like
+		// one with nobody working, so its agents and run count stay hidden.
+		hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+		if !ok {
+			return
+		}
+		if !hidden.CanSeeProject(projectID) {
+			writeJSON(w, http.StatusOK, []WorkspaceWorkingAgent{})
+			return
+		}
 	}
 
 	rows, err := h.Queries.ListWorkspaceWorkingAgents(
