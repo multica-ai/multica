@@ -302,7 +302,9 @@ jobs:
   e2e:
     needs: changes
     if: ${{ needs.changes.outputs.e2e == 'true' }}
-    runs-on: ubuntu-latest
+    # Playwright 1.58 installs Chromium only up to Ubuntu 24.04; ubuntu-latest
+    # is past that.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
