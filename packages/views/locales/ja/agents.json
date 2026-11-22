@@ -192,7 +192,9 @@
     "rename_required": "名前は必須です",
     "edit_description_title": "説明を編集",
     "description_placeholder": "このエージェントは何をしますか？",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "prop_recommended_runtime": "推奨 CLI",
+    "section_execution_hint": "ランタイム、モデル、推論レベル、速度、同時実行数の上限を選択します。"
   },
   "overview": {
     "attention_title": "対応が必要な実行",
@@ -254,7 +256,11 @@
     "service_tier_standard_description": "通常速度と標準使用量",
     "service_tier_tooltip": "速度 · {{value}}",
     "service_tier_clear": "ランタイムのデフォルト",
-    "service_tier_clear_title": "速度の上書きをクリアし、ローカルの Codex 設定に任せます"
+    "service_tier_clear_title": "速度の上書きをクリアし、ローカルの Codex 設定に任せます",
+    "cli_empty": "利用できる CLI がありません",
+    "cli_none": "CLI なし",
+    "cli_tooltip": "CLI · {{name}}",
+    "cli_tooltip_none": "CLI · 未選択"
   },
   "model_dropdown": {
     "label": "モデル",
@@ -264,7 +270,8 @@
     "managed_by_runtime_title": "このランタイムがモデル選択を管理します。",
     "managed_by_runtime_hint": "ランタイムホストでモデルを設定してください（例: Hermes は自身の設定ファイルから読み込みます）。",
     "discovery_failed": "検出に失敗しました",
-    "clear_full": "選択をクリア（プロバイダーのデフォルトを使用）"
+    "clear_full": "選択をクリア（プロバイダーのデフォルトを使用）",
+    "recommended_label": "推奨モデル"
   },
   "tabs": {
     "work": "作業",
@@ -338,6 +345,14 @@
       "remove_aria": "アバターを削除",
       "select_image_toast": "画像ファイルを選択してください。",
       "upload_failed_toast": "アバターのアップロードに失敗しました"
+    },
+    "recommended_runtime_label": "推奨 CLI",
+    "share_runtime": {
+      "fixed_desc": "すべてのユーザーが、紐付けられたランタイムの設定でこのエージェントを実行します。",
+      "fixed_title": "固定ランタイム",
+      "label": "ランタイムポリシー",
+      "smart_desc": "呼び出したユーザーは自分のランタイムを使います。設定したモデルがそのランタイムで利用できる必要があります。",
+      "smart_title": "スマートランタイム"
     }
   },
   "conversation_starters": {
@@ -646,7 +661,14 @@
       "cancel_failed_toast": "実行をキャンセルできませんでした",
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
-      "queued_prefix": "{{when}} に待機開始"
+      "queued_prefix": "{{when}} に待機開始",
+      "caller_filter_label": "呼び出し元",
+      "caller_filter_all": "すべて",
+      "caller_filter_search": "メンバーを検索",
+      "caller_filter_members": "メンバー",
+      "caller_filter_clear_aria": "呼び出し元フィルターをクリア",
+      "summary_load_failed": "この呼び出し元の 30 日間のサマリーを読み込めませんでした。",
+      "retry": "再試行"
     },
     "connected_apps": {
       "loading": "アプリを読み込み中…",
@@ -1068,7 +1090,8 @@
       "member_fix": "管理者に対応を依頼してください",
       "footer_selected": "選択中：",
       "cancel": "キャンセル",
-      "next": "次へ"
+      "next": "次へ",
+      "continue_smart": "マシンがない場合はスマートランタイムを使用"
     }
   },
   "intro": {
@@ -1094,6 +1117,35 @@
       "comment": "修正しました。375px 以下では料金カードを 1 列にしています。PR を作成し、テストも通っています。",
       "step_read": "{{file}} を読む"
     }
+  },
+  "runtime_config": {
+    "confirm_notice": "了解",
+    "confirming_notice": "保存中…",
+    "current_concurrency": "同時実行数",
+    "current_model": "モデル",
+    "current_runtime": "ランタイム",
+    "current_section": "現在の個人設定",
+    "current_speed": "速度",
+    "current_strategy": "設定方式",
+    "current_thinking": "推論",
+    "load_failed": "現在の設定を読み込めませんでした。",
+    "loading": "現在の設定を読み込み中…",
+    "not_editable": "先にランタイムを追加してください。",
+    "notice_required": "このエージェントは推奨または既定の設定であなたのランタイムを使用しました。必要に応じて、ここで個人設定を確認して保存できます。",
+    "notice_seen_failed_toast": "通知を確認できませんでした",
+    "resolution": {
+      "model_unavailable": "ランタイムでモデルを利用できません",
+      "no_user_runtime": "先にランタイムを追加してください",
+      "runtime_offline": "ランタイムがオフラインです",
+      "runtime_unavailable": "ランタイムを利用できません"
+    },
+    "save_failed_toast": "現在の設定を保存できませんでした",
+    "saved_toast": "現在の設定を保存しました",
+    "strategy_custom": "カスタム",
+    "strategy_recommended": "推奨"
+  },
+  "runtime_policy": {
+    "smart": "スマート"
   },
   "apps_section": {
     "title": "アプリ",

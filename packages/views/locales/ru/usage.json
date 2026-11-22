@@ -12,7 +12,9 @@
     "attribution_label": "Принадлежность",
     "all_attribution": "Все источники",
     "standalone_only": "Только отдельные агенты",
-    "squads_group": "Squad"
+    "squads_group": "Squad",
+    "caller_label": "Caller",
+    "all_callers": "Anyone"
   },
   "history_limit": {
     "note": "Ваш тариф охватывает последние {{days}} дн. Перейдите на другой тариф, чтобы увидеть более ранние данные. Данные не удаляются.",

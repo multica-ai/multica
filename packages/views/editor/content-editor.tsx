@@ -206,6 +206,8 @@ interface ContentEditorBaseProps {
   mentionHideGuests?: boolean;
   /** Leave squads out of the @ list, for places a squad cannot be asked (doc discussions). */
   mentionHideSquads?: boolean;
+  enableRuntimeAgentMentions?: boolean;
+  onMentionSelect?: (item: MentionItem) => void;
   /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
   /**
@@ -418,6 +420,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionContextItems,
       mentionHideGuests = false,
       mentionHideSquads = false,
+      enableRuntimeAgentMentions = false,
+      onMentionSelect,
       enableSlashCommands = false,
       slashCommandMode = "skill",
       showBlockHandles = false,
@@ -624,6 +628,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
 
+    const onMentionSelectRef = useRef(onMentionSelect);
+    onMentionSelectRef.current = onMentionSelect;
+
     // Tiptap compares these to the editor's options after every render and,
     // when they differ, calls `setOptions`, which re-runs every plugin view.
     // The collaboration plugin answers that by diffing the whole document
@@ -643,6 +650,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         getMentionContextItems: () => mentionContextItemsRef.current,
         mentionHideGuests,
         mentionHideSquads,
+        runtimeMentionIssueId: enableRuntimeAgentMentions ? currentIssueId : undefined,
+        onMentionSelect: (item) => onMentionSelectRef.current?.(item),
         enableSlashCommands,
         slashCommandMode,
         quickActionMenu: {

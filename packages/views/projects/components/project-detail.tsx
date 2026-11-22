@@ -257,7 +257,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         projectStatus: project.status,
       });
     }
-  }, [project?.id, project?.title, project?.description, project?.icon, project?.status, recordRecentContext, wsId]);
+  }, [project, recordRecentContext, wsId]);
   const issueTab = useIssuesScope(`project:${projectId}`);
   const issueScope = useMemo(
     () => ({ type: "project" as const, projectId, actorKind: issueTab }),

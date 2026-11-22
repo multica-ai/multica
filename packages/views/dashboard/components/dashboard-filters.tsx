@@ -1,6 +1,17 @@
 "use client";
 
-import { Bot, CalendarDays, ChevronDown, FolderKanban, Lock, Users } from "@multica/ui/icons";
+import {
+  Bot,
+  CalendarDays,
+  ChevronDown,
+  FolderKanban,
+  Lock,
+  UserRound,
+  Users,
+} from "@multica/ui/icons";
+import { useQuery } from "@tanstack/react-query";
+import { memberListOptions } from "@multica/core/workspace/queries";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -298,3 +309,79 @@ export function SquadFilter({
     </DropdownMenu>
   );
 }
+export const ALL_CALLERS = "__all__";
+
+/**
+ * Page-scoped caller filter. Same trigger grammar as `ProjectFilter`: an
+ * outline chip carrying the current value. Defaults to the signed-in member
+ * (the page owns that default); `ALL_CALLERS` is the explicit "anyone" value.
+ */
+export function CallerFilter({
+  callerValue,
+  onCallerChange,
+}: {
+  callerValue: string;
+  onCallerChange: (value: string) => void;
+}) {
+  const { t } = useT("usage");
+  const wsId = useWorkspaceId();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const allLabel = t(($) => $.filter.all_callers);
+  const selected =
+    callerValue === ALL_CALLERS
+      ? null
+      : (members.find((member) => member.user_id === callerValue) ?? null);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label={t(($) => $.filter.caller_label)}
+            className={selected ? "gap-1 px-2.5" : "gap-1 px-2.5 text-muted-foreground"}
+          >
+            {selected ? (
+              <ActorAvatarBase
+                name={selected.name}
+                initials={selected.name.slice(0, 2).toUpperCase()}
+                avatarUrl={resolvePublicFileUrl(selected.avatar_url)}
+                size="xs"
+              />
+            ) : (
+              <UserRound className="size-3.5 text-muted-foreground" />
+            )}
+            <span className="max-w-40 truncate">
+              {selected ? selected.name : allLabel}
+            </span>
+            <ChevronDown className="size-3 text-muted-foreground" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="max-h-72 w-auto min-w-52">
+        <DropdownMenuRadioGroup
+          value={callerValue}
+          onValueChange={(value) => onCallerChange(value ?? ALL_CALLERS)}
+        >
+          <DropdownMenuRadioItem value={ALL_CALLERS}>
+            <UserRound className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{allLabel}</span>
+          </DropdownMenuRadioItem>
+          {members.map((member) => (
+            <DropdownMenuRadioItem key={member.user_id} value={member.user_id}>
+              <ActorAvatarBase
+                name={member.name}
+                initials={member.name.slice(0, 2).toUpperCase()}
+                avatarUrl={resolvePublicFileUrl(member.avatar_url)}
+                size="xs"
+              />
+              <span className="truncate">{member.name}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+

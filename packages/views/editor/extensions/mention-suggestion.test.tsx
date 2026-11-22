@@ -1,3 +1,4 @@
+import { runtimeKeys } from "@multica/core/runtimes/queries";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -10,7 +11,7 @@ import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { statusCategoryOfKey } from "@multica/core/issues";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { IssueStatusCategory, ListIssuesCache } from "@multica/core/types";
-import type { QueryClient } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
@@ -181,6 +182,35 @@ function fakeQc(data: {
     },
   } as unknown as QueryClient;
 }
+
+describe("runtime-aware mention items", () => {
+  it("keeps a foreign task runtime selectable and uses its model instead of the viewer’s", () => {
+    const qc = new QueryClient();
+    qc.setQueryData(workspaceKeys.members("ws-1"), [
+      { user_id: "u1", name: "Viewer", role: "member" },
+      { user_id: "u2", name: "Runtime owner", role: "member" },
+    ]);
+    qc.setQueryData(workspaceKeys.agents("ws-1"), [{
+      id: "agent", name: "Reviewer", share_runtime: false, runtime_id: "", cli: "codex",
+      permission_mode: "public_to", invocation_targets: [{ target_type: "workspace" }],
+      runtime_config_summary: { current: { runtime_id: "mine", model: "viewer-model" } },
+    }]);
+    qc.setQueryData(runtimeKeys.list("ws-1"), [{
+      id: "mine", name: "Codex (Laptop)", provider: "codex", owner_id: "u1", status: "online",
+    }]);
+    qc.setQueryData(issueKeys.tasks("issue"), [{
+      id: "task", agent_id: "agent", runtime_id: "foreign", runtime_owner_id: "u2",
+      runtime_provider: "codex", effective_model: "task-model", created_at: "2026-01-01T00:00:00Z",
+    }]);
+
+    const config = createMentionSuggestion(qc, { runtimeMentionIssueId: "issue" });
+    const rows = (config.items!(itemArgs("reviewer")) as MentionItem[]).filter((item) => item.id === "agent");
+    expect(rows).toMatchObject([
+      { agentRuntimeGroup: "issue", runtimeId: "foreign", ownerLabel: "Runtime owner", runtimeModelLabel: "task-model", disabledReason: undefined },
+      { agentRuntimeGroup: "requester", runtimeId: "mine", runtimeModelLabel: "viewer-model", disabledReason: undefined },
+    ]);
+  });
+});
 
 function itemArgs(query: string) {
   return {

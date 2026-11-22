@@ -144,5 +144,13 @@
   },
   "navigation": {
     "open_in_new_tab": "新しいタブで開く"
-  }
+  },
+  "agents": {
+    "recent": {
+      "load_failed": "最近使用したエージェントを読み込めませんでした。",
+      "retry": "再試行",
+      "sync_failed": "エージェントは選択されましたが、最近使用した履歴を端末間で同期できませんでした。"
+    }
+  },
+  "recently_used": "最近使用"
 }

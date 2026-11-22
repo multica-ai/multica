@@ -18,6 +18,7 @@ import { AlertTriangle } from "@multica/ui/icons";
 import { AppLink } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 import { availabilityConfig, workloadConfig } from "../presence";
+import { SmartRuntimeAgentBadge } from "./agent-runtime-hover";
 
 interface AgentLivePeekCardProps {
   agentId: string;
@@ -95,7 +96,13 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
           size="xl"
         />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-body font-semibold">{agent.name}</p>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <p className="truncate text-body font-semibold">{agent.name}</p>
+            <SmartRuntimeAgentBadge
+              shareRuntime={agent.share_runtime}
+              archived={isArchived}
+            />
+          </div>
           <div className="mt-0.5 inline-flex items-center gap-1.5">
             {isArchived ? (
               <>

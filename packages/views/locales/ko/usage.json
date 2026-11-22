@@ -12,7 +12,9 @@
     "attribution_label": "귀속",
     "all_attribution": "전체 귀속",
     "standalone_only": "단독 에이전트만",
-    "squads_group": "Squad"
+    "squads_group": "Squad",
+    "caller_label": "호출자",
+    "all_callers": "전체"
   },
   "history_limit": {
     "note": "현재 요금제에서는 최근 {{days}}일을 볼 수 있습니다. 업그레이드하면 이전 데이터도 볼 수 있으며, 데이터는 삭제되지 않습니다.",

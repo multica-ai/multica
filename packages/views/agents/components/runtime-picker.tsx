@@ -5,7 +5,13 @@ import { ChevronDown, Cloud, Loader2, Lock, Search } from "@multica/ui/icons";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
+  catalogRuntimeForCli,
+  uniqueRuntimeClis,
+} from "@multica/core/agents";
+import {
   isRuntimeUsableForUser,
+  providerDisplayName,
+  RECOMMENDED_CLI_OPTIONS,
   runtimeDisplayName,
 } from "@multica/core/runtimes";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
@@ -36,8 +42,11 @@ export function RuntimePicker({
   members,
   currentUserId,
   selectedRuntimeId,
+  label,
   onSelect,
+  onSelectCli,
   disabled = false,
+  cliOnly = false,
   autoSelect = true,
 }: {
   runtimes: RuntimeDevice[];
@@ -45,10 +54,16 @@ export function RuntimePicker({
   members: MemberWithUser[];
   currentUserId: string | null;
   selectedRuntimeId: string;
+  label?: string;
   onSelect: (id: string) => void;
+  /** Selects a bare CLI when no local runtime exists to host model discovery
+   *  (smart-runtime recommendation for a machine-less member). */
+  onSelectCli?: (cli: string) => void;
   /** Blocks opening the picker while the selection cannot be honoured yet
    *  (e.g. a builder reply or a runtime rebind is in flight). */
   disabled?: boolean;
+  /** Smart-runtime recommended picker: list and display CLIs, not machines. */
+  cliOnly?: boolean;
   /** False when selecting also changes a live session's server-side binding. */
   autoSelect?: boolean;
 }) {
@@ -62,7 +77,8 @@ export function RuntimePicker({
     return members.find((m) => m.user_id === ownerId) ?? null;
   };
 
-  const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
+  const hasOtherRuntimes =
+    !cliOnly && runtimes.some((r) => r.owner_id !== currentUserId);
 
   // Base list honours the mine/all toggle and drives auto-selection; it is
   // intentionally independent of the search box so typing never changes the
@@ -82,10 +98,21 @@ export function RuntimePicker({
     return filterRuntimeMachines(all, search, "all");
   }, [filteredRuntimes, search, currentUserId]);
 
-  const showSearch = runtimes.length > SEARCH_THRESHOLD;
+  const showSearch = !cliOnly && runtimes.length > SEARCH_THRESHOLD;
 
   const selectedRuntime =
     runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
+  const selectedCli = selectedRuntime?.provider?.trim().toLowerCase() ?? "";
+  const knownClis = useMemo(() => uniqueRuntimeClis(runtimes), [runtimes]);
+  const clis = useMemo(
+    () =>
+      knownClis.length > 0
+        ? knownClis
+        : cliOnly
+          ? [...RECOMMENDED_CLI_OPTIONS]
+          : [],
+    [knownClis, cliOnly],
+  );
 
   // With autoSelect, seed the parent's selection when it's empty
   // — first mount with no template runtime, runtimes arriving later over
@@ -118,7 +145,7 @@ export function RuntimePicker({
     <div className="flex flex-col min-w-0">
       <div className="flex h-6 items-center justify-between">
         <Label className="text-caption text-muted-foreground">
-          {t(($) => $.create_dialog.runtime_label)}
+          {label ?? t(($) => $.create_dialog.runtime_label)}
         </Label>
         {hasOtherRuntimes && (
           // These are not just a view filter: changing tab re-selects the first
@@ -161,7 +188,9 @@ export function RuntimePicker({
         }}
       >
         <PopoverTrigger
-          disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
+          disabled={
+            disabled || (!cliOnly && runtimes.length === 0 && !runtimesLoading)
+          }
           className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           {runtimesLoading ? (
@@ -180,18 +209,20 @@ export function RuntimePicker({
                 {runtimesLoading
                   ? t(($) => $.create_dialog.runtime_loading)
                   : selectedRuntime
-                    ? runtimeDisplayName(selectedRuntime)
+                    ? cliOnly
+                      ? providerDisplayName(selectedCli)
+                      : runtimeDisplayName(selectedRuntime)
                     : !autoSelect && runtimes.length > 0
                       ? t(($) => $.model_dropdown.select_runtime_first)
                       : t(($) => $.create_dialog.runtime_none)}
               </span>
-              {selectedRuntime?.runtime_mode === "cloud" && (
+              {selectedRuntime?.runtime_mode === "cloud" && !cliOnly && (
                 <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
                   {t(($) => $.create_dialog.runtime_cloud_badge)}
                 </span>
               )}
             </div>
-            {selectedRuntime && (
+            {selectedRuntime && !cliOnly && (
               <div className="truncate text-caption text-muted-foreground">
                 {getOwnerMember(selectedRuntime.owner_id)?.name ??
                   selectedRuntime.device_info}
@@ -222,7 +253,52 @@ export function RuntimePicker({
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {machines.length === 0 ? (
+            {cliOnly ? (
+              clis.length === 0 ? (
+                <div className="px-3 py-6 text-center text-caption text-muted-foreground">
+                  {t(($) => $.pickers.cli_empty)}
+                </div>
+              ) : (
+                clis.map((cli) => {
+                  const catalog = catalogRuntimeForCli(
+                    runtimes,
+                    cli,
+                    currentUserId,
+                  );
+                  return (
+                    <button
+                      key={cli}
+                      type="button"
+                      onClick={() => {
+                        if (catalog) {
+                          onSelect(catalog.id);
+                        } else if (onSelectCli) {
+                          onSelectCli(cli);
+                        } else {
+                          return;
+                        }
+                        setOpen(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-body transition-colors ${
+                        !catalog
+                          ? "cursor-not-allowed opacity-50"
+                          : cli === selectedCli
+                            ? "bg-accent"
+                            : "hover:bg-accent/50"
+                      }`}
+                    >
+                      <ProviderLogo
+                        provider={cli}
+                        className="h-4 w-4 shrink-0"
+                      />
+                      <span className="min-w-0 flex-1 truncate font-medium">
+                        {providerDisplayName(cli)}
+                      </span>
+                    </button>
+                  );
+                })
+              )
+            ) : machines.length === 0 ? (
               <div className="px-3 py-6 text-center text-caption text-muted-foreground">
                 {t(($) => $.create_dialog.runtime_no_results)}
               </div>

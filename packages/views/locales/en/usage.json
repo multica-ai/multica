@@ -12,7 +12,9 @@
     "attribution_label": "Attribution",
     "all_attribution": "All attribution",
     "standalone_only": "Standalone agents only",
-    "squads_group": "Squads"
+    "squads_group": "Squads",
+    "caller_label": "Caller",
+    "all_callers": "Anyone"
   },
   "history_limit": {
     "note": "Your plan covers the last {{days}} days. Upgrade to see earlier data. Nothing is deleted.",

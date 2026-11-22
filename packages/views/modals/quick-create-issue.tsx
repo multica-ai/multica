@@ -75,7 +75,8 @@ import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import { agentEffectiveRuntimeId, isAgentRuntimeBound } from "@multica/core/agents";
+import { SmartRuntimeAgentBadge } from "../agents/components/agent-runtime-hover";
 import {
   PropertyPicker,
   PickerItem,
@@ -399,13 +400,8 @@ export function AgentCreatePanel({
   // (git-describe shape) are exempted inside checkQuickCreateCliVersion
   // — frontend and server share the same signal there, so they agree by
   // construction across web/desktop/staging without comparing env flags.
-  const selectedRuntime = useMemo(
-    () =>
-      selectedAgent?.runtime_id
-        ? runtimes.find((r) => r.id === selectedAgent.runtime_id)
-        : undefined,
-    [runtimes, selectedAgent?.runtime_id],
-  );
+  const effectiveRuntimeId = selectedAgent ? agentEffectiveRuntimeId(selectedAgent) : null;
+  const selectedRuntime = runtimes.find((runtime) => runtime.id === effectiveRuntimeId);
   // We can only pre-check a version we can actually see. A non-admin member's
   // runtime list (ListVisibleAgentRuntimes) omits other members' private
   // machines, so a selected agent bound to such a runtime yields no row here.
@@ -417,7 +413,6 @@ export function AgentCreatePanel({
   // role) instead of failing closed in the UI.
   // Qoder Cloud Agents runs through the managed bridge, which has no CLI.
   const canPrecheckVersion =
-    selectedAgent?.runtime_id != null &&
     selectedRuntime != null &&
     selectedRuntime.provider !== "qoder_cloud";
   const runtimeCliVersion = readRuntimeCliVersion(selectedRuntime?.metadata);
@@ -1106,11 +1101,17 @@ function ActorPicker({
   const query = filter.trim().toLowerCase();
 
   const filteredAgents = useMemo(
-    () => visibleAgents.filter((a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)),
+    () =>
+      visibleAgents.filter(
+        (a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query),
+      ),
     [visibleAgents, query],
   );
   const filteredSquads = useMemo(
-    () => visibleSquads.filter((s) => s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
+    () =>
+      visibleSquads.filter(
+        (s) => s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query),
+      ),
     [visibleSquads, query],
   );
 
@@ -1211,6 +1212,7 @@ function ActorPicker({
                   >
                     <ActorAvatar actorType="agent" actorId={a.id} size="sm" />
                     <span className="truncate">{a.name}</span>
+                    <SmartRuntimeAgentBadge shareRuntime={a.share_runtime} />
                   </PickerItem>
                 ))}
               </PickerSection>

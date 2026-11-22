@@ -30,7 +30,13 @@ vi.mock("@multica/core/api", async (original) => {
 });
 
 const key = "reply:issue:root" as const;
-type Submit = (content: string, attachments?: string[], suppress?: string[], steer?: string[]) => Promise<string | boolean>;
+type Submit = (
+  content: string,
+  attachmentIds?: string[],
+  suppressAgentIds?: string[],
+  steerTaskIds?: string[],
+  ...routingArgs: import("./comment-runtime-originator").CommentRoutingArgs
+) => Promise<string | boolean>;
 function Fixture({ deleted = false, description = false, onSubmit = async () => false }: {
   deleted?: boolean; description?: boolean; onSubmit?: Submit;
 }) {

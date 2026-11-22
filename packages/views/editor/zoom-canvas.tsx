@@ -165,6 +165,9 @@ export function ZoomCanvas({
         node.focus({ preventScroll: true });
       }
     },
+    // canvas is a per-render prop wrapper; keeping the ref callback stable
+    // avoids detaching/reattaching the focused node on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [canvasRef, canvas.setViewportNode, autoFocus],
   );
 

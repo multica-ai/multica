@@ -56,6 +56,13 @@ vi.mock("@multica/core/auth", () => {
 });
 vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (a: { runtime_id: string | null }) => !!a.runtime_id,
+  useRecentAgents: () => ({
+    recentAgents: [],
+    recentIds: new Set<string>(),
+    recordRecentAgent: () => {},
+    isRecentAgentsError: false,
+    refetchRecentAgents: async () => {},
+  }),
 }));
 vi.mock("@multica/core/permissions", async () => ({
   canAssignAgentToIssue: (await import("@multica/core/permissions/rules")).canAssignAgentToIssue,
