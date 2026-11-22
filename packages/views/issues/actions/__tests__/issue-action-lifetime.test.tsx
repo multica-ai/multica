@@ -11,6 +11,7 @@ import { getTestResources } from "../../../test/i18n";
 import { useIssueActions } from "../use-issue-actions";
 import { useIssueSurfaceActions } from "../../surface/use-issue-surface-actions";
 import type { IssueSurfaceMutationOptions } from "../../surface/actions-context";
+import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
@@ -34,9 +35,10 @@ vi.mock("@multica/core/pins", () => ({
   useCreatePin: () => ({ mutate: vi.fn() }),
   useDeletePin: () => ({ mutate: vi.fn() }),
 }));
-vi.mock("../../../navigation", () => ({
-  useNavigation: () => ({ getShareableUrl: (path: string) => path }),
-}));
+const navigation: NavigationAdapter = {
+  pathname: "/test/issues/TEST-1", searchParams: new URLSearchParams(), hash: "",
+  push: vi.fn(), replace: vi.fn(), back: vi.fn(), getShareableUrl: (path) => path,
+};
 
 const issue = {
   id: "issue", workspace_id: "ws", identifier: "TEST-1", title: "Review result",
@@ -76,7 +78,9 @@ for (const source of sources) {
       } });
       const wrapper = ({ children }: { children: ReactNode }) => (
         <I18nProvider locale="en" resources={getTestResources()}>
-          <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+          <QueryClientProvider client={qc}>
+            <NavigationProvider value={navigation}>{children}</NavigationProvider>
+          </QueryClientProvider>
         </I18nProvider>
       );
       return Object.assign(renderHook(source.useSave, { wrapper }), { qc });
