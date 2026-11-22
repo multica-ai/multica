@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -134,5 +136,75 @@ func TestMediaRejectsUntrustedURLsAndOversize(t *testing.T) {
 	_, err = downloadMedia(context.Background(), client, inboundMedia{ref: mediaRef{FullURL: "https://evil.test/", AESKey: base64.StdEncoding.EncodeToString([]byte(strings.Repeat("a", 16)))}})
 	if err == nil || called {
 		t.Fatal("untrusted media URL reached transport")
+	}
+}
+
+// Regression: the CDN upload rode on the API client, whose per-request timeout
+// cut off every file slower than that to upload.
+func TestMediaUploadOutlivesAPIRequestTimeout(t *testing.T) {
+	const apiTimeout = 100 * time.Millisecond
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ilink/bot/getuploadurl":
+			_, _ = w.Write([]byte(`{"ret":0,"upload_full_url":"https://novac2c.cdn.weixin.qq.com/c2c/upload"}`))
+		case "/c2c/upload":
+			_, _ = io.Copy(io.Discard, r.Body)
+			time.Sleep(3 * apiTimeout) // a slow cross-border transfer
+			w.Header().Set("x-encrypted-param", "download")
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := providerClient(server)
+	client.Timeout = apiTimeout
+	item, err := newAPI(DefaultBaseURL, "token", client).Upload(context.Background(), "owner", []byte("png"), "image.png", "image/png")
+	if err != nil || item.Image == nil || item.Image.Media.Query != "download" {
+		t.Fatalf("slow CDN upload was cut off: %v", err)
+	}
+}
+
+func TestMediaUploadUsesHTTP1ToTheCDN(t *testing.T) {
+	if newAPI(DefaultBaseURL, "token", nil).cdnClient().Transport != cdnTransport {
+		t.Fatal("default CDN uploads must use the HTTP/1.1 transport")
+	}
+	var proto atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proto.Store(int32(r.ProtoMajor))
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+	base := server.Client().Transport.(*http.Transport)
+	base.ForceAttemptHTTP2 = true
+	resp, err := (&http.Client{Transport: http1Transport(base)}).Post(server.URL, "application/octet-stream", strings.NewReader("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if proto.Load() != 1 {
+		t.Fatalf("CDN upload negotiated HTTP/%d", proto.Load())
+	}
+	// Control: the same server does speak HTTP/2 to the unmodified transport.
+	resp, err = (&http.Client{Transport: base}).Post(server.URL, "application/octet-stream", strings.NewReader("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if proto.Load() != 2 {
+		t.Fatal("test server did not offer HTTP/2")
+	}
+}
+
+func TestMediaTransferTimeoutScalesWithSize(t *testing.T) {
+	if got := mediaTransferTimeout(0); got != mediaTransferBase {
+		t.Fatalf("empty file budget %s", got)
+	}
+	// The failing replies carried ~2.3 MB images at ~20 KB/s.
+	if got := mediaTransferTimeout(2363885); got < 2363885/(20<<10)*time.Second {
+		t.Fatalf("2.3 MB budget %s is below the measured transfer time", got)
+	}
+	if got := mediaTransferTimeout(maxMediaBytes); got != mediaTransferMax {
+		t.Fatalf("budget is not capped: %s", got)
 	}
 }
