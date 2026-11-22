@@ -327,6 +327,25 @@ make up C=api,desktop ARGS="--ephemeral --cdp"
 make env-exec ARGS="-- node scripts/perf-desktop.mjs --attach --scenarios desktop-memory --out $PWD/perf/dev"
 ```
 
+## Retained memory while switching Inbox rows
+
+`desktop-memory` says whether the app grows; `inbox-heap.spec.ts` says what
+is kept. It drives the same Work-panel switches on the web build (or the
+Desktop renderer with `PERF_PLATFORM=desktop`) and, at each switch count in
+`PERF_HEAP_CHECKPOINTS` (default `0,40,80,160,320`), forces GC and records
+the JS heap, DOM nodes and event listeners. A count that keeps rising with
+the switches is a leak; caches level off. `PERF_HEAP_SNAPSHOT_DIR` also writes
+a heap snapshot at each checkpoint, to diff two counts in DevTools.
+
+```bash
+PERF_SCENARIO=inbox-heap PLAYWRIGHT_BASE_URL=http://localhost:3000 \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts inbox-heap.spec.ts"
+```
+
+MUL-9634 found this way that every editor's Markdown tokenizers stayed on the
+global `marked`, with the unmounted issue behind them: ~1,000 DOM nodes per
+switch, until each editor got its own instance.
+
 ## Inbox jump
 
 `inbox-jump.spec.ts` opens a notification about a reply deep in a long issue
@@ -370,6 +389,29 @@ only when set: `PERF_BUDGET_WARM_MS`, `PERF_BUDGET_WARM_LONGEST_TASK_MS`,
 targets are 100, 50, 300 and none. Machine load moves these numbers, and the
 report records it, so compare builds from one alternating run, not across
 runs.
+
+## Navigation timing in a local environment
+
+`scripts/web-nav-timing.mjs` times a hover-then-click navigation under added
+latency, from the click to the target content on screen, with each request
+and each frame's page state relative to the click (MUL-9796). By default it
+opens a doc; `--from`, `--link` and `--until` time any other link.
+`make web-prod` serves the environment's web port from a production build for
+the length of one command, then starts the dev server again:
+
+```bash
+make up ARGS="--ephemeral"    # docs also need FF_DOCS_V1=true in the env file
+make env-exec ARGS="-- node scripts/web-nav-timing.mjs --label dev"
+make web-prod ARGS="-- node scripts/web-nav-timing.mjs --label prod"
+make destroy ARGS="--yes"
+```
+
+Judge navigation on the production build. `next dev` does not prefetch routes
+on hover and serves every module unbundled: MUL-9781 measured "open a doc" at
+0.66 s there, and only the production build showed the doc page's JS chunk
+waiting on the route's RSC payload. The build is same-origin and must use the
+environment's own web port, because the API accepts realtime WebSockets only
+from `FRONTEND_ORIGIN`; the header of `scripts/web-prod.mjs` has the rest.
 
 ## When to run the typing scenarios
 

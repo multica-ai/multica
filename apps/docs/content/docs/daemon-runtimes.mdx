@@ -96,6 +96,12 @@ The registered command is `multica daemon start --foreground` for that profile, 
 - If a file Multica did not create already sits at that location (your own systemd unit, for example), `enable` and `disable` refuse to modify it.
 - A daemon launched by Desktop is managed by Desktop; `daemon start` neither hints nor refreshes a registration for it.
 
+### Updating the CLI from Runtimes [#updating-cli]
+
+When a newer release is available for a standalone CLI daemon, runtime owners and workspace admins can click **Update** on the **Runtimes** page. If the machine is running tasks and the daemon supports queued updates, the update is held without interrupting active work, and the **Runtimes** page shows **Updates when idle** with the running task count and a **Cancel** button across every runtime on that machine.
+
+Installation starts automatically once the last running task finishes. Only one unfinished update is allowed per machine; a queued update expires after 24 hours if the machine never becomes idle, and can be cancelled until installation begins. Daemons on older CLI versions without queue support refuse remote updates while busy; retry once the machine is idle. Daemons launched by Multica Desktop are managed by Desktop and upgraded with the Desktop app instead.
+
 ## Dispatch and online status
 
 Once registered, a runtime keeps a persistent connection. When a new run enters the queue, the server notifies the matching daemon; the daemon also polls periodically so a dropped connection does not lose the notification. When a runtime is online with spare capacity, runs usually start immediately.
@@ -152,11 +158,11 @@ The merge happens on the runtime's computer; the commands, URLs, headers, and en
 
 ### Cursor MCP logins [#cursor-mcp-login]
 
-Cursor stores MCP OAuth logins per project directory, and every run has its own directory. The daemon therefore keeps one login file per Cursor agent on the runtime's computer, `cursor-mcp-auth/<agent-id>/mcp-auth.json` in the Multica config directory, and links each run to it. Log in to a server such as Mobbin once and the agent's later runs on that computer use the login. It is separate from the logins of your own Cursor projects, so a run never signs you out there. Every run of the agent on that computer uses it, including runs other members trigger.
+Cursor stores MCP OAuth logins per project directory, and every run has its own directory. The daemon therefore keeps one login file per Cursor agent on the runtime's computer, `cursor-mcp-auth/<agent-id>/mcp-auth.json` in the Multica config directory, and gives each run a copy of it. The daemon merges the changes Cursor makes to that copy back into the agent's file every few seconds and when the run ends, so a token one run refreshes reaches the agent's later runs. Log in to a server such as Mobbin once and the agent's later runs on that computer use the login. It is separate from the logins of your own Cursor projects, so a run never signs you out there. Every run of the agent on that computer uses it, including runs other members trigger.
 
-When the agent has an MCP configuration, each run gets its own Cursor data directory, and the run's `mcp-auth.json` there is the link. When it has none, the run uses your own Cursor data directory (`~/.cursor`, or the daemon's `CURSOR_DATA_DIR`) and the MCP servers configured there; the daemon only links the `mcp-auth.json` that Cursor keeps for the run's directory under `projects/` to the agent's file. The link is removed when the run's directory is cleaned up.
+When the agent has an MCP configuration, each run gets its own Cursor data directory, and the run's `mcp-auth.json` there is the copy. When it has none, the run uses your own Cursor data directory (`~/.cursor`, or the daemon's `CURSOR_DATA_DIR`) and the MCP servers configured there; the daemon only replaces the `mcp-auth.json` that Cursor keeps for the run's directory under `projects/` with a copy of the agent's file. The copy is removed when the run's directory is cleaned up.
 
-Without an MCP configuration, two kinds of run are not linked, because their Cursor project is one you work in too and linking it would replace your own login there: runs that work in place in a project's local directory, and runs whose directory is enclosed by a git repository, such as a dotfiles repository in your home folder, since Cursor then treats that repository as the project. These runs use whatever login Cursor already holds for that directory, and their transcript gives no login command; log in by running `cursor-agent mcp login <server>` in that directory yourself.
+Without an MCP configuration, two kinds of run get no copy, because their Cursor project is one you work in too and the copy would replace your own login there: runs that work in place in a project's local directory, and runs whose directory is enclosed by a git repository, such as a dotfiles repository in your home folder, since Cursor then treats that repository as the project. These runs use whatever login Cursor already holds for that directory, and their transcript gives no login command; log in by running `cursor-agent mcp login <server>` in that directory yourself.
 
 If a server still needs a login, the run's transcript says which one and gives the command to run on the runtime's computer. For an agent with an MCP configuration, for example:
 
@@ -172,7 +178,7 @@ cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~
 
 Both commands run in a login folder kept next to the agent's login file, so they still work after the run's own directory has been cleaned up.
 
-The login applies from the agent's next run; the current run does not pick it up. To use a login file of your own instead, set `CURSOR_MCP_AUTH_SOURCE` in the agent's environment variables to an absolute path to an `mcp-auth.json` or the Cursor project directory containing it; it takes priority over the per-agent file. Two runs of one agent that refresh the same token at the same moment can still sign each other out; log in again if that happens.
+The login applies from the agent's next run, which collects it from the login folder before it starts; the current run does not pick it up. To use a login file of your own instead, set `CURSOR_MCP_AUTH_SOURCE` in the agent's environment variables to an absolute path to an `mcp-auth.json` or the Cursor project directory containing it; it takes priority over the per-agent file. Two runs of one agent that refresh the same token at the same moment can still sign each other out; log in again if that happens.
 
 ## Cleanup and retention [#cleanup]
 
@@ -235,7 +241,7 @@ A local runtime is **private** by default: only the runtime owner can create age
 
 Only the owner can make it **public**. Workspace admins can rename or delete a runtime, but sharing one is the owner's decision. Once it is public, other workspace members can select this runtime and route their agents' runs to this computer; the underlying AI coding tool's login credentials are not shared.
 
-To share it with selected people instead, open the runtime's detail page, choose **Members**, pick one or more workspace members, and **Save**. Those members can select the runtime and create agents on it. Only the owner can change the list, and being on it does not let anyone rename, delete, or administer the runtime. On Multica Cloud, sharing with selected members is included in Business. On Free and Pro, an existing list keeps working and members can still be removed or the runtime made private or public, but nobody new can be added. Self-hosted workspaces can share with selected members.
+To share it with selected people instead, open the runtime's detail page, choose **Members**, pick one or more workspace members, and **Save**. Those members can select the runtime and create agents on it. Only the owner can change the list, and being on it does not let anyone rename, delete, or administer the runtime.
 
 When the owner removes members, narrows a public runtime to specific members, or makes it **private** again, Multica shows the affected agents and active runs, including Agent Builder sessions, before applying the change. Confirmation unbinds those teammates' agents, cancels their queued, dispatched, running, local-directory-waiting and deferred runs with `runtime_access_revoked`, and pauses active autopilots assigned to the unbound agents. Agents and runs belonging to the owner or to members who keep access are unaffected. A changed plan requires renewed confirmation; concurrent chat writes may require a retry. To resume work, bind the agent to an accessible runtime, then explicitly resume its paused autopilots.
 

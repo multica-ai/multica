@@ -585,6 +585,27 @@ describe("createMentionSuggestion", () => {
     expect(screen.getByText("Release runbook")).toBeInTheDocument();
   });
 
+  it("shows a project's description with its mention links as their labels", () => {
+    render(
+      <I18nWrapper>
+        <MentionList
+          items={[
+            {
+              id: "p-geo",
+              label: "AI Search",
+              type: "project",
+              description: "Key docs: [Baseline report](mention://doc/d-1)",
+            },
+          ]}
+          query=""
+          command={vi.fn()}
+        />
+      </I18nWrapper>,
+    );
+    expect(screen.getByText("Key docs: Baseline report")).toBeInTheDocument();
+    expect(screen.queryByText(/mention:\/\//)).not.toBeInTheDocument();
+  });
+
   it("does not call searchIssues for an empty query", () => {
     render(<I18nWrapper><MentionList items={[]} query="" command={vi.fn()} /></I18nWrapper>);
 

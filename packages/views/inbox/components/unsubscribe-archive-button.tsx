@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BellOff, ListTree } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -13,23 +13,16 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useModalStore } from "@multica/core/modals";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
 import { childIssuesOptions, issueDetailOptions, issueSubscribersOptions } from "@multica/core/issues/queries";
 import { isOwnIssue } from "@multica/core/issues/ownership";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import {
-  getShortcut,
-  isEditableShortcutTarget,
-  isPortalLayerShortcutTarget,
-  shortcutMatchesEvent,
-} from "@multica/core/shortcuts";
-import { isImeComposing } from "@multica/core/utils";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
+import { useInboxShortcut } from "./use-inbox-shortcut";
 
 /**
- * "Unsubscribe & archive" in the header of an issue opened from the Inbox.
+ * "Unsubscribe & archive" in the Inbox bar of an issue opened from the Inbox.
  *
  * Offered only where it is a bystander's way out: the viewer is subscribed,
  * and the issue is not assigned to them or to an agent they own. Renders
@@ -67,25 +60,10 @@ export function UnsubscribeArchiveButton({
   const childCountKnown = childrenLoaded && !childrenFetching;
   const asksScope = !childCountKnown || children.length > 0;
 
-  const shortcutRef = useRef<(() => void) | null>(null);
-  useEffect(() => {
-    shortcutRef.current = offered ? (asksScope ? () => setMenuOpen(true) : () => onConfirm("issue")) : null;
-  });
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
-      if (isEditableShortcutTarget(event.target)) return;
-      if (isPortalLayerShortcutTarget(event.target)) return;
-      if (useModalStore.getState().modal) return;
-      if (!shortcutMatchesEvent(getShortcut("unsubscribeArchiveInboxItem"), event)) return;
-      const run = shortcutRef.current;
-      if (!run) return;
-      event.preventDefault();
-      run();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useInboxShortcut(
+    "unsubscribeArchiveInboxItem",
+    offered ? (asksScope ? () => setMenuOpen(true) : () => onConfirm("issue")) : null,
+  );
 
   if (!offered) return null;
 

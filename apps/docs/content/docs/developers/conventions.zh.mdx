@@ -202,18 +202,19 @@ Agent 在简体中文（`zh-Hans`）中译为**智能体**，在繁体中文（`
 | Empty / Failed / Success | 空 / 失败 / 成功 |
 | Error / Warning | 错误 / 警告 |
 
-### 角色名 + 状态名（小写英文，不翻）
+### 角色名与状态名：界面展示本地化，协议标识符保留小写英文
 
-这些是 schema-level 标识符，中文环境也保持小写英文：
+UI 中的展示标签（状态选择器、角色下拉框、筛选器、通知描述等）按各语言自然翻译：
+
+- 角色展示名：所有者 / 管理员 / 成员 / 访客
+- 任务状态展示名：待规划 / 待办 / 进行中 / 审核中 / 已完成 / 已阻塞 / 已取消
+- 状态分类展示名：未开始 / 已开始 / 已完成 / 已关闭
+
+仅在 API、数据库、CLI 命令与代码引用中保留小写英文 schema 标识符：
 
 - 角色：`owner` / `admin` / `member` / `guest`
 - Issue 状态：`backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
 - Issue 状态分类：`unstarted` / `started` / `done` / `closed`
-
-UI 里展示这些值时保持英文（必要时用 code-style 包起来）：
-
-- "你需要 owner 权限"
-- "已切换到 in_progress"
 
 ### 词组组合规则
 

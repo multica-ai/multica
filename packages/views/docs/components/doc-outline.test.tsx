@@ -32,6 +32,15 @@ describe("readOutline", () => {
   });
 });
 
+describe("readOutline: hidden editor", () => {
+  it("skips an editor still mounting behind `hidden`", () => {
+    const root = document.createElement("div");
+    root.innerHTML =
+      '<div class="ProseMirror"><h1>Shown</h1></div><div hidden><div class="ProseMirror"><h1>Mounting</h1></div></div>';
+    expect(readOutline(root).map(({ text }) => text)).toEqual(["Shown"]);
+  });
+});
+
 describe("DocOutline", () => {
   it("marks the current heading and reports clicks", () => {
     const headings = readOutline(

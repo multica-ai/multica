@@ -52,14 +52,14 @@ describe("formatActivity duplicate marks (MUL-7349)", () => {
     );
   });
 
-  it("renders Chinese copy with the status as its lowercase identifier", async () => {
+  it("renders Chinese copy with the localized status label", async () => {
     await i18n.changeLanguage("zh-Hans");
     expect(
       formatActivity(
         entry("duplicate_unmarked", { original_identifier: "MUL-1", to: "todo" }),
         noActor,
       ),
-    ).toBe("取消了这个任务对 MUL-1 的重复标记，并移至 todo");
+    ).toBe("取消了这个任务对 MUL-1 的重复标记，并移至 待办");
     expect(
       formatActivity(entry("duplicate_added", { duplicate_identifier: "MUL-2" }), noActor),
     ).toBe("把 MUL-2 标记为这个任务的重复");

@@ -92,10 +92,15 @@ export function RowActionsPointMenu({
   menu,
   onOpenChange,
   groups,
+  trailing,
+  finalFocus,
 }: {
   menu: RowMenuState;
   onOpenChange: (open: boolean) => void;
   groups: RowActionItem[][];
+  /** Rendered after the groups, e.g. the surrounding object's submenu. */
+  trailing?: ReactNode;
+  finalFocus?: () => boolean;
 }) {
   const anchor = usePointAnchor(menu.point);
   const filled = groups.filter((group) => group.length > 0);
@@ -111,8 +116,9 @@ export function RowActionsPointMenu({
         onOpenChange(open);
       }}
     >
-      <DropdownMenuContent align="start" anchor={anchor} className="w-auto">
+      <DropdownMenuContent align="start" anchor={anchor} finalFocus={finalFocus} className="w-auto">
         <RowActionGroups groups={filled} />
+        {trailing}
       </DropdownMenuContent>
     </DropdownMenu>
   );

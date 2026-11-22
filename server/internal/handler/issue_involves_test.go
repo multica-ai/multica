@@ -10,21 +10,22 @@ import (
 	"time"
 )
 
-// involvesFixture seeds, for a single test, the data needed to exercise every
-// branch of the `involves_user_id` 4-branch filter — owned agent, squad human
-// member, squad canonical leader (via squad.leader_id, NOT a squad_member copy
-// row), and squad agent member — plus a parallel set in a second workspace so
-// the cross-workspace negative tests can prove subquery-level isolation.
+// involvesFixture seeds, for a single test, the data needed to exercise the
+// `involves_user_id` filter — owned agent and squad canonical leader (via
+// squad.leader_id, NOT a squad_member copy row) — plus negative shapes for
+// shared squads where the user or one of their agents is only a member, and a
+// parallel set in a second workspace so cross-workspace negative tests can
+// prove subquery-level isolation.
 type involvesFixture struct {
 	// All IDs are in the primary handler-test workspace unless noted otherwise.
 	userID  string // the "me" user the filter is keyed on (== testUserID)
 	otherID string // a different user in the same workspace
 
-	ownedAgentID    string // agent.owner_id = userID — branch (1) seed
+	ownedAgentID    string // agent.owner_id = userID — matches
 	otherAgentID    string // agent.owner_id = otherID — must NOT match
-	squadMemberID   string // squad with userID as human member — branch (2)
-	squadLeaderID   string // squad whose leader_id is an agent owned by userID — branch (3)
-	squadAgentMemID string // squad with an owned-agent as squad_member row — branch (4)
+	squadMemberID   string // squad with userID as human member (other leader) — must NOT match
+	squadLeaderID   string // squad whose leader_id is an agent owned by userID — matches
+	squadAgentMemID string // squad with an owned-agent as squad_member row (other leader) — must NOT match
 
 	// Other workspace, mirror objects — used by ExcludesOtherWorkspace* tests
 	otherWsID            string
@@ -293,13 +294,13 @@ func TestListIssues_InvolvesUserID_MatchesOwnedAgentAssignee(t *testing.T) {
 	}
 }
 
-func TestListIssues_InvolvesUserID_MatchesSquadMember(t *testing.T) {
+func TestListIssues_InvolvesUserID_ExcludesSquadHumanMember(t *testing.T) {
 	ctx := context.Background()
 	fx := setupInvolvesFixture(t)
-	wantID := insertIssueTo(t, ctx, testWorkspaceID,
-		"issue assigned to a squad I'm a member of", "squad", fx.squadMemberID)
-	if got := listIssuesInvolves(t, fx.userID); !containsIssueID(got, wantID) {
-		t.Fatalf("branch (2) miss: human-member squad assignee not surfaced (want %s, got %v)", wantID, got)
+	issueID := insertIssueTo(t, ctx, testWorkspaceID,
+		"issue assigned to a shared squad I'm a human member of", "squad", fx.squadMemberID)
+	if got := listIssuesInvolves(t, fx.userID); containsIssueID(got, issueID) {
+		t.Fatalf("shared squad human-member assignee should not surface in involves_user_id (id=%s, got=%v)", issueID, got)
 	}
 }
 
@@ -307,21 +308,21 @@ func TestListIssues_InvolvesUserID_MatchesLeaderViaCanonicalRelation(t *testing.
 	ctx := context.Background()
 	fx := setupInvolvesFixture(t)
 	// Fixture deliberately omits the squad_member leader-copy row, so this
-	// can only match if the SQL reads squad.leader_id directly (branch 3).
+	// can only match if the SQL reads squad.leader_id directly.
 	wantID := insertIssueTo(t, ctx, testWorkspaceID,
 		"issue assigned to a squad my agent leads", "squad", fx.squadLeaderID)
 	if got := listIssuesInvolves(t, fx.userID); !containsIssueID(got, wantID) {
-		t.Fatalf("branch (3) miss: squad-leader-via-canonical assignee not surfaced (want %s, got %v)", wantID, got)
+		t.Fatalf("squad-leader-via-canonical assignee not surfaced (want %s, got %v)", wantID, got)
 	}
 }
 
-func TestListIssues_InvolvesUserID_MatchesSquadAgentMember(t *testing.T) {
+func TestListIssues_InvolvesUserID_ExcludesSquadAgentMember(t *testing.T) {
 	ctx := context.Background()
 	fx := setupInvolvesFixture(t)
-	wantID := insertIssueTo(t, ctx, testWorkspaceID,
-		"issue assigned to a squad my agent is a member of", "squad", fx.squadAgentMemID)
-	if got := listIssuesInvolves(t, fx.userID); !containsIssueID(got, wantID) {
-		t.Fatalf("branch (4) miss: squad agent-member assignee not surfaced (want %s, got %v)", wantID, got)
+	issueID := insertIssueTo(t, ctx, testWorkspaceID,
+		"issue assigned to another squad where my agent is only a member", "squad", fx.squadAgentMemID)
+	if got := listIssuesInvolves(t, fx.userID); containsIssueID(got, issueID) {
+		t.Fatalf("non-leader squad agent-member assignee should not surface in involves_user_id (id=%s, got=%v)", issueID, got)
 	}
 }
 
@@ -454,14 +455,25 @@ func TestListIssues_InvolvesUserID_InvalidUUIDReturns400(t *testing.T) {
 	}
 }
 
-// Grouped path also exercises canonical-leader resolution, so a single positive
-// guards the dynamic SQL builder against accidentally dropping branch (3).
+// Grouped path also exercises canonical-leader resolution and excludes
+// non-leader squad memberships, guarding the dynamic SQL builder.
 func TestListGroupedIssues_InvolvesUserID_MatchesLeaderViaCanonicalRelation(t *testing.T) {
 	ctx := context.Background()
 	fx := setupInvolvesFixture(t)
 	wantID := insertIssueTo(t, ctx, testWorkspaceID,
 		"grouped: squad my agent leads", "squad", fx.squadLeaderID)
-	if got := listGroupedIssuesInvolves(t, fx.userID); !containsIssueID(got, wantID) {
-		t.Fatalf("grouped branch (3) miss: squad-leader-via-canonical not surfaced (want %s, got %v)", wantID, got)
+	humanMemberID := insertIssueTo(t, ctx, testWorkspaceID,
+		"grouped: shared squad where I am a human member", "squad", fx.squadMemberID)
+	agentMemberID := insertIssueTo(t, ctx, testWorkspaceID,
+		"grouped: squad where my agent is only a member", "squad", fx.squadAgentMemID)
+	got := listGroupedIssuesInvolves(t, fx.userID)
+	if !containsIssueID(got, wantID) {
+		t.Fatalf("grouped squad-leader-via-canonical not surfaced (want %s, got %v)", wantID, got)
+	}
+	if containsIssueID(got, humanMemberID) {
+		t.Fatalf("grouped shared squad human-member should not surface (id=%s, got=%v)", humanMemberID, got)
+	}
+	if containsIssueID(got, agentMemberID) {
+		t.Fatalf("grouped non-leader squad agent-member should not surface (id=%s, got=%v)", agentMemberID, got)
 	}
 }

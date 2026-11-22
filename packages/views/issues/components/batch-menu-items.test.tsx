@@ -28,7 +28,7 @@ function issue(id: string, notes?: string): Issue {
   return { id, identifier: id, properties: notes === undefined ? {} : { notes } } as Issue;
 }
 
-function renderMenu(issues: Issue[]) {
+function renderMenu(issues: Issue[], { offersDelete = true } = {}) {
   const onProperties = vi.fn();
   const onEditor = vi.fn();
   renderWithI18n(
@@ -42,6 +42,7 @@ function renderMenu(issues: Issue[]) {
           projectId={null}
           allowedStatuses={null}
           disabled={false}
+          offersDelete={offersDelete}
           canDelete
           onStatus={vi.fn()}
           onAssignee={vi.fn()}
@@ -71,7 +72,7 @@ describe("BatchMenuItems custom properties", () => {
   it("still offers the editor next to the clear action", async () => {
     const { onEditor } = renderMenu([issue("a", "alpha"), issue("b", "beta")]);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Notes" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Set value…" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Set value..." }));
     expect(onEditor).toHaveBeenCalledWith({ kind: "property", property: PROPERTIES[0] });
   });
 
@@ -80,5 +81,18 @@ describe("BatchMenuItems custom properties", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Notes" }));
     expect(onEditor).toHaveBeenCalledWith({ kind: "property", property: PROPERTIES[0] });
     expect(screen.queryByRole("menuitem", { name: /Clear/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("BatchMenuItems delete", () => {
+  it("offers delete to a viewer who may delete issues", () => {
+    renderMenu([issue("a"), issue("b")]);
+    expect(screen.getByRole("menuitem", { name: "Delete 2 issues" })).toBeInTheDocument();
+  });
+
+  it("leaves delete out for a viewer who can delete nothing (a guest)", () => {
+    renderMenu([issue("a"), issue("b")], { offersDelete: false });
+    expect(screen.getByRole("menuitem", { name: "Copy links" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /Delete/ })).not.toBeInTheDocument();
   });
 });

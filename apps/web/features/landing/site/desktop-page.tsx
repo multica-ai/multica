@@ -73,7 +73,7 @@ const HIGHLIGHTS: { title: string; body: string; points: string[]; visual: Compo
     title: "A window for every workspace",
     body: "Open each workspace in a window of its own, with its own tabs for issues, chats, and projects. Quit and reopen, and every window comes back with its tabs.",
     points: [
-      "Open a new window from the workspace menu, or with ⌘⇧N / Ctrl+Shift+N",
+      "Open a new window from the workspace menu, or with ⇧⌘N / Ctrl+Shift+N",
       "Pin the tabs you keep coming back to",
       "Multica links open in a tab instead of the browser",
     ],

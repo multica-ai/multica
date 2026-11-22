@@ -163,6 +163,11 @@ const desktopAPI = {
   /** OS-preferred locale (BCP 47), passed from main via additionalArguments.
    *  Used by the renderer's LocaleAdapter as the system-preference signal. */
   systemLocale,
+  /** Report the renderer's resolved in-app locale to main so native dialogs
+   *  and daemon error messages follow the user's Settings choice. */
+  setLocale: (locale: string) => {
+    ipcRenderer.send("locale:set", locale);
+  },
   /** Subscribe to OS language changes detected after boot. The renderer
    *  decides whether to act (no-op when the user has an explicit Settings
    *  choice). Returns an unsubscribe function. */

@@ -44,6 +44,9 @@ type stateClaims struct {
 	// workspace that owns it and the admin who started the handshake.
 	WorkspaceID string `json:"w,omitempty"`
 	ConnectedBy string `json:"c,omitempty"`
+	// PersonalWorkspaceID is the workspace a personal account is made in;
+	// empty for the legacy connect, whose accounts count in every workspace.
+	PersonalWorkspaceID string `json:"pw,omitempty"`
 	// ReturnTo is the app path the browser goes back to, e.g. the issue whose
 	// connect card started the flow. Validated by SafeReturnPath at sign time.
 	ReturnTo string `json:"r,omitempty"`

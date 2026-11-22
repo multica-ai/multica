@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 const (
@@ -40,10 +41,14 @@ func TestCursorUserMcpAuthLoginCarriesAcrossTasks(t *testing.T) {
 	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
 
 	firstRoot, firstWork := newCursorUserTaskRoot(t, root, "task-1")
-	if got := linkCursorUserMcpAuth(userData, firstRoot, firstWork, "", store, nil); got != userData {
-		t.Fatalf("link first task = %q, want %q", got, userData)
+	got, firstMirror := linkCursorUserMcpAuthMirror(userData, firstRoot, firstWork, "", store, nil)
+	if got != userData || firstMirror == nil {
+		t.Fatalf("link first task = %q, %v; want %q and a mirror", got, firstMirror, userData)
 	}
-	writeTestFile(t, CursorMcpAuthPath(userData, firstWork), testCursorChallenge)
+	cursorSave(t, CursorMcpAuthPath(userData, firstWork), testCursorChallenge)
+	if err := firstMirror.Sync(); err != nil {
+		t.Fatalf("sync challenge: %v", err)
+	}
 	if got := CursorMcpServersNeedingLogin(userData, firstWork); !reflect.DeepEqual(got, []string{"mobbin"}) {
 		t.Fatalf("after challenge = %v, want [mobbin]", got)
 	}
@@ -56,12 +61,16 @@ func TestCursorUserMcpAuthLoginCarriesAcrossTasks(t *testing.T) {
 		t.Fatalf("next task before login = %v, want [mobbin]", got)
 	}
 
-	writeTestFile(t, CursorMcpAuthPath(userData, firstWork), testCursorLogin)
+	cursorSave(t, CursorMcpAuthPath(userData, firstWork), testCursorLogin)
+	if err := firstMirror.Sync(); err != nil {
+		t.Fatalf("sync login: %v", err)
+	}
+	assertCursorAuthJSON(t, store, testCursorLogin)
+	if got := linkCursorUserMcpAuth(userData, secondRoot, secondWork, "", store, nil); got != userData {
+		t.Fatalf("relink second task = %q, want %q", got, userData)
+	}
 	if got := CursorMcpServersNeedingLogin(userData, secondWork); got != nil {
 		t.Fatalf("next task after login = %v, want nothing to report", got)
-	}
-	if got := readFile(t, store); got != testCursorLogin {
-		t.Fatalf("store = %s, want the login", got)
 	}
 }
 
@@ -112,15 +121,33 @@ func TestCursorUserMcpAuthLinksWorktreeTask(t *testing.T) {
 	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
 	repo := newTestRepo(t)
 	envRoot := filepath.Join(root, "task-1")
-	worktree := filepath.Join(envRoot, "workdir")
+	worktree := filepath.Join(envRoot, "worktree")
 	gitRun(t, repo, "worktree", "add", "-b", "agent/task-1", worktree)
 
+	writeTestFile(t, store, testCursorLogin)
 	if got := linkCursorUserMcpAuth(userData, envRoot, worktree, "", store, nil); got != userData {
 		t.Fatalf("worktree link = %q, want %q", got, userData)
 	}
-	if got, err := os.Readlink(CursorMcpAuthPath(userData, worktree)); err != nil || got != store {
-		t.Fatalf("worktree project auth links to %q (err %v), want the store", got, err)
+	taskAuth := CursorMcpAuthPath(userData, worktree)
+	assertCursorUserTaskCopy(t, taskAuth, testCursorLogin)
+
+	// The worktree is removed at finalize, before the GC removes the env root.
+	gitRun(t, repo, "worktree", "remove", "--force", worktree)
+	if err := removeCursorMcpAuthLink(envRoot, userData, filepath.Dir(filepath.Dir(store))); err != nil {
+		t.Fatalf("removeCursorMcpAuthLink: %v", err)
 	}
+	if _, err := os.Lstat(taskAuth); !os.IsNotExist(err) {
+		t.Fatalf("worktree task's login copy should be removed, lstat err=%v", err)
+	}
+	assertCursorAuthJSON(t, store, testCursorLogin)
+}
+
+func assertCursorUserTaskCopy(t *testing.T, path, want string) {
+	t.Helper()
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("task project auth = %v, %v; want a copy of the store", info, err)
+	}
+	assertCursorAuthJSON(t, path, want)
 }
 
 func TestCursorUserMcpAuthAdoptsExistingTaskLogin(t *testing.T) {
@@ -163,21 +190,24 @@ func TestRemoveCursorMcpAuthLinkRemovesOnlyTheTaskLink(t *testing.T) {
 	store := filepath.Join(storeRoot, "agent-1", cursorMcpAuthFile)
 
 	envRoot, workDir := newCursorUserTaskRoot(t, root, "task-1")
-	if got := linkCursorUserMcpAuth(userData, envRoot, workDir, "", store, nil); got != userData {
+	got, mirror := linkCursorUserMcpAuthMirror(userData, envRoot, workDir, "", store, nil)
+	if got != userData {
 		t.Fatalf("link = %q, want %q", got, userData)
 	}
-	writeTestFile(t, CursorMcpAuthPath(userData, workDir), testCursorLogin)
+	cursorSave(t, CursorMcpAuthPath(userData, workDir), testCursorLogin)
+	if err := mirror.Sync(); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
 	if err := removeCursorMcpAuthLink(envRoot, userData, storeRoot); err != nil {
 		t.Fatalf("removeCursorMcpAuthLink: %v", err)
 	}
 	if _, err := os.Lstat(CursorMcpAuthPath(userData, workDir)); !os.IsNotExist(err) {
-		t.Fatalf("task link should be removed, lstat err=%v", err)
+		t.Fatalf("task's login copy should be removed, lstat err=%v", err)
 	}
-	if got := readFile(t, store); got != testCursorLogin {
-		t.Fatalf("store = %s, want it kept", got)
-	}
+	assertCursorAuthJSON(t, store, testCursorLogin)
 
-	// A hard link to the store (the Windows fallback) is removed too.
+	// A hard link to the store, left by a daemon that linked the login on
+	// Windows, is removed too.
 	hardRoot, hardWork := newCursorUserTaskRoot(t, root, "task-2")
 	hardLink := CursorMcpAuthPath(userData, hardWork)
 	if err := os.MkdirAll(filepath.Dir(hardLink), 0o700); err != nil {
@@ -186,7 +216,7 @@ func TestRemoveCursorMcpAuthLinkRemovesOnlyTheTaskLink(t *testing.T) {
 	if err := os.Link(store, hardLink); err != nil {
 		t.Fatalf("hard link: %v", err)
 	}
-	if err := writeCursorMcpAuthLinkRecord(hardRoot, hardLink, store); err != nil {
+	if err := writeCursorMcpAuthLinkRecord(hardRoot, hardLink, store, ""); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	if err := removeCursorMcpAuthLink(hardRoot, userData, storeRoot); err != nil {
@@ -201,14 +231,56 @@ func TestRemoveCursorMcpAuthLinkRemovesOnlyTheTaskLink(t *testing.T) {
 	userAuth := CursorMcpAuthPath(userData, userRepo)
 	writeTestFile(t, userAuth, `{"mine":true}`)
 	tamperedRoot, _ := newCursorUserTaskRoot(t, root, "task-3")
-	if err := writeCursorMcpAuthLinkRecord(tamperedRoot, userAuth, userAuth); err != nil {
-		t.Fatalf("record: %v", err)
+	for _, project := range []string{"", userRepo, "workdir"} {
+		if err := writeCursorMcpAuthLinkRecord(tamperedRoot, userAuth, userAuth, project); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+		if err := removeCursorMcpAuthLink(tamperedRoot, userData, storeRoot); err != nil {
+			t.Fatalf("removeCursorMcpAuthLink tampered with project %q: %v", project, err)
+		}
+		if readFile(t, userAuth) != `{"mine":true}` {
+			t.Fatalf("user's own login was removed with recorded project %q", project)
+		}
 	}
-	if err := removeCursorMcpAuthLink(tamperedRoot, userData, storeRoot); err != nil {
-		t.Fatalf("removeCursorMcpAuthLink tampered: %v", err)
+}
+
+// A user login workspace an older daemon set up holds a link to the store and
+// no base. A login made there after the upgrade replaces the link, and must
+// reach the store before the workspace is seeded again, although the store
+// still holds the spent login.
+func TestCursorMcpUserLoginWorkspaceFromOlderDaemonKeepsNewLogin(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	userData := filepath.Join(root, "home", ".cursor")
+	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
+	writeTestFile(t, store, `{"mobbin":{"clientInfo":{"client_id":"c"},"tokens":{"access_token":"old","refresh_token":"spent"}}}`)
+
+	loginWork, err := PrepareCursorMcpUserLoginWorkspace(userData, "", store)
+	if err != nil {
+		t.Fatalf("PrepareCursorMcpUserLoginWorkspace: %v", err)
 	}
-	if readFile(t, userAuth) != `{"mine":true}` {
-		t.Fatal("user's own login was removed")
+	makeCursorLoginWorkspaceLegacy(t, store, cursorMcpUserLoginWorkspaceDir)
+	cursorSave(t, CursorMcpAuthPath(userData, loginWork), testCursorLogin)
+
+	if _, err := PrepareCursorMcpUserLoginWorkspace(userData, "", store); err != nil {
+		t.Fatalf("rebuild user login workspace: %v", err)
+	}
+	assertCursorAuthJSON(t, store, testCursorLogin)
+	assertCursorUserTaskCopy(t, CursorMcpAuthPath(userData, loginWork), testCursorLogin)
+}
+
+// makeCursorLoginWorkspaceLegacy leaves an agent's login workspace the way an
+// older daemon set it up, with no base, and its store written before any
+// login made there.
+func makeCursorLoginWorkspaceLegacy(t *testing.T, store, workspace string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(filepath.Dir(store), workspace, cursorMcpAuthBaseFile)); err != nil {
+		t.Fatalf("remove base: %v", err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(store, past, past); err != nil {
+		t.Fatalf("age store: %v", err)
 	}
 }
 
@@ -226,15 +298,20 @@ func TestCursorMcpUserLoginWorkspaceLogsInForNextTask(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(loginWork, ".cursor")); !os.IsNotExist(err) {
 		t.Fatalf("user login workspace should carry no project config, stat err=%v", err)
 	}
-	writeTestFile(t, CursorMcpAuthPath(userData, loginWork), testCursorLogin)
+	cursorSave(t, CursorMcpAuthPath(userData, loginWork), testCursorLogin)
 
 	envRoot, workDir := newCursorUserTaskRoot(t, root, "task-1")
-	if got := linkCursorUserMcpAuth(userData, envRoot, workDir, "", store, nil); got != userData {
-		t.Fatalf("link = %q, want %q", got, userData)
+	env := &Environment{}
+	if err := prepareCursorMcp(env, envRoot, workDir, nil, "", store, userData, nil, nil); err != nil {
+		t.Fatalf("prepareCursorMcp: %v", err)
+	}
+	if env.CursorUserDataDir != userData {
+		t.Fatalf("CursorUserDataDir = %q, want %q", env.CursorUserDataDir, userData)
 	}
 	if got := CursorMcpServersNeedingLogin(userData, workDir); got != nil {
 		t.Fatalf("task after login = %v, want nothing to report", got)
 	}
+	assertCursorAuthJSON(t, store, testCursorLogin)
 }
 
 func TestPrepareCursorWithoutMcpConfigLinksUserDataDir(t *testing.T) {
@@ -269,8 +346,9 @@ func TestPrepareCursorWithoutMcpConfigLinksUserDataDir(t *testing.T) {
 	if env.CursorDataDir != "" || env.CursorUserDataDir != userData {
 		t.Fatalf("CursorDataDir=%q CursorUserDataDir=%q, want only the user data dir", env.CursorDataDir, env.CursorUserDataDir)
 	}
-	if got, err := os.Readlink(CursorMcpAuthPath(userData, env.WorkDir)); err != nil || got != store {
-		t.Fatalf("task project auth links to %q (err %v), want the store", got, err)
+	assertCursorUserTaskCopy(t, CursorMcpAuthPath(userData, env.WorkDir), "{}")
+	if env.CursorMcpAuthMirror == nil {
+		t.Fatal("CursorMcpAuthMirror = nil, want the task's login mirrored")
 	}
 
 	inPlace := prepare("bbbbbbbb-bbbb-cccc-dddd-ffffffffffff", newTestRepo(t))

@@ -113,7 +113,7 @@ describe("StepWorkspace — DISABLE_WORKSPACE_CREATION gate", () => {
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Workspace name")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("URL")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /log out/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
   });
 
   it("forces the existing-workspace-only state when the flag is on and the user already has a workspace", () => {

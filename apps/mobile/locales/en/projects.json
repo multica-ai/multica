@@ -24,7 +24,9 @@
     "resources": "Resources",
     "lead": "Lead",
     "no_resources": "No resources attached.",
-    "add_resource": "Add resource"
+    "add_resource": "Add resource",
+    "add_description": "Add a description",
+    "progress": "Progress"
   },
   "form": {
     "icon_emoji": "Icon (emoji)",

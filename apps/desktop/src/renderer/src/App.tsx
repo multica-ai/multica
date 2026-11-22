@@ -18,6 +18,10 @@ import { UpdateNotification } from "./components/update-notification";
 import { NativeContextMenu } from "./components/native-context-menu";
 import { IssueWindow } from "./components/issue-window";
 import { DesktopDevToolbar } from "./components/desktop-dev-toolbar";
+import {
+  DESKTOP_EMERGENCY_COPY,
+  resolveDesktopEmergencyLocale,
+} from "./components/emergency-copy";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
@@ -357,13 +361,22 @@ function AppContent() {
   return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
-function BlockingRuntimeConfigError({ message }: { message: string }) {
+function BlockingRuntimeConfigError({
+  locale,
+  message,
+}: {
+  locale: SupportedLocale;
+  message: string;
+}) {
+  const copy = DESKTOP_EMERGENCY_COPY[resolveDesktopEmergencyLocale(locale)];
   return (
     <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
       <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-        <h1 className="text-title font-semibold">Desktop configuration error</h1>
+        <h1 className="text-title font-semibold">{copy.configTitle}</h1>
         <p className="mt-3 text-body text-muted-foreground">
-          Multica Desktop could not load <code>~/.multica/desktop.json</code>. Fix or remove the file and restart the app.
+          {copy.configDescriptionBefore}
+          <code>~/.multica/desktop.json</code>
+          {copy.configDescriptionAfter}
         </p>
         <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-caption text-muted-foreground">
           {message}
@@ -449,6 +462,7 @@ export default function App() {
   // with the Chinese-first fallback stack before the override kicks in.
   useLayoutEffect(() => {
     document.documentElement.lang = HTML_LANG[locale];
+    window.desktopAPI.setLocale?.(locale);
   }, [locale]);
 
   // React to OS-level language changes detected by main on focus regain.
@@ -510,7 +524,10 @@ export default function App() {
             )}
         </CoreProvider>
       ) : (
-        <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
+        <BlockingRuntimeConfigError
+          locale={locale}
+          message={runtimeConfigResult.error.message}
+        />
       )}
       <Toaster />
       {windowContext.kind === "main" && <UpdateNotification />}

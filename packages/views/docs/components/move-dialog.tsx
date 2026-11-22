@@ -129,7 +129,7 @@ export function MoveDialog({
             : "hover:bg-surface-hover",
         )}
       >
-        <span className="text-muted-foreground [&_svg]:size-4">{icon}</span>
+        <span className="shrink-0 text-muted-foreground [&_svg]:size-4">{icon}</span>
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {id === current && (
           <span className="shrink-0 text-caption text-faint-foreground">
@@ -146,15 +146,15 @@ export function MoveDialog({
       onOpenChange={(open) => (open ? onOpenChange(true) : close())}
     >
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="truncate">
+        <DialogHeader className="min-w-0 pr-8">
+          <DialogTitle className="min-w-0 truncate">
             {t(($) => $.move.title, { title: target?.title ?? "" })}
           </DialogTitle>
         </DialogHeader>
         <div
           role="listbox"
           aria-label={t(($) => $.move.destination)}
-          className="max-h-80 overflow-y-auto"
+          className="max-h-80 min-w-0 overflow-y-auto"
         >
           {option(
             null,

@@ -10,6 +10,8 @@ import userEvent from "@testing-library/user-event";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
+import { useProjectTabStore } from "@multica/core/projects/tab-store";
+import { getIssueSurfaceViewStore, useIssuesScopeStore } from "@multica/core/issues/stores";
 import { ProjectDetail } from "./project-detail";
 
 const mocks = vi.hoisted(() => ({
@@ -18,10 +20,12 @@ const mocks = vi.hoisted(() => ({
   copyTextAndHtml: vi.fn(),
   deleteProject: vi.fn(),
   getProject: vi.fn(),
+  getProjectMembers: vi.fn(),
   getProjectSubscription: vi.fn(),
   setProjectSubscription: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
   push: vi.fn(),
+  replace: vi.fn(),
   recordVisit: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -155,6 +159,7 @@ vi.mock("../../editor", () => ({
     <div>{defaultValue}</div>
   ),
   ContentEditor: () => null,
+  ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 
 vi.mock("../../common/actor-avatar", () => ({
@@ -166,7 +171,26 @@ vi.mock("../../issues/components/priority-icon", () => ({
 }));
 
 vi.mock("./project-resources-section", () => ({
-  ProjectResourcesSection: () => null,
+  ProjectResourcesSection: ({ readOnly }: { readOnly?: boolean }) => (
+    <div data-testid="project-resources" data-read-only={String(!!readOnly)} />
+  ),
+}));
+
+vi.mock("./project-insights", () => ({
+  ProjectInsights: ({ onFilter, onShowActivity, readOnly }: {
+    onFilter: (filter: unknown) => void;
+    onShowActivity: () => void;
+    readOnly?: boolean;
+  }) => (
+    <div data-testid="project-insights" data-read-only={String(!!readOnly)}>
+      <button type="button" onClick={() => onFilter({ kind: "label", id: "label-1" })}>Filter by Design</button>
+      <button type="button" onClick={onShowActivity}>View all activity</button>
+    </div>
+  ),
+}));
+
+vi.mock("./project-activity", () => ({
+  ProjectActivityPage: () => <div data-testid="project-activity-page" />,
 }));
 
 vi.mock("./project-start-date-picker", () => ({
@@ -188,13 +212,16 @@ vi.mock("../../issues/surface/issue-surface", () => ({
 vi.mock("../../issue-views/view-header", () => ({
   IssueViewHeader: ({
     baseMenu,
+    afterTitle,
     trailing,
   }: {
     baseMenu?: React.ReactNode;
+    afterTitle?: React.ReactNode;
     trailing?: React.ReactNode;
   }) => (
-    <header>
+    <header data-testid="issue-view-header">
       {baseMenu}
+      {afterTitle}
       {trailing}
     </header>
   ),
@@ -245,14 +272,14 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function renderProjectDetail() {
+function renderProjectDetail(search = "") {
   qc.setQueryData(["members"], [{ user_id: "user-1", name: "User One", role: mocks.role }]);
   const adapter: NavigationAdapter = {
     push: mocks.push,
-    replace: vi.fn(),
+    replace: mocks.replace,
     back: vi.fn(),
     pathname: "/test-workspace/projects/project-1",
-    searchParams: new URLSearchParams(),
+    searchParams: new URLSearchParams(search),
     hash: "",
     getShareableUrl: mocks.getShareableUrl,
   };
@@ -277,16 +304,20 @@ beforeEach(() => {
   mocks.copyTextAndHtml.mockReset().mockResolvedValue(true);
   mocks.deleteProject.mockReset().mockReturnValue(pending.promise);
   mocks.getProject.mockReset().mockResolvedValue(PROJECT);
+  mocks.getProjectMembers.mockReset().mockResolvedValue({ members: [], manager_id: null });
   mocks.getProjectSubscription.mockReset().mockResolvedValue(false);
   mocks.setProjectSubscription.mockReset().mockImplementation(async (_id: string, subscribed: boolean) => subscribed);
   setApiInstance({
     deleteProject: mocks.deleteProject,
     getProject: mocks.getProject,
+    getProjectMembers: mocks.getProjectMembers,
     getProjectSubscription: mocks.getProjectSubscription,
     setProjectSubscription: mocks.setProjectSubscription,
   } as unknown as ApiClient);
   mocks.getShareableUrl.mockClear();
   mocks.push.mockReset();
+  mocks.replace.mockReset();
+  useProjectTabStore.setState({ lastTab: {} });
   mocks.recordVisit.mockReset();
   mocks.toastSuccess.mockReset();
   mocks.toastError.mockReset();
@@ -296,6 +327,81 @@ afterEach(() => {
   onlineManager.setOnline(true);
   qc.clear();
   useModalStore.getState().close();
+});
+
+describe("ProjectDetail tabs", () => {
+  it("opens on Overview, with the title and description in the page and not the sidebar", () => {
+    renderProjectDetail();
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Issues\s*3/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("issue-view-header")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Description" })).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).queryByText("Description")).not.toBeInTheDocument();
+  });
+
+  it("opens the panel with the properties, above the insights", () => {
+    renderProjectDetail();
+    const sidebar = screen.getByRole("complementary");
+    const properties = within(sidebar).getByTestId("project-properties");
+    expect(within(properties).getByRole("button", { name: "No lead" })).toBeInTheDocument();
+    expect(within(sidebar).getByTestId("project-insights")).toBeInTheDocument();
+    expect(
+      properties.compareDocumentPosition(within(sidebar).getByTestId("project-insights")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("shows the activity feed for ?tab=activity", async () => {
+    renderProjectDetail("tab=activity");
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("project-activity-page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Description" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).getByTestId("project-properties")).toBeInTheDocument();
+  });
+
+  it("opens the Activity tab from the sidebar digest", async () => {
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("button", { name: "View all activity" }));
+    expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=activity");
+  });
+
+  it("opens the Issues tab filtered to a breakdown row", async () => {
+    const store = getIssueSurfaceViewStore("project:project-1");
+    store.setState({ statusFilters: ["todo"] });
+    useIssuesScopeStore.getState().setScope("project:project-1", "members");
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("button", { name: "Filter by Design" }));
+    expect(store.getState().labelFilters).toEqual(["label-1"]);
+    expect(store.getState().statusFilters).toEqual([]);
+    expect(useIssuesScopeStore.getState().scopes["project:project-1"]).toBe("all");
+    expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=issues");
+    store.getState().clearFilters();
+  });
+
+  it("shows the issue views for ?tab=issues and remembers that choice", () => {
+    renderProjectDetail("tab=issues");
+    expect(screen.getByTestId("issue-view-header")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Issues/ })).toHaveAttribute("aria-selected", "true");
+    expect(useProjectTabStore.getState().lastTab["project-1"]).toBe("issues");
+  });
+
+  it("switches tabs through the URL", async () => {
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("tab", { name: /Issues/ }));
+    expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=issues");
+    expect(useProjectTabStore.getState().lastTab["project-1"]).toBe("issues");
+  });
+
+  it("reopens on the remembered tab unless the project has no issues", () => {
+    useProjectTabStore.setState({ lastTab: { "project-1": "issues" } });
+    const { unmount } = renderProjectDetail();
+    expect(screen.getByTestId("issue-view-header")).toBeInTheDocument();
+    unmount();
+
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, issue_count: 0, done_count: 0 });
+    renderProjectDetail();
+    expect(screen.queryByTestId("issue-view-header")).not.toBeInTheDocument();
+  });
 });
 
 describe("ProjectDetail rename", () => {
@@ -328,6 +434,72 @@ describe("ProjectDetail lead permissions", () => {
     expect(screen.getByRole("button", { name: "No lead" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "No lead" }));
     expect(screen.getByPlaceholderText("Assign lead...")).toBeInTheDocument();
+  });
+});
+
+describe("ProjectDetail for a guest", () => {
+  beforeEach(() => {
+    mocks.role = "guest";
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, description: "Ship the launch." });
+  });
+
+  it("keeps sharing, pinning and following, and drops every change to the project", async () => {
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+    for (const name of ["Rename project", "Archive project", "Delete project"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+  });
+
+  it("shows the overview as read-only, without the agent context", () => {
+    renderProjectDetail();
+    expect(screen.getByRole("heading", { name: "Launch Plan" })).toBeInTheDocument();
+    expect(screen.getByText("Ship the launch.")).toBeInTheDocument();
+    expect(screen.queryByText("Agent context")).not.toBeInTheDocument();
+    expect(screen.getByTestId("project-resources")).toHaveAttribute("data-read-only", "true");
+  });
+
+  it("locks the properties and passes read-only to the insights", () => {
+    renderProjectDetail();
+    const properties = screen.getByTestId("project-properties");
+    expect(within(properties).getByRole("button", { name: "No lead" }).closest("[inert]")).not.toBeNull();
+    expect(within(properties).getByText("Guests can view this project, but cannot change its properties.")).toBeInTheDocument();
+    expect(screen.getByTestId("project-insights")).toHaveAttribute("data-read-only", "true");
+  });
+
+  it("does not ask for the members of a private project it was shared", async () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });
+    renderProjectDetail();
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+    expect(mocks.getProjectMembers).not.toHaveBeenCalled();
+  });
+
+  it("says an archived project is archived without offering Restore", () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, archived_at: "2026-11-01T00:00:00Z" });
+    renderProjectDetail();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore project" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer deletion to a creator who is now a guest", () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), {
+      ...PROJECT,
+      creator_type: "member",
+      creator_id: "user-1",
+    });
+    renderProjectDetail();
+    expect(screen.queryByRole("button", { name: "Delete project" })).not.toBeInTheDocument();
+  });
+
+  it("leaves a member's page editable", () => {
+    mocks.role = "member";
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "Rename project" })).toBeInTheDocument();
+    expect(screen.getByText("Agent context")).toBeInTheDocument();
+    expect(screen.getByTestId("project-resources")).toHaveAttribute("data-read-only", "false");
+    expect(within(screen.getByTestId("project-properties")).getByRole("button", { name: "No lead" }).closest("[inert]")).toBeNull();
   });
 });
 

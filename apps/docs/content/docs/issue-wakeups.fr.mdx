@@ -76,7 +76,22 @@ Quand l'assigné de la tâche est un agent, les commentaires des membres le déc
 - Quand une vérification régulière ne trouve rien qui demande une réponse, l'agent peut terminer par une **vérification silencieuse** : pas de commentaire, seulement une note dans l'historique de la tâche et dans l'historique de la règle. Les vérifications silencieuses successives sont regroupées en une seule entrée.
 - Les commentaires et les modifications d'un agent ne le réveillent jamais lui-même.
 - Si le même agent a déjà une exécution en attente de démarrage sur la tâche, le réveil rejoint cette exécution au lieu d'en lancer une autre.
-- Tant qu'un réveil attend, l'en-tête de la tâche indique ce qu'elle attend, par exemple « Assistant ops : Attend une réponse ». Un clic mène à la section Réveils.
+
+## Étapes de workflow sur un travail poursuivi [#workflow-steps]
+
+Une exécution possède une liaison à une étape de workflow en plus de son identifiant d'exécution. Un nouvel identifiant d'exécution ou une conversation d'agent réutilisée ne détermine pas l'étape qu'elle peut faire avancer.
+
+| Origine du travail | Liaison d'étape |
+|---|---|
+| Réveil créé par un agent pendant une exécution | Hérite de l'étape de l'exécution source, lorsqu'elle en a une. |
+| Réveil créé par un membre qui démarre une nouvelle exécution | Le statut actuel de la tâche au moment où le réveil se déclenche. |
+| Nouvelle tentative automatique | Conserve la liaison de l'exécution parente. |
+| Relance explicite par un membre | Le statut actuel de la tâche lorsque la nouvelle exécution est mise en file d'attente. |
+| Réveil qui rejoint une exécution déjà en attente | Conserve la liaison de cette exécution en attente. |
+
+Les workflows nommés et les workflows **Par défaut** avec passages de relais protègent contre les changements de statut obsolètes. Si un autre acteur déplace la tâche hors de l'étape liée à une exécution, cette exécution ne peut plus faire avancer la tâche. Son brief affiche les deux étapes et lui demande de laisser le statut actuel inchangé et de commenter si une attention est nécessaire. Un changement de statut refusé renvoie `409 workflow_step_moved` ; réessayer ne rafraîchit pas la liaison.
+
+Pour poursuivre à partir du nouvel état, un membre doit examiner le déplacement externe et relancer explicitement le travail depuis le journal d'exécution. L'ancienne exécution n'est pas reliée automatiquement.
 
 ## Consulter et gérer [#manage]
 
