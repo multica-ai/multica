@@ -2937,13 +2937,13 @@ FROM agent_task_queue p
 LEFT JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
   AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(a.runtime_id, p.runtime_id))
-  -- A replayed failure must not restart an already exhausted retry lineage.
+  -- A replayed issue failure must not restart an exhausted retry lineage.
   -- parent_task_id uses the existing parent index; delegated children do not
   -- count as retries.
-  AND NOT EXISTS (
+  AND (p.issue_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM agent_task_queue retry
     WHERE retry.parent_task_id = p.id AND retry.retry_of_task_id = p.id
-  )
+  ))
   AND NOT EXISTS (
     SELECT 1 FROM agent_task_queue owner
     WHERE owner.issue_id = p.issue_id AND owner.agent_id = p.agent_id
