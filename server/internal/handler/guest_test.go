@@ -154,6 +154,49 @@ func TestGuestRoutesAreDenyByDefault(t *testing.T) {
 	}
 }
 
+// A shared project's page reads its progress and activity; a guest gets them
+// for its own project and nothing from the others.
+func TestGuestReadsProgressAndActivityOfItsProjectsOnly(t *testing.T) {
+	f := newGuestFixture(t)
+	for _, issue := range []string{f.sharedIssue, f.otherIssue, f.secretIssue} {
+		dbfx.Exec(t, `INSERT INTO activity_log (workspace_id, issue_id, actor_type, actor_id, action, details)
+			VALUES ($1, $2, 'member', $3, 'status_changed', '{"from":"todo","to":"in_progress"}'::jsonb)`,
+			testWorkspaceID, issue, testUserID)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		project string
+		want    int
+	}{
+		{"its project", f.shared, http.StatusOK},
+		{"another workspace project", f.other, http.StatusNotFound},
+		{"a private project", f.secret, http.StatusNotFound},
+	} {
+		path := "/api/projects/" + tc.project
+		if rec := guestRequest(t, testHandler.GetProjectProgress, f.guest, http.MethodGet, path+"/progress", nil, "id", tc.project); rec.Code != tc.want {
+			t.Errorf("%s: GET progress = %d, want %d", tc.name, rec.Code, tc.want)
+		}
+		if rec := guestRequest(t, testHandler.ListProjectActivity, f.guest, http.MethodGet, path+"/activity", nil, "id", tc.project); rec.Code != tc.want {
+			t.Errorf("%s: GET activity = %d, want %d", tc.name, rec.Code, tc.want)
+		}
+	}
+
+	var progress ProjectProgressResponse
+	guestRequest(t, testHandler.GetProjectProgress, f.guest, http.MethodGet, "/api/projects/"+f.shared+"/progress", nil, "id", f.shared).
+		Want(http.StatusOK).JSON(&progress)
+	if progress.Progress.Scope != 1 {
+		t.Errorf("progress scope = %d, want only the shared issue", progress.Progress.Scope)
+	}
+
+	var activity ProjectActivityResponse
+	guestRequest(t, testHandler.ListProjectActivity, f.guest, http.MethodGet, "/api/projects/"+f.shared+"/activity", nil, "id", f.shared).
+		Want(http.StatusOK).JSON(&activity)
+	if len(activity.Entries) != 1 || activity.Entries[0].IssueID != f.sharedIssue {
+		t.Errorf("activity = %+v, want only the shared issue's change", activity.Entries)
+	}
+}
+
 func TestGuestCannotRunAgents(t *testing.T) {
 	f := newGuestFixture(t)
 	ctx := context.Background()

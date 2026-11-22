@@ -79,6 +79,7 @@
     "toast_subscription_failed": "Failed to update subscription",
     "sidebar_tooltip": "Toggle right sidebar",
     "rename_action": "Rename project",
+    "guest_readonly_note": "Guests can view this project, but cannot change its properties.",
     "copy_link": "Copy link",
     "copy_title_as_link": "Copy link with title",
     "delete_action": "Delete project",

@@ -41,13 +41,13 @@ function useFormatDay() {
   return (date: string) => format.format(dayValue(date));
 }
 
-export function ProjectProgressSection({ project }: { project: Project }) {
+export function ProjectProgressSection({ project, readOnly = false }: { project: Project; readOnly?: boolean }) {
   const wsId = useWorkspaceId();
   const { data: detail } = useQuery(projectProgressOptions(wsId, project.id));
   const progress = detail?.progress ?? getProjectProgress(project);
 
   if (progress.scope === 0) {
-    return <ProjectProgressEmpty project={project} cancelled={progress.cancelled} />;
+    return <ProjectProgressEmpty project={project} cancelled={progress.cancelled} readOnly={readOnly} />;
   }
 
   return (
@@ -63,7 +63,7 @@ export function ProjectProgressSection({ project }: { project: Project }) {
   );
 }
 
-function ProjectProgressEmpty({ project, cancelled }: { project: Project; cancelled: number }) {
+function ProjectProgressEmpty({ project, cancelled, readOnly }: { project: Project; cancelled: number; readOnly: boolean }) {
   const { t } = useT("projects");
   return (
     <div className="space-y-2">
@@ -73,7 +73,7 @@ function ProjectProgressEmpty({ project, cancelled }: { project: Project; cancel
       </div>
       <div className="h-2 rounded-full bg-muted" />
       {cancelled > 0 && <CancelledNote count={cancelled} />}
-      {!project.archived_at && (
+      {!project.archived_at && !readOnly && (
         <>
           <p className="text-caption text-muted-foreground">{t(($) => $.detail.progress_panel.empty_hint)}</p>
           <div className="flex flex-wrap gap-2">
