@@ -222,6 +222,36 @@ func TestUpdateIssueDescriptionGoesThroughTheLiveSession(t *testing.T) {
 	}
 }
 
+func TestUpdateIssueDescriptionMergesFromTheFirstRevision(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	withFeatureFlag(t, testHandler, featureflags.IssueDescriptionLive, true)
+	id := dbfx.Issue(t, "first revision", testutil.Cols{"description": "## A\n\none\n\n## B\n\ntwo"})
+	start := getIssueForTest(t, id)
+
+	var got collab.WriteRequest
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"status":"ok","revision":2,"content":"","title":"","merged":true}`))
+	}))
+	defer service.Close()
+	useCollab(t, service.URL)
+
+	// Someone types in one section before the agent, which read the issue as
+	// created, writes another.
+	storeIssueDescription(t, id, map[string]any{
+		"base_revision": *start.DescriptionRevision, "content": "## A\n\none, edited\n\n## B\n\ntwo",
+		"contributors": []DocContributor{{Type: "member", ID: testUserID}},
+	}).Want(http.StatusOK)
+	putIssueForTest(t, id, map[string]any{
+		"description": "## A\n\none\n\n## B\n\ntwo, by the agent", "description_base_revision": *start.DescriptionRevision,
+	}).Want(http.StatusOK)
+	if got.BaseContent == nil || *got.BaseContent != "## A\n\none\n\n## B\n\ntwo" {
+		t.Fatalf("a write from the first revision must merge against it: %+v", got)
+	}
+}
+
 func TestIssueCollabTicketFollowsTheFlag(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

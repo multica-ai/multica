@@ -51,12 +51,16 @@ func (h *Handler) issueCollab(ctx context.Context) *collab.Client {
 }
 
 // recordIssueDescriptionRevision keeps the description of recent revisions,
-// the merge base for a write that started from one of them.
-func recordIssueDescriptionRevision(ctx context.Context, qtx *db.Queries, issue db.Issue) error {
-	if err := qtx.InsertIssueDescriptionRevision(ctx, db.InsertIssueDescriptionRevisionParams{
-		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Revision: issue.DescriptionRevision, Content: issue.Description.String,
-	}); err != nil {
-		return err
+// the merge base for a write that started from one of them. The revision
+// being replaced is recorded too: an issue's first description, and one
+// written by a path that keeps no history, has no row of its own.
+func recordIssueDescriptionRevision(ctx context.Context, qtx *db.Queries, prev, issue db.Issue) error {
+	for _, rev := range []db.Issue{prev, issue} {
+		if err := qtx.InsertIssueDescriptionRevision(ctx, db.InsertIssueDescriptionRevisionParams{
+			IssueID: rev.ID, WorkspaceID: rev.WorkspaceID, Revision: rev.DescriptionRevision, Content: rev.Description.String,
+		}); err != nil {
+			return err
+		}
 	}
 	return qtx.PruneIssueDescriptionRevisions(ctx, db.PruneIssueDescriptionRevisionsParams{
 		IssueID: issue.ID, KeepFrom: issue.DescriptionRevision - issueDescriptionRevisionsKept,
@@ -424,7 +428,7 @@ func (h *Handler) EditIssueDescription(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := qtx.UpdateIssue(ctx, descriptionOnlyParams(current, content, sourceTask))
 	if err == nil {
-		err = recordIssueDescriptionRevision(ctx, qtx, updated)
+		err = recordIssueDescriptionRevision(ctx, qtx, current, updated)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
@@ -587,7 +591,7 @@ func (h *Handler) StoreCollabIssue(w http.ResponseWriter, r *http.Request) {
 	if changed {
 		updated, err = qtx.UpdateIssue(ctx, descriptionOnlyParams(current, content, sourceTask))
 		if err == nil {
-			err = recordIssueDescriptionRevision(ctx, qtx, updated)
+			err = recordIssueDescriptionRevision(ctx, qtx, current, updated)
 		}
 		if err == nil {
 			linked, err = linkLiveDescriptionAttachments(ctx, qtx, updated, contributors)

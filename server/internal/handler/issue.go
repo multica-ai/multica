@@ -3932,7 +3932,7 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
 	}
 	if issue.DescriptionRevision != current.DescriptionRevision {
-		if err := recordIssueDescriptionRevision(ctx, qtx, issue); err != nil {
+		if err := recordIssueDescriptionRevision(ctx, qtx, current, issue); err != nil {
 			return db.Issue{}, current, false, fmt.Errorf("record issue description revision: %w", err)
 		}
 	}
