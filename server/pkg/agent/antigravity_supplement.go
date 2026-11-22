@@ -33,11 +33,16 @@ const (
 	antigravityHookTimeoutSeconds = 10
 	antigravityHookRequestLimit   = 64 << 10
 	antigravityHookStdinLimit     = 64 << 20
-	// antigravityHookGuidanceLimit bounds the guidance one hook reply carries,
-	// well inside the relay's response limit.
-	antigravityHookGuidanceLimit = 64 << 10
+	// antigravityHookGuidanceLimit bounds one message. It admits the API's
+	// 64 KiB comment plus the daemon's framing, and JSON escaping grows a byte
+	// to at most six (\u003c), so the hook reply stays inside the relay's
+	// response limit.
+	antigravityHookGuidanceLimit = 72 << 10
 	antigravityHookEmptyReply    = "{}"
 )
+
+// The relay must be able to carry the largest reply the session can build.
+const _ = uint(hookRelayResponseLimit - 6*antigravityHookGuidanceLimit - 1024)
 
 // antigravityHookRequest is the subset of agy's PreInvocation payload that
 // decides ownership. The relay forwards only this field.
@@ -53,10 +58,11 @@ type antigravityHookRequest struct {
 // entries. agy appends each as a user_input step of the running turn, so the
 // model reads it as a message from the user.
 //
-// A hook response is not delivery: the relay can fail after it. Guidance counts
-// as delivered only when the stream reports the user_input step it became.
-// Nothing else adds user_input steps to a print-mode turn, so injected inputs
-// settle in the order they were injected.
+// A hook response is not delivery: the relay can fail after it, and other
+// hooks (global, plugin) can inject user input of their own. Guidance counts as
+// delivered only when a user_input step of the turn carries its text in agy's
+// conversation transcript; the daemon delivers one message at a time, so each
+// hook reply carries at most one.
 type antigravitySupplementSession struct {
 	ctx       context.Context
 	logger    *slog.Logger
@@ -137,12 +143,28 @@ func AntigravityHooksInstallable(cwd string) error {
 	path := filepath.Join(dir, "hooks.json")
 	existing, err := os.ReadFile(path)
 	switch {
-	case err == nil && !bytes.Contains(existing, []byte(AntigravityHookHelperArg)):
+	case err == nil && !antigravityManagedHooks(existing):
 		return fmt.Errorf("workdir already has an unmanaged %s", path)
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return fmt.Errorf("read antigravity hooks: %w", err)
 	}
 	return nil
+}
+
+// antigravityManagedHooks reports whether data is exactly a hooks file Multica
+// generated, possibly by an earlier daemon binary. Anything a user added to it
+// makes the file theirs.
+func antigravityManagedHooks(data []byte) bool {
+	var file map[string]antigravityHookConfig
+	if json.Unmarshal(data, &file) != nil || len(file) != 1 {
+		return false
+	}
+	hooks := file[antigravityHookName].PreInvocation
+	if len(hooks) != 1 || !strings.Contains(hooks[0].Command, AntigravityHookHelperArg) {
+		return false
+	}
+	generated, err := antigravityHooksFileData(hooks[0].Command)
+	return err == nil && bytes.Equal(data, generated)
 }
 
 func (s *antigravitySupplementSession) writeHooksFile() error {
@@ -243,89 +265,79 @@ func (s *antigravitySupplementSession) supplement(ctx context.Context, text stri
 	return s.ctx.Err()
 }
 
-// prepareHook claims the pending guidance that fits one hook response. Only
+// prepareHook claims the oldest pending guidance for one hook response. Only
 // the run's own conversation may consume it: subagents run their own
 // conversations and their model calls fire the same hook.
-func (s *antigravitySupplementSession) prepareHook(req antigravityHookRequest) ([]*antigravitySupplementInput, map[string]any) {
+func (s *antigravitySupplementSession) prepareHook(req antigravityHookRequest) (*antigravitySupplementInput, map[string]any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.active || s.ended || s.ctx.Err() != nil || req.ConversationID != s.conversationID {
 		return nil, map[string]any{}
 	}
-	var claimed []*antigravitySupplementInput
-	var steps []map[string]string
-	size := 0
-	full := false
-	kept := s.pending[:0]
-	for _, input := range s.pending {
+	for len(s.pending) > 0 {
+		input := s.pending[0]
+		s.pending[0] = nil
+		s.pending = s.pending[1:]
 		if err := input.ctx.Err(); err != nil {
 			input.done <- err
 			continue
 		}
-		// Later guidance waits behind an input that does not fit, preserving
-		// comment order across hook responses.
-		if full || len(steps) > 0 && size+len(input.text) > antigravityHookGuidanceLimit {
-			full = true
-			kept = append(kept, input)
-			continue
-		}
-		size += len(input.text)
 		input.claimed = true
-		claimed = append(claimed, input)
-		steps = append(steps, map[string]string{"userMessage": input.text})
+		s.inflight = append(s.inflight, input)
+		return input, map[string]any{"injectSteps": []map[string]string{{"userMessage": input.text}}}
 	}
-	clear(s.pending[len(kept):])
-	s.pending = kept
-	if len(steps) == 0 {
-		return nil, map[string]any{}
-	}
-	s.inflight = append(s.inflight, claimed...)
-	return claimed, map[string]any{"injectSteps": steps}
+	return nil, map[string]any{}
 }
 
 // unclaim returns guidance whose hook response never left this process to the
 // head of the queue for the next model call.
-func (s *antigravitySupplementSession) unclaim(claimed []*antigravitySupplementInput) {
+func (s *antigravitySupplementSession) unclaim(input *antigravitySupplementInput) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var retry []*antigravitySupplementInput
-	s.inflight = slices.DeleteFunc(s.inflight, func(input *antigravitySupplementInput) bool {
-		if !slices.Contains(claimed, input) {
-			return false
-		}
-		input.claimed = false
-		if err := input.ctx.Err(); err != nil {
-			input.done <- err
-		} else {
-			retry = append(retry, input)
-		}
-		return true
-	})
-	if len(retry) > 0 && !s.ended {
-		s.pending = append(retry, s.pending...)
-	} else {
-		for _, input := range retry {
-			input.done <- context.Canceled
-		}
+	i := slices.Index(s.inflight, input)
+	if input == nil || i < 0 {
+		return
+	}
+	s.inflight = slices.Delete(s.inflight, i, i+1)
+	input.claimed = false
+	switch {
+	case input.ctx.Err() != nil:
+		input.done <- input.ctx.Err()
+	case s.ended:
+		input.done <- context.Canceled
+	default:
+		s.pending = append([]*antigravitySupplementInput{input}, s.pending...)
 	}
 }
 
-// receipt settles the oldest injected guidance when the stream reports a new
-// user_input step of the running turn. It reports false when no guidance was
-// awaiting one, so the caller can treat the step as foreign.
-func (s *antigravitySupplementSession) receipt() bool {
+// awaitingReceipt reports whether injected guidance is waiting for the
+// user_input step it should become.
+func (s *antigravitySupplementSession) awaitingReceipt() bool {
 	if s == nil {
 		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.inflight) == 0 {
-		return false
+	return len(s.inflight) > 0
+}
+
+// receipt settles the injected guidance that a user_input step of the turn
+// carries. content is that step's text from agy's transcript; a step another
+// hook injected matches nothing and settles nothing.
+func (s *antigravitySupplementSession) receipt(content string) {
+	if s == nil {
+		return
 	}
-	s.inflight[0].done <- nil
-	s.inflight[0] = nil
-	s.inflight = s.inflight[1:]
-	return true
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.inflight, func(input *antigravitySupplementInput) bool {
+		return strings.Contains(content, strings.TrimSpace(input.text))
+	})
+	if i < 0 {
+		return
+	}
+	s.inflight[i].done <- nil
+	s.inflight = slices.Delete(s.inflight, i, i+1)
 }
 
 func (s *antigravitySupplementSession) ServeHTTP(w http.ResponseWriter, r *http.Request) {

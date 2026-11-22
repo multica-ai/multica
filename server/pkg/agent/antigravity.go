@@ -1,15 +1,18 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -196,27 +199,48 @@ type antigravityStepSummary struct {
 
 type antigravityTurn struct {
 	start *int
-	// injected holds the user_input steps that steering guidance became.
-	injected map[int]bool
-	steps    map[int]antigravityStepSummary
-	invalid  bool
+	// injected holds the user_input steps that appeared while steering
+	// guidance was in flight; unconfirmed lists those whose transcript text
+	// has not been checked against that guidance yet.
+	injected    map[int]bool
+	unconfirmed []int
+	steps       map[int]antigravityStepSummary
+	invalid     bool
 }
 
 // observeUserInput classifies a user_input step. The first one opens the turn;
-// a later one is valid only as the receipt of injected steering guidance.
+// a later one is valid only while injected steering guidance awaits its step.
 func (t *antigravityTurn) observeUserInput(index int, supplements *antigravitySupplementSession) {
 	switch {
 	case t.start == nil:
 		t.start = &index
 	case *t.start == index || t.injected[index]:
-	case supplements.receipt():
+	case supplements.awaitingReceipt():
 		if t.injected == nil {
 			t.injected = make(map[int]bool)
 		}
 		t.injected[index] = true
+		t.unconfirmed = append(t.unconfirmed, index)
 	default:
 		t.invalid = true
 	}
+}
+
+// confirmInjected settles guidance whose text the transcript shows in an
+// injected user_input step. A step another hook injected settles nothing, so
+// the guidance it displaced fails at the end of the turn and falls back.
+func (t *antigravityTurn) confirmInjected(supplements *antigravitySupplementSession, transcript *antigravityTranscriptInputs, conversationID string) {
+	if len(t.unconfirmed) == 0 {
+		return
+	}
+	inputs := transcript.read(conversationID)
+	t.unconfirmed = slices.DeleteFunc(t.unconfirmed, func(index int) bool {
+		content, ok := inputs[index]
+		if ok {
+			supplements.receipt(content)
+		}
+		return ok
+	})
 }
 
 func (t *antigravityTurn) settledResponse() int {
@@ -475,6 +499,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		streamStepUsage := make(map[int]TokenUsage)
 		streamTools := make(map[int]antigravityToolState)
 		turn := antigravityTurn{steps: make(map[int]antigravityStepSummary)}
+		transcript := &antigravityTranscriptInputs{logPath: logPath}
 		finalStatus := "completed"
 		var finalError string
 
@@ -513,6 +538,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 						streamSessionID = event.StepUpdate.ConversationID
 						supplements.activate(streamSessionID)
 					}
+					turn.confirmInjected(supplements, transcript, streamSessionID)
 					for _, message := range antigravityToolMessages(event.StepUpdate, streamTools) {
 						// Tool lifecycle events also drive the daemon's in-flight
 						// counter. Unlike best-effort text, neither half may be
@@ -537,6 +563,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					if event.Result == nil {
 						continue
 					}
+					turn.confirmInjected(supplements, transcript, streamSessionID)
 					supplements.end()
 					if event.Result.ConversationID != "" {
 						streamSessionID = event.Result.ConversationID
@@ -572,6 +599,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			b.cfg.Logger.Warn("agy stdout scanner error", "err", err)
 		}
 
+		turn.confirmInjected(supplements, transcript, streamSessionID)
 		supplements.end()
 		waitErr := cmd.Wait()
 		releaseProcessGroup(cmd)
@@ -870,6 +898,60 @@ func readAntigravityTranscriptOutput(logPath, conversationID string) string {
 		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// antigravityTranscriptInputs follows the USER_INPUT records agy appends to
+// the conversation transcript during the turn, keyed by step index. Each read
+// parses only the complete lines added since the previous one.
+type antigravityTranscriptInputs struct {
+	logPath string
+	path    string
+	offset  int64
+	inputs  map[int]string
+}
+
+func (r *antigravityTranscriptInputs) read(conversationID string) map[int]string {
+	if r.path == "" {
+		if conversationID == "" {
+			return nil
+		}
+		// agy logs its data dir at startup, before any step; without it there
+		// is no transcript to follow, so do not rescan the log on every event.
+		appDataDir := readAntigravityAppDataDir(r.logPath)
+		r.logPath = ""
+		if appDataDir == "" {
+			return nil
+		}
+		r.path = filepath.Join(appDataDir, "brain", conversationID, ".system_generated", "logs", "transcript.jsonl")
+	}
+	f, err := os.Open(r.path)
+	if err != nil {
+		return r.inputs
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.NewSectionReader(f, r.offset, 1<<62))
+	if err != nil {
+		return r.inputs
+	}
+	data = data[:bytes.LastIndexByte(data, '\n')+1]
+	r.offset += int64(len(data))
+	for line := range bytes.Lines(data) {
+		var rec struct {
+			Type      string          `json:"type"`
+			StepIndex *int            `json:"step_index"`
+			Content   json.RawMessage `json:"content"`
+		}
+		var text string
+		if json.Unmarshal(line, &rec) != nil || rec.Type != "USER_INPUT" || rec.StepIndex == nil ||
+			json.Unmarshal(rec.Content, &text) != nil {
+			continue
+		}
+		if r.inputs == nil {
+			r.inputs = make(map[int]string)
+		}
+		r.inputs[*rec.StepIndex] = text
+	}
+	return r.inputs
 }
 
 // readAntigravityAppDataDir extracts agy's CLI app data directory from the

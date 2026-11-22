@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"os"
@@ -14,13 +15,46 @@ import (
 
 func TestAntigravityExecuteSteersRunningTurnThroughHooks(t *testing.T) {
 	t.Parallel()
+	for name, tc := range map[string]struct {
+		injectedContent string
+		wantDelivered   bool
+	}{
+		// agy records the injected guidance as the step's user input.
+		"delivered": {injectedContent: "Prefer the smaller fix.", wantDelivered: true},
+		// Multica's reply was not applied; another hook injected its own input.
+		"foreign hook input": {injectedContent: "lint: 3 warnings", wantDelivered: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			testAntigravityExecuteSteering(t, tc.injectedContent, tc.wantDelivered)
+		})
+	}
+}
+
+func testAntigravityExecuteSteering(t *testing.T, injectedContent string, wantDelivered bool) {
 	cwd := t.TempDir()
+	appDataDir := t.TempDir()
+	transcript := filepath.Join(appDataDir, "brain", "conv-steer", ".system_generated", "logs", "transcript.jsonl")
+	if err := os.MkdirAll(filepath.Dir(transcript), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	script := `#!/bin/sh
+log=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf 'I0630 1 common.go:156] CLI app data directory: %s\n' '` + appDataDir + `' >> "$log"
 printf '%s\n%s\n' "$MULTICA_ANTIGRAVITY_HOOK_URL" "$MULTICA_ANTIGRAVITY_HOOK_TOKEN" > hook-env.txt
 printf '%s\n' '{"event":"init","conversation_id":"conv-steer","init":{}}'
+printf '%s\n' '{"type":"USER_INPUT","step_index":0,"content":"original goal"}' >> '` + transcript + `'
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"conv-steer","step_index":0,"state":"DONE","step_type":"user_input"}}'
 while [ ! -f injected ]; do sleep 0.02; done
+printf '%s\n' '{"type":"USER_INPUT","step_index":3,"content":"` + injectedContent + `"}' >> '` + transcript + `'
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"conv-steer","step_index":3,"state":"DONE","step_type":"user_input"}}'
+while [ ! -f answer ]; do sleep 0.02; done
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"conv-steer","step_index":4,"state":"DONE","step_type":"agent_response","text_delta":"Done, with the smaller fix."}}'
 printf '%s\n' '{"event":"result","result":{"conversation_id":"conv-steer","status":"ERROR","response":"Done, with the smaller fix.","error":"There was a network issue connecting to the server, please try again."}}'
 `
@@ -90,8 +124,20 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"conv-steer","statu
 	if err := os.WriteFile(filepath.Join(cwd, "injected"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-done; err != nil {
-		t.Fatalf("Supplement = %v, want delivered", err)
+	if wantDelivered {
+		if err := <-done; err != nil {
+			t.Fatalf("Supplement = %v, want delivered", err)
+		}
+	} else {
+		assertAntigravitySupplementWaiting(t, done)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "answer"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !wantDelivered {
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("Supplement = %v, want canceled at turn end so the daemon falls back", err)
+		}
 	}
 
 	// The injected user_input step belongs to the turn, so a trailing transport

@@ -21,7 +21,7 @@ import (
 // endpoint, then prints the endpoint's reply as the hook output.
 const (
 	hookRelayTimeout       = 5 * time.Second
-	hookRelayResponseLimit = 256 << 10
+	hookRelayResponseLimit = 1 << 20
 )
 
 // forwardHookRequest posts req to the run's endpoint and returns the reply

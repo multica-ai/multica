@@ -154,14 +154,28 @@ func TestAntigravitySupplementDeliversThroughHookRelay(t *testing.T) {
 		t.Fatalf("second hook replayed claimed guidance: %#v", reply)
 	}
 
-	if !s.receipt() {
-		t.Fatal("receipt found no injected guidance")
-	}
+	s.receipt("Also update the changelog.")
 	if err := <-done; err != nil {
 		t.Fatalf("supplement = %v, want delivered", err)
 	}
-	if s.receipt() {
-		t.Fatal("a second user_input step settled guidance that was never injected")
+	if s.awaitingReceipt() {
+		t.Fatal("delivered guidance still awaits a receipt")
+	}
+}
+
+// Global and plugin hooks can inject user input into the same conversation.
+// Their user_input step must not count as Multica's delivery.
+func TestAntigravitySupplementIgnoresForeignUserInput(t *testing.T) {
+	s, _ := startTestAntigravitySupplements(t, t.Context())
+	s.activate("conv-main")
+	done := antigravitySupplementAsync(t, s, t.Context(), "Prefer the smaller fix.")
+	relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))
+
+	s.receipt("lint: 3 warnings in main.go")
+	assertAntigravitySupplementWaiting(t, done)
+	s.end()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("supplement = %v, want canceled at turn end", err)
 	}
 }
 
@@ -177,28 +191,30 @@ func TestAntigravitySupplementIgnoresOtherConversations(t *testing.T) {
 	if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); len(got) != 1 {
 		t.Fatalf("main conversation injected %q", got)
 	}
-	s.receipt()
+	s.receipt("Use the smaller fix.")
 	if err := <-done; err != nil {
 		t.Fatalf("supplement = %v", err)
 	}
 }
 
-func TestAntigravitySupplementSettlesInInjectionOrder(t *testing.T) {
+func TestAntigravitySupplementInjectsOneMessagePerHookInOrder(t *testing.T) {
 	s, _ := startTestAntigravitySupplements(t, t.Context())
 	s.activate("conv-main")
 	first := antigravitySupplementAsync(t, s, t.Context(), "first")
 	second := antigravitySupplementAsync(t, s, t.Context(), "second")
-	if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); strings.Join(got, ",") != "first,second" {
-		t.Fatalf("injected = %q, want comment order", got)
+	for _, want := range []string{"first", "second"} {
+		if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); len(got) != 1 || got[0] != want {
+			t.Fatalf("injected = %q, want %q", got, want)
+		}
 	}
-	s.receipt()
-	if err := <-first; err != nil {
-		t.Fatalf("first = %v", err)
-	}
-	assertAntigravitySupplementWaiting(t, second)
-	s.receipt()
+	s.receipt("second")
 	if err := <-second; err != nil {
 		t.Fatalf("second = %v", err)
+	}
+	assertAntigravitySupplementWaiting(t, first)
+	s.receipt("first")
+	if err := <-first; err != nil {
+		t.Fatalf("first = %v", err)
 	}
 }
 
@@ -248,11 +264,12 @@ func TestAntigravitySupplementUnsentReplyReturnsGuidanceToQueue(t *testing.T) {
 	second := antigravitySupplementAsync(t, s, t.Context(), "second")
 	s.unclaim(claimed)
 
-	if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); strings.Join(got, ",") != "first,second" {
-		t.Fatalf("injected = %q, want the unsent guidance first", got)
+	for _, want := range []string{"first", "second"} {
+		if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); len(got) != 1 || got[0] != want {
+			t.Fatalf("injected = %q, want the unsent guidance first", got)
+		}
+		s.receipt(want)
 	}
-	s.receipt()
-	s.receipt()
 	for _, done := range []<-chan error{first, second} {
 		if err := <-done; err != nil {
 			t.Fatalf("supplement = %v", err)
@@ -260,24 +277,20 @@ func TestAntigravitySupplementUnsentReplyReturnsGuidanceToQueue(t *testing.T) {
 	}
 }
 
-func TestAntigravitySupplementBatchesWithinLimit(t *testing.T) {
+// The API accepts 64 KiB comments and the daemon frames them before delivery.
+// JSON escapes '<' as six bytes, so the hook reply is several times larger than
+// the message; it must still reach agy intact.
+func TestAntigravitySupplementCarriesLargestCommentThroughRelay(t *testing.T) {
 	s, _ := startTestAntigravitySupplements(t, t.Context())
 	s.activate("conv-main")
-	big := strings.Repeat("a", antigravityHookGuidanceLimit-10)
-	first := antigravitySupplementAsync(t, s, t.Context(), big)
-	second := antigravitySupplementAsync(t, s, t.Context(), "second guidance")
+	big := strings.Repeat("x", 1024) + "\n\nHuman message:\n" + strings.Repeat("<", 64<<10)
+	done := antigravitySupplementAsync(t, s, t.Context(), big)
 	if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); len(got) != 1 || got[0] != big {
-		t.Fatalf("first hook injected %d messages, want only the one that fits", len(got))
+		t.Fatalf("relay injected %d messages, want the full comment", len(got))
 	}
-	if got := injectedUserMessages(t, relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))); len(got) != 1 || got[0] != "second guidance" {
-		t.Fatalf("second hook injected %q", got)
-	}
-	s.receipt()
-	s.receipt()
-	for _, done := range []<-chan error{first, second} {
-		if err := <-done; err != nil {
-			t.Fatalf("supplement = %v", err)
-		}
+	s.receipt(big)
+	if err := <-done; err != nil {
+		t.Fatalf("supplement = %v", err)
 	}
 
 	if err := s.supplement(t.Context(), strings.Repeat("b", antigravityHookGuidanceLimit+1)); err == nil || !strings.Contains(err.Error(), "limit") {
@@ -341,6 +354,30 @@ func TestAntigravitySupplementKeepsUnmanagedHooksFile(t *testing.T) {
 	}
 	s.close()
 
+	// A hook the user added to the generated file makes the file theirs, even
+	// though it still names the relay: a later run must not overwrite it.
+	var extended map[string]any
+	if err := json.Unmarshal(stale, &extended); err != nil {
+		t.Fatal(err)
+	}
+	extended["lint"] = map[string]any{"PreInvocation": []any{map[string]any{"type": "command", "command": "./lint.sh"}}}
+	userEdited, err := json.MarshalIndent(extended, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, userEdited, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AntigravityHooksInstallable(cwd); err == nil {
+		t.Fatal("a managed hooks.json with a user hook was reported installable")
+	}
+	if _, err := startAntigravitySupplementSession(t.Context(), cwd, testAntigravityHookCommand, slog.Default()); err == nil {
+		t.Fatal("started over a user-extended hooks.json")
+	}
+	if data, _ := os.ReadFile(path); string(data) != string(userEdited) {
+		t.Fatalf("user-extended hooks.json changed: %s", data)
+	}
+
 	agentsFile := t.TempDir()
 	if err := os.WriteFile(filepath.Join(agentsFile, ".agents"), nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -387,14 +424,37 @@ func TestAntigravityTurnAcceptsOnlyInjectedUserInputs(t *testing.T) {
 	done := antigravitySupplementAsync(t, s, t.Context(), "steer")
 	relayAntigravityHook(t, s.testEnv, preInvocation("conv-main"))
 
+	appDataDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "agy.log")
+	if err := os.WriteFile(logPath, []byte("I0630 1 common.go:156] CLI app data directory: "+appDataDir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	transcript := &antigravityTranscriptInputs{logPath: logPath}
+
 	turn := antigravityTurn{steps: map[int]antigravityStepSummary{}}
 	turn.observeUserInput(0, s)
 	turn.observeUserInput(0, s) // a re-emitted snapshot of the opening step
+	turn.observeUserInput(2, s) // another hook's input while guidance is in flight
 	turn.observeUserInput(3, s) // the injected guidance
 	turn.observeUserInput(3, s) // its re-emitted snapshot
-	if turn.invalid || *turn.start != 0 || !turn.injected[3] {
-		t.Fatalf("turn = %+v, want start 0 with step 3 injected", turn)
+	if turn.invalid || *turn.start != 0 || !turn.injected[2] || !turn.injected[3] {
+		t.Fatalf("turn = %+v, want start 0 with steps 2 and 3 injected", turn)
 	}
+
+	// Until the transcript shows the step's text, nothing is delivered; the
+	// foreign step settles nothing once it does.
+	turn.confirmInjected(s, transcript, "conv-main")
+	seedAntigravityTranscript(t, appDataDir, "conv-main", []string{
+		`{"type":"USER_INPUT","step_index":0,"content":"goal"}`,
+		`{"type":"USER_INPUT","step_index":2,"content":"lint: ok"}`,
+	})
+	turn.confirmInjected(s, transcript, "conv-main")
+	assertAntigravitySupplementWaiting(t, done)
+	if len(turn.unconfirmed) != 1 || turn.unconfirmed[0] != 3 {
+		t.Fatalf("unconfirmed = %v, want [3]", turn.unconfirmed)
+	}
+	appendAntigravityTranscript(t, appDataDir, "conv-main", `{"type":"USER_INPUT","step_index":3,"content":"steer"}`)
+	turn.confirmInjected(s, transcript, "conv-main")
 	if err := <-done; err != nil {
 		t.Fatalf("supplement = %v", err)
 	}
@@ -408,5 +468,18 @@ func TestAntigravityTurnAcceptsOnlyInjectedUserInputs(t *testing.T) {
 	unsteered.observeUserInput(1, nil)
 	if !unsteered.invalid {
 		t.Fatal("a second boundary without steering was accepted")
+	}
+}
+
+func appendAntigravityTranscript(t *testing.T, appDataDir, conversationID, record string) {
+	t.Helper()
+	path := filepath.Join(appDataDir, "brain", conversationID, ".system_generated", "logs", "transcript.jsonl")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(record + "\n"); err != nil {
+		t.Fatal(err)
 	}
 }
