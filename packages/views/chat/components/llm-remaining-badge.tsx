@@ -74,19 +74,27 @@ function ResetCountdown({ data }: { data: LlmLimitStatus }) {
   const sonnetLimits = remainingFromUsage(data.sonnet_pct) !== null &&
     (remainingFromUsage(data.seven_day_pct) === null || data.sonnet_pct! > data.seven_day_pct!);
   const claudeReset = sonnetLimits ? data.sonnet_resets_at : data.seven_day_resets_at;
-  const resets = [
-    ["C", data.claude_status && data.claude_status !== "available" ? futureResetAt(claudeReset, now) : claudeReset],
-    ["G", data.gpt_seven_resets_at],
+  const compactTime = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul", month: "numeric", day: "numeric",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  });
+  const exactTime = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul", dateStyle: "full", timeStyle: "long",
+  });
+  const providers = [
+    ["C", data.five_hour_resets_at, claudeReset],
+    ["G", data.gpt_five_resets_at, data.gpt_seven_resets_at],
   ] as const;
-  return <div data-testid="chat-reset-countdown" className="@container max-w-full pb-0.5 text-[10px] leading-4 tabular-nums" aria-label={t($ => $.limit_reset.countdown_label)}>
-    <div className="flex flex-col @[330px]:flex-row @[330px]:gap-2">
-    {resets.map(([label, resetAt], index) => <span key={label} className="whitespace-nowrap">
-      {index > 0 && <span aria-hidden="true" className="hidden pr-2 @[330px]:inline">|</span>}
-      <span title={resetAt ? t($ => $.limit_reset.at, { time: new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "full", timeStyle: "long" }).format(new Date(resetAt)) }) : t($ => $.limit_reset.unknown)}>
-        {label} {t($ => $.limit_reset.label)} {formatResetCountdown(resetAt, now)}
-      </span>
-    </span>)}
-    </div>
+  return <div data-testid="chat-reset-countdown" className="grid gap-x-3 pb-0.5 text-[10px] leading-4 tabular-nums sm:grid-cols-2" aria-label={t($ => $.limit_reset.countdown_label)}>
+    {providers.map(([provider, five, seven]) => <div key={provider} className="flex flex-wrap gap-x-2">
+      {([["5h", five], ["7d", seven]] as const).map(([window, resetAt]) => {
+        const target = futureResetAt(resetAt, now);
+        const date = target ? new Date(target) : null;
+        return <span key={window} className="whitespace-nowrap" title={date ? t($ => $.limit_reset.at, { time: exactTime.format(date) }) : t($ => $.limit_reset.unknown)}>
+          {provider} {window} {t($ => $.limit_reset.label)} {target && date && <time dateTime={target}>{compactTime.format(date)} KST </time>}{formatResetCountdown(target, now)}
+        </span>;
+      })}
+    </div>)}
   </div>;
 }
 

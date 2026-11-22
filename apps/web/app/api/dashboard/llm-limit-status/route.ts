@@ -81,7 +81,7 @@ function formatResetAt(value: string | undefined) {
 		hour12: true,
 	}).formatToParts(date);
 	const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
-	const period = part("dayPeriod") === "PM" ? "오후" : "오전";
+	const period = part("dayPeriod");
 	return `(${part("weekday")}) ${period} ${part("hour")}:${part("minute")}에 재설정`;
 }
 
