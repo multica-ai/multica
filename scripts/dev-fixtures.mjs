@@ -7,6 +7,7 @@
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs chat issue --json"
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --queued --json"
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs sidebar"
+//   make env-exec ARGS="-- node scripts/dev-fixtures.mjs guest --json"
 //   make env-exec ARGS="-- node scripts/dev-fixtures.mjs app-request --app posthog --member"
 //
 // Replies come from the daemon API, driven with the environment profile's user
@@ -18,22 +19,25 @@
 // to heartbeat.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const KINDS = ["chat", "builder", "issue", "task", "sidebar", "app-request", "app-resume"];
-// `sidebar` fills the whole Work panel, and the app fixtures need Composio, so
+const KINDS = ["chat", "builder", "issue", "task", "sidebar", "guest", "app-request", "app-resume"];
+// `sidebar` fills the whole Work panel, `guest` adds a workspace member, and the
+// app fixtures need Composio, so
 // `all` leaves them out.
 const ALL_KINDS = ["chat", "builder", "issue", "task"];
+// Kinds that need no fixture runtime.
+const RUNTIMELESS_KINDS = ["issue", "guest"];
 const FIXTURE_DAEMON_ID = "dev-fixtures";
 const FIXTURE_AGENT_NAME = "Fixture Agent";
 const FIXTURE_WORKER_NAME = "Fixture Worker";
 // Matches the daemon's own heartbeat period.
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
-const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issue | task | sidebar | app-request | app-resume>...
+const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issue | task | sidebar | guest | app-request | app-resume>...
          [--queued] [--hold] [--app SLUG] [--member] [--json]
 
   chat      a chat session: a user message and an assistant reply with a table, code and a long log line
@@ -42,6 +46,8 @@ const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issu
   task      an issue assigned to the Fixture Worker agent whose task stays running, with an execution log
   sidebar   a Work panel in use: 11 issues in 3 projects, read and unread notifications from 3 agents,
             pinned issues and a pinned project, and 2 saved views
+  guest     guest@localhost as a guest of a shared project, with an issue, a sub-issue, an assigned
+            issue and unread notifications; a second project stays hidden from it. Prints the guest's token
   all       chat, builder, issue and task
   app-request  an issue assigned to the Fixture Agent whose run asks for an app account through
             apps_request_connection, then ends its turn; needs \`node scripts/fake-composio.mjs up\`
@@ -52,7 +58,8 @@ const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issu
   --app     app-request: the app slug to ask for (default googlecalendar)
   --member  app-request: start the run as Alice (alice@localhost), a plain member of the workspace;
             --json adds her member_token for signing a browser in as her
-  --json    print the created ids and URLs as JSON instead of text; task adds task_id, auth_token and agent_id
+  --json    print the created ids and URLs as JSON instead of text; task adds task_id, auth_token and agent_id,
+            guest adds guest_token and guest_user_id
 
 A held task stays running for the server's reconnect grace (MULTICA_RUNTIME_RECONNECT_GRACE,
 3 hours by default), but without --hold the runtime itself shows offline after about 150 seconds.
@@ -100,7 +107,8 @@ function parseCli(argv) {
 function loadProfile(env) {
   if (!env.MULTICA_DEV_PROFILE) fail("MULTICA_DEV_PROFILE is not set; run this through `make env-exec`.");
   const home = env.MULTICA_DEV_PROFILES_HOME || join(homedir(), ".multica", "profiles");
-  const file = join(home, env.MULTICA_DEV_PROFILE, "config.json");
+  const dir = join(home, env.MULTICA_DEV_PROFILE);
+  const file = join(dir, "config.json");
   let config;
   try {
     config = JSON.parse(readFileSync(file, "utf8"));
@@ -113,17 +121,19 @@ function loadProfile(env) {
     appUrl: env.FRONTEND_PORT ? `http://localhost:${env.FRONTEND_PORT}` : config.app_url,
     token: config.token,
     workspaceId: config.workspace_id,
+    dir,
   };
 }
 
+// Without a token the requests are anonymous, as the login endpoints need.
 function client({ apiUrl, token, workspaceId }) {
-  return async function request(method, path, body) {
+  return async function request(method, path, body, headers = {}) {
     const response = await fetch(`${apiUrl}${path}`, {
       method,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        "X-Workspace-ID": workspaceId,
+        ...(token ? { Authorization: `Bearer ${token}`, "X-Workspace-ID": workspaceId } : {}),
+        ...headers,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -425,6 +435,62 @@ const SIDEBAR_SCRIPTS = [
     ],
   },
 ];
+
+// The guest fixture's cast. The guest signs in with the dev verification code
+// like dev@localhost, and is a guest of the shared project only.
+const GUEST_EMAIL = "guest@localhost";
+const GUEST_NAME = "Gina Guest";
+const GUEST_CAPABILITIES = { "X-Client-Capabilities": "workspace-guests-v1" };
+
+const GUEST_PROJECTS = {
+  shared: {
+    title: "Client portal",
+    description: "Shared with guest@localhost by scripts/dev-fixtures.mjs.",
+    status: "in_progress",
+    priority: "high",
+  },
+  internal: {
+    title: "Internal planning",
+    description: "Not shared with guest@localhost; the guest must not see it or its issues.",
+    status: "planned",
+    priority: "medium",
+  },
+};
+
+const GUEST_ISSUES = {
+  review: {
+    project: "shared",
+    title: "Review the client portal sign-up flow",
+    description: "Walk through sign-up as a new client and note every step that asks for something twice.",
+    status: "in_progress",
+    priority: "high",
+  },
+  form: {
+    project: "shared",
+    parent: "review",
+    title: "Collect feedback on the sign-up form",
+    status: "todo",
+    priority: "medium",
+  },
+  export: {
+    project: "shared",
+    title: "Export invoices as CSV",
+    description: "Clients want their invoices as CSV for their own bookkeeping.",
+    status: "todo",
+    priority: "medium",
+  },
+  pricing: {
+    project: "internal",
+    title: "Decide renewal pricing for the client",
+    description: "Internal only: margins and the discount we can offer at renewal.",
+    status: "todo",
+    priority: "high",
+  },
+};
+
+const guestMention = (guest) => `[@${guest.name}](mention://member/${guest.id})`;
+// `make up` writes the code into the env file, which `make env-exec` exports.
+const devCode = () => process.env.MULTICA_DEV_VERIFICATION_CODE || "888888";
 
 // -------------------------------------------------------------- fixtures ---
 
@@ -852,6 +918,139 @@ function createSidebarIssue(request, spec, projects, agent) {
   });
 }
 
+// send-code is rate-limited to 5 a minute, so the guest's token is kept in the
+// environment's profile directory and a rerun signs in again only when that
+// token no longer works. `make destroy` removes it with the profile.
+async function guestSession(profile) {
+  const file = join(profile.dir, "guest.json");
+  try {
+    const { token } = JSON.parse(readFileSync(file, "utf8"));
+    const me = await client({ ...profile, token })("GET", "/api/me");
+    if (me?.email === GUEST_EMAIL) return { token, user: me };
+  } catch {
+    // No saved token, or it stopped working: sign in below.
+  }
+
+  const anonymous = client({ ...profile, token: "" });
+  await anonymous("POST", "/auth/send-code", { email: GUEST_EMAIL });
+  const verified = await anonymous("POST", "/auth/verify-code", { email: GUEST_EMAIL, code: devCode() });
+  const created = await client({ ...profile, token: verified.token })("POST", "/api/tokens", {
+    name: "dev-fixtures guest",
+    expires_in_days: 365,
+  });
+  const asGuest = client({ ...profile, token: created.token });
+  const user = await asGuest("PATCH", "/api/me", { name: GUEST_NAME });
+  writeFileSync(file, `${JSON.stringify({ email: GUEST_EMAIL, token: created.token }, null, 2)}\n`, { mode: 0o600 });
+  return { token: created.token, user };
+}
+
+// Invites the guest to the shared project and accepts as the guest, the way
+// the web app does. On a rerun the guest is already a member and keeps its
+// other projects, but always has the shared one and never the internal one.
+async function ensureGuestMember({ request, asGuest, workspaceId, guest, shared, internal }) {
+  const workspaces = (await asGuest("GET", "/api/workspaces")) ?? [];
+  if (!workspaces.some((ws) => ws.id === workspaceId)) {
+    try {
+      await request("POST", `/api/workspaces/${workspaceId}/members`, {
+        email: GUEST_EMAIL,
+        role: "guest",
+        project_ids: [shared.id],
+      });
+    } catch (error) {
+      // An interrupted run can leave its invitation pending; accept that one.
+      if (!error.message.includes("invitation already pending")) throw error;
+    }
+    const invitations = listOf(await asGuest("GET", "/api/invitations"), "invitations");
+    const invitation = invitations.find((inv) => inv.workspace_id === workspaceId);
+    if (!invitation) throw new Error(`no pending invitation for ${GUEST_EMAIL} in workspace ${workspaceId}`);
+    await asGuest("POST", `/api/invitations/${invitation.id}/accept`);
+  }
+
+  const members = listOf(
+    await request("GET", `/api/workspaces/${workspaceId}/members`, undefined, GUEST_CAPABILITIES),
+    "members",
+  );
+  const member = members.find((m) => m.user_id === guest.id);
+  if (member?.role !== "guest") {
+    throw new Error(`${GUEST_EMAIL} is a ${member?.role ?? "missing"} member of this workspace, not a guest`);
+  }
+  const current = member.project_ids ?? [];
+  const wanted = [...current.filter((id) => id !== internal.id && id !== shared.id), shared.id];
+  if (current.length !== wanted.length || !current.includes(shared.id)) {
+    await request("PUT", `/api/workspaces/${workspaceId}/members/${member.id}/projects`, { project_ids: wanted });
+  }
+  return member;
+}
+
+async function seedGuest({ request, profile, appUrl, slug }) {
+  const existingProjects = listOf(await request("GET", "/api/projects"), "projects");
+  const projects = {};
+  for (const [key, project] of Object.entries(GUEST_PROJECTS)) {
+    projects[key] = await ensureProject(request, existingProjects, project);
+  }
+
+  const session = await guestSession(profile);
+  const guest = session.user;
+  const asGuest = client({ ...profile, token: session.token });
+  await ensureGuestMember({ request, asGuest, workspaceId: profile.workspaceId, guest, ...projects });
+
+  const issues = {};
+  for (const [key, spec] of Object.entries(GUEST_ISSUES)) {
+    issues[key] = await request("POST", "/api/issues", {
+      title: spec.title,
+      description: spec.description,
+      status: spec.status,
+      priority: spec.priority,
+      project_id: projects[spec.project].id,
+      parent_issue_id: spec.parent ? issues[spec.parent].id : undefined,
+      allow_duplicate: true,
+    });
+  }
+
+  // Each notifies the guest on a different issue: a mention, a reply in a
+  // thread the guest started, and an assignment.
+  await request("POST", `/api/issues/${issues.review.id}/comments`, {
+    content: `${guestMention(guest)} the new sign-up steps are live on staging. Could you go through them before Friday?`,
+  });
+  const question = await asGuest("POST", `/api/issues/${issues.form.id}/comments`, {
+    content: "The form asks for the company name twice, once on each step. Is that on purpose?",
+  });
+  await request("POST", `/api/issues/${issues.form.id}/comments`, {
+    content: "Not on purpose. The second field goes away in the next build.",
+    parent_id: question.id,
+  });
+  await request("PUT", `/api/issues/${issues.export.id}`, { assignee_type: "member", assignee_id: guest.id });
+
+  const inbox = listOf(await asGuest("GET", "/api/inbox"), "items");
+  const issueUrl = (issue) => `${appUrl}/${slug}/issues/${issue.identifier}`;
+  return {
+    url: `${appUrl}/${slug}/inbox`,
+    guest_email: GUEST_EMAIL,
+    guest_code: devCode(),
+    guest_user_id: guest.id,
+    guest_token: session.token,
+    inbox_issues: new Set(inbox.map((item) => item.issue_id)).size,
+    inbox_unread_issues: new Set(inbox.filter((item) => !item.read).map((item) => item.issue_id)).size,
+    projects: Object.fromEntries(
+      Object.entries(projects).map(([key, project]) => [
+        key,
+        { id: project.id, title: project.title, url: `${appUrl}/${slug}/projects/${project.id}` },
+      ]),
+    ),
+    issues: Object.fromEntries(
+      Object.entries(issues).map(([key, issue]) => [
+        key,
+        {
+          id: issue.id,
+          identifier: issue.identifier,
+          url: issueUrl(issue),
+          visible_to_guest: GUEST_ISSUES[key].project === "shared",
+        },
+      ]),
+    ),
+  };
+}
+
 // Keeps the runtime online, and its held tasks with it, the way a daemon does.
 // A failed beat (an API restart) is reported and retried on the next tick.
 async function holdRuntime(request, runtime) {
@@ -877,7 +1076,7 @@ async function main() {
   if (!workspace) fail(`the profile's workspace ${profile.workspaceId} is not visible to its token.`);
   const context = { request, profile, appUrl: profile.appUrl, slug: workspace.slug, queued, app, member };
 
-  if (kinds.some((kind) => kind !== "issue")) {
+  if (kinds.some((kind) => !RUNTIMELESS_KINDS.includes(kind))) {
     context.runtime = await ensureRuntime(request, profile.workspaceId);
   }
   if (kinds.includes("chat") || kinds.includes("app-request")) {
@@ -891,6 +1090,7 @@ async function main() {
     issue: seedIssue,
     task: seedTask,
     sidebar: seedSidebar,
+    guest: seedGuest,
     "app-request": seedAppRequest,
     "app-resume": seedAppResume,
   };
@@ -899,6 +1099,12 @@ async function main() {
     result[kind] = await seeders[kind](context);
     if (!json) console.log(`[dev-fixtures] ${kind.padEnd(12)}${result[kind].url}`);
     if (!json && result[kind].request) console.log(`[dev-fixtures] ${"".padEnd(12)}${result[kind].request}`);
+  }
+  if (result.guest && !json) {
+    const { guest_email, guest_code, guest_token, inbox_unread_issues } = result.guest;
+    console.log(`[dev-fixtures] ${"".padEnd(12)}sign in as ${guest_email} with code ${guest_code}, or set localStorage multica_token:`);
+    console.log(`[dev-fixtures] ${"".padEnd(12)}${guest_token}`);
+    console.log(`[dev-fixtures] ${"".padEnd(12)}${inbox_unread_issues} unread issues in the guest's Inbox`);
   }
   if (json) console.log(JSON.stringify(result, null, 2));
   if (hold) await holdRuntime(request, context.runtime);
