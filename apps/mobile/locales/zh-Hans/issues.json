@@ -14,19 +14,19 @@
     "running": "运行中",
     "completed": "完成",
     "failed": "失败",
-    "cancelled": "cancelled",
-    "backlog": "backlog",
-    "todo": "todo",
-    "in_progress": "in_progress",
-    "in_review": "in_review",
-    "done": "done",
-    "blocked": "blocked"
+    "cancelled": "已取消",
+    "backlog": "待规划",
+    "todo": "待办",
+    "in_progress": "进行中",
+    "in_review": "审核中",
+    "done": "已完成",
+    "blocked": "已阻塞"
   },
   "category": {
-    "unstarted": "unstarted",
-    "started": "started",
-    "done": "done",
-    "closed": "closed"
+    "unstarted": "未开始",
+    "started": "已开始",
+    "done": "已完成",
+    "closed": "已关闭"
   },
   "priority": {
     "none": "无优先级",
@@ -49,7 +49,8 @@
   "list": {
     "empty": "没有符合筛选条件的任务",
     "count_other": "{{count}} 个任务",
-    "search_placeholder": "搜索任务和项目"
+    "search_placeholder": "搜索任务和项目",
+    "search_no_results": "未找到与 \"{{query}}\" 相关的结果"
   },
   "detail": {
     "properties": "属性",
@@ -59,6 +60,7 @@
     "reply": "回复",
     "add_comment": "添加评论...",
     "description": "描述",
+    "no_description": "暂无描述。",
     "add_description": "添加描述...",
     "runs": "运行",
     "copy_link": "复制链接",
@@ -168,7 +170,7 @@
     "squad": "小队",
     "no_matches": "没有匹配结果。",
     "no_project": "无项目",
-    "no_projects": "该工作区还没有项目。\n请在网页端创建。",
+    "no_projects": "此工作区还没有项目。",
     "no_labels": "该工作区还没有标签。",
     "create_label": "创建 \"{{name}}\"",
     "no_members_agents": "该工作区还没有成员或智能体。",
@@ -199,6 +201,8 @@
     "delete_keep_replies": "该评论将被永久删除。其回复会保留在讨论中。此操作无法撤销。",
     "delete_with_replies": "该评论将被永久删除，讨论中的回复也会一并移除。此操作无法撤销。",
     "more_reactions": "更多表情...",
+    "add_reaction": "添加表情回应",
+    "deleted": "该评论已删除",
     "fallback_actor": "评论",
     "composer_placeholder": "添加评论...",
     "composer_pill": "添加评论，输入 @ 提及..."
@@ -229,6 +233,8 @@
     "url": "仓库 URL",
     "branch": "起始分支（可选）",
     "label": "标签（可选）",
+    "label_placeholder": "例如：后端",
+    "open_attachment": "打开 {{filename}}",
     "attach": "添加",
     "attaching": "添加中...",
     "branch_hint": "运行会从这个分支开始，并针对它创建 Pull Request。留空则使用仓库默认分支。",
@@ -273,7 +279,36 @@
       "cancelled": "已取消"
     },
     "failure_badge": {
-      "local_directory_missing": "文件夹不存在"
+      "queued_expired": "排队超时",
+      "runtime_offline": "运行时离线",
+      "runtime_access_revoked": "权限已撤销",
+      "runtime_recovery": "运行时重启",
+      "timeout": "超时",
+      "iteration_limit": "迭代达上限",
+      "agent_blocked": "需要输入",
+      "api_invalid_request": "请求被拒",
+      "skill_bundle_unavailable": "skill 下载失败",
+      "runtime_cli_timeout": "运行时 CLI 超时",
+      "environment_prepare_failed": "环境准备失败",
+      "runtime_access_denied": "无运行时权限",
+      "local_directory_missing": "文件夹不存在",
+      "agent_error_provider_auth_or_access": "认证失败",
+      "agent_error_provider_quota_limit": "配额已用尽",
+      "agent_error_provider_capacity_or_rate_limit": "触发限流",
+      "agent_error_provider_server_error": "提供商出错",
+      "agent_error_provider_network": "网络错误",
+      "agent_error_process_failure": "进程崩溃",
+      "agent_error_empty_or_unparseable_output": "无可用输出",
+      "agent_error_agent_timeout": "智能体超时",
+      "agent_error_context_overflow": "上下文超限",
+      "agent_error_missing_config": "缺少配置",
+      "agent_error_model_not_found_or_unavailable": "模型不可用",
+      "agent_error_runtime_version_unsupported": "CLI 版本不支持",
+      "agent_error_runtime_missing_executable": "未安装 CLI",
+      "agent_error_unknown": "智能体出错",
+      "agent_error": "智能体出错",
+      "codex_semantic_inactivity": "Codex 无进展",
+      "manual": "手动取消"
     }
   },
   "header_filter": "筛选",
@@ -286,13 +321,5 @@
     "open_file": "打开 {{name}}",
     "remove_file": "移除 {{name}}"
   },
-  "summary.comment": "评论运行",
-  "summary.chat": "聊天运行",
-  "summary.direct": "运行",
-  "cancel.title": "取消运行？",
-  "cancel.cancel_task": "取消运行",
-  "picker.create_label": "创建 \"{{name}}\"",
-  "comments.composer_pill": "添加评论，输入 @ 提及...",
-  "resources.branch_hint": "运行会从这个分支开始，并针对它创建 Pull Request。留空则使用仓库默认分支。",
-  "resources.commit": "这是提交 ID，不是分支。运行会回传到起始分支。如需一次性修订，请给 multica repo checkout 传入 --ref。"
+  "jump_new_other": "{{count}} 条新消息"
 }

@@ -10,6 +10,16 @@
     "all_projects": "すべてのプロジェクト",
     "period_label": "期間"
   },
+  "history_limit": {
+    "note": "現在のプランでは直近 {{days}} 日を表示できます。アップグレードするとそれ以前のデータも表示できます。データは削除されません。",
+    "fell_back": "現在のプランの上限である直近 {{days}} 日間を表示しています。",
+    "view_plans": "プランを見る",
+    "locked": "現在のプランに含まれていません",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
   "kpi": {
     "cost_label": "コスト · {{days}}日",
     "tokens_label": "トークン · {{days}}日",
@@ -20,7 +30,7 @@
     "tasks_hint": "{{failed}} 件失敗"
   },
   "dim": {
-    "label": "単位",
+    "label": "間隔",
     "daily": "日別",
     "weekly": "週別"
   },
@@ -50,8 +60,8 @@
     "kpi_failed_hint": "{{total}} 回の実行中",
     "kpi_rate_label": "失敗率 · {{days}}日",
     "kpi_agents_label": "影響を受けたエージェント · {{days}}日",
-    "kpi_agents_hint": "最多 {{name}} · {{count}} 回",
-    "tooltip_rate": "エラー率",
+    "kpi_agents_hint": "最多：{{name}}（失敗 {{count}} 件）",
+    "tooltip_rate": "失敗率",
     "class": {
       "auth": "認証",
       "rate_limit": "レート制限",
@@ -66,8 +76,8 @@
     "mix_title": "失敗の内訳 · {{failed}}",
     "mix_label": "失敗の内訳",
     "codes_label": "エラーコード",
-    "by_agent": "失敗の多いエージェント",
-    "sort_label": "失敗の多いエージェントの並び順",
+    "by_agent": "エージェント別のエラー",
+    "sort_label": "エージェントの並び替え基準",
     "sort_failed": "失敗数",
     "sort_rate": "失敗率",
     "header_agent": "エージェント",

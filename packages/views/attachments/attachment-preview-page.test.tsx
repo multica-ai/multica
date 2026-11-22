@@ -191,7 +191,7 @@ describe("AttachmentPreviewPage", () => {
   it("titles the tab from the URL's name until the record lands", () => {
     getAttachmentMock.mockReturnValue(new Promise(() => {}));
     renderPage(<AttachmentPreviewPage attachmentId="att-1" filename="from-url.pdf" />);
-    expect(screen.getByText("Loading preview…")).toBeTruthy();
+    expect(screen.getByText("Loading preview...")).toBeTruthy();
     expect(document.title).toBe("from-url.pdf");
   });
 

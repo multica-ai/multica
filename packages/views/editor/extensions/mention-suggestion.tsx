@@ -73,6 +73,7 @@ import {
 } from "../../common/picker-keys";
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 import { blockedReasonLabel } from "../../issues/blocked-trigger-copy";
+import { stripMentionMarkdown } from "../../issues/utils/strip-mention-markdown";
 
 // Types
 
@@ -665,7 +666,7 @@ function MentionRow({
           <span className="block truncate font-medium text-foreground">{item.label}</span>
           {item.description && (
             <span className="block truncate text-muted-foreground">
-              {item.description}
+              {stripMentionMarkdown(item.description)}
             </span>
           )}
         </span>

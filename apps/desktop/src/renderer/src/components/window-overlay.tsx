@@ -71,7 +71,7 @@ function WindowOverlayInner() {
             if (ws && destination?.kind === "chat") {
               push(paths.workspace(ws.slug).chatSession(destination.sessionId));
             } else if (ws && destination?.kind === "issue") {
-              push(paths.workspace(ws.slug).issueDetail(destination.issueId));
+              push(paths.workspace(ws.slug).issueDetail(destination.issueRef));
             } else if (ws) {
               push(paths.workspace(ws.slug).issues());
             }
@@ -94,7 +94,7 @@ function WindowOverlayInner() {
               );
             } else if (ws && destination?.kind === "issue") {
               push(
-                paths.workspace(ws.slug).issueDetail(destination.issueId),
+                paths.workspace(ws.slug).issueDetail(destination.issueRef),
               );
             } else if (ws) {
               push(paths.workspace(ws.slug).issues());

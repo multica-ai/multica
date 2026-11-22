@@ -216,6 +216,7 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
           {receipt.sources.map((s, i) => (
             <tr key={`${s.kind}-${s.name ?? ""}-${i}`} className="border-b align-top last:border-b-0">
               <td className={cn("py-1 pr-2 text-foreground", s.parent && "pl-3 text-muted-foreground")}>
+                {/* eslint-disable-next-line no-restricted-syntax -- technical SHA-256 hash prefix */}
                 <div className="truncate" title={s.sha256 ? `sha256 ${s.sha256}` : undefined}>
                   {s.parent ? "└ " : ""}
                   {sourceLabel(s, t)}

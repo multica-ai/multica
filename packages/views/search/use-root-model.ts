@@ -7,6 +7,7 @@ import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "@multica/core/paths";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import type { SearchDocResult, SearchIssueResult, SearchProjectResult } from "@multica/core/types";
+import { useComposioAvailable } from "../common/use-composio-available";
 import { useT } from "../i18n";
 import { useAgentCommandGroup, useAutopilotCommandGroup, useChatCommandGroup, useInboxCommandGroup, useProjectCommandGroup } from "./commands/context-commands";
 import { useGlobalCommands } from "./commands/global-commands";
@@ -47,6 +48,7 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   runtimes: ["runtimes", "environments", "machines", "运行时"],
   docs: ["docs", "knowledge", "知识库"],
   skills: ["skills", "library", "技能"],
+  apps: ["apps", "integrations", "connected", "accounts", "composio", "应用", "集成"],
   settings: ["settings", "config", "preferences", "设置", "配置"],
 };
 
@@ -195,14 +197,15 @@ export function useRootModel(
   const objects = useObjectSearch(scope === "issues" || scope === "commands" ? "" : q, active);
   const recent = useRecentItems(active && !rawQuery.trim());
 
+  const appsAvailable = useComposioAvailable();
   const navPages = useMemo<NavPage[]>(
     () =>
-      NAV_PAGE_KEYS.filter((key) => key !== "docs" || docsEnabled).map((key) => ({
+      NAV_PAGE_KEYS.filter((key) => (key !== "docs" || docsEnabled) && (key !== "apps" || appsAvailable)).map((key) => ({
         key,
         label: tNav(($) => $.nav[WORKSPACE_PAGES[key].navKey]),
         keywords: PAGE_KEYWORDS[key],
       })),
-    [docsEnabled, tNav],
+    [docsEnabled, tNav, appsAvailable],
   );
 
   return useMemo<RootModel>(() => {

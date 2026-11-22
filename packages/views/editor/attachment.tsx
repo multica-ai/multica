@@ -35,7 +35,15 @@ import {
   Maximize2,
   Trash2,
 } from "@multica/ui/icons";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { autoUpdate, computePosition, flip, hide, offset, shift } from "@floating-ui/dom";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -51,12 +59,23 @@ import {
 } from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
 import { DeferredTooltip } from "../common/deferred-tooltip";
-import { useContextMenuScope } from "../common/context-menu-scope";
+import {
+  ContextMenuScopeSubmenu,
+  findContextMenuScope,
+  useContextMenuScope,
+  useScopeSubmenuFocus,
+  type ResolvedContextMenuScope,
+} from "../common/context-menu-scope";
+import { dropdownPrimitives } from "../common/menu-primitives";
+import { CLOSED_ROW_MENU, yieldsToTextMenu, type RowMenuState } from "../common/point-menu";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
 import { usePreviewSequence } from "./preview-sequence-context";
+import { useImageThumbnails } from "./image-thumbnails-context";
+import { OriginalImageMenu } from "./original-image-menu";
 import {
   isObjectURL,
+  useAttachmentThumbnailURL,
   useResignedInlineMedia,
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
@@ -317,6 +336,26 @@ export function Attachment({
     (state.filename || state.contentType
       ? getPreviewKind(state.contentType, state.filename)
       : null);
+  // Where the surface asks for thumbnails, a large image paints the server's
+  // downscaled copy and never loads its original; a failed thumbnail falls
+  // back to the original.
+  const preferThumbnails = useImageThumbnails();
+  const [failedThumbnail, setFailedThumbnail] = useState<string | null>(null);
+  const thumbnailPath = state.record?.thumbnail_url ?? "";
+  const wantsThumbnail =
+    kind === "image" &&
+    preferThumbnails &&
+    !editable &&
+    !state.uploading &&
+    !!state.attachmentId &&
+    !!thumbnailPath &&
+    failedThumbnail !== thumbnailPath;
+  const thumbnail = useAttachmentThumbnailURL(
+    state.attachmentId ?? "",
+    thumbnailPath,
+    wantsThumbnail,
+  );
+  const showThumbnail = wantsThumbnail && !thumbnail.failed;
   // The picked URL may still be the auth-gated API endpoint (reopened drafts
   // whose persisted record has no signed download_url). Upgrade it to a
   // freshly signed URL on clients that can't load the endpoint natively, or —
@@ -327,7 +366,11 @@ export function Attachment({
     state.attachmentId,
     state.url,
     kind === "image",
+    { enabled: !showThumbnail },
   );
+  const [imageMenu, setImageMenu] = useState<RowMenuState>(CLOSED_ROW_MENU);
+  const [outerScope, setOuterScope] = useState<ResolvedContextMenuScope["submenu"]>(null);
+  const outerScopeFocus = useScopeSubmenuFocus(outerScope);
   // Object URLs are session-local, so anything that hands a URL to the user or
   // to another surface keeps the durable pick instead.
   const shareUrl = isObjectURL(mediaUrl) ? state.url : mediaUrl;
@@ -418,10 +461,17 @@ export function Attachment({
   }, { content: !editable });
 
   if (kind === "image") {
+    const openImageMenu = (event: MouseEvent<HTMLElement>) => {
+      if (yieldsToTextMenu(event.target as Element)) return;
+      event.preventDefault();
+      // The comment around the image, read when the menu opens.
+      setOuterScope(findContextMenuScope(event.currentTarget.parentElement).submenu);
+      setImageMenu({ open: true, point: { x: event.clientX, y: event.clientY } });
+    };
     return (
       <>
         <ImageAttachmentView
-          src={mediaUrl}
+          src={showThumbnail ? thumbnail.url : mediaUrl}
           linkUrl={shareUrl}
           alt={state.filename}
           uploading={state.uploading}
@@ -432,9 +482,28 @@ export function Attachment({
           onView={openPreview}
           onDownload={handleDownload}
           onDelete={onDelete}
+          onError={showThumbnail ? () => setFailedThumbnail(thumbnailPath) : undefined}
+          onContextMenu={showThumbnail ? openImageMenu : undefined}
           scopeRef={scopeRef}
           className={cn(layout === "card" && "image-standalone", className)}
         />
+        {showThumbnail && imageMenu.point && (
+          <OriginalImageMenu
+            attachmentId={state.attachmentId!}
+            link={shareUrl}
+            menu={imageMenu}
+            onOpenChange={(open) => setImageMenu((current) => ({ ...current, open }))}
+            onView={openPreview}
+            onDownload={() => void handleDownload()}
+            trailing={
+              <ContextMenuScopeSubmenu
+                submenu={outerScopeFocus.submenu}
+                primitives={dropdownPrimitives}
+              />
+            }
+            finalFocus={outerScopeFocus.finalFocus}
+          />
+        )}
         {preview.modal}
       </>
     );
@@ -516,6 +585,10 @@ interface ImageAttachmentViewProps {
   onView: () => void;
   onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
+  /** Called when `src` fails to load. */
+  onError?: () => void;
+  /** Replaces the host's right-click menu on the image. */
+  onContextMenu?: (event: MouseEvent<HTMLElement>) => void;
   /** Registers the image with the right-click menu. */
   scopeRef?: (element: HTMLElement | null) => void;
   className?: string;
@@ -533,6 +606,8 @@ function ImageAttachmentView({
   onView,
   onDownload,
   onDelete,
+  onError,
+  onContextMenu,
   scopeRef,
   className,
 }: ImageAttachmentViewProps) {
@@ -641,7 +716,7 @@ function ImageAttachmentView({
   // the NodeViewWrapper still emits its own outer .image-node div around
   // this — the duplicate `image-node` class is harmless.
   return (
-    <span ref={scopeRef} className="image-node">
+    <span ref={scopeRef} className="image-node" onContextMenu={onContextMenu}>
       <span
         ref={figureRef}
         className={cn(
@@ -679,7 +754,10 @@ function ImageAttachmentView({
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
           onLoad={() => setLoadedSrc(src)}
-          onError={() => setLoadedSrc(src)}
+          onError={() => {
+            setLoadedSrc(src);
+            onError?.();
+          }}
         />
         {hasToolbar && (
           <span

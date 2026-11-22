@@ -1,4 +1,4 @@
-import type { WorkspacePaths } from "@multica/core/paths";
+import { issueRouteRef, type IssueRouteRef, type WorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 
 function singleLine(value: string | null | undefined): string {
@@ -97,8 +97,8 @@ export function resolveDetailItem(
  * server sent one, so the issue route opens without rewriting its URL (a
  * rewrite mounts the whole issue page again on web), else the UUID.
  */
-export function inboxIssueRef(item: Pick<InboxItem, "issue_identifier">, issueId: string): string {
-  return item.issue_identifier || issueId;
+export function inboxIssueRef(item: Pick<InboxItem, "issue_identifier">, issueId: string): IssueRouteRef {
+  return issueRouteRef({ id: issueId, identifier: item.issue_identifier });
 }
 
 /**

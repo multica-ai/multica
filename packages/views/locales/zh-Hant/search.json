@@ -135,7 +135,7 @@
   },
   "delegate": {
     "row": "交給 AI 代理：「{{prompt}}」",
-    "hint": "快速建立"
+    "hint": "透過 AI 代理建立"
   },
   "best": {
     "assign": "把 {{subject}} 指派給 {{name}}",

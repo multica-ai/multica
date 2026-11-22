@@ -88,7 +88,7 @@ describe("AppBottomBar", () => {
     renderBar();
 
     expect(
-      screen.getByRole("link", { name: "3 tasks waiting on an offline runtime" }),
+      screen.getByRole("link", { name: "3 runs waiting on an offline runtime" }),
     ).toHaveAttribute("href", "/acme/agents");
   });
 

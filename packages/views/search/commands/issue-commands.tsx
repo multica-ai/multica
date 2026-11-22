@@ -34,6 +34,7 @@ import {
   issueTimelineOptions,
 } from "@multica/core/issues/queries";
 import { useRetryIssueRun, useToggleIssueSubscriber } from "@multica/core/issues/mutations";
+import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import { useCommentCollapseStore, useResolvedExpandStore } from "@multica/core/issues/stores";
 import { quickActionListOptions } from "@multica/core/quick-actions";
 import type { AgentTask, Issue } from "@multica/core/types";
@@ -85,6 +86,8 @@ export function useIssueCommandGroup(
   });
   const toggleSubscriber = useToggleIssueSubscriber(singleId);
   const retryRun = useRetryIssueRun(singleId);
+  const { canDelete } = useIssueDeletion(wsId);
+  const deletable = !!target && (target.kind === "single" ? canDelete(target.issue) : target.issues.every(canDelete));
 
   return useMemo(() => {
     if (!target) return null;
@@ -310,26 +313,28 @@ export function useIssueCommandGroup(
               .catch(() => {});
           },
         },
-        {
+      );
+      if (deletable) {
+        commands.push({
           id: "issue-delete",
           label: t(($) => $.issue.delete),
           icon: Trash2,
           keywords: ["delete", "remove", "删除"],
           destructive: true,
           run: () => actions.openDeleteConfirm({ onDeletedFallbackPath }),
-        },
-      );
+        });
+      }
     } else if (target.kind === "batch") {
-      commands.push(
-        {
-          id: "issue-parent",
-          label: t(($) => $.issue.set_parent),
-          icon: Network,
-          keywords: ["parent", "sub", "父任务"],
-          page: { type: "issue-parent", target },
-          crumb,
-        },
-        {
+      commands.push({
+        id: "issue-parent",
+        label: t(($) => $.issue.set_parent),
+        icon: Network,
+        keywords: ["parent", "sub", "父任务"],
+        page: { type: "issue-parent", target },
+        crumb,
+      });
+      if (deletable) {
+        commands.push({
           id: "issue-delete",
           label: t(($) => $.issue.delete_selected, { count: target.issues.length }),
           icon: Trash2,
@@ -341,8 +346,8 @@ export function useIssueCommandGroup(
               issues: target.issues,
               clearSelection: target.clearSelection,
             }),
-        },
-      );
+        });
+      }
     }
 
     return {
@@ -361,6 +366,7 @@ export function useIssueCommandGroup(
   }, [
     actions,
     activeQuickActions.length,
+    deletable,
     onDeletedFallbackPath,
     palette,
     queryClient,

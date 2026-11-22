@@ -444,6 +444,130 @@ func TestGuestMayDeleteOwnCommentKeepingReplies(t *testing.T) {
 	}
 }
 
+// A guest takes back an Unsubscribe & archive from its Inbox, on an issue in
+// its project only.
+func TestGuestUndoesItsUnsubscribe(t *testing.T) {
+	f := newGuestFixture(t)
+	t.Cleanup(func() {
+		dbfx.Exec(t, `DELETE FROM issue_subscriber WHERE issue_id IN ($1, $2)`, f.sharedIssue, f.otherIssue)
+	})
+	dbfx.Exec(t, `INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason) VALUES ($1, 'member', $2, 'commenter')`,
+		f.sharedIssue, f.guest)
+	post := func(h http.HandlerFunc, issue, suffix string) *testutil.Response {
+		t.Helper()
+		return guestRequest(t, h, f.guest, http.MethodPost, "/api/issues/"+issue+suffix, nil, "id", issue)
+	}
+
+	post(testHandler.UnsubscribeFromIssue, f.sharedIssue, "/unsubscribe").Want(http.StatusOK)
+	var body map[string]any
+	post(testHandler.UndoUnsubscribeFromIssue, f.sharedIssue, "/unsubscribe/undo").Want(http.StatusOK).JSON(&body)
+	if body["reason"] != "commenter" {
+		t.Fatalf("guest undo answered %v, want its commenter subscription back", body)
+	}
+	post(testHandler.UndoUnsubscribeFromIssue, f.otherIssue, "/unsubscribe/undo").Want(http.StatusNotFound)
+}
+
+// A guest's Unsubscribe & archive may take the sub-issues too, for itself
+// only, and on an issue in its project only.
+func TestGuestUnsubscribesItselfFromASubtree(t *testing.T) {
+	f := newGuestFixture(t)
+	child := dbfx.Issue(t, f.marker+" child", testutil.Cols{"project_id": f.shared, "parent_issue_id": f.sharedIssue})
+	t.Cleanup(func() {
+		dbfx.Exec(t, `DELETE FROM issue_subscriber WHERE issue_id IN ($1, $2)`, f.sharedIssue, child)
+	})
+	for _, issue := range []string{f.sharedIssue, child} {
+		for _, user := range []string{f.guest, testUserID} {
+			dbfx.Exec(t, `INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason) VALUES ($1, 'member', $2, 'commenter')`, issue, user)
+		}
+	}
+	subscribed := func(issue, user string) bool {
+		t.Helper()
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM issue_subscriber
+			WHERE issue_id = $1 AND user_type = 'member' AND user_id = $2 AND unsubscribed_at IS NULL`, issue, user).Scan(&n)
+		return n > 0
+	}
+	post := func(issue string, body any) *testutil.Response {
+		t.Helper()
+		return guestRequest(t, testHandler.UnsubscribeFromIssueSubtree, f.guest, http.MethodPost,
+			"/api/issues/"+issue+"/unsubscribe/subtree", body, "id", issue)
+	}
+
+	post(f.sharedIssue, map[string]string{"user_id": testUserID, "user_type": "member"}).Want(http.StatusForbidden)
+	if !subscribed(f.sharedIssue, testUserID) || !subscribed(child, testUserID) {
+		t.Fatal("a guest's subtree unsubscribe took a member's subscriptions")
+	}
+	post(f.otherIssue, nil).Want(http.StatusNotFound)
+	post(f.sharedIssue, nil).Want(http.StatusOK)
+	if subscribed(f.sharedIssue, f.guest) || subscribed(child, f.guest) {
+		t.Fatal("the guest is still subscribed to the tree it left")
+	}
+}
+
+// A guest subscribes and unsubscribes itself only: subscribing a member
+// notifies them, and unsubscribing one hides replies and mentions from them.
+// A member may still change anyone's subscription.
+func TestGuestChangesOnlyItsOwnSubscription(t *testing.T) {
+	f := newGuestFixture(t)
+	agent := dbfx.Agent(t, f.marker+" watcher", "")
+	t.Cleanup(func() {
+		dbfx.Exec(t, `DELETE FROM issue_subscriber WHERE issue_id = $1`, f.sharedIssue)
+	})
+	subscribed := func(userType, user string) bool {
+		t.Helper()
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM issue_subscriber
+			WHERE issue_id = $1 AND user_type = $2 AND user_id = $3 AND unsubscribed_at IS NULL`,
+			f.sharedIssue, userType, user).Scan(&n)
+		return n > 0
+	}
+	post := func(h http.HandlerFunc, suffix string, body any) *testutil.Response {
+		t.Helper()
+		return guestRequest(t, h, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+suffix, body, "id", f.sharedIssue)
+	}
+	target := func(userType, user string) map[string]string {
+		return map[string]string{"user_id": user, "user_type": userType}
+	}
+
+	post(testHandler.SubscribeToIssue, "/subscribe", target("member", testUserID)).Want(http.StatusForbidden)
+	post(testHandler.SubscribeToIssue, "/subscribe", target("agent", agent)).Want(http.StatusForbidden)
+	if subscribed("member", testUserID) || subscribed("agent", agent) {
+		t.Fatal("a guest subscribed someone else")
+	}
+
+	dbfx.Exec(t, `INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason) VALUES ($1, 'member', $2, 'commenter')`,
+		f.sharedIssue, testUserID)
+	post(testHandler.UnsubscribeFromIssue, "/unsubscribe", target("member", testUserID)).Want(http.StatusForbidden)
+	if !subscribed("member", testUserID) {
+		t.Fatal("a guest unsubscribed a member")
+	}
+
+	post(testHandler.SubscribeToIssue, "/subscribe", target("member", f.guest)).Want(http.StatusOK)
+	if !subscribed("member", f.guest) {
+		t.Fatal("the guest could not subscribe itself")
+	}
+	post(testHandler.UnsubscribeFromIssue, "/unsubscribe", target("member", strings.ToUpper(f.guest))).Want(http.StatusOK)
+	if subscribed("member", f.guest) {
+		t.Fatal("the guest could not unsubscribe itself")
+	}
+
+	asMember := withURLParams(newRequest(http.MethodPost, "/api/issues/"+f.sharedIssue+"/subscribe",
+		target("member", f.guest)), "id", f.sharedIssue)
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.SubscribeToIssue), asMember).Want(http.StatusOK)
+	if !subscribed("member", f.guest) {
+		t.Fatal("a member could not subscribe someone else")
+	}
+}
+
+// A guest settles the auto-archive prompt its Inbox shows it.
+func TestGuestResolvesAutoArchivePrompt(t *testing.T) {
+	f := newGuestFixture(t)
+	guestRequest(t, testHandler.ResolveAutoArchivePrompt, f.guest, http.MethodPost,
+		"/api/notification-preferences/auto-archive-prompt",
+		map[string]any{"preferences": map[string]string{"auto_archive_completed": "all"}}).
+		Want(http.StatusOK)
+}
+
 // --- Local search after losing access --------------------------------------
 
 func searchChangesAs(t *testing.T, userID, cursor string) *testutil.Response {

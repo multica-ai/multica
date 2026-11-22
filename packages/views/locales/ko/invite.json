@@ -20,7 +20,7 @@
     "title": "대기 중인 초대가 없습니다",
     "hint": "내 워크스페이스 설정을 계속하세요.",
     "continue": "설정 계속하기",
-    "go_to_dashboard": "대시보드로 이동"
+    "go_to_dashboard": "워크스페이스로 이동"
   },
   "linked": {
     "not_found": "초대가 만료되었거나 취소되었거나, 현재 계정에 해당하지 않을 수 있습니다.",
@@ -38,7 +38,7 @@
     "invalid": "유효하지 않거나 만료된 초대 링크입니다.",
     "joined_title": "참가했습니다",
     "redirecting": "워크스페이스로 이동하는 중...",
-    "error_title": "문제가 발생했습니다",
+    "error_title": "초대를 열 수 없습니다",
     "go_home": "홈으로",
     "loading": "초대 정보를 불러오는 중...",
     "title": "{{workspace}}에 초대되었습니다",

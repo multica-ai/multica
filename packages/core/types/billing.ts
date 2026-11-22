@@ -219,6 +219,8 @@ export interface WorkspaceSubscriptionEntitlements {
     autopilotRuns: WorkspaceEntitlementLimit;
     /** Attachment storage in bytes (MUL-9489); absent from older Cloud. */
     storageBytes?: WorkspaceEntitlementLimit | null;
+    /** Dashboard history range in days. Null when Cloud did not send it. */
+    dashboardHistoryDays?: WorkspaceEntitlementLimit | null;
   };
   currentPeriodEnd: string | null;
   snapshotExpiresAt: string | null;
@@ -342,7 +344,21 @@ export interface WorkspaceSubscriptionPrices {
    * on a cloud that predates add-ons.
    */
   autopilotAddon: WorkspaceAutopilotAddonPrice | null;
+  /**
+   * Each plan's limits, from the same configuration Cloud enforces. Null when
+   * Cloud did not send them (an older Cloud) or they could not be read.
+   */
+  planLimits?: WorkspacePlanLimits | null;
 }
+
+export type WorkspacePlanLimitPlan = "free" | WorkspaceSubscriptionPaidPlan;
+
+export interface WorkspacePlanLimit {
+  /** Calendar days the dashboard can read on this plan; null when unknown. */
+  dashboardHistoryDays: number | null;
+}
+
+export type WorkspacePlanLimits = Record<WorkspacePlanLimitPlan, WorkspacePlanLimit>;
 
 /** Autopilot runs bought this month, valid until the month ends. */
 export interface WorkspaceAutopilotAddonSummary {
@@ -526,6 +542,19 @@ export type WorkspaceFeatureState = "available" | "locked";
 
 export interface WorkspaceFeatures {
   features: Partial<Record<PaidFeature, WorkspaceFeatureState>>;
+  /**
+   * Numeric plan limits the server applies. The API client always fills it;
+   * optional so hand-built values (tests, older caches) need not.
+   */
+  limits?: WorkspaceFeatureLimits;
+}
+
+export interface WorkspaceFeatureLimits {
+  /**
+   * How many calendar days back the dashboard can read (MUL-9490). Null when
+   * nothing is enforced: off, observed, or self-hosted.
+   */
+  dashboardHistoryDays: number | null;
 }
 
 /**

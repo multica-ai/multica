@@ -301,17 +301,18 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A joiner who also holds a pending email invitation takes the slot that
-	// invitation reserved, exactly as accepting it would.
+	// invitation reserved, exactly as accepting it would. A guest invitation
+	// reserves no slot (CountWorkspaceMemberSlots), so it holds none to take.
 	holdsInvitation := false
 	if h.Entitlements != nil {
-		_, pendingErr := h.Queries.GetPendingInvitationByEmail(r.Context(), db.GetPendingInvitationByEmailParams{
+		pending, pendingErr := h.Queries.GetPendingInvitationByEmail(r.Context(), db.GetPendingInvitationByEmailParams{
 			WorkspaceID: linkPreview.WorkspaceID, InviteeEmail: strings.ToLower(user.Email),
 		})
 		if pendingErr != nil && !errors.Is(pendingErr, pgx.ErrNoRows) {
 			writeError(w, http.StatusInternalServerError, "failed to join workspace")
 			return
 		}
-		holdsInvitation = pendingErr == nil
+		holdsInvitation = pendingErr == nil && roleTakesMemberSlot(pending.Role)
 	}
 	memberLimit, err := h.memberLimitFor(r.Context(), linkPreview.WorkspaceID, linkPreview.Role, holdsInvitation)
 	if err != nil {
@@ -402,9 +403,10 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A joiner whose pending invitation was settled above takes the slot that
-	// invitation held, as accepting it would; otherwise the join is a new slot.
-	memberLimit.reserved = settledInvitationID.Valid
+	// A joiner whose pending member invitation was settled above takes the
+	// slot that invitation held, as accepting it would; otherwise the join is
+	// a new slot.
+	memberLimit.reserved = settledInvitationID.Valid && roleTakesMemberSlot(pendingInv.Role)
 	limitAdmission, err := memberLimit.admit(r.Context(), qtx)
 	if err != nil {
 		_ = tx.Rollback(r.Context())

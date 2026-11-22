@@ -1,10 +1,10 @@
-import {
-  preprocessLinks,
-  preprocessMentionShortcodes,
-  preprocessFileCards,
-  preprocessIssueIdentifiers,
-} from "@multica/ui/markdown";
-import { stripChannelMediaMarkers } from "@multica/core/types";
+// Submodule imports, not the `@multica/ui/markdown` barrel: the collaboration
+// server runs this in Node, and the barrel pulls in React renderers and CSS.
+import { preprocessLinks } from "@multica/ui/markdown/linkify";
+import { preprocessMentionShortcodes } from "@multica/ui/markdown/mentions";
+import { preprocessFileCards } from "@multica/ui/markdown/file-cards";
+import { preprocessIssueIdentifiers } from "@multica/ui/markdown/issue-identifiers";
+import { stripChannelMediaMarkers } from "@multica/core/types/attachment-url";
 
 /**
  * Preprocess a markdown string before loading into Tiptap via contentType: 'markdown'.

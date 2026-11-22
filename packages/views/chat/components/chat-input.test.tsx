@@ -1839,7 +1839,7 @@ describe("ChatInput commit handoff", () => {
     // Editor untouched — it now shows the session the user navigated to.
     expect(editorState.cleared).toBe(0);
     expect(editorState.blurred).toBe(0);
-    // …but the sent session's persisted draft is cleared regardless.
+    // ...but the sent session's persisted draft is cleared regardless.
     expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__");
     // And the caret must NOT be pulled into an editor that is showing someone
     // else's draft: refocus is bound to having actually scrubbed the document.
@@ -1940,7 +1940,7 @@ describe("ChatInput revoked-access placeholder", () => {
   it("leaves the normal placeholder alone when access is intact", () => {
     renderInput({ agentName: "Multica" });
 
-    expect(editorProps.last?.placeholder).toBe("Message Multica…");
+    expect(editorProps.last?.placeholder).toBe("Message Multica...");
   });
 });
 

@@ -38,6 +38,7 @@ const SPACE_BY_SEGMENT: Record<string, AppSpaceId> = {
   members: "team",
   skills: "team",
   docs: "docs",
+  apps: "team",
   runtimes: "team",
   usage: "team",
   chat: "chat",

@@ -503,7 +503,19 @@ describe("createElectronBusyInstallPrompt", () => {
       buttons: ["Install now", "Cancel"],
       defaultId: 1,
       cancelId: 1,
-      message: "2 agent tasks are running on this computer.",
+      message: "2 runs are active on this device.",
+    }));
+  });
+
+  it("localizes the busy-install dialog for non-English OS locales", async () => {
+    const showMessageBox = vi.fn(async () => ({ response: 1 }));
+    await expect(
+      createElectronBusyInstallPrompt(showMessageBox, () => "zh-CN")(2),
+    ).resolves.toBe(false);
+    expect(showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      title: "安装更新",
+      buttons: ["立即安装", "取消"],
+      message: "此设备上有 2 次运行尚未结束。",
     }));
   });
 });

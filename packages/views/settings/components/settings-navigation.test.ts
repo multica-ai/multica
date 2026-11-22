@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { movedAppsHref, resolveSettingsLocation, settingsHref } from "./settings-navigation";
 
 const resolve = (search: string) =>
   resolveSettingsLocation(new URLSearchParams(search));
@@ -61,19 +61,48 @@ describe("settings location", () => {
   });
 
   it.each(["connected=notion", "error=composio_connect_failed"])(
-    "sends the Composio OAuth callback (%s) to Connected apps",
+    "sends the legacy personal Composio callback (%s) to the Apps page's Accounts",
     (callback) => {
-      expect(resolve(`tab=integrations&${callback}`).tab).toBe("apps");
+      expect(resolve(`tab=integrations&${callback}`)).toEqual({ tab: "apps", section: "accounts", integration: null });
     },
   );
 
-  it("lands a team connect refused by the plan on Connected apps", () => {
+  it("lands a team connect refused by the plan on the Apps page", () => {
     expect(
       resolve("tab=apps&error=composio_connect_failed&reason=feature_locked&scope=team"),
     ).toEqual({ tab: "apps", section: null, integration: null });
     expect(
       resolve("tab=integrations&error=composio_connect_failed&reason=feature_locked").tab,
     ).toBe("apps");
+  });
+
+  it.each([
+    ["tab=apps", null],
+    ["tab=apps&connected=gmail", "accounts"],
+    ["tab=apps&error=composio_connect_failed", "accounts"],
+    ["tab=apps&connected=gmail&scope=team", null],
+    ["tab=apps&error=composio_connect_failed&scope=team", null],
+    ["tab=apps&error=something_else", null],
+    ["tab=accounts", "accounts"],
+    ["tab=connected-accounts", "accounts"],
+  ])("routes %s to the Apps page (tab %s)", (search, section) => {
+    expect(resolve(search)).toEqual({ tab: "apps", section, integration: null });
+  });
+
+  it("keeps only the connect result when a settings link moves to the Apps page", () => {
+    expect(movedAppsHref("/acme/apps", new URLSearchParams("tab=apps"))).toBe("/acme/apps");
+    expect(
+      movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&connected=notion&scope=team&section=x")),
+    ).toBe("/acme/apps?connected=notion");
+    expect(
+      movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&error=composio_connect_failed&scope=team")),
+    ).toBe("/acme/apps?error=composio_connect_failed");
+    expect(
+      movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&error=composio_connect_failed&reason=feature_locked&scope=team")),
+    ).toBe("/acme/apps?error=composio_connect_failed&reason=feature_locked");
+    expect(
+      movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&connected=gmail"), "accounts"),
+    ).toBe("/acme/apps?tab=accounts&connected=gmail");
   });
 
   it("passes current pages and anchors through untouched", () => {

@@ -591,7 +591,7 @@ describe("AgentTranscriptDialog", () => {
   it("narrows the list to steps matching the search", () => {
     renderDialog();
 
-    fireEvent.change(screen.getByLabelText("Search this run…"), {
+    fireEvent.change(screen.getByLabelText("Search this run..."), {
       target: { value: "pnpm" },
     });
 
@@ -1066,7 +1066,7 @@ describe("AgentTranscriptDialog — reason vs raw diagnostics", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "运行详情" }));
 
-    expect(screen.getByText("原始诊断")).toBeInTheDocument();
+    expect(screen.getByText("技术详情")).toBeInTheDocument();
     expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
     // The diagnostic itself is not translated — it is the runner's own output.
     // Keeping it readable is the point; presenting it as the reason is not.

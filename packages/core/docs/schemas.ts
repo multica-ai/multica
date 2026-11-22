@@ -135,6 +135,10 @@ export const DocVersionSchema = z
     action_ref: z.number().nullable().default(null),
     task_id: z.string().nullable().default(null),
     issue_id: z.string().nullable().default(null),
+    contributors: z
+      .array(z.object({ type: actor, id: z.string() }))
+      .catch([])
+      .default([]),
     created_at: z.string(),
     updated_at: z.string(),
     content: z.string().optional(),
@@ -150,6 +154,7 @@ export const DocVersionSchema = z
     actionRef: d.action_ref,
     taskId: d.task_id,
     issueId: d.issue_id,
+    contributors: d.contributors,
     createdAt: d.created_at,
     updatedAt: d.updated_at,
     content: d.content,
@@ -157,3 +162,22 @@ export const DocVersionSchema = z
 export const DocVersionListSchema = z.object({
   versions: z.array(DocVersionSchema),
 });
+export const DocCollabTicketSchema = z
+  .object({
+    enabled: z.boolean(),
+    token: z.string().optional(),
+    document: z.string().optional(),
+    expires_at: z.string().optional(),
+    state: z.string().optional(),
+  })
+  .transform((t) =>
+    t.enabled && t.token && t.document
+      ? {
+          enabled: true as const,
+          token: t.token,
+          document: t.document,
+          expiresAt: t.expires_at ?? "",
+          ...(t.state ? { state: t.state } : {}),
+        }
+      : { enabled: false as const },
+  );
