@@ -3,13 +3,16 @@ package service
 import (
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
 	"mime"
 	"mime/quotedprintable"
 	"net"
 	"net/smtp"
+	"net/textproto"
 	"os"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -94,18 +97,27 @@ func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 }
 
 func smtpAuthWithFallback(c smtpAuthClient, host, username, password string) (bool, error) {
+	ok, authLine := c.Extension("AUTH")
+	mechs := strings.Fields(strings.ToUpper(authLine))
+	supportsLogin := ok && slices.Contains(mechs, "LOGIN")
+	if supportsLogin && !slices.Contains(mechs, "PLAIN") {
+		return false, c.Auth(&loginAuth{username: username, password: password, host: host})
+	}
+
 	plainErr := c.Auth(smtp.PlainAuth("", username, password, host))
 	if plainErr == nil {
 		return false, nil
 	}
 
-	msg := strings.ToLower(plainErr.Error())
-	if !strings.Contains(msg, "unrecognized authentication type") && !strings.Contains(msg, "504 5.7.4") {
+	// 504 is the RFC 4954 reply for an unsupported mechanism; providers word
+	// its text differently, so match the code rather than the message.
+	var tpErr *textproto.Error
+	is504 := errors.As(plainErr, &tpErr) && tpErr.Code == 504
+	if !is504 && !strings.Contains(strings.ToLower(plainErr.Error()), "unrecognized authentication type") {
 		return false, plainErr
 	}
 
-	ok, authLine := c.Extension("AUTH")
-	if !ok || !strings.Contains(strings.ToUpper(authLine), "LOGIN") {
+	if !supportsLogin {
 		return false, plainErr
 	}
 	return true, plainErr
