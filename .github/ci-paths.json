@@ -19,6 +19,10 @@
   ],
   "docs": [
     "apps/docs/**",
+    "server/internal/daemon/agents_probe.go",
+    "server/internal/daemon/config.go",
+    "server/pkg/agent/builtin_runtimes.go",
+    "server/internal/featureflags/keys.go",
     "package.json",
     ".npmrc",
     "pnpm-lock.yaml",
