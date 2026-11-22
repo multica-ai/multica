@@ -504,6 +504,61 @@ func TestGuestUnsubscribesItselfFromASubtree(t *testing.T) {
 	}
 }
 
+// A guest subscribes and unsubscribes itself only: subscribing a member
+// notifies them, and unsubscribing one hides replies and mentions from them.
+// A member may still change anyone's subscription.
+func TestGuestChangesOnlyItsOwnSubscription(t *testing.T) {
+	f := newGuestFixture(t)
+	agent := dbfx.Agent(t, f.marker+" watcher", "")
+	t.Cleanup(func() {
+		dbfx.Exec(t, `DELETE FROM issue_subscriber WHERE issue_id = $1`, f.sharedIssue)
+	})
+	subscribed := func(userType, user string) bool {
+		t.Helper()
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM issue_subscriber
+			WHERE issue_id = $1 AND user_type = $2 AND user_id = $3 AND unsubscribed_at IS NULL`,
+			f.sharedIssue, userType, user).Scan(&n)
+		return n > 0
+	}
+	post := func(h http.HandlerFunc, suffix string, body any) *testutil.Response {
+		t.Helper()
+		return guestRequest(t, h, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+suffix, body, "id", f.sharedIssue)
+	}
+	target := func(userType, user string) map[string]string {
+		return map[string]string{"user_id": user, "user_type": userType}
+	}
+
+	post(testHandler.SubscribeToIssue, "/subscribe", target("member", testUserID)).Want(http.StatusForbidden)
+	post(testHandler.SubscribeToIssue, "/subscribe", target("agent", agent)).Want(http.StatusForbidden)
+	if subscribed("member", testUserID) || subscribed("agent", agent) {
+		t.Fatal("a guest subscribed someone else")
+	}
+
+	dbfx.Exec(t, `INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason) VALUES ($1, 'member', $2, 'commenter')`,
+		f.sharedIssue, testUserID)
+	post(testHandler.UnsubscribeFromIssue, "/unsubscribe", target("member", testUserID)).Want(http.StatusForbidden)
+	if !subscribed("member", testUserID) {
+		t.Fatal("a guest unsubscribed a member")
+	}
+
+	post(testHandler.SubscribeToIssue, "/subscribe", target("member", f.guest)).Want(http.StatusOK)
+	if !subscribed("member", f.guest) {
+		t.Fatal("the guest could not subscribe itself")
+	}
+	post(testHandler.UnsubscribeFromIssue, "/unsubscribe", target("member", strings.ToUpper(f.guest))).Want(http.StatusOK)
+	if subscribed("member", f.guest) {
+		t.Fatal("the guest could not unsubscribe itself")
+	}
+
+	asMember := withURLParams(newRequest(http.MethodPost, "/api/issues/"+f.sharedIssue+"/subscribe",
+		target("member", f.guest)), "id", f.sharedIssue)
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.SubscribeToIssue), asMember).Want(http.StatusOK)
+	if !subscribed("member", f.guest) {
+		t.Fatal("a member could not subscribe someone else")
+	}
+}
+
 // A guest settles the auto-archive prompt its Inbox shows it.
 func TestGuestResolvesAutoArchivePrompt(t *testing.T) {
 	f := newGuestFixture(t)

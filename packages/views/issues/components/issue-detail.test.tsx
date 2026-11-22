@@ -94,7 +94,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "members"],
-    queryFn: () => Promise.resolve([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
+    queryFn: () => mockApiObj.listMembers(),
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
@@ -4610,6 +4610,30 @@ describe("IssueDetail (shared)", () => {
         ),
       );
     });
+  });
+
+  // A guest changes only its own subscription (MUL-9869): it sees who follows
+  // the issue, but gets no picker that would subscribe someone else.
+  it("shows a guest the subscribers without the picker", async () => {
+    mockApiObj.listMembers.mockResolvedValue([
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "guest" },
+    ]);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([
+      {
+        issue_id: "issue-1",
+        user_type: "agent" as const,
+        user_id: "agent-1",
+        reason: "manual" as const,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    renderIssueDetail();
+
+    expect(await screen.findByText("Subscribe")).toBeTruthy();
+    const header = (await screen.findByText("Activity")).parentElement?.parentElement;
+    await waitFor(() => expect(header?.querySelector('[data-slot="avatar-group"]')).not.toBeNull());
+    expect(header?.querySelector('[data-trigger="popover"]')).toBeNull();
+    document.body.innerHTML = "";
   });
 
   it("keeps the initial assignment block before a later mention and its run (MUL-7632)", async () => {
