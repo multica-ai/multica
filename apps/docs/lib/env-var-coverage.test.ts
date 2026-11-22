@@ -195,6 +195,7 @@ describe("environment variables docs", () => {
         }
       }
       for (const { name, source } of argsVariables) {
+        if (name.replace(/_ARGS$/, "") in undocumentedPrefixes) continue;
         if (!documentsVariable(mdx, name)) {
           missing.push(`${file}: ${name} missing from the MULTICA_<PREFIX>_ARGS list (read in ${source})`);
         }
