@@ -80,6 +80,7 @@ Installed desktop clients may talk to newer backends. Preserve response compatib
 - Every migration-created index, including indexes on new tables, uses `CREATE [UNIQUE] INDEX CONCURRENTLY`. Each concurrent index build gets its own single-statement migration file; the runner executes files outside an explicit transaction.
 - Register every concurrent index build in `server/cmd/migrate/main.go` so an interrupted build's INVALID index is dropped before retry: up-direction builds in `concurrentIndexCleanups`, down-direction rebuilds in `concurrentDownIndexCleanups` (version → index name).
 - Before pushing a migration, rebase onto the latest `origin/main`, number it as the current highest prefix plus one, and run `go test ./cmd/migrate ./internal/migrations` from `server/`.
+- A PR's green CI covers only the main it ran against; main can take the same number later without a textual conflict. Right before merging a PR that adds migrations, run `git fetch origin main` and `node scripts/check-migration-numbers.mjs --head <PR head>`. A failing check, or a failing `Migration numbers vs latest main` status on the PR, means renumber first, never merge as is.
 - Conditionally skipped migrations are still recorded in `schema_migrations`. Later DDL touching conditional objects must be idempotent (`IF EXISTS` / `IF NOT EXISTS`); document recovery if the missing object would break runtime behavior.
 
 ## Row Lock Order
