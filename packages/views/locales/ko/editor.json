@@ -118,8 +118,6 @@
     "html_preview": "HTML 미리보기",
     "close_preview": "닫기",
     "copy_code": "코드 복사",
-    "show_preview": "미리보기 표시",
-    "show_source": "소스 보기",
     "fullscreen": "전체 화면"
   },
   "dynamic_block": {
@@ -133,7 +131,10 @@
     "error_mermaid": "이 다이어그램을 그릴 수 없습니다",
     "error_at_line": "{{message}} ({{line}}행)",
     "view_source": "소스 보기",
-    "copy_error": "오류 복사"
+    "copy_error": "오류 복사",
+    "title": "제목",
+    "rename": "이름 바꾸기",
+    "add_title": "제목 추가"
   },
   "file_card": {
     "uploading": "{{filename}} 업로드 중"

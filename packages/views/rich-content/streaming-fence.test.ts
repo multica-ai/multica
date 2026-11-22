@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { computeClosedFences, parseFenceTitle } from "./streaming-fence";
+import { computeClosedFences } from "./streaming-fence";
 
 const isClosed = (src: string, offset = 0): boolean =>
   computeClosedFences(src).has(offset);
@@ -110,14 +110,5 @@ describe("fence titles", () => {
 
   it("has no title when the info string carries none", () => {
     expect(computeClosedFences("```html\n<b>x</b>\n```\n").get(0)).toEqual({ title: null });
-  });
-
-  it("accepts double, single and bare values", () => {
-    expect(parseFenceTitle('title="Weekly p95" theme=dark')).toBe("Weekly p95");
-    expect(parseFenceTitle("title='Sign-up funnel'")).toBe("Sign-up funnel");
-    expect(parseFenceTitle("title=Funnel")).toBe("Funnel");
-    expect(parseFenceTitle('subtitle="nope"')).toBeNull();
-    expect(parseFenceTitle('title="  "')).toBeNull();
-    expect(parseFenceTitle(null)).toBeNull();
   });
 });

@@ -125,8 +125,6 @@
     "html_preview": "HTML 预览",
     "close_preview": "关闭",
     "copy_code": "复制代码",
-    "show_preview": "显示预览",
-    "show_source": "显示源码",
     "fullscreen": "全屏"
   },
   "dynamic_block": {
@@ -140,7 +138,10 @@
     "error_mermaid": "无法绘制这张图",
     "error_at_line": "{{message}}（第 {{line}} 行）",
     "view_source": "查看源码",
-    "copy_error": "复制错误"
+    "copy_error": "复制错误",
+    "title": "标题",
+    "rename": "重命名",
+    "add_title": "添加标题"
   },
   "file_card": {
     "uploading": "正在上传 {{filename}}"
