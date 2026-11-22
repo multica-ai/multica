@@ -33,6 +33,7 @@ export type RouteIconName =
   | "Monitor"
   | "Server"
   | "BookOpenText"
+  | "Globe"
   | "Settings"
   | "File"
   | "FileText"
