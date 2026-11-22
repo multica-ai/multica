@@ -28,6 +28,7 @@ import {
   RotateCw,
 } from "@multica/ui/icons";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { useReducedMotion } from "@multica/core/appearance";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
@@ -65,6 +66,8 @@ import { ChatWakeupCards, ChatWakeupDivider, useWakeupsBySourceTask } from "./ch
 
 // ─── Public component ────────────────────────────────────────────────────
 
+export type ChatMessageEnterTransition = "next" | "prev" | "fade";
+
 interface ChatMessageListProps {
   /** Pause bottom-stick effects while a closing floating window fades out. */
   active?: boolean;
@@ -74,6 +77,13 @@ interface ChatMessageListProps {
    * (stick-to-bottom.ts). Omit to pay the settle on every mount.
    */
   revealKey?: string | null;
+  /**
+   * Subtle reveal transition played once the list has landed at the live end
+   * (`hasReachedLiveEnd`): directional glide for archive-advance (`"next"` /
+   * `"prev"`), or gentle opacity fade for direct session switches (`"fade"`).
+   * Respects `prefers-reduced-motion` by degrading directional glides to fade.
+   */
+  enterTransition?: ChatMessageEnterTransition | null;
   /** The list became visible to the reader — on reveal, and on each reactivation after it. */
   onRevealed?: () => void;
   messages: ChatMessage[];
@@ -196,6 +206,7 @@ const LIST_COMPONENTS: Components<ChatRenderItem, ChatListContext> = {
 export function ChatMessageList({
   active = true,
   revealKey = null,
+  enterTransition = null,
   onRevealed,
   messages,
   pendingTask,
@@ -237,6 +248,17 @@ export function ChatMessageList({
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
+  const reduceMotion = useReducedMotion();
+  const enterClass =
+    hasReachedLiveEnd && enterTransition
+      ? reduceMotion
+        ? "animate-chat-enter-fade"
+        : enterTransition === "next"
+          ? "animate-chat-enter-next"
+          : enterTransition === "prev"
+            ? "animate-chat-enter-prev"
+            : "animate-chat-enter-fade"
+      : undefined;
 
   const pendingTaskId = pendingTask?.task_id ?? null;
   const wakeupsBySourceTask = useWakeupsBySourceTask(wakeups);
@@ -366,9 +388,11 @@ export function ChatMessageList({
      *  pinned above the composer instead of scrolling with the rows. */}
     <div ref={annotations?.cardRef} {...annotations?.captureProps} className="relative flex min-h-0 flex-1 flex-col">
     {annotations?.popup}
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
+      data-chat-enter-transition={hasReachedLiveEnd && enterTransition ? (reduceMotion ? "fade" : enterTransition) : undefined}
       style={fadeStyle}
       // The gutter lives on the scroll container, so it applies once to the
       // whole list — rows, header, footer — and the scrollbar still rides the
@@ -377,7 +401,7 @@ export function ChatMessageList({
       // container paints nothing for that whole window anyway — the rows are
       // not measured yet — so this costs no visible time and spares the
       // reader a frame of the wrong messages (see stick-to-bottom.ts).
-      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible")}
+      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible", enterClass)}
     >
       {/* Already inside the gutter + column, so this pre-mount frame renders the
        *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
@@ -457,6 +481,7 @@ export function ChatMessageList({
       />
       </RichContentScrollRootProvider>
       )}
+    </div>
     </div>
     {jumpToLiveEnd.visible && (
       <JumpToLiveEndButton
