@@ -179,6 +179,10 @@ func taskScopedAuthToken(task Task) (string, error) {
 	return token, nil
 }
 
+// taskMessageFlushInterval bounds how often live transcript chunks are batched
+// to the server. First visible output still flushes immediately via firstVisible.
+var taskMessageFlushInterval = 150 * time.Millisecond
+
 func taskMulticaEnvironment(task Task, provider, agentName, token, configRoot, workspacesRoot, serverURL string, healthPort, slot int, tempDir string) map[string]string {
 	env := map[string]string{
 		"MULTICA_TOKEN":        token,
@@ -446,6 +450,7 @@ type Daemon struct {
 	client     *Client
 	repoCache  repoCacheBackend
 	skillCache *SkillBundleCache
+	warmPool   *agent.WarmSessionPool
 	logger     *slog.Logger
 
 	// gitCALastErr is the last applyGitCACerts failure, so a persistent one
@@ -800,6 +805,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		client:                      client,
 		repoCache:                   repocache.New(cacheRoot, logger),
 		skillCache:                  NewSkillBundleCache(skillCacheRoot),
+		warmPool:                    agent.NewWarmSessionPoolFromEnv(logger),
 		logger:                      logger,
 		terminalReports:             newTerminalReportStore(cfg),
 		terminalReportWakeup:        make(chan struct{}, 1),
@@ -2110,6 +2116,11 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		}
 	}
 	defer healthLn.Close()
+	defer func() {
+		if d.warmPool != nil && !d.warmPool.Close() {
+			d.cleanupUnconfirmed.Store(true)
+		}
+	}()
 
 	agentNames := make([]string, 0, len(d.agents()))
 	for name := range d.agents() {
@@ -5547,6 +5558,9 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			// taskWG.Wait at a zero counter.
 			<-pollerDone
 			d.waitForTaskCleanup(&taskWG, 30*time.Second)
+			if d.warmPool != nil && !d.warmPool.Close() {
+				d.cleanupUnconfirmed.Store(true)
+			}
 			return ctx.Err()
 		case <-runtimeSetCh:
 			// The batch poller re-derives allRuntimeIDs() each cycle; nudge it to
@@ -9036,7 +9050,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopPrepareLease()
 	prepareComplete = true
 	cancelPrepare()
-	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
+	// Run best-effort pre-launch progress and context-receipt HTTP reports off
+	// the critical launch path so the provider process starts immediately
+	// without waiting for two synchronous API round trips (~1-1.5s). Wait for
+	// them to drain before runTask returns so they never outlive the task.
+	var preLaunchWG sync.WaitGroup
+	defer preLaunchWG.Wait()
+	preLaunchWG.Add(1)
+	go func(reqCtx context.Context) {
+		defer preLaunchWG.Done()
+		progressCtx, progressCancel := context.WithTimeout(reqCtx, 5*time.Second)
+		defer progressCancel()
+		_ = d.client.ReportProgress(progressCtx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
+	}(ctx)
 
 	taskCtx = execenv.ApplyPreparedSkillNames(taskCtx, env.PreparedSkillNames)
 	// usesCustomProfileCommand is the same provenance the backend receives as
@@ -9208,7 +9234,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
 		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
 	}
-	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
+	codexShellEnv := agentEnv
+	if provider == "codex" && d.warmPool != nil {
+		// Ensure Codex's managed shell_environment_policy allowlist permits
+		// MULTICA_TASK_ENV_FILE so warm pooled sessions can deliver fresh
+		// per-turn credentials to `multica` CLI subprocesses.
+		codexShellEnv = make(map[string]string, len(agentEnv)+1)
+		for k, v := range agentEnv {
+			codexShellEnv[k] = v
+		}
+		codexShellEnv[agent.TaskEnvFileEnv] = "1"
+	}
+	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), codexShellEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
 	}
 	// The overlay is authoritative once built, so nothing on the command line
@@ -9242,6 +9279,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		DaemonVersion:  d.cfg.CLIVersion,
 		CodexVersion:   codexVersion,
 		BuiltinRuntime: !usesCustomProfileCommand,
+		WarmPool:       d.warmPool,
 	}
 	if hermesOverlayActive {
 		// Retire an owner left by a crashed/interrupted daemon before it can
@@ -9391,6 +9429,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		OpenclawModelOverride:  openclawModelOverride,
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
+		WarmPoolBriefHash:      agent.HashWarmBrief(runtimeBrief),
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -9482,7 +9521,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		Skills:               env.SkillReceipts(provider, taskCtx.AgentSkills),
 		ExistingInstructions: execenv.ExistingRuntimeConfigContent(env.WorkDir, provider),
 	}
-	d.reportContextReceipt(ctx, task.ID, buildContextReceipt(receiptInput), taskLog)
+	initialReceipt := buildContextReceipt(receiptInput)
+	preLaunchWG.Add(1)
+	go func(reqCtx context.Context) {
+		defer preLaunchWG.Done()
+		receiptCtx, receiptCancel := context.WithTimeout(reqCtx, 5*time.Second)
+		defer receiptCancel()
+		d.reportContextReceipt(receiptCtx, task.ID, initialReceipt, taskLog)
+	}(ctx)
 
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
@@ -9569,6 +9615,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		//     paragraph twice.
 		// task and taskCtx are local (runTask takes task by value), so these
 		// mutations only affect the retry.
+		if d.warmPool != nil && task.PriorSessionID != "" {
+			d.warmPool.Evict(provider, task.PriorSessionID)
+		}
 		execOpts.ResumeSessionID = ""
 		task.PriorSessionID = ""
 		task.PriorSessionResumeUnavailable = true
@@ -9587,6 +9636,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		freshPrompt, freshSkills := buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
 		execOpts.SkillInvocation = freshSkills
+		execOpts.WarmPoolBriefHash = agent.HashWarmBrief(runtimeBrief)
 
 		receiptInput.Prompt = freshPrompt
 		receiptInput.RuntimeBrief = freshBrief
@@ -9601,7 +9651,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		receiptInput.TaskCtx = taskCtx
 		receiptInput.Skills = env.SkillReceipts(provider, taskCtx.AgentSkills)
 		receiptInput.ExistingInstructions = execenv.ExistingRuntimeConfigContent(env.WorkDir, provider)
-		d.reportContextReceipt(ctx, task.ID, buildContextReceipt(receiptInput), taskLog)
+		retryReceipt := buildContextReceipt(receiptInput)
+		preLaunchWG.Add(1)
+		go func(reqCtx context.Context) {
+			defer preLaunchWG.Done()
+			receiptCtx, receiptCancel := context.WithTimeout(reqCtx, 5*time.Second)
+			defer receiptCancel()
+			d.reportContextReceipt(receiptCtx, task.ID, retryReceipt, taskLog)
+		}(ctx)
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, withPriorTaskUsage(execOpts, firstUsage), taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
@@ -10459,7 +10516,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			}
 		}
 
-		ticker := time.NewTicker(500 * time.Millisecond)
+		ticker := time.NewTicker(taskMessageFlushInterval)
 		defer ticker.Stop()
 
 		done := make(chan struct{})

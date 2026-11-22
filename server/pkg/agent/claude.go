@@ -58,6 +58,9 @@ type claudeBackend struct {
 }
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	if b.cfg.WarmPool != nil {
+		return b.executeWarm(ctx, prompt, opts)
+	}
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "claude"
@@ -304,6 +307,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}()
 
 		scanner := newAgentStreamScanner(stdout)
+		streamCoalescer := newClaudeStreamCoalescer(msgCh, nil)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -319,15 +323,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			eventCount++
 
 			switch msg.Type {
+			case "stream_event":
+				if msg.ParentToolUseID == "" {
+					streamCoalescer.handleEvent(msg.Event)
+				}
 			case "assistant":
 				assistantEventCount++
-				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
+				turn := b.handleAssistantWithStream(msg, msgCh, usage, seenUsage, streamCoalescer)
 				toolUseCount += turn.toolUses
 				if !turn.understood {
 					unreadableAssistantCount++
 				}
 				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
+				streamCoalescer.flushAll()
 				if b.handleUser(msg, msgCh) {
 					sawAsyncLaunch = true
 				}
@@ -341,6 +350,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
+				streamCoalescer.flushAll()
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
@@ -419,6 +429,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 			}
 		}
+		streamCoalescer.flushAll()
 		scanErr := scanner.Err()
 		if scanErr != nil {
 			// Scanner stopped consuming stdout. Close the pipe before Wait so a
@@ -553,14 +564,22 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}) assistantTurn {
+	return b.handleAssistantWithStream(msg, ch, usage, seenUsage, nil)
+}
+
+func (b *claudeBackend) handleAssistantWithStream(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}, coalescer *claudeStreamCoalescer) assistantTurn {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		// Unreadable body: understood stays false so the caller drops any
 		// fallback rather than let an older turn stand in for this one.
 		return assistantTurn{}
 	}
+	if coalescer != nil && msg.ParentToolUseID == "" {
+		coalescer.flushAll()
+	}
 	turn := assistantTurn{understood: true}
 	var assistantText strings.Builder
+	var assistantThinking strings.Builder
 	toolUseCount := 0
 
 	// A response can emit several assistant blocks with the same message ID
@@ -589,11 +608,16 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		case "text":
 			if block.Text != "" {
 				assistantText.WriteString(block.Text)
-				trySend(ch, Message{Type: MessageText, Content: block.Text})
+				if coalescer == nil || msg.ParentToolUseID != "" || !coalescer.hasStreamedText() {
+					trySend(ch, Message{Type: MessageText, Content: block.Text})
+				}
 			}
 		case "thinking":
 			if block.Thinking != "" {
-				trySend(ch, Message{Type: MessageThinking, Content: block.Thinking})
+				assistantThinking.WriteString(block.Thinking)
+				if coalescer == nil || msg.ParentToolUseID != "" || !coalescer.hasStreamedThinking() {
+					trySend(ch, Message{Type: MessageThinking, Content: block.Thinking})
+				}
 			}
 		case "tool_use":
 			toolUseCount++
@@ -615,9 +639,174 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 			turn.understood = false
 		}
 	}
+	if coalescer != nil && msg.ParentToolUseID == "" {
+		coalescer.reconcileAssistant(assistantText.String(), assistantThinking.String())
+	}
 	turn.text = assistantText.String()
 	turn.toolUses = toolUseCount
 	return turn
+}
+
+const (
+	claudeStreamFlushInterval  = 50 * time.Millisecond
+	claudeStreamAggregateBytes = agentStreamMaxLineBytes / 64
+)
+
+// claudeStreamCoalescer handles Anthropic SSE `stream_event` envelopes emitted
+// by `claude --include-partial-messages`, delivering the leading delta
+// immediately and coalescing subsequent tokens at claudeStreamFlushInterval.
+// When the matching `assistant` snapshot arrives, reconcileAssistant emits any
+// trailing suffix not already delivered and resets per-message state so zero
+// text is duplicated or dropped.
+type claudeStreamCoalescer struct {
+	ch  chan<- Message
+	now func() time.Time
+
+	streamedText     bool
+	deliveredText    strings.Builder
+	pendingText      strings.Builder
+	lastTextFlush    time.Time
+	streamedThinking bool
+	deliveredThink   strings.Builder
+	pendingThink     strings.Builder
+	lastThinkFlush   time.Time
+}
+
+func newClaudeStreamCoalescer(ch chan<- Message, now func() time.Time) *claudeStreamCoalescer {
+	if now == nil {
+		now = time.Now
+	}
+	return &claudeStreamCoalescer{ch: ch, now: now}
+}
+
+func (c *claudeStreamCoalescer) hasStreamedText() bool {
+	return c != nil && c.streamedText
+}
+
+func (c *claudeStreamCoalescer) hasStreamedThinking() bool {
+	return c != nil && c.streamedThinking
+}
+
+func (c *claudeStreamCoalescer) handleEvent(raw json.RawMessage) {
+	if c == nil || len(raw) == 0 {
+		return
+	}
+	var env struct {
+		Type  string `json:"type"`
+		Delta struct {
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Thinking string `json:"thinking"`
+		} `json:"delta"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return
+	}
+	switch env.Type {
+	case "message_start":
+		c.flushAll()
+		c.resetMessage()
+	case "content_block_delta":
+		switch env.Delta.Type {
+		case "text_delta":
+			if env.Delta.Text != "" {
+				c.appendText(env.Delta.Text)
+			}
+		case "thinking_delta":
+			if env.Delta.Thinking != "" {
+				c.appendThinking(env.Delta.Thinking)
+			}
+		}
+	case "content_block_stop", "message_stop":
+		c.flushAll()
+	}
+}
+
+func (c *claudeStreamCoalescer) appendText(delta string) {
+	firstDelta := !c.streamedText && c.pendingText.Len() == 0
+	c.streamedText = true
+	c.pendingText.WriteString(delta)
+	now := c.now()
+	if firstDelta || c.pendingText.Len() >= claudeStreamAggregateBytes || (!c.lastTextFlush.IsZero() && now.Sub(c.lastTextFlush) >= claudeStreamFlushInterval) {
+		c.flushText(now)
+	}
+}
+
+func (c *claudeStreamCoalescer) appendThinking(delta string) {
+	firstDelta := !c.streamedThinking && c.pendingThink.Len() == 0
+	c.streamedThinking = true
+	c.pendingThink.WriteString(delta)
+	now := c.now()
+	if firstDelta || c.pendingThink.Len() >= claudeStreamAggregateBytes || (!c.lastThinkFlush.IsZero() && now.Sub(c.lastThinkFlush) >= claudeStreamFlushInterval) {
+		c.flushThinking(now)
+	}
+}
+
+func (c *claudeStreamCoalescer) flushText(now time.Time) {
+	if c.pendingText.Len() == 0 {
+		return
+	}
+	chunk := c.pendingText.String()
+	if trySend(c.ch, Message{Type: MessageText, Content: chunk}) {
+		c.deliveredText.WriteString(chunk)
+		c.pendingText.Reset()
+		c.lastTextFlush = now
+	}
+}
+
+func (c *claudeStreamCoalescer) flushThinking(now time.Time) {
+	if c.pendingThink.Len() == 0 {
+		return
+	}
+	chunk := c.pendingThink.String()
+	if trySend(c.ch, Message{Type: MessageThinking, Content: chunk}) {
+		c.deliveredThink.WriteString(chunk)
+		c.pendingThink.Reset()
+		c.lastThinkFlush = now
+	}
+}
+
+func (c *claudeStreamCoalescer) flushAll() {
+	if c == nil {
+		return
+	}
+	now := c.now()
+	c.flushText(now)
+	c.flushThinking(now)
+}
+
+func (c *claudeStreamCoalescer) reconcileAssistant(fullText, fullThinking string) {
+	if c == nil {
+		return
+	}
+	if c.streamedText && fullText != "" {
+		delivered := c.deliveredText.String()
+		if len(fullText) > len(delivered) && strings.HasPrefix(fullText, delivered) {
+			if tail := fullText[len(delivered):]; tail != "" {
+				trySend(c.ch, Message{Type: MessageText, Content: tail})
+			}
+		}
+	}
+	if c.streamedThinking && fullThinking != "" {
+		delivered := c.deliveredThink.String()
+		if len(fullThinking) > len(delivered) && strings.HasPrefix(fullThinking, delivered) {
+			if tail := fullThinking[len(delivered):]; tail != "" {
+				trySend(c.ch, Message{Type: MessageThinking, Content: tail})
+			}
+		}
+	}
+	c.resetMessage()
+}
+
+func (c *claudeStreamCoalescer) resetMessage() {
+	c.streamedText = false
+	c.deliveredText.Reset()
+	c.pendingText.Reset()
+	c.lastTextFlush = time.Time{}
+	c.streamedThinking = false
+	c.deliveredThink.Reset()
+	c.pendingThink.Reset()
+	c.lastThinkFlush = time.Time{}
 }
 
 func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool {
@@ -761,6 +950,9 @@ type claudeSDKMessage struct {
 
 	// rate_limit_event fields
 	RateLimitInfo json.RawMessage `json:"rate_limit_info,omitempty"`
+
+	// stream_event fields (--include-partial-messages)
+	Event json.RawMessage `json:"event,omitempty"`
 
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`
@@ -1164,11 +1356,12 @@ func trySend(ch chan<- Message, msg Message) bool {
 // overridden by user-configured custom_args. Overriding these would break
 // the daemon↔Claude communication protocol.
 var claudeBlockedArgs = map[string]blockedArgMode{
-	"-p":                blockedStandalone, // non-interactive mode
-	"--output-format":   blockedWithValue,  // stream-json protocol
-	"--input-format":    blockedWithValue,  // stream-json protocol
-	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
-	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
+	"-p":                         blockedStandalone, // non-interactive mode
+	"--output-format":            blockedWithValue,  // stream-json protocol
+	"--input-format":             blockedWithValue,  // stream-json protocol
+	"--include-partial-messages": blockedStandalone, // incremental stream_event deltas
+	"--permission-mode":          blockedWithValue,  // bypassPermissions for autonomous operation
+	"--mcp-config":               blockedWithValue,  // set by daemon from agent.mcp_config
 	// `--effort` is owned by the per-agent thinking_level picker so a
 	// user-supplied custom_arg cannot silently outvote it. The daemon
 	// injects --effort only when opts.ThinkingLevel is set; if a user
@@ -1184,6 +1377,7 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
+		"--include-partial-messages",
 		"--permission-mode", "bypassPermissions",
 		// AskUserQuestion is Claude Code's built-in interactive question tool.
 		// The daemon runs Claude in non-interactive stream-json mode and has
