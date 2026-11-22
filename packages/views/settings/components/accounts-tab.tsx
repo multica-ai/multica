@@ -70,6 +70,7 @@ export function AccountsTab() {
     (r) => r.kind === "connect" && r.status === "pending" && r.account_scope === "personal",
   );
   const data = overview.data;
+  const usage = useUsage(data, waiting);
 
   const handlersFor = (app: AppRef): AccountRowHandlers => ({
     connect: (scope) => setConnecting({ scope, app }),
@@ -113,7 +114,7 @@ export function AccountsTab() {
             showLogo
             overview={data}
             title={app.name}
-            subtitle={<AccountOwner scope={scope} detail={<Usage scope={scope} slug={app.slug} overview={data} waiting={waiting} />} />}
+            subtitle={<AccountOwner scope={scope} detail={usage(scope, app.slug)} />}
             on={handlersFor(app)}
           />
         ))}
@@ -204,29 +205,22 @@ export function AccountsTab() {
 }
 
 /** Who relies on the account: the agents acting as it, or who waits for it. */
-function Usage({
-  scope,
-  slug,
-  overview,
-  waiting,
-}: {
-  scope: AppAccountScope;
-  slug: string;
-  overview: AppsOverview;
-  waiting: AppRequest[];
-}) {
+function useUsage(overview: AppsOverview | undefined, waiting: AppRequest[]) {
   const { t } = useT("settings");
   const { getActorName } = useActorName();
-  const agentIds = [...new Set(overview.agent_apps.filter((a) => a.toolkit_slug === slug && a.account_scope === scope).map((a) => a.agent_id))];
-  const waitingAgents = scope === "team"
-    ? (teamRequestFor(overview, slug)?.agent_ids ?? [])
-    : waiting.filter((r) => r.toolkit_slug === slug).map((r) => r.agent_id);
-  const needing = [...new Set(waitingAgents)].filter(Boolean);
-  if (needing.length > 0 && appAccountStatus(overview, scope, slug) !== "connected") {
-    return <>{t(($) => $.connected_apps.accounts_page.needed_by, { agents: names(needing, getActorName) })}</>;
-  }
-  if (agentIds.length === 0) return null;
-  return <>{t(($) => $.connected_apps.accounts_page.used_by, { agents: names(agentIds, getActorName) })}</>;
+  return (scope: AppAccountScope, slug: string): string | undefined => {
+    if (!overview) return undefined;
+    const agentIds = [...new Set(overview.agent_apps.filter((a) => a.toolkit_slug === slug && a.account_scope === scope).map((a) => a.agent_id))];
+    const waitingAgents = scope === "team"
+      ? (teamRequestFor(overview, slug)?.agent_ids ?? [])
+      : waiting.filter((r) => r.toolkit_slug === slug).map((r) => r.agent_id);
+    const needing = [...new Set(waitingAgents)].filter(Boolean);
+    if (needing.length > 0 && appAccountStatus(overview, scope, slug) !== "connected") {
+      return t(($) => $.connected_apps.accounts_page.needed_by, { agents: names(needing, getActorName) });
+    }
+    if (agentIds.length === 0) return undefined;
+    return t(($) => $.connected_apps.accounts_page.used_by, { agents: names(agentIds, getActorName) });
+  };
 }
 
 function names(ids: string[], getActorName: (type: "agent", id: string) => string): string {

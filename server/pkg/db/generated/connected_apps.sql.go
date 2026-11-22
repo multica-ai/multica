@@ -35,6 +35,44 @@ func (q *Queries) AppendQueuedTaskHandoffNote(ctx context.Context, arg AppendQue
 	return result.RowsAffected(), nil
 }
 
+const archiveAppRequestInbox = `-- name: ArchiveAppRequestInbox :many
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
+WHERE workspace_id = $1 AND type = 'app_connect_requested' AND archived = false
+  AND details->>'request_id' = $2::text
+RETURNING recipient_type, recipient_id
+`
+
+type ArchiveAppRequestInboxParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RequestID   string      `json:"request_id"`
+}
+
+type ArchiveAppRequestInboxRow struct {
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+// A withdrawn ask leaves the admins nothing to answer.
+func (q *Queries) ArchiveAppRequestInbox(ctx context.Context, arg ArchiveAppRequestInboxParams) ([]ArchiveAppRequestInboxRow, error) {
+	rows, err := q.db.Query(ctx, archiveAppRequestInbox, arg.WorkspaceID, arg.RequestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ArchiveAppRequestInboxRow{}
+	for rows.Next() {
+		var i ArchiveAppRequestInboxRow
+		if err := rows.Scan(&i.RecipientType, &i.RecipientID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelAppActionRequest = `-- name: CancelAppActionRequest :one
 UPDATE app_action_request
 SET status = 'cancelled', updated_at = now()

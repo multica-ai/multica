@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // EventRequestChanged tells clients to refetch the requests of an issue or
@@ -136,7 +137,35 @@ func (s *Service) WithdrawTeamAsk(ctx context.Context, workspaceID, memberID pgt
 		return err
 	}
 	s.withdraw(ctx, req)
+	s.archiveAdminNotifications(ctx, req)
 	return nil
+}
+
+func (s *Service) archiveAdminNotifications(ctx context.Context, req db.AppActionRequest) {
+	rows, err := s.q.ArchiveAppRequestInbox(ctx, db.ArchiveAppRequestInboxParams{
+		WorkspaceID: req.WorkspaceID, RequestID: util.UUIDToString(req.ID),
+	})
+	if err != nil {
+		slog.Warn("connectedapps: archive withdrawn request notifications failed", "request_id", util.UUIDToString(req.ID), "error", err)
+		return
+	}
+	if s.bus == nil {
+		return
+	}
+	for _, row := range rows {
+		if row.RecipientType != "member" {
+			continue
+		}
+		s.bus.Publish(events.Event{
+			Type:        protocol.EventInboxBatchArchived,
+			WorkspaceID: util.UUIDToString(req.WorkspaceID),
+			Payload: map[string]any{
+				"recipient_id": util.UUIDToString(row.RecipientID),
+				"count":        int64(1),
+				"reason":       "app_request_withdrawn",
+			},
+		})
+	}
 }
 
 // Approve executes an approved request with args (nil keeps the agent's) and

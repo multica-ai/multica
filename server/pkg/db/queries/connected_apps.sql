@@ -367,6 +367,13 @@ WHERE workspace_id = $1 AND toolkit_slug = $2 AND approver_user_id = $3
   AND task_id IS NULL AND kind = 'connect' AND account_scope = 'team' AND status = 'pending'
 LIMIT 1;
 
+-- name: ArchiveAppRequestInbox :many
+-- A withdrawn ask leaves the admins nothing to answer.
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
+WHERE workspace_id = $1 AND type = 'app_connect_requested' AND archived = false
+  AND details->>'request_id' = sqlc.arg('request_id')::text
+RETURNING recipient_type, recipient_id;
+
 -- name: ListTeamAccountRequestSummaries :many
 -- One row per app with open requests for a team account: who is waiting and
 -- which agents, oldest first. A person or agent waiting on several requests

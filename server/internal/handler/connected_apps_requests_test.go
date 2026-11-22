@@ -106,6 +106,10 @@ func TestConnectedApps_TeamAccountRequests(t *testing.T) {
 	if got, _ := f.overview(t, f.member); len(got.TeamRequests) != 1 || len(got.TeamRequests[0].RequestedBy) != 1 || got.TeamRequests[0].RequestedBy[0] != testUserID {
 		t.Fatalf("team requests after the member withdrew = %+v", got.TeamRequests)
 	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM inbox_item WHERE workspace_id=$1 AND recipient_id=$2 AND type=$3 AND NOT archived`,
+		testWorkspaceID, testUserID, connectedapps.NotifConnectRequested); n != 0 {
+		t.Fatalf("admin still has %d open notifications for the withdrawn ask", n)
+	}
 	if code := f.requestTeamApp(t, f.member, map[string]any{"toolkit_slug": "slack"}); code != http.StatusNoContent {
 		t.Fatalf("member asks again: %d", code)
 	}
