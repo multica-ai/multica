@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -210,4 +211,107 @@ func TestParseCronScheduleTimezonePrefix(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestNextOccurrencesUTCAcrossDaylightSaving pins cron(8) semantics at DST
+// changes. A schedule with a fixed minute and hour names a wall time, so it
+// fires once when clocks go back over it and still fires (at the change)
+// when clocks jump past it. A "*" in the minute or hour field follows
+// elapsed time, so hourly schedules keep running every real hour.
+func TestNextOccurrencesUTCAcrossDaylightSaving(t *testing.T) {
+	utc := func(s string) time.Time {
+		v, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	cases := []struct {
+		name, cron, tz, after, until string
+		want                         []string
+	}{
+		{
+			// New York falls back at 2026-11-01 02:00 EDT -> 01:00 EST.
+			name: "daily slot in the repeated hour fires once",
+			cron: "30 1 * * *", tz: "America/New_York",
+			after: "2026-10-31T12:00:00Z", until: "2026-11-02T12:00:00Z",
+			want: []string{"2026-11-01T05:30:00Z", "2026-11-02T06:30:00Z"},
+		},
+		{
+			// Berlin falls back at 2026-10-25 03:00 CEST -> 02:00 CET.
+			name: "repeated hour in Europe fires once",
+			cron: "0 2 * * *", tz: "Europe/Berlin",
+			after: "2026-10-24T12:00:00Z", until: "2026-10-26T12:00:00Z",
+			want: []string{"2026-10-25T00:00:00Z", "2026-10-26T01:00:00Z"},
+		},
+		{
+			// New York springs forward at 2027-03-14 02:00 EST -> 03:00 EDT.
+			name: "daily slot in the skipped hour fires at the change",
+			cron: "30 2 * * *", tz: "America/New_York",
+			after: "2027-03-13T12:00:00Z", until: "2027-03-15T12:00:00Z",
+			want: []string{"2027-03-14T07:00:00Z", "2027-03-15T06:30:00Z"},
+		},
+		{
+			// Berlin springs forward at 2027-03-28 02:00 CET -> 03:00 CEST.
+			name: "skipped hour in Europe fires at the change",
+			cron: "0 2 * * *", tz: "Europe/Berlin",
+			after: "2027-03-27T12:00:00Z", until: "2027-03-29T12:00:00Z",
+			want: []string{"2027-03-28T01:00:00Z", "2027-03-29T00:00:00Z"},
+		},
+		{
+			name: "slot after the skipped hour is not doubled",
+			cron: "0 2,3 * * *", tz: "America/New_York",
+			after: "2027-03-14T00:00:00Z", until: "2027-03-14T12:00:00Z",
+			want: []string{"2027-03-14T07:00:00Z"},
+		},
+		{
+			name: "hourly keeps every real hour when clocks go back",
+			cron: "0 * * * *", tz: "America/New_York",
+			after: "2026-11-01T03:30:00Z", until: "2026-11-01T07:30:00Z",
+			want: []string{"2026-11-01T04:00:00Z", "2026-11-01T05:00:00Z", "2026-11-01T06:00:00Z", "2026-11-01T07:00:00Z"},
+		},
+		{
+			name: "stepped minutes follow elapsed time in the repeated hour",
+			cron: "*/30 1 * * *", tz: "America/New_York",
+			after: "2026-11-01T04:30:00Z", until: "2026-11-01T07:00:00Z",
+			want: []string{"2026-11-01T05:00:00Z", "2026-11-01T05:30:00Z", "2026-11-01T06:00:00Z", "2026-11-01T06:30:00Z"},
+		},
+		{
+			// Chatham falls back at 2026-04-05 03:45 +1345 -> 02:45 +1245, so
+			// 03:45 happens once, at +1245. robfig alone returns the change
+			// instant again and again here.
+			name: "45-minute offset zone fires each wall time once",
+			cron: "45 3 * * *", tz: "Pacific/Chatham",
+			after: "2026-04-03T12:00:00Z", until: "2026-04-06T12:00:00Z",
+			want: []string{"2026-04-03T14:00:00Z", "2026-04-04T15:00:00Z", "2026-04-05T15:00:00Z"},
+		},
+		{
+			// The prefix zone, not the timezone argument, decides DST.
+			name: "prefix zone drives the DST handling",
+			cron: "CRON_TZ=America/New_York 30 1 * * *", tz: "Asia/Tokyo",
+			after: "2026-10-31T12:00:00Z", until: "2026-11-02T12:00:00Z",
+			want: []string{"2026-11-01T05:30:00Z", "2026-11-02T06:30:00Z"},
+		},
+		{
+			name: "UTC prefix ignores the column zone's DST",
+			cron: "TZ=UTC 30 6 * * *", tz: "America/New_York",
+			after: "2026-10-31T12:00:00Z", until: "2026-11-02T12:00:00Z",
+			want: []string{"2026-11-01T06:30:00Z", "2026-11-02T06:30:00Z"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NextOccurrencesUTC(tc.cron, tc.tz, utc(tc.after), utc(tc.until))
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotS := make([]string, len(got))
+			for i, g := range got {
+				gotS[i] = g.Format(time.RFC3339)
+			}
+			if strings.Join(gotS, " ") != strings.Join(tc.want, " ") {
+				t.Fatalf("got %v, want %v", gotS, tc.want)
+			}
+		})
+	}
 }
