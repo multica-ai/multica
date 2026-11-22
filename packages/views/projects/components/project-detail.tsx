@@ -27,7 +27,7 @@ import type { BreakdownFilter } from "./project-progress-section";
 import { ProjectInsights } from "./project-insights";
 import { ProjectPropertiesPanel } from "./project-properties";
 import { ProjectActivityPage } from "./project-activity";
-import { getIssueSurfaceViewStore } from "@multica/core/issues/stores";
+import { getIssueSurfaceViewStore, useIssuesScopeStore } from "@multica/core/issues/stores";
 import { issueScopeKey } from "@multica/core/issues/surface/scope";
 import { ProjectOverviewBody, ProjectOverviewHeader, ProjectTabs } from "./project-overview";
 import {
@@ -256,7 +256,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   // A breakdown row opens the Issues tab showing just that slice.
   const showFilteredIssues = useCallback(
     (filter: BreakdownFilter) => {
-      const store = getIssueSurfaceViewStore(issueScopeKey(issueScope));
+      // Any slice lands on the All tab: Members or Agents would hide half of
+      // them, and each tab keeps its own filters.
+      useIssuesScopeStore.getState().setScope(`project:${projectId}`, "all");
+      const store = getIssueSurfaceViewStore(issueScopeKey({ type: "project", projectId, actorKind: "all" }));
       store.getState().clearFilters();
       if (filter.kind === "assignee") {
         store.setState({ assigneeFilters: [{ type: filter.type, id: filter.id }] });
@@ -268,7 +271,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       setMobileSidebarOpen(false);
       handleTabChange("issues");
     },
-    [issueScope, handleTabChange],
+    [projectId, handleTabChange],
   );
 
   const handleDelete = useCallback(() => {

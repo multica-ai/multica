@@ -11,7 +11,7 @@ import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { useProjectTabStore } from "@multica/core/projects/tab-store";
-import { getIssueSurfaceViewStore } from "@multica/core/issues/stores";
+import { getIssueSurfaceViewStore, useIssuesScopeStore } from "@multica/core/issues/stores";
 import { ProjectDetail } from "./project-detail";
 
 const mocks = vi.hoisted(() => ({
@@ -361,10 +361,12 @@ describe("ProjectDetail tabs", () => {
   it("opens the Issues tab filtered to a breakdown row", async () => {
     const store = getIssueSurfaceViewStore("project:project-1");
     store.setState({ statusFilters: ["todo"] });
+    useIssuesScopeStore.getState().setScope("project:project-1", "members");
     renderProjectDetail();
     await userEvent.click(screen.getByRole("button", { name: "Filter by Design" }));
     expect(store.getState().labelFilters).toEqual(["label-1"]);
     expect(store.getState().statusFilters).toEqual([]);
+    expect(useIssuesScopeStore.getState().scopes["project:project-1"]).toBe("all");
     expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=issues");
     store.getState().clearFilters();
   });

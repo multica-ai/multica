@@ -73,24 +73,28 @@ function ProjectProgressEmpty({ project, cancelled }: { project: Project; cancel
       </div>
       <div className="h-2 rounded-full bg-muted" />
       {cancelled > 0 && <CancelledNote count={cancelled} />}
-      <p className="text-caption text-muted-foreground">{t(($) => $.detail.progress_panel.empty_hint)}</p>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => useModalStore.getState().open("create-issue", { project_id: project.id })}
-        >
-          <Plus aria-hidden="true" />
-          {t(($) => $.detail.empty_issues_new_button)}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => useModalStore.getState().open("project-add-issue", { projectId: project.id })}
-        >
-          {t(($) => $.detail.empty_issues_add_existing)}
-        </Button>
-      </div>
+      {!project.archived_at && (
+        <>
+          <p className="text-caption text-muted-foreground">{t(($) => $.detail.progress_panel.empty_hint)}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => useModalStore.getState().open("create-issue", { project_id: project.id })}
+            >
+              <Plus aria-hidden="true" />
+              {t(($) => $.detail.empty_issues_new_button)}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => useModalStore.getState().open("project-add-issue", { projectId: project.id })}
+            >
+              {t(($) => $.detail.empty_issues_add_existing)}
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

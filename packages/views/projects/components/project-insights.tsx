@@ -5,6 +5,7 @@ import { ObjectPanelSection } from "../../layout/object-page";
 import { useT } from "../../i18n";
 import { ProjectActivityFeed } from "./project-activity";
 import { ProjectBreakdown, ProjectProgressSection, type BreakdownFilter } from "./project-progress-section";
+import { getProjectProgress } from "./project-issue-metrics";
 
 const ACTIVITY_DIGEST = 5;
 
@@ -29,7 +30,7 @@ export function ProjectInsights({
         <ProjectProgressSection project={project} />
       </ObjectPanelSection>
 
-      {project.issue_count > 0 && (
+      {getProjectProgress(project).scope > 0 && (
         <ObjectPanelSection title={t(($) => $.detail.section_breakdown)}>
           <ProjectBreakdown project={project} onFilter={onFilter} />
         </ObjectPanelSection>
