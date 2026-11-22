@@ -614,6 +614,17 @@ func TestOpencodeNativeMcpServers(t *testing.T) {
 		want    []string
 	}{
 		{
+			name:    "v2 timeout defaults are not a server",
+			cfgJSON: `{"mcp":{"timeout":{"catalog":5000}}}`,
+			wantOK:  true,
+		},
+		{
+			name:    "v1 server named timeout is still a server",
+			cfgJSON: `{"mcp":{"timeout":{"type":"local","command":["fixture"]}}}`,
+			wantOK:  true,
+			want:    []string{"timeout"},
+		},
+		{
 			name:    "v2 nested under mcp.servers",
 			cfgJSON: `{"mcp":{"servers":{"github":{"type":"remote","url":"https://g.example/mcp"},"grafana":{"type":"local","command":["grafana-mcp"]}}}}`,
 			wantOK:  true,
@@ -926,7 +937,7 @@ func TestOpenCodeGlobalMCPReadsJSONC(t *testing.T) {
 		{
 			name: "v2 replaces named servers",
 			base: `{"mcp":{"servers":{"keep":{"type":"remote","url":"https://base.example/mcp","headers":{"Test-Key":"fixture"}},"off":{"type":"local","command":["fixture"]}}}}`,
-			overlay: `{"mcp":{"servers":{
+			overlay: `{"mcp":{"timeout":{"catalog":5000},"servers":{
 				// Replace this server without inheriting the old headers.
 				"keep":{"type":"remote","url":"https://overlay.example/mcp"},
 				"off":{"type":"local","command":["fixture"],"disabled":true},

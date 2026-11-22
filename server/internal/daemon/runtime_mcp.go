@@ -600,18 +600,30 @@ func opencodeMcpServersByLayout(cfg map[string]any, key string) (map[string]any,
 	if !ok {
 		return nil, false
 	}
-	if servers, ok := mcp["servers"].(map[string]any); ok {
-		// A flat server named "servers" has entry fields; a nested server
-		// with one of these names has an object as its value instead.
-		for _, field := range []string{"type", "url", "command", "enabled", "disabled"} {
-			switch servers[field].(type) {
-			case string, bool, []any:
-				return mcp, false
-			}
-		}
+	if servers, ok := mcp["servers"].(map[string]any); ok && !isFlatOpenCodeMcpServer(servers) {
 		return servers, true
 	}
+	// A v2 document can set global timeouts without defining any servers.
+	// A v1 server with the same name still has ordinary server fields.
+	if timeout, ok := mcp["timeout"]; ok && !isFlatOpenCodeMcpServer(timeout) {
+		delete(mcp, "timeout")
+		return mcp, true
+	}
 	return mcp, false
+}
+
+func isFlatOpenCodeMcpServer(value any) bool {
+	server, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, field := range []string{"type", "url", "command", "enabled", "disabled"} {
+		switch server[field].(type) {
+		case string, bool, []any:
+			return true
+		}
+	}
+	return false
 }
 
 func nestedRuntimeMcpMap(cfg map[string]any, path string) (map[string]any, bool) {
