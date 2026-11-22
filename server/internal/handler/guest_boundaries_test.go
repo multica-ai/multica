@@ -467,6 +467,52 @@ func TestGuestUndoesItsUnsubscribe(t *testing.T) {
 	post(testHandler.UndoUnsubscribeFromIssue, f.otherIssue, "/unsubscribe/undo").Want(http.StatusNotFound)
 }
 
+// A guest's Unsubscribe & archive may take the sub-issues too, for itself
+// only, and on an issue in its project only.
+func TestGuestUnsubscribesItselfFromASubtree(t *testing.T) {
+	f := newGuestFixture(t)
+	child := dbfx.Issue(t, f.marker+" child", testutil.Cols{"project_id": f.shared, "parent_issue_id": f.sharedIssue})
+	t.Cleanup(func() {
+		dbfx.Exec(t, `DELETE FROM issue_subscriber WHERE issue_id IN ($1, $2)`, f.sharedIssue, child)
+	})
+	for _, issue := range []string{f.sharedIssue, child} {
+		for _, user := range []string{f.guest, testUserID} {
+			dbfx.Exec(t, `INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason) VALUES ($1, 'member', $2, 'commenter')`, issue, user)
+		}
+	}
+	subscribed := func(issue, user string) bool {
+		t.Helper()
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM issue_subscriber
+			WHERE issue_id = $1 AND user_type = 'member' AND user_id = $2 AND unsubscribed_at IS NULL`, issue, user).Scan(&n)
+		return n > 0
+	}
+	post := func(issue string, body any) *testutil.Response {
+		t.Helper()
+		return guestRequest(t, testHandler.UnsubscribeFromIssueSubtree, f.guest, http.MethodPost,
+			"/api/issues/"+issue+"/unsubscribe/subtree", body, "id", issue)
+	}
+
+	post(f.sharedIssue, map[string]string{"user_id": testUserID, "user_type": "member"}).Want(http.StatusForbidden)
+	if !subscribed(f.sharedIssue, testUserID) || !subscribed(child, testUserID) {
+		t.Fatal("a guest's subtree unsubscribe took a member's subscriptions")
+	}
+	post(f.otherIssue, nil).Want(http.StatusNotFound)
+	post(f.sharedIssue, nil).Want(http.StatusOK)
+	if subscribed(f.sharedIssue, f.guest) || subscribed(child, f.guest) {
+		t.Fatal("the guest is still subscribed to the tree it left")
+	}
+}
+
+// A guest settles the auto-archive prompt its Inbox shows it.
+func TestGuestResolvesAutoArchivePrompt(t *testing.T) {
+	f := newGuestFixture(t)
+	guestRequest(t, testHandler.ResolveAutoArchivePrompt, f.guest, http.MethodPost,
+		"/api/notification-preferences/auto-archive-prompt",
+		map[string]any{"preferences": map[string]string{"auto_archive_completed": "all"}}).
+		Want(http.StatusOK)
+}
+
 // --- Local search after losing access --------------------------------------
 
 func searchChangesAs(t *testing.T, userID, cursor string) *testutil.Response {
