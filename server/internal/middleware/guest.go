@@ -52,6 +52,8 @@ var guestRoutes = compileGuestRoutes([]string{
 	"DELETE /api/issues/*/reactions",
 	"POST /api/issues/*/subscribe",
 	"POST /api/issues/*/unsubscribe",
+	// The Inbox's Unsubscribe & archive offers this as its undo.
+	"POST /api/issues/*/unsubscribe/undo",
 	"POST /api/issues/*/read",
 	"POST /api/issues/*/unread",
 	"PUT /api/comments/*",

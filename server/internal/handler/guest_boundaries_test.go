@@ -444,6 +444,29 @@ func TestGuestMayDeleteOwnCommentKeepingReplies(t *testing.T) {
 	}
 }
 
+// A guest takes back an Unsubscribe & archive from its Inbox, on an issue in
+// its project only.
+func TestGuestUndoesItsUnsubscribe(t *testing.T) {
+	f := newGuestFixture(t)
+	t.Cleanup(func() {
+		dbfx.Exec(t, `DELETE FROM issue_subscriber WHERE issue_id IN ($1, $2)`, f.sharedIssue, f.otherIssue)
+	})
+	dbfx.Exec(t, `INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason) VALUES ($1, 'member', $2, 'commenter')`,
+		f.sharedIssue, f.guest)
+	post := func(h http.HandlerFunc, issue, suffix string) *testutil.Response {
+		t.Helper()
+		return guestRequest(t, h, f.guest, http.MethodPost, "/api/issues/"+issue+suffix, nil, "id", issue)
+	}
+
+	post(testHandler.UnsubscribeFromIssue, f.sharedIssue, "/unsubscribe").Want(http.StatusOK)
+	var body map[string]any
+	post(testHandler.UndoUnsubscribeFromIssue, f.sharedIssue, "/unsubscribe/undo").Want(http.StatusOK).JSON(&body)
+	if body["reason"] != "commenter" {
+		t.Fatalf("guest undo answered %v, want its commenter subscription back", body)
+	}
+	post(testHandler.UndoUnsubscribeFromIssue, f.otherIssue, "/unsubscribe/undo").Want(http.StatusNotFound)
+}
+
 // --- Local search after losing access --------------------------------------
 
 func searchChangesAs(t *testing.T, userID, cursor string) *testutil.Response {

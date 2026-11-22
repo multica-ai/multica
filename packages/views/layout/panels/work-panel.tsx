@@ -41,7 +41,7 @@ interface ClickedIssue {
  * The `{id}` of a `{base}/{id}` route — for `/issues/{id}`, a UUID or an
  * identifier like `MUL-123`.
  */
-function routeSegment(pathname: string, base: string): string | null {
+export function routeSegment(pathname: string, base: string): string | null {
   if (!pathname.startsWith(base + "/")) return null;
   const segment = pathname.slice(base.length + 1).split("/")[0];
   return segment ? decodeURIComponent(segment) : null;
