@@ -20,7 +20,11 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({ apps: () => "/acme/apps", appDetail: (slug: string) => `/acme/apps/${slug}` }),
 }));
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getActorName: (_type: string, id: string) => `Name ${id}` }),
+  useActorName: () => ({
+    getActorName: (_type: string, id: string) => `Name ${id}`,
+    getActorInitials: () => "N",
+    getActorAvatarUrl: () => null,
+  }),
 }));
 vi.mock("@multica/core/auth", () => {
   const state = { user: { id: "me" } };
@@ -106,6 +110,9 @@ describe("AppsPage", () => {
     const list = screen.getAllByRole("list")[0];
     expect(screen.getByRole("tab", { name: /Needs attention/ })).toHaveTextContent("2");
     expect(within(list!).getByRole("link", { name: "Notion" })).toHaveAttribute("href", "/acme/apps/notion");
+    // A card with nothing to do names its agents in place of an action.
+    expect(within(list!).getAllByRole("img", { name: /^Used by / }).map((el) => el.getAttribute("aria-label")))
+      .toEqual(["Used by Name a1"]);
     expect(screen.getByRole("heading", { name: "Popular in Acme" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Linear" })).toBeInTheDocument();
   });

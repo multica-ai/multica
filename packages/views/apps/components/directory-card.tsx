@@ -1,10 +1,12 @@
 "use client";
 
 import { Loader2 } from "@multica/ui/icons";
-import { Button, buttonVariants } from "@multica/ui/components/ui/button";
+import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { AppAccountScope } from "@multica/core/types";
+import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { UpgradeToAddLink } from "../../billing";
 import { useT } from "../../i18n";
 import type { DirectoryApp } from "../lib/directory";
@@ -21,7 +23,7 @@ export interface DirectoryCardHandlers {
   needsUpgrade: (slug: string) => boolean;
 }
 
-/** An app in use: whose account it acts as, where that stands, and who uses it. */
+/** An app in use: where its account stands, whose it is, and what to do or who uses it. */
 export function DirectoryCard({ app, handlers }: { app: DirectoryApp; handlers: DirectoryCardHandlers }) {
   const { t } = useT("settings");
   const paths = useWorkspacePaths();
@@ -38,14 +40,14 @@ export function DirectoryCard({ app, handlers }: { app: DirectoryApp; handlers: 
   const asked = app.request && app.status === "requested"
     ? t(($) => $.connected_apps.hub.members_asked, { count: app.request.requested_by.length })
     : undefined;
-  const usage =
-    app.agentIds.length > 0
-      ? t(($) => $.connected_apps.hub.used_by, { agents: app.agentIds.map((id) => getActorName("agent", id)).join(", ") })
-      : app.request && app.request.agent_ids.length > 0
-        ? t(($) => $.connected_apps.hub.wanted_by, { agents: app.request.agent_ids.map((id) => getActorName("agent", id)).join(", ") })
-        : app.request
-          ? t(($) => $.connected_apps.hub.asked_by, { names: app.request.requested_by.map((id) => getActorName("member", id)).join(", ") })
-          : null;
+  const hasAction = !!app.action && app.action.kind !== "set_up";
+  // With nothing to do, the trailing slot shows the agents behind the app.
+  const using = app.agentIds.length > 0;
+  const agentIds = using ? app.agentIds : (app.request?.agent_ids ?? []);
+  const agents = agentIds.map((id) => getActorName("agent", id)).join(", ");
+  const usage = using
+    ? t(($) => $.connected_apps.hub.used_by, { agents })
+    : t(($) => $.connected_apps.hub.wanted_by, { agents });
 
   return (
     <AppCard
@@ -53,31 +55,46 @@ export function DirectoryCard({ app, handlers }: { app: DirectoryApp; handlers: 
       name={app.name}
       logo={app.entry?.logo}
       href={paths.appDetail(app.slug)}
-      subtitle={scopeLine}
-      action={<DirectoryAction app={app} handlers={handlers} />}
-    >
-      {app.status ? <p className="flex min-w-0"><AppStatusLabel status={app.status} detail={asked} /></p> : null}
-      {usage ? <p className="truncate">{usage}</p> : null}
-    </AppCard>
+      meta={
+        app.status
+          ? <AppStatusLabel status={app.status} detail={asked ?? scopeLine} />
+          : <span className="truncate">{scopeLine}</span>
+      }
+      action={
+        hasAction ? (
+          <DirectoryAction app={app} handlers={handlers} />
+        ) : agentIds.length > 0 ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  role="img"
+                  tabIndex={0}
+                  aria-label={usage}
+                  className="inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              }
+            >
+              <AgentAvatarStack agentIds={agentIds} />
+            </TooltipTrigger>
+            <TooltipContent>{usage}</TooltipContent>
+          </Tooltip>
+        ) : undefined
+      }
+    />
   );
 }
 
 export function SetUpCard({ app }: { app: DirectoryApp }) {
-  const { t } = useT("settings");
   const paths = useWorkspacePaths();
+  const category = app.entry?.category;
   return (
     <AppCard
       slug={app.slug}
       name={app.name}
       logo={app.entry?.logo}
       href={paths.appDetail(app.slug)}
-      subtitle={app.entry?.category}
-      // The whole card already links to the app; this only labels it.
-      action={
-        <span aria-hidden="true" className={buttonVariants({ variant: "outline", size: "xs" })}>
-          {t(($) => $.connected_apps.hub.set_up)}
-        </span>
-      }
+      meta={category ? <span className="truncate">{category}</span> : undefined}
     />
   );
 }
