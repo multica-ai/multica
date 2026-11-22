@@ -722,9 +722,8 @@ SELECT 'comment', c.id, c.workspace_id, pg_current_xact_id(), now()
 FROM comment c
 JOIN issue i ON i.id = c.issue_id
 WHERE i.project_id = $1 AND i.workspace_id = $2
-ON CONFLICT (entity_type, entity_id) DO UPDATE
-    SET workspace_id = EXCLUDED.workspace_id,
-        change_xid = EXCLUDED.change_xid,
+ON CONFLICT (workspace_id, entity_type, entity_id) DO UPDATE
+    SET change_xid = EXCLUDED.change_xid,
         changed_at = EXCLUDED.changed_at
 `
 
