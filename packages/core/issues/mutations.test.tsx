@@ -1,3 +1,4 @@
+import { registerProjectSourceHost } from "../projects/source-choice";
 /**
  * @vitest-environment jsdom
  */
@@ -202,6 +203,22 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
   afterEach(() => {
     qc.clear();
     vi.restoreAllMocks();
+  });
+
+  it("passes pre-optimistic state to the source host and rolls back a cancelled write", async () => {
+    onTestFinished(registerProjectSourceHost());
+    const previous = makeIssue(1, { status: "backlog", assignee_type: "agent", assignee_id: "agent" });
+    qc.setQueryData(issueKeys.detail(WS_ID, previous.id), previous);
+    let reject!: (error: Error) => void;
+    updateIssue.mockReturnValue(new Promise<Issue>((_resolve, fail) => { reject = fail; }));
+    const { result } = renderHook(() => useUpdateIssue(), { wrapper: createWrapper(qc) });
+    act(() => { result.current.mutate({ id: previous.id, status: "in_progress" }); });
+    await waitFor(() => expect(updateIssue).toHaveBeenCalledWith(previous.id, { status: "in_progress" }, { workspaceId: WS_ID, previousIssues: { [previous.id]: previous } }));
+    expect(qc.getQueryData<Issue>(issueKeys.detail(WS_ID, previous.id))?.status).toBe("in_progress");
+    expect(previous.status).toBe("backlog");
+    await act(async () => { reject(new Error("Source selection cancelled")); });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(qc.getQueryData<Issue>(issueKeys.detail(WS_ID, previous.id))?.status).toBe("backlog");
   });
 
   it("optimistically moves the card in both the workspace and myList caches", async () => {

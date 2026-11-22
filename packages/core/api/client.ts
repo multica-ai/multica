@@ -1,3 +1,4 @@
+import type { ProjectSourceWriteContext } from "../projects/source-choice";
 import { hasProjectSourceHost, requestProjectSourceChoice, cachedProjectSourceChoice } from "../projects/source-choice";
 import type { ListWeixinInstallationsResponse, WeixinLogin } from "../types/weixin";
 import { ListWeixinInstallationsSchema, WeixinLoginSchema, EMPTY_WEIXIN_INSTALLATIONS, INVALID_WEIXIN_LOGIN } from "../weixin/schema";
@@ -990,6 +991,7 @@ export class ApiClient {
     init: ApiRequestInit,
     body: object,
     batch = false,
+    context?: ProjectSourceWriteContext,
   ): Promise<T> {
     if (!hasProjectSourceHost()) {
       return this.fetch<T>(path, { ...init, body: JSON.stringify(body) });
@@ -999,7 +1001,7 @@ export class ApiClient {
     };
     const decisions: Record<string, string> = { ...sourceInput.source_decisions };
     for (;;) {
-      const cached = cachedProjectSourceChoice(path, body, decisions);
+      const cached = cachedProjectSourceChoice(path, body, decisions, context);
       if (cached) {
         const choice = await requestProjectSourceChoice(cached);
         if (choice === "cancel") throw new Error("Source selection cancelled");
@@ -2064,15 +2066,15 @@ export class ApiClient {
     });
   }
 
-  async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
+  async updateIssue(id: string, data: UpdateIssueRequest, context?: ProjectSourceWriteContext): Promise<Issue> {
     return this.sourceAwareWrite<Issue>(`/api/issues/${id}`, {
       method: "PUT",
 
-    }, data);
+    }, data, false, context);
   }
 
-  async moveIssue(id: string, data: MoveIssueRequest): Promise<Issue> {
-    return this.sourceAwareWrite<Issue>(`/api/issues/${id}/move`, {method:"POST"}, data);
+  async moveIssue(id: string, data: MoveIssueRequest, context?: ProjectSourceWriteContext): Promise<Issue> {
+    return this.sourceAwareWrite<Issue>(`/api/issues/${id}/move`, {method:"POST"}, data, false, context);
   }
 
   async listIssueDuplicates(id: string): Promise<IssueDuplicates> {
@@ -2125,11 +2127,12 @@ export class ApiClient {
     issueIds: string[],
     updates: UpdateIssueRequest,
     ops: { labels?: BatchIssueLabelOps; properties?: BatchIssuePropertyOps } = {},
+    context?: ProjectSourceWriteContext,
   ): Promise<BatchUpdateIssuesResponse> {
     const raw = await this.sourceAwareWrite<unknown>("/api/issues/batch-update", {
       method: "POST",
 
-    }, { issue_ids: issueIds, updates, ...ops }, true);
+    }, { issue_ids: issueIds, updates, ...ops }, true, context);
     const response = parseWithFallback(raw, BatchUpdateIssuesResponseSchema, UNCONFIRMED_BATCH_UPDATE, {
       endpoint: "POST /api/issues/batch-update",
     });

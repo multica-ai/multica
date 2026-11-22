@@ -1,13 +1,21 @@
 import { create } from "zustand";
+import type { Issue } from "../types/issue";
 import type { Project } from "../types/project";
 
 type Choice = "once" | "saved" | "cancel";
 type Target = Pick<Project, "id" | "workspace_id" | "title" | "resource_count" | "source_intent">;
 type Request = { project: Target; finish: (choice: Choice) => void };
+// Captured before optimistic cache changes; never serialized into the request.
+export interface ProjectSourceWriteContext {
+  workspaceId: string;
+  previousIssues: Record<string, Issue | undefined>;
+}
+
 type Lookup = (
   path: string,
   body: object,
   decisions: Record<string, string>,
+  context?: ProjectSourceWriteContext,
 ) => Project | undefined;
 
 export const useProjectSourceChoice = create<{ current: Request | null }>(
@@ -23,9 +31,10 @@ export function cachedProjectSourceChoice(
   path: string,
   body: object,
   decisions: Record<string, string>,
+  context?: ProjectSourceWriteContext,
 ) {
   for (const lookup of lookups) {
-    const project = lookup(path, body, decisions);
+    const project = lookup(path, body, decisions, context);
     if (project) return project;
   }
   return undefined;

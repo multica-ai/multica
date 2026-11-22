@@ -1,3 +1,4 @@
+import { hasProjectSourceHost, type ProjectSourceWriteContext } from "../projects/source-choice";
 import { issueBehavesAs, normalizeStatusPatch } from "./status-category";
 import {
   hashKey,
@@ -193,17 +194,27 @@ export function useCreateCommentSubIssue() {
   }) => api.createCommentSubIssue(anchorCommentId, data));
 }
 
+// React Query supplies a distinct execution context to onMutate and mutationFn.
+// Key by that context, rather than variables, so concurrent reuse and retries
+// retain their own pre-optimistic state without changing mutation payloads.
+const sourceWriteContexts = new WeakMap<object, ProjectSourceWriteContext>();
+
 export function useUpdateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
     mutationKey: issueWriteMutationKey(wsId),
-    mutationFn: ({ id, move_intent: moveIntent, ...data }: UpdateIssueMutationInput) => {
-      if (!moveIntent) return api.updateIssue(id, data);
+    mutationFn: ({ id, move_intent: moveIntent, ...data }: UpdateIssueMutationInput, execution) => {
+      const context = hasProjectSourceHost() ? sourceWriteContexts.get(execution) : undefined;
+      if (!moveIntent) return context ? api.updateIssue(id, data, context) : api.updateIssue(id, data);
       const { position: _optimisticPosition, ...target } = data;
-      return api.moveIssue(id, { ...target, ...moveIntent });
+      return context ? api.moveIssue(id, { ...target, ...moveIntent }, context) : api.moveIssue(id, { ...target, ...moveIntent });
     },
-    onMutate: ({ id, move_intent: _moveIntent, ...data }) => {
+    onMutate: ({ id, move_intent: _moveIntent, ...data }, execution) => {
+      sourceWriteContexts.set(execution, {
+        workspaceId: wsId,
+        previousIssues: { [id]: qc.getQueryData<Issue>(issueKeys.detail(wsId, id)) },
+      });
       // suppress_run is a write-time control field, not an Issue column.
       // description_base is merge metadata, while description itself
       // is resolved against that base on the server and therefore is not safe
@@ -568,11 +579,18 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
       labels?: BatchIssueLabelOps;
       properties?: BatchIssuePropertyOps;
-    }) =>
-      labels || properties
+    }, execution) => {
+      const context = hasProjectSourceHost() ? sourceWriteContexts.get(execution) : undefined;
+      if (context) return api.batchUpdateIssues(ids, updates, { labels, properties }, context);
+      return labels || properties
         ? api.batchUpdateIssues(ids, updates, { labels, properties })
-        : api.batchUpdateIssues(ids, updates),
-    onMutate: async ({ ids, updates }) => {
+        : api.batchUpdateIssues(ids, updates);
+    },
+    onMutate: async ({ ids, updates }, execution) => {
+      sourceWriteContexts.set(execution, {
+        workspaceId: wsId,
+        previousIssues: Object.fromEntries(ids.map(id => [id, qc.getQueryData<Issue>(issueKeys.detail(wsId, id))])),
+      });
       // Control and description-merge fields are not safe optimistic cache
       // patches. The server resolves description against description_base, so
       // preserve the authoritative raw description (including media markers)

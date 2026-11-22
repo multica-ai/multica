@@ -1,4 +1,6 @@
 "use client";
+import { issueWorkflowKeys, resolveProjectWorkflow, workflowStep } from "@multica/core/issue-workflows/queries";
+import type { ListIssueWorkflowsResponse } from "@multica/core/types";
 import { useQueryClient } from "@tanstack/react-query";
 import { projectKeys } from "@multica/core/projects/queries";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -19,27 +21,41 @@ export function ProjectSourceChoiceModal() {
   const update = useUpdateProject(), wsId = useWorkspaceId(), paths = useWorkspacePaths(), nav = useNavigation();
   const { t } = useT("projects");
   const [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false);
-  useEffect(() => registerProjectSourceHost((path, raw, decisions) => {
+  useEffect(() => registerProjectSourceHost((path, raw, decisions, context) => {
+    if (context && context.workspaceId !== wsId) return;
     const body = raw as Record<string, unknown>, data = (body.updates ?? body) as Record<string, unknown>;
     if (data.suppress_run)
       return;
     const match = path.match(/^\/api\/issues\/([^/]+)(?:\/move)?$/);
     const ids = Array.isArray(body.issue_ids) ? body.issue_ids : match ? [match[1]] : [null];
     for (const id of ids) {
-      const issue = typeof id === "string" ? qc.getQueryData<Issue>(issueKeys.detail(wsId, id)) : undefined;
-      const assignee = data.assignee_type ?? (data.agent_id ? "agent" : data.squad_id ? "squad" : issue?.assignee_type);
-      const status = data.status ?? issue?.status ?? "todo";
-      if (assignee !== "agent" && assignee !== "squad")
-        continue;
-      if (status === "backlog" || status === "done" || status === "cancelled")
-        continue;
-      if (issue && data.assignee_id === undefined && data.status === undefined && data.project_id === undefined)
-        continue;
+      const issue = typeof id === "string"
+        ? context ? context.previousIssues[id] : qc.getQueryData<Issue>(issueKeys.detail(wsId, id))
+        : undefined;
       const parent = typeof data.parent_issue_id === "string" ? qc.getQueryData<Issue>(issueKeys.detail(wsId, data.parent_issue_id)) : undefined;
       const projectId = ("project_id" in data ? data.project_id : issue?.project_id) ?? parent?.project_id;
-      if (typeof projectId !== "string" || decisions[projectId])
-        continue;
+      if (typeof projectId !== "string" || decisions[projectId]) continue;
       const project = qc.getQueryData<Project>(projectKeys.detail(wsId, projectId)) ?? qc.getQueryData<ListProjectsResponse>(projectKeys.list(wsId))?.projects.find(p => p.id === projectId);
+      const status = data.status ?? issue?.status ?? "todo";
+      if (status === "backlog" || status === "done" || status === "cancelled") continue;
+      const projectMoving = issue && data.project_id !== undefined && data.project_id !== issue.project_id;
+      const entering = issue &&
+        data.assignee_type === undefined && data.assignee_id === undefined &&
+        (projectMoving ? data.enter_workflow_step === true : data.status !== undefined && status !== issue.status);
+      const workflows = qc.getQueryData<ListIssueWorkflowsResponse>(issueWorkflowKeys.list(wsId))?.workflows;
+      const handler = entering ? workflowStep(resolveProjectWorkflow(workflows, project), String(status))?.handler : undefined;
+      const handoff = handler?.type === "agent" || handler?.type === "squad";
+      const assignee = handoff ? handler.type : "assignee_type" in data ? data.assignee_type : data.agent_id ? "agent" : data.squad_id ? "squad" : issue?.assignee_type;
+      const assigneeId = handoff ? handler.id : "assignee_id" in data ? data.assignee_id : data.agent_id ?? data.squad_id ?? issue?.assignee_id;
+      if ((assignee !== "agent" && assignee !== "squad") || !assigneeId) continue;
+      const assigned = issue && (data.assignee_type !== undefined || data.assignee_id !== undefined) &&
+        (assignee !== issue.assignee_type || assigneeId !== issue.assignee_id);
+      const created = !match && !Array.isArray(body.issue_ids);
+      const promoted = issue?.status === "backlog" && data.status !== undefined && status !== issue.status;
+      // Ordinary active-to-active status / same-assignee / project edits do
+      // not start runs. Missing or stale state still goes through the normal
+      // write's authoritative, side-effect-free 409 admission; no preview GET.
+      if (!created && !assigned && !promoted && !handoff) continue;
       if (project && project.resource_count === 0 && project.source_intent !== "no_code")
         return project;
     }
