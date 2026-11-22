@@ -1,11 +1,10 @@
 "use client";
 
-import { useMemo, type ReactNode, useEffect, useRef, useState } from "react";
+import { useMemo, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlarmClock, ChevronDown } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useModalStore } from "@multica/core/modals";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
 import type { LastInboxCleared } from "@multica/core/inbox/selection-store";
 import type { InboxItem } from "@multica/core/types";
@@ -13,18 +12,12 @@ import { findSnoozedInboxIssue, snoozedInboxOptions } from "@multica/core/inbox/
 import { nextInboxRow } from "@multica/core/inbox/open-row";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useIsGuest } from "@multica/core/permissions";
-import {
-  getShortcut,
-  isEditableShortcutTarget,
-  isPortalLayerShortcutTarget,
-  shortcutMatchesEvent,
-} from "@multica/core/shortcuts";
-import { isImeComposing } from "@multica/core/utils";
 import { InboxArchiveButton, InboxBar, InboxBarButton, InboxBarStatus, InboxOpenBar } from "../../inbox/components/inbox-bar";
 import { inboxRowHref } from "../../inbox/components/inbox-display";
 import { InboxKeptActions, InboxNextButton, useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
+import { useInboxShortcut } from "../../inbox/components/use-inbox-shortcut";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
 import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
@@ -154,35 +147,12 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
   };
   const cause = useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
 
-  const archiveRef = useRef<(() => void) | null>(null);
-  const snoozeRef = useRef<(() => void) | null>(null);
-  useEffect(() => {
-    // Archived already, E moves on (to the next notification or Inbox Zero).
-    archiveRef.current = item ? archiveItem : settled ? moveOn : null;
-    snoozeRef.current = item
-      ? () => setSnoozeOpen(true)
-      : snoozed
-        ? () => unsnooze(snoozed.item_id, issueId)
-        : null;
-  });
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
-      if (isEditableShortcutTarget(event.target)) return;
-      if (isPortalLayerShortcutTarget(event.target)) return;
-      if (useModalStore.getState().modal) return;
-      const run = shortcutMatchesEvent(getShortcut("archiveInboxItem"), event)
-        ? archiveRef.current
-        : shortcutMatchesEvent(getShortcut("snoozeInboxItem"), event)
-          ? snoozeRef.current
-          : null;
-      if (!run) return;
-      event.preventDefault();
-      run();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  // Archived already, E moves on (to the next notification or Inbox Zero).
+  useInboxShortcut("archiveInboxItem", item ? archiveItem : settled ? moveOn : null);
+  useInboxShortcut(
+    "snoozeInboxItem",
+    item ? () => setSnoozeOpen(true) : snoozed ? () => unsnooze(snoozed.item_id, issueId) : null,
+  );
 
   if (!item) {
     if (snoozed) {
