@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   copyTextAndHtml: vi.fn(),
   deleteProject: vi.fn(),
   getProject: vi.fn(),
+  getProjectMembers: vi.fn(),
   getProjectSubscription: vi.fn(),
   setProjectSubscription: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
@@ -303,11 +304,13 @@ beforeEach(() => {
   mocks.copyTextAndHtml.mockReset().mockResolvedValue(true);
   mocks.deleteProject.mockReset().mockReturnValue(pending.promise);
   mocks.getProject.mockReset().mockResolvedValue(PROJECT);
+  mocks.getProjectMembers.mockReset().mockResolvedValue({ members: [], manager_id: null });
   mocks.getProjectSubscription.mockReset().mockResolvedValue(false);
   mocks.setProjectSubscription.mockReset().mockImplementation(async (_id: string, subscribed: boolean) => subscribed);
   setApiInstance({
     deleteProject: mocks.deleteProject,
     getProject: mocks.getProject,
+    getProjectMembers: mocks.getProjectMembers,
     getProjectSubscription: mocks.getProjectSubscription,
     setProjectSubscription: mocks.setProjectSubscription,
   } as unknown as ApiClient);
@@ -463,6 +466,31 @@ describe("ProjectDetail for a guest", () => {
     expect(within(properties).getByRole("button", { name: "No lead" }).closest("[inert]")).not.toBeNull();
     expect(within(properties).getByText("Guests can view this project, but cannot change its properties.")).toBeInTheDocument();
     expect(screen.getByTestId("project-insights")).toHaveAttribute("data-read-only", "true");
+  });
+
+  it("does not ask for the members of a private project it was shared", async () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });
+    renderProjectDetail();
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+    expect(mocks.getProjectMembers).not.toHaveBeenCalled();
+  });
+
+  it("says an archived project is archived without offering Restore", () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, archived_at: "2026-11-01T00:00:00Z" });
+    renderProjectDetail();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore project" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer deletion to a creator who is now a guest", () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), {
+      ...PROJECT,
+      creator_type: "member",
+      creator_id: "user-1",
+    });
+    renderProjectDetail();
+    expect(screen.queryByRole("button", { name: "Delete project" })).not.toBeInTheDocument();
   });
 
   it("leaves a member's page editable", () => {

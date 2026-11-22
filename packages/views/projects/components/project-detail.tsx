@@ -480,7 +480,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               />
               {archived && (
                 <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
-                  <ArchivedProjectNotice project={project} />
+                  <ArchivedProjectNotice project={project} readOnly={guest} />
                 </div>
               )}
               {tab === "overview" ? (
@@ -507,7 +507,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   />
                   {archived && (
                     <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
-                      <ArchivedProjectNotice project={project} />
+                      <ArchivedProjectNotice project={project} readOnly={guest} />
                     </div>
                   )}
                 </>
