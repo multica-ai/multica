@@ -45,7 +45,11 @@ function item(id: string, issueId: string): InboxItem {
 const archived = (issueId: string): KeptInboxRow => ({ key: issueId, item: item(`n-${issueId}`, issueId), reason: "archived" });
 const nextRow = item("n-next", "issue-next");
 
-function setup(preferences: Record<string, string>, initial: KeptInboxRow | null = null) {
+function setup(
+  preferences: Record<string, string>,
+  initial: KeptInboxRow | null = null,
+  next: InboxItem | null = nextRow,
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(notificationPreferenceKeys.all("ws"), { workspace_id: "ws", preferences });
   const resources = getTestResources();
@@ -56,7 +60,7 @@ function setup(preferences: Record<string, string>, initial: KeptInboxRow | null
   );
   const onNext = vi.fn();
   const view = renderHook(
-    ({ settled }: { settled: KeptInboxRow | null }) => useMoveOnAfterAutoArchive({ settled, next: nextRow, onNext }),
+    ({ settled }: { settled: KeptInboxRow | null }) => useMoveOnAfterAutoArchive({ settled, next, onNext }),
     { wrapper, initialProps: { settled: initial } },
   );
   return {
@@ -108,6 +112,14 @@ describe("useMoveOnAfterAutoArchive", () => {
     const { onNext, settle } = setup({ after_auto_archive: "next" });
     settle(archived("issue-d"));
     expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("moves on to Inbox Zero when the last notification auto-archives under after_auto_archive=next", () => {
+    const { onNext, settle } = setup({ after_auto_archive: "next" }, null, null);
+    noteInboxAutoArchive({ issue_id: "issue-last", reason: "actor_acted" });
+    settle(archived("issue-last"));
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(toast.success).toHaveBeenCalledWith("Notification archived", expect.anything());
   });
 
   it("stays when the action happened in another window", () => {

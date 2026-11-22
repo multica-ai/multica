@@ -222,16 +222,40 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list personal accounts")
 		return
 	}
+	remoteTeam, err := h.remoteConnections(r, connectedapps.ScopeTeam, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list team accounts")
+		return
+	}
+	remotePersonal, err := h.remoteConnections(r, connectedapps.ScopePersonal, member.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list personal accounts")
+		return
+	}
 	agentApps, err := h.Queries.ListAgentAppsInWorkspace(ctx, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent apps")
 		return
 	}
-	slugs := make([]string, 0, len(team)+len(personal))
+	teamRows := make([]AppConnectionResponse, 0, len(team)+len(remoteTeam))
 	for _, row := range team {
+		teamRows = append(teamRows, connectionFromTeam(row))
+	}
+	for _, row := range remoteTeam {
+		teamRows = append(teamRows, connectionFromRemote(row))
+	}
+	personalRows := make([]AppConnectionResponse, 0, len(personal)+len(remotePersonal))
+	for _, row := range personal {
+		personalRows = append(personalRows, connectionFromPersonal(row))
+	}
+	for _, row := range remotePersonal {
+		personalRows = append(personalRows, connectionFromRemote(row))
+	}
+	slugs := make([]string, 0, len(teamRows)+len(personalRows))
+	for _, row := range teamRows {
 		slugs = append(slugs, row.ToolkitSlug)
 	}
-	for _, row := range personal {
+	for _, row := range personalRows {
 		slugs = append(slugs, row.ToolkitSlug)
 	}
 	rules, err := h.Queries.ListAppActionRulesForRun(ctx, db.ListAppActionRulesForRunParams{
@@ -252,18 +276,16 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		CatalogMode:     catalog.Mode,
 		AllowedToolkits: append([]string{}, catalog.Allowed...),
 		CanManage:       isAdmin,
-		Team:            make([]AppConnectionResponse, 0, len(team)),
-		Personal:        make([]AppConnectionResponse, 0, len(personal)),
+		Team:            make([]AppConnectionResponse, 0, len(teamRows)),
+		Personal:        make([]AppConnectionResponse, 0, len(personalRows)),
 		AgentApps:       make([]AgentAppResponse, 0, len(agentApps)),
 	}
-	for _, row := range team {
-		connection := connectionFromTeam(row)
-		connection.ActionsBlocked = blocked[uuidToString(pgtype.UUID{})+":"+row.ToolkitSlug]
+	for _, connection := range teamRows {
+		connection.ActionsBlocked = blocked[uuidToString(pgtype.UUID{})+":"+connection.ToolkitSlug]
 		resp.Team = append(resp.Team, connection)
 	}
-	for _, row := range personal {
-		connection := connectionFromPersonal(row)
-		connection.ActionsBlocked = blocked[uuidToString(member.UserID)+":"+row.ToolkitSlug]
+	for _, connection := range personalRows {
+		connection.ActionsBlocked = blocked[uuidToString(member.UserID)+":"+connection.ToolkitSlug]
 		resp.Personal = append(resp.Personal, connection)
 	}
 	for _, row := range agentApps {
@@ -291,9 +313,24 @@ func (h *Handler) ListAppCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	catalog := h.ConnectedApps.Catalog(r.Context(), workspaceID)
-	out := make([]AppCatalogEntry, 0, len(toolkits))
+	remoteApps := h.ConnectedApps.RemoteApps()
+	out := make([]AppCatalogEntry, 0, len(remoteApps)+len(toolkits))
+	for _, app := range remoteApps {
+		allowed := catalog.Allows(app.Slug)
+		if !allowed && !viewAll {
+			continue
+		}
+		entry := AppCatalogEntry{Slug: app.Slug, Name: app.Name, Category: app.Category, Allowed: allowed}
+		if curated, ok := connectedapps.Curated(app.Slug); ok {
+			entry.Curated, entry.RecommendedScope = true, curated.Scope
+		}
+		out = append(out, entry)
+	}
 	for _, tk := range toolkits {
 		slug := connectedapps.NormalizeSlug(tk.Slug)
+		if _, remote := h.ConnectedApps.RemoteApp(slug); remote {
+			continue
+		}
 		allowed := catalog.Allows(slug)
 		if !allowed && !viewAll {
 			continue
@@ -378,7 +415,13 @@ func (h *Handler) ConnectTeamApp(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	url, err := h.Composio.BeginTeamConnect(r.Context(), workspaceID, member.UserID, req.ToolkitSlug, req.ReturnTo)
+	var url string
+	var err error
+	if _, remote := h.ConnectedApps.RemoteApp(req.ToolkitSlug); remote {
+		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopeTeam, workspaceID, member.UserID, req.ReturnTo)
+	} else {
+		url, err = h.Composio.BeginTeamConnect(r.Context(), workspaceID, member.UserID, req.ToolkitSlug, req.ReturnTo)
+	}
 	if err != nil {
 		writeConnectError(w, r, err)
 		return
@@ -400,7 +443,13 @@ func (h *Handler) ConnectPersonalApp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	url, err := h.Composio.BeginConnectReturning(r.Context(), member.UserID, req.ToolkitSlug, req.ReturnTo)
+	var url string
+	var err error
+	if _, remote := h.ConnectedApps.RemoteApp(req.ToolkitSlug); remote {
+		url, err = h.ConnectedApps.BeginRemoteConnect(r.Context(), req.ToolkitSlug, connectedapps.ScopePersonal, member.UserID, member.UserID, req.ReturnTo)
+	} else {
+		url, err = h.Composio.BeginConnectReturning(r.Context(), member.UserID, req.ToolkitSlug, req.ReturnTo)
+	}
 	if err != nil {
 		writeConnectError(w, r, err)
 		return
@@ -426,7 +475,15 @@ func (h *Handler) DisconnectTeamApp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	slug := ""
 	row, err := h.Composio.DisconnectTeam(r.Context(), workspaceID, id)
+	if errors.Is(err, composio.ErrConnectionNotFound) {
+		var remoteRow db.RemoteAppConnection
+		remoteRow, err = h.ConnectedApps.DisconnectRemote(r.Context(), id, connectedapps.ScopeTeam, workspaceID)
+		slug = remoteRow.AppSlug
+	} else {
+		slug = row.ToolkitSlug
+	}
 	if errors.Is(err, composio.ErrConnectionNotFound) {
 		writeError(w, http.StatusNotFound, "connection not found")
 		return
@@ -436,7 +493,7 @@ func (h *Handler) DisconnectTeamApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "failed to disconnect")
 		return
 	}
-	h.ConnectedApps.CancelTeamRequests(r.Context(), workspaceID, row.ToolkitSlug)
+	h.ConnectedApps.CancelTeamRequests(r.Context(), workspaceID, slug)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -741,13 +798,17 @@ func (h *Handler) ListAppTools(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
 	}
-	_, workspaceID, _, ok := h.appsMember(w, r)
+	member, workspaceID, _, ok := h.appsMember(w, r)
 	if !ok {
 		return
 	}
 	slug := connectedapps.NormalizeSlug(r.URL.Query().Get("toolkit_slug"))
 	if slug == "" {
 		writeError(w, http.StatusBadRequest, "toolkit_slug is required")
+		return
+	}
+	if _, remote := h.ConnectedApps.RemoteApp(slug); remote {
+		h.listRemoteAppTools(w, r, workspaceID, member.UserID, slug)
 		return
 	}
 	tools, err := h.Composio.ListToolkitTools(r.Context(), slug)

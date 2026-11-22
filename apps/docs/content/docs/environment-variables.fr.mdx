@@ -47,6 +47,8 @@ Vous devez aussi choisir un service d'e-mail ; sinon, les codes de vérification
 | `LOG_LEVEL` | valeur par défaut de l'application | Niveau de journalisation |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | Délai d'attente, après un signal d'arrêt, avant le début de l'arrêt propre |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | Durée pendant laquelle un runtime hors ligne peut se reconnecter avant que ses exécutions en cours n'échouent ; les valeurs inférieures à `150s` sont relevées à ce plancher |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Le Web et le Desktop maintiennent un index de recherche local par espace de travail ; définissez `off` pour renvoyer les recherches vers le serveur |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | Active la plage de 365 jours sur la page Statistiques ; définissez `off` si les requêtes annuelles sont trop lentes pour votre base de données |
 
 Lorsque vous définissez un délai de maintien avant arrêt sur Kubernetes, `terminationGracePeriodSeconds` doit dépasser ce délai plus le temps nécessaire à l'arrêt proprement dit.
 
@@ -300,6 +302,7 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 
 | Outil | Préfixe | Variable de modèle |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓ (sélectionne un mode Amp, par exemple `high`) |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓ (le nom exact affiché par `agy models`) |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -308,7 +311,9 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓ (un ID du catalogue dsh, par exemple `deepseek-official/deepseek-chat`) |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓ (un ID du catalogue dim) |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -326,6 +331,7 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | — (le modèle est géré par le profil d'agent ZeroClaw) |
 
 </Accordion>
@@ -333,7 +339,7 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 
 QwenPaw et MiniMax Code n'ont pas de variable de modèle, car Multica ne leur envoie jamais de modèle ; consultez [Comparaison des outils de codage IA](/providers#sources-des-modèles). DeepSeek Harness a aussi `MULTICA_DSH_PROFILE_BUNDLE` et `MULTICA_DSH_PLUGIN_PATH`, décrits dans la section suivante.
 
-Les arguments par défaut à l'échelle de la machine via `MULTICA_<PREFIX>_ARGS` sont actuellement pris en charge pour cinq outils : Claude Code, Codex, CodeBuddy, Qwen Code et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
+Les arguments par défaut à l'échelle de la machine via `MULTICA_<PREFIX>_ARGS` sont actuellement pris en charge pour sept outils : Claude Code, Codex, CodeBuddy, Qwen Code, Amp, Factory Droid et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_AMP_ARGS`, `MULTICA_DROID_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

@@ -1,15 +1,18 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useMemo, type ReactNode, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlarmClock, ChevronDown } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
+import type { LastInboxCleared } from "@multica/core/inbox/selection-store";
 import type { InboxItem } from "@multica/core/types";
 import { findSnoozedInboxIssue, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { nextInboxRow } from "@multica/core/inbox/open-row";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import {
   getShortcut,
   isEditableShortcutTarget,
@@ -18,6 +21,7 @@ import {
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import { InboxArchiveButton, InboxBar, InboxBarButton, InboxBarStatus, InboxOpenBar } from "../../inbox/components/inbox-bar";
+import { inboxRowHref } from "../../inbox/components/inbox-display";
 import { InboxKeptActions, InboxNextButton, useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
@@ -28,10 +32,13 @@ import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-arc
 import { useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import { useMoveOnAfterAutoArchive } from "../../inbox/components/use-move-on-after-auto-archive";
 import {
+  clearedLabelForItem,
   useArchiveInboxWithUndo,
   useLeaveInboxRow,
   useRestoreInbox,
 } from "../../inbox/components/use-leave-inbox-row";
+import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
+import { useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
 
 /**
@@ -52,8 +59,12 @@ import { useLocale, useT } from "../../i18n";
 export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issueActions?: ReactNode }) {
   const { t } = useT("inbox");
   const wsId = useWorkspaceId();
+  const p = useWorkspacePaths();
+  const { push } = useNavigation();
+  const builtinNav = useBuiltinViewNavigation();
+  const guest = useIsGuest(wsId);
   const { fromInbox } = useSidebarInboxIssue(wsId, issueId);
-  const { rows, kept } = useFilteredInboxRows(wsId, issueId, fromInbox);
+  const { rows, kept, filtered } = useFilteredInboxRows(wsId, issueId, fromInbox);
   const index = fromInbox ? rows.findIndex((row) => row.issue_id === issueId) : -1;
   const row = index >= 0 ? rows[index]! : null;
   // A row kept after it left the Inbox on its own is no longer there to act on.
@@ -67,35 +78,87 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
   const { snooze, unsnooze } = useInboxSnooze();
   const { data: snoozedList } = useQuery(snoozedInboxOptions(wsId));
   const snoozed = item ? undefined : findSnoozedInboxIssue(snoozedList, issueId);
+  const activeSnoozedCount = useMemo(() => {
+    const now = Date.now();
+    return (snoozedList ?? []).filter((entry) => new Date(entry.snoozed_until).getTime() > now).length;
+  }, [snoozedList]);
   const keptText = useKeptInboxRowText(wsId);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
 
   const archiveItem = () => {
     if (!item) return;
     archiveWithUndo(item.id, issueId);
-    leave(issueId, next);
+    leave(issueId, next, {
+      kind: "archived",
+      itemId: item.id,
+      key: issueId,
+      label: clearedLabelForItem(item),
+      href: inboxRowHref(p, item),
+      clearedAt: Date.now(),
+    });
   };
 
   const unsubscribeItem = (scope: InboxUnsubscribeScope) => {
     if (!item?.issue_id) return;
     unsubscribeArchive({ id: item.id, issueId: item.issue_id }, scope);
-    leave(issueId, next);
+    leave(issueId, next, {
+      kind: "unsubscribed",
+      itemId: item.id,
+      issueId: item.issue_id,
+      key: issueId,
+      label: clearedLabelForItem(item),
+      href: inboxRowHref(p, item),
+      undoable: scope === "issue",
+      clearedAt: Date.now(),
+    });
   };
 
   const snoozeItem = (until: Date) => {
     if (!item) return;
     snooze(item, until);
-    leave(issueId, next);
+    leave(issueId, next, {
+      kind: "snoozed",
+      itemId: item.id,
+      key: issueId,
+      label: clearedLabelForItem(item),
+      href: inboxRowHref(p, item),
+      until: until.toISOString(),
+      wasRead: item.read === true,
+      clearedAt: Date.now(),
+    });
   };
 
-  const moveOn = () => leave(issueId, next);
+  const moveOn = () => {
+    const cleared: LastInboxCleared | undefined = settled
+      ? settled.reason === "snoozed" && settled.item.snoozed_until
+        ? {
+            kind: "snoozed",
+            itemId: settled.item.id,
+            key: issueId,
+            label: clearedLabelForItem(settled.item),
+            href: inboxRowHref(p, settled.item),
+            until: settled.item.snoozed_until,
+            wasRead: settled.item.read === true,
+            clearedAt: Date.now(),
+          }
+        : {
+            kind: "archived",
+            itemId: settled.item.id,
+            key: issueId,
+            label: clearedLabelForItem(settled.item),
+            href: inboxRowHref(p, settled.item),
+            clearedAt: Date.now(),
+          }
+      : undefined;
+    leave(issueId, next, cleared);
+  };
   const cause = useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
 
   const archiveRef = useRef<(() => void) | null>(null);
   const snoozeRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    // Archived already, E moves on as archiving would have.
-    archiveRef.current = item ? archiveItem : settled && next ? moveOn : null;
+    // Archived already, E moves on (to the next notification or Inbox Zero).
+    archiveRef.current = item ? archiveItem : settled ? moveOn : null;
     snoozeRef.current = item
       ? () => setSnoozeOpen(true)
       : snoozed
@@ -136,6 +199,7 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
       );
     }
     if (!settled) return null;
+    const inboxCleared = !next && !filtered;
     return (
       <InboxKeptActions
         label={keptText.notice(settled, cause)}
@@ -143,6 +207,24 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
         onUndo={() => restore(settled.item.id, { quiet: true })}
         next={next}
         onNext={moveOn}
+        inboxCleared={inboxCleared}
+        snoozedCount={inboxCleared ? activeSnoozedCount : 0}
+        onSnoozedClick={
+          inboxCleared
+            ? () => {
+                builtinNav.prepare("snoozed");
+                push(builtinNav.hrefFor("snoozed"));
+              }
+            : undefined
+        }
+        onGoToMyWork={
+          inboxCleared && !guest
+            ? () => {
+                builtinNav.prepare("my_work");
+                push(builtinNav.hrefFor("my_work"));
+              }
+            : undefined
+        }
       />
     );
   }

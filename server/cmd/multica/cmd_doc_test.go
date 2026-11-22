@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -380,10 +381,66 @@ func TestRunDocFolderUpdateRejectsEmptyAndNonUUIDRefs(t *testing.T) {
 		}
 	}
 	nonUUID := "aaaaaaaa/../../../docs?x=1#yyyyyyyyyy"[:36]
-	if err := runDocFolderUpdate(docFolderUpdateCmd, []string{nonUUID}); err == nil || !strings.Contains(err.Error(), "no folder matches") {
+	if err := runDocFolderUpdate(docFolderUpdateCmd, []string{nonUUID}); err == nil || !strings.Contains(err.Error(), "resolve folder") {
 		t.Fatalf("36-char non-UUID ref must not be used as an id: %v", err)
 	}
 	if writes != 0 {
 		t.Fatalf("rejected refs must not reach a write endpoint, got %d writes", writes)
+	}
+}
+
+func TestResolveDocRefMatchesSharedPrefixRules(t *testing.T) {
+	const docA = "abcd1234-0000-0000-0000-000000000001"
+	const docB = "abcd5678-0000-0000-0000-000000000002"
+	const folderID = "fedc1234-0000-0000-0000-000000000003"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"folders": []any{map[string]any{"id": folderID, "title": "Guides"}},
+			"docs": []any{
+				map[string]any{"id": docA, "title": "Runbook"},
+				map[string]any{"id": docB, "title": "Roadmap"},
+			},
+		})
+	}))
+	defer srv.Close()
+	client := cli.NewAPIClient(srv.URL, "ws-1", "mat_test-token")
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		ref     string
+		folders bool
+		want    string
+		wantErr []string
+	}{
+		{name: "uppercase prefix", ref: "ABCD1", want: docA},
+		{name: "prefix with dash", ref: "abcd5678-0", want: docB},
+		{name: "folder prefix", ref: "FEDC", folders: true, want: folderID},
+		{name: "doc prefix does not match folders", ref: "abcd1", folders: true, wantErr: []string{"no folder found", "`multica doc folder list`"}},
+		{name: "unmatched doc prefix", ref: "0000", wantErr: []string{"no doc found", "`multica doc list`"}},
+		{name: "too short prefix", ref: "abc", wantErr: []string{"resolve doc", "at least 4"}},
+		{name: "ambiguous prefix lists candidates", ref: "abcd", wantErr: []string{"ambiguous doc id prefix", docA, docB, "`multica doc list`"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveDocRef(ctx, client, tc.ref, tc.folders)
+			if tc.wantErr == nil {
+				if err != nil || got != tc.want {
+					t.Fatalf("resolveDocRef(%q) = %q, %v; want %q", tc.ref, got, err, tc.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("resolveDocRef(%q) = %q; want error", tc.ref, got)
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("resolveDocRef(%q) error = %v; want it to contain %q", tc.ref, err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "--full-id") {
+				t.Fatalf("resolveDocRef(%q) error = %v; doc list commands have no --full-id flag", tc.ref, err)
+			}
+		})
 	}
 }

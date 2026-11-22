@@ -65,6 +65,10 @@ type run struct {
 // authenticates with the bearer token minted at claim; the token only works
 // while its task is dispatched or running.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.serveRPC(w, r, s.dispatch)
+}
+
+func (s *Service) serveRPC(w http.ResponseWriter, r *http.Request, dispatch func(context.Context, *run, rpcRequest) (rpcResponse, bool)) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -103,7 +107,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var out []rpcResponse
 	for _, req := range reqs {
-		resp, notify := s.dispatch(r.Context(), rn, req)
+		resp, notify := dispatch(r.Context(), rn, req)
 		if !notify {
 			out = append(out, resp)
 		}
@@ -331,6 +335,9 @@ func (s *Service) toolListApps(ctx context.Context, rn *run) map[string]any {
 		Account string `json:"account"`
 		Level   string `json:"level"`
 		Status  string `json:"status"`
+		// Server is set for an app whose tools are called directly on its
+		// own MCP server rather than through apps_run_tool.
+		Server string `json:"server,omitempty"`
 	}
 	out := []appView{}
 	for slug, app := range rn.apps {
@@ -342,10 +349,14 @@ func (s *Service) toolListApps(ctx context.Context, rn *run) map[string]any {
 		if _, err := s.resolveAccount(ctx, rn.workspaceID, rn.triggeredBy, slug, app.AccountScope); err != nil {
 			status = "not_connected"
 		}
-		out = append(out, appView{
+		view := appView{
 			App: slug, Name: runtimeapps.DisplayNameForToolkitSlug(slug),
 			Account: app.AccountScope, Level: level, Status: status,
-		})
+		}
+		if remote, ok := s.RemoteApp(slug); ok {
+			view.Name, view.Server = remote.Name, remote.Slug
+		}
+		out = append(out, view)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].App < out[j].App })
 	return jsonResult(map[string]any{"apps": out})
@@ -384,6 +395,9 @@ func (s *Service) toolSearch(ctx context.Context, rn *run, slug, query string) m
 	app, ok := rn.apps[slug]
 	if !ok {
 		return textResult(fmt.Sprintf("app %q is not available to you in this run; call apps_list", slug), true)
+	}
+	if remote, ok := s.RemoteApp(slug); ok {
+		return remoteServerHint(remote)
 	}
 	tools, err := s.composio.ListToolkitTools(ctx, slug)
 	if err != nil {
@@ -442,6 +456,9 @@ func (s *Service) toolGet(ctx context.Context, rn *run, toolSlug string) map[str
 	if !ok {
 		return textResult("this tool does not belong to an app you can use in this run", true)
 	}
+	if remote, ok := s.RemoteApp(app.ToolkitSlug); ok {
+		return remoteServerHint(remote)
+	}
 	tool, err := s.composio.GetTool(ctx, app.ToolkitSlug, toolSlug)
 	if err != nil {
 		return textResult("tool not found", true)
@@ -466,6 +483,9 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 		return textResult("this tool does not belong to an app you can use in this run", true)
 	}
 	slug := NormalizeSlug(app.ToolkitSlug)
+	if remote, ok := s.RemoteApp(slug); ok {
+		return remoteServerHint(remote)
+	}
 	tool, err := s.composio.GetTool(ctx, slug, toolSlug)
 	if err != nil {
 		return textResult("tool not found", true)
@@ -484,30 +504,8 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 		}
 		return textResult("could not resolve the account for this app", true)
 	}
-	switch policy {
-	case PolicyBlock:
-		call.outcome = "blocked"
-		first := s.firstBlock(ctx, call)
-		s.recordCall(ctx, call)
-		if first && rn.triggeredBy.Valid {
-			s.notify(ctx, db.AppActionRequest{
-				WorkspaceID: rn.workspaceID, Status: "blocked", Kind: KindAction,
-				TaskID: rn.task.ID, AgentID: rn.agent.ID, IssueID: rn.task.IssueID, ChatSessionID: rn.task.ChatSessionID,
-				ApproverUserID: rn.triggeredBy, AccountScope: app.AccountScope,
-				ToolkitSlug: slug, ToolSlug: tool.Slug, ActionClass: class,
-			}, NotifActionResult)
-		}
-		return textResult(fmt.Sprintf("blocked: %s calls (%s) are not allowed for you on %s. Do not work around this; tell the person what you would have done.", class, tool.Slug, slug), true)
-	}
-	// Tool lookup may involve a network call, and one gateway request may
-	// contain a batch. Check again immediately before allowing execution.
-	if !s.mayRun(ctx, rn.task, rn.agent) {
-		return textResult("this run is no longer allowed to use this agent", true)
-	}
-	if s.overLimit(ctx, rn.workspaceID, slug, acct) {
-		call.outcome = "rate_limited"
-		s.recordCall(ctx, call)
-		return textResult(fmt.Sprintf("rate limited: this %s account already ran %d calls in the last minute. Wait a minute before the next call, and batch work where the app allows it.", slug, s.perMinute), true)
+	if refusal := s.refuseCall(ctx, rn, app, &call, policy); refusal != nil {
+		return refusal
 	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
 	s.touch(ctx, rn.workspaceID, acct)
@@ -526,6 +524,37 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 	call.outcome = "ok"
 	s.recordCall(ctx, call)
 	return jsonResult(resp.Data)
+}
+
+// refuseCall applies what stands between an allowed policy and executing a
+// call: a blocking rule, the run losing access, and the account's rate limit.
+// It records and returns the refusal, or nil when the call may run.
+func (s *Service) refuseCall(ctx context.Context, rn *run, app db.AgentApp, call *toolCall, policy string) map[string]any {
+	if policy == PolicyBlock {
+		call.outcome = "blocked"
+		first := s.firstBlock(ctx, *call)
+		s.recordCall(ctx, *call)
+		if first && rn.triggeredBy.Valid {
+			s.notify(ctx, db.AppActionRequest{
+				WorkspaceID: rn.workspaceID, Status: "blocked", Kind: KindAction,
+				TaskID: rn.task.ID, AgentID: rn.agent.ID, IssueID: rn.task.IssueID, ChatSessionID: rn.task.ChatSessionID,
+				ApproverUserID: rn.triggeredBy, AccountScope: app.AccountScope,
+				ToolkitSlug: call.toolkit, ToolSlug: call.tool, ActionClass: call.class,
+			}, NotifActionResult)
+		}
+		return textResult(fmt.Sprintf("blocked: %s calls (%s) are not allowed for you on %s. Do not work around this; tell the person what you would have done.", call.class, call.tool, call.toolkit), true)
+	}
+	// Tool lookup may involve a network call, and one gateway request may
+	// contain a batch. Check again immediately before allowing execution.
+	if !s.mayRun(ctx, rn.task, rn.agent) {
+		return textResult("this run is no longer allowed to use this agent", true)
+	}
+	if s.overLimit(ctx, rn.workspaceID, call.toolkit, call.acct) {
+		call.outcome = "rate_limited"
+		s.recordCall(ctx, *call)
+		return textResult(fmt.Sprintf("rate limited: this %s account already ran %d calls in the last minute. Wait a minute before the next call, and batch work where the app allows it.", call.toolkit, s.perMinute), true)
+	}
+	return nil
 }
 
 func (s *Service) toolRequestConnection(ctx context.Context, rn *run, slug, summary string) map[string]any {

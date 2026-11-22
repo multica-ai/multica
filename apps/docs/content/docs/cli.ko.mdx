@@ -294,6 +294,12 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args`는 JSON 배열이며 실행 인수의 맨 끝에 붙습니다. 모델은 `--model`로 고르세요. 사용자 지정 인수 안의 `--model`을 거부하는 도구도 있습니다.
 - 에이전트를 호출할 수 있는 사람은 `--permission-mode`로 정합니다. `private`은 소유자만, `public_to`는 `--public-to-workspace` 또는 `--public-to-member <user-id>`와 함께 씁니다. `--visibility private|workspace`는 예전 방식이며 `--permission-mode`로 변환됩니다. 둘 다 지정하면 `--permission-mode`가 우선합니다.
 
+### 에이전트 실행 기록
+
+`multica agent tasks <agent-id> --limit 200`은 최신 실행 페이지를 반환합니다. 기본 및 최대 페이지 크기는 200입니다. 실행 기록이 더 있으면 stderr에 커서가 출력되며, 이를 그대로 `--before '<cursor>'`에 넘겨 다음 페이지를 읽습니다. `--output json`은 배열 출력을 유지하며 해당 페이지의 사용량만 포함합니다.
+
+대응하는 `GET /api/agents/{id}/tasks` 엔드포인트는 `limit`과 `before`를 받으며 JSON 배열 응답을 유지합니다. `X-Agent-Tasks-Next-Cursor` 응답 헤더가 다음 커서를 제공하며, 이 헤더가 없으면 마지막 페이지입니다. 커서는 타임스탬프 정밀도를 포함해 `(created_at, id)` 순서를 보존합니다. 잘못된 limit 또는 커서는 HTTP 400을 반환하며 200을 초과하는 limit은 200으로 제한됩니다. 커서를 따라가지 않는 클라이언트는 최신 200건의 실행만 받습니다.
+
 ## 데몬과 런타임
 
 ```bash
@@ -462,6 +468,12 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 ## 명령 참조
 
 다음 표는 현재의 모든 최상위 명령을 CLI 자체 그룹 순서로 정리합니다. 모든 명령은 전역 flag `--server-url`, `--workspace-id`, `--profile`, `--debug`를 허용합니다. `--output`은 명령별로 등록되는 flag이며 기본 형식은 명령에 따라 다릅니다. `list` 계열은 기본적으로 표를 사용하고 `get`, `create` 계열은 주로 JSON을 사용합니다. 전체 인수는 `multica <command> --help`를 기준으로 확인하세요.
+
+### 태스크 첨부 파일
+
+`issue create`, `issue update`, `issue comment add`의 각 `--attachment`는 파일 이름에 쉼표나 큰따옴표가 들어 있어도 리터럴 파일 경로 하나로 받습니다. 여러 파일을 첨부하려면 `--attachment 'report,final.csv' --attachment notes.txt`처럼 flag를 반복합니다. flag를 생략하면 첨부하지 않으며, 빈 경로를 명시하면 오류가 발생합니다. 모든 로컬 경로를 확인한 뒤에 업로드를 시작합니다.
+
+이전 CSV 파싱 방식에서의 전환: 두 파일을 첨부할 때는 `--attachment a,b`를 `--attachment a --attachment b`로 바꾸세요. 앞의 표기는 이제 이름이 `a,b`인 단일 파일을 가리킵니다. 예전 우회 방식인 `--attachment '"report,final.csv"'`의 여분 CSV 큰따옴표도 제거하고, 파일 이름 자체에 큰따옴표가 들어 있는 경우가 아니라면 `--attachment 'report,final.csv'`를 사용하세요.
 
 ### Core
 

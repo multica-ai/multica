@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -67,12 +67,24 @@ export function KeptRowsRelease() {
   const issueId = issueSegment ? (issue?.id ?? (isIssueUuid(issueSegment) ? issueSegment : undefined)) : null;
   const projectId = routeSegment(pathname, p.projects());
   // The notification the Inbox page has open, as its rows are keyed.
-  const inboxKey = pathname === p.inbox() ? searchParams.get("issue") : null;
+  const onInbox = pathname === p.inbox();
+  const inboxKey = onInbox ? searchParams.get("issue") : null;
+  const wasOnInbox = useRef(false);
   useLayoutEffect(() => {
     if (issueId === undefined) return;
     useSidebarKeptStore.getState().release([issueId, projectId].filter((id) => id !== null));
-    if (wsId) useInboxSelectionStore.getState().releaseRows(wsId, [issueId, inboxKey].filter((id) => id !== null));
-  }, [wsId, issueId, projectId, inboxKey]);
+    if (wsId) {
+      const store = useInboxSelectionStore.getState();
+      store.releaseRows(wsId, [issueId, inboxKey].filter((id) => id !== null));
+      // Keep the Inbox Zero undo context only while on /inbox, or while the
+      // just-cleared issue is still handing off its navigation to /inbox.
+      const lastCleared = store.lastClearedByWorkspace[wsId];
+      if (lastCleared && !onInbox && (wasOnInbox.current || issueId !== lastCleared.key)) {
+        store.clearLastCleared(wsId);
+      }
+    }
+    wasOnInbox.current = onInbox;
+  }, [wsId, issueId, projectId, inboxKey, onInbox]);
   return null;
 }
 

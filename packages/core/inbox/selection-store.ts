@@ -3,6 +3,48 @@
 import { create } from "zustand";
 import type { HeldInboxRow } from "./open-row";
 
+/**
+ * The notification action that just emptied the Inbox, kept in memory so the
+ * Inbox Zero surface can offer a persistent inline undo (and return to that
+ * notification) after the transient toast has gone.
+ */
+export type LastInboxCleared =
+  | {
+      kind: "archived";
+      itemId: string;
+      key: string;
+      label: string;
+      href: string;
+      clearedAt: number;
+    }
+  | {
+      kind: "snoozed";
+      itemId: string;
+      key: string;
+      label: string;
+      href: string;
+      until: string;
+      wasRead: boolean;
+      clearedAt: number;
+    }
+  | {
+      kind: "unsubscribed";
+      itemId: string;
+      issueId: string;
+      key: string;
+      label: string;
+      href: string;
+      undoable: boolean;
+      clearedAt: number;
+    }
+  | {
+      kind: "batch_archived";
+      count: number;
+      itemIds: string[];
+      key: string | null;
+      clearedAt: number;
+    };
+
 interface InboxSelectionState {
   lastResolvedKeyByWorkspace: Record<string, string>;
   rememberResolvedKey: (wsId: string, key: string) => void;
@@ -52,6 +94,10 @@ interface InboxSelectionState {
   releaseRows: (wsId: string, openKeys: readonly string[]) => void;
   /** Forgets the row one list holds, for a list that is going away. */
   dropRow: (wsId: string, list: string) => void;
+  /** The action that just emptied the Inbox, per workspace, for the Inbox Zero screen. */
+  lastClearedByWorkspace: Record<string, LastInboxCleared>;
+  recordLastCleared: (wsId: string, entry: LastInboxCleared) => void;
+  clearLastCleared: (wsId: string, matchKey?: string) => void;
 }
 
 const heldRowId = (wsId: string, list: string) => `${wsId}:${list}`;
@@ -131,11 +177,15 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set) => ({
       );
       const left = state.leftRowKeyByWorkspace[wsId];
       const leftGoes = left !== undefined && keys.includes(left);
-      if (!leftGoes && held.length === Object.keys(state.heldRows).length) return state;
+      const cleared = state.lastClearedByWorkspace[wsId];
+      const clearedGoes = !!cleared?.key && keys.includes(cleared.key);
+      if (!leftGoes && !clearedGoes && held.length === Object.keys(state.heldRows).length) return state;
       const { [wsId]: _forgotten, ...otherLeft } = state.leftRowKeyByWorkspace;
+      const { [wsId]: _cleared, ...otherCleared } = state.lastClearedByWorkspace;
       return {
         heldRows: Object.fromEntries(held),
         leftRowKeyByWorkspace: leftGoes ? otherLeft : state.leftRowKeyByWorkspace,
+        lastClearedByWorkspace: clearedGoes ? otherCleared : state.lastClearedByWorkspace,
       };
     }),
   releaseRows: (wsId, openKeys) =>
@@ -158,5 +208,18 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set) => ({
       if (!(id in state.heldRows)) return state;
       const { [id]: _dropped, ...heldRows } = state.heldRows;
       return { heldRows };
+    }),
+  lastClearedByWorkspace: {},
+  recordLastCleared: (wsId, entry) =>
+    set((state) => ({
+      lastClearedByWorkspace: { ...state.lastClearedByWorkspace, [wsId]: entry },
+    })),
+  clearLastCleared: (wsId, matchKey) =>
+    set((state) => {
+      const current = state.lastClearedByWorkspace[wsId];
+      if (!current) return state;
+      if (matchKey !== undefined && current.key !== matchKey) return state;
+      const { [wsId]: _cleared, ...lastClearedByWorkspace } = state.lastClearedByWorkspace;
+      return { lastClearedByWorkspace };
     }),
 }));

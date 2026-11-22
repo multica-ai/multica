@@ -47,6 +47,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Web と Desktop がワークスペースごとにローカル検索インデックスを保持します。`off` にするとクライアントはサーバー経由の検索に切り替わります |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | 分析ページで 365 日の期間を有効にします。1 年分の集計クエリがデータベースに重い場合は `off` にしてください |
 
 Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeconds` は hold と実際のシャットダウンにかかる時間の合計より大きくしてください。
 
@@ -303,6 +305,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 | ツール | プレフィックス | モデル変数 |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓（Amp のモードを選択。例: `high`） |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓（値は `agy models` が表示する名前そのもの） |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -311,7 +314,9 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓（値は dsh のモデルカタログにある ID。例: `deepseek-official/deepseek-chat`） |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓（値は dim のモデルカタログにある ID） |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -329,6 +334,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —（モデルは ZeroClaw のエージェント設定で管理） |
 
 </Accordion>
@@ -336,7 +342,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 QwenPaw と MiniMax Code には、Multica がモデルを渡さないためモデル変数がありません。詳しくは [AI コーディングツール比較](/providers#モデルの取得元)を参照してください。DeepSeek Harness には `MULTICA_DSH_PROFILE_BUNDLE` と `MULTICA_DSH_PLUGIN_PATH` もあり、次のセクションで説明します。
 
-マシン全体のデフォルト引数 `MULTICA_<PREFIX>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
+マシン全体のデフォルト引数 `MULTICA_<PREFIX>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、Amp、Factory Droid、QwenPaw の 7 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_AMP_ARGS`、`MULTICA_DROID_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

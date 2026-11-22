@@ -231,5 +231,28 @@
     },
     "hint": "You can change this in Settings › Notifications",
     "confirm": "Done"
+  },
+  "zero": {
+    "cleared_title": "Inbox cleared",
+    "just_archived": "Just archived {{label}}",
+    "just_snoozed": "Snoozed {{label}} until {{time}}",
+    "just_unsubscribed": "Unsubscribed from {{label}}",
+    "just_archived_many_one": "Archived {{count}} notification",
+    "just_archived_many_other": "Archived {{count}} notifications",
+    "snoozed_summary_one": "{{count}} snoozed · returns {{time}}",
+    "snoozed_summary_other": "{{count}} snoozed · next returns {{time}}",
+    "bar_snoozed_one": "{{count}} snoozed",
+    "bar_snoozed_other": "{{count}} snoozed",
+    "my_work": "My work",
+    "go_to_my_work": "Go to My work",
+    "agents_working_one": "{{count}} agent working",
+    "agents_working_other": "{{count}} agents working",
+    "view_archived": "View archived",
+    "quick_jump": "Quick jump",
+    "filtered_title": "All caught up for this filter",
+    "filtered_remaining_one": "{{count}} other notification in your inbox",
+    "filtered_remaining_other": "{{count}} other notifications in your inbox",
+    "clear_and_continue": "Clear filters and continue",
+    "undo_item": "Undo {{label}}"
   }
 }
