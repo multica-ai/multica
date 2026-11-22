@@ -131,8 +131,6 @@
     "tab_activity": "활동",
     "agent_context_badge": "에이전트 컨텍스트",
     "section_breakdown": "분포",
-    "section_working": "작업 중인 에이전트",
-    "working_empty": "지금 이 프로젝트의 이슈에서 실행 중인 에이전트가 없습니다.",
     "section_activity": "최근 활동",
     "activity": {
       "empty": "이 프로젝트의 이슈에 아직 활동이 없습니다.",

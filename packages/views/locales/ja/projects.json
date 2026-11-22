@@ -131,8 +131,6 @@
     "tab_activity": "アクティビティ",
     "agent_context_badge": "エージェントのコンテキスト",
     "section_breakdown": "内訳",
-    "section_working": "作業中のエージェント",
-    "working_empty": "このプロジェクトの課題で実行中のエージェントはいません。",
     "section_activity": "最近のアクティビティ",
     "activity": {
       "empty": "このプロジェクトの課題にはまだアクティビティがありません。",

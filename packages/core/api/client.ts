@@ -3439,13 +3439,12 @@ export class ApiClient {
   // issue work, the authenticated member's My Issues relation.
   // `parentIssueId` narrows the projection to that issue's direct children,
   // which is how the sub-issue header on issue detail reads the same source
-  // as the Issues list header. `projectId` narrows it to one project's issues.
-  // The server rejects combining the narrowings, so callers pass at most one.
+  // as the Issues list header. The server rejects combining it with `scope`,
+  // so callers pass one or the other.
   async getWorkspaceWorkingAgents(
     type?: WorkspaceWorkingAgentType,
     mineRelation?: WorkspaceWorkingAgentMineRelation,
     parentIssueId?: string,
-    projectId?: string,
   ): Promise<WorkspaceWorkingAgent[]> {
     const search = new URLSearchParams();
     if (type) search.set("type", type);
@@ -3454,8 +3453,6 @@ export class ApiClient {
       search.set("relation", mineRelation);
     } else if (parentIssueId) {
       search.set("parent", parentIssueId);
-    } else if (projectId) {
-      search.set("project", projectId);
     }
     const query = search.toString();
     return this.fetch(`/api/working-agents${query ? `?${query}` : ""}`);

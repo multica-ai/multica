@@ -135,8 +135,6 @@
     "tab_activity": "Actividad",
     "agent_context_badge": "Contexto del agente",
     "section_breakdown": "Desglose",
-    "section_working": "Agentes trabajando",
-    "working_empty": "Ahora mismo no hay agentes trabajando en las incidencias de este proyecto.",
     "section_activity": "Actividad reciente",
     "activity": {
       "empty": "Las incidencias de este proyecto aún no tienen actividad.",

@@ -1087,7 +1087,7 @@ describe("useIssueSurfaceController", () => {
     );
     expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
     expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
-    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined, undefined);
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
     expect(listIssues).not.toHaveBeenCalled();
   });
 
@@ -1124,7 +1124,6 @@ describe("useIssueSurfaceController", () => {
       expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith(
         "issue",
         "assigned",
-        undefined,
         undefined,
       ),
     );
@@ -1164,7 +1163,7 @@ describe("useIssueSurfaceController", () => {
       );
       expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
       expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
-      expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined, undefined);
+      expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
       expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
     },
   );
@@ -1717,7 +1716,7 @@ describe("useIssueSurfaceController", () => {
     expect(listIssueTableRows).toHaveBeenCalledWith(expect.objectContaining({
       query: expect.objectContaining({ filters: expect.objectContaining({ working_issue_ids: ["todo-1"] }) }),
     }));
-    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined, undefined);
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
     act(() => store.getState().toggleAgentRunningFilter());
     act(() => store.getState().toggleAgentRunningFilter());
     expect(getWorkspaceWorkingAgents).toHaveBeenCalledTimes(1);
@@ -2153,7 +2152,7 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc) },
     );
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined, undefined);
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
     expect(result.current.workingAgents).toBeUndefined();
     await act(async () => finish([makeWorkingAgent("agent-1", ["gantt-open"])]));
     await waitFor(() => expect(result.current.workingAgents).toEqual([{ id: "agent-1", running_task_count: 1 }]));
@@ -2247,7 +2246,6 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() =>
       expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith(
         "issue",
-        undefined,
         undefined,
         undefined,
       ),

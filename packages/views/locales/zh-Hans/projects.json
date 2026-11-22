@@ -131,8 +131,6 @@
     "tab_activity": "活动",
     "agent_context_badge": "智能体上下文",
     "section_breakdown": "分布",
-    "section_working": "智能体在做",
-    "working_empty": "目前没有智能体在处理这个项目的任务。",
     "section_activity": "动态",
     "activity": {
       "empty": "这个项目的任务还没有动态。",

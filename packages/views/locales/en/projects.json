@@ -135,8 +135,6 @@
     "tab_activity": "Activity",
     "agent_context_badge": "Agent context",
     "section_breakdown": "Breakdown",
-    "section_working": "Agents working",
-    "working_empty": "No agents are running on this project's issues right now.",
     "section_activity": "Recent activity",
     "activity": {
       "empty": "No activity on this project's issues yet.",

@@ -135,8 +135,6 @@
     "tab_activity": "Activité",
     "agent_context_badge": "Contexte des agents",
     "section_breakdown": "Répartition",
-    "section_working": "Agents au travail",
-    "working_empty": "Aucun agent ne travaille sur les tickets de ce projet pour le moment.",
     "section_activity": "Activité récente",
     "activity": {
       "empty": "Aucune activité sur les tickets de ce projet pour l'instant.",
