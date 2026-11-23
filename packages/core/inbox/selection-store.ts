@@ -71,11 +71,17 @@ interface InboxSelectionState {
   lastResolvedKeyByWorkspace: Record<string, string>;
   rememberResolvedKey: (wsId: string, key: string) => void;
   /**
-   * The tab the Work panel's Inbox section last showed, per workspace, for
-   * pages other than the Inbox, whose own `?view=` sets the tab there.
+   * The tab the Work panel's Inbox section last showed, per workspace.
    */
   sectionTabByWorkspace: Record<string, InboxTab>;
-  setSectionTab: (wsId: string, tab: InboxTab) => void;
+  /**
+   * The `/inbox` route key (`${view}:${issue}`) the section tab last followed,
+   * so switching sidebar tabs while an item stays open is preserved across
+   * remounts and hover peeks while any new `/inbox` navigation syncs again.
+   */
+  sectionTabSyncedUrlByWorkspace: Record<string, string>;
+  setSectionTab: (wsId: string, tab: InboxTab, syncedUrl?: string) => void;
+  clearSectionTabSync: (wsId: string) => void;
   /**
    * Pending directional transition into the next (or undone) Inbox item.
    * Consumed once when that destination mounts; stale entries expire.
@@ -137,9 +143,26 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set, get) =
       lastResolvedKeyByWorkspace: { ...state.lastResolvedKeyByWorkspace, [wsId]: key },
     }),
   sectionTabByWorkspace: {},
-  setSectionTab: (wsId, tab) =>
-    set((state) => (state.sectionTabByWorkspace[wsId] ?? "inbox") === tab ? state : {
-      sectionTabByWorkspace: { ...state.sectionTabByWorkspace, [wsId]: tab },
+  sectionTabSyncedUrlByWorkspace: {},
+  setSectionTab: (wsId, tab, syncedUrl) =>
+    set((state) => {
+      const tabSame = (state.sectionTabByWorkspace[wsId] ?? "inbox") === tab;
+      const syncSame = syncedUrl === undefined || state.sectionTabSyncedUrlByWorkspace[wsId] === syncedUrl;
+      if (tabSame && syncSame) return state;
+      return {
+        sectionTabByWorkspace: tabSame
+          ? state.sectionTabByWorkspace
+          : { ...state.sectionTabByWorkspace, [wsId]: tab },
+        sectionTabSyncedUrlByWorkspace: syncSame
+          ? state.sectionTabSyncedUrlByWorkspace
+          : { ...state.sectionTabSyncedUrlByWorkspace, [wsId]: syncedUrl! },
+      };
+    }),
+  clearSectionTabSync: (wsId) =>
+    set((state) => {
+      if (!(wsId in state.sectionTabSyncedUrlByWorkspace)) return state;
+      const { [wsId]: _cleared, ...sectionTabSyncedUrlByWorkspace } = state.sectionTabSyncedUrlByWorkspace;
+      return { sectionTabSyncedUrlByWorkspace };
     }),
   transitionByWorkspace: {},
   recordTransition: (wsId, targetKey, direction) =>
