@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { useReducedMotion } from "@multica/core/appearance";
 import { UI_EASE_OUT } from "@multica/ui/lib/motion";
@@ -600,17 +600,7 @@ function DocEditor({ doc }: { doc: Doc }) {
       </div>
       <AnimatePresence initial={false}>
         {commentsOpen && (
-          <motion.div
-            key="doc-comments-panel"
-            initial={reduceMotion ? false : { width: 0, opacity: 0 }}
-            animate={{ width: 360, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{
-              duration: reduceMotion ? 0 : 0.22,
-              ease: [0.22, 1, 0.36, 1],
-            }}
-            className="flex h-full shrink-0 overflow-hidden"
-          >
+          <DocCommentsDrawer key="doc-comments-panel" reduceMotion={reduceMotion}>
             <DocCommentsPanel
               docId={doc.id}
               threads={threads}
@@ -628,7 +618,7 @@ function DocEditor({ doc }: { doc: Doc }) {
                 setNewAnchor(null);
               }}
             />
-          </motion.div>
+          </DocCommentsDrawer>
         )}
       </AnimatePresence>
       </div>
@@ -641,6 +631,31 @@ function DocEditor({ doc }: { doc: Doc }) {
         onOpenChange={setDeleting}
       />
     </div>
+  );
+}
+
+function DocCommentsDrawer({
+  reduceMotion,
+  children,
+}: {
+  reduceMotion: boolean;
+  children: React.ReactNode;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      inert={!isPresent}
+      initial={reduceMotion ? false : { width: 0, opacity: 0 }}
+      animate={{ width: 360, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{
+        duration: reduceMotion ? 0 : 0.22,
+        ease: [0.22, 1, 0.36, 1],
+      }}
+      className="flex h-full shrink-0 overflow-hidden"
+    >
+      {children}
+    </motion.div>
   );
 }
 

@@ -83,6 +83,15 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 - 确认操作的图标切换（复制 → 勾、发送 → 停止）交叉淡入并带轻微缩放，约 140ms；复制使用 `CopyCheckIcon`。
 - 颜色和背景的状态变化使用 `transition-colors`。
 
+## 交互保持完好
+
+动画容器不能破坏里面的控件，动的时候不能，停下来之后也不能。
+
+- 只在尺寸变化期间裁切。常驻的 `overflow-hidden` 会裁掉里面各行的焦点环和拖放 ring。用 motion 时，把 `overflow: "hidden"` 放在 `initial` 和 `exit` 中，`animate` 以 `transitionEnd: { overflow: "visible" }` 收尾，参考 `packages/views/layout/panel-nav.tsx` 中的 `PanelDisclosure` 和 `packages/views/chat/components/chat-bar.tsx` 中的 `ChatBarChip`。`CollapsibleContent` 已经只在高度变化期间裁切。本身就要裁切的容器，比如从边缘滑入的抽屉、带圆角的卡片，要把行放在它们自己的滚动区域里，并给焦点环留出空间。
+- 正在退场的内容不接受点击，也不能获得焦点。在 `AnimatePresence` 渲染的组件中读取 `useIsPresent()`，给退场元素加 `inert={!isPresent}`。只加 `pointer-events-none` 时，Tab 仍然能落到它上面。`CollapsibleContent` 在折叠期间是 inert 的。
+- motion 动画的尺寸，全程由 motion 接管。motion 把 `width` 和 `height` 写成内联样式，优先级高于同一属性的 Tailwind class，比如 `max-md:w-full`。尺寸随断点变化时，按断点选择 motion 的目标值（`useIsMobile()`），参考 `packages/views/common/task-transcript/agent-transcript-dialog.tsx` 中的 `StepInspectorDrawer`。
+- 焦点环先要画得出来，才谈得上完整。在 Tailwind v4 中，`outline-none` 同时会把 `--tw-outline-style` 设为 `none`，而 `focus-visible:outline-2` 读取的正是这个变量，两者在同一个元素上什么都画不出来。要加上 `focus-visible:outline-solid`，参考 `packages/views/layout/panel-nav.tsx` 中的 `PANEL_ROW_CLASS`。画在 `::after` 上的焦点环（`focus-visible:after:outline-2`）不受影响，因为这个变量不继承。
+
 ## 减少动态效果
 
 外观设置中的「减少动态效果」和系统的 `prefers-reduced-motion` 都表示瞬切：不移动，不做尺寸动画，也不用淡入淡出代替。
@@ -116,6 +125,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 | `Collapsible` 中的展开折叠 | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
 | 由 `open` prop 控制的展开折叠（面板区块、树节点、对象页分组） | `PanelDisclosure` | `packages/views/layout/panel-nav.tsx` |
 | Issue 拖拽抬起和放下落位（看板、列表、泳道） | `ISSUE_DRAG_OVERLAY_CLASS`、`createIssueDropAnimation` | `packages/views/issues/components/drag-drop-animation.ts` |
+| 只在尺寸变化期间裁切、退场时不接受输入的 motion 容器 | `PanelDisclosure`、`ChatBarChip` | `packages/views/layout/panel-nav.tsx`、`packages/views/chat/components/chat-bar.tsx` |
 | 标签指示器 | `Tabs` | `packages/ui/components/ui/tabs.tsx` |
 | 分段控件指示器 | `SegmentedToggle` | `packages/views/common/segmented-toggle.tsx` |
 | motion/react 的减少动态效果 | `MotionProvider`（挂在 web 和桌面端根部） | `packages/views/common/motion-provider.tsx` |

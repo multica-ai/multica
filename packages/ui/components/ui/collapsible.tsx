@@ -40,6 +40,7 @@ function observeSettled(panel: HTMLDivElement) {
 function CollapsibleContent({
   className,
   ref,
+  render,
   ...props
 }: CollapsiblePrimitive.Panel.Props) {
   const panelRef = React.useCallback(
@@ -65,6 +66,16 @@ function CollapsibleContent({
         "flow-root h-(--collapsible-panel-height) overflow-hidden transition-[height,opacity] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] data-settled:overflow-visible data-starting-style:h-0 data-starting-style:opacity-0 data-ending-style:h-0 data-ending-style:opacity-0 motion-reduce:transition-none",
         className
       )}
+      // Rows in a closing panel take no clicks or focus.
+      render={
+        render ??
+        ((panelProps, state) => (
+          <div
+            {...panelProps}
+            inert={panelProps.inert || state.transitionStatus === "ending"}
+          />
+        ))
+      }
       {...props}
     />
   )

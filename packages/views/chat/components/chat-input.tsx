@@ -827,7 +827,7 @@ export function ChatInput({
                 type="button"
                 onClick={() => setAttachedPageKey(null)}
                 aria-label={t(($) => $.input.page_context_remove)}
-                className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-surface-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-surface-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
               >
                 <X aria-hidden className="size-3" />
               </button>
