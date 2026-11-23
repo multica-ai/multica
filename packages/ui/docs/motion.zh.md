@@ -29,7 +29,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 - 直接使用 `packages/ui/components/ui/` 中的组件。Dialog 的时长和曲线在 `--dialog-*` token 中（见 `dialog.md`）；不要在调用处覆盖浮层动画。
 - 退场结束前保持内容挂载。不要用 `{open && …}` 包住弹层内容，也不要在关闭时卸载根组件；Base UI 的 Portal 会在退场后卸载。一次只渲染一个弹窗的宿主，要保留上一个弹窗及其数据，直到 `onOpenChangeComplete(false)`。
 - 退场期间，内容和数据也要保持不变。`open` 在退场第一帧就变为 false：不要把它传给数据 hook、查询的 `enabled` 或会重置状态的 effect，否则列表会被清空，面板在淡出过程中变矮。`open` 只用来停掉输入，比如键盘监听。`packages/views/search/search-command.tsx` 中的命令面板调用 `useRootModel(…, { active: true })`，由 Portal 在退场后卸载它。
-- 指针扫过工具栏时立即打开的 Tooltip 跳过动画（`data-[instant]:animate-none`）。
+- 指针扫过工具栏时立即打开的 Tooltip 把动画时长归零来跳过动画（`data-[instant]:animation-duration-0`）。不要在退场动画播放中移除它（在可能于退场中途生效的状态上用 `animate-none`）：Base UI 会因此永远不卸载弹层，弹层一直留在屏幕上。
 
 ### 展开折叠
 

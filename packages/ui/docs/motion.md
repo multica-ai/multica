@@ -29,7 +29,7 @@ Dialog, AlertDialog, Sheet, Popover, DropdownMenu, ContextMenu, Select, HoverCar
 - Use the components in `packages/ui/components/ui/` as they are. Dialog timing lives in the `--dialog-*` tokens (`dialog.md`); do not override an overlay's animation at a call site.
 - Keep the content mounted until the exit finishes. Do not gate the popup's children with `{open && …}`, and do not unmount the root when it closes. Base UI's Portal unmounts after the exit. A host that renders one modal at a time keeps the last modal and its data until `onOpenChangeComplete(false)`.
 - Keep the content and its data unchanged during the exit, too. `open` turns false on the exit's first frame: do not pass it to a data hook, a query's `enabled`, or an effect that resets state, or the list empties and the panel shrinks while it fades. Use `open` only to stop input, such as key listeners. The palette in `packages/views/search/search-command.tsx` calls `useRootModel(…, { active: true })` and lets the Portal unmount it after the exit.
-- Tooltips that open instantly while the pointer moves across a toolbar skip their animation (`data-[instant]:animate-none`).
+- Tooltips that open instantly while the pointer moves across a toolbar skip their animation by zeroing its duration (`data-[instant]:animation-duration-0`). Never remove an exit animation while it plays (`animate-none` on a state that can turn on mid-exit): Base UI then never unmounts the popup, and it stays on screen.
 
 ### Expand and collapse
 
