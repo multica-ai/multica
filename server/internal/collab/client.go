@@ -76,8 +76,11 @@ type MergeConflict struct {
 
 // Result statuses.
 const (
-	StatusOK         = "ok"
-	StatusConflict   = "conflict"
+	StatusOK       = "ok"
+	StatusConflict = "conflict"
+	// StatusStale: a restore named a revision that is no longer the stored
+	// one once pending edits are saved. Nothing was written.
+	StatusStale      = "stale"
 	StatusEditFailed = "edit_failed"
 	StatusGone       = "gone"
 	// StatusTooLarge: the write would make the doc larger than the API stores.

@@ -141,6 +141,8 @@ function sendResult(response: ServerResponse, result: WriteResult): boolean {
       return send(response, 404, { error: "document not found" });
     case "conflict":
       return send(response, 409, { error: "merge_conflict", ...result });
+    case "stale":
+      return send(response, 409, { error: "revision_conflict", ...result });
     case "edit_failed":
       return send(response, 409, { error: "edit_failed", ...result });
     case "too_large":
