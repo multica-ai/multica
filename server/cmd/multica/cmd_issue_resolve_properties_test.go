@@ -440,6 +440,36 @@ func newIssueGetTestCmd(output string, resolve bool) *cobra.Command {
 	return cmd
 }
 
+func TestRunIssueGetJSONPreservesIntegerPrecision(t *testing.T) {
+	const revision int64 = 9007199254740993
+	issue := testIssue("issue-1", "MUL-1", map[string]any{"score": revision})
+	issue["revision"] = revision
+	srv := newResolveTestServer(t, issue)
+
+	out, err := captureStdout(t, func() error {
+		return runIssueGet(newIssueGetTestCmd("json", false), []string{"MUL-1"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueGet: %v", err)
+	}
+	var decoded struct {
+		Revision   int64            `json:"revision"`
+		Properties map[string]int64 `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("unmarshal output: %v\n%s", err, out)
+	}
+	if decoded.Revision != revision {
+		t.Errorf("revision = %d, want %d", decoded.Revision, revision)
+	}
+	if score := decoded.Properties["score"]; score != revision {
+		t.Errorf("properties.score = %d, want %d", score, revision)
+	}
+	if srv.propertiesCalls != 0 {
+		t.Errorf("catalog calls = %d, want none without the flag", srv.propertiesCalls)
+	}
+}
+
 func TestRunIssueGetResolvesProperties(t *testing.T) {
 	srv := newResolveTestServer(t, testIssue("issue-1", "MUL-1", alphaBag()))
 
@@ -475,8 +505,12 @@ func TestRunIssueGetResolvesProperties(t *testing.T) {
 
 	srv = newResolveTestServer(t, testIssue("issue-1", "MUL-1", alphaBag()))
 	srv.catalogStatus = http.StatusInternalServerError
-	if _, err := captureStdout(t, func() error { return runIssueGet(newIssueGetTestCmd("table", true), []string{"MUL-1"}) }); err != nil {
+	out, err = captureStdout(t, func() error { return runIssueGet(newIssueGetTestCmd("table", true), []string{"MUL-1"}) })
+	if err != nil {
 		t.Fatalf("runIssueGet table: %v", err)
+	}
+	if !strings.Contains(out, "START DATE") || !strings.Contains(out, "MUL-1 title") {
+		t.Errorf("expected issue table with headers and row, got:\n%s", out)
 	}
 	if srv.propertiesCalls != 0 {
 		t.Errorf("table output must not fetch the catalog (%d)", srv.propertiesCalls)

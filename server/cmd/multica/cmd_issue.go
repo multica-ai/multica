@@ -1380,12 +1380,23 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
+	path := "/api/issues/" + issueRef.ID
+	output, _ := cmd.Flags().GetString("output")
+	resolve, _ := cmd.Flags().GetBool("resolve-properties")
+	if output != "table" && !resolve {
+		// Keep JSON values out of float64 so large integers remain exact.
+		var issue map[string]json.RawMessage
+		if err := client.GetJSON(ctx, path, &issue); err != nil {
+			return fmt.Errorf("get issue: %w", err)
+		}
+		return cli.PrintJSON(os.Stdout, issue)
+	}
+
 	var issue map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID, &issue); err != nil {
+	if err := client.GetJSON(ctx, path, &issue); err != nil {
 		return fmt.Errorf("get issue: %w", err)
 	}
 
-	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
 		assignee := formatAssignee(issue, actors)
@@ -1412,10 +1423,8 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if resolve, _ := cmd.Flags().GetBool("resolve-properties"); resolve {
-		if err := resolveIssueProperties(ctx, client, nil, &memberDirectory{}, []any{issue}); err != nil {
-			return err
-		}
+	if err := resolveIssueProperties(ctx, client, nil, &memberDirectory{}, []any{issue}); err != nil {
+		return err
 	}
 	return cli.PrintJSON(os.Stdout, issue)
 }
