@@ -11734,13 +11734,6 @@ func codexShellAuthorizedCustomEnvNames(customEnv map[string]string) []string {
 	return names
 }
 
-// configureCodexTaskShellEnvironment writes the managed shell policy only
-// after the task and agent custom environment are fully assembled. This makes
-// the allowlist reflect the child environment that will actually be launched,
-// including platform-specific essentials and blocklist-checked custom_env
-// credentials.
-// Failure is fatal: launching with an unowned or malformed policy could either
-// drop the task-scoped token again or expose inherited daemon credentials.
 // selectTaskWarmPool returns the daemon's warm session pool only for built-in
 // runtimes. Custom runtime profile commands (wrappers, version-pinned shims,
 // sandbox launchers) always launch cold so startup wrappers can read per-task
@@ -11753,6 +11746,13 @@ func selectTaskWarmPool(pool *agent.WarmSessionPool, usesCustomProfileCommand bo
 	return pool
 }
 
+// configureCodexTaskShellEnvironment writes the managed shell policy only
+// after the task and agent custom environment are fully assembled. This makes
+// the allowlist reflect the child environment that will actually be launched,
+// including platform-specific essentials and blocklist-checked custom_env
+// credentials.
+// Failure is fatal: launching with an unowned or malformed policy could either
+// drop the task-scoped token again or expose inherited daemon credentials.
 func configureCodexTaskShellEnvironment(provider, codexHome string, inherited []string, agentEnv, agentCustomEnv map[string]string, logger *slog.Logger) error {
 	if provider != "codex" {
 		return nil

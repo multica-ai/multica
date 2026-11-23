@@ -18,22 +18,22 @@ import (
 )
 
 type claudeWarmTurn struct {
-	backend         *claudeBackend
-	runCtx          context.Context
-	cancel          context.CancelFunc
-	opts            ExecOptions
-	msgCh           chan Message
-	coalescer       *claudeStreamCoalescer
-	inputWriter     *claudeInputWriter
-	supplements     *claudeSupplementSession
-	initializer     *claudeSupplementSession
-	usageSnapshot   *claudeUsageSnapshot
-	baselineUsage   map[string]TokenUsage
-	rateLimits      *rateLimitTracker
-	controlWrites   sync.WaitGroup
-	controlErrors   chan error
-	resultCh        chan struct{}
-	resultOnce      sync.Once
+	backend       *claudeBackend
+	runCtx        context.Context
+	cancel        context.CancelFunc
+	opts          ExecOptions
+	msgCh         chan Message
+	coalescer     *claudeStreamCoalescer
+	inputWriter   *claudeInputWriter
+	supplements   *claudeSupplementSession
+	initializer   *claudeSupplementSession
+	usageSnapshot *claudeUsageSnapshot
+	baselineUsage map[string]TokenUsage
+	rateLimits    *rateLimitTracker
+	controlWrites sync.WaitGroup
+	controlErrors chan error
+	resultCh      chan struct{}
+	resultOnce    sync.Once
 
 	mu                       sync.Mutex
 	lastAssistantText        string

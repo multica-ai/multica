@@ -365,11 +365,11 @@ func (b *codexBackend) executeWarmOnce(ctx context.Context, prompt string, opts 
 	}
 
 	c.attachTurnHooks(codexTurnHooks{
-		cfg:                     b.cfg,
-		acceptNotification:      turnNotificationGate.accept,
+		cfg:                      b.cfg,
+		acceptNotification:       turnNotificationGate.accept,
 		guardianRateLimitCircuit: &codexGuardianRateLimitCircuit{},
-		rateLimits:              newRateLimitTracker(opts.OnRateLimits),
-		preserveUsageBaseline:   warmHit,
+		rateLimits:               newRateLimitTracker(opts.OnRateLimits),
+		preserveUsageBaseline:    warmHit,
 		onGuardianRateLimit: func() {
 			guardianRateLimitTripped.Store(true)
 			b.cfg.Logger.Warn("codex Guardian approval rate-limit circuit opened",

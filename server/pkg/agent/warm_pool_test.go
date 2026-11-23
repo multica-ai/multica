@@ -264,10 +264,10 @@ done
 			TaskID:         taskID,
 			WarmPool:       pool,
 			Env: map[string]string{
-				"CODEX_HOME":          codexHome,
-				"MULTICA_TOKEN":       token,
-				"MULTICA_TASK_ID":     taskID,
-				"MULTICA_AGENT_ID":    "agent-1",
+				"CODEX_HOME":           codexHome,
+				"MULTICA_TOKEN":        token,
+				"MULTICA_TASK_ID":      taskID,
+				"MULTICA_AGENT_ID":     "agent-1",
 				"MULTICA_WORKSPACE_ID": "ws-1",
 			},
 		})

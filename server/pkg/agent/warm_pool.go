@@ -307,9 +307,9 @@ func (p *WarmSessionPool) Close() bool {
 	}
 	p.logger.Info("warm pool: closing idle sessions", "count", len(entries))
 	var (
-		wg          sync.WaitGroup
-		mu          sync.Mutex
-		allClean    = true
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		allClean = true
 	)
 	for _, entry := range entries {
 		wg.Add(1)

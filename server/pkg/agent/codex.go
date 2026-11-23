@@ -2417,9 +2417,9 @@ func describeCodexSemanticActivity(msg Message) string {
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg                    Config
-	stdin                  interface{ Write([]byte) (int, error) }
-	mu                     sync.Mutex
+	cfg   Config
+	stdin interface{ Write([]byte) (int, error) }
+	mu    sync.Mutex
 	// hookMu serializes turn-state attachment/detachment on pooled warm clients
 	// against the persistent stdout reader goroutine's notification dispatch.
 	hookMu                 sync.Mutex
