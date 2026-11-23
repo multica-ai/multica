@@ -118,7 +118,7 @@ func TestClientMapsServiceResponses(t *testing.T) {
 	}
 
 	srv.Close()
-	if err = client.Flush(ctx, DocumentName("abc")); !errors.Is(err, ErrUnavailable) {
+	if _, err = client.Flush(ctx, DocumentName("abc")); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("unreachable err = %v, want ErrUnavailable", err)
 	}
 }

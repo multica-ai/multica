@@ -4254,30 +4254,29 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// With live editing on, the description goes through its live session,
-	// merged into what people are typing; the other fields follow as usual.
-	// Everything above has been validated, so nothing is refused after it.
-	// A write pinned to expected_revision stays a direct compare-and-swap of
-	// the whole issue; the live session folds it in on its next save.
-	if client := h.issueCollab(r.Context()); req.Description != nil && req.ExpectedRevision == nil && client != nil {
+	// With live editing on, a write of the description alone goes through its
+	// live session, merged into what people are typing. One that changes other
+	// fields too, or is pinned to expected_revision, commits as a single
+	// transaction below, so a field refused there never leaves the description
+	// changed; the live session takes the new description afterwards.
+	liveClient := h.issueCollab(r.Context())
+	if liveClient != nil && req.Description != nil && req.ExpectedRevision == nil && issueUpdateOnlyDescription(rawFields) {
 		writerType, writerID := h.resolveActor(r, userID, workspaceID)
-		handled, ok := h.updateIssueDescriptionViaCollab(w, r, client, prevIssue, req, writerType, writerID)
+		handled, ok := h.updateIssueDescriptionViaCollab(w, r, liveClient, prevIssue, req, writerType, writerID)
 		if !ok {
 			return
 		}
 		if handled {
-			if issueUpdateOnlyDescription(rawFields) {
-				updated, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: prevIssue.ID, WorkspaceID: prevIssue.WorkspaceID})
-				if err != nil {
-					writeError(w, http.StatusInternalServerError, "failed to load issue")
-					return
-				}
-				h.writeIssueForCaller(w, r, updated)
+			updated, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: prevIssue.ID, WorkspaceID: prevIssue.WorkspaceID})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load issue")
 				return
 			}
-			req.Description, req.DescriptionBase, req.DescriptionBaseRevision = nil, nil, nil
-			params.Description = pgtype.Text{}
+			h.writeIssueForCaller(w, r, updated)
+			return
 		}
+		// The service is unreachable; there is no session to tell.
+		liveClient = nil
 	}
 
 	// The agent this write hands the issue to gets the change as its own run,
@@ -4326,6 +4325,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
+	if liveClient != nil && issue.Description != prevIssue.Description {
+		h.syncIssueDescriptionCollab(r, liveClient, prevIssue, issue, actorType, actorID)
+	}
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)

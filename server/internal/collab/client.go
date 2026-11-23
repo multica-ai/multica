@@ -97,6 +97,8 @@ type Result struct {
 	Merged    bool            `json:"merged"`
 	Conflicts []MergeConflict `json:"conflicts,omitempty"`
 	Failure   *EditFailure    `json:"failure,omitempty"`
+	// Loaded: a flushed document is open in the service.
+	Loaded bool `json:"loaded,omitempty"`
 }
 
 // Write, Edit and Flush address a live document by its service name:
@@ -110,10 +112,11 @@ func (c *Client) Edit(ctx context.Context, document string, req EditRequest) (Re
 }
 
 // Flush persists pending editor changes of a loaded document, so a read sees
-// what people have typed. Documents nobody has open return immediately.
-func (c *Client) Flush(ctx context.Context, document string) error {
-	_, err := c.call(ctx, document, "flush", struct{}{})
-	return err
+// what people have typed. Documents nobody has open return immediately;
+// loaded reports whether it was open.
+func (c *Client) Flush(ctx context.Context, document string) (loaded bool, err error) {
+	result, err := c.call(ctx, document, "flush", struct{}{})
+	return result.Loaded, err
 }
 
 func (c *Client) call(ctx context.Context, document, op string, body any) (Result, error) {
