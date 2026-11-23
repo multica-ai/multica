@@ -3563,8 +3563,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.TriggerCommentContent = "The newest triggering comment is no longer available. Address every earlier comment included below."
 		}
 
-		// Resolve the prior agent session / workdir to resume.
-		if task.RerunOfTaskID.Valid && !service.IsFreshRerun(*task) {
+		// Resolve the prior agent session / workdir to resume when the
+		// agent's issue session policy allows it.
+		allowIssueResume := !agentStartsFreshIssueSessions(agent.RuntimeConfig)
+		if allowIssueResume && task.RerunOfTaskID.Valid && !service.IsFreshRerun(*task) {
 			// Manual retry: resume precisely from the source task the user
 			// clicked, NOT the most-recent (agent, issue) row — a parallel task
 			// on the same issue must never hijack the resume (MUL-4869). The
@@ -3625,7 +3627,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				)
 				resp.PriorSessionResumeUnavailable = true
 			}
-		} else if !task.ForceFreshSession {
+		} else if allowIssueResume && !task.ForceFreshSession {
 			// Non-rerun follow-up on the same issue: resume the most recent
 			// (agent, issue) session so the agent keeps the issue's conversation
 			// context across turns. The "Focus on THIS comment" guard in
@@ -3662,7 +3664,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}); err == nil && missing {
 				resp.PriorSessionResumeUnavailable = true
 			}
-		} else if task.RetryOfTaskID.Valid {
+		} else if allowIssueResume && task.RetryOfTaskID.Valid {
 			// Automatic retry that must start a fresh session: continue in the
 			// parent's workdir, never its session. A force_fresh task with no
 			// retry lineage still resumes nothing.

@@ -319,6 +319,13 @@ func openclawModelOverride(raw []byte) string {
 	return strings.TrimSpace(rc.ModelOverride)
 }
 
+func agentStartsFreshIssueSessions(raw []byte) bool {
+	var config struct {
+		IssueSessionPolicy string `json:"issue_session_policy"`
+	}
+	return json.Unmarshal(raw, &config) == nil && config.IssueSessionPolicy == "fresh"
+}
+
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
