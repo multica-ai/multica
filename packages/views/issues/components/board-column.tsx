@@ -29,7 +29,7 @@ import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ProjectIcon } from "../../projects/components/project-icon";
-import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
+import { useRestoredScrollRef } from "../../platform";
 import { DeferredPopup } from "../../common/deferred-popup";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { VirtuosoSeed } from "../../common/virtuoso-seed";
@@ -161,10 +161,12 @@ export const BoardColumn = memo(function BoardColumn({
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   // Pull-based scroll restoration (MUL-4741): assign the saved offset at
   // ref-attach (the seed + estimate spacer give the column a truthful height
-  // on its first commit, so the assignment sticks pre-paint) and feed the
-  // same offset into the Virtuoso as its initial position.
+  // on its first commit, so the assignment sticks pre-paint). The Virtuoso
+  // reads its first range from that scroll position. It must not also get
+  // the offset as `initialScrollTop`: with `customScrollParent` Virtuoso
+  // counts it from the list's top, so the column's padding was added to the
+  // offset on every return.
   const scrollMementoKey = `board:${group.id}`;
-  const restoredScrollTop = useRestoredScrollOffset(scrollMementoKey);
   const restoreScrollRef = useRestoredScrollRef(scrollMementoKey);
   const mergedRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -360,7 +362,6 @@ export const BoardColumn = memo(function BoardColumn({
                   customScrollParent={scrollEl}
                   data={resolvedIssues}
                   computeItemKey={computeItemKey}
-                  initialScrollTop={restoredScrollTop}
                   initialItemCount={Math.min(resolvedIssues.length, BOARD_SEED_COUNT)}
                   defaultItemHeight={BOARD_CARD_ESTIMATED_HEIGHT}
                   increaseViewportBy={{ top: 300, bottom: 300 }}

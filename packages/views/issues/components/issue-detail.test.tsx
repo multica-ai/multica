@@ -510,16 +510,25 @@ const mockVirtualWindow = vi.hoisted(() => ({
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
-    { data, itemContent, computeItemKey, customScrollParent, totalListHeightChanged }: {
+    { data, itemContent, computeItemKey, customScrollParent, initialScrollTop, totalListHeightChanged }: {
       data: unknown[];
       itemContent: (i: number, item: unknown) => unknown;
       computeItemKey: (i: number, item: unknown) => React.Key;
       customScrollParent?: HTMLElement;
+      initialScrollTop?: number;
       totalListHeightChanged?: (height: number) => void;
     },
     ref: any,
   ) {
     const [windowStart, setWindowStart] = useState(0);
+    // Like Virtuoso, scroll to `initialScrollTop` once the rows are in, counted
+    // from the list's own top: under `customScrollParent` that adds whatever
+    // sits above the list (here a description 500px tall).
+    useEffect(() => {
+      if (initialScrollTop === undefined || !customScrollParent) return;
+      const timer = window.setTimeout(() => { customScrollParent.scrollTop = initialScrollTop + 500; }, 100);
+      return () => window.clearTimeout(timer);
+    }, [initialScrollTop, customScrollParent]);
     const correctionTimer = useRef<ReturnType<typeof setInterval> | null>(null);
     useEffect(() => {
       if (!mockVirtualWindow.holdAtIndex || !customScrollParent) return;
@@ -3065,6 +3074,28 @@ describe("IssueDetail (shared)", () => {
         if (hadElementFromPoint) document.elementFromPoint = originalElementFromPoint;
         else delete (document as { elementFromPoint?: unknown }).elementFromPoint;
       }
+    });
+
+    // MUL-9959: the timeline's Virtuoso took the page's saved offset as its
+    // `initialScrollTop`, which it counts from the list's top, so a reader in
+    // the description came back a description's height further down.
+    it("returns to the saved offset of a page scrolled in the description", async () => {
+      mockApiObj.listTasksByIssue.mockResolvedValue([]);
+      const adapter: ScrollRestorationAdapter = {
+        get: (key) => (key === "main:issue-1" ? { top: 300, height: 2000 } : undefined),
+      };
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={createTestQueryClient()}>
+            <ScrollRestorationProvider adapter={adapter}>
+              <IssueDetail issueId="issue-1" />
+            </ScrollRestorationProvider>
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+      const comment = await screen.findByText("Started working on this");
+      await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 200)); });
+      expect(comment.closest<HTMLElement>("[data-tab-scroll-root]")!.scrollTop).toBe(300);
     });
 
     it("restarts a comment landing that a timeline update cancels while it is still aligning", async () => {

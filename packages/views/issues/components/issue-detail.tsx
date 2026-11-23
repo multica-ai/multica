@@ -1543,9 +1543,11 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   const composerRef = useRef<HTMLDivElement | null>(null);
   // Pull-based scroll restoration (MUL-4741): the platform serves the offset
   // captured when this route was last left. The ref-attach assignment covers
-  // the flat render modes (real heights at commit); the virtualized browsing
-  // mode feeds the offset into Virtuoso's initialScrollTop below so the
-  // list's first render already materializes the rows around it.
+  // content that is already there; useIssueDetailScrollRestore applies it
+  // again once the timeline has loaded. The timeline's Virtuoso must not get
+  // it as `initialScrollTop`: with `customScrollParent` Virtuoso counts that
+  // from the list's top, which sits below the description, so the page came
+  // back a description's height further down.
   //
   // The container key carries the issue id: on the issue route that is
   // redundant with the route scoping, but in the inbox the selection lives
@@ -4577,7 +4579,6 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
-                      initialScrollTop={ownsTimelineScroll ? undefined : restoredScrollTop}
                       heightEstimates={timelineHeightEstimates}
                       increaseViewportBy={timelineOverscan}
                       totalListHeightChanged={handleTimelineHeightChange}
