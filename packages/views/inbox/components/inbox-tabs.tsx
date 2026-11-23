@@ -1,11 +1,8 @@
 "use client";
 
-import { useId, type KeyboardEvent } from "react";
-import { motion } from "motion/react";
+import type { KeyboardEvent } from "react";
 import { AlarmClock, Archive, Inbox } from "@multica/ui/icons";
-import { useReducedMotion } from "@multica/core/appearance";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
-import { UI_INDICATOR_SPRING } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import type { InboxTab } from "./inbox-view";
@@ -49,9 +46,6 @@ export function InboxTabs({
   className?: string;
 }) {
   const { t } = useT("inbox");
-  const indicatorId = useId();
-  const prefersReducedMotion = useReducedMotion();
-  const indicatorTransition = prefersReducedMotion ? { duration: 0 } : UI_INDICATOR_SPRING;
   const labels: Record<InboxTab, string> = {
     inbox: t(($) => $.page.title),
     snoozed: t(($) => $.list.snoozed_title),
@@ -91,37 +85,26 @@ export function InboxTabs({
             tabIndex={active ? 0 : -1}
             onClick={() => onSelect(id)}
             className={cn(
-              "relative flex items-center gap-1 rounded-md outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+              "flex items-center gap-1 rounded-md outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring",
               size === "section" ? "h-5" : "h-7 px-2",
               // The open tab gives up width before the icons do; a label
               // still too long for the panel (Spanish, French) truncates.
               iconOnly ? "shrink-0 px-1" : size === "section" ? "min-w-0 px-1.5" : "min-w-0",
-              active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+              active ? "bg-surface-selected text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {active && (
-              <motion.span
-                layoutId={indicatorId}
-                transition={indicatorTransition}
-                aria-hidden="true"
-                data-slot="inbox-tabs-indicator"
-                className="pointer-events-none absolute inset-0 rounded-md bg-surface-selected"
-              />
+            {iconOnly ? (
+              <>
+                <Icon aria-hidden className="size-3.5" />
+                <span className="sr-only">{labels[id]}</span>
+                {count > 0 && <span className={cn(countClass, id !== "inbox" && "sr-only")}>{count}</span>}
+              </>
+            ) : (
+              <>
+                <span className="truncate">{labels[id]}</span>
+                {count > 0 && <span className={countClass}>{count}</span>}
+              </>
             )}
-            <span className="relative z-10 flex min-w-0 items-center gap-1">
-              {iconOnly ? (
-                <>
-                  <Icon aria-hidden className="size-3.5" />
-                  <span className="sr-only">{labels[id]}</span>
-                  {count > 0 && <span className={cn(countClass, id !== "inbox" && "sr-only")}>{count}</span>}
-                </>
-              ) : (
-                <>
-                  <span className="truncate">{labels[id]}</span>
-                  {count > 0 && <span className={countClass}>{count}</span>}
-                </>
-              )}
-            </span>
           </button>
         );
         // Every tab keeps the same element as it opens and closes, so arrow
