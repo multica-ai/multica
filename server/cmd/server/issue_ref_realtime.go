@@ -81,6 +81,18 @@ func duplicateMarkMoved(e events.Event) bool {
 	return jsonString(top[duplicateMarkKeys[0]]) != jsonString(top[duplicateMarkKeys[1]])
 }
 
+// anyRefReader reports whether anyone may read one of the references
+// refReaders maps. When nobody may, every recipient gets the same stripped
+// frame.
+func anyRefReader(refReaders map[string]map[string]bool) bool {
+	for _, readers := range refReaders {
+		if len(readers) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // strippedFrame marshals e for the wire with the references strip selects
 // removed (see visitIssueRefs).
 func strippedFrame(e events.Event, omitOriginal bool, strip func(id string) bool) ([]byte, error) {
@@ -115,15 +127,12 @@ func jsonString(raw json.RawMessage) string {
 // IssueRefReaders maps each issue e names besides its own (visitIssueRefs)
 // that not every member may read to the user ids who may: the members of its
 // private project. A reference whose issue is gone, or cannot be told, maps to
-// nobody, as in the HTTP reads. nil means every recipient may read every
-// reference.
+// nobody, as in the HTTP reads, even in a workspace without private projects:
+// the original may have sat in one deleted since. nil means every recipient
+// may read every reference.
 func (a *dbPrivateProjectAudience) IssueRefReaders(ctx context.Context, e events.Event) (map[string]map[string]bool, error) {
 	if !issueRefEvents[e.Type] || e.WorkspaceID == "" {
 		return nil, nil
-	}
-	ws, err := a.workspace(ctx, e.WorkspaceID)
-	if err != nil || len(ws.projects) == 0 {
-		return nil, err
 	}
 	var refs []string
 	visitIssueRefs(e.Type, jsonObject(e.Payload), false, func(id string) bool {
@@ -132,6 +141,10 @@ func (a *dbPrivateProjectAudience) IssueRefReaders(ctx context.Context, e events
 	})
 	if len(refs) == 0 {
 		return nil, nil
+	}
+	ws, err := a.workspace(ctx, e.WorkspaceID)
+	if err != nil {
+		return nil, err
 	}
 	var ids []pgtype.UUID
 	for _, ref := range refs {
