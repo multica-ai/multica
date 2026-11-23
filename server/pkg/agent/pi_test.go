@@ -595,13 +595,17 @@ func TestPiExecuteTurnErrorGraceWaitsForInFlightTool(t *testing.T) {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
-	const grace = 60 * time.Millisecond
+	// tool_execution_end re-arms the grace and then scans the process table
+	// before the next event is read. On a Linux host with ~1000 processes one
+	// scan takes 50-120ms under -race, so the grace must cover it; the tool
+	// still runs for twice the grace to prove an in-flight tool blocks expiry.
+	const grace = 300 * time.Millisecond
 	script := "#!/bin/sh\n" +
 		"cat > /dev/null\n" +
 		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
 		`printf '%s\n' '{"type":"tool_execution_start","toolCallId":"call-1","toolName":"bash","args":{}}'` + "\n" +
 		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"temporary provider error"}}'` + "\n" +
-		"sleep 0.15\n" +
+		"sleep 0.6\n" +
 		`printf '%s\n' '{"type":"tool_execution_end","toolCallId":"call-1","toolName":"bash","result":"ok"}'` + "\n" +
 		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
 		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"done"}}'` + "\n" +
