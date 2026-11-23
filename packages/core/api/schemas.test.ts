@@ -1057,6 +1057,27 @@ describe("DuplicateIssueErrorBodySchema", () => {
     const { error: _omit, ...without } = valid;
     expect(DuplicateIssueErrorBodySchema.safeParse(without).success).toBe(true);
   });
+
+  it("keeps the assignee of the matched issue, null when unassigned", () => {
+    const assigned = { ...valid, issue: { ...valid.issue, assignee_type: "member", assignee_id: "u-1" } };
+    expect(DuplicateIssueErrorBodySchema.parse(assigned).issue).toMatchObject({
+      assignee_type: "member",
+      assignee_id: "u-1",
+    });
+    const unassigned = { ...valid, issue: { ...valid.issue, assignee_type: null, assignee_id: null } };
+    expect(DuplicateIssueErrorBodySchema.parse(unassigned).issue).toMatchObject({
+      assignee_type: null,
+      assignee_id: null,
+    });
+  });
+
+  it("reads a malformed assignee as null instead of rejecting the body", () => {
+    const broken = { ...valid, issue: { ...valid.issue, assignee_type: 7, assignee_id: {} } };
+    expect(DuplicateIssueErrorBodySchema.parse(broken).issue).toMatchObject({
+      assignee_type: null,
+      assignee_id: null,
+    });
+  });
 });
 
 // `user.timezone` (Viewing tz) was added in the timezone-architecture RFC.
