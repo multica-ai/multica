@@ -704,35 +704,24 @@ export function InboxDemo() {
                       aria-current={active ? "page" : undefined}
                       onClick={() => setPhase("opened")}
                       className={cn(
-                        "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left motion-safe:animate-in motion-safe:fade-in",
+                        "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left motion-safe:animate-in motion-safe:fade-in",
                         active ? "bg-accent" : "enabled:hover:bg-accent/50",
                       )}
                     >
-                      <span className="mt-[3px] flex shrink-0">
-                        <DemoStatus status={statusOf(notice.id)} />
+                      <DemoStatus status={statusOf(notice.id)} />
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate text-body",
+                          rowUnread ? "font-medium text-foreground" : "text-muted-foreground",
+                        )}
+                      >
+                        {notice.title}
                       </span>
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="flex min-w-0 items-center gap-2 leading-5">
-                          <span
-                            className={cn(
-                              "min-w-0 flex-1 truncate text-body",
-                              rowUnread ? "font-medium text-foreground" : "text-muted-foreground",
-                            )}
-                          >
-                            {notice.title}
-                          </span>
-                          <span className="shrink-0 text-caption text-faint-foreground tabular-nums">{notice.time}</span>
-                        </span>
-                        <span className="mt-0.5 flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
-                          <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                            <RowAvatar name={notice.actor} agent={notice.agent} />
-                            <span className="min-w-0 flex-1 truncate">
-                              <span className="font-medium">{notice.actor}</span> {notice.detail}
-                            </span>
-                          </span>
-                          {rowUnread && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand" />}
-                        </span>
-                      </span>
+                      <span className="shrink-0 text-caption text-faint-foreground tabular-nums">{notice.time}</span>
+                      <span
+                        aria-hidden
+                        className={cn("size-1.5 shrink-0 rounded-full", rowUnread ? "bg-brand" : "bg-transparent")}
+                      />
                     </button>
                   </CoachMark>
                 </li>
