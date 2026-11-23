@@ -156,8 +156,8 @@ const EASE = { ease: UI_EASE_OUT } as const;
  *
  * Everything is measured once, before the first frame paints: where each part
  * is now and where the switch leaves it, header space the switch frees or
- * takes included. Every part then eases there on the same curve, and the
- * highlight blends from the old tab's box to the new tab's as both move.
+ * takes included. Every part then eases there on the same curve, the
+ * highlight with them, from where it is to the new tab's final box.
  */
 function useTabSwitchMotion(
   listRef: RefObject<HTMLDivElement | null>,
@@ -228,7 +228,6 @@ function useTabSwitchMotion(
       }
       button(from).style.flexShrink = "0";
       const end = parts.map((el) => ({ w: el.getBoundingClientRect().width, o: el.classList.contains("opacity-0") ? 0 : 1 }));
-      const fromEnd = box(button(from));
       const toEnd = box(button(tab));
       button(from).style.flexShrink = "";
 
@@ -237,25 +236,17 @@ function useTabSwitchMotion(
         el.style.opacity = String(start[i]!.o);
         el.querySelector<HTMLElement>(".truncate")?.style.setProperty("text-overflow", "clip");
       });
-      const toStart = box(button(tab));
-      x.set(highlightFrom.x);
-      width.set(highlightFrom.w);
 
       const transition = { duration: seconds, ...EASE };
-      const mix = (a: number, b: number, p: number) => a + (b - a) * p;
       running.current = [
         ...parts.map((el, i) =>
           animate(el, { width: [`${start[i]!.w}px`, `${end[i]!.w}px`], opacity: [start[i]!.o, end[i]!.o] }, transition),
         ),
-        // The parts move on this same curve, so each tab's box at progress p
-        // is its start and end mixed by p: no layout read per frame.
-        animate(0, 1, {
-          ...transition,
-          onUpdate: (p) => {
-            x.set(mix(mix(highlightFrom.x, fromEnd.x, p), mix(toStart.x, toEnd.x, p), p));
-            width.set(mix(mix(highlightFrom.w, fromEnd.w, p), mix(toStart.w, toEnd.w, p), p));
-          },
-        }),
+        // Straight to where the new tab ends up, on the parts' curve. Tracking
+        // the tabs as they move would bulge past the end when the new tab
+        // starts far from where it settles.
+        animate(x, [highlightFrom.x, toEnd.x], transition),
+        animate(width, [highlightFrom.w, toEnd.w], transition),
       ];
       setFolding(from);
       void Promise.all(running.current).then(() => {
