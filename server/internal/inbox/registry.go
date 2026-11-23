@@ -122,8 +122,9 @@ func WithLegacyDefaults(prefs map[string]string) map[string]string {
 // issue's squad handing work to each other (MUL-10008). Absent means "all".
 const SquadHandoffsPref = "squad_handoffs"
 
-// SquadHandoffDetail is the new_comment details key, set to true, that marks
-// a squad handoff.
+// SquadHandoffDetail is the new_comment details key, set to "true", that
+// marks a squad handoff. Details values stay strings: clients parse them as
+// a string map and reject the whole Inbox list otherwise.
 const SquadHandoffDetail = "squad_handoff"
 
 // MutedSquadHandoff reports whether a member's parsed preferences drop this
@@ -136,8 +137,7 @@ func MutedSquadHandoff(prefs map[string]string, notifType string, details []byte
 	if err := json.Unmarshal(details, &d); err != nil {
 		return false
 	}
-	handoff, _ := d[SquadHandoffDetail].(bool)
-	return handoff
+	return d[SquadHandoffDetail] == "true"
 }
 
 // Muted reports whether a member's parsed preferences mute notifType. nil

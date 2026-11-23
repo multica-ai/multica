@@ -1193,10 +1193,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 		newCommentDetails := commentDetails
 		if authorType == "agent" && isSquadHandoff(ctx, queries, e.WorkspaceID, commentID, mentions) {
-			newCommentDetails, _ = json.Marshal(map[string]any{
-				"comment_id":             commentID,
-				inbox.SquadHandoffDetail: true,
-			})
+			newCommentDetails = withDetail(commentDetails, inbox.SquadHandoffDetail, "true")
 		}
 
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,

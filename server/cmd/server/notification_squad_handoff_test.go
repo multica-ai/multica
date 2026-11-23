@@ -138,9 +138,11 @@ func TestNotification_SquadHandoffs(t *testing.T) {
 			if defaultRow == nil {
 				t.Fatalf("member on the default got no new_comment row")
 			}
-			var details map[string]any
-			_ = json.Unmarshal(defaultRow.Details, &details)
-			if marked, _ := details[inbox.SquadHandoffDetail].(bool); marked != tc.handoff {
+			var details map[string]string
+			if err := json.Unmarshal(defaultRow.Details, &details); err != nil {
+				t.Fatalf("details must stay a string map for clients: %v (%s)", err, defaultRow.Details)
+			}
+			if marked := details[inbox.SquadHandoffDetail] == "true"; marked != tc.handoff {
 				t.Fatalf("squad_handoff marked %v, want %v (details %s)", marked, tc.handoff, defaultRow.Details)
 			}
 			if got := newCommentRow(t, mutedID, issueID) != nil; got == tc.handoff {

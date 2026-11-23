@@ -62,7 +62,10 @@ func isSquadHandoff(ctx context.Context, queries *db.Queries, workspaceID, comme
 
 	if comment.SourceTaskID.Valid {
 		task, err := queries.GetAgentTask(ctx, comment.SourceTaskID)
-		if err == nil && task.AgentID == comment.AuthorID {
+		if err != nil {
+			return false
+		}
+		if task.AgentID == comment.AuthorID {
 			if task.DelegatedFromTaskID.Valid {
 				source, err := queries.GetAgentTask(ctx, task.DelegatedFromTaskID)
 				if err == nil && source.IsLeaderTask && source.SquadID == squad.ID {

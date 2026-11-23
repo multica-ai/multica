@@ -291,7 +291,7 @@ func frontendTypeMismatches(frontend []string) []string {
 // TestMutedSquadHandoff pins that squad_handoffs only ever drops a marked
 // new_comment row, and only for a member who muted it (MUL-10008).
 func TestMutedSquadHandoff(t *testing.T) {
-	marked := []byte(`{"comment_id":"c","squad_handoff":true}`)
+	marked := []byte(`{"comment_id":"c","squad_handoff":"true"}`)
 	plain := []byte(`{"comment_id":"c"}`)
 	muted := map[string]string{SquadHandoffsPref: "muted"}
 	cases := []struct {
