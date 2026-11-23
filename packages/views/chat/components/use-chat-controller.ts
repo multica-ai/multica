@@ -43,6 +43,7 @@ import {
 import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
+import { useChatWorkingDirectory } from "./use-chat-working-directory";
 import { createLogger } from "@multica/core/logger";
 import type {
   Agent,
@@ -367,6 +368,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const noAgent = agentAvailability === "none";
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
+  const directorySelection = useChatWorkingDirectory(wsId, activeAgent, currentSession);
+  const carryDirectoryToDraft = directorySelection.carryToDraft;
 
   const presenceDetail = useAgentPresenceDetail(wsId, activeAgent?.id);
   const availability =
@@ -432,6 +435,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
           const session = await createSession.mutateAsync({
             agent_id: activeAgent.id,
             project_id: activeProjectId,
+            working_directory: directorySelection.workingDirectory,
           });
           return session.id;
         } finally {
@@ -445,6 +449,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       activeSessionId,
       activeAgent,
       activeProjectId,
+      directorySelection.workingDirectory,
       createSession,
       sessions,
       sessionsLoaded,
@@ -701,6 +706,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     // The open session's project is server-owned history, not a default for
     // the next session.
     setSelectedProjectId(null);
+    useChatStore.getState().setWorkingDirectoryDraft(null);
     setActiveSession(null);
     requestInputFocus();
   }, [
@@ -723,6 +729,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       });
       setSelectedAgentId(agent.id);
       setSelectedProjectId(null);
+      useChatStore.getState().setWorkingDirectoryDraft(null);
       setActiveSession(null);
       requestInputFocus();
     },
@@ -808,6 +815,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
         case "startFreshChat":
           setSelectedAgentId(plan.agentId);
           setSelectedProjectId(plan.projectId);
+          carryDirectoryToDraft();
           setActiveSession(null);
           break;
         case "setDraftProject":
@@ -817,6 +825,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       requestInputFocus();
     }, [
       activeProjectId,
+      carryDirectoryToDraft,
       activeSessionId,
       currentSession,
       setSessionProject,
@@ -877,6 +886,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     activeSessionId,
     selectedAgentId,
     activeProjectId,
+    directorySelection,
     projectContextUnsupported: projectContextSupport === false,
     isProjectUpdating:
       setSessionProject.isPending || (!!activeSessionId && !currentSession),

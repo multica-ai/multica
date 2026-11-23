@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { StorageAdapter } from "../types";
+import type { ChatWorkingDirectory, StorageAdapter } from "../types";
 import type { Attachment } from "../types/attachment";
 import { getCurrentSlug, registerForWorkspaceRehydration } from "../platform/workspace-storage";
 import { registerDraftCleanup } from "../drafts/cleanup-registry";
@@ -359,6 +359,7 @@ export interface ChatState {
   /** Project context for the next session. Existing sessions remain bound to
    *  their server-persisted project_id. */
   selectedProjectId: string | null;
+  workingDirectoryDraft: { agentId: string; runtimeId: string; directory: ChatWorkingDirectory } | null;
   /** Settings preference: the agent Ask Multica starts a new chat with. */
   quickChatAgentId: string | null;
   /** Bumped by `startNewChat`; the window focuses its composer on each bump. */
@@ -386,6 +387,7 @@ export interface ChatState {
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
   setSelectedProjectId: (id: string | null) => void;
+  setWorkingDirectoryDraft: (value: ChatState["workingDirectoryDraft"]) => void;
   setQuickChatAgentId: (id: string | null) => void;
   /** Ask Multica: open the window on a new chat with the quick-chat agent and no project. */
   startNewChat: () => void;
@@ -461,6 +463,8 @@ export function createChatStore(options: ChatStoreOptions) {
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: initialAgentId,
     selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
+    workingDirectoryDraft: null,
+    setWorkingDirectoryDraft: (value) => set({ workingDirectoryDraft: value }),
     quickChatAgentId: storage.getItem(wsKey(QUICK_CHAT_AGENT_KEY)),
     newChatRequest: 0,
     chatBarKept: initialChatBar.kept,
@@ -503,7 +507,10 @@ export function createChatStore(options: ChatStoreOptions) {
     setSelectedAgentId: (id) => {
       logger.info("setSelectedAgentId", { from: get().selectedAgentId, to: id });
       storage.setItem(wsKey(AGENT_STORAGE_KEY), id);
-      set({ selectedAgentId: id });
+      set({
+        selectedAgentId: id,
+        workingDirectoryDraft: get().selectedAgentId === id ? get().workingDirectoryDraft : null,
+      });
     },
     setSelectedProjectId: (id) => {
       logger.info("setSelectedProjectId", { from: get().selectedProjectId, to: id });
@@ -524,7 +531,7 @@ export function createChatStore(options: ChatStoreOptions) {
       setSelectedProjectId(null);
       setActiveSession(null);
       setOpen(true);
-      set((state) => ({ newChatRequest: state.newChatRequest + 1 }));
+      set((state) => ({ workingDirectoryDraft: null, newChatRequest: state.newChatRequest + 1 }));
     },
     keepChatInBar: (sessionId) => {
       const { chatBarKept, chatBarDismissed } = get();
@@ -739,7 +746,7 @@ export function createChatStore(options: ChatStoreOptions) {
   registerDraftCleanup({
     storageKey: DRAFTS_KEY,
     workspaceScoped: true,
-    resetInMemory: () => store.setState({ inputDrafts: {} }),
+    resetInMemory: () => store.setState({ inputDrafts: {}, workingDirectoryDraft: null }),
   });
   registerDraftCleanup({
     storageKey: DRAFT_ATTACHMENTS_KEY,
@@ -785,6 +792,7 @@ export function createChatStore(options: ChatStoreOptions) {
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
       selectedProjectId: nextProject,
+      workingDirectoryDraft: null,
       quickChatAgentId: storage.getItem(wsKey(QUICK_CHAT_AGENT_KEY)),
       chatBarKept: nextChatBar.kept,
       chatBarDismissed: nextChatBar.dismissed,

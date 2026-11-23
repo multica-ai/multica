@@ -167,6 +167,9 @@ type Task struct {
 	WakeupJoined                  string                 `json:"wakeup_joined,omitempty"`      // wakeups that joined this run instead of queuing their own
 	HandoffNote                   string                 `json:"handoff_note,omitempty"`       // legacy assignment handoff instruction; rendered only in the per-turn prompt
 
+	// WorkingDirectory is the daemon-bound path selected for a chat.
+	WorkingDirectory *protocol.ChatWorkingDirectory `json:"working_directory,omitempty"`
+
 	ChatSource *protocol.ChatSource `json:"chat_source,omitempty"`
 	// ChatFeishuSource is the Feishu ids of the message a Feishu chat task
 	// answers. Older servers omit it and the prompt then lists no ids.

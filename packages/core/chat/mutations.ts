@@ -5,6 +5,7 @@ import { chatKeys, sortChatSessions, QUICK_ACTIONS_PENDING_TIMEOUT_MS } from "./
 import { createLogger } from "../logger";
 import type {
   ChatSession,
+  ChatWorkingDirectory,
   ChatPinnedAgent,
   ChatWakeup,
   ChatDraftRestoresResponse,
@@ -162,7 +163,7 @@ export function useCreateChatSession() {
   const wsId = useWorkspaceId();
 
   return useMutation({
-    mutationFn: (data: { agent_id: string; title?: string; project_id?: string | null }) => {
+    mutationFn: (data: { agent_id: string; title?: string; project_id?: string | null; working_directory?: ChatWorkingDirectory | null }) => {
       logger.info("createChatSession.start", {
         agent_id: data.agent_id,
         project_id: data.project_id,

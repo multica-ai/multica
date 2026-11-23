@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Scan, TriangleAlert, X } from "@multica/ui/icons";
+import { Folder, Scan, TriangleAlert, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -20,6 +20,8 @@ import {
   type UploadDraftBinding,
 } from "../../editor/use-coordinated-uploads";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { Button } from "@multica/ui/components/ui/button";
+import { ChatDirectoryDialog } from "./chat-directory-dialog";
 import { ChatAddMenu } from "./chat-add-menu";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
@@ -29,7 +31,7 @@ import { useShortcut, type ShortcutChord } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { escapeMarkdownLabel } from "../../editor/utils/escape-markdown-label";
-import type { Attachment, Project } from "@multica/core/types";
+import type { AgentRuntime, ChatWorkingDirectory, Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { StorageLimitNotice } from "../../billing/storage-limit-notice";
@@ -147,6 +149,10 @@ interface ChatInputProps {
   /** Optional project context for the draft or current chat session. */
   projects?: Project[];
   projectId?: string | null;
+  directoryWorkspaceId?: string;
+  directoryRuntime?: AgentRuntime | null;
+  workingDirectory?: ChatWorkingDirectory | null;
+  onWorkingDirectoryChange?: (directory: ChatWorkingDirectory | null) => void;
   onProjectChange?: (projectId: string | null) => void;
   isProjectUpdating?: boolean;
   /** True when the active agent's daemon is too old to inject the project
@@ -199,6 +205,10 @@ export function ChatInput({
   pageContext,
   projects = [],
   projectId,
+  directoryWorkspaceId,
+  directoryRuntime,
+  workingDirectory,
+  onWorkingDirectoryChange,
   onProjectChange,
   isProjectUpdating,
   projectContextUnsupported,
@@ -209,6 +219,7 @@ export function ChatInput({
   annotations: annotationSlot,
 }: ChatInputProps) {
   const { t } = useT("chat");
+  const [directoryOpen, setDirectoryOpen] = useState(false);
   const { t: tEditor } = useT("editor");
   const { t: tIssues } = useT("issues");
   const sendShortcut = useShortcut("send");
@@ -713,6 +724,9 @@ export function ChatInput({
     !noAgent &&
     !submitting &&
     !isProjectUpdating;
+  const directorySelectionEnabled = !!directoryRuntime && !!onWorkingDirectoryChange &&
+    !disabled && !noAgent && !submitting;
+  const directoryName = workingDirectory?.path.split(/[\\/]/).filter(Boolean).at(-1) || workingDirectory?.path;
   const selectedProject = projects.find((project) => project.id === projectId);
   const canSubmitNow = !disabled && !noAgent && (!isRunning || !!allowSubmitWhileRunning);
   const showRunHint = isRunning && allowSubmitWhileRunning && canSteerWhileRunning !== undefined
@@ -795,6 +809,26 @@ export function ChatInput({
           togglePageContext();
         }}
       >
+        {workingDirectory && (
+          <div className="flex min-w-0 items-center gap-1 px-3 pt-2">
+            <Button variant="ghost" size="xs" disabled={!directorySelectionEnabled} title={workingDirectory.path} aria-label={t(($) => $.directory.title)} onClick={() => setDirectoryOpen(true)} className="min-w-0 max-w-full bg-surface-raised">
+              <Folder className="size-3 shrink-0" /><span className="truncate">{directoryName}</span>
+            </Button>
+            {directorySelectionEnabled && <Button variant="ghost" size="icon-xs" aria-label={t(($) => $.directory.remove)} onClick={() => onWorkingDirectoryChange?.(null)}><X /></Button>}
+          </div>
+        )}
+        {directoryRuntime?.daemon_id && directoryWorkspaceId && directorySelectionEnabled && (
+          <ChatDirectoryDialog
+            key={`${directoryWorkspaceId}:${directoryRuntime.id}:${directoryRuntime.daemon_id}`}
+            wsId={directoryWorkspaceId}
+            runtimeId={directoryRuntime.id}
+            daemonId={directoryRuntime.daemon_id}
+            initialPath={workingDirectory?.path}
+            open={directoryOpen}
+            onOpenChange={setDirectoryOpen}
+            onSelect={(directory) => onWorkingDirectoryChange?.(directory)}
+          />
+        )}
         {showRunHint && (
           <p role="status" className={cn("px-3 pt-2 text-caption", willSteer ? "text-brand" : "text-muted-foreground")}>
             {willSteer
@@ -910,13 +944,14 @@ export function ChatInput({
             <VoiceStrip voice={voice} />
           </div>
         )}
-        {!voice.showStrip && (uploadEnabled || projectSelectionEnabled || leftAdornment) && (
+        {!voice.showStrip && (uploadEnabled || projectSelectionEnabled || directorySelectionEnabled || leftAdornment) && (
           <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
-            {(uploadEnabled || projectSelectionEnabled) && (
+            {(uploadEnabled || projectSelectionEnabled || directorySelectionEnabled) && (
               <ChatAddMenu
                 onSelectFile={uploadEnabled
                   ? (file) => editorRef.current?.uploadFile(file)
                   : undefined}
+                onSelectDirectory={directorySelectionEnabled ? () => setDirectoryOpen(true) : undefined}
                 projects={projects}
                 projectId={projectId}
                 onSelectProject={projectSelectionEnabled ? onProjectChange : undefined}
