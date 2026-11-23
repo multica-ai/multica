@@ -290,13 +290,13 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 데몬이 백그라운드에서(터미널에 연결되지 않은 채) 실행될 때 로그는 `~/.multica/daemon.log`(이름 있는 프로필은 `~/.multica/profiles/<name>/daemon.log`)에 기록되고 크기에 따라 순환됩니다. 순환된 파일은 gzip으로 압축됩니다.
 
-| 변수 | 기본값 | 설명 |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log`를 순환할 크기(MB) |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 보관할 순환 파일의 최대 개수 |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | 순환 파일을 보관할 일수 |
+| 변수 | 프로필 설정 키 | 기본값 | 설명 |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | `daemon.log`를 순환할 크기(MB) |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | 보관할 순환 파일의 최대 개수 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | 순환 파일을 보관할 일수 |
 
-세 변수 모두 양의 정수를 받습니다. `0`, 음수, 해석할 수 없는 값은 기본값으로 처리되며 "무제한"이 되지 않습니다. 순환 파일은 개수와 일수 중 먼저 도달한 한도에 따라 삭제됩니다. 충돌 출력은 같은 디렉터리의 `daemon.err.log`에 기록되며, 시작할 때 5MB를 넘으면 `daemon.err.log.1`로 이름이 바뀝니다.
+세 값 모두 양의 정수를 받습니다. `multica --profile dev config set <key> <value>`로 저장하고 `config show`로 저장된 값을 확인합니다. `""`를 전달하면 설정을 지웁니다. 변경 사항은 다음 데몬 시작 또는 재시작에 적용됩니다. 유효한 환경 변수는 프로필보다 우선합니다. 미설정, 공백, 0, 음수, 잘못된 형식 또는 오버플로 값은 유효한 프로필 값으로, 그 값도 없으면 표의 기본값으로 돌아갑니다. 크기와 일수는 바이트와 시간으로 변환할 때도 오버플로가 없어야 하며, `config set`은 잘못된 값을 거부합니다. 0으로 보관 제한을 해제할 수 없습니다. 순환 파일은 개수와 일수 중 먼저 도달한 한도에 따라 삭제됩니다. 충돌 출력은 같은 디렉터리의 `daemon.err.log`에 기록되며, 시작할 때 5MB를 넘으면 `daemon.err.log.1`로 이름이 바뀝니다.
 
 ### 도구별 경로, 모델, 인수
 
@@ -399,6 +399,9 @@ multica config show
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
 | `auto_update_check_interval` | `6h` | 업데이트 확인 간격 |
 | `disable_auto_reload` | 환경을 따름 | `true`는 디스크에서 교체된 바이너리 추적을 끔. `false`는 로컬 덮어쓰기를 지움. `disable_auto_update`와 별도로 해석됨 |
+| `daemon_log_max_size_mb` | `20` | `daemon.log`를 순환할 크기(MB). [데몬 로그](#daemon-logs) 참고 |
+| `daemon_log_max_backups` | `5` | 보관할 순환 파일의 최대 개수 |
+| `daemon_log_max_age_days` | `30` | 순환 파일을 보관할 일수 |
 
 값에는 다음 규칙이 적용됩니다.
 
