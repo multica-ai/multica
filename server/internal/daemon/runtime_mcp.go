@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // runtimeLocalMcpServerSummary is the intentionally non-secret inventory
@@ -33,13 +35,13 @@ type runtimeLocalMcpServerSummary struct {
 // A present config (including an empty mcpServers map) opts into the merged,
 // task-local config so adding one managed server no longer disables unrelated
 // runtime servers.
-func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage) (json.RawMessage, error) {
+func mergeRuntimeAndAgentMcpConfig(provider, cliVersion string, agentConfig json.RawMessage) (json.RawMessage, error) {
 	trimmed := bytes.TrimSpace(agentConfig)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return agentConfig, nil
 	}
 
-	runtimeServers, supported, err := loadRuntimeMcpServerConfigs(provider)
+	runtimeServers, supported, err := loadRuntimeMcpServerConfigs(provider, cliVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +261,7 @@ func stripJSONC(raw []byte) ([]byte, error) {
 // for task-local merging. Callers must never send the result to the server or
 // logs; the public capabilities endpoint continues to use the redacted summary
 // type above.
-func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) {
+func loadRuntimeMcpServerConfigs(provider, cliVersion string) (map[string]any, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
@@ -308,25 +310,18 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		return map[string]any{}, false, nil
 	}
 
-	servers := map[string]any{}
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		cfg, err := unmarshalRuntimeMcpConfig(raw, format)
-		if err != nil {
-			return nil, true, err
+	configured, err := readRuntimeMcpServers(provider, cliVersion, path, key, format)
+	if err != nil {
+		return nil, true, err
+	}
+	servers := make(map[string]any, len(configured))
+	for name, entry := range configured {
+		// OpenCode 2.x uses disabled, but the task adapters only read
+		// enabled. Keep disabled entries in inventory, not in task config.
+		if server, ok := entry.(map[string]any); provider == "opencode" && ok && server["disabled"] == true {
+			continue
 		}
-		if configured, ok := runtimeMcpServersForProvider(provider, key, cfg); ok {
-			for name, entry := range configured {
-				// OpenCode 2.x uses disabled, but the task adapters only read
-				// enabled. Keep disabled entries in inventory, not in task config.
-				if server, ok := entry.(map[string]any); provider == "opencode" && ok && server["disabled"] == true {
-					continue
-				}
-				servers[name] = normalizeRuntimeMcpEntry(provider, entry)
-			}
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
+		servers[name] = normalizeRuntimeMcpEntry(provider, entry)
 	}
 
 	if provider == "claude" {
@@ -394,7 +389,7 @@ func loadClaudePluginMcpServerConfigs(home string) map[string]any {
 	return out
 }
 
-func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary, bool, error) {
+func listRuntimeLocalMcpServers(provider, cliVersion string) ([]runtimeLocalMcpServerSummary, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
@@ -462,19 +457,11 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		return []runtimeLocalMcpServerSummary{}, false, nil
 	}
 
-	out := make([]runtimeLocalMcpServerSummary, 0)
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		cfg, err := unmarshalRuntimeMcpConfig(raw, format)
-		if err != nil {
-			return nil, true, err
-		}
-		if servers, ok := runtimeMcpServersForProvider(provider, key, cfg); ok {
-			out = append(out, runtimeMcpSummaries(servers, source)...)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
+	servers, err := readRuntimeMcpServers(provider, cliVersion, path, key, format)
+	if err != nil {
+		return nil, true, err
 	}
+	out := runtimeMcpSummaries(servers, source)
 
 	if provider == "claude" {
 		out = append(out, listClaudePluginMcpServers(home)...)
@@ -550,38 +537,128 @@ func listClaudePluginMcpServers(home string) []runtimeLocalMcpServerSummary {
 	return out
 }
 
-// runtimeMcpServersForProvider resolves the user-scope MCP server map for a
-// provider. OpenCode is the only provider that stores the same field under two
-// shapes depending on which version wrote the config file, so it gets a
-// dedicated resolver; every other provider uses the dotted-key lookup.
-func runtimeMcpServersForProvider(provider, key string, cfg map[string]any) (map[string]any, bool) {
-	if provider == "opencode" {
-		return opencodeNativeMcpServers(cfg, key)
+func readRuntimeMcpDocument(path, format string) (map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
 	}
-	return nestedRuntimeMcpMap(cfg, key)
+	if err != nil {
+		return nil, fmt.Errorf("read runtime MCP config: %w", err)
+	}
+	cfg, err := unmarshalRuntimeMcpConfig(raw, format)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	return cfg, nil
 }
 
-// opencodeNativeMcpServers returns the OpenCode user MCP server map. OpenCode
-// 1.x stores servers directly under "mcp" while 2.x nests them under
-// "mcp.servers"; the shape is decided by whichever version the user runs, so it
-// is detected from the content rather than a fixed key.
-func opencodeNativeMcpServers(cfg map[string]any, key string) (map[string]any, bool) {
+func readRuntimeMcpServers(provider, cliVersion, path, key, format string) (map[string]any, error) {
+	cfg, err := readRuntimeMcpDocument(path, format)
+	if err != nil {
+		return nil, err
+	}
+	if provider != "opencode" {
+		servers, _ := nestedRuntimeMcpMap(cfg, key)
+		return servers, nil
+	}
+
+	overlay, err := readRuntimeMcpDocument(filepath.Join(filepath.Dir(path), "opencode.jsonc"), "jsonc")
+	if err != nil {
+		return nil, err
+	}
+	usesV2 := agent.OpenCodeVersionIsV2OrLater(cliVersion)
+	baseServers := opencodeMcpServers(cfg, key, usesV2)
+	overlayServers := opencodeMcpServers(overlay, key, usesV2)
+	if baseServers == nil {
+		return overlayServers, nil
+	}
+	// OpenCode 2.x replaces servers by name, even when both files use the
+	// legacy flat layout. Unknown versions follow the 1.x deep-merge rule.
+	if !usesV2 {
+		mergeOpenCodeMcpObjects(baseServers, overlayServers)
+	} else {
+		for name, entry := range overlayServers {
+			baseServers[name] = entry
+		}
+	}
+	return baseServers, nil
+}
+
+func mergeOpenCodeMcpObjects(base, overlay map[string]any) {
+	for name, entry := range overlay {
+		oldObject, oldOK := base[name].(map[string]any)
+		newObject, newOK := entry.(map[string]any)
+		if oldOK && newOK {
+			mergeOpenCodeMcpObjects(oldObject, newObject)
+			continue
+		}
+		base[name] = entry
+	}
+}
+
+func opencodeMcpServers(cfg map[string]any, key string, usesV2 bool) map[string]any {
 	mcp, ok := cfg[key].(map[string]any)
 	if !ok {
-		return nil, false
+		return nil
 	}
-	if servers, ok := mcp["servers"].(map[string]any); ok {
-		// A flat server named "servers" has entry fields; a nested server
-		// with one of these names has an object as its value instead.
-		for _, field := range []string{"type", "url", "command", "enabled", "disabled"} {
-			switch servers[field].(type) {
-			case string, bool, []any:
-				return mcp, true
+	if usesV2 {
+		return normalizeOpenCodeV2McpServers(mcp)
+	}
+	// Keep recognizing nested inventories when CLI version detection is
+	// unavailable, including a document containing only timeout defaults.
+	if servers, ok := mcp["servers"].(map[string]any); ok && !isFlatOpenCodeMcpServer(servers) {
+		return servers
+	}
+	if !isFlatOpenCodeMcpServer(mcp["timeout"]) {
+		delete(mcp, "timeout")
+	}
+	return mcp
+}
+
+func normalizeOpenCodeV2McpServers(mcp map[string]any) map[string]any {
+	servers := make(map[string]any, len(mcp))
+	for name, value := range mcp {
+		server, ok := value.(map[string]any)
+		if !ok || !isTypedOpenCodeMcpServer(server) {
+			continue
+		}
+		// OpenCode 2.x ignores enabled-only overrides and migrates the
+		// enabled flag on complete legacy entries to disabled.
+		if server["enabled"] == false {
+			server["disabled"] = true
+		}
+		servers[name] = server
+	}
+	if native, ok := mcp["servers"].(map[string]any); ok && !isTypedOpenCodeMcpServer(native) {
+		// A legacy override named "servers" is not a nested server map.
+		if _, enabledOnly := native["enabled"].(bool); enabledOnly {
+			return servers
+		}
+		for name, value := range native {
+			if server, ok := value.(map[string]any); ok && isTypedOpenCodeMcpServer(server) {
+				servers[name] = server
 			}
 		}
-		return servers, true
 	}
-	return mcp, true
+	return servers
+}
+
+func isTypedOpenCodeMcpServer(server map[string]any) bool {
+	return server["type"] == "local" || server["type"] == "remote"
+}
+
+func isFlatOpenCodeMcpServer(value any) bool {
+	server, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, field := range []string{"type", "url", "command", "enabled", "disabled"} {
+		switch server[field].(type) {
+		case string, bool, []any:
+			return true
+		}
+	}
+	return false
 }
 
 func nestedRuntimeMcpMap(cfg map[string]any, path string) (map[string]any, bool) {

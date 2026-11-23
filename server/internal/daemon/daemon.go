@@ -5059,7 +5059,15 @@ func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID
 		})
 		return
 	}
-	mcpServers, mcpSupported, err := listRuntimeLocalMcpServers(rt.Provider)
+	var cliVersion string
+	if rt.Provider == "opencode" {
+		if spec, ok := d.customProfileLaunchForRuntime(rt.ID); ok {
+			cliVersion = spec.version
+		} else if rt.ProfileID == "" {
+			cliVersion = d.agentVersion(rt.Provider)
+		}
+	}
+	mcpServers, mcpSupported, err := listRuntimeLocalMcpServers(rt.Provider, cliVersion)
 	if err != nil {
 		d.logger.Warn("runtime local MCP discovery failed", "runtime_id", rt.ID, "provider", rt.Provider, "error", err)
 		mcpServers = []runtimeLocalMcpServerSummary{}
@@ -8565,7 +8573,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
 		effectiveMcpConfig = agentMcpConfig
-		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, agentMcpConfig); mergeErr != nil {
+		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, resolvedVersion, agentMcpConfig); mergeErr != nil {
 			taskLog.Warn("mcp_config: runtime merge failed; using agent configuration only",
 				"provider", provider,
 				"error", mergeErr,
