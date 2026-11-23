@@ -918,6 +918,10 @@
         "label": "Comentarios",
         "description": "Comentarios nuevos en tareas que sigues"
       },
+      "squad_handoffs": {
+        "label": "Incluir traspasos del squad",
+        "description": "Comentarios con los que el líder y los agentes de un squad se pasan el trabajo. Las @menciones, las ejecuciones de agente fallidas y los estados que requieren atención te siguen llegando."
+      },
       "mentions": {
         "label": "Menciones",
         "description": "Cuando alguien te @menciona, incluidos @all y @squad"

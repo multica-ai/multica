@@ -67,6 +67,7 @@ describe("Inbox notification settings", () => {
       "Other people's issues",
       "Status changes",
       "Comments",
+      "Include squad handoffs",
       "Priority & due date",
       "Projects you subscribe to",
       "New issues",
@@ -87,6 +88,24 @@ describe("Inbox notification settings", () => {
 
     await user.click(statusChanges);
     expect(mutate).toHaveBeenCalledWith({ status_changes: "all" }, expect.anything());
+  });
+
+  it("keeps squad handoffs on under Comments until you turn them off", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const handoffs = within(screen.getByRole("region", { name: "Inbox" })).getByRole("switch", {
+      name: "Include squad handoffs",
+    });
+    expect(handoffs).toBeChecked();
+
+    await user.click(handoffs);
+    expect(mutate).toHaveBeenCalledWith({ squad_handoffs: "muted" }, expect.anything());
+  });
+
+  it("hides squad handoffs while comments are off", () => {
+    renderTab({ comments: "muted" });
+    const inbox = screen.getByRole("region", { name: "Inbox" });
+    expect(within(inbox).queryByRole("switch", { name: "Include squad handoffs" })).toBeNull();
   });
 
   it("shows status changes on once you turned them on", () => {

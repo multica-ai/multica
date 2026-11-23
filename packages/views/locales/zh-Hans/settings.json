@@ -908,6 +908,10 @@
         "label": "评论",
         "description": "你订阅的任务有新评论时"
       },
+      "squad_handoffs": {
+        "label": "包含小队内部交接",
+        "description": "小队队长给成员派活、成员向队长回报的评论。@你、智能体运行失败和需要人工关注的状态照常通知。"
+      },
       "mentions": {
         "label": "提及",
         "description": "有人 @ 你时，包括 @all 和 @squad"
