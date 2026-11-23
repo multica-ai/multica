@@ -794,6 +794,8 @@ func daemonStartupFailureError(logs daemonStartupLogs, waitErr error, profile, s
 		strings.Contains(joined, "returned 401") ||
 		strings.Contains(joined, "not authenticated"):
 		return fmt.Errorf("daemon failed to start: the server rejected your login token (it may have expired or been revoked).\nRun '%s' to sign in again, then rerun 'multica daemon start'.\nFull log: %s", loginHint, logs.logPath)
+	case strings.Contains(strings.ToLower(joined), "tls handshake timeout"):
+		return fmt.Errorf("daemon failed to start: %s\nFull log: %s", cli.TLSHandshakeTimeoutMessage(), logs.logPath)
 	case strings.Contains(joined, "connection refused") ||
 		strings.Contains(joined, "no such host") ||
 		strings.Contains(joined, "i/o timeout") ||

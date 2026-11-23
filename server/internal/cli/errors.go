@@ -511,6 +511,13 @@ func TaskTokenRejectedMessage() string {
 	return messageFor(KindTaskTokenRejected, DetectLanguage())
 }
 
+// TLSHandshakeTimeoutMessage returns the localized TLS handshake timeout
+// guidance. It is for callers that only see the failure as text (the daemon
+// start command reading its child's logs), so there is one copy of it.
+func TLSHandshakeTimeoutMessage() string {
+	return messageFor(KindNetworkTLSHandshakeTimeout, DetectLanguage())
+}
+
 // messageFor returns the localized message for a kind.
 func messageFor(kind ErrorKind, lang Language) string {
 	m, ok := kindMessages[kind]
