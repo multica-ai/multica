@@ -583,7 +583,14 @@ func TestRunIssueCommentAddIdempotencyKey(t *testing.T) {
 
 	var keys []string
 	replay := false
-	uploads := 0
+	uploads, lookups := 0, 0
+	var lookupKey, lookupParent string
+	last := func() string {
+		if len(keys) == 0 {
+			return ""
+		}
+		return keys[len(keys)-1]
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
@@ -591,6 +598,15 @@ func TestRunIssueCommentAddIdempotencyKey(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
 			uploads++
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": fmt.Sprintf("attachment-%d", uploads), "url": fmt.Sprintf("https://files.test/%d.png", uploads)})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID+"/comments/idempotent":
+			lookups++
+			lookupKey, lookupParent = r.Header.Get("Idempotency-Key"), r.URL.Query().Get("parent_id")
+			if !replay {
+				http.Error(w, `{"error":"no comment"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Idempotent-Replayed", "true")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
 			keys = append(keys, r.Header.Get("Idempotency-Key"))
 			if replay {
@@ -626,7 +642,6 @@ func TestRunIssueCommentAddIdempotencyKey(t *testing.T) {
 		}
 		return stderr.read()
 	}
-	last := func() string { return keys[len(keys)-1] }
 
 	// Outside an agent run, no key unless one is passed.
 	run(map[string]string{"content": "verdict"})
@@ -645,15 +660,29 @@ func TestRunIssueCommentAddIdempotencyKey(t *testing.T) {
 	if !strings.HasPrefix(first, "cli-task-v1:") {
 		t.Fatalf("derived key = %q", first)
 	}
-	// The rerun uploads the file again and its link is rewritten to a new URL,
-	// but it is the same comment.
+	if lookups != 1 || uploads != 1 {
+		t.Fatalf("first attempt lookups = %d, uploads = %d, want 1 and 1", lookups, uploads)
+	}
+	// The rerun finds the saved comment before uploading anything, so it
+	// neither re-uploads the file nor posts again.
 	replay = true
+	posts := len(keys)
 	report := run(body, "shot.png")
-	if last() != first {
-		t.Fatalf("rerun key = %q, want %q", last(), first)
+	if lookups != 2 || uploads != 1 || len(keys) != posts {
+		t.Fatalf("rerun lookups = %d, uploads = %d, posts = %d, want 2, 1, %d", lookups, uploads, len(keys), posts)
+	}
+	if lookupKey != first || lookupParent != body["parent"] {
+		t.Fatalf("lookup key %q parent %q, want %q %q", lookupKey, lookupParent, first, body["parent"])
 	}
 	if !strings.Contains(report, "already posted") || strings.Contains(report, "Comment added") {
 		t.Fatalf("replay stderr = %q, want the already-posted notice", report)
+	}
+	// Without attachments there is nothing to save by asking first: the POST
+	// itself replays.
+	run(map[string]string{"content": "no files", "parent": body["parent"]})
+	run(map[string]string{"content": "no files", "parent": body["parent"]})
+	if lookups != 2 || keys[len(keys)-1] != keys[len(keys)-2] {
+		t.Fatalf("attachment-free rerun lookups = %d, keys %q / %q", lookups, keys[len(keys)-2], keys[len(keys)-1])
 	}
 	replay = false
 
@@ -672,6 +701,75 @@ func TestRunIssueCommentAddIdempotencyKey(t *testing.T) {
 	run(body, "shot.png")
 	if last() == first {
 		t.Fatalf("another run reused the key %q", first)
+	}
+}
+
+// When a keyed POST ends without a response, stderr must say that rerunning
+// is safe; otherwise an agent falls back to checking the thread and drops the
+// comment when that check also times out (GH #8221).
+func TestRunIssueCommentAddTimeoutSaysRerunIsSafe(t *testing.T) {
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	const hint = "is safe: the server returns the comment already posted"
+	status := 0
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			_, _ = io.ReadAll(r.Body)
+			if status != 0 {
+				http.Error(w, `{"error":"rejected"}`, status)
+				return
+			}
+			// The server got the comment; the response never arrives.
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_HTTP_TIMEOUT", "300ms")
+
+	run := func(flags map[string]string) string {
+		t.Helper()
+		cmd := newIssueCommentAddTestCmd()
+		_ = cmd.Flags().Set("content", "verdict")
+		for name, value := range flags {
+			_ = cmd.Flags().Set(name, value)
+		}
+		stderr := captureStderr(t)
+		defer stderr.restore()
+		if err := runIssueCommentAdd(cmd, []string{issueID}); err == nil {
+			t.Fatalf("runIssueCommentAdd succeeded, want an error")
+		}
+		return stderr.read()
+	}
+
+	if report := run(nil); strings.Contains(report, hint) {
+		t.Fatalf("unkeyed timeout stderr = %q, want no rerun hint", report)
+	}
+	if report := run(map[string]string{"idempotency-key": "k1"}); !strings.Contains(report, "Rerunning with the same --idempotency-key "+hint) {
+		t.Fatalf("explicit-key timeout stderr = %q", report)
+	}
+	t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
+	if report := run(nil); !strings.Contains(report, "Rerunning this exact command "+hint) {
+		t.Fatalf("agent timeout stderr = %q", report)
+	}
+	status = http.StatusBadGateway
+	if report := run(nil); !strings.Contains(report, hint) {
+		t.Fatalf("5xx stderr = %q, want the rerun hint", report)
+	}
+	status = http.StatusUnprocessableEntity
+	if report := run(nil); strings.Contains(report, hint) {
+		t.Fatalf("422 stderr = %q, want no rerun hint", report)
 	}
 }
 

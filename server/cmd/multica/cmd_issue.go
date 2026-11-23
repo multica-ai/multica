@@ -3012,6 +3012,16 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	if idempotencyKey == "" && client.TaskID != "" {
 		idempotencyKey = deriveCommentIdempotencyKey(client.TaskID, issueID, parentID, content, steerInputs, steerActive, pending)
 	}
+	if idempotencyKey != "" && len(pending) > 0 {
+		// Ask before uploading: on a rerun whose comment already landed, the
+		// POST would replay and the fresh uploads would be bound to nothing.
+		// Any answer other than a replay (no receipt yet, an older server
+		// without this route, a network error) falls through to the keyed
+		// POST, which is still safe.
+		if saved, ok := lookupIdempotentComment(ctx, client, issueID, parentID, idempotencyKey); ok {
+			return finishIssueCommentAdd(cmd, issueRef.Display, steerTargets, saved, true)
+		}
+	}
 	var attachmentIDs []string
 	uploaded := make([]cli.AttachmentResponse, 0, len(pending))
 	for _, att := range pending {
@@ -3053,15 +3063,25 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	respHeaders, err := client.PostJSONWithHeaders(ctx, "/api/issues/"+issueID+"/comments", body, headers, &result)
 	if err != nil {
+		if idempotencyKey != "" && commentAddDeliveryUncertain(err) {
+			// Without this line an agent only sees the generic transport
+			// error, checks the thread, and gives up when that check times
+			// out too: the comment is lost although resending was safe
+			// (GH #8221).
+			fmt.Fprintln(os.Stderr, commentAddRerunSafeHint(cmd))
+		}
 		return fmt.Errorf("add comment: %w", err)
 	}
+	return finishIssueCommentAdd(cmd, issueRef.Display, steerTargets, result, respHeaders.Get("Idempotent-Replayed") == "true")
+}
 
-	if respHeaders.Get("Idempotent-Replayed") == "true" {
+func finishIssueCommentAdd(cmd *cobra.Command, issueDisplay string, steerTargets []steerTarget, result map[string]any, replayed bool) error {
+	if replayed {
 		// An earlier attempt of this command already posted the comment; the
 		// server returned it without posting again or re-triggering anyone.
-		fmt.Fprintf(os.Stderr, "Comment was already posted to issue %s by an earlier attempt; not posted again.\n", issueRef.Display)
+		fmt.Fprintf(os.Stderr, "Comment was already posted to issue %s by an earlier attempt; not posted again.\n", issueDisplay)
 	} else {
-		fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueRef.Display)
+		fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueDisplay)
 		reportSteerOutcomes(os.Stderr, steerTargets, result)
 	}
 
@@ -3070,6 +3090,45 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// lookupIdempotentComment reports the comment already saved under key, if the
+// server has one and supports the lookup.
+func lookupIdempotentComment(ctx context.Context, client *cli.APIClient, issueID, parentID, key string) (map[string]any, bool) {
+	path := "/api/issues/" + url.PathEscape(issueID) + "/comments/idempotent"
+	if parentID != "" {
+		path += "?parent_id=" + url.QueryEscape(parentID)
+	}
+	var saved map[string]any
+	headers, err := client.GetJSONWithRequestHeaders(ctx, path, map[string]string{"Idempotency-Key": key}, &saved)
+	if err != nil || headers.Get("Idempotent-Replayed") != "true" {
+		return nil, false
+	}
+	return saved, true
+}
+
+// commentAddDeliveryUncertain reports whether err leaves it unknown whether
+// the server saved the comment: the request may have reached the server and
+// only the response was lost. Failures that happen before the request is sent
+// (DNS, refused connection, TLS) and definite rejections are excluded.
+func commentAddDeliveryUncertain(err error) bool {
+	var networkErr *cli.NetworkError
+	if errors.As(err, &networkErr) {
+		switch networkErr.Kind {
+		case cli.KindNetworkTimeout, cli.KindNetworkStalled, cli.KindNetworkIncompleteResponse, cli.KindNetworkOffline:
+			return true
+		}
+	}
+	var httpErr *cli.HTTPError
+	return errors.As(err, &httpErr) && httpErr.Kind() == cli.KindServerError
+}
+
+func commentAddRerunSafeHint(cmd *cobra.Command) string {
+	rerun := "Rerunning this exact command"
+	if explicit, _ := cmd.Flags().GetString("idempotency-key"); strings.TrimSpace(explicit) != "" {
+		rerun = "Rerunning with the same --idempotency-key"
+	}
+	return "The comment may have been posted. " + rerun + " is safe: the server returns the comment already posted instead of posting it twice (servers that do not support Idempotency-Key ignore it)."
 }
 
 // deriveCommentIdempotencyKey names one logical comment inside one agent run.

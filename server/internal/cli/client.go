@@ -319,6 +319,34 @@ func (c *APIClient) GetJSONWithHeaders(ctx context.Context, path string, out any
 	return resp.Header, nil
 }
 
+// GetJSONWithRequestHeaders performs a GET request with extra request headers
+// (for example Idempotency-Key) and returns the response headers on success.
+func (c *APIClient) GetJSONWithRequestHeaders(ctx context.Context, path string, headers map[string]string, out any) (http.Header, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, newHTTPError(http.MethodGet, path, resp)
+	}
+	if out == nil {
+		return resp.Header, nil
+	}
+	return resp.Header, wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
+}
+
 // DeleteJSON performs a DELETE request.
 func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 	return c.DeleteJSONResponse(ctx, path, nil)

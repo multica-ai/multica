@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -42,6 +43,9 @@ type commentIdempotency struct {
 	key         db.GetCommentIdempotencyReceiptParams
 	issueID     pgtype.UUID
 	fingerprint []byte
+	// issueRevision is the issue's revision as this request read it. A replay
+	// does not write the issue, so it reports this as its issue_revision.
+	issueRevision int64
 }
 
 // commentIdempotencyFromRequest returns nil when the request carries no key.
@@ -75,8 +79,9 @@ func commentIdempotencyFromRequest(w http.ResponseWriter, r *http.Request, issue
 			ActorID:        parseUUID(authorID),
 			IdempotencyKey: key,
 		},
-		issueID:     issue.ID,
-		fingerprint: sum[:],
+		issueID:       issue.ID,
+		fingerprint:   sum[:],
+		issueRevision: issue.Revision,
 	}, true
 }
 
@@ -139,10 +144,52 @@ func (h *Handler) replayIdempotentComment(w http.ResponseWriter, r *http.Request
 	}
 	grouped := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, grouped[uuidToString(comment.ID)])
+	resp.IssueRevision = c.issueRevision
 	slog.Info("comment create replayed", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", uuidToString(comment.IssueID))...)
 	w.Header().Set(commentIdempotencyReplayedHeader, "true")
 	writeJSON(w, http.StatusOK, resp)
 	return true
+}
+
+// LookupIdempotentComment answers GET /api/issues/{id}/comments/idempotent:
+// "did a comment with this Idempotency-Key already land?". It is read-only and
+// returns exactly what a replayed POST would (200 with the saved comment, 422,
+// 409), or 404 when no comment has the key yet.
+//
+// The CLI asks before it uploads attachments for a keyed comment. A rerun
+// would otherwise upload every file again only for the POST to replay, leaving
+// the new uploads bound to nothing.
+func (h *Handler) LookupIdempotentComment(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(r.Header.Get(commentIdempotencyKeyHeader)) == "" {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key header is required")
+		return
+	}
+	var parentID pgtype.UUID
+	if raw := r.URL.Query().Get("parent_id"); raw != "" {
+		if parentID, ok = parseUUIDOrBadRequest(w, raw, "parent_id"); !ok {
+			return
+		}
+	}
+	commentType := r.URL.Query().Get("type")
+	if commentType == "" {
+		commentType = "comment"
+	}
+	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	idem, ok := commentIdempotencyFromRequest(w, r, issue, parentID, commentType, authorType, authorID)
+	if !ok {
+		return
+	}
+	if !h.replayIdempotentComment(w, r, idem) {
+		writeError(w, http.StatusNotFound, "no comment has been posted with this Idempotency-Key")
+	}
 }
 
 // SweepCommentIdempotencyReceipts deletes receipts older than the retention

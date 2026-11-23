@@ -59,6 +59,9 @@ func TestCreateCommentIdempotencyKeyReplaysSavedComment(t *testing.T) {
 	if got := replayed.Header().Get(commentIdempotencyReplayedHeader); got != "true" {
 		t.Fatalf("replay %s = %q, want true", commentIdempotencyReplayedHeader, got)
 	}
+	if second.IssueRevision != first.IssueRevision {
+		t.Fatalf("replay issue_revision = %d, want %d", second.IssueRevision, first.IssueRevision)
+	}
 	if second.ID != first.ID || second.Content != "verdict" {
 		t.Fatalf("replay = %s %q, want the saved comment %s %q", second.ID, second.Content, first.ID, first.Content)
 	}
@@ -230,5 +233,45 @@ func TestSweepCommentIdempotencyReceipts(t *testing.T) {
 	}
 	if n := dbfx.Count(t, `SELECT count(*) FROM comment_idempotency_receipt WHERE idempotency_key = $1`, freshKey); n != 1 {
 		t.Fatalf("fresh receipt removed")
+	}
+}
+
+func lookupIdempotentCommentRequest(issueID, key, query string) *http.Request {
+	req := newRequest(http.MethodGet, "/api/issues/"+issueID+"/comments/idempotent"+query, nil)
+	if key != "" {
+		req.Header.Set(commentIdempotencyKeyHeader, key)
+	}
+	return withURLParam(req, "id", issueID)
+}
+
+// The CLI asks before uploading attachments, so a rerun whose comment already
+// landed does not leave fresh uploads bound to nothing.
+func TestLookupIdempotentComment(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := dbfx.Issue(t, "idempotent comment lookup")
+	rootID := dbfx.Comment(t, issueID, "root")
+	key := newCommentIdempotencyKey(t)
+	query := "?parent_id=" + rootID
+
+	testutil.Call(t, testHandler.LookupIdempotentComment, lookupIdempotentCommentRequest(issueID, "", query)).Want(http.StatusBadRequest)
+	testutil.Call(t, testHandler.LookupIdempotentComment, lookupIdempotentCommentRequest(issueID, key, query)).Want(http.StatusNotFound)
+
+	var created CommentResponse
+	testutil.Call(t, testHandler.CreateComment, idempotentCommentRequest(issueID, key, map[string]any{"content": "reply", "parent_id": rootID})).Want(http.StatusCreated).JSON(&created)
+
+	var found CommentResponse
+	resp := testutil.Call(t, testHandler.LookupIdempotentComment, lookupIdempotentCommentRequest(issueID, key, query))
+	resp.Want(http.StatusOK).JSON(&found)
+	if resp.Header().Get(commentIdempotencyReplayedHeader) != "true" || found.ID != created.ID || found.IssueRevision != created.IssueRevision {
+		t.Fatalf("lookup = %s rev %d (replayed %q), want %s rev %d", found.ID, found.IssueRevision, resp.Header().Get(commentIdempotencyReplayedHeader), created.ID, created.IssueRevision)
+	}
+	// Same rules as a replayed POST: another thread is a different comment.
+	testutil.Call(t, testHandler.LookupIdempotentComment, lookupIdempotentCommentRequest(issueID, key, "")).Want(http.StatusUnprocessableEntity)
+	testutil.Call(t, testHandler.LookupIdempotentComment, lookupIdempotentCommentRequest(issueID, key, "?parent_id=nope")).Want(http.StatusBadRequest)
+	// The lookup only reads.
+	if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID); n != 2 {
+		t.Fatalf("comments = %d, want 2", n)
 	}
 }
