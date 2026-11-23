@@ -142,3 +142,29 @@ test("globs follow turbo and ci-paths semantics", () => {
   assert.ok(!covers(["apps/web/**/*.css"], { path: "apps/desktop", kind: "dir" }));
   assert.ok(!covers(["apps/web/**/*.css"], { path: "apps/web/app/page.tsx", kind: "file" }));
 });
+
+test("a single-level wildcard does not declare the directories below it", () => {
+  const manifests = ["apps/*/package.json", "packages/*/package.json"];
+  for (const path of ["apps/mobile/src", "apps/desktop/src/renderer", "packages/ee/project-folders/locales"]) {
+    assert.ok(!covers(manifests, { path, kind: "dir" }), path);
+  }
+  assert.ok(covers(manifests, { path: "apps", kind: "dir" }), "the manifests are read from under apps/");
+  assert.ok(covers(manifests, { path: "apps/web", kind: "dir" }), "apps/web/package.json is under apps/web");
+  assert.ok(!covers(["README*.md"], { path: "apps/web", kind: "dir" }), "a root-level wildcard stays at the root");
+  assert.ok(covers(["**/*.css"], { path: "apps/web/app", kind: "dir" }));
+  assert.ok(covers(["packages/ee/project-folders/locales/*.json"], { path: "packages/ee/project-folders/locales", kind: "dir" }));
+  assert.ok(!covers(["packages/ee/project-folders/locales/*.json"], { path: "packages/ee/project-folders/locales/en", kind: "dir" }));
+});
+
+test("dropping a scanned directory from views' inputs fails even with workspace manifests declared", (t) => {
+  const { write, inputs, ciPaths, passes, failsNaming } = fixture(t);
+  ciPaths({ frontend: ["apps/**", "packages/**"] });
+  write(viewsTest, [
+    'const REPO = join(__dirname, "../../..");',
+    'const ROOTS = ["apps/web/app"];',
+  ].join("\n"));
+  inputs("packages/views", ["$TURBO_ROOT$/apps/*/package.json", "$TURBO_ROOT$/packages/*/package.json"]);
+  failsNaming(["apps/web/app/"], "apps/*/package.json does not declare the app sources");
+  inputs("packages/views", ["$TURBO_ROOT$/apps/*/package.json", "$TURBO_ROOT$/apps/web/app/**/*.tsx"]);
+  passes("the scan is declared once its own glob is");
+});

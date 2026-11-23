@@ -94,13 +94,26 @@ const staticBase = (glob) => {
   return glob.slice(0, glob.lastIndexOf("/", wild) + 1).replace(/\/$/, "");
 };
 
+/**
+ * Whether `glob` can match a file under directory `dir`. Segments are matched
+ * one by one, so `apps/*` + `/package.json` reaches into `apps` but not into
+ * `apps/desktop/src`; only `**` matches the levels below it.
+ */
+function reachesInto(glob, dir) {
+  const parts = glob.split("/");
+  const dirs = dir.split("/");
+  for (let i = 0; i < dirs.length; i++) {
+    if (i >= parts.length - 1) return false;
+    if (parts[i] === "**") return true;
+    if (!globToRegExp(parts[i]).test(dirs[i])) return false;
+  }
+  return true;
+}
+
 /** A read of `ref` is declared by `globs` (repo-relative). */
 export function covers(globs, ref) {
   if (ref.kind === "file") return globs.some((glob) => globToRegExp(glob).test(ref.path));
-  return globs.some((glob) => {
-    const base = staticBase(glob);
-    return base === ref.path || base.startsWith(`${ref.path}/`) || ref.path.startsWith(`${base}/`) || base === "";
-  });
+  return globs.some((glob) => reachesInto(glob, ref.path));
 }
 
 function workspacePackages() {
