@@ -29,6 +29,8 @@ test("app rail shows every space label whole, selected or not, in every language
 }) => {
   test.setTimeout(240000);
   if (!baseURL) throw new Error("The app rail label regression requires a baseURL");
+  const labelSets = SUPPORTED_LOCALES.map((locale) => SPACES.map((space) => railLabels[locale]![space]).join(" / "));
+  expect(new Set(labelSets).size, "every language needs its own set of rail labels").toBe(SUPPORTED_LOCALES.length);
   // An account of its own, so no stored language overrides the locale cookie.
   const api = new TestApiClient();
   const run = `${Date.now()}-${process.pid}`;
@@ -50,9 +52,13 @@ test("app rail shows every space label whole, selected or not, in every language
       await context.addCookies([{ name: "multica-locale", value: locale, url: baseURL }]);
       if (index === 0) await page.goto(`/${workspace.slug}/issues`, { waitUntil: "domcontentloaded" });
       else await page.reload({ waitUntil: "domcontentloaded" });
-      await expect(tile("autopilots"), `${locale}: Autopilots label`).toHaveText(railLabels[locale]!.autopilots, {
-        timeout: 30000,
-      });
+      // Several languages share a label ("Auto" in en, fr and es), so only
+      // the whole set of labels proves the page has switched to this one.
+      for (const space of SPACES) {
+        await expect(tile(space), `${locale}: ${space} label`).toHaveText(railLabels[locale]![space], {
+          timeout: 30000,
+        });
+      }
       await page.evaluate(() => document.fonts.ready);
 
       for (const selected of SPACES) {
