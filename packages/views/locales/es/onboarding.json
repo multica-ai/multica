@@ -218,6 +218,7 @@
     "heading_web": "Tu ordenador está conectado",
     "lede_web": "Elige la herramienta que usará tu agente.",
     "section_tools": "Herramientas de programación con IA",
+    "section_other_tools": "Otras herramientas en este equipo",
     "section_install": "Elige una para instalar",
     "section_agent": "Tu agente",
     "detecting": "Revisando este ordenador; las herramientas que instales tú aparecen automáticamente",

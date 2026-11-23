@@ -69,6 +69,7 @@ describe("createPersonalAgent", () => {
       "acme",
     );
     expect(mocks.createAgent.mock.calls[0]![0]).not.toHaveProperty("instructions");
+    expect(mocks.createAgent.mock.calls[0]![0]).not.toHaveProperty("avatar_url");
     expect(mocks.createChatSession).toHaveBeenCalledWith({ agent_id: "agent-1" }, "acme");
     expect(result.chatSession.id).toBe("session-1");
     // The chat page drops an active session missing from the cached list.
@@ -82,6 +83,12 @@ describe("createPersonalAgent", () => {
       .mockResolvedValue({ id: "agent-3" });
     await createPersonalAgent({ ...target(), runtimeId: "rt-1", name: "Ada", description: "" });
     expect(mocks.createAgent.mock.calls.map((call) => call[0].name)).toEqual(["Ada", "Ada 2", "Ada 3"]);
+  });
+
+  it("keeps the avatar picked in the step", async () => {
+    mocks.createAgent.mockResolvedValue({ id: "agent-1" });
+    await createPersonalAgent({ ...target(), runtimeId: "rt-1", name: "Ada", description: "", avatarUrl: "emoji:🦉" });
+    expect(mocks.createAgent.mock.calls[0]![0]).toMatchObject({ avatar_url: "emoji:🦉" });
   });
 
   it("does not retry other failures", async () => {

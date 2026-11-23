@@ -218,6 +218,7 @@
     "heading_web": "コンピュータが接続されました",
     "lede_web": "エージェントが使うツールを選んでください。",
     "section_tools": "AI コーディングツール",
+    "section_other_tools": "このコンピュータのその他のツール",
     "section_install": "インストールするツールを選ぶ",
     "section_agent": "あなたのエージェント",
     "detecting": "このコンピュータを確認中 — 自分で入れたツールも自動で表示されます",

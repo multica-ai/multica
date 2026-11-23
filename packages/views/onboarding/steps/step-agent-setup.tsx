@@ -14,10 +14,11 @@ import {
   type CodingToolRunEvent,
   type CodingToolsBridge,
 } from "@multica/core/onboarding";
-import { runtimeDisplayLabel } from "@multica/core/runtimes";
+import { providerDisplayName, runtimeDisplayLabel } from "@multica/core/runtimes";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
 import type { AgentRuntime } from "@multica/core/types";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { useT } from "../../i18n";
 import { StepFooter, StepHeading } from "../components/step-shell";
@@ -30,6 +31,7 @@ export interface CreatePersonalAgentRequest {
   runtime: AgentRuntime;
   name: string;
   description: string;
+  avatarUrl: string | null;
 }
 
 /** How long an installed tool may wait for its runtime before the daemon is restarted. */
@@ -52,8 +54,9 @@ const NOT_DETECTED_RUN: CodingToolRun = {
  * With a `codingTools` bridge (Desktop) the step lists Claude Code, Codex and
  * Cursor CLI for this machine and installs or signs in to them in place. A
  * tool is ready once the daemon has registered it as an online runtime and it
- * is not known to be signed out. Without a bridge (web, after a computer has
- * connected) it lists the member's online runtimes instead.
+ * is not known to be signed out. Any other tool the daemon found on this
+ * machine is listed below them, ready to pick. Without a bridge (web, after a
+ * computer has connected) it lists the member's online runtimes instead.
  */
 export function StepAgentSetup({
   wsId,
@@ -61,6 +64,7 @@ export function StepAgentSetup({
   userName,
   workspaceName,
   codingTools,
+  localDaemonId,
   onRuntimeRefresh,
   runtimesPending,
   onCreate,
@@ -73,6 +77,8 @@ export function StepAgentSetup({
   /** Set when a member who joined an existing workspace sets up their agent there. */
   workspaceName?: string;
   codingTools?: CodingToolsBridge;
+  /** Desktop's own daemon; its runtimes are the ones on this computer. */
+  localDaemonId?: string | null;
   /** Restarts the local daemon so a newly installed tool registers. */
   onRuntimeRefresh?: () => void | Promise<void>;
   /** The local daemon is still booting or probing; don't restart it yet. */
@@ -84,8 +90,15 @@ export function StepAgentSetup({
 }) {
   const { t } = useT("onboarding");
   const qc = useQueryClient();
-  const { runtimes } = useRuntimePicker(wsId, wsSlug);
+  const { runtimes: memberRuntimes } = useRuntimePicker(wsId, wsSlug);
   const isDesktop = !!codingTools;
+  const runtimes = useMemo(
+    () =>
+      isDesktop && localDaemonId
+        ? memberRuntimes.filter((runtime) => runtime.daemon_id === localDaemonId)
+        : memberRuntimes,
+    [isDesktop, localDaemonId, memberRuntimes],
+  );
 
   const [selected, setSelected] = useState<string | null>(null);
   const [terminalFor, setTerminalFor] = useState<CodingToolId | null>(null);
@@ -194,6 +207,7 @@ export function StepAgentSetup({
   }, [connectingKey, isDesktop]);
 
   // Web: rows are the member's runtimes, the coding tools this step offers first.
+  // Desktop: the tools it cannot install, found by the daemon on this computer.
   const onlineRuntimes = useMemo(() => {
     const rank = (runtime: AgentRuntime) => {
       const index = CODING_TOOLS.findIndex((tool) => tool.provider === runtime.provider);
@@ -203,26 +217,36 @@ export function StepAgentSetup({
       .filter((runtime) => runtime.status === "online")
       .sort((a, b) => rank(a) - rank(b));
   }, [runtimes]);
+  const otherRuntimes = useMemo(
+    () =>
+      isDesktop
+        ? onlineRuntimes
+            .filter((runtime) => !codingToolForProvider(runtime.provider))
+            .sort((a, b) => providerDisplayName(a.provider).localeCompare(providerDisplayName(b.provider)))
+        : [],
+    [isDesktop, onlineRuntimes],
+  );
 
   // Keep a valid selection: a fresh tool, else the first ready one.
   useEffect(() => {
     if (isDesktop) {
       if (selected && readyIds.includes(selected as CodingToolId)) return;
+      if (selected && otherRuntimes.some((runtime) => runtime.id === selected)) return;
       const fresh = tools.fresh.find((id) => readyIds.includes(id));
-      setSelected(fresh ?? readyIds[0] ?? null);
+      setSelected(fresh ?? readyIds[0] ?? otherRuntimes[0]?.id ?? null);
     } else {
       if (selected && onlineRuntimes.some((runtime) => runtime.id === selected)) return;
       setSelected(onlineRuntimes[0]?.id ?? null);
     }
-  }, [isDesktop, onlineRuntimes, readyIds, selected, tools.fresh]);
+  }, [isDesktop, onlineRuntimes, otherRuntimes, readyIds, selected, tools.fresh]);
 
-  const selectedRuntime = isDesktop
-    ? selected
-      ? runtimeFor(codingTool(selected as CodingToolId))
-      : null
+  const selectedTool = isDesktop ? CODING_TOOLS.find((tool) => tool.id === selected) : undefined;
+  const selectedRuntime = selectedTool
+    ? runtimeFor(selectedTool)
     : (onlineRuntimes.find((runtime) => runtime.id === selected) ?? null);
   const selectedToolName = selectedRuntime
-    ? (codingToolForProvider(selectedRuntime.provider)?.name ?? runtimeDisplayLabel(selectedRuntime))
+    ? (codingToolForProvider(selectedRuntime.provider)?.name ??
+      (isDesktop ? providerDisplayName(selectedRuntime.provider) : runtimeDisplayLabel(selectedRuntime)))
     : null;
 
   // Default name, numbered when the workspace already has it.
@@ -240,6 +264,7 @@ export function StepAgentSetup({
   );
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!nameTouched) setName(defaultName);
   }, [defaultName, nameTouched]);
@@ -256,6 +281,7 @@ export function StepAgentSetup({
         runtime: selectedRuntime,
         name: name.trim(),
         description: t(($) => $.step_agent.agent_description, { name: userName }),
+        avatarUrl,
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.step_agent.create_failed));
@@ -274,7 +300,7 @@ export function StepAgentSetup({
     }
   };
 
-  const anyReady = isDesktop ? readyIds.length > 0 : onlineRuntimes.length > 0;
+  const anyReady = isDesktop ? readyIds.length > 0 || otherRuntimes.length > 0 : onlineRuntimes.length > 0;
 
   let heading: string;
   let lede: string;
@@ -293,8 +319,8 @@ export function StepAgentSetup({
         ? t(($) => $.step_agent.heading_logging_in, { tool: codingTool(installingId).name })
         : t(($) => $.step_agent.heading_installing, { tool: codingTool(installingId).name });
     lede = t(($) => $.step_agent.lede_installing);
-  } else if (selected && tools.fresh.includes(selected as CodingToolId)) {
-    heading = t(($) => $.step_agent.heading_ready_fresh, { tool: codingTool(selected as CodingToolId).name });
+  } else if (selectedTool && tools.fresh.includes(selectedTool.id)) {
+    heading = t(($) => $.step_agent.heading_ready_fresh, { tool: selectedTool.name });
     lede = t(($) => $.step_agent.lede_ready_fresh);
   } else if (anyReady) {
     heading = t(($) => $.step_agent.heading_pick);
@@ -375,6 +401,22 @@ export function StepAgentSetup({
                   />
                 );
               })}
+              {otherRuntimes.length > 0 && (
+                <>
+                  <div className="pt-3">
+                    <SectionLabel>{t(($) => $.step_agent.section_other_tools)}</SectionLabel>
+                  </div>
+                  {otherRuntimes.map((runtime) => (
+                    <RuntimeRow
+                      key={runtime.id}
+                      runtime={runtime}
+                      label={providerDisplayName(runtime.provider)}
+                      selected={selected === runtime.id}
+                      onSelect={() => setSelected(runtime.id)}
+                    />
+                  ))}
+                </>
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-2" role="radiogroup">
@@ -400,12 +442,17 @@ export function StepAgentSetup({
           <SectionLabel>{t(($) => $.step_agent.section_agent)}</SectionLabel>
           <div className="flex flex-col gap-3 rounded-lg border bg-card p-4">
             <div className="flex items-center gap-3">
-              <span
-                aria-hidden
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-body font-medium text-foreground"
-              >
-                {(name.trim() || userName).slice(0, 1).toUpperCase()}
-              </span>
+              <AvatarUploadControl
+                variant="agent"
+                value={avatarUrl}
+                name={name.trim() || userName}
+                size={36}
+                disabled={creating}
+                onUploaded={setAvatarUrl}
+                onEmojiSelected={setAvatarUrl}
+                textIconEnabled
+                onClear={() => setAvatarUrl(null)}
+              />
               <Input
                 aria-label={t(($) => $.step_agent.agent_name_label)}
                 value={name}
@@ -472,10 +519,12 @@ function Chip({ children }: { children: React.ReactNode }) {
 
 function RuntimeRow({
   runtime,
+  label = runtimeDisplayLabel(runtime),
   selected,
   onSelect,
 }: {
   runtime: AgentRuntime;
+  label?: string;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -495,7 +544,7 @@ function RuntimeRow({
         <ProviderLogo provider={runtime.provider} className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-body font-medium text-foreground">{runtimeDisplayLabel(runtime)}</div>
+        <div className="truncate text-body font-medium text-foreground">{label}</div>
         <div className="text-caption text-success">{t(($) => $.step_agent.status_online)}</div>
       </div>
       <span

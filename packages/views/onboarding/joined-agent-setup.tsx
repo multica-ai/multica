@@ -20,11 +20,13 @@ import { StepAgentSetup } from "./steps/step-agent-setup";
 export function JoinedAgentSetup({
   workspace,
   codingTools,
+  localDaemonId,
   onRuntimeRefresh,
   runtimesPending,
 }: {
   workspace: Workspace;
   codingTools?: CodingToolsBridge;
+  localDaemonId?: string | null;
   onRuntimeRefresh?: () => void | Promise<void>;
   runtimesPending?: boolean;
 }) {
@@ -44,10 +46,11 @@ export function JoinedAgentSetup({
             userName={user.name}
             workspaceName={workspace.name}
             codingTools={codingTools}
+            localDaemonId={localDaemonId}
             onRuntimeRefresh={onRuntimeRefresh}
             runtimesPending={runtimesPending}
             skipHint={false}
-            onCreate={async ({ runtime, name, description }) => {
+            onCreate={async ({ runtime, name, description, avatarUrl }) => {
               const { chatSession } = await createPersonalAgent({
                 workspaceSlug: workspace.slug,
                 workspaceId: workspace.id,
@@ -55,6 +58,7 @@ export function JoinedAgentSetup({
                 runtimeId: runtime.id,
                 name,
                 description,
+                avatarUrl,
               });
               push(paths.workspace(workspace.slug).chatSession(chatSession.id));
             }}

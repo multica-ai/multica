@@ -218,6 +218,7 @@
     "heading_web": "Votre ordinateur est connecté",
     "lede_web": "Choisissez l'outil que votre agent utilisera.",
     "section_tools": "Outils de codage IA",
+    "section_other_tools": "Autres outils sur cet ordinateur",
     "section_install": "Choisissez un outil à installer",
     "section_agent": "Votre agent",
     "detecting": "Vérification de cet ordinateur — les outils que vous installez vous-même apparaissent automatiquement",

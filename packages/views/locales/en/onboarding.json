@@ -218,6 +218,7 @@
     "heading_web": "Your computer is connected",
     "lede_web": "Pick the tool your agent will use.",
     "section_tools": "AI coding tools",
+    "section_other_tools": "Other tools on this computer",
     "section_install": "Pick one to install",
     "section_agent": "Your agent",
     "detecting": "Checking this computer — tools you install yourself show up automatically",

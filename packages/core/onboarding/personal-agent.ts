@@ -44,6 +44,8 @@ export interface CreatePersonalAgentInput {
   description: string;
   /** Empty falls back to the runtime's default model. */
   model?: string;
+  /** An uploaded image URL or an `emoji:` value; omitted keeps the default avatar. */
+  avatarUrl?: string | null;
 }
 
 const MAX_NAME_ATTEMPTS = 5;
@@ -73,6 +75,7 @@ export async function createPersonalAgent(
           runtime_id: input.runtimeId,
           visibility: "private",
           ...(input.model ? { model: input.model } : {}),
+          ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}),
           template: "onboarding_personal",
         },
         input.workspaceSlug,

@@ -6,6 +6,7 @@ import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 import { useLocalRuntimesPending } from "../platform/use-local-runtimes-pending";
+import { useDesktopRuntimeContext } from "./use-desktop-runtime-context";
 
 /**
  * Window-level transition overlay: renders above the tab system when the
@@ -39,6 +40,7 @@ function WindowOverlayInner() {
   // Live local-daemon signal for the onboarding runtime step so it doesn't
   // flash "no runtime found" while the daemon is still probing CLI versions.
   const runtimesPending = useLocalRuntimesPending();
+  const { localDaemonId } = useDesktopRuntimeContext();
 
   if (!overlay) return null;
 
@@ -68,6 +70,7 @@ function WindowOverlayInner() {
           onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
           codingTools={codingTools}
+          localDaemonId={localDaemonId}
           onComplete={(ws, destination) => {
             close();
             if (ws && destination?.kind === "chat") {
@@ -85,6 +88,7 @@ function WindowOverlayInner() {
           invitationId={overlay.invitationId}
           onBack={onBack}
           codingTools={codingTools}
+          localDaemonId={localDaemonId}
           onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
         />
@@ -111,6 +115,7 @@ function WindowOverlayInner() {
           onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
           codingTools={codingTools}
+          localDaemonId={localDaemonId}
         />
       )}
     </div>

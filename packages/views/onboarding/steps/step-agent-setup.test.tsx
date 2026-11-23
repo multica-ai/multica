@@ -31,13 +31,14 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
 
 import { StepAgentSetup } from "./step-agent-setup";
 
-function runtime(provider: string, status: "online" | "offline" = "online"): AgentRuntime {
+function runtime(provider: string, status: "online" | "offline" = "online", daemonId = "daemon-local"): AgentRuntime {
   return {
     id: `rt-${provider}`,
     name: `${provider} (laptop)`,
     provider,
     status,
     owner_id: "u-1",
+    daemon_id: daemonId,
   } as unknown as AgentRuntime;
 }
 
@@ -137,7 +138,32 @@ describe("StepAgentSetup on Desktop", () => {
       runtime: mocks.runtimes[0],
       name: "Ada's assistant 2",
       description: "Ada's personal agent. Only Ada can use it.",
+      avatarUrl: null,
     });
+  });
+
+  it("also offers the other tools the daemon found on this computer", async () => {
+    mocks.runtimes = [
+      runtime("claude", "online", "daemon-other"),
+      runtime("gemini"),
+      runtime("opencode", "online", "daemon-other"),
+    ];
+    const { bridge } = fakeBridge([
+      { id: "claude", installed: true, version: "2.1.3", loggedIn: true },
+      ...MISSING.slice(1),
+    ]);
+    const { onCreate } = renderStep({ codingTools: bridge, localDaemonId: "daemon-local" });
+
+    expect(await screen.findByText("Other tools on this computer")).toBeInTheDocument();
+    // Claude only runs on another computer, so this one still needs it.
+    await waitFor(() => expect(screen.getByTestId("coding-tool-claude")).toHaveAttribute("data-state", "connecting"));
+    const gemini = screen.getByRole("radio", { name: /^gemini/i });
+    expect(gemini).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByText(/opencode/i)).toBeNull();
+    expect(screen.getByText("Uses Gemini")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Create agent and start chatting" }));
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ runtime: mocks.runtimes[1] }));
   });
 
   it("installs a tool in place, hands over the sign-in code, and restarts the daemon when it is done", async () => {

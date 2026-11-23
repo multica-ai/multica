@@ -218,6 +218,7 @@
     "heading_web": "你的電腦已經連上了",
     "lede_web": "選一個工具，你的 AI 代理會用它工作。",
     "section_tools": "AI 程式設計工具",
+    "section_other_tools": "這台電腦上的其他工具",
     "section_install": "選一個安裝",
     "section_agent": "你的 AI 代理",
     "detecting": "正在檢測這臺電腦，自己裝好的也會自動出現",

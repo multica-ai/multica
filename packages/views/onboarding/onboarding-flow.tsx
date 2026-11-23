@@ -139,6 +139,8 @@ interface OnboardingFlowProps {
   runtimesPending?: boolean;
   /** Desktop only: installs and signs in to AI coding tools on this machine. */
   codingTools?: CodingToolsBridge;
+  /** Desktop only: the bundled daemon, whose runtimes are this machine's. */
+  localDaemonId?: string | null;
 }
 
 export function OnboardingFlow({
@@ -149,6 +151,7 @@ export function OnboardingFlow({
   onRuntimeRefresh,
   runtimesPending,
   codingTools,
+  localDaemonId,
 }: OnboardingFlowProps) {
   const { t, i18n } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
@@ -288,7 +291,7 @@ export function OnboardingFlow({
   );
 
   const handleCreateAgent = useCallback(
-    async ({ runtime, name, description }: CreatePersonalAgentRequest) => {
+    async ({ runtime, name, description, avatarUrl }: CreatePersonalAgentRequest) => {
       if (!workspace) return;
       const { chatSession } = await createPersonalAgent({
         workspaceSlug: workspace.slug,
@@ -297,6 +300,7 @@ export function OnboardingFlow({
         runtimeId: runtime.id,
         name,
         description,
+        avatarUrl,
       });
       await completeOnboarding("full", workspace.id);
       onComplete(workspace, { kind: "chat", sessionId: chatSession.id });
@@ -468,6 +472,7 @@ export function OnboardingFlow({
             wsSlug={workspace.slug}
             userName={user.name}
             codingTools={codingTools}
+            localDaemonId={localDaemonId}
             onRuntimeRefresh={onRuntimeRefresh}
             runtimesPending={runtimesPending}
             onCreate={handleCreateAgent}

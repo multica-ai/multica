@@ -218,6 +218,7 @@
     "heading_web": "컴퓨터가 연결되었습니다",
     "lede_web": "에이전트가 사용할 도구를 선택하세요.",
     "section_tools": "AI 코딩 도구",
+    "section_other_tools": "이 컴퓨터의 다른 도구",
     "section_install": "설치할 도구 선택",
     "section_agent": "내 에이전트",
     "detecting": "이 컴퓨터를 확인하는 중입니다. 직접 설치한 도구도 자동으로 표시됩니다",

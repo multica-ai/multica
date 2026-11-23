@@ -218,6 +218,7 @@
     "heading_web": "你的电脑已经连上了",
     "lede_web": "选一个工具，你的智能体会用它干活。",
     "section_tools": "AI 编程工具",
+    "section_other_tools": "这台电脑上的其他工具",
     "section_install": "选一个装上",
     "section_agent": "你的智能体",
     "detecting": "正在检测这台电脑，自己装好的也会自动出现",

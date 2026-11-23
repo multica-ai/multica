@@ -42,6 +42,7 @@ export interface InvitationsPageProps {
   onBack?: () => void;
   /** Desktop: lets a member who joined without an agent install a tool and create one. */
   codingTools?: CodingToolsBridge;
+  localDaemonId?: string | null;
   onRuntimeRefresh?: () => void | Promise<void>;
   runtimesPending?: boolean;
 }
@@ -60,6 +61,7 @@ export function InvitationsPage({
   invitationId,
   onBack,
   codingTools,
+  localDaemonId,
   onRuntimeRefresh,
   runtimesPending,
 }: InvitationsPageProps) {
@@ -86,6 +88,7 @@ export function InvitationsPage({
       <JoinedAgentSetup
         workspace={joined}
         codingTools={codingTools}
+        localDaemonId={localDaemonId}
         onRuntimeRefresh={onRuntimeRefresh}
         runtimesPending={runtimesPending}
       />
