@@ -1,6 +1,7 @@
 package composiotest_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -16,6 +17,32 @@ func TestExampleMatchesTheSpecForEveryOperation(t *testing.T) {
 		body := composiotest.Example(t, op, nil)
 		if len(body) == 0 {
 			t.Errorf("%s: empty example", op)
+		}
+	}
+}
+
+func TestExampleReturnsACopy(t *testing.T) {
+	for op, edit := range map[string]func(map[string]any){
+		"POST /connected_accounts/{nanoid}/revoke": func(body map[string]any) {
+			body["connected_account"].(map[string]any)["id"] = "edited"
+		},
+		"GET /toolkits": func(body map[string]any) {
+			meta := body["items"].([]any)[0].(map[string]any)["meta"].(map[string]any)
+			meta["categories"].([]any)[0].(map[string]any)["name"] = "edited"
+		},
+	} {
+		body := composiotest.Example(t, op, nil)
+		before, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		edit(body)
+		after, err := json.Marshal(composiotest.Example(t, op, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Errorf("%s: editing one example changed the next:\n before %s\n after  %s", op, before, after)
 		}
 	}
 }

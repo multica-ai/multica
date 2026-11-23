@@ -354,6 +354,26 @@ func Response(t testing.TB, op string, status int, overlay map[string]any) map[s
 
 type builder struct{ checker }
 
+// clone copies a value decoded from the embedded spec, which every test
+// shares, so callers can edit what Example returns.
+func clone(v any) any {
+	switch v := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, item := range v {
+			out[k] = clone(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = clone(item)
+		}
+		return out
+	}
+	return v
+}
+
 func (b builder) matches(schema, v any) bool {
 	var problems []string
 	b.visit(schema, v, "$", &problems)
@@ -371,7 +391,7 @@ func (b builder) build(rawSchema, overlay any, has bool, depth int) any {
 		return overlay
 	}
 	if example, ok := s["example"]; ok && !has && b.matches(s, example) {
-		return example
+		return clone(example)
 	}
 	alternatives, _ := s["anyOf"].([]any)
 	if alternatives == nil {
