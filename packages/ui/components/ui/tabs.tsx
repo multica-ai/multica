@@ -55,7 +55,7 @@ function TabsList({
       <TabsPrimitive.Indicator
         data-slot="tabs-indicator"
         className={cn(
-          "pointer-events-none absolute z-0 transition-[transform,width,height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+          "pointer-events-none absolute z-0 transition-[translate,width,height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
           variant === "line"
             ? "bg-foreground group-data-horizontal/tabs:bottom-0 group-data-horizontal/tabs:left-0 group-data-horizontal/tabs:h-0.5 group-data-horizontal/tabs:w-(--active-tab-width) group-data-horizontal/tabs:translate-x-(--active-tab-left) group-data-vertical/tabs:top-0 group-data-vertical/tabs:-right-1 group-data-vertical/tabs:h-(--active-tab-height) group-data-vertical/tabs:w-0.5 group-data-vertical/tabs:translate-y-(--active-tab-top)"
             : "top-0 left-0 h-(--active-tab-height) w-(--active-tab-width) translate-x-(--active-tab-left) translate-y-(--active-tab-top) rounded-[calc(var(--radius)-3px)] bg-background shadow-sm dark:bg-input/60",
