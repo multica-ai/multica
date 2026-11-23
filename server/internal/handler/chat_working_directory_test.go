@@ -95,6 +95,7 @@ func TestCreateChatSessionWorkingDirectoryRejections(t *testing.T) {
 	if testHandler == nil || dbfx == nil {
 		t.Skip("database not available")
 	}
+	otherOwnerID := dbfx.User(t, "Other chat directory owner", "chat-directory-other-owner@example.com")
 	runtimeID := dbfx.Runtime(t, "Chat directory validation host", testutil.Cols{"provider": "openclaw", "runtime_mode": "local", "daemon_id": "validation-host", "metadata": testutil.Raw(`'{"capabilities":["chat-working-directory-v1"]}'::jsonb`)})
 	agentID := dbfx.Agent(t, "Chat directory validation agent", runtimeID)
 	cases := []struct {
@@ -109,7 +110,7 @@ func TestCreateChatSessionWorkingDirectoryRejections(t *testing.T) {
 		{name: "offline", status: "offline", want: 400},
 		{name: "unsupported", metadata: `{}`, want: 400},
 		{name: "gateway", config: `{"mode":"gateway"}`, want: 400},
-		{name: "non owner", owner: "01900000-0000-7000-8000-000000000002", want: 403},
+		{name: "non owner", owner: otherOwnerID, want: 403},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -127,7 +127,7 @@ func TestDirectoryListReportIdentityAndFailure(t *testing.T) {
 	}
 	ctx := context.Background()
 	runtimeID := dbfx.Runtime(t, "Directory report", testutil.Cols{"daemon_id": "directory-daemon", "runtime_mode": "local", "provider": "claude"})
-	otherID := dbfx.Runtime(t, "Other directory runtime", testutil.Cols{"daemon_id": "directory-daemon", "runtime_mode": "local", "provider": "claude"})
+	otherID := dbfx.Runtime(t, "Other directory runtime", testutil.Cols{"daemon_id": "directory-daemon", "runtime_mode": "local", "provider": "codex"})
 	h := *testHandler
 	h.DirectoryListStore = NewInMemoryDirectoryListStore()
 	req, err := h.DirectoryListStore.Create(ctx, runtimeID, "directory-daemon", "/missing")
