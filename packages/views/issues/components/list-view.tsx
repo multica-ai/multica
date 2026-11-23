@@ -25,6 +25,7 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, rowParity, type ChildProgress } from "./list-row";
 import { useDragSettle } from "./use-drag-settle";
+import { createIssueDropAnimation, ISSUE_DRAG_OVERLAY_CLASS } from "./drag-drop-animation";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { useT } from "../../i18n";
 import {
@@ -135,6 +136,8 @@ function ListViewImpl({
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
+  const skipDropAnimationRef = useRef(false);
+  const dropAnimation = useMemo(() => createIssueDropAnimation(skipDropAnimationRef), []);
   // Shared drag/settle primitive (see use-drag-settle) — same machine as
   // board-view, so the two surfaces can't drift apart.
   const {
@@ -185,6 +188,7 @@ function ListViewImpl({
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
+      skipDropAnimationRef.current = false;
       isDraggingRef.current = true;
       const issue = issueMapRef.current.get(event.active.id as string) ?? null;
       setActiveIssue(issue);
@@ -227,8 +231,10 @@ function ListViewImpl({
       isDraggingRef.current = false;
       setActiveIssue(null);
 
-      const resetColumns = () =>
+      const resetColumns = () => {
+        skipDropAnimationRef.current = true;
         setColumns(buildColumns(issues, groups, "status"));
+      };
 
       if (!over || !onMoveIssue) {
         resetColumns();
@@ -352,6 +358,7 @@ function ListViewImpl({
   // onValueChange is guarded by the same ref — made tapping a status header a
   // no-op, so groups could no longer be collapsed at all (MUL-6240).
   const handleDragCancel = useCallback(() => {
+    skipDropAnimationRef.current = true;
     isDraggingRef.current = false;
     setActiveIssue(null);
     setColumns(buildColumns(issues, groups, "status"));
@@ -445,9 +452,9 @@ function ListViewImpl({
         {content}
       </div>
 
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={dropAnimation}>
         {activeIssue ? (
-          <div className="max-w-2xl rotate-1 cursor-grabbing opacity-90 shadow-lg shadow-black/10 rounded-md border border-border bg-card px-4 py-2">
+          <div className={`max-w-2xl rounded-md border border-border bg-card px-4 py-2 ${ISSUE_DRAG_OVERLAY_CLASS}`}>
             <span className="text-caption text-muted-foreground mr-2">{activeIssue.identifier}</span>
             <span className="text-body">{activeIssue.title}</span>
           </div>

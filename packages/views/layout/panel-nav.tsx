@@ -1,7 +1,10 @@
 "use client";
 
 import { createContext, useContext, useId, useRef, type RefObject } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronDown } from "@multica/ui/icons";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink } from "../navigation";
@@ -102,6 +105,73 @@ export function PanelBody({
   );
 }
 
+function PanelDisclosureInner({
+  id,
+  className,
+  children,
+}: {
+  id?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      id={id}
+      inert={!isPresent}
+      initial={{ height: 0, opacity: 0 }}
+      animate={{
+        height: "auto",
+        opacity: 1,
+        transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      exit={{
+        height: 0,
+        opacity: 0,
+        transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      className={cn("overflow-hidden", !isPresent && "pointer-events-none", className)}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/**
+ * Smooth 150ms height + opacity disclosure matched to sidebar and section
+ * chevron rotation. Unmounts children after exit (and immediately under
+ * reduced motion) so collapsed lists release their subscriptions.
+ */
+export function PanelDisclosure({
+  open,
+  id,
+  className,
+  children,
+}: {
+  open: boolean;
+  id?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const reduceMotion = useReducedMotion();
+  if (reduceMotion) {
+    return open ? (
+      <div id={id} className={className}>
+        {children}
+      </div>
+    ) : null;
+  }
+  return (
+    <AnimatePresence initial={false}>
+      {open && (
+        <PanelDisclosureInner key="disclosure" id={id} className={className}>
+          {children}
+        </PanelDisclosureInner>
+      )}
+    </AnimatePresence>
+  );
+}
+
 export function PanelSection({
   label,
   heading,
@@ -133,7 +203,7 @@ export function PanelSection({
     <ChevronDown
       aria-hidden
       className={cn(
-        "size-3.5 shrink-0 transition-[transform,opacity] duration-150 ease-out motion-reduce:transition-none",
+        "size-3.5 shrink-0 transition-[transform,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
         collapsed
           ? "-rotate-90"
           : "opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100",
@@ -189,7 +259,9 @@ export function PanelSection({
         )}
         {action}
       </div>
-      {!collapsed && <div id={contentId}>{children}</div>}
+      <PanelDisclosure open={!collapsed} id={contentId}>
+        {children}
+      </PanelDisclosure>
     </section>
   );
 }
