@@ -11,6 +11,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  CircleDot,
   Clock,
   Ellipsis,
   Folder,
@@ -25,8 +26,10 @@ import {
   Search,
   Server,
   Square,
+  Trash2,
   WeChat,
 } from "@multica/ui/icons";
+import { Kbd } from "@multica/ui/components/ui/kbd";
 import { cn } from "@multica/ui/lib/utils";
 import { useLocale, useT } from "../i18n";
 import { formatSnoozeTime } from "../inbox/components/inbox-snooze-time";
@@ -93,12 +96,23 @@ function Menu({ className, children }: { className?: string; children: ReactNode
   );
 }
 
-function MenuItem({ icon, active, children }: { icon: ReactNode; active?: boolean; children: ReactNode }) {
+function MenuItem({
+  icon,
+  active,
+  danger,
+  children,
+}: {
+  icon: ReactNode;
+  active?: boolean;
+  danger?: boolean;
+  children: ReactNode;
+}) {
   return (
     <div
       className={cn(
         "flex h-7 items-center gap-2 rounded-md px-2 text-label whitespace-nowrap [&_svg]:size-3.5 [&_svg]:text-muted-foreground",
         active && "bg-accent",
+        danger && "text-destructive [&_svg]:text-destructive",
       )}
     >
       {icon}
@@ -692,6 +706,46 @@ function ProjectOverviewArt() {
   );
 }
 
+/* ── Inbox triage: J/K/U keycaps and a Work panel row's right-click menu ── */
+
+function InboxTriageArt() {
+  const { t } = useT("inbox");
+  const { t: tLayout } = useT("layout");
+  return (
+    <>
+      <Surface className="top-4 left-6 w-[13.5rem]">
+        <div className="flex h-8 items-center gap-1 px-3">
+          <span className="text-label font-medium">{tLayout(($) => $.nav.inbox)}</span>
+          <ChevronDown className="size-3 text-muted-foreground" />
+          <span className="ml-auto text-caption text-muted-foreground tabular-nums">3</span>
+        </div>
+        <div className="px-1 pb-2">
+          <InboxRowArt title={120} detail={88} agent />
+          <InboxRowArt title={96} detail={128} active />
+          <InboxRowArt title={136} detail={72} agent />
+        </div>
+      </Surface>
+      <Menu className="top-[4.75rem] left-[9.75rem] w-44">
+        <MenuItem icon={<CircleDot />} active>
+          {t(($) => $.context_menu.mark_unread)}
+        </MenuItem>
+        <MenuItem icon={<Archive />}>{t(($) => $.context_menu.archive)}</MenuItem>
+        <div className="mx-1 my-1 h-px bg-border" />
+        <MenuItem icon={<Trash2 />} danger>
+          {t(($) => $.context_menu.delete)}
+        </MenuItem>
+      </Menu>
+      <div className="absolute top-5 right-5 flex gap-1.5">
+        {["J", "K", "U"].map((key) => (
+          <Kbd key={key} size="md" compact className="text-foreground">
+            {key}
+          </Kbd>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
@@ -703,3 +757,4 @@ export const WEIXIN_HERO: WhatsNewHero = { ground: "ice", Art: WeixinArt };
 export const PROJECT_FOLDERS_HERO: WhatsNewHero = { ground: "brand", Art: ProjectFoldersArt };
 export const INBOX_TABS_HERO: WhatsNewHero = { ground: "lime", Art: InboxTabsArt };
 export const PROJECT_OVERVIEW_HERO: WhatsNewHero = { ground: "ice", Art: ProjectOverviewArt };
+export const INBOX_TRIAGE_HERO: WhatsNewHero = { ground: "orange", Art: InboxTriageArt };
