@@ -182,6 +182,13 @@
     "cancel": "取消",
     "active_issue_description": "這將永久刪除此任務在收件匣中的待處理通知。先前歸檔的通知、任務本身及其執行記錄都會保留。"
   },
+  "archive_all_dialog": {
+    "title": "歸檔全部通知？",
+    "description": "收件匣中的所有活躍通知都會移至已歸檔。已延後的任務會保持延後，你隨時可以恢復通知。",
+    "description_count_other": "收件匣中的全部 {{count}} 則活躍通知都會移至已歸檔。已延後的任務會保持延後，你隨時可以恢復它們。",
+    "cancel": "取消",
+    "confirm": "歸檔全部"
+  },
   "unsubscribe": {
     "title": "取消訂閱並歸檔：不再收到它的訂閱通知，@你時仍會通知",
     "this_issue": "僅此任務",

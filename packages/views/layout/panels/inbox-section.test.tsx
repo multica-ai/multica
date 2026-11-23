@@ -32,6 +32,7 @@ const state = vi.hoisted(() => ({
   archiveCompleted: vi.fn(),
   markRead: vi.fn(),
   markUnread: vi.fn(),
+  deleteInbox: vi.fn(() => Promise.resolve()),
   snooze: vi.fn(() => Promise.resolve()),
   unsnooze: vi.fn(() => Promise.resolve()),
 }));
@@ -68,6 +69,7 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useArchiveCompletedInbox: () => ({ mutateAsync: async () => (await state.archiveCompleted()) ?? { count: 1 } }),
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
+  useDeleteInbox: () => ({ mutateAsync: state.deleteInbox, isPending: false }),
   useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
   undoUnsubscribeArchiveInbox: vi.fn(),
   useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
@@ -340,7 +342,7 @@ describe("InboxSection", () => {
 
     expect(actions.getByRole("link", { name: "Open" })).toHaveAttribute("href", "/acme/inbox?issue=issue-a");
     fireEvent.click(actions.getByRole("button", { name: "Mark as read" }));
-    expect(state.markRead).toHaveBeenCalledWith("n1");
+    expect(state.markRead).toHaveBeenCalledWith("n1", expect.any(Object));
     fireEvent.click(actions.getByRole("button", { name: "Archive" }));
     expect(state.archive).toHaveBeenCalledWith("n1");
   });
@@ -582,7 +584,64 @@ describe("InboxSection", () => {
     fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive completed" }));
     expect(state.archiveCompleted).toHaveBeenCalledTimes(1);
     fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive all" }));
+    expect(state.archiveAll).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive all" }));
     expect(state.archiveAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels archive all without mutating when dismissed from the confirmation dialog", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(state.archiveAll).not.toHaveBeenCalled();
+  });
+
+  it("offers right-click mark unread and delete on desktop sidebar rows", async () => {
+    state.deleteInbox.mockClear();
+    useInboxSelectionStore.setState({ manualUnreadIdByWorkspace: {} });
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one", read: true }),
+        item({ id: "n2", issue_id: "issue-b", title: "Next one", read: true, created_at: "2026-11-09T08:00:00Z" }),
+      ],
+      "issue-a",
+      "/acme/inbox?issue=issue-a",
+    );
+
+    fireEvent.contextMenu(rows()[0]!.firstElementChild!);
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Mark as unread" }));
+    expect(state.markUnread).toHaveBeenCalledWith("n1", expect.any(Object));
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["ws-1"]).toBe("n1");
+
+    fireEvent.contextMenu(rows()[0]!.firstElementChild!);
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(state.deleteInbox).toHaveBeenCalledWith("n1"));
+    expect(nav.push).toHaveBeenCalledWith("/acme/inbox?issue=issue-b");
+  });
+
+  it("offers right-click unarchive and delete on archived sidebar rows", async () => {
+    state.deleteInbox.mockClear();
+    apiMock.listArchivedInboxPage.mockResolvedValue({
+      items: [item({ id: "a1", issue_id: "issue-a", title: "Archived one", archived: true })],
+      nextCursor: null,
+      hasMore: false,
+    });
+    renderSection([], null, "/acme/inbox?view=archived");
+    const archivedRow = await screen.findByRole("link", { name: /^Archived one/ });
+    fireEvent.contextMenu(archivedRow.parentElement!);
+
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: "Mark as unread" })).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "Unarchive" })).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(state.deleteInbox).toHaveBeenCalledWith("a1"));
   });
 
   it("opens the next row a bulk archive leaves when it takes the open one", async () => {
@@ -604,6 +663,8 @@ describe("InboxSection", () => {
     const { nav } = renderSection([item({ id: "n1", issue_id: "issue-a", title: "Open one" })], "issue-a");
     fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
     fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive all" }));
     expect(state.archiveAll).toHaveBeenCalledTimes(1);
     expect(nav.push).toHaveBeenCalledWith("/acme/inbox");
     expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBe("issue-a");

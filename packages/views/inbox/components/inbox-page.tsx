@@ -61,7 +61,9 @@ import { toast } from "sonner";
 import {
   MoreHorizontal,
   Inbox,
+  Check,
   CheckCheck,
+  CircleDot,
   Archive,
   ArchiveRestore,
   BookCheck,
@@ -89,6 +91,7 @@ import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
+import { InboxArchiveAllDialog } from "./inbox-archive-all-dialog";
 import { InboxDeleteDialog } from "./inbox-delete-dialog";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
@@ -448,6 +451,7 @@ export function InboxPage() {
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
+  const [archiveAllConfirmOpen, setArchiveAllConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<InboxItem | null>(null);
   const [retainedDeleteTarget, setRetainedDeleteTarget] = useState<InboxItem | null>(null);
   if (deleteTarget !== null && retainedDeleteTarget?.id !== deleteTarget.id) {
@@ -469,17 +473,15 @@ export function InboxPage() {
   const typeLabels = useTypeLabels();
 
 
-  // An explicit "mark as unread" on the row that is currently open has to
-  // survive the auto-read effect below, which would otherwise fire on the very
-  // next commit and silently undo it. Holds that one item's id, and only while
-  // it stays selected: moving the selection elsewhere releases the guard, so
-  // re-opening the row later marks it read again like any other open.
-  const manualUnreadIdRef = useRef<string | null>(null);
-
   // Read once on opening, even if the visible row is already read: older
   // unread notifications can still be hidden under it. Also read new unread
   // arrivals while the row stays open. Track the opening separately from the
   // optimistic cache patch so a read row cannot cause a request loop.
+  //
+  // An explicit "mark as unread" on the open row records its id in the
+  // selection store so this effect does not immediately undo it — whether the
+  // user triggered it from the Inbox bar, the Work panel sidebar, a shortcut,
+  // or the command bar.
   const openedItemIdRef = useRef<string | null>(null);
   const markReadMutate = markReadMutation.mutate;
   const selectedId = selected?.id;
@@ -492,7 +494,7 @@ export function InboxPage() {
     const justOpened = openedItemIdRef.current !== selectedId;
     openedItemIdRef.current = selectedId;
     if (!justOpened && selectedRead) return;
-    if (manualUnreadIdRef.current === selectedId) return;
+    if (useInboxSelectionStore.getState().manualUnreadIdByWorkspace[wsId] === selectedId) return;
     if (filters.unreadOnly) {
       pinnedUnreadKeyRef.current = selectedKey;
       if (isArchivedView && selected) {
@@ -515,8 +517,10 @@ export function InboxPage() {
 
   // Release the guards as soon as the selection moves off their row.
   useEffect(() => {
-    if (manualUnreadIdRef.current && manualUnreadIdRef.current !== selectedId) {
-      manualUnreadIdRef.current = null;
+    const store = useInboxSelectionStore.getState();
+    const manualUnreadId = store.manualUnreadIdByWorkspace[wsId];
+    if (manualUnreadId && manualUnreadId !== selectedId) {
+      store.clearManualUnread(wsId, manualUnreadId);
     }
     if (pinnedUnreadKeyRef.current && pinnedUnreadKeyRef.current !== selectedKey) {
       pinnedUnreadKeyRef.current = null;
@@ -524,7 +528,7 @@ export function InboxPage() {
     if (pinnedAgentRef.current && pinnedAgentRef.current.key !== selectedKey) {
       pinnedAgentRef.current = null;
     }
-  }, [selectedId, selectedKey]);
+  }, [wsId, selectedId, selectedKey]);
 
   // `selected` only exists once the open row passed every filter, so under
   // the agent filter this pins a row that matched when the user opened it.
@@ -596,7 +600,7 @@ export function InboxPage() {
 
   const handleMarkRead = (id: string) => {
     // Reading it back explicitly cancels an earlier park on the same row.
-    if (manualUnreadIdRef.current === id) manualUnreadIdRef.current = null;
+    useInboxSelectionStore.getState().clearManualUnread(wsId, id);
     markReadMutation.mutate(id, {
       onError: (err) =>
         toast.error(
@@ -611,14 +615,16 @@ export function InboxPage() {
     // Only the open row needs the guard — the auto-read effect never touches
     // the others, and arming it for a background row would suppress the very
     // first open of that row later.
-    if (selected?.id === id) manualUnreadIdRef.current = id;
+    if (selected?.id === id) useInboxSelectionStore.getState().markManualUnread(wsId, id);
     markUnreadMutation.mutate(id, {
-      onError: (err) =>
+      onError: (err) => {
+        useInboxSelectionStore.getState().clearManualUnread(wsId, id);
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.errors.mark_unread_failed),
-        ),
+        );
+      },
     });
   };
 
@@ -733,6 +739,47 @@ export function InboxPage() {
       ? () => (isArchivedView ? handleUnarchive(selected.id) : handleArchive(selected.id))
       : null,
   );
+
+  // U toggles unread/read on any open live notification (issue-backed or not).
+  useInboxShortcut(
+    "markInboxUnread",
+    selected && tab === "inbox" && !settledRow
+      ? () => (selected.read === true ? handleMarkUnread(selected.id) : handleMarkRead(selected.id))
+      : null,
+  );
+
+  // J / K step through the current tab's rows without archiving or touching
+  // the mouse. Uses the same row order the sidebar/list displays.
+  const navigationTargets = useMemo((): readonly { key: string; issueId: string | null }[] => {
+    if (isSnoozedView) {
+      return snoozed.rows.map((entry) => ({ key: entry.issue_id, issueId: entry.issue_id }));
+    }
+    const source = isArchivedView ? (isCompact ? visibleItems : archivedItems) : listedItems;
+    return source.map((item) => ({ key: inboxRowKey(item), issueId: item.issue_id }));
+  }, [isSnoozedView, snoozed.rows, isArchivedView, isCompact, visibleItems, archivedItems, listedItems]);
+
+  const stepSelection = (direction: "next" | "prev") => {
+    if (navigationTargets.length === 0) return;
+    const current = selectedKey ? navigationTargets.findIndex((entry) => entry.key === selectedKey) : -1;
+    const nextIndex =
+      current < 0
+        ? direction === "next"
+          ? 0
+          : navigationTargets.length - 1
+        : Math.min(Math.max(current + (direction === "next" ? 1 : -1), 0), navigationTargets.length - 1);
+    if (nextIndex === current) return;
+    const target = navigationTargets[nextIndex];
+    if (!target) return;
+    if (target.issueId) {
+      writeViewState(issueHighlightMementoKey(target.issueId), undefined);
+      useInboxSelectionStore.getState().requestLanding(target.issueId);
+    }
+    recordTransition(wsId, target.key, direction);
+    setSelectedKey(target.key);
+  };
+
+  useInboxShortcut("nextInboxItem", navigationTargets.length > 0 ? () => stepSelection("next") : null);
+  useInboxShortcut("prevInboxItem", navigationTargets.length > 0 ? () => stepSelection("prev") : null);
 
   // Batch operations
   const handleMarkAllRead = () => {
@@ -853,7 +900,7 @@ export function InboxPage() {
             {t(($) => $.menu.mark_all_read)}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleArchiveAll}>
+          <DropdownMenuItem onClick={() => setArchiveAllConfirmOpen(true)}>
             <Archive className="h-4 w-4" />
             {t(($) => $.menu.archive_all)}
           </DropdownMenuItem>
@@ -1230,6 +1277,38 @@ export function InboxPage() {
         )}
         {/* Mirrors the row action: the button always reverses the view the
             item is being read in. */}
+        {!isArchivedView && !settledRow && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    detailItem.read === true
+                      ? handleMarkUnread(detailItem.id)
+                      : handleMarkRead(detailItem.id)
+                  }
+                >
+                  {detailItem.read === true ? (
+                    <CircleDot className="mr-1.5 h-3.5 w-3.5" />
+                  ) : (
+                    <Check className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  {detailItem.read === true
+                    ? t(($) => $.context_menu.mark_unread)
+                    : t(($) => $.context_menu.mark_read)}
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">
+              {detailItem.read === true
+                ? t(($) => $.context_menu.mark_unread)
+                : t(($) => $.context_menu.mark_read)}
+              <ActionShortcutKeycaps action="markInboxUnread" />
+            </TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -1316,7 +1395,17 @@ export function InboxPage() {
     }
 
     // Compact: full-screen list
-    return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
+    return (
+      <div className="flex flex-1 flex-col min-h-0">
+        {listPanel}
+        <InboxArchiveAllDialog
+          open={archiveAllConfirmOpen}
+          count={listedItems.length}
+          onClose={() => setArchiveAllConfirmOpen(false)}
+          onConfirm={handleArchiveAll}
+        />
+      </div>
+    );
   }
 
   // -- Desktop layout ----------------------------------------------------------

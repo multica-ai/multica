@@ -1343,4 +1343,59 @@ describe("InboxPage", () => {
     expect(replace).toHaveBeenCalledWith("/acme/issues/issue-404");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
+
+  it("steps through notifications with J and K shortcuts on desktop", () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", created_at: "2026-04-03T00:00:00Z" }),
+      item({ id: "inbox-b", issue_id: "issue-b", created_at: "2026-04-02T00:00:00Z" }),
+      item({ id: "inbox-c", issue_id: "issue-c", created_at: "2026-04-01T00:00:00Z" }),
+    ];
+
+    render(<InboxPage />);
+
+    // Nothing selected yet: J opens the first notification.
+    fireEvent.keyDown(document, { key: "j", code: "KeyJ" });
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-a");
+
+    // J advances to the next row; K moves back to the previous row.
+    fireEvent.keyDown(document, { key: "j", code: "KeyJ" });
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-b");
+    expect(useInboxSelectionStore.getState().transitionByWorkspace["workspace-1"]?.direction).toBe("next");
+
+    fireEvent.keyDown(document, { key: "k", code: "KeyK" });
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-a");
+    expect(useInboxSelectionStore.getState().transitionByWorkspace["workspace-1"]?.direction).toBe("prev");
+
+    // Clamps at the start of the list.
+    replace.mockClear();
+    fireEvent.keyDown(document, { key: "k", code: "KeyK" });
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("toggles unread and read on the open notification with U without auto-read reverting it", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: true }),
+    ];
+
+    const { rerender } = render(<InboxPage />);
+    markReadMutate.mockClear();
+
+    fireEvent.keyDown(document, { key: "u", code: "KeyU" });
+    expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBe("inbox-a");
+
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
+    rerender(<InboxPage />);
+    expect(markReadMutate).not.toHaveBeenCalled();
+
+    // Pressing U again marks it back read and releases the guard.
+    fireEvent.keyDown(document, { key: "u", code: "KeyU" });
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBeUndefined();
+  });
 });

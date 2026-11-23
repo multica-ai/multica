@@ -185,6 +185,14 @@
     "cancel": "Cancelar",
     "active_issue_description": "Esto elimina permanentemente las notificaciones activas de la bandeja de entrada para esta tarea. Las notificaciones archivadas anteriormente, la tarea y sus ejecuciones se conservan."
   },
+  "archive_all_dialog": {
+    "title": "¿Archivar todas las notificaciones?",
+    "description": "Todas las notificaciones activas de tu bandeja de entrada pasarán a Archivadas. Las incidencias pospuestas seguirán pospuestas y podrás restaurar las notificaciones en cualquier momento.",
+    "description_count_one": "{{count}} notificación activa de tu bandeja de entrada pasará a Archivadas. Las incidencias pospuestas seguirán pospuestas y podrás restaurarla en cualquier momento.",
+    "description_count_other": "Las {{count}} notificaciones activas de tu bandeja de entrada pasarán a Archivadas. Las incidencias pospuestas seguirán pospuestas y podrás restaurarlas en cualquier momento.",
+    "cancel": "Cancelar",
+    "confirm": "Archivar todo"
+  },
   "unsubscribe": {
     "title": "Darse de baja y archivar. Dejarás de recibir sus actualizaciones; las @menciones te seguirán llegando.",
     "this_issue": "Solo esta tarea",

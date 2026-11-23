@@ -6,7 +6,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useReducedMotion } from "@multica/core/appearance";
-import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, CheckCheck, Filter, ListChecks, MoreHorizontal } from "@multica/ui/icons";
+import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, CheckCheck, CircleDot, Filter, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
@@ -29,6 +29,7 @@ import {
   useArchiveCompletedInbox,
   useMarkAllInboxRead,
   useMarkInboxRead,
+  useMarkInboxUnread,
 } from "@multica/core/inbox/mutations";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { inboxRowTime, inboxSnoozeReturnedAt } from "@multica/core/inbox/snooze";
@@ -43,8 +44,11 @@ import { AppLink, useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
 import { getInboxDisplayTitle, inboxRowHref, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
-import { inboxTabFromParam, inboxTabHref, type InboxTab } from "../../inbox/components/inbox-view";
+import { inboxTabFromParam, inboxTabHref, type InboxTab, type InboxView } from "../../inbox/components/inbox-view";
 import { InboxTabs } from "../../inbox/components/inbox-tabs";
+import { InboxArchiveAllDialog } from "../../inbox/components/inbox-archive-all-dialog";
+import { InboxContextMenuProvider, useInboxContextMenu } from "../../inbox/components/inbox-context-menu";
+import { InboxDeleteDialog } from "../../inbox/components/inbox-delete-dialog";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
 import { useArchivedInboxRows, useSnoozedInboxRows } from "../../inbox/components/use-inbox-tab-rows";
 import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
@@ -147,10 +151,21 @@ export function InboxSection({
   const compact = useSidebarTreeStore((s) => s.inboxSettings.compact);
   const unread = useInboxUnreadCount(wsId);
   const archive = useArchiveInboxWithUndo();
+  const restoreInbox = useRestoreInbox();
+  const markRead = useMarkInboxRead();
+  const markUnread = useMarkInboxUnread();
   const leave = useLeaveInboxRow();
+  const leaveRow = useInboxSelectionStore((s) => s.leaveRow);
+  const recordTransition = useInboxSelectionStore((s) => s.recordTransition);
   const unsubscribable = useInboxUnsubscribable(wsId);
   const unsubscribeArchive = useUnsubscribeArchive();
   const { snooze } = useInboxSnooze();
+  const [deleteTarget, setDeleteTarget] = useState<{ item: InboxItem; view: InboxView } | null>(null);
+  const [retainedDeleteTarget, setRetainedDeleteTarget] = useState<{ item: InboxItem; view: InboxView } | null>(null);
+  if (deleteTarget !== null && retainedDeleteTarget?.item.id !== deleteTarget.item.id) {
+    setRetainedDeleteTarget(deleteTarget);
+  }
+  const activeDeleteTarget = deleteTarget ?? retainedDeleteTarget;
   const { searchParams, replace } = useNavigation();
   const isCompact = useIsCompact();
   const { list, rows: all, displayed, expanded, limit, setExpanded } = rows;
@@ -226,8 +241,43 @@ export function InboxSection({
   // Rows are memoized and re-render only when their own props change, not on
   // every navigation that re-renders this section (MUL-9609); the handlers
   // keep one identity and read this render's state when they run.
+  const archivedOpenKey = pageTab === "archived" ? pageKey : null;
+  const restoreArchivedItem = (item: InboxItem) => {
+    const key = inboxRowKey(item);
+    if (key === archivedOpenKey) {
+      leaveRow(wsId, key);
+      const next = nextInboxRow(archived.items, key);
+      const nextKey = next ? inboxRowKey(next) : "";
+      recordTransition(wsId, nextKey, "next");
+      replace(inboxTabHref(p, "archived", nextKey || null));
+    }
+    void restoreInbox(item.id);
+  };
+  const markItemRead = (id: string) => {
+    useInboxSelectionStore.getState().clearManualUnread(wsId, id);
+    markRead.mutate(id, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message ? err.message : tInbox(($) => $.errors.mark_read_failed),
+        ),
+    });
+  };
+  const markItemUnread = (item: InboxItem) => {
+    const key = inboxRowKey(item);
+    if (key === openRowKey) useInboxSelectionStore.getState().markManualUnread(wsId, item.id);
+    markUnread.mutate(item.id, {
+      onError: (err) => {
+        useInboxSelectionStore.getState().clearManualUnread(wsId, item.id);
+        toast.error(
+          err instanceof Error && err.message ? err.message : tInbox(($) => $.errors.mark_unread_failed),
+        );
+      },
+    });
+  };
   const latest = {
     prefetch: (item: InboxItem) => void prefetchRow(item),
+    markRead: (item: InboxItem) => markItemRead(item.id),
+    markUnread: (item: InboxItem) => markItemUnread(item),
     archive: (item: InboxItem) => {
       const key = inboxRowKey(item);
       archive(item.id, key);
@@ -275,10 +325,47 @@ export function InboxSection({
   });
   const handlers = useMemo<InboxRowHandlers>(() => ({
     prefetch: (item) => latestRef.current.prefetch(item),
+    markRead: (item) => latestRef.current.markRead(item),
+    markUnread: (item) => latestRef.current.markUnread(item),
     archive: (item) => latestRef.current.archive(item),
     unsubscribe: (item) => latestRef.current.unsubscribe(item),
     snooze: (item, until) => latestRef.current.snooze(item, until),
   }), []);
+  const contextView: InboxView = tab === "archived" ? "archived" : "inbox";
+  const contextMenuActions = {
+    onMarkRead: (id: string) => markItemRead(id),
+    onMarkUnread: (id: string) => {
+      const target = all.find((item) => item.id === id);
+      if (target) markItemUnread(target);
+      else {
+        markUnread.mutate(id, {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message ? err.message : tInbox(($) => $.errors.mark_unread_failed),
+            ),
+        });
+      }
+    },
+    onAction: (id: string) => {
+      if (contextView === "archived") {
+        const target = archived.items.find((item) => item.id === id);
+        if (target) restoreArchivedItem(target);
+        return;
+      }
+      const target = all.find((item) => item.id === id);
+      if (target) latestRef.current.archive(target);
+    },
+    onDelete: (id: string) => {
+      const source = contextView === "archived" ? archived.items : all;
+      const target = source.find((item) => item.id === id);
+      if (target) setDeleteTarget({ item: target, view: contextView });
+    },
+    onUnsubscribeArchive: (id: string) => {
+      const target = all.find((item) => item.id === id);
+      if (target?.issue_id) latestRef.current.unsubscribe(target);
+    },
+    canUnsubscribe: unsubscribable,
+  };
   const renderRow = (item: InboxItem, measure?: RowMeasure) => (
     <InboxRow
       key={item.id}
@@ -356,6 +443,7 @@ export function InboxSection({
       }
     >
       <InboxTabBody tab={tab} loading={tabLoading}>
+        <InboxContextMenuProvider view={contextView} actions={contextMenuActions}>
         {tab === "snoozed" ? (
           <SnoozedSectionList
             wsId={wsId}
@@ -368,7 +456,7 @@ export function InboxSection({
             wsId={wsId}
             archived={archived}
             limit={limit}
-            openKey={pageTab === "archived" ? pageKey : null}
+            openKey={archivedOpenKey}
           />
         ) : displayed.length > 0 ? (
           displayed.length > VIRTUALIZE_AFTER && scrollRef ? (
@@ -410,6 +498,39 @@ export function InboxSection({
             {t(($) => $.panels.work.inbox_empty)}
           </p>
         ) : null}
+        </InboxContextMenuProvider>
+        {activeDeleteTarget && (
+          <InboxDeleteDialog
+            key={activeDeleteTarget.item.id}
+            open={deleteTarget !== null}
+            item={activeDeleteTarget.item}
+            view={activeDeleteTarget.view}
+            onClose={() => setDeleteTarget(null)}
+            onOpenChangeComplete={(nextOpen) => {
+              if (!nextOpen) {
+                setRetainedDeleteTarget((prev) =>
+                  prev?.item.id === activeDeleteTarget.item.id ? null : prev,
+                );
+              }
+            }}
+            onDeleted={() => {
+              const { item: deleted, view: deletedView } = activeDeleteTarget;
+              const key = inboxRowKey(deleted);
+              if (deletedView === "archived") {
+                if (key === archivedOpenKey) {
+                  leaveRow(wsId, key);
+                  const next = nextInboxRow(archived.items, key);
+                  const nextKey = next ? inboxRowKey(next) : "";
+                  recordTransition(wsId, nextKey, "next");
+                  replace(inboxTabHref(p, "archived", nextKey || null));
+                }
+              } else if (key === openRowKey) {
+                leave(key, nextInboxRow(all, key));
+              }
+              toast.success(tInbox(($) => $.toasts.deleted));
+            }}
+          />
+        )}
         {tab === "inbox" && all.length > limit && (
           <button
             type="button"
@@ -652,11 +773,13 @@ function InboxSectionActions({
   const archiveAll = useArchiveAllInbox();
   const archiveAllRead = useArchiveAllReadInbox();
   const archiveCompleted = useArchiveCompletedInbox();
+  const [archiveAllConfirmOpen, setArchiveAllConfirmOpen] = useState(false);
   const label = t(($) => $.panels.work.inbox_actions);
   const onError = (fallback: string) => (err: unknown) =>
     toast.error(err instanceof Error && err.message ? err.message : fallback);
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
@@ -718,15 +841,7 @@ function InboxSectionActions({
               <ListChecks className="size-4" />
               {tInbox(($) => $.menu.archive_completed)}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() =>
-                archiveBatch(
-                  () => archiveAll.mutateAsync(),
-                  () => true,
-                  tInbox(($) => $.errors.archive_all_failed),
-                )
-              }
-            >
+            <DropdownMenuItem onClick={() => setArchiveAllConfirmOpen(true)}>
               <Archive className="size-4" />
               {tInbox(($) => $.menu.archive_all)}
             </DropdownMenuItem>
@@ -734,6 +849,19 @@ function InboxSectionActions({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+    <InboxArchiveAllDialog
+      open={archiveAllConfirmOpen}
+      count={rows.length}
+      onClose={() => setArchiveAllConfirmOpen(false)}
+      onConfirm={() =>
+        archiveBatch(
+          () => archiveAll.mutateAsync(),
+          () => true,
+          tInbox(($) => $.errors.archive_all_failed),
+        )
+      }
+    />
+    </>
   );
 }
 
@@ -741,6 +869,8 @@ function InboxSectionActions({
 interface InboxRowHandlers {
   /** Warms the issue a row opens, so the click renders from cache. */
   prefetch: (item: InboxItem) => void;
+  markRead: (item: InboxItem) => void;
+  markUnread: (item: InboxItem) => void;
   archive: (item: InboxItem) => void;
   /** Unsubscribe & archive. */
   unsubscribe: (item: InboxItem) => void;
@@ -779,9 +909,12 @@ const InboxRow = memo(function InboxRow({
   handlers: InboxRowHandlers;
 }) {
   const onPrefetch = () => handlers.prefetch(item);
+  const onMarkRead = () => handlers.markRead(item);
+  const onMarkUnread = () => handlers.markUnread(item);
   const onArchive = () => handlers.archive(item);
   const onUnsubscribe = unsubscribable ? () => handlers.unsubscribe(item) : undefined;
   const onSnooze = (until: Date) => handlers.snooze(item, until);
+  const openContextMenu = useInboxContextMenu();
   const { t } = useT("inbox");
   const typeLabels = useTypeLabels();
   const timeAgo = useTimeAgo();
@@ -894,13 +1027,26 @@ const InboxRow = memo(function InboxRow({
           render={<div />}
           onPointerDown={dismissCard}
           onPointerLeave={() => setCardDismissed(false)}
+          onContextMenu={
+            !settled && openContextMenu
+              ? (event) => {
+                  dismissCard();
+                  openContextMenu(item, event);
+                }
+              : undefined
+          }
           // Enter on the focused link opens the issue too. Focus does not
           // move, so the card stays shut without the dismissed flag.
           onKeyDown={(event) => {
             if (event.key === "Enter") setCardOpen(false);
           }}
           {...panelRowAnchor(active)}
-          className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-1.5")}
+          className={cn(
+            PANEL_ROW_CLASS,
+            panelRowStateClass(active),
+            "relative select-none data-[popup-open]:bg-surface-hover",
+            !compact && "items-start py-1.5",
+          )}
         >
           {statusIcon ||
             (compact ? (
@@ -994,6 +1140,8 @@ const InboxRow = memo(function InboxRow({
               dismissCard();
               land();
             }}
+            onMarkRead={settled ? undefined : onMarkRead}
+            onMarkUnread={settled ? undefined : onMarkUnread}
             onArchive={settled ? undefined : onArchive}
             onUnsubscribe={settled ? undefined : onUnsubscribe}
             onSnooze={
@@ -1380,6 +1528,7 @@ function ArchivedSectionRow({
   const status = item.issue_status;
   const restoreLabel = t(($) => $.detail.restore);
   const requestLanding = useInboxSelectionStore((s) => s.requestLanding);
+  const openContextMenu = useInboxContextMenu();
   const isPresent = useIsPresent();
   const reduceMotion = useReducedMotion();
   return (
@@ -1397,7 +1546,11 @@ function ArchivedSectionRow({
       }}
       className={cn("group/inbox relative", !isPresent && "pointer-events-none")}
     >
-      <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative")}>
+      <div
+        {...panelRowAnchor(active)}
+        onContextMenu={openContextMenu ? (event) => openContextMenu(item, event) : undefined}
+        className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative select-none data-[popup-open]:bg-surface-hover")}
+      >
         {status ? (
           <span aria-hidden className="flex shrink-0">
             <StatusIcon
@@ -1481,6 +1634,8 @@ function InboxRowCard({
   href,
   title,
   onOpen,
+  onMarkRead,
+  onMarkUnread,
   onArchive,
   onUnsubscribe,
   onSnooze,
@@ -1489,6 +1644,8 @@ function InboxRowCard({
   href: string;
   title: string;
   onOpen: () => void;
+  onMarkRead?: () => void;
+  onMarkUnread?: () => void;
   /** Left out for a row kept after it left the Inbox. */
   onArchive?: () => void;
   onUnsubscribe?: () => void;
@@ -1501,7 +1658,6 @@ function InboxRowCard({
   const timeAgo = useTimeAgo();
   const { categoryOf, colorOf, iconOf } = useIssueStatuses(item.workspace_id);
   const statusLabelOf = useStatusLabel(item.workspace_id);
-  const markRead = useMarkInboxRead();
   const { data: issue } = useQuery({ ...issueDetailOptions(item.workspace_id, item.issue_id ?? ""), enabled: !!item.issue_id });
   const unread = item.read !== true;
   // A comment gets its own block, so the line above names only the kind.
@@ -1547,8 +1703,8 @@ function InboxRowCard({
         >
           {t(($) => $.panels.work.inbox_open)}
         </AppLink>
-        {unread && (
-          <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => markRead.mutate(item.id)}>
+        {unread && onMarkRead && (
+          <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onMarkRead}>
             {tInbox(($) => $.context_menu.mark_read)}
           </Button>
         )}
@@ -1562,14 +1718,27 @@ function InboxRowCard({
             {tInbox(($) => $.context_menu.archive)}
           </Button>
         )}
-        {onUnsubscribe && (
-          <IconButton
-            label={tInbox(($) => $.context_menu.unsubscribe_archive)}
-            className="ml-auto text-muted-foreground"
-            onClick={onUnsubscribe}
-          >
-            <BellOff />
-          </IconButton>
+        {((!unread && onMarkUnread) || onUnsubscribe) && (
+          <div className="ml-auto flex items-center gap-0.5">
+            {!unread && onMarkUnread && (
+              <IconButton
+                label={tInbox(($) => $.context_menu.mark_unread)}
+                className="text-muted-foreground"
+                onClick={onMarkUnread}
+              >
+                <CircleDot />
+              </IconButton>
+            )}
+            {onUnsubscribe && (
+              <IconButton
+                label={tInbox(($) => $.context_menu.unsubscribe_archive)}
+                className="text-muted-foreground"
+                onClick={onUnsubscribe}
+              >
+                <BellOff />
+              </IconButton>
+            )}
+          </div>
         )}
       </div>
     </div>

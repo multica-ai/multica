@@ -182,6 +182,13 @@
     "cancel": "取消",
     "active_issue_description": "此任务在收件箱中的通知将被永久删除，此前归档的通知、任务本身及运行记录均不受影响。"
   },
+  "archive_all_dialog": {
+    "title": "归档全部通知？",
+    "description": "收件箱中的所有活跃通知都会移至已归档。已延后的任务会保持延后，你随时可以恢复通知。",
+    "description_count_other": "收件箱中的全部 {{count}} 条活跃通知都会移至已归档。已延后的任务会保持延后，你随时可以恢复它们。",
+    "cancel": "取消",
+    "confirm": "归档全部"
+  },
   "unsubscribe": {
     "title": "取消订阅并归档：不再收到它的订阅通知，@你时仍会通知",
     "this_issue": "仅此任务",

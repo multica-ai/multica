@@ -22,6 +22,8 @@ const state = vi.hoisted(() => ({
   archiveInbox: vi.fn(),
   unarchiveInbox: vi.fn(() => Promise.resolve()),
   unsubscribeArchive: vi.fn(),
+  markRead: vi.fn(),
+  markUnread: vi.fn(),
   snooze: vi.fn(() => Promise.resolve()),
   unsnooze: vi.fn(() => Promise.resolve()),
 }));
@@ -39,6 +41,8 @@ vi.mock("@multica/core/inbox/mutations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/inbox/mutations")>()),
   useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
   undoUnsubscribeArchiveInbox: vi.fn(),
+  useMarkInboxRead: () => ({ mutate: state.markRead }),
+  useMarkInboxUnread: () => ({ mutate: state.markUnread }),
   useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
   useUnsnoozeInbox: () => ({ mutateAsync: state.unsnooze }),
   cachedInboxSnoozedUntil: () => null,
@@ -282,11 +286,22 @@ describe("IssueInboxBar", () => {
     });
   });
 
-  it("offers snooze in place of a read toggle", () => {
+  it("offers mark unread and read toggle alongside snooze", () => {
+    state.markRead.mockClear();
+    state.markUnread.mockClear();
+    useInboxSelectionStore.setState({ manualUnreadIdByWorkspace: {} });
     setup();
-    expect(screen.queryByRole("button", { name: "Mark as unread" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Mark as read" })).toBeNull();
     expect(screen.getByRole("button", { name: "Snooze" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+    expect(state.markUnread).toHaveBeenCalledWith("n-1", expect.any(Object));
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace.ws).toBe("n-1");
+    cleanup();
+
+    setup({ rows: [{ ...ROWS[0]!, read: false }, ROWS[1]!] });
+    fireEvent.click(screen.getByRole("button", { name: "Mark as read" }));
+    expect(state.markRead).toHaveBeenCalledWith("n-1", expect.any(Object));
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace.ws).toBeUndefined();
   });
 
   it("snoozes and moves on to the next notification", async () => {
