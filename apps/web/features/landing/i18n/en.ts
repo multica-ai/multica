@@ -312,7 +312,6 @@ export function createEnDict(): LandingDict {
           "Completing an Issue or starting an agent on it archives it from your Inbox; change this in Settings → Notifications.",
           "Projects have an Overview tab for the description, a sidebar with progress and recent activity, and an Activity tab.",
           "Project progress leaves out cancelled Issues and shows a weekly trend and forecast finish date, also in the CLI.",
-          "Self-hosted workspaces can invite guests who see only the projects shared with them.",
           "HTML and Mermaid blocks render while you edit, with a title bar you can rename.",
           "Send follow-up instructions to a running Antigravity agent.",
           "Clicking Update on a busy machine queues the CLI update, which installs once the machine is idle.",
