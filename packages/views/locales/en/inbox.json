@@ -56,6 +56,7 @@
       "days": "{{count}}d"
     },
     "archived_title": "Archived",
+    "snoozed_title": "Snoozed",
     "archived_empty": "No archived notifications",
     "unarchive_tooltip": "Unarchive",
     "actions_aria": "Notification actions",
@@ -65,6 +66,7 @@
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
+    "restore": "Move back to Inbox",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Open full form",
@@ -217,9 +219,7 @@
     "failed": "Failed to snooze",
     "unsnooze_failed": "Failed to bring back",
     "view_empty": "Nothing snoozed",
-    "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back.",
-    "col_updates": "While snoozed",
-    "col_back": "Back"
+    "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back."
   },
   "auto_archive_prompt": {
     "title": "Archive notifications once you've handled them",

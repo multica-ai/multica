@@ -174,8 +174,6 @@
       "view_delete": "ビューを削除",
       "new_issue_here": "このプロジェクトに新規タスク",
       "inbox_actions": "インボックスの操作",
-      "inbox_view_snoozed": "スヌーズ中を表示",
-      "inbox_view_archived": "アーカイブ済みを表示",
       "inbox_empty": "通知はありません",
       "inbox_settings": "インボックスの表示",
       "inbox_all": "すべての通知",

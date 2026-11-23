@@ -598,7 +598,8 @@
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
     "subscription_update_failed": "无法更新订阅状态，请重试。",
     "pull_requests_empty_title": "暂无关联 PR。",
-    "guest_readonly_note": "访客可以查看和评论，不能修改任务属性。"
+    "guest_readonly_note": "访客可以查看和评论，不能修改任务属性。",
+    "open_issue_page": "在任务页打开"
   },
   "timeline": {
     "loading": "加载中...",
@@ -1839,8 +1840,7 @@
       "all_issues": "全部任务",
       "my_work": "我的工作",
       "working": "运行中",
-      "subscribed": "已订阅",
-      "snoozed": "已延后"
+      "subscribed": "已订阅"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",

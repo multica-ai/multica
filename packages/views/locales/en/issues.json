@@ -610,7 +610,8 @@
     "workdir_path_copy_failed": "Failed to copy working directory path",
     "workdir_path_unavailable": "No local working directory yet — this issue hasn't been run by a local agent",
     "pull_requests_empty_title": "No linked pull requests.",
-    "guest_readonly_note": "Guests can view and comment, but cannot change issue properties."
+    "guest_readonly_note": "Guests can view and comment, but cannot change issue properties.",
+    "open_issue_page": "Open issue page"
   },
   "timeline": {
     "loading": "Loading...",
@@ -1923,8 +1924,7 @@
       "all_issues": "All issues",
       "my_work": "My work",
       "working": "Working",
-      "subscribed": "Subscribed",
-      "snoozed": "Snoozed"
+      "subscribed": "Subscribed"
     },
     "untitled": "Untitled view",
     "copy_name": "{{name}} (copy)",

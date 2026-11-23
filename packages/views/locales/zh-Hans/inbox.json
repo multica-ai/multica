@@ -54,6 +54,7 @@
       "days": "{{count}} 天"
     },
     "archived_title": "已归档",
+    "snoozed_title": "已延后",
     "archived_empty": "暂无已归档通知",
     "unarchive_tooltip": "取消归档",
     "actions_aria": "通知操作",
@@ -63,6 +64,7 @@
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
+    "restore": "移回收件箱",
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
@@ -212,9 +214,7 @@
     "failed": "延后失败",
     "unsnooze_failed": "恢复失败",
     "view_empty": "没有延后的事项",
-    "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。",
-    "col_updates": "延后期间",
-    "col_back": "恢复时间"
+    "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。"
   },
   "auto_archive_prompt": {
     "title": "处理完的通知，可以自动归档",

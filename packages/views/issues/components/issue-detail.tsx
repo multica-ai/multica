@@ -36,6 +36,7 @@ import {
   Unlink,
   Users,
   ArrowDown,
+  ArrowUpRight,
 } from "@multica/ui/icons";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -76,10 +77,8 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { MemberProfileCard } from "../../members/member-profile-card";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
-import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
-import { InboxArchiveButton, InboxBarSkeleton, InboxOpenBar } from "../../inbox/components/inbox-bar";
+import { InboxBarSkeleton } from "../../inbox/components/inbox-bar";
 import { InboxIssueActions } from "./inbox-issue-actions";
-import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
 import { useInboxSelectionStore, type InboxTransitionDirection } from "@multica/core/inbox/selection-store";
 import { useReducedMotion } from "@multica/core/appearance";
 import { PropRow } from "../../common/prop-row";
@@ -104,7 +103,7 @@ import { AssigneePicker } from "./pickers/assignee-picker";
 import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider, IssueInboxBar } from "../actions";
+import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
@@ -1112,21 +1111,28 @@ function SubIssueDisplayPopover({
 
 // Props
 
+/** The Inbox page, hosting this detail for the notification it has open. */
+export interface IssueDetailInboxHost {
+  /**
+   * The breadcrumb's segment in place of the issue's container: back to the
+   * Inbox's list. Left out where the host's own way back already says so.
+   */
+  crumb?: BreadcrumbSegment;
+  /** The notification's bar under the header, given the issue's own actions to keep in it. */
+  bar: (issueActions: ReactNode) => ReactNode;
+  /** The open notification, so a cold load shows its bar and title at once. */
+  item?: InboxItem;
+}
+
 interface IssueDetailProps {
   issueId: string;
   onDelete?: () => void;
   /**
-   * The Inbox page's Archive in its bar: archives the open notification. The
-   * Inbox page owns the bar then; without it, the Work panel's Inbox does.
+   * Set on the Inbox page: the breadcrumb starts at the Inbox, the
+   * notification's bar sits under the header, and the header offers the
+   * issue's own page.
    */
-  onArchive?: () => void;
-  /**
-   * The Inbox's "unsubscribe & archive", shown next to Archive on issues that
-   * are not the viewer's own. Only read alongside `onArchive`.
-   */
-  onUnsubscribeArchive?: (scope: InboxUnsubscribeScope) => void;
-  /** The Inbox page's open notification, whose bar says why it is here. Only read alongside `onArchive`. */
-  inboxItem?: InboxItem;
+  inbox?: IssueDetailInboxHost;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
@@ -1165,12 +1171,6 @@ interface IssueDetailProps {
   variant?: "page" | "peek";
   /** Peek only: host controls at the end of the header (open full page, close). */
   trailingActions?: ReactNode;
-  /**
-   * A bar the host shows under the header in place of the Inbox bar, above the
-   * scrolling body, given the issue's own actions to keep in it. Returning
-   * nothing shows the Inbox bar.
-   */
-  notice?: (issueActions: ReactNode) => ReactNode;
   /**
    * Read the viewer's inbox notifications on this issue while it is on screen
    * (MUL-8588). The inbox turns this off for the issue it has open: it reads
@@ -1419,7 +1419,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive, inboxItem, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightRequestPending = false, onHighlightLanded, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightRequestPending = false, onHighlightLanded, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -1583,8 +1583,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   // task. The hold is bounded in case the landing never runs (a target that
   // is gone). `null`: the full overscan.
   //
-  // An Inbox click marks its landing pending before the page mounts; the
-  // comment it names arrives a render later on web, with the URL's fragment.
+  // An Inbox click marks its landing pending before the page mounts.
   const landingAtMount = highlightRequestPending || (!!highlightCommentId && !highlightConsumed);
   const [landingOverscanStep, setLandingOverscanStep] = useState<number | null>(
     () => (landingAtMount ? 0 : null),
@@ -1598,9 +1597,6 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   const [landingChromeHeld, setLandingChromeHeld] = useState(() => landingAtMount);
   const releaseLandingChrome = useCallback(() => setLandingChromeHeld(false), []);
   const reduceMotion = useReducedMotion();
-  const fromSidebarInbox = useInboxSelectionStore(
-    (s) => !!wsId && s.sidebarIssueByWorkspace[wsId] === id,
-  );
   const pendingInboxTransition = useInboxSelectionStore((s) =>
     wsId ? s.transitionByWorkspace[wsId] : undefined,
   );
@@ -3032,8 +3028,8 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
-  // The inbox passes `onArchive` and owns archive and restore there.
-  const archivedInboxItemId = useArchivedInboxItemId(id, !onArchive);
+  // The Inbox page owns archive and restore for the notification it has open.
+  const archivedInboxItemId = useArchivedInboxItemId(id, !inbox);
   const pageMenu = useIssuePageMenu();
 
   // Labels live in their own query (not on the issue body) — fetch the count
@@ -3208,8 +3204,8 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
         trailing={trailingActions}
         sidebar={!isPeek && desktopSidebarOpen}
         layoutId={layoutId}
-        showInboxBar={!isPeek && (!!inboxItem || fromSidebarInbox)}
-        inboxItem={isPeek ? undefined : inboxItem}
+        showInboxBar={!!inbox}
+        inboxItem={inbox?.item}
       />
     );
   }
@@ -3809,23 +3805,26 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
   // different project than its parent), so we never render both: parent wins,
   // else project, else nothing. The project is still shown in the properties
   // panel. The workspace name is intentionally absent — "all issues" is a view,
-  // not a container.
-  const breadcrumbSegments: BreadcrumbSegment[] = parentIssue
-    ? [{ href: paths.issueDetail(issueRouteRef(parentIssue)), label: parentIssue.identifier }]
-    : breadcrumbProject
-      ? [
-          {
-            href: paths.projectDetail(breadcrumbProject.id),
-            className: "flex items-center gap-1 min-w-0 max-w-72",
-            label: (
-              <>
-                <ProjectIcon project={breadcrumbProject} size="sm" />
-                <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
-              </>
-            ),
-          },
-        ]
-      : [];
+  // not a container. On the Inbox page the issue is read as a notification, so
+  // the trail leads back to the Inbox instead.
+  const breadcrumbSegments: BreadcrumbSegment[] = inbox
+    ? inbox.crumb ? [inbox.crumb] : []
+    : parentIssue
+      ? [{ href: paths.issueDetail(issueRouteRef(parentIssue)), label: parentIssue.identifier }]
+      : breadcrumbProject
+        ? [
+            {
+              href: paths.projectDetail(breadcrumbProject.id),
+              className: "flex items-center gap-1 min-w-0 max-w-72",
+              label: (
+                <>
+                  <ProjectIcon project={breadcrumbProject} size="sm" />
+                  <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
+                </>
+              ),
+            },
+          ]
+        : [];
 
   const titleSizeClass = isPeek ? "text-title-lg font-semibold" : ISSUE_PAGE_TITLE_CLASS;
 
@@ -3903,6 +3902,17 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
                 <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
               </div>
             )}
+            {inbox && (
+              <IconButton
+                label={t(($) => $.detail.open_issue_page)}
+                tooltipSide="bottom"
+                className="text-muted-foreground"
+                nativeButton={false}
+                render={<AppLink href={paths.issueDetail(issueRouteRef(issue))} />}
+              >
+                <ArrowUpRight />
+              </IconButton>
+            )}
             {!guest && <IssueDetailActionsDropdown
               issue={issue}
               locateInSidebar={!isPeek}
@@ -3940,19 +3950,7 @@ export function IssueDetail({ issueId, onDelete, onArchive, onUnsubscribeArchive
             </>
           }
         />
-        {notice?.(inboxIssueActions) ??
-          (onArchive ? (
-            inboxItem && (
-              <InboxOpenBar item={inboxItem} issueActions={inboxIssueActions}>
-                {onUnsubscribeArchive && (
-                  <UnsubscribeArchiveButton issueId={id} userId={user?.id} onConfirm={onUnsubscribeArchive} />
-                )}
-                <InboxArchiveButton onClick={onArchive} />
-              </InboxOpenBar>
-            )
-          ) : (
-            !isPeek && <IssueInboxBar issueId={id} issueActions={inboxIssueActions} />
-          ))}
+        {inbox?.bar(inboxIssueActions)}
 
         {/* scrollbar-gutter both-edges: with classic (space-taking) scrollbars —
             macOS with a mouse or "always show", Windows, Linux — the global
