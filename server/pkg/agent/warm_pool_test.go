@@ -303,7 +303,7 @@ done
 
 	// Verify idle task-env file holds NO live token while parked.
 	pool.mu.Lock()
-	parked := pool.entries[warmPoolKey{provider: "codex", sessionID: "thr-warm-1"}].proc.(*warmCodexProcess)
+	parked := pool.entries[warmPoolKey{provider: "codex", sessionID: "thr-warm-1"}].proc.(*codexProcess)
 	envFilePath := parked.taskEnvFile
 	pool.mu.Unlock()
 	idleData, err := os.ReadFile(envFilePath)
