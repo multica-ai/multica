@@ -77,18 +77,17 @@ func writeBackgroundTaskSafetySlim(b *strings.Builder, provider string) {
 	b.WriteString("Never terminate `multica` or `multica.exe` by executable name: a long-lived matching process may be the workspace daemon. Cancel only the exact child PID you started, and before terminating it compare that PID with `multica daemon status --output json`; never kill it if it is the reported daemon PID.\n\n")
 }
 
-// writeCodexWorkdir tells Codex to stop spelling out the task workdir on
-// every `exec_command`. Codex's default guidance is to always set `workdir`,
-// and the daemon's workdir is a long absolute path full of hex ids (~45–60
-// output tokens), so a typical run spent ~11% of its output tokens on it. The
-// thread's cwd is the task workdir (daemon.go passes env.WorkDir), and Codex
-// resolves an omitted or relative `workdir` against that cwd.
-func writeCodexWorkdir(b *strings.Builder, provider string) {
-	if provider != "codex" {
-		return
-	}
+// writeCommandWorkdir tells the agent to stop spelling out the task workdir in
+// shell commands. The daemon's workdir is a long absolute path full of hex ids
+// (~45–60 output tokens), and runtimes default to repeating it: Codex sets an
+// absolute `workdir` on nearly every exec_command, Claude Code prefixes many
+// Bash calls with `cd <absolute path> &&` even when it is already there. Every
+// backend starts in the task workdir (daemon.go passes env.WorkDir as Cwd), so
+// relative paths resolve correctly. File tools that require absolute paths are
+// explicitly left alone.
+func writeCommandWorkdir(b *strings.Builder) {
 	b.WriteString("## Command Working Directory\n\n")
-	b.WriteString("Every `exec_command` starts in this task's working directory, and a relative `workdir` resolves against it. Omit `workdir` for commands that run here. For a subdirectory, such as a repository from `multica repo checkout`, pass a relative path (`\"workdir\": \"<repo>/server\"`). Use an absolute `workdir` only for a directory outside this one, and do not prefix commands with `cd <absolute path> &&`. This overrides any default guidance to always set `workdir`: the absolute path costs dozens of output tokens on every command.\n\n")
+	b.WriteString("Shell commands start in this task's working directory. Do not spell out its absolute path: no `cd <absolute path> &&` prefix for a directory inside it, and when your shell tool takes a working-directory parameter (such as `workdir`), omit it for this directory. Reach a subdirectory, such as a repository from `multica repo checkout`, with a path relative to where the shell is (`cd <repo>/server`, `\"workdir\": \"<repo>/server\"`). Use absolute paths only for directories outside this one and for file tools that require them. This overrides any default guidance to always set a working directory or to prefer absolute paths in commands: the long path costs dozens of output tokens on every command.\n\n")
 }
 
 // writeAgentIdentity emits the Agent Identity heading and (optionally) the
@@ -1036,11 +1035,10 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Mentions              |    ✓    |   ✓    |     —     |      —       |  —
 //	Attachments           |    ✓    |   ✓    |     —     |      —       |  —
 //
-// Always-on rows — Header, Background Task Safety, Agent Identity,
-// Requesting User, Workspace Context, Connected Apps,
+// Always-on rows — Header, Background Task Safety, Command Working Directory,
+// Agent Identity, Requesting User, Workspace Context, Connected Apps,
 // Workflow, Always Use CLI, Output — are shared by every kind and emitted
-// unconditionally (or gated by their own data preconditions). Command
-// Working Directory is emitted for every kind, Codex only.
+// unconditionally (or gated by their own data preconditions).
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
@@ -1052,7 +1050,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	// (daemon.BuildPrompt) instead. See MUL-5377.
 	writeHeader(&b)
 	writeBackgroundTaskSafetySlim(&b, provider)
-	writeCodexWorkdir(&b, provider)
+	writeCommandWorkdir(&b)
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
