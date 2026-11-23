@@ -330,7 +330,10 @@ Remove the path override:
 multica runtime profile unset-path <profile-id>
 ```
 
-Editing a profile only affects runs claimed afterwards. Before deleting a profile, deal with the active agents still bound to its runtimes. Deleting only the runtime instance on one computer does not delete the profile — a running daemon will re-register it.
+Editing a profile only affects runs claimed afterwards.
+
+- **Retire one machine.** You cannot delete a runtime instance directly while its custom profile exists. Stop the daemon on the retired machine so it cannot re-register the instance. An offline instance is eligible for automatic cleanup after 7 days, once it has no active agents or unfinished tasks. If a legacy profile still keeps a copy on its creator’s machine, edit the profile and select the machine that should keep it.
+- **Retire the profile.** Deleting a profile removes its runtimes on every registered machine. First move active agents to runtimes outside the profile, or archive agents that can be retired. If you cannot manage a blocking agent, ask its owner to move or archive it.
 
 ## Qoder Cloud Agents remote runtime
 
