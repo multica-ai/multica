@@ -91,6 +91,8 @@ type CLIConfig struct {
 	// DefaultHeartbeatInterval.
 	HeartbeatInterval string `json:"heartbeat_interval,omitempty"`
 
+	LogLevel string `json:"log_level,omitempty"`
+
 	// AgentTimeout is the absolute wall-clock cap per agent run (Go
 	// duration string). Unlike the other duration knobs, "0s" is a
 	// meaningful, non-default value here: it explicitly disables the cap

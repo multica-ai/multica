@@ -282,6 +282,8 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 
 ### 守護程序日誌 [#daemon-logs]
 
+守護程序預設以 `debug` 層級寫入日誌。設定 `LOG_LEVEL`（`debug`、`info`、`warn` 或 `error`）可以修改，也可以用 `multica config set log_level info` 儲存設定檔的預設值。環境變數優先於設定檔。
+
 守護程序在後臺執行（不連著終端）時，日誌寫入 `~/.multica/daemon.log`，命名 profile 為 `~/.multica/profiles/<name>/daemon.log`，並按大小輪轉，輪轉出的檔案用 gzip 壓縮。
 
 | 變數 | 預設值 | 說明 |
@@ -384,6 +386,7 @@ multica config show
 | `poll_interval` | `30s` | 執行輪詢間隔 |
 | `ws_claim_poll_interval` | `3m` | 健康 WebSocket 下 claim 安全輪詢的上限，與 `poll_interval` 獨立配置；Daemon 會應用向下抖動 |
 | `heartbeat_interval` | `15s` | 心跳間隔 |
+| `log_level` | `debug` | 守護程序日誌層級：`debug`、`info`、`warn` 或 `error`。`LOG_LEVEL` 優先 |
 | `agent_timeout` | 不限制 | 單次執行的絕對時限 |
 | `agent_idle_watchdog` | `2h` | 沒有工具執行時的靜默上限；`0s` 關閉守護程序的整套 watchdog，`agent_tool_watchdog` 也隨之失效 |
 | `agent_tool_watchdog` | 同 `agent_idle_watchdog` | 工具執行期間的靜默上限；`0s` 表示守護程序的 watchdog 不會因工具靜默而停止執行，此時執行只受 `agent_timeout` 限制，而它預設不限制 |
