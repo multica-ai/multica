@@ -64,4 +64,27 @@ describe("useSidebarTreeStore", () => {
     expect(state.workingCollapsed).toBe(false);
     expect(state.needsAttentionCollapsed).toBe(false);
   });
+
+  it("makes the Inbox section compact once for preferences stored before it was the default", async () => {
+    localStorage.setItem("multica_sidebar_tree:before", JSON.stringify({
+      state: { inboxSettings: { limit: 10, showCount: false, railBadge: true, compact: false } },
+      version: 0,
+    }));
+    setCurrentWorkspace("before", "ws-before");
+    await Promise.resolve();
+    expect(useSidebarTreeStore.getState().inboxSettings).toEqual({
+      limit: 10,
+      showCount: false,
+      railBadge: true,
+      compact: true,
+    });
+
+    localStorage.setItem("multica_sidebar_tree:after", JSON.stringify({
+      state: { inboxSettings: { limit: 5, showCount: true, railBadge: true, compact: false } },
+      version: 1,
+    }));
+    setCurrentWorkspace("after", "ws-after");
+    await Promise.resolve();
+    expect(useSidebarTreeStore.getState().inboxSettings.compact).toBe(false);
+  });
 });

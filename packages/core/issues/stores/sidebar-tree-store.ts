@@ -68,7 +68,7 @@ export const DEFAULT_SIDEBAR_INBOX_SETTINGS: SidebarInboxSettings = {
   limit: 5,
   showCount: true,
   railBadge: true,
-  compact: false,
+  compact: true,
 };
 
 export interface SidebarLocateRequest {
@@ -177,6 +177,15 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
     {
       name: "multica_sidebar_tree",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      // 1: the Inbox section became compact by default. Every device had
+      // stored the old default, which says nothing about a choice, so each
+      // one starts compact once.
+      version: 1,
+      migrate: (persisted, version) => {
+        const p = (persisted ?? {}) as Partial<PersistedSidebarTree>;
+        if (version < 1 && p.inboxSettings) return { ...p, inboxSettings: { ...p.inboxSettings, compact: true } };
+        return p;
+      },
       partialize: (state): PersistedSidebarTree => ({
         expanded: state.expanded,
         issueSettings: state.issueSettings,
