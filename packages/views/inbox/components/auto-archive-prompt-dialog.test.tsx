@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -8,14 +8,20 @@ import enInbox from "../../locales/en/inbox.json";
 import enSettings from "../../locales/en/settings.json";
 import { AutoArchivePromptDialog } from "./auto-archive-prompt-dialog";
 
-const { resolve } = vi.hoisted(() => ({ resolve: vi.fn() }));
-vi.mock("@multica/core/notification-preferences/mutations", () => ({
-  useResolveAutoArchivePrompt: () => ({ mutate: resolve }),
+const { resolve, toastError } = vi.hoisted(() => ({
+  resolve: vi.fn(() => Promise.resolve()),
+  toastError: vi.fn(),
 }));
+vi.mock("@multica/core/notification-preferences/mutations", () => ({
+  useResolveAutoArchivePrompt: () => ({ mutateAsync: resolve }),
+}));
+vi.mock("sonner", () => ({ toast: { error: toastError } }));
 
 afterEach(() => {
   cleanup();
   resolve.mockReset();
+  resolve.mockImplementation(() => Promise.resolve());
+  toastError.mockReset();
 });
 
 function renderDialog({ prompt, active = true }: { prompt: boolean; active?: boolean }) {
@@ -74,14 +80,52 @@ describe("AutoArchivePromptDialog", () => {
     renderDialog({ prompt: true });
     await user.click(screen.getByRole("radio", { name: /Only completing or cancelling an issue/ }));
     await user.click(screen.getByRole("button", { name: "Done" }));
-    expect(resolve).toHaveBeenCalledWith({ ...off, auto_archive_completed: "all" }, expect.anything());
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(resolve).toHaveBeenCalledWith({ ...off, auto_archive_completed: "all" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("stays open until the save succeeds", async () => {
+    const user = userEvent.setup();
+    let settle: () => void = () => {};
+    resolve.mockImplementation(
+      () =>
+        new Promise<void>((resolvePromise) => {
+          settle = resolvePromise;
+        }),
+    );
+    renderDialog({ prompt: true });
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(
+      screen.getByRole("dialog", { name: "Archive notifications once you've handled them" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Done" })).toBeDisabled();
+    settle();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("keeps the prompt and the choice when the save fails", async () => {
+    const user = userEvent.setup();
+    resolve.mockRejectedValueOnce(new Error("save failed"));
+    renderDialog({ prompt: true });
+    await user.click(screen.getByRole("radio", { name: /You archive notifications yourself/ }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(resolve).toHaveBeenCalledWith(off);
+    expect(
+      screen.getByRole("dialog", { name: "Archive notifications once you've handled them" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /You archive notifications yourself/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Done" })).toBeEnabled();
+    expect(toastError).toHaveBeenCalledWith("save failed");
   });
 
   it("keeps what you have when you close it", async () => {
     const user = userEvent.setup();
     renderDialog({ prompt: true });
     await user.keyboard("{Escape}");
-    expect(resolve).toHaveBeenCalledWith({}, expect.anything());
+    expect(resolve).toHaveBeenCalledWith({});
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });

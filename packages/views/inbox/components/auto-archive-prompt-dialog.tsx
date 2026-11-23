@@ -39,17 +39,27 @@ export function AutoArchivePromptDialog({ wsId, active }: { wsId: string; active
   const resolve = useResolveAutoArchivePrompt();
   const [choice, setChoice] = useState<AutoArchivePreset>("handled");
   const [answered, setAnswered] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
+  // Dismiss only after the server records the answer. A failed save leaves the
+  // prompt open with the same choice so the member can retry. The promise
+  // handlers still run if this panel unmounts first.
   const answer = (preferences: NotificationPreferences) => {
-    setAnswered(true);
-    resolve.mutate(preferences, {
-      onError: (err) =>
+    if (submitting) return;
+    setSubmitting(true);
+    void resolve.mutateAsync(preferences).then(
+      () => {
+        setAnswered(true);
+      },
+      (err: unknown) => {
+        setSubmitting(false);
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : tSettings(($) => $.notifications.toast_failed),
-        ),
-    });
+        );
+      },
+    );
   };
 
   return (
@@ -77,6 +87,7 @@ export function AutoArchivePromptDialog({ wsId, active }: { wsId: string; active
                 type="button"
                 role="radio"
                 aria-checked={selected}
+                disabled={submitting}
                 onClick={() => setChoice(preset)}
                 className={cn(
                   "flex flex-col gap-1 rounded-lg border border-border px-3 py-2.5 text-left transition-colors outline-none hover:bg-surface-hover focus-visible:ring-3 focus-visible:ring-ring/50",
@@ -111,7 +122,10 @@ export function AutoArchivePromptDialog({ wsId, active }: { wsId: string; active
           <span className="text-caption text-muted-foreground">
             {t(($) => $.auto_archive_prompt.hint)}
           </span>
-          <Button onClick={() => answer(autoArchivePreferences(AUTO_ARCHIVE_PRESETS[choice]))}>
+          <Button
+            disabled={submitting}
+            onClick={() => answer(autoArchivePreferences(AUTO_ARCHIVE_PRESETS[choice]))}
+          >
             {t(($) => $.auto_archive_prompt.confirm)}
           </Button>
         </DialogFooter>
