@@ -114,7 +114,8 @@
     "app_connect_requested": "アプリの接続依頼",
     "app_action_result": "アプリ操作の結果",
     "doc_comment": "ドキュメントへの新しいコメント",
-    "doc_mentioned": "ドキュメントでメンションされました"
+    "doc_mentioned": "ドキュメントでメンションされました",
+    "blockers_done": "待機中のタスクが終了しました"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",

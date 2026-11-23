@@ -56,6 +56,7 @@ var typeGroups = map[string]string{
 	"autopilot_paused":         "",
 	"autopilot_quota_exceeded": "",
 	"children_done":            "",
+	"blockers_done":            "",
 	"project_owner_joined":     "",
 	// The agent is stopped until the person answers these.
 	"app_action_requested":  "",
