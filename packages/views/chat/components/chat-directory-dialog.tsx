@@ -78,7 +78,7 @@ function DirectoryBrowser({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-lg">
+      <DialogContent className="flex max-h-[80%] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t(($) => $.directory.title)}</DialogTitle>
           <DialogDescription>{t(($) => $.directory.new_conversation)}</DialogDescription>

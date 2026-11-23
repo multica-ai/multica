@@ -273,6 +273,20 @@
     "delete": "Eliminar chat",
     "agent_settings": "Ajustes del agente"
   },
+  "directory": {
+    "title": "Directorio de trabajo",
+    "new_conversation": "Cambiar el directorio inicia una conversación nueva.",
+    "path": "Ruta del directorio",
+    "browse": "Explorar",
+    "loading": "Cargando directorios...",
+    "failed": "No se ha podido cargar este directorio. Prueba con otra ruta.",
+    "parent": "Directorio superior",
+    "empty": "No hay subdirectorios",
+    "not_selectable": "No se puede usar este directorio.",
+    "cancel": "Cancelar",
+    "select": "Usar directorio",
+    "remove": "Usar directorio predeterminado"
+  },
   "wakeup": {
     "panel_title": "Recordatorios",
     "panel_empty": "No hay recordatorios en esta conversación",
