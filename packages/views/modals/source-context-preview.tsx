@@ -138,21 +138,41 @@ export function SourceContextPreviewCard({
           <span className="truncate text-muted-foreground">· {anchor.author.name}</span>
         )}
       </button>
-      {expanded && (
+      {constrainToParent ? (
+        expanded && (
+          <div
+            data-slot="source-context-preview-body"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t px-3 py-3 animate-in fade-in-0 duration-150 motion-reduce:animate-none"
+          >
+            <SourceContextContent
+              sourceIssue={preview.source_issue}
+              comments={preview.comment_thread}
+              anchorCommentId={preview.anchor_comment_id}
+            />
+          </div>
+        )
+      ) : (
         <div
-          data-slot="source-context-preview-body"
           className={cn(
-            "border-t px-3 py-3",
-            constrainToParent
-              ? "min-h-0 flex-1 overflow-y-auto overscroll-contain"
-              : "max-h-72 overflow-y-auto overscroll-contain",
+            "grid transition-[grid-template-rows,opacity] duration-180 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
           )}
+          aria-hidden={!expanded}
         >
-          <SourceContextContent
-            sourceIssue={preview.source_issue}
-            comments={preview.comment_thread}
-            anchorCommentId={preview.anchor_comment_id}
-          />
+          <div className="overflow-hidden">
+            {expanded && (
+              <div
+                data-slot="source-context-preview-body"
+                className="max-h-72 overflow-y-auto overscroll-contain border-t px-3 py-3"
+              >
+                <SourceContextContent
+                  sourceIssue={preview.source_issue}
+                  comments={preview.comment_thread}
+                  anchorCommentId={preview.anchor_comment_id}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

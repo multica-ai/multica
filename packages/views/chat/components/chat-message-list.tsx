@@ -19,14 +19,13 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import {
   ChevronRight,
-  ChevronDown,
   Brain,
   AlertCircle,
   AlertTriangle,
   ArrowUpRight,
-  Copy,
   RotateCw,
 } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useReducedMotion } from "@multica/core/appearance";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
@@ -1034,8 +1033,17 @@ function MessageCopyButton({
   content: string;
 }) {
   const { t } = useT("chat");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
   const handleCopy = async () => {
     if (await copyText(content)) {
+      setCopied(true);
       toast.success(t(($) => $.message_list.copied_toast));
     } else {
       toast.error(t(($) => $.message_list.copy_failed_toast));
@@ -1054,7 +1062,7 @@ function MessageCopyButton({
           />
         }
       >
-        <Copy />
+        <CopyCheckIcon copied={copied} className="size-3" />
       </TooltipTrigger>
       <TooltipContent side="top">
         {t(($) => $.message_list.copy_action)}
@@ -1177,11 +1185,12 @@ function FailureBubble({
           {rawError.trim() && (
             <Collapsible open={open} onOpenChange={setOpen}>
               <CollapsibleTrigger className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
-                {open ? (
-                  <ChevronDown className="size-3" />
-                ) : (
-                  <ChevronRight className="size-3" />
-                )}
+                <ChevronRight
+                  className={cn(
+                    "size-3 transition-transform duration-150 ease-out motion-reduce:transition-none",
+                    open && "rotate-90",
+                  )}
+                />
                 <span>{t(($) => $.message_list.show_details)}</span>
               </CollapsibleTrigger>
               <CollapsibleContent>
@@ -1330,7 +1339,12 @@ function OuterProcessFold({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
-        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        <ChevronRight
+          className={cn(
+            "size-3 transition-transform duration-150 ease-out motion-reduce:transition-none",
+            open && "rotate-90",
+          )}
+        />
         <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>

@@ -91,6 +91,7 @@ export type AutopilotDialogProps =
       mode: "create";
       open: boolean;
       onOpenChange: (v: boolean) => void;
+      onOpenChangeComplete?: (v: boolean) => void;
       initial?: Partial<AutopilotInitial>;
       initialSchedule?: Pick<ScheduleConfig, "time" | "days">;
     }
@@ -98,6 +99,7 @@ export type AutopilotDialogProps =
       mode: "edit";
       open: boolean;
       onOpenChange: (v: boolean) => void;
+      onOpenChangeComplete?: (v: boolean) => void;
       autopilotId: string;
       initial: AutopilotInitial;
       triggers: AutopilotTrigger[];
@@ -418,7 +420,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const contentKey = isCreate ? "create" : props.autopilotId;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      onOpenChangeComplete={props.onOpenChangeComplete}
+    >
       <DialogContent
         showCloseButton={false}
         className={cn(

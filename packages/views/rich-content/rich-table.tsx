@@ -31,7 +31,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ExtraProps } from "react-markdown";
-import { Check, Copy, Maximize2, RotateCcw } from "@multica/ui/icons";
+import { Maximize2, RotateCcw } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
@@ -439,7 +440,7 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
               className={cn(toolbarButton, "w-6")}
               aria-label={t(($) => $.table.copy_markdown)}
             >
-              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              <CopyCheckIcon copied={copied} className="size-3.5" />
             </button>
           }
         />

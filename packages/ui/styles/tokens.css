@@ -132,10 +132,10 @@
 
 :root {
     /* Dialog motion, shared by popup and backdrop. */
-    --dialog-enter-duration: 100ms;
+    --dialog-enter-duration: 130ms;
     --dialog-exit-duration: 100ms;
-    --dialog-enter-easing: ease;
-    --dialog-exit-easing: ease;
+    --dialog-enter-easing: cubic-bezier(0.23, 1, 0.32, 1);
+    --dialog-exit-easing: cubic-bezier(0.4, 0, 1, 1);
     /* Nav panel collapse, shared by the space panel and list columns. The
        first frame also pays for the toggle's render and the page relayout, so
        the curve starts soft instead of jumping. */

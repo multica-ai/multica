@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Skill } from "@multica/core/types";
@@ -695,7 +695,7 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
     renderPage();
     fireEvent.change(await openDescription(), { target: { value: "edited" } });
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
-    expect(screen.queryByText(/^Changed:/)).toBeNull();
+    await waitFor(() => expect(screen.queryByText(/^Changed:/)).toBeNull());
   });
 
   it("pulls a remote edit in silently while the draft is untouched", async () => {

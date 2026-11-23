@@ -1,9 +1,14 @@
 "use client";
 
+import { useId } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import {
   NumberFlow,
   NumberFlowGroup,
 } from "@multica/ui/components/ui/number-flow";
+
+const SEGMENTED_PILL_SPRING = { type: "spring", stiffness: 500, damping: 38 } as const;
 import { formatDuration } from "../utils";
 
 // Period selector — mirrors the runtime detail page so users see the same
@@ -83,27 +88,41 @@ export function Segmented<T extends string | number>({
   options: readonly { label: string; value: T }[];
   label: string;
 }) {
+  const indicatorId = useId();
+  const reduceMotion = useReducedMotion();
+
   return (
     <div
       role="group"
       aria-label={label}
       className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
     >
-      {options.map((o) => (
-        <button
-          key={String(o.value)}
-          type="button"
-          aria-pressed={o.value === value}
-          onClick={() => onChange(o.value)}
-          className={`rounded-sm px-2.5 py-1 text-caption font-medium transition-colors ${
-            o.value === value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={String(o.value)}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(o.value)}
+            className={`relative rounded-sm px-2.5 py-1 text-caption font-medium transition-colors ${
+              active
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {active && (
+              <motion.span
+                aria-hidden="true"
+                layoutId={indicatorId}
+                transition={reduceMotion ? { duration: 0 } : SEGMENTED_PILL_SPRING}
+                className="pointer-events-none absolute inset-0 rounded-sm bg-background shadow-sm"
+              />
+            )}
+            <span className="relative z-[1]">{o.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

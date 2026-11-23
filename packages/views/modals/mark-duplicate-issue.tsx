@@ -36,10 +36,14 @@ const notDuplicate = (candidate: Issue) => !isDuplicateIssue(candidate);
  * left out of candidates and search results alike.
  */
 export function MarkDuplicateIssueModal({
+  open = true,
   onClose,
+  onExitComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onExitComplete?: () => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -93,9 +97,12 @@ export function MarkDuplicateIssueModal({
 
   return (
     <IssuePickerModal
-      open
+      open={open}
       onOpenChange={(v) => {
         if (!v) onClose();
+      }}
+      onOpenChangeComplete={(v) => {
+        if (!v) onExitComplete?.();
       }}
       title={t(($) => $.mark_duplicate.title)}
       description={t(($) => $.mark_duplicate.description)}

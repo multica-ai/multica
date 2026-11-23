@@ -145,10 +145,14 @@ function RepoUrlText({
 }
 
 export function CreateProjectModal({
+  open = true,
   onClose,
+  onExitComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onExitComplete?: () => void;
   data?: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -494,13 +498,17 @@ export function CreateProjectModal({
   };
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      onOpenChangeComplete={(v) => { if (!v) onExitComplete?.(); }}
+    >
       <DialogContent
         showCloseButton={false}
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!top-1/2 !left-1/2 !-translate-x-1/2",
-          "!transition-all !duration-300 !ease-out",
+          "transition-[width,max-width,height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
           isExpanded
             ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
             : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",

@@ -253,7 +253,7 @@ function Deck({
       onKeyDown={onKeyDown}
       className={cn(
         "absolute right-[var(--chat-launcher-inset)] z-50 w-[min(23.75rem,calc(100%-2*var(--chat-launcher-inset)))]",
-        "animate-in fade-in-0 slide-in-from-bottom-3 duration-300 motion-reduce:animate-none",
+        "animate-in fade-in-0 slide-in-from-bottom-3 duration-300 motion-reduce:animate-none motion-reduce:!transition-none",
         className,
       )}
       style={{

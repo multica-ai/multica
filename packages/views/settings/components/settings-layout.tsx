@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import {
   AlertCircle,
   Building2,
@@ -347,6 +349,8 @@ export function SettingsRow({
   );
 }
 
+const SETTINGS_TAB_PILL_SPRING = { type: "spring", stiffness: 500, damping: 38 } as const;
+
 /** Segmented switch between the lists one settings page manages. */
 export function SettingsViewTabs<T extends string>({
   label,
@@ -360,37 +364,53 @@ export function SettingsViewTabs<T extends string>({
   value: T;
   onChange: (value: T) => void;
 }) {
+  const indicatorId = useId();
+  const reduceMotion = useReducedMotion();
+
   return (
     <div
       role="tablist"
       aria-label={label}
       className="inline-flex w-fit items-center gap-0.5 rounded-lg bg-muted p-0.5"
     >
-      {items.map((item) => (
-        <button
-          key={item.value}
-          type="button"
-          role="tab"
-          aria-selected={value === item.value}
-          onClick={() => onChange(item.value)}
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-label font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-            value === item.value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {item.label}
-          {item.count !== undefined ? (
-            <>
-              {" "}
-              <span className="text-caption font-normal tabular-nums text-muted-foreground">
-                {item.count}
-              </span>
-            </>
-          ) : null}
-        </button>
-      ))}
+      {items.map((item) => {
+        const active = value === item.value;
+        return (
+          <button
+            key={item.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(item.value)}
+            className={cn(
+              "relative inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-label font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+              active
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {active && (
+              <motion.span
+                aria-hidden="true"
+                layoutId={indicatorId}
+                transition={reduceMotion ? { duration: 0 } : SETTINGS_TAB_PILL_SPRING}
+                className="pointer-events-none absolute inset-0 rounded-md bg-background shadow-sm"
+              />
+            )}
+            <span className="relative z-[1] inline-flex items-center gap-1.5">
+              {item.label}
+              {item.count !== undefined ? (
+                <>
+                  {" "}
+                  <span className="text-caption font-normal tabular-nums text-muted-foreground">
+                    {item.count}
+                  </span>
+                </>
+              ) : null}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -214,12 +214,24 @@ function WorkflowHandoffHint({ projectId, status }: { projectId?: string; status
   const handlerLabel = useStepHandlerLabel(project);
   const step = workflowStep(workflow, status);
   const label = handlerLabel(step);
-  if (!label) return null;
-  const actor = stepHandlerActor(step, project);
+  const actor = label ? stepHandlerActor(step, project) : null;
+  const ready = Boolean(label);
   return (
-    <div aria-live="polite" className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground">
-      {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="sm" profileLink={false} />}
-      <span className="truncate">{t(($) => $.workflows.create_handoff_hint, { name: label })}</span>
+    <div
+      className={cn(
+        "grid shrink-0 transition-[grid-template-rows] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+        ready ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+      )}
+      aria-hidden={!ready}
+    >
+      <div className="overflow-hidden">
+        {label && (
+          <div aria-live="polite" className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground">
+            {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="sm" profileLink={false} />}
+            <span className="truncate">{t(($) => $.workflows.create_handoff_hint, { name: label })}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1571,7 +1583,7 @@ export function ManualCreatePanel({
                     aria-busy={gate.uploading || undefined}
                     className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
+                    <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180 motion-reduce:transition-none" />
                     {t(($) => $.create_issue.switch_to_agent)}
                     <BorderBeam />
                   </button>
@@ -1608,7 +1620,7 @@ export function manualDialogContentClass(isExpanded: boolean) {
   return cn(
     "p-0 gap-0 flex flex-col overflow-hidden",
     "!top-1/2 !left-1/2 !-translate-x-1/2",
-    "!transition-all !duration-300 !ease-out",
+    "transition-[width,max-width,height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
     // Phone gutter — see the matching note in create-issue-dialog.tsx: the
     // `!important` widths below also override DialogContent's
     // `max-w-[calc(100%-2rem)]`, leaving the card edge to edge on a phone

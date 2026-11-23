@@ -201,7 +201,7 @@ export function LimitRecoveryDialog() {
               disabled={openingPortal}
               onClick={recovery.action.onClick}
             >
-              {openingPortal && <Loader2 className="animate-spin" />}
+              {openingPortal && <Loader2 className="animate-spin motion-reduce:animate-none" />}
               {recovery.action.label}
             </Button>
           )}

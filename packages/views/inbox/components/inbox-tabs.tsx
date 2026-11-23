@@ -1,11 +1,15 @@
 "use client";
 
-import type { KeyboardEvent } from "react";
+import { useId, type KeyboardEvent } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { AlarmClock, Archive, Inbox } from "@multica/ui/icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import type { InboxTab } from "./inbox-view";
+
+const INBOX_TAB_PILL_SPRING = { type: "spring", stiffness: 500, damping: 38 } as const;
 
 const TABS: readonly InboxTab[] = ["inbox", "snoozed", "archived"];
 
@@ -62,6 +66,9 @@ export function InboxTabs({
     event.currentTarget.querySelector<HTMLElement>(`[data-inbox-tab="${next}"]`)?.focus();
   };
 
+  const indicatorId = useId();
+  const reduceMotion = useReducedMotion();
+
   return (
     <div
       role="tablist"
@@ -85,25 +92,33 @@ export function InboxTabs({
             tabIndex={active ? 0 : -1}
             onClick={() => onSelect(id)}
             className={cn(
-              "flex items-center gap-1 rounded-md outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+              "relative flex items-center gap-1 rounded-md outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring",
               size === "section" ? "h-5" : "h-7 px-2",
               // The open tab gives up width before the icons do; a label
               // still too long for the panel (Spanish, French) truncates.
               iconOnly ? "shrink-0 px-1" : size === "section" ? "min-w-0 px-1.5" : "min-w-0",
-              active ? "bg-surface-selected text-foreground" : "text-muted-foreground hover:text-foreground",
+              active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
+            {active && (
+              <motion.span
+                aria-hidden="true"
+                layoutId={indicatorId}
+                transition={reduceMotion ? { duration: 0 } : INBOX_TAB_PILL_SPRING}
+                className="pointer-events-none absolute inset-0 rounded-md bg-surface-selected"
+              />
+            )}
             {iconOnly ? (
-              <>
+              <span className="relative z-[1] flex items-center gap-1">
                 <Icon aria-hidden className="size-3.5" />
                 <span className="sr-only">{labels[id]}</span>
                 {count > 0 && <span className={cn(countClass, id !== "inbox" && "sr-only")}>{count}</span>}
-              </>
+              </span>
             ) : (
-              <>
+              <span className="relative z-[1] flex min-w-0 items-center gap-1">
                 <span className="truncate">{labels[id]}</span>
                 {count > 0 && <span className={countClass}>{count}</span>}
-              </>
+              </span>
             )}
           </button>
         );

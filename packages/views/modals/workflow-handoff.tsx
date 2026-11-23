@@ -11,10 +11,14 @@ import { WorkflowHandoffConfirmDialog } from "../workflows/handoff-confirm-dialo
  * status change once confirmed.
  */
 export function WorkflowHandoffModal({
+  open = true,
   onClose,
+  onExitComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onExitComplete?: () => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("issues");
@@ -25,9 +29,13 @@ export function WorkflowHandoffModal({
   if (!issueId || !status) return null;
   return (
     <WorkflowHandoffConfirmDialog
+      open={open}
       issue={{ id: issueId, identifier }}
       toStatus={status}
       onCancel={onClose}
+      onOpenChangeComplete={(v) => {
+        if (!v) onExitComplete?.();
+      }}
       onConfirm={({ stopPreviousRuns }) => {
         onClose();
         // Closing unmounts this modal, so the failure follows the promise.

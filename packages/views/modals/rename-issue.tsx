@@ -26,10 +26,14 @@ import { useT } from "../i18n";
  * the detail projection all reconcile from one code path).
  */
 export function RenameIssueModal({
+  open = true,
   onClose,
+  onExitComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onExitComplete?: () => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -92,11 +96,14 @@ export function RenameIssueModal({
 
   return (
     <Dialog
-      open
+      open={open}
       onOpenChange={(v) => {
         // Never dismiss mid-write: the mutation has already been sent, and
         // closing here would leave the user with no feedback either way.
         if (!v && !pending) onClose();
+      }}
+      onOpenChangeComplete={(v) => {
+        if (!v) onExitComplete?.();
       }}
     >
       <DialogContent className="sm:max-w-md">

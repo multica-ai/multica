@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Check, Copy, Eye, EyeOff } from "@multica/ui/icons";
+import { Eye, EyeOff } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { toast } from "sonner";
 import { maskAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -113,11 +114,11 @@ export function WebhookUrlField({ url, size = "sm", actions }: WebhookUrlFieldPr
         onClick={handleCopy}
         label={t(($) => $.trigger_row.copy_url)}
       >
-        {copied ? (
-          <Check className={cn(s.icon, "text-emerald-500")} />
-        ) : (
-          <Copy className={cn(s.icon, "text-muted-foreground")} />
-        )}
+        <CopyCheckIcon
+          copied={copied}
+          className={s.icon}
+          copyClassName="text-muted-foreground"
+        />
       </IconButton>
       {actions}
     </div>

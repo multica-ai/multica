@@ -31,6 +31,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
@@ -1223,7 +1224,7 @@ export function AgentTranscriptDialog({
                   : t(($) => $.transcript.sort_chronological)}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleCopyAll}>
-                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                <CopyCheckIcon copied={copied} className="h-3.5 w-3.5" />
                 {copyTranscriptLabel}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -1781,7 +1782,7 @@ function StepInspector({
           tooltipSide="bottom"
           className="shrink-0 text-muted-foreground"
         >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          <CopyCheckIcon copied={copied} className="h-3.5 w-3.5" />
         </IconButton>
         <IconButton
           variant="ghost"

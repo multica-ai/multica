@@ -8,6 +8,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import {
   AlertCircle,
   AlertTriangle,
@@ -351,6 +354,7 @@ function UsedByList({ agents }: { agents: Agent[] }) {
 export function SkillDetailPage({ skillId }: { skillId: string }) {
   const { t } = useT("skills");
   const { t: tCommon } = useT("common");
+  const reduceMotion = useReducedMotion();
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
@@ -1103,48 +1107,69 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
       {/* Dirty-only and floating, matching the skills list batch toolbar;
           anchored to the page root (relative), NOT the viewport. */}
-      {canEdit && isDirty && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 animate-in items-center gap-1 rounded-lg border bg-background px-2 py-1.5 fade-in slide-in-from-bottom-2 shadow-lg max-md:above-chat-launcher"
-        >
-          <div className="mr-1 flex items-center border-r pl-1 pr-2">
-            <span className="whitespace-nowrap text-caption text-muted-foreground">
-              {t(($) => $.detail.save_bar.changed_summary, {
-                parts: changedParts.join(" · "),
-              })}
-            </span>
+      <AnimatePresence initial={false}>
+        {canEdit && isDirty && (
+          <div
+            key="skill-save-bar"
+            className="absolute bottom-6 left-1/2 z-50 -translate-x-1/2 max-md:above-chat-launcher"
+          >
+            <motion.div
+              role="status"
+              aria-live="polite"
+              initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+              animate={{
+                opacity: 1,
+                y: 0,
+                transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+              }}
+              exit={{
+                opacity: 0,
+                y: reduceMotion ? 0 : 8,
+                transition: {
+                  duration: reduceMotion ? UI_MOTION_DURATION.fast : UI_MOTION_DURATION.micro,
+                  ease: UI_EASE_OUT,
+                },
+              }}
+              className="flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg"
+            >
+              <div className="mr-1 flex items-center border-r pl-1 pr-2">
+                <span className="whitespace-nowrap text-caption text-muted-foreground">
+                  {t(($) => $.detail.save_bar.changed_summary, {
+                    parts: changedParts.join(" · "),
+                  })}
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={handleDiscard}
+                disabled={saving}
+              >
+                {t(($) => $.detail.save_bar.discard)}
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                onClick={handleSave}
+                disabled={saving || !name.trim()}
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
+                    {t(($) => $.detail.save_bar.saving)}
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-3 w-3" />
+                    {t(($) => $.detail.save_bar.save)}
+                  </>
+                )}
+              </Button>
+            </motion.div>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={handleDiscard}
-            disabled={saving}
-          >
-            {t(($) => $.detail.save_bar.discard)}
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            onClick={handleSave}
-            disabled={saving || !name.trim()}
-          >
-            {saving ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin" />
-                {t(($) => $.detail.save_bar.saving)}
-              </>
-            ) : (
-              <>
-                <Save className="h-3 w-3" />
-                {t(($) => $.detail.save_bar.save)}
-              </>
-            )}
-          </Button>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* Delete confirmation */}
       <Dialog

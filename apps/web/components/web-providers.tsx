@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { CoreProvider } from "@multica/core/platform";
+import { MotionProvider } from "@multica/views/common/motion-provider";
 import { installUserTimingCap } from "@multica/core/diagnostics";
 import { registerEE } from "@multica/ee";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
@@ -100,12 +101,14 @@ export function WebProviders({
           localeAdapter={localeAdapter}
           syncUserLocale={syncUserLocale}
         >
-          <WebNavigationProvider>
-            <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
-            {process.env.NODE_ENV === "development" && devToolbarApiUrl && (
-              <WebDevToolbar apiUrl={devToolbarApiUrl} />
-            )}
-          </WebNavigationProvider>
+          <MotionProvider>
+            <WebNavigationProvider>
+              <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
+              {process.env.NODE_ENV === "development" && devToolbarApiUrl && (
+                <WebDevToolbar apiUrl={devToolbarApiUrl} />
+              )}
+            </WebNavigationProvider>
+          </MotionProvider>
         </CoreProvider>
       )}
     </LocaleBundle>

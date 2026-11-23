@@ -36,11 +36,15 @@ import { useWorkspaceId } from "@multica/core/hooks";
  * create-mode store, so the dialog reopens at the size it was last left at.
  */
 export function CreateIssueDialog({
+  open = true,
   onClose,
+  onExitComplete,
   initialMode,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onExitComplete?: () => void;
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
 }) {
@@ -50,23 +54,37 @@ export function CreateIssueDialog({
   if (anchorCommentId) {
     return (
       <SourceContextCreateIssueDialog
+        open={open}
         onClose={onClose}
+        onExitComplete={onExitComplete}
         initialMode={initialMode}
         data={data}
         anchorCommentId={anchorCommentId}
       />
     );
   }
-  return <CreateIssueDialogBody onClose={onClose} initialMode={initialMode} data={data} />;
+  return (
+    <CreateIssueDialogBody
+      open={open}
+      onClose={onClose}
+      onExitComplete={onExitComplete}
+      initialMode={initialMode}
+      data={data}
+    />
+  );
 }
 
 function SourceContextCreateIssueDialog({
+  open = true,
   onClose,
+  onExitComplete,
   initialMode,
   data,
   anchorCommentId,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onExitComplete?: () => void;
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
   anchorCommentId: string;
@@ -86,7 +104,9 @@ function SourceContextCreateIssueDialog({
 
   return (
     <CreateIssueDialogBody
+      open={open}
       onClose={onClose}
+      onExitComplete={onExitComplete}
       initialMode={initialMode}
       data={data}
       sourceContextExpanded={sourceContextExpanded}
@@ -107,13 +127,17 @@ function SourceContextCreateIssueDialog({
 }
 
 function CreateIssueDialogBody({
+  open = true,
   onClose,
+  onExitComplete,
   initialMode,
   data,
   sourceContextData,
   sourceContextExpanded = false,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onExitComplete?: () => void;
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
   sourceContextData?: Record<string, unknown>;
@@ -121,6 +145,7 @@ function CreateIssueDialogBody({
 }) {
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const [mode, setMode] = useState<CreateMode>(initialMode);
+  const [hasSwitchedMode, setHasSwitchedMode] = useState(false);
   const [manualOpened, setManualOpened] = useState(initialMode === "manual");
   const [panelData, setPanelData] = useState(data ?? null);
   // Remembered across opens: the dialog reopens at the size it was left at.
@@ -145,6 +170,7 @@ function CreateIssueDialogBody({
       assignee_id: data.assignee_id,
     } : carry ?? null);
     if (next === "manual") setManualOpened(true);
+    setHasSwitchedMode(true);
     setMode(next);
   };
 
@@ -153,9 +179,9 @@ function CreateIssueDialogBody({
       ? cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2",
-          // Smooth size transition when switching modes — the manual mode
-          // uses the same easing.
-          "!transition-all !duration-300 !ease-out",
+          // Scope resize transitions to geometry only so DialogContent's
+          // open/close animation duration tokens stay intact.
+          "transition-[width,max-width,height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
           // Phone gutter. The widths below are `!important` so they beat
           // DialogContent's own sizing — which also made them beat its
           // `max-w-[calc(100%-2rem)]` safety margin, leaving the card flush
@@ -180,29 +206,41 @@ function CreateIssueDialogBody({
         );
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      onOpenChangeComplete={(v) => { if (!v) onExitComplete?.(); }}
+    >
       <DialogContent
         finalFocus={false}
         showCloseButton={false}
         className={className}
       >
-        {mode === "agent" ? (
-          <AgentCreatePanel
-            onClose={onClose}
-            onSwitchMode={switchTo("manual")}
-            data={effectiveData}
-            isExpanded={isExpanded}
-            setIsExpanded={setIsExpanded}
-          />
-        ) : (
-          <ManualCreatePanel
-            onClose={onClose}
-            onSwitchMode={switchTo("agent")}
-            data={effectiveData}
-            isExpanded={isExpanded}
-            setIsExpanded={setIsExpanded}
-          />
-        )}
+        <div
+          key={mode}
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            hasSwitchedMode && "animate-in fade-in-0 duration-150 motion-reduce:animate-none",
+          )}
+        >
+          {mode === "agent" ? (
+            <AgentCreatePanel
+              onClose={onClose}
+              onSwitchMode={switchTo("manual")}
+              data={effectiveData}
+              isExpanded={isExpanded}
+              setIsExpanded={setIsExpanded}
+            />
+          ) : (
+            <ManualCreatePanel
+              onClose={onClose}
+              onSwitchMode={switchTo("agent")}
+              data={effectiveData}
+              isExpanded={isExpanded}
+              setIsExpanded={setIsExpanded}
+            />
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

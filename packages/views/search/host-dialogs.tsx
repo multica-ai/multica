@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { toast } from "sonner";
 import { useBatchDeleteIssues, useCancelIssueRun } from "@multica/core/issues/mutations";
 import {
@@ -17,6 +18,11 @@ import { TerminateTaskConfirmDialog } from "../issues/components/terminate-task-
 import { useT } from "../i18n";
 import type { PaletteHostDialog } from "./types";
 
+type PresentedHostDialog = {
+  dialog: PaletteHostDialog;
+  id: number;
+};
+
 /**
  * Confirms and forms a palette command opens after the palette closes. They
  * live here rather than on the page because the page that would host them
@@ -30,31 +36,74 @@ export function PaletteHostDialogs({
   dialog: PaletteHostDialog | null;
   onClose: () => void;
 }) {
-  if (!dialog) return null;
-  switch (dialog.type) {
+  // Keep the closing dialog mounted until Base UI finishes its exit animation.
+  const [presented, setPresented] = useState<PresentedHostDialog | null>(() =>
+    dialog ? { dialog, id: 1 } : null,
+  );
+  if (dialog && (!presented || presented.dialog !== dialog)) {
+    setPresented({ dialog, id: (presented?.id ?? 0) + 1 });
+  }
+
+  if (!presented) return null;
+
+  const isOpen = dialog !== null;
+  const clearAfterExit = () => {
+    setPresented((current) => (current?.id === presented.id && dialog === null ? null : current));
+  };
+
+  switch (presented.dialog.type) {
     case "cancel-run":
-      return <CancelRunDialog dialog={dialog} onClose={onClose} />;
+      return (
+        <CancelRunDialog
+          key={presented.id}
+          open={isOpen}
+          dialog={presented.dialog}
+          onClose={onClose}
+          onExitComplete={clearAfterExit}
+        />
+      );
     case "batch-delete":
-      return <BatchDeleteDialog dialog={dialog} onClose={onClose} />;
+      return (
+        <BatchDeleteDialog
+          key={presented.id}
+          open={isOpen}
+          dialog={presented.dialog}
+          onClose={onClose}
+          onExitComplete={clearAfterExit}
+        />
+      );
     case "new-autopilot":
-      return <AutopilotDialog mode="create" open onOpenChange={(open) => !open && onClose()} />;
+      return (
+        <AutopilotDialog
+          key={presented.id}
+          mode="create"
+          open={isOpen}
+          onOpenChange={(open) => !open && onClose()}
+          onOpenChangeComplete={(open) => !open && clearAfterExit()}
+        />
+      );
   }
 }
 
 function CancelRunDialog({
+  open,
   dialog,
   onClose,
+  onExitComplete,
 }: {
+  open: boolean;
   dialog: Extract<PaletteHostDialog, { type: "cancel-run" }>;
   onClose: () => void;
+  onExitComplete: () => void;
 }) {
   const { t } = useT("issues");
   const { t: tSearch } = useT("search");
   const cancelRun = useCancelIssueRun(dialog.issueId);
   return (
     <TerminateTaskConfirmDialog
-      open
-      onOpenChange={(open) => !open && onClose()}
+      open={open}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
+      onOpenChangeComplete={(nextOpen) => !nextOpen && onExitComplete()}
       showRunningNote={dialog.running}
       onConfirm={() => {
         onClose();
@@ -69,11 +118,15 @@ function CancelRunDialog({
 }
 
 function BatchDeleteDialog({
+  open,
   dialog,
   onClose,
+  onExitComplete,
 }: {
+  open: boolean;
   dialog: Extract<PaletteHostDialog, { type: "batch-delete" }>;
   onClose: () => void;
+  onExitComplete: () => void;
 }) {
   const { t } = useT("issues");
   const batchDelete = useBatchDeleteIssues();
@@ -90,7 +143,11 @@ function BatchDeleteDialog({
     }
   };
   return (
-    <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
+      onOpenChangeComplete={(nextOpen) => !nextOpen && onExitComplete()}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t(($) => $.batch.delete_dialog_title, { count })}</AlertDialogTitle>

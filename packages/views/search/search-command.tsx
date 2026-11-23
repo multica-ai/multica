@@ -62,9 +62,11 @@ export function SearchCommand() {
             <DialogTitle>{t(($) => $.title)}</DialogTitle>
             <DialogDescription>{t(($) => $.description)}</DialogDescription>
           </DialogHeader>
-          {/* The desktop shell survives workspace navigation. Reset its query,
-              selection and pending searches together with their workspace. */}
-          {open && <PaletteBody key={workspaceSlug} close={close} openHostDialog={openHostDialog} />}
+          {/* Keep PaletteBody mounted while DialogContent plays its exit
+              animation; Base UI's Portal unmounts it once closed, so the next
+              open always starts fresh, and keying by workspaceSlug resets it
+              across desktop workspace switches. */}
+          <PaletteBody key={workspaceSlug} open={open} close={close} openHostDialog={openHostDialog} />
         </DialogContent>
       </Dialog>
       <PaletteHostDialogs dialog={hostDialog} onClose={() => setHostDialog(null)} />
@@ -73,9 +75,11 @@ export function SearchCommand() {
 }
 
 function PaletteBody({
+  open,
   close,
   openHostDialog,
 }: {
+  open: boolean;
   close: () => void;
   openHostDialog: (dialog: PaletteHostDialog) => void;
 }) {
@@ -120,8 +124,11 @@ function PaletteBody({
     [close, consumeIntent, intentNavigate, openHostDialog, push],
   );
 
-  // Close on single ESC — capture phase fires before base-ui Dialog's handlers
+  // Close on single ESC — capture phase fires before base-ui Dialog's handlers.
+  // Stop listening as soon as `open` turns false so Escape during the 100ms
+  // exit animation is not swallowed.
   useEffect(() => {
+    if (!open) return;
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -131,11 +138,12 @@ function PaletteBody({
     };
     document.addEventListener("keydown", handleEsc, true);
     return () => document.removeEventListener("keydown", handleEsc, true);
-  }, [close]);
+  }, [open, close]);
 
   return (
     <PaletteContext.Provider value={api}>
       <PaletteFrame
+        open={open}
         stack={stack}
         setStack={setStack}
         pageQuery={pageQuery}
@@ -148,12 +156,14 @@ function PaletteBody({
 
 /** Everything that reads the palette API lives under its provider. */
 function PaletteFrame({
+  open,
   stack,
   setStack,
   pageQuery,
   setPageQuery,
   recordIntent,
 }: {
+  open: boolean;
   stack: PaletteStackEntry[];
   setStack: React.Dispatch<React.SetStateAction<PaletteStackEntry[]>>;
   pageQuery: string;
@@ -167,7 +177,7 @@ function PaletteFrame({
   const current = stack[stack.length - 1] ?? null;
   const inputValue = current ? pageQuery : rawQuery;
 
-  const model = useRootModel(rawQuery, contexts, { active: true });
+  const model = useRootModel(rawQuery, contexts, { active: open });
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     // cmdk's root handler intercepts Home/End for list navigation; stop

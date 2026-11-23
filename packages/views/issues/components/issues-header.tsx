@@ -1,6 +1,8 @@
 "use client";
 
-import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, useEffect, useId, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import {
   Activity,
   BotOff,
@@ -2131,27 +2133,13 @@ export function IssueDisplayControls({
           <PopoverContent align="end" className="w-88 p-3">
             {/* Spacing separates sections — no dividers (see UI rules). */}
             {!hideViewToggle && (
-              <div
-                role="group"
-                aria-label={t(($) => $.view.section)}
-                className={cn(
-                  "mb-3 grid gap-0.5 rounded-lg bg-muted p-0.5",
-                  layouts.length === 5 ? "grid-cols-5" : "grid-cols-4",
-                )}
-              >
-                {layouts.map(({ mode, Icon }) => (
-                  <Toggle
-                    key={mode}
-                    pressed={layout === mode}
-                    onPressedChange={() => act.setViewMode(mode)}
-                    title={t(($) => $.view[mode])}
-                    className="h-auto min-w-0 flex-col gap-1 rounded-md px-0.5 py-1.5 text-caption font-normal text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm aria-pressed:hover:bg-background"
-                  >
-                    <Icon className="size-4" />
-                    <span className="max-w-full truncate">{t(($) => $.view[mode])}</span>
-                  </Toggle>
-                ))}
-              </div>
+              <ViewModeSegmented
+                layouts={layouts}
+                layout={layout}
+                onSelect={(mode) => act.setViewMode(mode)}
+                label={t(($) => $.view.section)}
+                getModeLabel={(mode) => t(($) => $.view[mode])}
+              />
             )}
             <div className="space-y-3">
               {viewMode === "board" && (
@@ -2436,6 +2424,61 @@ export function IssueDisplayControls({
           </PopoverContent>
         </Popover>
 
+    </div>
+  );
+}
+
+const VIEW_MODE_PILL_SPRING = { type: "spring", stiffness: 500, damping: 38 } as const;
+
+function ViewModeSegmented<T extends string>({
+  layouts,
+  layout,
+  onSelect,
+  label,
+  getModeLabel,
+}: {
+  layouts: ReadonlyArray<{ mode: T; Icon: React.ComponentType<{ className?: string }> }>;
+  layout: T;
+  onSelect: (mode: T) => void;
+  label: string;
+  getModeLabel: (mode: T) => string;
+}) {
+  const indicatorId = useId();
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className={cn(
+        "mb-3 grid gap-0.5 rounded-lg bg-muted p-0.5",
+        layouts.length === 5 ? "grid-cols-5" : "grid-cols-4",
+      )}
+    >
+      {layouts.map(({ mode, Icon }) => {
+        const active = layout === mode;
+        const modeLabel = getModeLabel(mode);
+        return (
+          <Toggle
+            key={mode}
+            pressed={active}
+            onPressedChange={() => onSelect(mode)}
+            title={modeLabel}
+            className="relative h-auto min-w-0 flex-col gap-1 rounded-md px-0.5 py-1.5 text-caption font-normal text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-transparent aria-pressed:text-foreground aria-pressed:hover:bg-transparent"
+          >
+            {active && (
+              <motion.span
+                aria-hidden="true"
+                layoutId={indicatorId}
+                transition={reduceMotion ? { duration: 0 } : VIEW_MODE_PILL_SPRING}
+                className="pointer-events-none absolute inset-0 rounded-md bg-background shadow-sm"
+              />
+            )}
+            <Icon className="relative z-[1] size-4" />
+            <span className="relative z-[1] max-w-full truncate">{modeLabel}</span>
+          </Toggle>
+        );
+      })}
     </div>
   );
 }

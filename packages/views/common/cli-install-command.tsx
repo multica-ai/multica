@@ -55,7 +55,7 @@ export function CliInstallCommand({
 }: {
   labels: CliInstallCommandLabels;
   /** Palette overrides for surfaces that do not use the product tokens. */
-  classNames?: { list?: string; trigger?: string };
+  classNames?: { list?: string; trigger?: string; indicator?: string };
   children: (command: string) => ReactNode;
 }) {
   return (
@@ -64,6 +64,7 @@ export function CliInstallCommand({
         aria-label={labels.group}
         activateOnFocus
         className={classNames?.list}
+        indicatorClassName={classNames?.indicator}
       >
         {PLATFORMS.map((platform) => (
           <TabsTrigger

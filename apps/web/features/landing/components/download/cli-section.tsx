@@ -16,8 +16,9 @@ const SETUP_CMD = "multica setup";
  */
 const PLATFORM_TABS = {
   list: "border border-white/10 bg-white/5",
+  indicator: "bg-white/10 shadow-none dark:bg-white/10",
   trigger:
-    "text-site-inverse-muted hover:text-site-inverse-ink data-active:bg-white/10 data-active:text-site-inverse-ink",
+    "text-site-inverse-muted hover:text-site-inverse-ink data-active:text-site-inverse-ink",
 };
 
 /**

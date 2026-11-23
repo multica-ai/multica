@@ -31,6 +31,7 @@ import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { AppearanceSync } from "@multica/views/common/appearance-sync";
+import { MotionProvider } from "@multica/views/common/motion-provider";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
@@ -485,7 +486,8 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <AppearanceSync />
+      <MotionProvider>
+        <AppearanceSync />
       {runtimeConfigResult.ok ? (
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}
@@ -529,8 +531,9 @@ export default function App() {
           message={runtimeConfigResult.error.message}
         />
       )}
-      <Toaster />
-      {windowContext.kind === "main" && <UpdateNotification />}
+        <Toaster />
+        {windowContext.kind === "main" && <UpdateNotification />}
+      </MotionProvider>
     </ThemeProvider>
   );
 }
