@@ -10,8 +10,10 @@
 // It serves the part of the Composio v3.1 REST API that server/pkg/composio
 // calls (toolkits, auth configs, connect links, connected accounts, tools, tool
 // execution and tool-router sessions), plus a stand-in for the hosted connect
-// page: Allow finishes the connection, Cancel fails it. Every toolkit has a
-// Composio-managed auth config, and tool calls return canned data.
+// page: Allow finishes the connection, Cancel fails it. OAuth toolkits come
+// with a Composio-managed auth config; API-key toolkits get one when Multica
+// creates it, and their connect page asks for the key. Tool calls return
+// canned data.
 //
 // `up` appends a marked block to the environment's env file with
 // COMPOSIO_API_KEY, COMPOSIO_BASE_URL, COMPOSIO_STATE_SECRET and
@@ -58,39 +60,67 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 // ------------------------------------------------------------------ catalog ---
 
+const COLLAB = "Collaboration & Communication";
+const PRODUCTIVITY = "Productivity & Project Management";
+const DOCS = "Document & File Management";
+const DEV = "Developer Tools & DevOps";
+const DATA = "Data & Analytics";
+const AI = "AI & Machine Learning";
+const MARKETING = "Marketing & Social Media";
+const SUPPORT = "Sales & Customer Support";
+
+// [slug, name, category, auth]: "managed" toolkits sign in through Composio's
+// own OAuth app and come with an auth config; "api_key" and "bearer_token"
+// toolkits have none until Multica creates one, and their connect page asks
+// for the key. "none" toolkits need no account, so Multica does not list them.
 const TOOLKITS = [
-  ["gmail", "Gmail", "email"],
-  ["googlecalendar", "Google Calendar", "scheduling"],
-  ["outlook", "Outlook", "email"],
-  ["slack", "Slack", "communication"],
-  ["notion", "Notion", "productivity"],
-  ["googledrive", "Google Drive", "file storage"],
-  ["googledocs", "Google Docs", "documents"],
-  ["googlesheets", "Google Sheets", "spreadsheets"],
-  ["confluence", "Confluence", "documents"],
-  ["linear", "Linear", "project management"],
-  ["jira", "Jira", "project management"],
-  ["asana", "Asana", "project management"],
-  ["figma", "Figma", "design"],
-  ["sentry", "Sentry", "developer tools"],
-  ["posthog", "PostHog", "analytics"],
-  ["hubspot", "HubSpot", "crm"],
-  ["zendesk", "Zendesk", "customer support"],
-  ["intercom", "Intercom", "customer support"],
-  ["stripe", "Stripe", "payments"],
-  ["airtable", "Airtable", "databases"],
-  ["github", "GitHub", "developer tools"],
-  ["discord", "Discord", "communication"],
-  ["trello", "Trello", "project management"],
-  ["dropbox", "Dropbox", "file storage"],
-].map(([slug, name, category]) => ({
+  ["gmail", "Gmail", COLLAB, "managed"],
+  ["googlecalendar", "Google Calendar", "Scheduling & Booking", "managed"],
+  ["outlook", "Outlook", COLLAB, "managed"],
+  ["slack", "Slack", COLLAB, "managed"],
+  ["notion", "Notion", PRODUCTIVITY, "managed"],
+  ["googledrive", "Google Drive", DOCS, "managed"],
+  ["googledocs", "Google Docs", DOCS, "managed"],
+  ["googlesheets", "Google Sheets", PRODUCTIVITY, "managed"],
+  ["confluence", "Confluence", COLLAB, "managed"],
+  ["linear", "Linear", PRODUCTIVITY, "managed"],
+  ["jira", "Jira", PRODUCTIVITY, "managed"],
+  ["asana", "Asana", PRODUCTIVITY, "managed"],
+  ["figma", "Figma", "Design & Creative Tools", "managed"],
+  ["sentry", "Sentry", DEV, "managed"],
+  ["posthog", "PostHog", DATA, "api_key"],
+  ["hubspot", "HubSpot", "CRM", "managed"],
+  ["zendesk", "Zendesk", SUPPORT, "managed"],
+  ["intercom", "Intercom", SUPPORT, "managed"],
+  ["stripe", "Stripe", "Finance & Accounting", "managed"],
+  ["airtable", "Airtable", PRODUCTIVITY, "managed"],
+  ["github", "GitHub", DEV, "managed"],
+  ["discord", "Discord", COLLAB, "managed"],
+  ["trello", "Trello", PRODUCTIVITY, "managed"],
+  ["dropbox", "Dropbox", DOCS, "managed"],
+  ["mailchimp", "Mailchimp", MARKETING, "managed"],
+  ["tavily", "Tavily", DATA, "api_key"],
+  ["exa", "Exa", DATA, "bearer_token"],
+  ["firecrawl", "Firecrawl", DATA, "api_key"],
+  ["openai", "OpenAI", AI, "api_key"],
+  ["perplexityai", "Perplexity AI", AI, "api_key"],
+  ["elevenlabs", "ElevenLabs", AI, "api_key"],
+  ["sendgrid", "SendGrid", MARKETING, "api_key"],
+  ["datadog", "Datadog", DEV, "api_key"],
+  ["vercel", "Vercel", DEV, "bearer_token"],
+  ["shopify", "Shopify", "E-commerce", "api_key"],
+  ["hackernews", "Hacker News", "Entertainment & Media", "none"],
+].map(([slug, name, category, auth]) => ({
   slug,
   name,
-  logo: `https://logos.composio.dev/api/${slug}`,
-  description: `${name} through the local Composio stand-in.`,
-  categories: [category],
-  auth_schemes: ["OAUTH2"],
-  composio_managed_auth_schemes: ["OAUTH2"],
+  meta: {
+    logo: `https://logos.composio.dev/api/${slug}`,
+    description: `${name} through the local Composio stand-in.`,
+    categories: [{ id: category.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: category }],
+  },
+  no_auth: auth === "none",
+  auth_schemes: auth === "managed" ? ["oauth2"] : auth === "none" ? [] : [auth],
+  composio_managed_auth_schemes: auth === "managed" ? ["oauth2"] : [],
 }));
 
 // Slugs follow Composio's VERB_OBJECT naming, which is what the gateway
@@ -186,13 +216,18 @@ function cannedResult(toolSlug, args) {
 // ------------------------------------------------------------------- server ---
 
 function serve({ port, stateFile, watchFile }) {
-  const authConfigs = new Map(TOOLKITS.map((t) => [t.slug, `ac_${t.slug}`]));
+  const authConfigs = new Map(
+    TOOLKITS.filter((t) => t.composio_managed_auth_schemes.length > 0).map((t) => [
+      t.slug,
+      { id: `ac_${t.slug}`, scheme: "OAUTH2", managed: true },
+    ]),
+  );
   const links = new Map();
   const accounts = new Map();
   let seq = 1;
   let baseURL = "";
 
-  const slugOfAuthConfig = (id) => [...authConfigs.entries()].find(([, value]) => value === id)?.[0];
+  const slugOfAuthConfig = (id) => [...authConfigs.entries()].find(([, config]) => config.id === id)?.[0];
   const toolkitName = (slug) => TOOLKITS.find((t) => t.slug === slug)?.name ?? slug;
 
   function send(res, code, body) {
@@ -216,20 +251,31 @@ function serve({ port, stateFile, watchFile }) {
 
   function connectPage(token, link) {
     const name = toolkitName(link.slug);
+    const scheme = authConfigs.get(link.slug)?.scheme ?? "OAUTH2";
     const finish = (ok) => `/connect/finish?token=${encodeURIComponent(token)}&ok=${ok}`;
+    const keyLabel = scheme === "BEARER_TOKEN" ? "Token" : scheme === "BASIC" ? "Password" : "API key";
+    const body =
+      scheme === "OAUTH2"
+        ? `<h1>Multica wants to access your ${name} account</h1>
+<p>In production this step is ${name}'s own consent screen, reached through Composio's connect link.</p>
+<div class="row"><a class="no" id="deny" href="${finish(0)}">Cancel</a><a class="ok" id="allow" href="${finish(1)}">Allow</a></div>`
+        : `<h1>Connect ${name}</h1>
+<p>In production Composio's connect page asks for your ${name} ${scheme === "API_KEY" ? keyLabel : keyLabel.toLowerCase()}. The fake accepts anything.</p>
+<form action="/connect/finish" method="get"><input type="hidden" name="token" value="${token}"/><input type="hidden" name="ok" value="1"/>
+<label>${keyLabel}<input id="key" name="key" type="password" required placeholder="${keyLabel}"/></label>
+<div class="row"><a class="no" id="deny" href="${finish(0)}">Cancel</a><button class="ok" id="allow" type="submit">Connect</button></div></form>`;
     return `<!doctype html><html><head><meta charset="utf-8"><title>Connect ${name}</title><style>
 body{font-family:-apple-system,system-ui,sans-serif;background:#f5f5f7;margin:0;display:flex;align-items:center;justify-content:center;height:100vh}
 .card{background:#fff;border-radius:16px;padding:36px 40px;width:420px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
 .tag{display:inline-block;background:#fff3cd;color:#7a5b00;font-size:12px;padding:3px 8px;border-radius:6px;margin-bottom:18px}
 h1{font-size:20px;margin:0 0 8px}p{color:#555;font-size:14px;line-height:1.5}
 .logo{width:44px;height:44px;border-radius:10px;margin-bottom:14px}
-.row{display:flex;gap:10px;margin-top:24px}a{flex:1;text-align:center;padding:10px 0;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600}
-.ok{background:#111;color:#fff}.no{background:#eee;color:#333}</style></head><body><div class="card">
+.row{display:flex;gap:10px;margin-top:24px}a,button{flex:1;text-align:center;padding:10px 0;border-radius:8px;border:0;text-decoration:none;font:600 14px inherit;cursor:pointer}
+.ok{background:#111;color:#fff}.no{background:#eee;color:#333}
+label{display:block;font-size:13px;font-weight:600;margin-top:16px}input[type=password]{display:block;box-sizing:border-box;width:100%;margin-top:6px;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px}</style></head><body><div class="card">
 <div class="tag">Local stand-in for Composio's hosted connect page</div><br/>
 <img class="logo" alt="" src="https://logos.composio.dev/api/${link.slug}"/>
-<h1>Multica wants to access your ${name} account</h1>
-<p>In production this step is ${name}'s own consent screen, reached through Composio's connect link.</p>
-<div class="row"><a class="no" id="deny" href="${finish(0)}">Cancel</a><a class="ok" id="allow" href="${finish(1)}">Allow</a></div>
+${body}
 </div></body></html>`;
   }
 
@@ -254,11 +300,12 @@ h1{font-size:20px;margin:0 0 8px}p{color:#555;font-size:14px;line-height:1.5}
       if (url.searchParams.get("ok") === "1") {
         const id = `ca_${link.slug}_${seq++}`;
         const now = new Date().toISOString();
+        const config = authConfigs.get(link.slug);
         accounts.set(id, {
           id,
           user_id: link.user_id,
           auth_config_id: link.auth_config_id,
-          auth_config: { id: link.auth_config_id, auth_scheme: "OAUTH2", is_composio_managed: true },
+          auth_config: { id: link.auth_config_id, auth_scheme: config?.scheme ?? "OAUTH2", is_composio_managed: Boolean(config?.managed) },
           toolkit: { slug: link.slug },
           status: "ACTIVE",
           created_at: now,
@@ -278,34 +325,61 @@ h1{font-size:20px;margin:0 0 8px}p{color:#555;font-size:14px;line-height:1.5}
 
     if (method === "GET" && api === "/toolkits") {
       const category = url.searchParams.get("category");
-      const items = category ? TOOLKITS.filter((t) => t.categories.includes(category)) : TOOLKITS;
+      const items = category ? TOOLKITS.filter((t) => t.meta.categories.some((c) => c.id === category)) : TOOLKITS;
       return send(res, 200, { items, total_items: items.length });
     }
     if (method === "GET" && api.startsWith("/toolkits/")) {
       const slug = decodeURIComponent(api.slice("/toolkits/".length)).toLowerCase();
       const toolkit = TOOLKITS.find((t) => t.slug === slug);
-      return toolkit ? send(res, 200, toolkit) : send(res, 404, { error: { message: "toolkit not found" } });
+      if (!toolkit) return send(res, 404, { error: { message: "toolkit not found" } });
+      // Unlike the list, the single-toolkit response has no auth_schemes or
+      // no_auth: each scheme is an auth_config_details entry.
+      const { auth_schemes: schemes, no_auth: noAuth, ...rest } = toolkit;
+      const modes = noAuth ? ["NO_AUTH"] : schemes.map((s) => s.toUpperCase());
+      return send(res, 200, {
+        ...rest,
+        auth_config_details: modes.map((mode) => ({
+          mode,
+          name: `${slug}_${mode.toLowerCase()}`,
+          fields: {
+            auth_config_creation: { required: [], optional: [] },
+            connected_account_initiation: {
+              required: mode === "OAUTH2" || mode === "NO_AUTH" ? [] : [{ name: "generic_api_key", displayName: "API Key", type: "string", required: true, default: null }],
+              optional: [],
+            },
+          },
+        })),
+      });
     }
     if (method === "GET" && api === "/auth_configs") {
       const wanted = (url.searchParams.get("toolkit_slug") ?? "").split(",").filter(Boolean);
       const items = [...authConfigs.entries()]
         .filter(([slug]) => wanted.length === 0 || wanted.includes(slug))
-        .map(([slug, id]) => ({
-          id,
+        .map(([slug, config]) => ({
+          id: config.id,
           name: `${toolkitName(slug)} (fake)`,
           toolkit: { slug },
-          auth_scheme: "OAUTH2",
-          is_composio_managed: true,
+          auth_scheme: config.scheme,
+          is_composio_managed: config.managed,
           status: "ENABLED",
           last_updated_at: "2026-01-01T00:00:00Z",
         }));
       return send(res, 200, { items, total_items: items.length });
     }
     if (method === "POST" && api === "/auth_configs") {
-      const slug = (await readBody(req))?.toolkit?.slug;
-      if (!slug) return send(res, 400, { error: { message: "toolkit.slug is required" } });
-      authConfigs.set(slug, `ac_${slug}`);
-      return send(res, 201, { auth_config: { id: `ac_${slug}`, toolkit: { slug }, is_composio_managed: true } });
+      const body = await readBody(req);
+      const slug = body?.toolkit?.slug;
+      const toolkit = TOOLKITS.find((t) => t.slug === slug);
+      if (!toolkit) return send(res, 400, { error: { message: "toolkit.slug must name a known toolkit" } });
+      const custom = body.auth_config?.type === "use_custom_auth";
+      const scheme = custom ? String(body.auth_config.authScheme ?? "").toUpperCase() : "OAUTH2";
+      const offered = custom ? toolkit.auth_schemes : toolkit.composio_managed_auth_schemes;
+      if (!offered.some((s) => s.toUpperCase() === scheme)) {
+        return send(res, 400, { error: { message: `${slug} does not offer ${custom ? scheme : "managed"} auth` } });
+      }
+      const config = { id: `ac_${slug}`, scheme, managed: !custom };
+      authConfigs.set(slug, config);
+      return send(res, 201, { auth_config: { id: config.id, auth_scheme: scheme, is_composio_managed: config.managed }, toolkit: { slug } });
     }
     if (method === "POST" && api === "/connected_accounts/link") {
       const body = await readBody(req);

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -454,6 +455,97 @@ func TestListToolkits_Success(t *testing.T) {
 	}
 	if len(resp.Items) != 2 || resp.Items[0].Slug != "notion" {
 		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestToolkitPrimaryCategory(t *testing.T) {
+	var listed composio.ListToolkitsResponse
+	raw := `{"items":[
+		{"slug":"github","meta":{"categories":[{"id":"developer-tools","name":"Developer Tools"},{"id":"productivity","name":"Productivity"}]}},
+		{"slug":"legacy","categories":["email"],"meta":{"categories":[{"id":"ignored","name":"Ignored"}]}},
+		{"slug":"bare"}
+	]}`
+	if err := json.Unmarshal([]byte(raw), &listed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := []composio.ToolkitCategory{
+		{ID: "developer-tools", Name: "Developer Tools"},
+		{Name: "email"},
+		{},
+	}
+	for i, tk := range listed.Items {
+		if got := tk.PrimaryCategory(); got != want[i] {
+			t.Errorf("%s: PrimaryCategory = %+v, want %+v", tk.Slug, got, want[i])
+		}
+	}
+}
+
+// GET /toolkits/{slug} reports auth schemes only as auth_config_details.
+func TestGetToolkit_AuthModesFromDetails(t *testing.T) {
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/toolkits/openai" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"slug": "openai", "name": "OpenAI", "composio_managed_auth_schemes": [],
+			"meta": {"categories": [{"id": "ai-machine-learning", "name": "AI & Machine Learning"}]},
+			"auth_config_details": [
+				{"mode": "API_KEY", "name": "openai_api_key", "fields": {
+					"auth_config_creation": {"required": [], "optional": []},
+					"connected_account_initiation": {"required": [{"name": "generic_api_key", "displayName": "API Key", "type": "string", "required": true, "default": null}], "optional": []}
+				}},
+				{"mode": "BASIC", "fields": {
+					"auth_config_creation": {"required": [{"name": "subdomain", "type": "string", "required": true, "default": null}]}
+				}},
+				{"mode": "BEARER_TOKEN", "fields": {
+					"auth_config_creation": {"required": [{"name": "region", "type": "string", "required": true, "default": "us"}]}
+				}}
+			]
+		}`))
+	})
+	tk, err := c.GetToolkit(context.Background(), "openai")
+	if err != nil {
+		t.Fatalf("GetToolkit: %v", err)
+	}
+	if got, want := tk.AuthModes(), []string{"API_KEY", "BASIC", "BEARER_TOKEN"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("AuthModes = %v, want %v", got, want)
+	}
+	for mode, want := range map[string]bool{"api_key": false, "BASIC": true, "BEARER_TOKEN": false, "OAUTH2": false} {
+		if got := tk.NeedsProjectCredentials(mode); got != want {
+			t.Errorf("NeedsProjectCredentials(%s) = %v, want %v", mode, got, want)
+		}
+	}
+	listed := composio.Toolkit{AuthSchemes: []string{"oauth2"}, AuthConfigDetails: tk.AuthConfigDetails}
+	if got := listed.AuthModes(); !reflect.DeepEqual(got, []string{"oauth2"}) {
+		t.Errorf("AuthModes prefers auth_schemes, got %v", got)
+	}
+}
+
+func TestCreateCustomAuthConfig_Body(t *testing.T) {
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/auth_configs" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		readJSON(t, r, &body)
+		want := map[string]any{
+			"toolkit": map[string]any{"slug": "tavily"},
+			"auth_config": map[string]any{
+				"type":        "use_custom_auth",
+				"authScheme":  "API_KEY",
+				"name":        "Tavily",
+				"credentials": map[string]any{},
+			},
+		}
+		if !reflect.DeepEqual(body, want) {
+			t.Errorf("body = %#v, want %#v", body, want)
+		}
+		writeJSON(t, w, http.StatusCreated, map[string]any{"auth_config": map[string]any{"id": "ac_tavily"}})
+	})
+	id, err := c.CreateCustomAuthConfig(context.Background(), "tavily", "api_key", "Tavily")
+	if err != nil || id != "ac_tavily" {
+		t.Fatalf("CreateCustomAuthConfig = %q, %v", id, err)
 	}
 }
 

@@ -5050,9 +5050,11 @@ const AppCatalogEntrySchema = z.object({
   name: z.string().default(""),
   logo: z.string().optional().catch(undefined),
   category: z.string().optional().catch(undefined),
+  category_id: z.string().optional().catch(undefined),
   curated: z.boolean().default(false).catch(false),
   recommended_scope: AppAccountScopeSchema.optional(),
   allowed: z.boolean().optional().catch(undefined),
+  connect_method: z.enum(["oauth", "key"]).optional().catch(undefined),
 }).loose();
 
 export const AppCatalogResponseSchema = z.object({

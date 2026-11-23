@@ -80,10 +80,13 @@ export interface AppCatalogEntry {
   name: string;
   logo?: string;
   category?: string;
+  category_id?: string;
   curated: boolean;
   recommended_scope?: AppAccountScope;
   /** False only in the admin's full view for apps the catalog leaves out. */
   allowed?: boolean;
+  /** "key" when connecting asks the member for an API key or token. */
+  connect_method?: "oauth" | "key";
 }
 
 export type AppCallOutcome =
