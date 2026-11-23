@@ -836,4 +836,3 @@ function environmentMeta(
   }
   return t(($) => $.environments.started_ago, { time: timeAgo(env.started_at) });
 }
-

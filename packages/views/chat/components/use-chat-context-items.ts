@@ -122,4 +122,3 @@ export function useChatContextItems(wsId: string): MentionItem[] {
     return [...currentItems, ...recentItems];
   }, [currentIssue, currentProject, recentQueries, visibleRecentEntries]);
 }
-

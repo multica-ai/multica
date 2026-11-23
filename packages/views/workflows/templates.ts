@@ -28,4 +28,3 @@ export const WORKFLOW_TEMPLATES: {
     ],
   },
 ];
-
