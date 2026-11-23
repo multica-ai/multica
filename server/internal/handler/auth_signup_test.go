@@ -108,6 +108,9 @@ type mockDB struct {
 }
 
 func (m *mockDB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	if strings.HasPrefix(sql, "-- name: GetPlatformSettings :one\n") {
+		return &mockRow{jsonValue: []byte("{}")}
+	}
 	if strings.HasPrefix(sql, "-- name: HasPendingInvitationForEmail :one\n") {
 		m.invitationLookups++
 		m.invitationEmail = args[0].(string)
@@ -124,11 +127,19 @@ type mockRow struct {
 	pgx.Row
 	err       error
 	boolValue *bool
+	jsonValue []byte
 }
 
 func (m *mockRow) Scan(dest ...interface{}) error {
 	if m.err != nil {
 		return m.err
+	}
+	if m.jsonValue != nil {
+		value, ok := dest[0].(*[]byte)
+		if !ok {
+			return fmt.Errorf("expected *[]byte destination, got %T", dest[0])
+		}
+		*value = m.jsonValue
 	}
 	if m.boolValue != nil {
 		value, ok := dest[0].(*bool)
