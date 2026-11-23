@@ -669,7 +669,7 @@ func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 			out = append(out, ToolkitView{
 				Slug:       tk.Slug,
 				Name:       tk.Name,
-				LogoURL:    toolkitLogoURL(slug, tk.LogoURL),
+				LogoURL:    toolkitLogoURL(slug, tk.Logo()),
 				Category:   category.Name,
 				CategoryID: category.ID,
 				// Every surfaced toolkit is connectable by construction. The
@@ -831,11 +831,7 @@ func (s *Service) verifyAccountOwnership(ctx context.Context, connectedAccountID
 	// config the connect link used. An empty expected value (state missing it,
 	// or a resolver gap) is rejected rather than skipped — skipping is the
 	// fail-open hole that let a cross-toolkit account id be bound here.
-	accountAuthConfigID := acct.AuthConfigID
-	if accountAuthConfigID == "" {
-		accountAuthConfigID = acct.AuthConfig.ID
-	}
-	if expectedAuthConfigID == "" || accountAuthConfigID != expectedAuthConfigID {
+	if expectedAuthConfigID == "" || acct.AuthConfig.ID != expectedAuthConfigID {
 		return ErrAccountVerification
 	}
 	return nil
