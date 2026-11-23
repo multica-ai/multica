@@ -1947,6 +1947,13 @@ func (q *Queries) ClearAgentThinkingLevel(ctx context.Context, id pgtype.UUID) (
 const completeAgentTask = `-- name: CompleteAgentTask :one
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2,
+    context = CASE
+        WHEN issue_id IS NOT NULL
+          AND COALESCE(context->>'type', '') <> 'triage'
+          AND COALESCE(context->>'manual_issue_dispatch', '') <> 'true'
+        THEN COALESCE(context, '{}'::jsonb) || '{"issue_automatic_completion":true}'::jsonb
+        ELSE context
+    END,
     session_id = CASE WHEN $5 THEN NULL ELSE $3 END,
     work_dir = $4,
     durable_work_dir = COALESCE($6, durable_work_dir),
@@ -5038,33 +5045,41 @@ func (q *Queries) IsTaskSessionRetired(ctx context.Context, arg IsTaskSessionRet
 }
 
 const issueAgentHasConsecutiveRunFailures = `-- name: IssueAgentHasConsecutiveRunFailures :one
-SELECT count(*) FILTER (WHERE status = 'failed') = 3
-FROM (
-    SELECT status
-    FROM agent_task_queue
-    WHERE issue_id = $1 AND agent_id = $2
-      AND status IN ('completed', 'failed')
-      AND COALESCE(context->>'type', '') <> 'triage'
-      AND COALESCE(context->>'preserve_issue_failure_streak', '') <> 'true'
-      AND id IS DISTINCT FROM $3::uuid
-    ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
-    LIMIT 3
-) outcomes
+SELECT EXISTS (
+    SELECT 1
+    FROM (
+        SELECT status,
+               lag(status, 1) OVER outcome_order AS next_status,
+               lag(status, 2) OVER outcome_order AS second_next_status,
+               bool_or(status = 'completed' AND
+                       COALESCE(context->>'issue_automatic_completion', '') <> 'true')
+                   OVER (outcome_order ROWS UNBOUNDED PRECEDING) AS reset_seen
+        FROM agent_task_queue
+        WHERE issue_id = $1 AND agent_id = $2
+          AND status IN ('completed', 'failed')
+          AND COALESCE(context->>'type', '') <> 'triage'
+        WINDOW outcome_order AS (
+            ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+        )
+    ) outcomes
+    WHERE NOT reset_seen
+      AND status = 'failed' AND next_status = 'failed' AND second_next_status = 'failed'
+)
 `
 
 type IssueAgentHasConsecutiveRunFailuresParams struct {
-	IssueID       pgtype.UUID `json:"issue_id"`
-	AgentID       pgtype.UUID `json:"agent_id"`
-	ExcludeTaskID pgtype.UUID `json:"exclude_task_id"`
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
 }
 
-// Check the latest execution outcomes, ordered by completion. Cancelled and
-// triage tasks do not establish whether this agent can execute the issue.
+// Use committed outcomes. A regular automatic success breaks a streak before
+// it reaches three, but only a manual success clears an existing pause. A
+// completion written before the pause feature is the legacy history boundary.
 func (q *Queries) IssueAgentHasConsecutiveRunFailures(ctx context.Context, arg IssueAgentHasConsecutiveRunFailuresParams) (bool, error) {
-	row := q.db.QueryRow(ctx, issueAgentHasConsecutiveRunFailures, arg.IssueID, arg.AgentID, arg.ExcludeTaskID)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
+	row := q.db.QueryRow(ctx, issueAgentHasConsecutiveRunFailures, arg.IssueID, arg.AgentID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
@@ -5971,20 +5986,28 @@ WHERE recovery.author_type = 'system'
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
   -- A pause blocks another run, but exhausted signals still need their
-  -- terminal explanation and settlement. The offset is the recovery attempt
-  -- budget (delegatedFailureRecoveryMaxTaskAttempts) minus one.
-  AND CASE WHEN (
-      SELECT count(*) FILTER (WHERE status = 'failed') = 3
+  -- terminal explanation and settlement. Use the same ordered outcomes as
+  -- IssueAgentHasConsecutiveRunFailures, and skip two attempts of the budget
+  -- delegatedFailureRecoveryMaxTaskAttempts before checking for exhaustion.
+  AND CASE WHEN EXISTS (
+      SELECT 1
       FROM (
-          SELECT status
-          FROM agent_task_queue outcome
-          WHERE outcome.issue_id = source_issue.id AND outcome.agent_id = source_agent.id
+          SELECT status,
+                 lag(status, 1) OVER outcome_order AS next_status,
+                 lag(status, 2) OVER outcome_order AS second_next_status,
+                 bool_or(status = 'completed' AND
+                         COALESCE(context->>'issue_automatic_completion', '') <> 'true')
+                     OVER (outcome_order ROWS UNBOUNDED PRECEDING) AS reset_seen
+          FROM agent_task_queue
+          WHERE issue_id = source_issue.id AND agent_id = source_agent.id
             AND status IN ('completed', 'failed')
             AND COALESCE(context->>'type', '') <> 'triage'
-            AND COALESCE(context->>'preserve_issue_failure_streak', '') <> 'true'
-          ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
-          LIMIT 3
-      ) recent_outcomes
+          WINDOW outcome_order AS (
+              ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+          )
+      ) outcomes
+      WHERE NOT reset_seen
+        AND status = 'failed' AND next_status = 'failed' AND second_next_status = 'failed'
   ) THEN EXISTS (
       SELECT 1
       FROM agent_task_queue attempt
@@ -7671,81 +7694,6 @@ func (q *Queries) NextDeferredTaskFireAtForRuntimes(ctx context.Context, arg Nex
 	var column_1 pgtype.Timestamptz
 	err := row.Scan(&column_1)
 	return column_1, err
-}
-
-const preserveIssueAgentFailureStreak = `-- name: PreserveIssueAgentFailureStreak :one
-UPDATE agent_task_queue
-SET context = COALESCE(context, '{}'::jsonb) || '{"preserve_issue_failure_streak":true}'::jsonb
-WHERE id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
-`
-
-func (q *Queries) PreserveIssueAgentFailureStreak(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
-	row := q.db.QueryRow(ctx, preserveIssueAgentFailureStreak, id)
-	var i AgentTaskQueue
-	err := row.Scan(
-		&i.ID,
-		&i.AgentID,
-		&i.IssueID,
-		&i.Status,
-		&i.Priority,
-		&i.DispatchedAt,
-		&i.StartedAt,
-		&i.CompletedAt,
-		&i.Result,
-		&i.Error,
-		&i.CreatedAt,
-		&i.Context,
-		&i.RuntimeID,
-		&i.SessionID,
-		&i.WorkDir,
-		&i.TriggerCommentID,
-		&i.ChatSessionID,
-		&i.AutopilotRunID,
-		&i.Attempt,
-		&i.MaxAttempts,
-		&i.ParentTaskID,
-		&i.FailureReason,
-		&i.TriggerSummary,
-		&i.ForceFreshSession,
-		&i.IsLeaderTask,
-		&i.WaitReason,
-		&i.InitiatorUserID,
-		&i.HandoffNote,
-		&i.PrepareLeaseExpiresAt,
-		&i.SquadID,
-		&i.RuntimeMcpOverlay,
-		&i.EscalationForTaskID,
-		&i.FireAt,
-		&i.OriginatorUserID,
-		&i.RuntimeConnectedApps,
-		&i.CoalescedCommentIds,
-		&i.DeliveredCommentIds,
-		&i.ChatInputTaskID,
-		&i.ChatFinalizeDeferredAt,
-		&i.OriginatorSource,
-		&i.DelegatedFromTaskID,
-		&i.RetryOfTaskID,
-		&i.RerunOfTaskID,
-		&i.RuleVersionID,
-		&i.TriggerEvidenceKind,
-		&i.TriggerEvidenceRefID,
-		&i.AccountableUserID,
-		&i.SessionRolloutMissing,
-		&i.RetiredSessionID,
-		&i.QuickActionsDisabled,
-		&i.RegenerateQuickActionsFor,
-		&i.BranchName,
-		&i.DurableWorkDir,
-		&i.ChannelContextRevision,
-		&i.CommentThreadID,
-		&i.CancelledByType,
-		&i.CancelledByID,
-		&i.CancelledByName,
-		&i.IssueSnapshot,
-		&i.WorkflowStep,
-	)
-	return i, err
 }
 
 const promoteDeferredChannelIssueTask = `-- name: PromoteDeferredChannelIssueTask :one

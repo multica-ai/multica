@@ -1102,6 +1102,13 @@ RETURNING *;
 -- pointing at the same id resurrects it on the next run.
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2,
+    context = CASE
+        WHEN issue_id IS NOT NULL
+          AND COALESCE(context->>'type', '') <> 'triage'
+          AND COALESCE(context->>'manual_issue_dispatch', '') <> 'true'
+        THEN COALESCE(context, '{}'::jsonb) || '{"issue_automatic_completion":true}'::jsonb
+        ELSE context
+    END,
     session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE $3 END,
     work_dir = $4,
     durable_work_dir = COALESCE(sqlc.narg('durable_work_dir'), durable_work_dir),
@@ -1212,26 +1219,29 @@ ORDER BY terminal_at DESC
 LIMIT 1;
 
 -- name: IssueAgentHasConsecutiveRunFailures :one
--- Check the latest execution outcomes, ordered by completion. Cancelled and
--- triage tasks do not establish whether this agent can execute the issue.
-SELECT count(*) FILTER (WHERE status = 'failed') = 3
-FROM (
-    SELECT status
-    FROM agent_task_queue
-    WHERE issue_id = $1 AND agent_id = $2
-      AND status IN ('completed', 'failed')
-      AND COALESCE(context->>'type', '') <> 'triage'
-      AND COALESCE(context->>'preserve_issue_failure_streak', '') <> 'true'
-      AND id IS DISTINCT FROM sqlc.narg(exclude_task_id)::uuid
-    ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
-    LIMIT 3
-) outcomes;
-
--- name: PreserveIssueAgentFailureStreak :one
-UPDATE agent_task_queue
-SET context = COALESCE(context, '{}'::jsonb) || '{"preserve_issue_failure_streak":true}'::jsonb
-WHERE id = $1
-RETURNING *;
+-- Use committed outcomes. A regular automatic success breaks a streak before
+-- it reaches three, but only a manual success clears an existing pause. A
+-- completion written before the pause feature is the legacy history boundary.
+SELECT EXISTS (
+    SELECT 1
+    FROM (
+        SELECT status,
+               lag(status, 1) OVER outcome_order AS next_status,
+               lag(status, 2) OVER outcome_order AS second_next_status,
+               bool_or(status = 'completed' AND
+                       COALESCE(context->>'issue_automatic_completion', '') <> 'true')
+                   OVER (outcome_order ROWS UNBOUNDED PRECEDING) AS reset_seen
+        FROM agent_task_queue
+        WHERE issue_id = $1 AND agent_id = $2
+          AND status IN ('completed', 'failed')
+          AND COALESCE(context->>'type', '') <> 'triage'
+        WINDOW outcome_order AS (
+            ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+        )
+    ) outcomes
+    WHERE NOT reset_seen
+      AND status = 'failed' AND next_status = 'failed' AND second_next_status = 'failed'
+);
 
 -- name: GetLatestTaskRolloutMissing :one
 -- Reports whether the most recent terminal task for (agent_id, issue_id)
@@ -2206,20 +2216,28 @@ WHERE recovery.author_type = 'system'
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
   -- A pause blocks another run, but exhausted signals still need their
-  -- terminal explanation and settlement. The offset is the recovery attempt
-  -- budget (delegatedFailureRecoveryMaxTaskAttempts) minus one.
-  AND CASE WHEN (
-      SELECT count(*) FILTER (WHERE status = 'failed') = 3
+  -- terminal explanation and settlement. Use the same ordered outcomes as
+  -- IssueAgentHasConsecutiveRunFailures, and skip two attempts of the budget
+  -- delegatedFailureRecoveryMaxTaskAttempts before checking for exhaustion.
+  AND CASE WHEN EXISTS (
+      SELECT 1
       FROM (
-          SELECT status
-          FROM agent_task_queue outcome
-          WHERE outcome.issue_id = source_issue.id AND outcome.agent_id = source_agent.id
+          SELECT status,
+                 lag(status, 1) OVER outcome_order AS next_status,
+                 lag(status, 2) OVER outcome_order AS second_next_status,
+                 bool_or(status = 'completed' AND
+                         COALESCE(context->>'issue_automatic_completion', '') <> 'true')
+                     OVER (outcome_order ROWS UNBOUNDED PRECEDING) AS reset_seen
+          FROM agent_task_queue
+          WHERE issue_id = source_issue.id AND agent_id = source_agent.id
             AND status IN ('completed', 'failed')
             AND COALESCE(context->>'type', '') <> 'triage'
-            AND COALESCE(context->>'preserve_issue_failure_streak', '') <> 'true'
-          ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
-          LIMIT 3
-      ) recent_outcomes
+          WINDOW outcome_order AS (
+              ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+          )
+      ) outcomes
+      WHERE NOT reset_seen
+        AND status = 'failed' AND next_status = 'failed' AND second_next_status = 'failed'
   ) THEN EXISTS (
       SELECT 1
       FROM agent_task_queue attempt

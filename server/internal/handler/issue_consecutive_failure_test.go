@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -29,6 +31,8 @@ func TestIssueDispatchAfterConsecutiveFailures(t *testing.T) {
 		success          bool
 		successByOther   bool
 		automaticSuccess bool
+		legacySuccess    bool
+		failureAfter     bool
 		manual           bool
 		wantQueued       bool
 	}{
@@ -37,6 +41,8 @@ func TestIssueDispatchAfterConsecutiveFailures(t *testing.T) {
 		{name: "successful manual run reopens automatic dispatch", failedRuns: 3, success: true, wantQueued: true},
 		{name: "another agent's success leaves the streak intact", failedRuns: 3, success: true, successByOther: true},
 		{name: "an already running automatic task cannot reopen dispatch", failedRuns: 3, automaticSuccess: true},
+		{name: "automatic success before the pause breaks the streak", failedRuns: 2, automaticSuccess: true, failureAfter: true, wantQueued: true},
+		{name: "legacy success keeps recovered issues runnable", failedRuns: 3, legacySuccess: true, wantQueued: true},
 		{name: "human can explicitly dispatch after three failures", failedRuns: 3, manual: true, wantQueued: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,6 +98,20 @@ func TestIssueDispatchAfterConsecutiveFailures(t *testing.T) {
 				if _, err := testHandler.TaskService.CompleteTask(ctx, automaticID, []byte("{}"), "", "", "", false, "", ""); err != nil {
 					t.Fatalf("complete already running automatic task: %v", err)
 				}
+			}
+			if tc.legacySuccess {
+				at := now.Add(-time.Minute)
+				dbfx.Task(t, agentID, testutil.Cols{
+					"issue_id": issue.ID, "runtime_id": runtimeID,
+					"status": "completed", "created_at": at, "started_at": at, "completed_at": at,
+				})
+			}
+			if tc.failureAfter {
+				at := time.Now()
+				dbfx.Task(t, agentID, testutil.Cols{
+					"issue_id": issue.ID, "runtime_id": runtimeID,
+					"status": "failed", "created_at": at, "started_at": at, "completed_at": at,
+				})
 			}
 			if tc.manual {
 				_, err = testHandler.TaskService.EnqueueTaskForIssueByActor(ctx, issue, issue.CreatorID)
@@ -213,4 +233,71 @@ func TestConcurrentAutomaticSuccessesDoNotClearIssueFailurePause(t *testing.T) {
 	if _, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, issue); !errors.Is(err, service.ErrIssueAgentConsecutiveFailures) {
 		t.Fatalf("automatic dispatch after concurrent completions: %v", err)
 	}
+}
+
+func TestAutomaticCompletionOverlappingThirdIssueFailure(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := t.Context()
+	runtimeID := dbfx.Runtime(t, "Overlapping issue outcomes runtime")
+	agentID := dbfx.Agent(t, "Overlapping issue outcomes agent "+uuid.NewString(), runtimeID)
+	issueID := parseUUID(dbfx.Issue(t, "Third issue failure overlaps an automatic completion", testutil.Cols{
+		"assignee_type": "agent", "assignee_id": agentID,
+	}))
+	issue, err := testHandler.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for _, minutesAgo := range []int{2, 1} {
+		at := now.Add(-time.Duration(minutesAgo) * time.Minute)
+		dbfx.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "runtime_id": runtimeID, "status": "failed",
+			"created_at": at, "started_at": at, "completed_at": at,
+		})
+	}
+	running := testutil.Cols{"issue_id": issueID, "runtime_id": runtimeID, "status": "running", "started_at": now.Add(-3 * time.Minute)}
+	failedID := parseUUID(dbfx.Task(t, agentID, running))
+	completedID := parseUUID(dbfx.Task(t, agentID, running))
+
+	failService := service.NewTaskService(testHandler.Queries, beforeIssueFailureCommitStarter{
+		base: testPool,
+		beforeCommit: func(ctx context.Context) error {
+			// Keep the third failure invisible while the other run reports success.
+			_, err := testHandler.TaskService.CompleteTask(ctx, completedID, []byte("{}"), "", "", "", false, "", "")
+			return err
+		},
+	}, testHandler.TaskService.Hub, testHandler.TaskService.Bus)
+	if _, err := failService.FailTask(ctx, failedID, "process failed", "", "", "", "agent_error.process_failure", false, "", ""); err != nil {
+		t.Fatalf("fail third run: %v", err)
+	}
+	if _, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, issue); !errors.Is(err, service.ErrIssueAgentConsecutiveFailures) {
+		t.Fatalf("automatic dispatch after overlapping terminal reports: %v", err)
+	}
+}
+
+type beforeIssueFailureCommitStarter struct {
+	base         service.TxStarter
+	beforeCommit func(context.Context) error
+}
+
+func (s beforeIssueFailureCommitStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.base.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return beforeIssueFailureCommitTx{Tx: tx, beforeCommit: s.beforeCommit}, nil
+}
+
+type beforeIssueFailureCommitTx struct {
+	pgx.Tx
+	beforeCommit func(context.Context) error
+}
+
+func (tx beforeIssueFailureCommitTx) Commit(ctx context.Context) error {
+	if err := tx.beforeCommit(ctx); err != nil {
+		return err
+	}
+	return tx.Tx.Commit(ctx)
 }
