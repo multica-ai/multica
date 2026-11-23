@@ -288,6 +288,17 @@ Les runtimes intégrés **Codex** et **Claude Code** réutilisent par défaut de
 Lorsqu'elles sont injectées directement dans l'environnement du processus (y compris pour les profils de runtime personnalisés et les exécutions avec `MULTICA_WARM_POOL=0`), ces valeurs se trouvent dans l'environnement réel du processus du runtime. Tout processus enfant lancé par le runtime hérite par défaut de toutes ces valeurs, y compris `MULTICA_TOKEN`. Si un processus enfant ne doit pas détenir cet identifiant, retirez-le explicitement ; ne comptez pas sur une isolation des processus qui n'existe pas. L'exception va dans l'autre sens : les outils qui filtrent l'environnement de leurs propres sous-processus peuvent exiger une règle d'autorisation explicite. Par exemple, l'outil shell de Codex écarte les noms contenant `TOKEN`, `KEY` ou `SECRET` ; le daemon installe donc une politique shell gérée qui autorise les variables d'exécution requises. Conservez le jeton uniquement dans les environnements de processus — jamais dans un prompt, un journal, un fichier du dépôt ou une configuration persistante. Un processus enfant partage l'identité et les permissions de l'exécution parente ; il ne reçoit pas de nouvelle identité à la portée indépendante.
 </Callout>
 
+### Lancement via un gestionnaire de secrets [#secrets-managers]
+
+Certaines équipes démarrent l'agent via un gestionnaire de secrets, avec une commande comme `doppler run -- claude`. Le gestionnaire de secrets démarre après le daemon et reconstruit l'environnement de l'agent à partir de votre projet de secrets. Si ce projet contient aussi un `MULTICA_TOKEN`, souvent un jeton personnel `mul_` conservé pour des scripts, il remplace le jeton de l'exécution, et chaque appel au CLI Multica dans l'exécution échoue avec `agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token`. Quand le CLI voit un jeton `mul_` à côté de `MULTICA_TASK_ID`, l'erreur renvoie à cette section.
+
+Donnez la priorité aux valeurs du daemon :
+
+- **Doppler** : ajoutez `--preserve-env=MULTICA_TOKEN` avant `--`, par exemple `doppler run --preserve-env=MULTICA_TOKEN -- claude`. Si le projet définit d'autres variables `MULTICA_`, listez-les séparées par des virgules : `--preserve-env=MULTICA_TOKEN,MULTICA_SERVER_URL`. Doppler n'accepte que la forme avec `=` ; `--preserve-env MULTICA_TOKEN` avec une espace ne fonctionne pas. L'option est sans effet avec `--mount`.
+- **Autres outils** : utilisez l'option de l'outil qui donne la priorité aux variables d'environnement existantes, ou retirez les variables `MULTICA_` du projet de secrets utilisé pour les exécutions d'agents.
+
+Un profil shell comme `~/.zshrc` qui exporte `MULTICA_TOKEN` remplace le jeton de l'exécution de la même façon lorsque le shell de l'agent le charge. Supprimez cet export, ou ne le définissez que lorsque `MULTICA_TASK_ID` est vide.
+
 ### Créer un profil
 
 Seuls les propriétaires et administrateurs de l'espace de travail peuvent créer, modifier ou supprimer des profils de runtime personnalisés :
