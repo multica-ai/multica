@@ -8,7 +8,7 @@ import {
   type KnownAppCategory,
 } from "../lib/categories";
 
-/** Labels for app categories: translated when Multica knows them, Composio's name title-cased otherwise. */
+/** Translated labels for known app categories; Composio's name, title-cased, for the rest. */
 export function useAppCategoryLabel() {
   const { t } = useT("settings");
   return useMemo(() => {
