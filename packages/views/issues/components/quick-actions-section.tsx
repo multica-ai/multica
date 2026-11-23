@@ -78,7 +78,7 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
 
   return (
     <div>
-      <IssueSidebarSectionHeader title={t(($) => $.detail.section_quick_actions)} count={actions.length} open={open} onOpenChange={setOpen} />
+      <IssueSidebarSectionHeader title={t(($) => $.detail.section_quick_actions)} count={actions.length} countWhenOpen={hiddenCount > 0} open={open} onOpenChange={setOpen} />
       <IssueSidebarCollapsible open={open}>
         <div className="space-y-0.5 px-2">
           {isError && <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onClick={() => void refetch()}>

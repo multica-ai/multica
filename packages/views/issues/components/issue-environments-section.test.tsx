@@ -177,7 +177,9 @@ function task(overrides: Partial<AgentTask>): AgentTask {
 
 const lambda = { id: "agent-1", name: "Lambda", archived_at: null } as Agent;
 
-function renderSection(props: { assigneeType?: "agent" | "member" | null; assigneeId?: string | null } = {}) {
+function renderSection(
+  props: { assigneeType?: "agent" | "member" | null; assigneeId?: string | null; reveal?: boolean; onRevealEnd?: () => void } = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -213,11 +215,29 @@ describe("IssueEnvironmentsSection", () => {
     apiMock.getIssueEnvironmentCommand.mockReset();
   });
 
-  it("keeps the header and its start menu while the issue has no environments", async () => {
+  it("stays out of the sidebar while the issue has no environments", async () => {
     mockTasks = [];
-    renderSection();
+    const { container } = renderSection();
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it("opens the start menu when revealed and ends the reveal when it closes", async () => {
+    mockTasks = [];
+    const onRevealEnd = vi.fn();
+    renderSection({ reveal: true, onRevealEnd });
     expect(await screen.findByText("Environments")).toBeVisible();
     expect(screen.queryByTestId("environment-row")).not.toBeInTheDocument();
+    fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(onRevealEnd).toHaveBeenCalled());
+  });
+
+  it("names a lone machine on the row instead of above it", async () => {
+    mockEnvironments = [environment({ expires_at: new Date(Date.now() + 30 * 60_000).toISOString() })];
+    renderSection();
+    const row = await screen.findByTestId("environment-row");
+    expect(within(row).getByText("studio.local")).toBeVisible();
+    expect(screen.getAllByText("studio.local")).toHaveLength(1);
+    expect(within(row).getByText("Expires in 30m")).toHaveClass("text-warning");
   });
 
   it("groups live environments by machine and links the running ones", async () => {
@@ -229,28 +249,31 @@ describe("IssueEnvironmentsSection", () => {
     renderSection();
 
     expect(await screen.findByText("Web app")).toBeVisible();
-    expect(screen.getByText("2 running")).toBeVisible();
+    expect(screen.queryByText("2 running")).not.toBeInTheDocument();
     expect(screen.getByText("This machine")).toBeVisible();
     expect(screen.getByText("studio.local")).toBeVisible();
     expect(screen.getByText("build-02")).toBeVisible();
 
     const [local, remote] = screen.getAllByTestId("environment-row");
     expect(within(local!).getByText("localhost:41000")).toBeVisible();
-    expect(within(local!).getByText("Expires in 23h")).toBeVisible();
+    expect(within(local!).queryByText("Expires in 23h")).not.toBeInTheDocument();
     expect(within(local!).getAllByRole("link")[0]).toHaveAttribute("href", "http://localhost:41000");
     expect(within(remote!).getByText("localhost:5173")).toBeVisible();
     expect(remote).toHaveAttribute("title", expect.stringContaining("Runs on build-02"));
-    expect(local).not.toHaveAttribute("title");
+    expect(local).toHaveAttribute("title", "Expires in 23h");
 
     fireEvent.click(within(local!).getByRole("button", { name: "Copy URL" }));
     expect(copyText).toHaveBeenCalledWith("http://localhost:41000");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Environments/ }));
+    expect(screen.getByText("2 running")).toBeVisible();
   });
 
   it("tells a viewer who may be on another machine where each localhost URL opens", async () => {
     mockEnvironments = [
-      environment({ runtime_id: "rt-2" }),
-      environment({ id: "env-2", runtime_id: "rt-gone", name: "api", label: "API", url: "http://127.0.0.1:41010", port: 41010 }),
-      environment({ id: "env-3", runtime_id: "rt-2", name: "docs", label: "Docs", url: "https://docs.example.com", port: 0 }),
+      environment({ runtime_id: "rt-2", expires_at: null }),
+      environment({ id: "env-2", runtime_id: "rt-gone", name: "api", label: "API", url: "http://127.0.0.1:41010", port: 41010, expires_at: null }),
+      environment({ id: "env-3", runtime_id: "rt-2", name: "docs", label: "Docs", url: "https://docs.example.com", port: 0, expires_at: null }),
     ];
     renderSection();
 
@@ -635,11 +658,10 @@ describe("IssueEnvironmentsSection", () => {
 
   it("asks the agent to start it when nothing can be started directly", async () => {
     mockTasks = [];
-    renderSection({ assigneeType: "agent", assigneeId: "agent-1" });
-    fireEvent.click(await screen.findByRole("button", { name: "Start an environment" }));
+    renderSection({ assigneeType: "agent", assigneeId: "agent-1", reveal: true });
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByText(/hasn't run yet/)).toBeInTheDocument();
-    fireEvent.click(within(menu).getByRole("menuitem", { name: /Ask Lambda to start it/ }));
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: /Ask Lambda to start it/ }));
     expect(createComment).toHaveBeenCalledTimes(1);
     const [{ content }] = createComment.mock.calls[0]!;
     expect(content).toMatch(/^\[@Lambda\]\(mention:\/\/agent\/agent-1\) /);

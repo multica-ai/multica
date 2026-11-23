@@ -86,14 +86,22 @@ export function WakeupCreate({
   workspaceId,
   issueId,
   defaultAgentId,
+  defaultOpen = false,
+  onOpenChange,
 }: {
   workspaceId: string;
   issueId: string;
   defaultAgentId?: string;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(defaultOpen);
   const busy = useRef(false);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    onOpenChange?.(next);
+  };
   return (
     <Popover
       open={open}

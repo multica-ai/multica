@@ -42,6 +42,8 @@ export function EnvironmentStartMenu({
   agentChoices,
   preparing,
   onAskAgent,
+  defaultOpen,
+  onOpenChange,
 }: {
   configs: IssueEnvironmentConfig[];
   machineFor: (runtimeId: string) => StartMenuMachine;
@@ -53,6 +55,8 @@ export function EnvironmentStartMenu({
   agentChoices: Agent[];
   preparing: boolean;
   onAskAgent: (agent: Agent) => void;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
   const declaring = configs.filter((config) => config.environments.length > 0);
@@ -62,7 +66,7 @@ export function EnvironmentStartMenu({
   const askSide = preparing ? t(($) => $.environments.start_menu.preparing) : t(($) => $.environments.start_menu.new_run);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu defaultOpen={defaultOpen} onOpenChange={(open) => onOpenChange?.(open)}>
       <DropdownMenuTrigger
         render={
           <IconButton variant="ghost" size="icon-xs" label={t(($) => $.environments.start_menu.trigger)}>

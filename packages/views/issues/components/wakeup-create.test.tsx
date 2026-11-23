@@ -52,6 +52,19 @@ beforeEach(() => {
 });
 afterEach(() => configureShortcutPlatform(null));
 
+describe("WakeupCreate", () => {
+  it("opens on mount when asked and reports closing", async () => {
+    const onOpenChange = vi.fn();
+    renderWithI18n(
+      <WakeupCreate workspaceId="ws" issueId="issue" defaultAgentId="emacs" defaultOpen onOpenChange={onOpenChange} />,
+      { locale: "zh-Hans" },
+    );
+    const form = await screen.findByRole("form", { name: "新建唤醒" });
+    fireEvent.keyDown(form, { key: "Escape" });
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+});
+
 describe("WakeupCreateForm", () => {
   it("says a reply wait for the assignee joins the run a comment already starts", async () => {
     await renderForm();

@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   Calendar,
   CalendarClock,
+  FolderKanban,
   CalendarDays,
   ChevronDown,
   ChevronLeft,
@@ -75,8 +76,6 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { MemberProfileCard } from "../../members/member-profile-card";
-import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { COMPOSER_DOCK_GAP, ComposerDock, JumpToLatestButton } from "./composer-dock";
 import { InboxIssueActions } from "./inbox-issue-actions";
@@ -210,6 +209,9 @@ import { READING_COLUMN } from "../../layout/reading-column";
 import { useShowInSidebar } from "../../layout/panels/show-in-sidebar";
 
 import { ProgressRing } from "./progress-ring";
+import { IssueSidebarAddRow, useIssueSidebarAddables, type IssueSidebarAddable } from "./issue-sidebar-add-row";
+import { IssueSidebarFooter } from "./issue-sidebar-footer";
+import { SystemWakeupChips } from "./system-wakeup-chip";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { MetadataSection } from "./metadata-section";
 import { IssueSidebarCollapsible, IssueSidebarSectionHeader, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
@@ -445,7 +447,7 @@ const EMPTY_REPLIES: TimelineEntry[] = [];
 /** The sidebar sections a guest gets: read-only facts about the issue itself. */
 const GUEST_SIDEBAR_SECTIONS = new Set<IssueSidebarSection>(["properties", "parent", "deliverables"]);
 
-const OPTIONAL_PROP_KEYS = ["priority", "stage", "start_date", "due_date", "labels"] as const;
+const OPTIONAL_PROP_KEYS = ["project", "priority", "stage", "start_date", "due_date", "labels"] as const;
 type OptionalPropKey = (typeof OPTIONAL_PROP_KEYS)[number];
 
 function isOptionalPropSet(
@@ -454,6 +456,8 @@ function isOptionalPropSet(
   attachedLabelsCount: number,
 ): boolean {
   switch (key) {
+    case "project":
+      return !!issue.project_id;
     case "priority":
       return issue.priority !== "none";
     case "stage":
@@ -466,8 +470,6 @@ function isOptionalPropSet(
       return attachedLabelsCount > 0;
   }
 }
-
-const SIDEBAR_SUB_ISSUES_LIMIT = 10;
 
 // groupSubIssuesByStage orders a parent's children for display: staged groups
 // ascending by stage, then the unstaged group (stage === null) last. Callers
@@ -1474,12 +1476,10 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   }, [isMobile]);
   const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
   const [propertiesOpen, setPropertiesOpen] = useState(true);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
-  const [sidebarSubIssuesOpen, setSidebarSubIssuesOpen] = useState(true);
-  const [sidebarSubIssuesExpanded, setSidebarSubIssuesExpanded] = useState(false);
-  const sidebarSubIssuesListId = useId();
-  useEffect(() => setSidebarSubIssuesExpanded(false), [id]);
+  // An empty section the reader picked from the add row, shown until its form closes.
+  const [sidebarReveal, setSidebarReveal] = useState<IssueSidebarAddable | null>(null);
+  useEffect(() => setSidebarReveal(null), [id]);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const githubSettings = useGitHubSettings();
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
@@ -2608,15 +2608,6 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     });
   }, [setSubIssuesCollapsed, scrollContainerEl]);
   const doneChildCount = childIssues.filter((child) => issueBehavesAs(child, "done")).length;
-  const sidebarChildIssues = useMemo(() => {
-    let ordered = groupSubIssuesByStage(childIssues).flatMap(({ items }) => items);
-    if (ordered.length > SIDEBAR_SUB_ISSUES_LIMIT) {
-      const unfinished = ordered.filter((child) => !issueBehavesAsAny(child, ["done", "closed"]));
-      const finished = ordered.filter((child) => issueBehavesAsAny(child, ["done", "closed"]));
-      ordered = [...unfinished, ...finished];
-    }
-    return sidebarSubIssuesExpanded ? ordered : ordered.slice(0, SIDEBAR_SUB_ISSUES_LIMIT);
-  }, [childIssues, sidebarSubIssuesExpanded]);
 
   // The sub-issue list owns its selection, reset per issue. Rows, select-all
   // and the inline batch toolbar must read the same one: a peek renders this
@@ -3157,6 +3148,15 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     overrideTop: restoredScrollTop,
   });
 
+  const issueClosed = !!issue && ["done", "closed"].includes(resolveStatusCategory(issue.status));
+  const sidebarAddables = useIssueSidebarAddables({
+    issueId: id,
+    closed: issueClosed,
+    enabled: !!issue && !guest,
+    pullRequestsAvailable: githubSettings.prSidebar,
+  });
+  const endSidebarReveal = useCallback(() => setSidebarReveal(null), []);
+
   // Keep the identity value stable across unrelated issue-detail updates so
   // context consumers only re-render when the owning issue changes identity.
   const resolvedIssueId = issue?.id;
@@ -3264,9 +3264,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     <div className="col-span-2 mt-1">
       <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
         <PopoverTrigger
-          className="-mx-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          className="-mx-2 flex items-center gap-2.5 rounded-md px-2 py-1 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
         >
-          <Plus className="h-3 w-3 shrink-0" />
+          <Plus className="size-3.5 shrink-0" />
           <span>{t(($) => $.detail.add_property_action)}</span>
         </PopoverTrigger>
         {/* Each option leads with the icon the resulting picker uses, so the
@@ -3287,6 +3287,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
               onClick={() => addOptionalProp(k)}
               className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-caption text-foreground transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
             >
+              {k === "project" && (
+                <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
               {k === "priority" && (
                 <PriorityIcon priority="medium" inheritColor className="text-muted-foreground" />
               )}
@@ -3303,6 +3306,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                 <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
               <span className="truncate">
+                {k === "project" && t(($) => $.detail.prop_project)}
                 {k === "priority" && t(($) => $.detail.prop_priority)}
                 {k === "stage" && t(($) => $.detail.prop_stage)}
                 {k === "start_date" && t(($) => $.detail.prop_start_date)}
@@ -3346,6 +3350,17 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     </div>
   );
 
+  const builtInPropLabels = [
+    t(($) => $.detail.prop_status),
+    t(($) => $.detail.prop_assignee),
+    t(($) => $.detail.prop_project),
+    t(($) => $.workflows.project.label),
+    t(($) => $.detail.prop_priority),
+    t(($) => $.detail.prop_stage),
+    t(($) => $.detail.prop_start_date),
+    t(($) => $.detail.prop_due_date),
+    t(($) => $.detail.prop_labels),
+  ];
   const locked = (value: ReactNode) => (
     <>
       <div inert className="flex min-w-0 flex-1 items-center">{value}</div>
@@ -3356,7 +3371,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     <div>
       <IssueSidebarSectionHeader title={t(($) => $.detail.section_properties)} open={propertiesOpen} onOpenChange={setPropertiesOpen} />
       <IssueSidebarCollapsible open={propertiesOpen}>
-        <IssueSidebarPropertyGrid>
+        <IssueSidebarPropertyGrid sizerLabels={builtInPropLabels}>
           <PropRow interactive={false} label={t(($) => $.detail.prop_status)}>
             {locked(<StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" projectId={issue.project_id} issue={issue} />)}
           </PropRow>
@@ -3366,9 +3381,11 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           <PropRow interactive={false} label={t(($) => $.detail.prop_priority)}>
             {locked(<PriorityPicker priority={issue.priority} onUpdate={handleUpdateField} align="start" />)}
           </PropRow>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_project)}>
-            {locked(<IssueProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} issue={issue} />)}
-          </PropRow>
+          {issue.project_id && (
+            <PropRow interactive={false} label={t(($) => $.detail.prop_project)}>
+              {locked(<IssueProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} issue={issue} />)}
+            </PropRow>
+          )}
           {attachedLabels.length > 0 && (
             <PropRow interactive={false} label={t(($) => $.detail.prop_labels)}>
               {locked(<LabelPicker issueId={issue.id} align="start" />)}
@@ -3384,8 +3401,8 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     properties: guest ? guestProperties : (
       <div>
         <IssueSidebarSectionHeader title={t(($) => $.detail.section_properties)} open={propertiesOpen} onOpenChange={setPropertiesOpen}  />
-        <IssueSidebarCollapsible open={propertiesOpen}><IssueSidebarPropertyGrid>
-          {/* Core props — always rendered. */}
+        <IssueSidebarCollapsible open={propertiesOpen}><IssueSidebarPropertyGrid sizerLabels={builtInPropLabels}>
+          {/* Status and assignee — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker
               status={issue.status}
@@ -3400,13 +3417,16 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_project)}>
-            <IssueProjectPicker
-              projectId={issue.project_id}
-              onUpdate={handleUpdateField}
-              issue={issue}
-            />
-          </PropRow>
+          {visibleOptionalProps.has("project") && (
+            <PropRow label={t(($) => $.detail.prop_project)}>
+              <IssueProjectPicker
+                projectId={issue.project_id}
+                onUpdate={handleUpdateField}
+                issue={issue}
+                defaultOpen={autoOpenProp === "project"}
+              />
+            </PropRow>
+          )}
           <IssueWorkflowPropRow projectId={issue.project_id} status={issue.status} label={t(($) => $.workflows.project.label)} />
 
           {/* Optional props — rendered only when set on the issue OR added
@@ -3499,8 +3519,10 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     wakeups: (
       <WakeupsSection
         issueId={issue.id}
-        closed={["done", "closed"].includes(resolveStatusCategory(issue.status))}
+        closed={issueClosed}
         defaultAgentId={issue.assignee_type === "agent" ? (issue.assignee_id ?? undefined) : undefined}
+        reveal={sidebarReveal === "wakeups"}
+        onRevealEnd={endSidebarReveal}
       />
     ),
     plugins: <PluginPanelSection issueId={issue.id} />,
@@ -3533,72 +3555,6 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           </div></IssueSidebarCollapsible>
         </div>
     ),
-    sub_issues: childIssuesLoaded && childIssues.length > 0 && (
-      <div>
-        <IssueSidebarSectionHeader
-          title={t(($) => $.detail.sub_issues_label)}
-          open={sidebarSubIssuesOpen}
-          onOpenChange={setSidebarSubIssuesOpen}
-          status={
-            <span
-              role="progressbar"
-              aria-label={t(($) => $.detail.sub_issues_label)}
-              aria-valuemin={0}
-              aria-valuemax={childIssues.length}
-              aria-valuenow={doneChildCount}
-              aria-valuetext={t(($) => $.detail.sub_issues_nav_progress, { done: doneChildCount, total: childIssues.length })}
-              className="inline-flex shrink-0 items-center gap-1.5 pr-2 text-caption tabular-nums text-muted-foreground"
-            >
-              <ProgressRing done={doneChildCount} total={childIssues.length} size={11} />
-              <span>{doneChildCount}/{childIssues.length}</span>
-            </span>
-          }
-        />
-        <IssueSidebarCollapsible open={sidebarSubIssuesOpen}>
-          <ul id={sidebarSubIssuesListId} className="px-2">
-            {sidebarChildIssues.map((child) => (
-              <li key={child.id}>
-                <AppLink
-                  href={paths.issueDetail(issueRouteRef(child))}
-                  title={`${child.identifier} ${child.title}`}
-                  aria-label={`${child.identifier} ${child.title}, ${resolveStatusLabel(child.status)}`}
-                  className="group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-2 text-label transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <span role="img" aria-label={resolveStatusLabel(child.status)} className="shrink-0">
-                    <StatusIcon
-                      status={child.status}
-                      color={resolveStatusColor(child.status)}
-                      icon={resolveStatusIcon(child.status)}
-                      category={issueStatusCategory(child) ?? undefined}
-                      className="h-3.5 w-3.5"
-                    />
-                  </span>
-                  <span className="max-w-[45%] shrink-0 truncate text-muted-foreground">{child.identifier}</span>
-                  <span className="min-w-0 truncate group-hover:text-foreground">{child.title}</span>
-                </AppLink>
-              </li>
-            ))}
-            {childIssues.length > SIDEBAR_SUB_ISSUES_LIMIT && (
-              <li>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start text-muted-foreground"
-                  aria-expanded={sidebarSubIssuesExpanded}
-                  aria-controls={sidebarSubIssuesListId}
-                  onClick={() => setSidebarSubIssuesExpanded((expanded) => !expanded)}
-                >
-                  {sidebarSubIssuesExpanded
-                    ? t(($) => $.detail.sub_issues_show_less)
-                    : t(($) => $.detail.sub_issues_show_more, { count: childIssues.length - SIDEBAR_SUB_ISSUES_LIMIT })}
-                </Button>
-              </li>
-            )}
-          </ul>
-        </IssueSidebarCollapsible>
-      </div>
-    ),
     duplicates: <IssueDuplicatesSection issueId={issue.id} />,
     // Pull requests — unavailable when the workspace disables the PR sidebar
     // (or the GitHub master switch is off). Backend data is kept either
@@ -3609,10 +3565,20 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
         identifier={issue.identifier}
         open={pullRequestsOpen}
         onOpenChange={setPullRequestsOpen}
+        reveal={sidebarReveal === "pull_requests"}
+        onRevealEnd={endSidebarReveal}
       />
     ),
     // Environments the issue's runs left running, and the "+" that starts one.
-    environments: <IssueEnvironmentsSection issueId={id} assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} />,
+    environments: (
+      <IssueEnvironmentsSection
+        issueId={id}
+        assigneeType={issue.assignee_type}
+        assigneeId={issue.assignee_id}
+        reveal={sidebarReveal === "environments"}
+        onRevealEnd={endSidebarReveal}
+      />
+    ),
     // Deliverables — the files this issue's comments delivered. Hidden
     // while there are none.
     deliverables: (
@@ -3626,49 +3592,6 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     apps: <IssueAppsSection issueId={id} />,
     // Execution summary owns its query, realtime updates and disclosure.
     execution_log: <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />,
-    // Details — creator and timestamps. Defaults to below the execution
-    // log because it is the least-read block in the sidebar: the values
-    // never change once the issue exists, while the log above it is
-    // what people actually come here to check.
-    details: (
-      <div>
-        <IssueSidebarSectionHeader title={t(($) => $.detail.section_details)} open={detailsOpen} onOpenChange={setDetailsOpen} />
-        <IssueSidebarCollapsible open={detailsOpen}><IssueSidebarPropertyGrid>
-          <PropRow
-            interactive={false}
-            label={t(($) => $.detail.prop_created_by)}
-            className={requesterName ? "items-start py-1.5" : undefined}
-          >
-            <div className="flex min-w-0 flex-1 items-start gap-1.5">
-              <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
-                {requesterName && issue.requester_id && (
-                  <HoverCard>
-                    <HoverCardTrigger
-                      render={<AppLink href={paths.memberDetail(issue.requester_id)} />}
-                      className="block truncate text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      title={t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
-                    >
-                      {t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
-                    </HoverCardTrigger>
-                    <HoverCardContent align="start" className="w-72">
-                      <MemberProfileCard userId={issue.requester_id} />
-                    </HoverCardContent>
-                  </HoverCard>
-                )}
-              </div>
-            </div>
-          </PropRow>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_created)}>
-            <span className="text-muted-foreground">{shortDate(issue.created_at, locale)}</span>
-          </PropRow>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_updated)}>
-            <span className="text-muted-foreground">{shortDate(issue.updated_at, locale)}</span>
-          </PropRow>
-        </IssueSidebarPropertyGrid></IssueSidebarCollapsible>
-      </div>
-    ),
     metadata: <MetadataSection metadata={issue.metadata ?? {}} />,
   };
 
@@ -3683,6 +3606,8 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             ? GUEST_SIDEBAR_SECTIONS.has(section)
             : (section !== "pull_requests" || githubSettings.prSidebar) && (section !== "plugins" || pluginsEnabled),
       )}
+      addRow={<IssueSidebarAddRow items={sidebarAddables.filter((item) => item !== sidebarReveal)} onPick={setSidebarReveal} />}
+      footer={guest ? undefined : <IssueSidebarFooter issue={issue} />}
     />
   );
 
@@ -4330,6 +4255,11 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                         : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
                     )}
                   />}
+                  {!guest && !issueClosed && (
+                    <span className="ml-1 flex min-w-0 items-center gap-0.5 empty:hidden">
+                      <SystemWakeupChips workspaceId={wsId} issueId={issue.id} />
+                    </span>
+                  )}
                   <div className="ml-auto flex items-center gap-0.5">
                     <SubIssueDisplayPopover workspaceProperties={activeWorkspaceProperties} />
                     {!guest && <Tooltip>

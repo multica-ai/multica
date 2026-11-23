@@ -50,7 +50,10 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
 
 import { PullRequestsSection } from "./pull-requests-section";
 
-function renderSection(cachedDecision?: PRAutoComplete) {
+function renderSection(
+  cachedDecision?: PRAutoComplete,
+  { reveal = true, onRevealEnd }: { reveal?: boolean; onRevealEnd?: () => void } = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   if (cachedDecision) {
     qc.setQueryData(["github", "pull-requests", "issue-1"], { pull_requests: [], auto_complete: cachedDecision });
@@ -58,7 +61,14 @@ function renderSection(cachedDecision?: PRAutoComplete) {
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
-        <PullRequestsSection issueId="issue-1" identifier="MUL-1" open onOpenChange={() => {}} />
+        <PullRequestsSection
+          issueId="issue-1"
+          identifier="MUL-1"
+          open
+          onOpenChange={() => {}}
+          reveal={reveal}
+          onRevealEnd={onRevealEnd}
+        />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -81,11 +91,19 @@ describe("PullRequestsSection (MUL-7429)", () => {
     navigatePush.mockReset();
   });
 
-  it("keeps the empty title static and retains linking without redundant copy", async () => {
-    renderSection();
-    expect(await screen.findByRole("button", { name: "Link pull request" })).toBeVisible();
+  it("stays out of the sidebar while empty until the add row reveals it", async () => {
+    const { container } = renderSection(undefined, { reveal: false });
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it("opens the link form when revealed and ends the reveal when it closes", async () => {
+    const onRevealEnd = vi.fn();
+    renderSection(undefined, { onRevealEnd });
+    expect(await screen.findByRole("textbox", { name: "Link pull request" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
     expect(screen.queryByText(enIssues.detail.pull_requests_empty_title)).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Link pull request" }), { key: "Escape" });
+    await waitFor(() => expect(onRevealEnd).toHaveBeenCalled());
   });
 
   it("keeps a retry entry when loading fails with no cached PRs", async () => {
@@ -105,7 +123,6 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("links a pasted PR URL", async () => {
     apiMock.linkIssuePullRequest.mockResolvedValue({ pull_requests: [], auto_complete: decision });
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Link pull request" }), {
       target: { value: "https://github.com/acme/widget/pull/41" },
     });
@@ -121,7 +138,6 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("accepts a link pasted without a scheme", async () => {
     apiMock.linkIssuePullRequest.mockResolvedValue({ pull_requests: [], auto_complete: decision });
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Link pull request" }), {
       target: { value: "github.com/acme/widget/pull/41/files" },
     });
@@ -134,7 +150,6 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("explains a PR Multica has not received", async () => {
     apiMock.linkIssuePullRequest.mockRejectedValue(new ApiError("not found", 404, "Not Found"));
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Link pull request" }), {
       target: { value: "https://github.com/acme/widget/pull/999" },
     });
@@ -170,7 +185,6 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("drops the auto-link hint when the workspace does not auto-link PRs", async () => {
     mockWorkspaceSettings = { github_auto_link_prs_enabled: false };
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
     await screen.findByRole("textbox", { name: "Link pull request" });
     expect(screen.queryByText("PRs with MUL-1 in the title or branch name link automatically.")).toBeNull();
   });
