@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // Toolkit is the minimal toolkit descriptor used as a nested field inside
@@ -25,6 +26,58 @@ type Toolkit struct {
 	ComposioManagedAuthSchemes []string `json:"composio_managed_auth_schemes,omitempty"`
 	// NoAuth is true for toolkits that need no credential at all.
 	NoAuth bool `json:"no_auth,omitempty"`
+	// AuthConfigDetails describes each auth scheme. GET /toolkits/{slug}
+	// reports schemes only here, without auth_schemes or no_auth.
+	AuthConfigDetails []ToolkitAuthConfigDetail `json:"auth_config_details,omitempty"`
+}
+
+// ToolkitAuthConfigDetail is one auth scheme of a toolkit and the fields it
+// needs.
+type ToolkitAuthConfigDetail struct {
+	Mode   string `json:"mode"`
+	Fields struct {
+		AuthConfigCreation struct {
+			Required []ToolkitAuthField `json:"required"`
+		} `json:"auth_config_creation"`
+	} `json:"fields"`
+}
+
+// ToolkitAuthField is a credential field of an auth scheme.
+type ToolkitAuthField struct {
+	Name    string  `json:"name"`
+	Default *string `json:"default"`
+}
+
+// AuthModes returns the auth schemes the toolkit offers, from auth_schemes
+// (the list endpoint) or else auth_config_details (GET /toolkits/{slug}).
+func (t Toolkit) AuthModes() []string {
+	if len(t.AuthSchemes) > 0 {
+		return t.AuthSchemes
+	}
+	modes := make([]string, 0, len(t.AuthConfigDetails))
+	for _, d := range t.AuthConfigDetails {
+		if d.Mode != "" {
+			modes = append(modes, d.Mode)
+		}
+	}
+	return modes
+}
+
+// NeedsProjectCredentials reports whether an auth config for mode can only be
+// created with a project-level value, i.e. a required field with no default.
+// It is false when the toolkit carries no details for mode.
+func (t Toolkit) NeedsProjectCredentials(mode string) bool {
+	for _, d := range t.AuthConfigDetails {
+		if !strings.EqualFold(d.Mode, mode) {
+			continue
+		}
+		for _, f := range d.Fields.AuthConfigCreation.Required {
+			if f.Default == nil || *f.Default == "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ToolkitCategory is one category a toolkit is listed under.

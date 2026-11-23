@@ -331,7 +331,25 @@ ${body}
     if (method === "GET" && api.startsWith("/toolkits/")) {
       const slug = decodeURIComponent(api.slice("/toolkits/".length)).toLowerCase();
       const toolkit = TOOLKITS.find((t) => t.slug === slug);
-      return toolkit ? send(res, 200, toolkit) : send(res, 404, { error: { message: "toolkit not found" } });
+      if (!toolkit) return send(res, 404, { error: { message: "toolkit not found" } });
+      // Unlike the list, the single-toolkit response has no auth_schemes or
+      // no_auth: each scheme is an auth_config_details entry.
+      const { auth_schemes: schemes, no_auth: noAuth, ...rest } = toolkit;
+      const modes = noAuth ? ["NO_AUTH"] : schemes.map((s) => s.toUpperCase());
+      return send(res, 200, {
+        ...rest,
+        auth_config_details: modes.map((mode) => ({
+          mode,
+          name: `${slug}_${mode.toLowerCase()}`,
+          fields: {
+            auth_config_creation: { required: [], optional: [] },
+            connected_account_initiation: {
+              required: mode === "OAUTH2" || mode === "NO_AUTH" ? [] : [{ name: "generic_api_key", displayName: "API Key", type: "string", required: true, default: null }],
+              optional: [],
+            },
+          },
+        })),
+      });
     }
     if (method === "GET" && api === "/auth_configs") {
       const wanted = (url.searchParams.get("toolkit_slug") ?? "").split(",").filter(Boolean);

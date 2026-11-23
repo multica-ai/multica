@@ -243,14 +243,16 @@ const (
 var userKeySchemes = []string{"API_KEY", "BEARER_TOKEN", "BASIC"}
 
 // userKeyScheme returns the scheme to register for a toolkit a member connects
-// with their own credentials, or "" when it offers none.
+// with their own credentials, or "" when it offers none. A scheme whose auth
+// config needs a project-level value does not count: Multica has none to give.
 func userKeyScheme(tk sdk.Toolkit) string {
 	if tk.NoAuth {
 		return ""
 	}
+	modes := tk.AuthModes()
 	for _, want := range userKeySchemes {
-		for _, have := range tk.AuthSchemes {
-			if strings.EqualFold(strings.TrimSpace(have), want) {
+		for _, have := range modes {
+			if strings.EqualFold(strings.TrimSpace(have), want) && !tk.NeedsProjectCredentials(want) {
 				return want
 			}
 		}

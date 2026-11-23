@@ -3,6 +3,7 @@ package composio
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	sdk "github.com/multica-ai/multica/server/pkg/composio"
@@ -14,14 +15,27 @@ type catalogFakeSDK struct {
 	fakeSDK
 	created []string
 	custom  map[string]string
-	keyless bool
+	// projectFields names, per toolkit, the scheme whose auth config needs a
+	// project-level field (GET /toolkits/{slug} only).
+	projectFields map[string]string
 }
 
+// GetToolkit answers like GET /toolkits/{slug}: schemes come only as
+// auth_config_details, without auth_schemes or no_auth.
 func (f *catalogFakeSDK) GetToolkit(_ context.Context, slug string) (*sdk.Toolkit, error) {
-	for i := range f.toolkits {
-		if f.toolkits[i].Slug == slug {
-			return &f.toolkits[i], nil
+	for _, listed := range f.toolkits {
+		if listed.Slug != slug {
+			continue
 		}
+		tk := sdk.Toolkit{Slug: listed.Slug, Name: listed.Name, Meta: listed.Meta, ComposioManagedAuthSchemes: listed.ComposioManagedAuthSchemes}
+		for _, scheme := range listed.AuthSchemes {
+			detail := sdk.ToolkitAuthConfigDetail{Mode: strings.ToUpper(scheme)}
+			if strings.EqualFold(f.projectFields[slug], scheme) {
+				detail.Fields.AuthConfigCreation.Required = []sdk.ToolkitAuthField{{Name: "subdomain"}}
+			}
+			tk.AuthConfigDetails = append(tk.AuthConfigDetails, detail)
+		}
+		return &tk, nil
 	}
 	return nil, &sdk.APIError{HTTPStatus: 404}
 }
@@ -76,8 +90,10 @@ func newCatalogFake() *catalogFakeSDK {
 			{Slug: "pagerduty", Name: "PagerDuty", AuthSchemes: []string{"OAUTH2", "BEARER_TOKEN"}},
 			{Slug: "salesforce", Name: "Salesforce", AuthSchemes: []string{"oauth2"}},
 			{Slug: "hackernews", Name: "Hacker News", NoAuth: true, AuthSchemes: []string{"no_auth"}},
+			{Slug: "zendesk", Name: "Zendesk", AuthSchemes: []string{"api_key", "basic"}},
+			{Slug: "freshdesk", Name: "Freshdesk", AuthSchemes: []string{"api_key"}},
 		},
-	}}
+	}, projectFields: map[string]string{"zendesk": "api_key", "freshdesk": "api_key"}}
 }
 
 func TestListToolkits_SurfacesKeyToolkits(t *testing.T) {
@@ -101,6 +117,8 @@ func TestListToolkits_SurfacesKeyToolkits(t *testing.T) {
 		"github":    ConnectOAuth,
 		"tavily":    ConnectKey,
 		"pagerduty": ConnectKey,
+		"zendesk":   ConnectKey,
+		"freshdesk": ConnectKey,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("listed %v, want %d toolkits", order, len(want))
@@ -143,6 +161,8 @@ func TestEnsureAuthConfig_CreatesPerToolkitKind(t *testing.T) {
 		{"github", "ac_managed_github"},
 		{"tavily", "ac_API_KEY_tavily"},
 		{"pagerduty", "ac_BEARER_TOKEN_pagerduty"},
+		// Its API_KEY config would need a project-level field.
+		{"zendesk", "ac_BASIC_zendesk"},
 	}
 	for _, tc := range cases {
 		id, err := svc.ensureAuthConfig(ctx, tc.slug)
@@ -150,7 +170,7 @@ func TestEnsureAuthConfig_CreatesPerToolkitKind(t *testing.T) {
 			t.Errorf("ensureAuthConfig(%s) = %q, %v; want %q", tc.slug, id, err, tc.want)
 		}
 	}
-	for _, slug := range []string{"salesforce", "hackernews", "unknown"} {
+	for _, slug := range []string{"salesforce", "hackernews", "freshdesk", "unknown"} {
 		if _, err := svc.ensureAuthConfig(ctx, slug); !errors.Is(err, ErrToolkitNotSupported) {
 			t.Errorf("ensureAuthConfig(%s) err = %v, want ErrToolkitNotSupported", slug, err)
 		}
