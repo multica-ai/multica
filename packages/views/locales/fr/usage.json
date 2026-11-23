@@ -8,7 +8,11 @@
   "filter": {
     "project_label": "Projet",
     "all_projects": "Tous les projets",
-    "period_label": "Période"
+    "period_label": "Période",
+    "attribution_label": "Attribution",
+    "all_attribution": "Toute attribution",
+    "standalone_only": "Agents autonomes uniquement",
+    "squads_group": "Squads"
   },
   "history_limit": {
     "note": "Votre forfait couvre les {{days}} derniers jours. Passez à un forfait supérieur pour voir les données plus anciennes. Rien n'est supprimé.",
@@ -27,7 +31,9 @@
     "run_time_label": "Temps d'exécution · {{days}} j",
     "run_time_hint": "Sur {{tasks}} exécutions",
     "tasks_label": "Exécutions · {{days}} j",
-    "tasks_hint": "{{failed}} en échec"
+    "tasks_hint": "{{failed}} en échec",
+    "cost_squad_hint": "{{name}} au global (membres délégués inclus)",
+    "cost_squad_share_hint": "Déclenché par Squad {{cost}} ({{pct}}%)"
   },
   "dim": {
     "label": "Intervalle",
@@ -90,7 +96,8 @@
     "show_reasons": "Afficher les codes d'erreur",
     "hide_reasons": "Masquer les codes d'erreur",
     "show_all": "Afficher les {{count}}",
-    "show_less": "Afficher le top {{count}}"
+    "show_less": "Afficher le top {{count}}",
+    "by_squad": "Erreurs par squad"
   },
   "leaderboard": {
     "title": "Classement",
@@ -111,7 +118,19 @@
     "usage_totals_pending": "Les totaux de consommation sont encore en cours de traitement",
     "show_all": "Tout afficher",
     "show_less": "Afficher le top {{count}}",
-    "no_data": "Aucune activité d'agent sur cette fenêtre."
+    "no_data": "Aucune activité d'agent sur cette fenêtre.",
+    "group_label": "Grouper le classement par",
+    "group_agent": "Agents",
+    "group_squad": "Squads",
+    "header_squad": "Squad / Attribution",
+    "squad_caption": "{{count}} squads",
+    "squad_caption_with_standalone": "{{count}} squads · autonomes inclus",
+    "squad_members_title": "Répartition des membres de {{name}}",
+    "squad_members_count": "{{count}} membres impliqués",
+    "standalone_agents": "Agents autonomes (hors Squad)",
+    "standalone_agents_hint": "Mention ou assignation directe · {{count}} agents",
+    "deleted_squads": "Squads supprimés",
+    "toggle_squad_members": "Afficher ou masquer les membres de {{name}}"
   },
   "empty": {
     "title": "Aucune consommation pour l'instant",

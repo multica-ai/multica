@@ -8,7 +8,11 @@
   "filter": {
     "project_label": "项目",
     "all_projects": "全部项目",
-    "period_label": "时间范围"
+    "period_label": "时间范围",
+    "attribution_label": "归属",
+    "all_attribution": "全部归属",
+    "standalone_only": "仅独立智能体",
+    "squads_group": "Squad"
   },
   "history_limit": {
     "note": "当前套餐可以查看最近 {{days}} 天。升级后可以查看更早的数据，数据一直保留。",
@@ -27,7 +31,9 @@
     "run_time_label": "耗时 · {{days}}天",
     "run_time_hint": "共 {{tasks}} 次运行",
     "tasks_label": "运行数 · {{days}}天",
-    "tasks_hint": "失败 {{failed}} 次"
+    "tasks_hint": "失败 {{failed}} 次",
+    "cost_squad_hint": "{{name}} 整体（含委派成员）",
+    "cost_squad_share_hint": "其中 Squad 触发 {{cost}}（{{pct}}%）"
   },
   "dim": {
     "label": "时间粒度",
@@ -90,7 +96,8 @@
     "show_reasons": "展开错误码",
     "hide_reasons": "收起错误码",
     "show_all": "展开全部 {{count}} 个",
-    "show_less": "只看前 {{count}} 个"
+    "show_less": "只看前 {{count}} 个",
+    "by_squad": "问题最多的 Squad"
   },
   "leaderboard": {
     "title": "排行榜",
@@ -109,7 +116,19 @@
     "usage_totals_pending": "用量汇总仍在处理中",
     "show_all": "展开全部",
     "show_less": "只看前 {{count}} 个",
-    "no_data": "所选时间范围内暂无智能体活动。"
+    "no_data": "所选时间范围内暂无智能体活动。",
+    "group_label": "排行榜分组方式",
+    "group_agent": "智能体",
+    "group_squad": "Squad",
+    "header_squad": "Squad / 归属",
+    "squad_caption": "{{count}} 个 Squad",
+    "squad_caption_with_standalone": "{{count}} 个 Squad · 含非 Squad 归总",
+    "squad_members_title": "{{name}} 成员消耗构成",
+    "squad_members_count": "{{count}} 个成员参与",
+    "standalone_agents": "独立智能体（非 Squad 触发）",
+    "standalone_agents_hint": "直接 @ 提及或单智能体指派 · {{count}} 个智能体",
+    "deleted_squads": "已删除的 Squad",
+    "toggle_squad_members": "展开或收起 {{name}} 成员明细"
   },
   "empty": {
     "title": "暂无用量数据",

@@ -8,7 +8,11 @@
   "filter": {
     "project_label": "專案",
     "all_projects": "全部專案",
-    "period_label": "時間範圍"
+    "period_label": "時間範圍",
+    "attribution_label": "歸屬",
+    "all_attribution": "全部歸屬",
+    "standalone_only": "僅獨立智能體",
+    "squads_group": "Squad"
   },
   "history_limit": {
     "note": "目前方案可以查看最近 {{days}} 天。升級後可以查看更早的資料，資料一直保留。",
@@ -27,7 +31,9 @@
     "run_time_label": "耗時 · {{days}}天",
     "run_time_hint": "共 {{tasks}} 次執行",
     "tasks_label": "執行數 · {{days}}天",
-    "tasks_hint": "失敗 {{failed}} 個"
+    "tasks_hint": "失敗 {{failed}} 個",
+    "cost_squad_hint": "{{name}} 整體（含委派成員）",
+    "cost_squad_share_hint": "其中 Squad 觸發 {{cost}}（{{pct}}%）"
   },
   "dim": {
     "label": "時間區間",
@@ -90,7 +96,8 @@
     "show_reasons": "展開錯誤碼",
     "hide_reasons": "收起錯誤碼",
     "show_all": "展開全部 {{count}} 個",
-    "show_less": "只看前 {{count}} 個"
+    "show_less": "只看前 {{count}} 個",
+    "by_squad": "問題最多的 Squad"
   },
   "leaderboard": {
     "title": "排行榜",
@@ -109,7 +116,19 @@
     "usage_totals_pending": "用量彙總仍在處理中",
     "show_all": "展開全部",
     "show_less": "只看前 {{count}} 個",
-    "no_data": "所選時間範圍內暫無 AI 代理活動。"
+    "no_data": "所選時間範圍內暫無 AI 代理活動。",
+    "group_label": "排行榜分組方式",
+    "group_agent": "智能體",
+    "group_squad": "Squad",
+    "header_squad": "Squad / 歸屬",
+    "squad_caption": "{{count}} 個 Squad",
+    "squad_caption_with_standalone": "{{count}} 個 Squad · 含非 Squad 彙總",
+    "squad_members_title": "{{name}} 成員消耗構成",
+    "squad_members_count": "{{count}} 個成員參與",
+    "standalone_agents": "獨立智能體（非 Squad 觸發）",
+    "standalone_agents_hint": "直接 @ 提及或單智能體指派 · {{count}} 個智能體",
+    "deleted_squads": "已刪除的 Squad",
+    "toggle_squad_members": "展開或收合 {{name}} 成員明細"
   },
   "empty": {
     "title": "暫無消耗資料",
