@@ -38,6 +38,12 @@ const (
 	ppAutopilotTask    = "00000000-0000-0000-0000-0000000000e2"
 	ppQuickCreateTask  = "00000000-0000-0000-0000-0000000000e3"
 	ppCrossProjectTask = "00000000-0000-0000-0000-0000000000e4"
+
+	// Workspace members in no private project, and another issue in the
+	// first private project.
+	ppPlain         = "00000000-0000-0000-0000-0000000000c4"
+	ppGuest         = "00000000-0000-0000-0000-0000000000c5"
+	ppSecretSibling = "00000000-0000-0000-0000-0000000000d4"
 )
 
 type fakeAudienceQuerier struct {
@@ -68,7 +74,7 @@ func (f fakeAudienceQuerier) ListPrivateProjectAudience(context.Context, pgtype.
 
 func (fakeAudienceQuerier) GetIssueProjectID(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	switch util.UUIDToString(id) {
-	case ppSecretIssue:
+	case ppSecretIssue, ppSecretSibling:
 		return ppUUID(ppPrivate), nil
 	case ppPublicIssue:
 		return ppUUID(ppPublic), nil
@@ -76,6 +82,14 @@ func (fakeAudienceQuerier) GetIssueProjectID(_ context.Context, id pgtype.UUID) 
 		return ppUUID(ppPrivate2), nil
 	}
 	return pgtype.UUID{}, pgx.ErrNoRows
+}
+
+func (fakeAudienceQuerier) ListMembers(_ context.Context, ws pgtype.UUID) ([]db.Member, error) {
+	var out []db.Member
+	for _, id := range []string{ppMember, ppShared, ppOther, ppPlain} {
+		out = append(out, db.Member{WorkspaceID: ws, UserID: ppUUID(id), Role: "member"})
+	}
+	return append(out, db.Member{WorkspaceID: ws, UserID: ppUUID(ppGuest), Role: "guest"}), nil
 }
 
 func (fakeAudienceQuerier) GetCommentIssueProjectID(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {

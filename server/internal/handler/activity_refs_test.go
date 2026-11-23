@@ -28,6 +28,29 @@ func TestStripActivityIssueRef(t *testing.T) {
 	}
 }
 
+func TestActivityIssueRef(t *testing.T) {
+	const id = "00000000-0000-0000-0000-000000000001"
+	cases := []struct {
+		name, action, details string
+		named, valid          bool
+	}{
+		{"id and identifier", "duplicate_marked", `{"original_id":"` + id + `","original_identifier":"MUL-1"}`, true, true},
+		{"identifier without id", "duplicate_added", `{"duplicate_identifier":"MUL-1"}`, true, false},
+		{"unreadable id", "duplicate_unmarked", `{"original_id":"x","original_identifier":"MUL-1"}`, true, false},
+		{"unreadable details", "duplicate_marked", `not json`, true, false},
+		{"no reference left", "duplicate_removed", `{"reason":"x"}`, false, false},
+		{"unrelated action", "status_changed", `{"original_id":"` + id + `"}`, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, named := ActivityIssueRef(tc.action, []byte(tc.details))
+			if named != tc.named || got.Valid != tc.valid {
+				t.Errorf("ActivityIssueRef(%s, %s) = valid %v, named %v; want valid %v, named %v", tc.action, tc.details, got.Valid, named, tc.valid, tc.named)
+			}
+		})
+	}
+}
+
 // A duplicate mark names an issue in another project. Readers who can see the
 // project feed or the issue's timeline but not that other project must not
 // learn the other issue's id or identifier; readers who can see both still do.
@@ -123,4 +146,62 @@ func TestActivityRefsToHiddenIssuesAreRedacted(t *testing.T) {
 			t.Errorf("timeline duplicate_added = %v, want the duplicate kept", d)
 		}
 	})
+}
+
+// Once the private original is deleted, the reference names an issue whose
+// project is gone with it, and its delete adds a row that names it again.
+// Neither may come back for a reader who could not see it before.
+func TestActivityRefsToDeletedIssuesAreRedacted(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	f := newPrivateProjectFixture(t)
+	openIssue := dbfx.Issue(t, f.marker+" open issue")
+	original := dbfx.Issue(t, f.marker+" doomed original", testutil.Cols{"project_id": f.projectID})
+	insertActivity := func(action string, details map[string]string) {
+		t.Helper()
+		body, _ := json.Marshal(details)
+		dbfx.Exec(t, `
+			INSERT INTO activity_log (workspace_id, issue_id, actor_type, actor_id, action, details)
+			VALUES ($1, $2, 'member', $3, $4, $5::jsonb)
+		`, testWorkspaceID, openIssue, testUserID, action, string(body))
+	}
+	timeline := func(userID string) map[string]map[string]string {
+		t.Helper()
+		var entries []TimelineEntry
+		req := withURLParam(asUser(newRequest(http.MethodGet, "/api/issues/"+openIssue+"/timeline", nil), userID), "id", openIssue)
+		rec := httptest.NewRecorder()
+		testHandler.ListTimeline(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("timeline as %s: %d %s", userID, rec.Code, rec.Body.String())
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&entries); err != nil {
+			t.Fatalf("decode timeline: %v", err)
+		}
+		out := map[string]map[string]string{}
+		for _, e := range entries {
+			if e.Action != nil {
+				var d map[string]string
+				_ = json.Unmarshal(e.Details, &d)
+				out[*e.Action] = d
+			}
+		}
+		return out
+	}
+
+	insertActivity("duplicate_marked", map[string]string{"original_id": original, "original_identifier": "SECRET-9", "to": "cancelled"})
+	dbfx.Exec(t, `DELETE FROM issue WHERE id = $1`, original)
+	insertActivity("duplicate_unmarked", map[string]string{"original_id": original, "original_identifier": "SECRET-9", "reason": "original_deleted"})
+
+	for _, reader := range []struct{ name, id string }{{"outsider", f.outsider}, {"outside admin", f.outsideAdmin}} {
+		t.Run(reader.name, func(t *testing.T) {
+			got := timeline(reader.id)
+			if d := got["duplicate_marked"]; d == nil || d["original_id"] != "" || d["original_identifier"] != "" || d["to"] != "cancelled" {
+				t.Errorf("duplicate_marked = %v, want the deleted original redacted and the rest kept", d)
+			}
+			if d := got["duplicate_unmarked"]; d == nil || d["original_id"] != "" || d["original_identifier"] != "" || d["reason"] != "original_deleted" {
+				t.Errorf("duplicate_unmarked = %v, want the deleted original redacted and the reason kept", d)
+			}
+		})
+	}
 }

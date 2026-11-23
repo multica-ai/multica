@@ -37,7 +37,9 @@ import (
 // internal/external payload boundary in one reviewable place.
 var internalOnlyPayloadKeys = map[string][]string{
 	// The live-session keys feed activity folding and mention dedup.
-	protocol.EventIssueUpdated: {"prev_description", "prev_title", "description_live_editors", "description_seen_mentions"},
+	// prev_duplicate_of_identifier names a deleted original for the activity
+	// log, which can no longer look it up or tell who could see it.
+	protocol.EventIssueUpdated: {"prev_description", "prev_title", "description_live_editors", "description_seen_mentions", "prev_duplicate_of_identifier"},
 	// task:failed error text is consumed synchronously by channel outbounds.
 	// It may contain provider/runtime detail that belongs in the originating
 	// chat transcript, not in the workspace-wide realtime fanout.
@@ -340,9 +342,21 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 		if projectAudience != nil && e.WorkspaceID != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), audienceResolveTimeout)
 			recipients, private, err := projectAudience.Audience(ctx, e)
+			var refReaders map[string]map[string]bool
+			if err == nil {
+				refReaders, err = projectAudience.IssueRefReaders(ctx, e)
+			}
+			if err == nil && len(refReaders) > 0 && !private {
+				recipients, err = projectAudience.Members(ctx, e.WorkspaceID)
+			}
 			cancel()
 			if err != nil {
 				logAudienceFailure(e, err)
+				return
+			}
+			if len(refReaders) > 0 {
+				realtime.M.RecordEvent(e.Type)
+				sendPerReader(b, e, data, recipients, refReaders)
 				return
 			}
 			if private {
