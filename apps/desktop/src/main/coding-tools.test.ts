@@ -18,7 +18,7 @@ const context = vi.hoisted(() => ({
 }));
 
 vi.mock("electron", () => ({
-  app: { on: vi.fn() },
+  app: { on: vi.fn(), isPackaged: true },
   ipcMain: { handle: vi.fn() },
   BrowserWindow: {
     getAllWindows: () => [

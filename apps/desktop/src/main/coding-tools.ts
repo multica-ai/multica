@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { spawn, type ChildProcess } from "child_process";
-import { constants, createWriteStream } from "fs";
+import { constants, createWriteStream, existsSync } from "fs";
 import { access, chmod, copyFile, mkdir, mkdtemp, readdir, rm } from "fs/promises";
 import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
@@ -126,8 +126,20 @@ export function codexAssetName(platform: NodeJS.Platform, arch: string): string 
   return null;
 }
 
+/**
+ * Dev builds only: while `<userData>/coding-tools-sandbox` exists, tool runs
+ * use it as HOME with a bare system PATH, so a machine that already has every
+ * tool still walks through install and sign-in. Each `make up` environment
+ * has its own userData, so the switch stays in that environment.
+ */
+function sandboxHome(): string | null {
+  if (app.isPackaged || process.platform === "win32") return null;
+  const dir = join(app.getPath("userData"), "coding-tools-sandbox");
+  return existsSync(dir) ? dir : null;
+}
+
 export function userBinDir(): string {
-  return join(homedir(), ".local", "bin");
+  return join(sandboxHome() ?? homedir(), ".local", "bin");
 }
 
 /** Every directory a freshly installed tool may sit in, PATH first. */
@@ -148,6 +160,11 @@ interface ExecResult {
 
 function spawnEnv(): NodeJS.ProcessEnv {
   const env = daemonSpawnEnv(process.env);
+  const sandbox = sandboxHome();
+  if (sandbox) {
+    env.HOME = sandbox;
+    env.PATH = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter);
+  }
   const local = userBinDir();
   const path = env.PATH ?? "";
   if (!path.split(delimiter).includes(local)) env.PATH = path ? `${path}${delimiter}${local}` : local;
