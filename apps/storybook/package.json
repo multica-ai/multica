@@ -12,6 +12,7 @@
   "dependencies": {
     "@fontsource-variable/inter": "catalog:",
     "@multica/ui": "workspace:*",
+    "motion": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "shadcn": "catalog:",

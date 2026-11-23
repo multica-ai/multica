@@ -747,6 +747,9 @@ importers:
       '@multica/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      motion:
+        specifier: 'catalog:'
+        version: 12.38.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react:
         specifier: 'catalog:'
         version: 19.2.3
