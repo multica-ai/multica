@@ -93,6 +93,8 @@ const (
 	// run's member or the agent's owner cannot access (MUL-8472). The caller
 	// already sees the issue, so the code reveals nothing new about it.
 	ReasonProjectAccessBlocked ReasonCode = "project_access_blocked"
+
+	ReasonIssueAgentConsecutiveFailures ReasonCode = "issue_agent_consecutive_failures"
 	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
 	// Cloud-provided autopilot interval.
 	ReasonQuotaExceeded ReasonCode = "quota_exceeded"

@@ -7,6 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 func findCommentOutcome(t *testing.T, outcomes []CommentTriggerOutcome, targetID string) CommentTriggerOutcome {
@@ -312,5 +316,51 @@ func TestCreateComment_SquadLeaderSelfMentionCompletedTaskDoesNotFakeSuccess(t *
 	}
 	if total != 1 {
 		t.Errorf("leader tasks = %d, want 1 (self-mention suppressed, no new task)", total)
+	}
+}
+
+func TestCommentEnqueueFailureReportsIssueAgentPause(t *testing.T) {
+	err := fmt.Errorf("enqueue comment: %w", service.ErrIssueAgentConsecutiveFailures)
+	if got := commentEnqueueFailureReason(err); got != "issue_agent_consecutive_failures" {
+		t.Fatalf("comment trigger reason = %q, want issue_agent_consecutive_failures", got)
+	}
+}
+
+func TestAgentCommentSavesWhenTargetDispatchIsPaused(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	targetID, runtimeID, _ := createRuntimeGuardAgent(t, t.Context())
+	authorID := dbfx.Agent(t, "Comment author during failure pause", runtimeID, testutil.Cols{
+		"runtime_mode": "local", "visibility": "workspace",
+	})
+	issueID := dbfx.Issue(t, "Comment while automatic dispatch is paused")
+	authorTaskID := dbfx.Task(t, authorID, testutil.Cols{
+		"issue_id": issueID, "runtime_id": runtimeID, "status": "running",
+		"originator_user_id": testUserID, "accountable_user_id": testUserID,
+	})
+	for _, minutesAgo := range []int{3, 2, 1} {
+		at := time.Now().Add(-time.Duration(minutesAgo) * time.Minute)
+		dbfx.Task(t, targetID, testutil.Cols{
+			"issue_id": issueID, "runtime_id": runtimeID,
+			"status": "failed", "failure_reason": "agent_error.process_failure",
+			"created_at": at, "started_at": at, "completed_at": at,
+		})
+	}
+	content := fmt.Sprintf("[@Target](mention://agent/%s) Please review the results.", targetID)
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{"content": content}), "id", issueID)
+	req.Header.Set("X-Agent-ID", authorID)
+	req.Header.Set("X-Task-ID", authorTaskID)
+	var response CommentResponse
+	testutil.Call(t, testHandler.CreateComment, req).Want(http.StatusCreated).JSON(&response)
+	if response.ID == "" || response.Content != content {
+		t.Fatalf("saved comment = %s %q", response.ID, response.Content)
+	}
+	outcome := findCommentOutcome(t, response.TriggerOutcomes, targetID)
+	if outcome.Status != DispatchBlocked || outcome.ReasonCode != ReasonIssueAgentConsecutiveFailures {
+		t.Fatalf("dispatch outcome = %+v", outcome)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, targetID); got != 0 {
+		t.Fatalf("paused target queued %d comment-triggered runs", got)
 	}
 }
