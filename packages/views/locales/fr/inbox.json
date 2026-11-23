@@ -155,7 +155,7 @@
     "unassigned": "Désassigné",
     "ran_quick_action": "Action lancée : {{name}}",
     "agent_triggered": "Agent déclenché",
-    "returns_when_done": "Revient dans la boîte de réception à la fin",
+    "returns_on_activity": "Revient dans la boîte de réception en cas de nouvelle activité",
     "next": "Suivante",
     "next_tooltip": "Ouvrir la suivante : {{title}}"
   },

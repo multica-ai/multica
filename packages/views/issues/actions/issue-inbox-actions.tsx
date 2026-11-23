@@ -239,7 +239,7 @@ export function IssueInboxBar({
             ·
           </span>
           <span className="truncate text-muted-foreground @max-[32rem]/inbox-bar:hidden">
-            {t(($) => $.kept.returns_when_done)}
+            {t(($) => $.kept.returns_on_activity)}
           </span>
         </span>
       ) : (

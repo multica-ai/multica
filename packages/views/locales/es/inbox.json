@@ -155,7 +155,7 @@
     "unassigned": "Desasignada",
     "ran_quick_action": "Se ejecutó {{name}}",
     "agent_triggered": "Agente activado",
-    "returns_when_done": "Vuelve a la bandeja al terminar",
+    "returns_on_activity": "Vuelve a la bandeja con nueva actividad",
     "next": "Siguiente",
     "next_tooltip": "Abrir la siguiente: {{title}}"
   },

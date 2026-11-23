@@ -585,7 +585,7 @@ describe("IssueInboxBar once an action is undone", () => {
 
     const statusBar = await screen.findByRole("status");
     expect(statusBar).toHaveTextContent("Emacs is working");
-    expect(statusBar).toHaveTextContent("Returns to Inbox when done");
+    expect(statusBar).toHaveTextContent("Returns to Inbox on new activity");
     expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
     expect(nav.push).not.toHaveBeenCalled();
@@ -600,7 +600,7 @@ describe("IssueInboxBar once an action is undone", () => {
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
     expect(await screen.findByText("Agent triggered")).toBeInTheDocument();
-    expect(screen.getByText("Returns to Inbox when done")).toBeInTheDocument();
+    expect(screen.getByText("Returns to Inbox on new activity")).toBeInTheDocument();
     expect(nav.push).not.toHaveBeenCalled();
   });
 });
