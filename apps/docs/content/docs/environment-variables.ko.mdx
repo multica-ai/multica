@@ -291,7 +291,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 ### 데몬 로그 [#daemon-logs]
 
-`LOG_LEVEL`. 데몬의 기본 로그 수준은 `debug`입니다. 데몬 로그 수준입니다. `multica config set log_level info`로 프로필 기본값을 설정합니다. 환경 변수가 우선합니다.
+데몬의 기본 로그 수준은 `debug`입니다. 바꾸려면 `LOG_LEVEL`(`debug`, `info`, `warn`, `error`)을 설정하거나 `multica config set log_level info`로 프로필 기본값을 저장합니다. 환경 변수가 프로필보다 우선합니다.
 
 데몬이 백그라운드에서(터미널에 연결되지 않은 채) 실행될 때 로그는 `~/.multica/daemon.log`(이름 있는 프로필은 `~/.multica/profiles/<name>/daemon.log`)에 기록되고 크기에 따라 순환됩니다. 순환된 파일은 gzip으로 압축됩니다.
 
@@ -391,6 +391,7 @@ multica config show
 | `poll_interval` | `30s` | 실행 polling 간격 |
 | `ws_claim_poll_interval` | `3m` | 정상 WebSocket에서 claim 안전 polling의 상한. `poll_interval`과 독립적으로 설정되며 Daemon은 하향 jitter를 적용합니다 |
 | `heartbeat_interval` | `15s` | heartbeat 간격 |
+| `log_level` | `debug` | 데몬 로그 수준(`debug`, `info`, `warn`, `error`). `LOG_LEVEL`이 우선함 |
 | `agent_timeout` | 제한 없음 | 단일 실행의 절대 시간 제한 |
 | `agent_idle_watchdog` | `2h` | 실행 중인 도구 호출이 없을 때의 무응답 상한. `0s`이면 데몬 watchdog 전체가 꺼지며 `agent_tool_watchdog`도 적용되지 않습니다 |
 | `agent_tool_watchdog` | `agent_idle_watchdog`와 동일 | 도구 호출이 실행 중일 때의 무응답 상한. `0s`이면 데몬 watchdog이 무응답 도구 호출 때문에 실행을 멈추지 않으며, 실행은 `agent_timeout`(기본값은 제한 없음)으로만 제한됩니다 |

@@ -405,6 +405,22 @@ func TestApplyConfigSetRejectsBadValues(t *testing.T) {
 	}
 }
 
+// TestApplyConfigSetNormalizesLogLevel keeps config set in step with the
+// spellings LOG_LEVEL already accepts.
+func TestApplyConfigSetNormalizesLogLevel(t *testing.T) {
+	t.Parallel()
+
+	for value, want := range map[string]string{"INFO": "info", " Debug ": "debug", "warning": "warn", "ERROR": "error", "": ""} {
+		cfg := cli.CLIConfig{LogLevel: "info"}
+		if err := applyConfigSet(&cfg, "log_level", value); err != nil {
+			t.Fatalf("applyConfigSet(log_level, %q): %v", value, err)
+		}
+		if cfg.LogLevel != want {
+			t.Fatalf("applyConfigSet(log_level, %q) stored %q, want %q", value, cfg.LogLevel, want)
+		}
+	}
+}
+
 // TestApplyConfigSetPollIntervalZeroDoesNotOverwrite ensures a rejected
 // "0s" write leaves any previously persisted value intact — the caller
 // only saves when applyConfigSet returns nil, but pin the invariant so

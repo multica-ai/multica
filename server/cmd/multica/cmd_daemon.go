@@ -973,10 +973,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// than server URL: an unreadable / missing config only means "no
 	// persisted overrides", not "cannot start".
 	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
-	logLevel := os.Getenv("LOG_LEVEL")
-	if logLevel == "" {
-		logLevel = fileCfg.LogLevel
-	}
+	logLevel := resolveDaemonLogLevel(fileCfg.LogLevel)
 	// Pick the log sink. A user who runs `daemon start --foreground` in a shell
 	// keeps live, colored logging on their terminal (a documented debugging
 	// path — see docs troubleshooting). A detached/background child, whose
@@ -1815,6 +1812,16 @@ func resolveWorkspacesRootForProfile(profile, flagValue string) (string, error) 
 		fileCfg.WorkspacesRoot,
 	)
 	return daemon.ResolveWorkspacesRoot(profile, override)
+}
+
+// resolveDaemonLogLevel picks the daemon log level: LOG_LEVEL wins when set,
+// otherwise the profile's log_level. An empty result leaves the logger on its
+// built-in default (debug).
+func resolveDaemonLogLevel(cfgValue string) string {
+	if !envUnset("LOG_LEVEL") {
+		return os.Getenv("LOG_LEVEL")
+	}
+	return cfgValue
 }
 
 // resolveDaemonDurationOverride is the numeric counterpart for

@@ -219,9 +219,12 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 			return err
 		}
 	case "log_level":
-		switch value {
+		// Accept the same spellings LOG_LEVEL does, stored in canonical form.
+		switch level := strings.ToLower(strings.TrimSpace(value)); level {
 		case "", "debug", "info", "warn", "error":
-			cfg.LogLevel = value
+			cfg.LogLevel = level
+		case "warning":
+			cfg.LogLevel = "warn"
 		default:
 			return fmt.Errorf("log_level must be debug, info, warn, or error (got %q)", value)
 		}

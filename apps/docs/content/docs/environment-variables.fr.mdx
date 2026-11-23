@@ -288,7 +288,7 @@ Le daemon nettoie régulièrement les répertoires des exécutions, les caches d
 
 ### Journaux du daemon [#daemon-logs]
 
-`LOG_LEVEL`. Le niveau par défaut du daemon est `debug`. Niveau des journaux du daemon. Définissez la valeur du profil avec `multica config set log_level info`. La variable d’environnement est prioritaire.
+Le daemon journalise au niveau `debug` par défaut. Définissez `LOG_LEVEL` (`debug`, `info`, `warn` ou `error`) pour le changer, ou enregistrez une valeur par défaut pour le profil avec `multica config set log_level info`. La variable d’environnement est prioritaire sur le profil.
 
 Quand le daemon tourne en arrière-plan (sans terminal attaché), il écrit ses journaux dans `~/.multica/daemon.log`, ou `~/.multica/profiles/<name>/daemon.log` pour un profil nommé, avec une rotation par taille ; les fichiers issus de la rotation sont compressés en gzip.
 
@@ -388,6 +388,7 @@ Clés prises en charge :
 | `poll_interval` | `30s` | Intervalle d'interrogation des exécutions |
 | `ws_claim_poll_interval` | `3m` | Borne supérieure des interrogations de sécurité de la prise en charge via WebSocket lorsque celle-ci est saine, indépendante de `poll_interval` ; le daemon applique une gigue uniquement à la baisse |
 | `heartbeat_interval` | `15s` | Intervalle des signaux de vie (heartbeat) |
+| `log_level` | `debug` | Niveau des journaux du daemon : `debug`, `info`, `warn` ou `error`. `LOG_LEVEL` est prioritaire |
 | `agent_timeout` | illimité | Durée maximale absolue par exécution |
 | `agent_idle_watchdog` | `2h` | Durée maximale de silence lorsqu'aucun appel d'outil n'est en cours ; `0s` désactive entièrement le watchdog du daemon, y compris `agent_tool_watchdog` |
 | `agent_tool_watchdog` | identique à `agent_idle_watchdog` | Durée maximale de silence pendant un appel d'outil ; avec `0s`, le watchdog du daemon n'arrête jamais une exécution à cause d'un appel d'outil silencieux, et l'exécution n'est plus bornée que par `agent_timeout`, illimité par défaut |
