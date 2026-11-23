@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -26,7 +28,6 @@ func TestClaimTaskIssueSessionPolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, t.Context())
 			dbfx.Cleanup(t, "DELETE FROM agent WHERE id = $1", agentID)
-			dbfx.Exec(t, "UPDATE agent SET runtime_config = $2::jsonb WHERE id = $1", agentID, tc.config)
 			issueID := dbfx.Issue(t, "Issue session policy", testutil.Cols{"status": "in_progress"})
 			parentID := dbfx.Task(t, agentID, testutil.Cols{
 				"issue_id": issueID, "runtime_id": runtimeID, "status": "completed",
@@ -42,6 +43,11 @@ func TestClaimTaskIssueSessionPolicy(t *testing.T) {
 				task["work_dir"] = "/tmp/previous-workdir"
 			}
 			dbfx.Task(t, agentID, task)
+			update := newRequest(http.MethodPut, "/api/agents/"+agentID, map[string]any{
+				"runtime_config": json.RawMessage(tc.config),
+			})
+			testutil.Call(t, testHandler.UpdateAgent, withURLParam(update, "id", agentID)).Want(http.StatusOK)
+
 			claim := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityCheckoutKeepsWorkV1)
 
 			var wantSession, wantWorkDir string
