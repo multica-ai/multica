@@ -75,7 +75,7 @@ Counts, progress, copy, send/stop, save state, toggles.
 The Appearance setting "Reduce motion" and the system's `prefers-reduced-motion` both mean instant: no movement, no size animation, no fade in its place.
 
 - The Appearance setting zeroes CSS animation and transition durations for the whole document. The system setting reaches CSS only through media queries, so every CSS animation or transition also carries `motion-reduce:animate-none` or `motion-reduce:transition-none`.
-- JavaScript motion (motion/react, WAAPI) reads `useReducedMotion()` from `@multica/core/appearance`, or `prefersReducedMotion()` outside render, which cover both settings. With either set, pass `duration: 0` or skip the animation. motion's own `useReducedMotion` and a bare `matchMedia` check see only the system setting.
+- JavaScript motion (motion/react, WAAPI) reads `useReducedMotion()` from `@multica/core/appearance`, or `prefersReducedMotion()` outside render, which cover both settings. With either set, pass `duration: 0` or skip the animation. motion's own `useReducedMotion` and a bare `matchMedia` check see only the system setting. `MotionProvider` at the app root makes motion/react skip transform and layout animation under either setting, but opacity and color still animate, so the `duration: 0` above still applies.
 - Test the reduced branch: with reduced motion, the end state is there in the same frame.
 
 ## Do not animate
@@ -98,11 +98,12 @@ These stay instant:
 
 | Need | Use | Where |
 | --- | --- | --- |
-| Durations and curves | `UI_MOTION_DURATION`, `UI_EASE_OUT`, `UI_EASE_IN` | `packages/ui/lib/motion.ts` |
+| Durations and curves | `UI_MOTION_DURATION`, `UI_EASE_OUT`, `UI_EASE_IN`, `UI_INDICATOR_SPRING` (selected-state indicators) | `packages/ui/lib/motion.ts` |
 | Overlay enter and exit | The overlay components; Dialog's `--dialog-*` tokens | `packages/ui/components/ui/`, `packages/ui/styles/tokens.css` |
 | Expand and collapse | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
 | Tabs indicator | `Tabs` | `packages/ui/components/ui/tabs.tsx` |
 | Segmented control indicator | `SegmentedToggle` | `packages/views/common/segmented-toggle.tsx` |
+| Reduced motion for motion/react | `MotionProvider` (mounted at the web and desktop roots) | `packages/views/common/motion-provider.tsx` |
 | Tabs whose labels fold and unfold | `useTabSwitchMotion` | `packages/views/inbox/components/inbox-tabs.tsx` |
 | Content switch that keeps its height while loading | `InboxTabBody` (pattern; extract it when a second caller needs it) | `packages/views/layout/panels/inbox-section.tsx` |
 | Row exit collapse | Inbox row `motion.li` exit | `packages/views/layout/panels/inbox-section.tsx` |

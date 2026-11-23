@@ -75,7 +75,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 外观设置中的「减少动态效果」和系统的 `prefers-reduced-motion` 都表示瞬切：不移动，不做尺寸动画，也不用淡入淡出代替。
 
 - 外观设置会把整个文档的 CSS 动画和过渡时长归零。系统设置只能通过媒体查询影响 CSS，所以每个 CSS 动画或过渡都要加 `motion-reduce:animate-none` 或 `motion-reduce:transition-none`。
-- JavaScript 动效（motion/react、WAAPI）读取 `@multica/core/appearance` 的 `useReducedMotion()`，渲染之外用 `prefersReducedMotion()`，两者都覆盖这两个设置。任一设置开启时传 `duration: 0` 或跳过动画。motion 自带的 `useReducedMotion` 和单独的 `matchMedia` 判断只能看到系统设置。
+- JavaScript 动效（motion/react、WAAPI）读取 `@multica/core/appearance` 的 `useReducedMotion()`，渲染之外用 `prefersReducedMotion()`，两者都覆盖这两个设置。任一设置开启时传 `duration: 0` 或跳过动画。motion 自带的 `useReducedMotion` 和单独的 `matchMedia` 判断只能看到系统设置。应用根部的 `MotionProvider` 会让 motion/react 在任一设置开启时跳过位移和布局动画，但透明度和颜色仍会过渡，所以上面的 `duration: 0` 仍然需要。
 - 测试减少动态效果的分支：开启后，终点状态在同一帧出现。
 
 ## 不要加动效
@@ -98,11 +98,12 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 
 | 需求 | 使用 | 位置 |
 | --- | --- | --- |
-| 时长和曲线 | `UI_MOTION_DURATION`、`UI_EASE_OUT`、`UI_EASE_IN` | `packages/ui/lib/motion.ts` |
+| 时长和曲线 | `UI_MOTION_DURATION`、`UI_EASE_OUT`、`UI_EASE_IN`、`UI_INDICATOR_SPRING`（选中态指示器） | `packages/ui/lib/motion.ts` |
 | 浮层进退场 | 浮层组件；Dialog 的 `--dialog-*` token | `packages/ui/components/ui/`、`packages/ui/styles/tokens.css` |
 | 展开折叠 | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
 | 标签指示器 | `Tabs` | `packages/ui/components/ui/tabs.tsx` |
 | 分段控件指示器 | `SegmentedToggle` | `packages/views/common/segmented-toggle.tsx` |
+| motion/react 的减少动态效果 | `MotionProvider`（挂在 web 和桌面端根部） | `packages/views/common/motion-provider.tsx` |
 | 标签名会展开收起的标签 | `useTabSwitchMotion` | `packages/views/inbox/components/inbox-tabs.tsx` |
 | 加载期间保持高度的内容切换 | `InboxTabBody`（模式；出现第二个使用者时再抽成原语） | `packages/views/layout/panels/inbox-section.tsx` |
 | 行退场收起 | Inbox 行的 `motion.li` 退场 | `packages/views/layout/panels/inbox-section.tsx` |
