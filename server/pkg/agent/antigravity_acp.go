@@ -458,11 +458,11 @@ func antigravityACPToolName(name, title, kind string) string {
 // All stream state lives on the ACP reader. Text frames carry deltas without
 // event IDs. Identical deltas can be intentional, unlike repeated tool IDs.
 type antigravityACPStream struct {
-	messages    chan Message
-	deliverable acpDeliverableTracker
-	tools       map[string]bool // true once a tool has finished
-	lastType    MessageType
-	trailing    string
+	messages        chan Message
+	deliverable     acpDeliverableTracker
+	tools           map[string]bool // true once a tool has finished
+	textNewlines    string
+	thoughtNewlines string
 }
 
 func (s *antigravityACPStream) acceptToolUpdate(updateType string, data json.RawMessage) bool {
@@ -492,21 +492,27 @@ func (s *antigravityACPStream) acceptToolUpdate(updateType string, data json.Raw
 }
 
 func (s *antigravityACPStream) send(msg Message) {
-	if s.lastType != msg.Type {
-		s.trailing = ""
-	}
-	s.lastType = msg.Type
 	switch msg.Type {
-	case MessageText, MessageThinking:
-		content := s.trailing + msg.Content
-		msg.Content = strings.TrimRight(content, "\r\n")
-		s.trailing = content[len(msg.Content):]
-		if msg.Content == "" {
-			return
-		}
+	case MessageText:
+		msg.Content = trimACPChunkTail(msg.Content, &s.textNewlines)
+	case MessageThinking:
+		msg.Content = trimACPChunkTail(msg.Content, &s.thoughtNewlines)
 	case MessageToolUse:
 		msg.Input = antigravityToolInput(msg.Input)
+		s.textNewlines, s.thoughtNewlines = "", ""
+	case MessageToolResult:
+		s.textNewlines, s.thoughtNewlines = "", ""
+	}
+	if (msg.Type == MessageText || msg.Type == MessageThinking) && msg.Content == "" {
+		return
 	}
 	s.deliverable.observe(msg)
 	trySend(s.messages, msg)
+}
+
+func trimACPChunkTail(delta string, trailing *string) string {
+	content := *trailing + delta
+	text := strings.TrimRight(content, "\r\n")
+	*trailing = content[len(text):]
+	return text
 }

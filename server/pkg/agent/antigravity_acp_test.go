@@ -77,7 +77,7 @@ func TestAntigravityACPStreamAndResume(t *testing.T) {
 				t.Fatal("concurrent prompts have no in-turn receipt")
 			}
 			result, messages := collectAntigravityACP(t, newSession)
-			if result.Status != "completed" || result.SessionID != "session-1" || result.Output != "Final\n\nanswer answer" {
+			if result.Status != "completed" || result.SessionID != "session-1" || result.Output != "Final\n\nanswer answer answer" {
 				t.Fatalf("new result = %+v", result)
 			}
 			if got := result.Usage["claude-sonnet-test"]; got.InputTokens != 17 || got.OutputTokens != 4 || got.CostUSDTicks != 0 {
@@ -103,7 +103,7 @@ func TestAntigravityACPStreamAndResume(t *testing.T) {
 					kinds = append(kinds, msg.Type)
 				}
 			}
-			if text.String() != "CheckingFinal\n\nanswer answer" || thoughts.String() != "Thinking\nnext" ||
+			if text.String() != "CheckingFinal\n\nanswer answer answer" || thoughts.String() != "Thinking\nnextReviewing" ||
 				!slices.Equal(kinds, []MessageType{MessageToolUse, MessageToolResult}) {
 				t.Fatalf("unexpected stream: %+v", messages)
 			}
@@ -356,8 +356,11 @@ func TestAntigravityACPFakeProcess(t *testing.T) {
 				update("session-1", "tool_call_update", map[string]any{"toolCallId": "call-1", "status": "completed", "rawOutput": "ok"})
 			}
 			chunk("session-1", text, "Final\n")
+			chunk("session-1", thought, "Reviewing\n")
 			chunk("session-1", text, "\nanswer")
-			chunk("session-1", text, " answer\n\n")
+			chunk("session-1", text, " answer")
+			chunk("session-1", text, " answer")
+			chunk("session-1", text, "\n\n")
 			if err := os.WriteFile("session-1.saved", nil, 0o600); err != nil {
 				t.Fatal(err)
 			}
