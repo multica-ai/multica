@@ -589,17 +589,13 @@ function NextBackFields({
           );
         })}
       </div>
-      <p className="text-caption leading-5 text-muted-foreground">
-        {t(($) => $.workflows.editor.next_hint)}
-        {onPreview && (
-          <>
-            {" "}
-            <button type="button" onClick={onPreview} className="text-brand hover:underline">
-              {t(($) => $.workflows.editor.preview_brief)}
-            </button>
-          </>
-        )}
-      </p>
+      {onPreview && (
+        <p className="text-caption leading-5">
+          <button type="button" onClick={onPreview} className="text-brand hover:underline">
+            {t(($) => $.workflows.editor.preview_brief)}
+          </button>
+        </p>
+      )}
     </div>
   );
 }
