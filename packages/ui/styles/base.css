@@ -545,7 +545,7 @@ html[data-resizing] [data-right-sidebar-panel] {
   }
 
   [data-comment-actions],
-  [data-right-sidebar-panel] {
+  [data-right-sidebar-panel][data-right-sidebar-motion] {
     transition: none;
   }
 }

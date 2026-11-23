@@ -195,7 +195,11 @@ vi.mock("../../editor", async () => ({
   PreviewSequenceProvider: ({ children }: { children: React.ReactNode }) =>
     children,
   usePreviewSequence: () => ({ openAt: () => false }),
+  usePreviewActiveKey: () => null,
   collectPreviewSequence: () => [],
+  // Pass-through for the same reason; the dock has its own suite.
+  PreviewDockHost: ({ children }: { children: React.ReactNode }) => children,
+  PreviewDock: ({ children }: { children: React.ReactNode }) => children,
   // The real provider is plain context; attachment-thumbnail.test.tsx covers it.
   ...(await vi.importActual<typeof import("../../editor/image-thumbnails-context")>(
     "../../editor/image-thumbnails-context",

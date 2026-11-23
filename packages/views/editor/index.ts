@@ -38,8 +38,11 @@ export type {
 export {
   PreviewSequenceProvider,
   collectPreviewSequence,
+  usePreviewActiveKey,
   usePreviewSequence,
 } from "./preview-sequence-context";
+export { PreviewDock, PreviewDockHost } from "./preview-dock";
+export type { PreviewDockController, PreviewDockYield } from "./preview-dock";
 export type {
   OpenAtOptions,
   PreviewItemDetails,
