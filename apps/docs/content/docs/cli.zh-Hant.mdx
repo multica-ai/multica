@@ -141,6 +141,8 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
+如果 `issue comment add` 逾時或連線中斷，留言可能已經儲存。在智慧體執行中，直接重新執行同一條指令是安全的：CLI 會根據執行、任務、父留言、內容和附件產生冪等鍵，伺服器會回傳已儲存的留言，不會再發一則。在其他情境下，每次嘗試都傳同一個 `--idempotency-key <key>` 即可獲得同樣的保護。舊版伺服器會忽略這個鍵。
+
 同一專案、同一父任務下已有標題相同（不區分大小寫，忽略多餘空格）且未關閉的任務時，`issue create` 會拒絕建立並給出那個任務。確實要再建一個，加 `--allow-duplicate`；要把一個任務標為另一個的重複，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
 
 一個任務要依次提交多個 PR 時，用 `issue create --title "..." --pr-auto-complete off` 或 `issue update <id> --pr-auto-complete off`，讓這個任務在 PR 合併後保持原狀態。用 `--pr-auto-complete on` 恢復工作區規則，從下一次 PR 事件起生效。`issue pull-requests <id>` 會顯示任務開關、工作區開關、目標狀態和判斷結果，沒有關聯 PR 時也會顯示。支援該欄位的伺服器會在建立交易內儲存開關；舊伺服器會補呼叫一次 PUT，失敗時 CLI 會提供已建立的任務 ID 和重試用的 update 命令，請勿重複建立。

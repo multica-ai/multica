@@ -563,8 +563,116 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	cmd.Flags().String("parent", "", "")
 	cmd.Flags().StringSlice("steer", nil, "")
 	cmd.Flags().Bool("steer-active", false, "")
+	cmd.Flags().String("idempotency-key", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+// GH #8221: an agent that reruns `comment add` after a lost response must send
+// the same Idempotency-Key, so the server returns the saved comment instead of
+// posting a duplicate.
+func TestRunIssueCommentAddIdempotencyKey(t *testing.T) {
+	const (
+		issueID = "11111111-1111-4111-8111-111111111111"
+		taskID  = "22222222-2222-4222-8222-222222222222"
+	)
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("shot.png", []byte("png-v1"), 0o644); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	var keys []string
+	replay := false
+	uploads := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
+			uploads++
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": fmt.Sprintf("attachment-%d", uploads), "url": fmt.Sprintf("https://files.test/%d.png", uploads)})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			keys = append(keys, r.Header.Get("Idempotency-Key"))
+			if replay {
+				w.Header().Set("Idempotent-Replayed", "true")
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusCreated)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	run := func(flags map[string]string, attachments ...string) string {
+		t.Helper()
+		cmd := newIssueCommentAddTestCmd()
+		_ = cmd.Flags().Set("output", "table")
+		for name, value := range flags {
+			_ = cmd.Flags().Set(name, value)
+		}
+		for _, path := range attachments {
+			_ = cmd.Flags().Set("attachment", path)
+		}
+		stderr := captureStderr(t)
+		defer stderr.restore()
+		if err := runIssueCommentAdd(cmd, []string{issueID}); err != nil {
+			t.Fatalf("runIssueCommentAdd: %v", err)
+		}
+		return stderr.read()
+	}
+	last := func() string { return keys[len(keys)-1] }
+
+	// Outside an agent run, no key unless one is passed.
+	run(map[string]string{"content": "verdict"})
+	if last() != "" {
+		t.Fatalf("key outside an agent run = %q, want none", last())
+	}
+	run(map[string]string{"content": "verdict", "idempotency-key": "my-key"})
+	if last() != "my-key" {
+		t.Fatalf("explicit key = %q, want my-key", last())
+	}
+
+	t.Setenv("MULTICA_TASK_ID", taskID)
+	body := map[string]string{"content": "verdict ![shot](shot.png)", "parent": "33333333-3333-4333-8333-333333333333"}
+	run(body, "shot.png")
+	first := last()
+	if !strings.HasPrefix(first, "cli-task-v1:") {
+		t.Fatalf("derived key = %q", first)
+	}
+	// The rerun uploads the file again and its link is rewritten to a new URL,
+	// but it is the same comment.
+	replay = true
+	report := run(body, "shot.png")
+	if last() != first {
+		t.Fatalf("rerun key = %q, want %q", last(), first)
+	}
+	if !strings.Contains(report, "already posted") || strings.Contains(report, "Comment added") {
+		t.Fatalf("replay stderr = %q, want the already-posted notice", report)
+	}
+	replay = false
+
+	for name, change := range map[string]func(){
+		"content":    func() { run(map[string]string{"content": "other", "parent": body["parent"]}, "shot.png") },
+		"parent":     func() { run(map[string]string{"content": body["content"]}, "shot.png") },
+		"attachment": func() { _ = os.WriteFile("shot.png", []byte("png-v2"), 0o644); run(body, "shot.png") },
+	} {
+		change()
+		if last() == first {
+			t.Fatalf("changing %s kept the key %q", name, first)
+		}
+	}
+	t.Setenv("MULTICA_TASK_ID", "44444444-4444-4444-8444-444444444444")
+	_ = os.WriteFile("shot.png", []byte("png-v1"), 0o644)
+	run(body, "shot.png")
+	if last() == first {
+		t.Fatalf("another run reused the key %q", first)
+	}
 }
 
 func TestRunIssueCommentAddUploadsAttachmentWithoutIssueID(t *testing.T) {

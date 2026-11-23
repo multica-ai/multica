@@ -141,6 +141,8 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
+Si `issue comment add` expire ou perd sa connexion, le commentaire est peut-être déjà enregistré. Dans une exécution d'agent, relancer la même commande est sans risque : la CLI envoie une clé d'idempotence dérivée de l'exécution, du ticket, du commentaire parent, du contenu et des pièces jointes, et le serveur renvoie le commentaire enregistré au lieu de le publier une seconde fois. Ailleurs, passez la même `--idempotency-key <key>` à chaque tentative pour obtenir la même protection. Les serveurs plus anciens ignorent la clé.
+
 Si une tâche ouverte portant le même titre (sans tenir compte de la casse ni des espaces en trop) existe déjà sous le même projet et le même parent, `issue create` refuse et indique cette tâche. Pour en créer une autre malgré tout, ajoutez `--allow-duplicate`. Pour marquer une tâche comme doublon d'une autre, utilisez `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
 
 Pour livrer plusieurs PR successives, utilisez `issue create --title "..." --pr-auto-complete off` ou `issue update <id> --pr-auto-complete off` pour conserver le statut de cette tâche après fusion. `--pr-auto-complete on` rétablit la règle de l'espace de travail au prochain événement PR. `issue pull-requests <id>` affiche le réglage de la tâche, celui de l'espace de travail, le statut cible et la décision, même sans PR liée. Les serveurs compatibles enregistrent le réglage dans la transaction de création ; les anciens reçoivent un PUT supplémentaire. En cas d'échec, le CLI indique l'ID créé et la commande update à réessayer : ne répétez pas create.

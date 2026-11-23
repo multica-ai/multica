@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -818,6 +820,7 @@ func init() {
 	issueCommentAddCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). To show an image at a specific spot, reference the same path in the content (e.g. ![shot](./a.png)); that link is rewritten to the uploaded file before posting. Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
 	issueCommentAddCmd.Flags().StringSlice("steer", nil, "Run ID (full UUID or short prefix) whose in-progress turn should receive this comment instead of a follow-up run (repeatable)")
 	issueCommentAddCmd.Flags().Bool("steer-active", false, "Add this comment to the running turn of every agent on this issue you may steer, and of any other recipient that is running")
+	issueCommentAddCmd.Flags().String("idempotency-key", "", "Key that makes resending this comment safe: a retry with the same key returns the comment already posted instead of posting it again. Inside an agent run the CLI derives one from the run, issue, parent, content and attachments")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment update
@@ -3003,6 +3006,12 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	parentID, _ := cmd.Flags().GetString("parent")
+	idempotencyKey, _ := cmd.Flags().GetString("idempotency-key")
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" && client.TaskID != "" {
+		idempotencyKey = deriveCommentIdempotencyKey(client.TaskID, issueID, parentID, content, steerInputs, steerActive, pending)
+	}
 	var attachmentIDs []string
 	uploaded := make([]cli.AttachmentResponse, 0, len(pending))
 	for _, att := range pending {
@@ -3031,25 +3040,71 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		// listing above.
 		body["steer"] = true
 	}
-	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
+	if parentID != "" {
 		body["parent_id"] = parentID
 	}
 	if len(attachmentIDs) > 0 {
 		body["attachment_ids"] = attachmentIDs
 	}
+	var headers map[string]string
+	if idempotencyKey != "" {
+		headers = map[string]string{"Idempotency-Key": idempotencyKey}
+	}
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/comments", body, &result); err != nil {
+	respHeaders, err := client.PostJSONWithHeaders(ctx, "/api/issues/"+issueID+"/comments", body, headers, &result)
+	if err != nil {
 		return fmt.Errorf("add comment: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueRef.Display)
-	reportSteerOutcomes(os.Stderr, steerTargets, result)
+	if respHeaders.Get("Idempotent-Replayed") == "true" {
+		// An earlier attempt of this command already posted the comment; the
+		// server returned it without posting again or re-triggering anyone.
+		fmt.Fprintf(os.Stderr, "Comment was already posted to issue %s by an earlier attempt; not posted again.\n", issueRef.Display)
+	} else {
+		fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueRef.Display)
+		reportSteerOutcomes(os.Stderr, steerTargets, result)
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// deriveCommentIdempotencyKey names one logical comment inside one agent run.
+// An agent whose comment add timed out typically reruns the same command; the
+// same run, target and input produce the same key, so the server returns the
+// comment it already saved instead of posting a duplicate (GH #8221).
+//
+// The key is built from the inputs as given, before attachments are uploaded:
+// a rerun uploads the files again and rewrites the body's links to the new
+// uploads, so the request body itself differs between attempts. Attachments
+// count by content, so a rerun with an edited file is a different comment.
+func deriveCommentIdempotencyKey(taskID, issueID, parentID, content string, steer []string, steerActive bool, attachments []pendingAttachment) string {
+	type attachmentInput struct {
+		Path   string `json:"path"`
+		SHA256 string `json:"sha256"`
+	}
+	files := make([]attachmentInput, 0, len(attachments))
+	for _, att := range attachments {
+		sum := sha256.Sum256(att.data)
+		files = append(files, attachmentInput{Path: att.path, SHA256: hex.EncodeToString(sum[:])})
+	}
+	steerSorted := append([]string(nil), steer...)
+	sort.Strings(steerSorted)
+	// A structured encoding keeps field boundaries unambiguous.
+	payload, _ := json.Marshal(struct {
+		TaskID      string            `json:"task_id"`
+		IssueID     string            `json:"issue_id"`
+		ParentID    string            `json:"parent_id"`
+		Content     string            `json:"content"`
+		Steer       []string          `json:"steer"`
+		SteerActive bool              `json:"steer_active"`
+		Attachments []attachmentInput `json:"attachments"`
+	}{taskID, issueID, parentID, content, steerSorted, steerActive, files})
+	sum := sha256.Sum256(payload)
+	return "cli-task-v1:" + hex.EncodeToString(sum[:])
 }
 
 func runIssueCommentUpdate(cmd *cobra.Command, args []string) error {
