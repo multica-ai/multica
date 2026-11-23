@@ -1785,7 +1785,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listTimeline.mockResolvedValue([root]);
     act(() => client.setQueryData(issueKeys.timeline("issue-1"), [root]));
     await screen.findByText("Waiting for an available agent.");
-    const userBlock = container.querySelector(`#comment-body-${root.id}`)!.parentElement!;
+    const userBlock = container.querySelector(`#root-comment-body-${root.id}`)!.parentElement!;
     const agentBlock = container.querySelector(`[data-run-comment-id="${taskId}"]`)!;
     expect(agentBlock).not.toBeNull();
     expect(userBlock.contains(agentBlock)).toBe(false);
@@ -3022,6 +3022,49 @@ describe("IssueDetail (shared)", () => {
         await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
         expect(onHighlightLanded).toHaveBeenCalledTimes(1);
       });
+    });
+
+    // MUL-9959: the reading position is the comment at the viewport's centre,
+    // found as its nearest `[id^="comment-"]` ancestor. The root comment's
+    // body sat in between with id `comment-body-<id>`, so a reader in the
+    // middle of a comment's text saved "body-<id>", which matches no comment,
+    // and the tab came back at the top.
+    it("saves the reading position against the comment whose body is at the viewport's centre", async () => {
+      mockApiObj.listTasksByIssue.mockResolvedValue([]);
+      const anchors: string[] = [];
+      const adapter: ScrollRestorationAdapter = {
+        get: () => undefined,
+        getViewState: () => undefined,
+        setViewState: (key, value) => {
+          if (key === "timeline-anchor:main:issue-1" && value) anchors.push(value);
+        },
+      };
+      const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute("data-tab-scroll-root") ? new DOMRect(0, 0, 400, 200) : new DOMRect(0, 0, 0, 0);
+      });
+      const hadElementFromPoint = "elementFromPoint" in document;
+      const originalElementFromPoint = document.elementFromPoint;
+      let centre: Element | null = null;
+      document.elementFromPoint = () => centre;
+      try {
+        render(
+          <I18nProvider locale="en" resources={TEST_RESOURCES}>
+            <QueryClientProvider client={createTestQueryClient()}>
+              <ScrollRestorationProvider adapter={adapter}>
+                <IssueDetail issueId="issue-1" />
+              </ScrollRestorationProvider>
+            </QueryClientProvider>
+          </I18nProvider>,
+        );
+        centre = await screen.findByText("Started working on this");
+        fireEvent.scroll(centre.closest("[data-tab-scroll-root]")!);
+        await waitFor(() => expect(anchors.length).toBeGreaterThan(0));
+        expect(JSON.parse(anchors.at(-1)!)).toMatchObject({ commentId: "comment-1" });
+      } finally {
+        rect.mockRestore();
+        if (hadElementFromPoint) document.elementFromPoint = originalElementFromPoint;
+        else delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+      }
     });
 
     it("restarts a comment landing that a timeline update cancels while it is still aligning", async () => {
