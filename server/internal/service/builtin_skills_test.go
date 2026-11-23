@@ -365,6 +365,7 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/skill-import.md":  "skill import",
 		"references/themes.md":        "theme",
 		"references/inbox.md":         "inbox",
+		"references/docs.md":          "docs",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
@@ -441,6 +442,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"references/skill-import.md",
 				"references/themes.md",
 				"references/inbox.md",
+				"references/docs.md",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
 				// home, so losing one here loses it everywhere.
@@ -740,6 +742,20 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 		{
 			// MUL-9549: an agent manages only its triggering owner's inbox,
 			// cannot delete, and bulk sweeps need explicit confirmation.
+			file: "references/docs.md",
+			want: []string{
+				"`--debug` shows\nthe server's `docs_disabled` code",
+				"Moves and folder commands do not take it",
+				"Prefer `doc edit` for a\ntargeted change",
+				"never retry the same body with a newer revision",
+				"multica doc comment list <doc-id>",
+				"Writing in doc discussions is reserved for people",
+				"multica doc restore <doc-id> --version 3 --base-revision <revision>",
+				"To undo one change and keep the rest, use `doc edit` instead",
+				"Deleting a doc or a folder answers `403`",
+			},
+		},
+		{
 			file: "references/inbox.md",
 			want: []string{
 				"**runtime owner's** inbox",

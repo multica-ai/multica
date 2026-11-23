@@ -315,6 +315,39 @@ describe("collaboration server", () => {
     expect(markdown(a.document)).toBe("One\n\nTwo (Ada)");
   });
 
+  it("refuses a restore from a revision someone has since saved over, keeping their text", async () => {
+    resetDoc("Old body");
+    const a = await connect(ada);
+    typeInto(a.document, 0, 8, " (Ada)");
+    await waitFor(() => markdown(a.document).includes("Ada"));
+    // The caller read revision 1; Ada's pending edit is saved as revision 2
+    // before the restore is checked.
+    const stale = await internal("write", {
+      actor: agent,
+      base_revision: 1,
+      content: "Restored body",
+      action: "restore",
+      action_ref: 1,
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe("revision_conflict");
+    expect(stale.body.revision).toBe(2);
+    expect(stale.body.content).toBe("Old body (Ada)");
+    expect(fake.content).toBe("Old body (Ada)");
+    expect(markdown(a.document)).toBe("Old body (Ada)");
+
+    const fresh = await internal("write", {
+      actor: agent,
+      base_revision: 2,
+      content: "Restored body",
+      action: "restore",
+      action_ref: 1,
+    });
+    expect(fresh.status).toBe(200);
+    await waitFor(() => markdown(a.document) === "Restored body");
+    expect(fake.content).toBe("Restored body");
+  });
+
   describe("keeps what Markdown cannot express", () => {
     const image = { type: "image", attrs: { src: "https://cdn.example.com/a.png", alt: "a", width: 800, height: 600 } };
     const file = { type: "fileCard", attrs: { href: "https://cdn.example.com/f.pdf", filename: "f.pdf", fileSize: 12345 } };

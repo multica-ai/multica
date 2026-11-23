@@ -10,13 +10,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 func TestDocCommandsExposeOnlyAgentReadWrite(t *testing.T) {
 	expected := map[string]bool{
 		"list": true, "search": true, "get": true, "create": true,
-		"edit": true, "update": true, "move": true, "folder": true,
+		"edit": true, "update": true, "move": true, "history": true,
+		"restore": true, "comment": true, "folder": true,
 	}
 	for _, command := range docCmd.Commands() {
 		if !expected[command.Name()] {
@@ -37,6 +40,10 @@ func TestDocCommandsExposeOnlyAgentReadWrite(t *testing.T) {
 	}
 	if len(expectedFolder) != 0 {
 		t.Fatalf("missing doc folder commands: %v", expectedFolder)
+	}
+	// Writing in doc discussions is human-only on the server.
+	if names := commandNames(docCommentCmd); len(names) != 1 || names[0] != "list" {
+		t.Fatalf("doc comment commands = %v, want only list", names)
 	}
 	if !docFolderUpdateCmd.HasAlias("rename") {
 		t.Fatal("doc folder update should accept rename as an alias")
@@ -443,4 +450,202 @@ func TestResolveDocRefMatchesSharedPrefixRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+func commandNames(cmd interface{ Commands() []*cobra.Command }) []string {
+	var names []string
+	for _, c := range cmd.Commands() {
+		names = append(names, c.Name())
+	}
+	return names
+}
+
+func setDocTestServer(t *testing.T, handler http.HandlerFunc) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+}
+
+// setDocFlag sets a flag on a shared command and restores its default after the test.
+func setDocFlag(t *testing.T, cmd *cobra.Command, name, value string) {
+	t.Helper()
+	f := cmd.Flags().Lookup(name)
+	if err := cmd.Flags().Set(name, value); err != nil {
+		t.Fatalf("set --%s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Flags().Set(name, f.DefValue)
+		f.Changed = false
+	})
+}
+
+func TestRunDocHistoryListsVersionsAndShowsOne(t *testing.T) {
+	const docID = "11111111-2222-3333-4444-555555555555"
+	var gotPaths []string
+	setDocTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/docs/" + docID + "/versions":
+			_ = json.NewEncoder(w).Encode(map[string]any{"versions": []any{
+				map[string]any{"number": 3, "action": "restore", "action_ref": 1, "author_type": "agent",
+					"author_id": "aaaaaaaa-0000-0000-0000-000000000000", "message": "roll back", "updated_at": "2026-11-23T04:53:02Z"},
+				map[string]any{"number": 2, "action": "edit", "author_type": "member",
+					"author_id": "bbbbbbbb-0000-0000-0000-000000000000", "message": "", "updated_at": "2026-11-22T10:00:00Z"},
+			}})
+		case "/api/docs/" + docID + "/versions/2":
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 2, "title": "Runbook", "content": "# Old body\n"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	out, err := captureStdout(t, func() error { return runDocHistory(docHistoryCmd, []string{docID}) })
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, want := range []string{"restore of v1", "agent:aaaaaaaa", "roll back", "2026-11-23 04:53", "member:bbbbbbbb"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("history table missing %q:\n%s", want, out)
+		}
+	}
+
+	setDocFlag(t, docHistoryCmd, "version", "2")
+	setDocFlag(t, docHistoryCmd, "output", "content")
+	out, err = captureStdout(t, func() error { return runDocHistory(docHistoryCmd, []string{docID}) })
+	if err != nil {
+		t.Fatalf("show version: %v", err)
+	}
+	if out != "# Old body\n" {
+		t.Fatalf("--output content = %q", out)
+	}
+	if last := gotPaths[len(gotPaths)-1]; last != "/api/docs/"+docID+"/versions/2" {
+		t.Fatalf("version request path = %s", last)
+	}
+
+	setDocFlag(t, docHistoryCmd, "output", "table")
+	if err := runDocHistory(docHistoryCmd, []string{docID}); err == nil || !strings.Contains(err.Error(), "json or content") {
+		t.Fatalf("table output for one version must be refused: %v", err)
+	}
+}
+
+func TestRunDocRestoreSendsRestoreAction(t *testing.T) {
+	const docID = "11111111-2222-3333-4444-555555555555"
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	conflict := false
+	setDocTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		if conflict {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": "revision_conflict", "actual_revision": 9})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": docID, "title": "Runbook", "revision": 8, "content": "restored"})
+	})
+
+	if err := runDocRestore(docRestoreCmd, []string{docID}); err == nil || !strings.Contains(err.Error(), "--version is required") {
+		t.Fatalf("missing --version must explain itself: %v", err)
+	}
+	setDocFlag(t, docRestoreCmd, "version", "2")
+	if err := runDocRestore(docRestoreCmd, []string{docID}); err == nil || !strings.Contains(err.Error(), "--base-revision is required") {
+		t.Fatalf("missing --base-revision must explain itself: %v", err)
+	}
+	setDocFlag(t, docRestoreCmd, "base-revision", "7")
+	setDocFlag(t, docRestoreCmd, "message", "undo broken rewrite")
+	out, err := captureStdout(t, func() error { return runDocRestore(docRestoreCmd, []string{docID}) })
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if gotMethod != http.MethodPatch || gotPath != "/api/docs/"+docID {
+		t.Fatalf("request = %s %s", gotMethod, gotPath)
+	}
+	if gotBody["action"] != "restore" || gotBody["action_ref"] != float64(2) || gotBody["base_revision"] != float64(7) ||
+		gotBody["message"] != "undo broken rewrite" {
+		t.Fatalf("body = %v", gotBody)
+	}
+	if _, ok := gotBody["content"]; ok {
+		t.Fatalf("restore must not send content: %v", gotBody)
+	}
+	if strings.Contains(out, "restored") {
+		t.Fatalf("restore output should omit the doc body: %s", out)
+	}
+
+	conflict = true
+	err = runDocRestore(docRestoreCmd, []string{docID})
+	if err == nil || !strings.Contains(err.Error(), "nothing was restored") || !strings.Contains(err.Error(), "only if the whole doc should still go back") {
+		t.Fatalf("stale revision must ask to re-read before restoring again: %v", err)
+	}
+	if strings.Contains(err.Error(), "merge your change") {
+		t.Fatalf("a restore has no change to merge: %v", err)
+	}
+}
+
+func TestRunDocCommentListGroupsThreadsAndHidesResolved(t *testing.T) {
+	const docID = "11111111-2222-3333-4444-555555555555"
+	var gotPath string
+	setDocTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		// Server order is chronological, so a reply can come after a later root.
+		_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{
+			map[string]any{"id": "c-open", "author_type": "member", "author_id": "m1", "content": "Cite the source\nhere",
+				"anchor_quote": "growth doubled"},
+			map[string]any{"id": "c-done", "author_type": "member", "author_id": "m1", "content": "typo",
+				"anchor_quote": "teh", "resolved_at": "2026-11-22T00:00:00Z"},
+			map[string]any{"id": "c-reply", "parent_id": "c-open", "author_type": "member", "author_id": "m2", "content": "agreed"},
+			map[string]any{"id": "c-done-reply", "parent_id": "c-done", "author_type": "member", "author_id": "m2", "content": "fixed"},
+		}})
+	})
+
+	setDocFlag(t, docCommentListCmd, "output", "json")
+	out, err := captureStdout(t, func() error { return runDocCommentList(docCommentListCmd, []string{docID}) })
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if gotPath != "/api/docs/"+docID+"/comments" {
+		t.Fatalf("request path = %s", gotPath)
+	}
+	var threads []map[string]any
+	if err := json.Unmarshal([]byte(out), &threads); err != nil {
+		t.Fatalf("json output: %v\n%s", err, out)
+	}
+	if ids := commentIDs(threads); strings.Join(ids, ",") != "c-open,c-reply" {
+		t.Fatalf("default list = %v, want the open thread with its reply", ids)
+	}
+
+	setDocFlag(t, docCommentListCmd, "include-resolved", "true")
+	out, err = captureStdout(t, func() error { return runDocCommentList(docCommentListCmd, []string{docID}) })
+	if err != nil {
+		t.Fatalf("list --include-resolved: %v", err)
+	}
+	threads = nil
+	_ = json.Unmarshal([]byte(out), &threads)
+	if ids := commentIDs(threads); strings.Join(ids, ",") != "c-open,c-reply,c-done,c-done-reply" {
+		t.Fatalf("--include-resolved list = %v", ids)
+	}
+
+	setDocFlag(t, docCommentListCmd, "output", "table")
+	out, err = captureStdout(t, func() error { return runDocCommentList(docCommentListCmd, []string{docID}) })
+	if err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	for _, want := range []string{"growth doubled", "Cite the source here", "resolved", "open"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("table missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func commentIDs(comments []map[string]any) []string {
+	ids := make([]string, 0, len(comments))
+	for _, c := range comments {
+		ids = append(ids, strVal(c, "id"))
+	}
+	return ids
 }
