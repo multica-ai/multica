@@ -17,7 +17,6 @@ type Toolkit struct {
 	Name        string         `json:"name,omitempty"`
 	LogoURL     string         `json:"logo,omitempty"`
 	Description string         `json:"description,omitempty"`
-	Categories  []string       `json:"categories,omitempty"`
 	AuthSchemes []string       `json:"auth_schemes,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
 	// ComposioManagedAuthSchemes lists the schemes Composio can authenticate
@@ -86,13 +85,20 @@ type ToolkitCategory struct {
 	Name string
 }
 
+// Logo returns the toolkit's logo URL: top-level on the toolkit nested in auth
+// configs and tools, under meta in the toolkit list.
+func (t Toolkit) Logo() string {
+	if t.LogoURL != "" {
+		return t.LogoURL
+	}
+	logo, _ := t.Meta["logo"].(string)
+	return logo
+}
+
 // PrimaryCategory returns the first category the toolkit is listed under, or
 // a zero value when it has none. The v3.1 list endpoint nests categories under
-// meta as {id, name} objects; a top-level list of names is read first.
+// meta as {id, name} objects.
 func (t Toolkit) PrimaryCategory() ToolkitCategory {
-	if len(t.Categories) > 0 {
-		return ToolkitCategory{Name: t.Categories[0]}
-	}
 	list, _ := t.Meta["categories"].([]any)
 	for _, item := range list {
 		switch v := item.(type) {
