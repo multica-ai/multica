@@ -21,7 +21,7 @@ import { useT } from "../../i18n";
  * out earlier by `!hasOnboarded`.
  *
  * Layout: two-column editorial hero on lg+, single column below.
- * Left = wordmark + serif headline + lede + CTA; right = a stack of
+ * Left = wordmark + headline + lede + CTA; right = a stack of
  * mock issue cards that show what human/agent collaboration looks
  * like on the board — the thing the user is about to create. The
  * right column is an illustration, not content: hidden below lg so
@@ -85,11 +85,12 @@ export function StepWelcome({
               className="h-[35px] self-start text-foreground"
             />
 
-            <h1 className="text-balance font-serif text-5xl font-medium leading-[1.04] tracking-tight sm:text-6xl">
+            {/* CJK wraps only between the translated phrases, so it stays at a size where each phrase fits the column. */}
+            <h1 className="text-balance break-keep text-5xl font-semibold leading-[1.08] tracking-tight sm:text-6xl sm:cjk:text-5xl">
               {t(($) => $.welcome.headline_line1)}
               <br />
               {t(($) => $.welcome.headline_line2)}{" "}
-              <em className="italic text-brand">{t(($) => $.welcome.headline_emphasis)}</em>
+              <span className="text-brand">{t(($) => $.welcome.headline_emphasis)}</span>
             </h1>
 
             <div className="flex flex-col gap-4">
