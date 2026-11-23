@@ -36,6 +36,7 @@
     "apps/web/features/landing/site/cloud-page.tsx",
     "packages/core/ai-traffic/**",
     "SELF_HOSTING_AI.md",
+    ".vercelignore",
     "package.json",
     ".npmrc",
     "pnpm-lock.yaml",
