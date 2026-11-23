@@ -299,11 +299,16 @@ export function HandoffFields({
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const labelOf = useStatusLabel(wsId);
+  const catalog = useIssueStatuses(wsId);
   const mode = modeOf(step.handler);
   // Not derived from the status key: a step for a status still to be created
   // goes by a draft id that need not be a valid element id.
   const instructionsId = useId();
-  const nextDefault = workflowNextStatus({ steps: workflow.steps.map((s) => ({ ...s, next_status_key: undefined })) }, step.status_key);
+  const nextDefault = workflowNextStatus(
+    { steps: workflow.steps.map((s) => ({ ...s, next_status_key: undefined })) },
+    step.status_key,
+    catalog.categoryOf,
+  );
   const nextDefaultLabel = defaultNextLabel ?? (nextDefault ? labelOf(nextDefault) : "");
   const choose = (m: HandoffMode) => {
     if (m === mode) return;

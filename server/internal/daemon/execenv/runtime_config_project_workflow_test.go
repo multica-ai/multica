@@ -125,6 +125,8 @@ func TestBriefWithStatusMapStatesTheMapRules(t *testing.T) {
 			"leave `done`-category statuses to a human unless Routes leads there",
 			"a `closed`-category status that fits; comment why first",
 			"add no wakeup for that",
+			// Without a blocked column, a stuck step still goes back to whoever can supply what is missing.
+			"then `blocked` when the map has it, else your step's send-back route when it has one",
 			"This issue's status map is in `[Project workflow]`",
 			"--duplicate-of",
 			"questions, discussion, and acknowledgements never touch status",

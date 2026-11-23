@@ -31,9 +31,10 @@ const maxEntryHintRunes = 160
 // what the runtime rules need to choose among them — the done and closed
 // categories, what a status means, who entering it hands off to and where
 // its author routed the work on. It repeats nothing those rules say, and the
-// command lives in the runtime brief's command list. The agent picks the status that matches
-// where the issue stands, under the rules its runtime brief states, instead
-// of following a move computed for each step (MUL-9913).
+// command lives in the runtime brief's command list. The agent picks the
+// status that matches where the issue stands, under the rules its runtime
+// brief states, instead of following a move computed for each step
+// (MUL-9913).
 func statusMapBrief(in BriefInput) string {
 	step, _ := in.Workflow.Step(in.StatusKey)
 	stepMoved := in.BoundStep != "" && in.BoundStep != in.StatusKey
@@ -113,12 +114,14 @@ func writeStatusMapEntry(b *strings.Builder, in BriefInput, s Step) {
 // routedNext is where finished work at s goes: its author's choice, or for a
 // step that hands off, the next status on the board — the stage that follows
 // it. A status without a handler names none; whoever owns the issue there
-// works on through the map.
+// works on through the map. Nothing on the board follows a terminal status,
+// so it names only its author's choice (MUL-9746).
 func (in BriefInput) routedNext(s Step) string {
 	if s.NextStatusKey != "" {
 		return s.NextStatusKey
 	}
-	if !s.HandsOff() {
+	behavior := in.effective(s.StatusKey)
+	if !s.HandsOff() || behavior == issuestatus.Done || behavior == issuestatus.Cancelled {
 		return ""
 	}
 	return in.Workflow.nextStatus(s.StatusKey, in.EffectiveStatus)

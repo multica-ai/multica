@@ -780,7 +780,7 @@ func writeIssueStatusRulesForStatusMap(b *strings.Builder, ctx TaskContextForEnv
 	b.WriteString("- At a step you handle, follow its Routes line. Otherwise, delivered work goes to the status meaning delivered; leave `done`-category statuses to a human unless Routes leads there or the map has no delivered status.\n")
 	b.WriteString(issueStatusClosedRule)
 	b.WriteString("- Work continues beyond this turn → leave the status.\n")
-	b.WriteString("- You cannot proceed without something you are missing → `blocked` when the map has it; either way comment what is missing.\n")
+	b.WriteString("- You cannot proceed without something you are missing → comment what is missing, then `blocked` when the map has it, else your step's send-back route when it has one.\n")
 	if ctx.IsSquadLeader {
 		b.WriteString("- Squad leader: dispatching members is not delivery — move the parent on only on a later turn that confirms the current step's goal is met.\n")
 	}

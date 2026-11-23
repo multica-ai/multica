@@ -170,3 +170,27 @@ func TestStatusMapCutsLongInstructionHints(t *testing.T) {
 		t.Fatalf("hint must be cut to %d runes:\n%s", maxEntryHintRunes, brief)
 	}
 }
+
+// A terminal status's handler routes only where its author said: nothing on
+// the board follows it, and the fallback would file "won't do" as done
+// (MUL-9746).
+func TestStatusMapRoutesATerminalStatusOnlyAsConfigured(t *testing.T) {
+	in := reviewedWithWontFix()
+	in.StatusKey = "wont_fix"
+	in.Workflow = withHandoffs(in.Workflow, []Step{{
+		StatusKey: "wont_fix", Handler: Handler{Type: HandlerAgent, ID: testAgentID},
+		Instructions: "Confirm it should be dropped.", BackStatusKey: "in_progress",
+	}})
+	brief := Brief(in)
+	entry := brief[strings.Index(brief, "- `wont_fix`"):]
+	entry = entry[:strings.Index(entry, "\n- `blocked`")]
+	if !strings.Contains(entry, "    Routes: send back `in_progress`.") || strings.Contains(entry, "next `") {
+		t.Fatalf("terminal status must route only its configured send-back:\n%s", brief)
+	}
+	in.Workflow = withHandoffs(in.Workflow, []Step{{
+		StatusKey: "wont_fix", Handler: Handler{Type: HandlerAgent, ID: testAgentID}, NextStatusKey: "done",
+	}})
+	if brief := Brief(in); !strings.Contains(brief, "    Routes: next `done`.") {
+		t.Fatalf("a configured Next at a terminal status must be kept:\n%s", brief)
+	}
+}
