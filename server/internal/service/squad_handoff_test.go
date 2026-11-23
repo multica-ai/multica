@@ -92,6 +92,16 @@ func TestDelegatedFailureRecoveryGoesToDirectSquadLeader(t *testing.T) {
 				t.Fatalf("failure handoff = %s", handoffs)
 			}
 
+			// The sweeper must judge the leader, not the member that handed
+			// off: that member going away cannot strand the signal, and the
+			// leader's queued run covers it.
+			if _, err := f.pool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, f.coordinator); err != nil {
+				t.Fatalf("archive handing-off member: %v", err)
+			}
+			if !recoveryPending(t, svc, target.comment.ID) {
+				t.Fatal("recovery signal not pending for the leader after the handing-off member was archived")
+			}
+
 			if outcome, err := svc.dispatchDelegatedFailureRecovery(ctx, target, pgtype.UUID{}); err != nil || outcome != delegatedFailureRecoveryReplayed {
 				t.Fatalf("dispatch = %v, %v", outcome, err)
 			}
@@ -105,6 +115,23 @@ func TestDelegatedFailureRecoveryGoesToDirectSquadLeader(t *testing.T) {
 			if !isLeader || taskSquad != squadID {
 				t.Fatalf("leader recovery run is_leader_task=%v squad=%s, want true/%s", isLeader, taskSquad, squadID)
 			}
+			if recoveryPending(t, svc, target.comment.ID) {
+				t.Fatal("recovery signal still pending while the leader's recovery run is queued")
+			}
 		})
 	}
+}
+
+func recoveryPending(t *testing.T, svc *TaskService, commentID pgtype.UUID) bool {
+	t.Helper()
+	pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(context.Background(), 1000)
+	if err != nil {
+		t.Fatalf("ListPendingDelegatedFailureRecoveries: %v", err)
+	}
+	for _, c := range pending {
+		if c.ID == commentID {
+			return true
+		}
+	}
+	return false
 }

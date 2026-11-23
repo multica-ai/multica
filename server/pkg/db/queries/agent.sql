@@ -2145,7 +2145,26 @@ FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
 JOIN issue source_issue ON source_issue.id = source.issue_id
-JOIN agent source_agent ON source_agent.id = source.agent_id
+-- A member turn on a direct-handoff squad's own issue recovers to the squad
+-- leader, not to the member that handed the work over. Must match
+-- squadDirectHandoffLeader, which picks the same target at dispatch.
+LEFT JOIN squad direct_squad
+  ON NOT source.is_leader_task
+ AND failed.issue_id = source_issue.id
+ AND source_issue.assignee_type = 'squad'
+ AND direct_squad.id = source_issue.assignee_id
+ AND direct_squad.workspace_id = source_issue.workspace_id
+ AND direct_squad.archived_at IS NULL
+ AND direct_squad.handoff_mode = 'direct'
+ AND direct_squad.leader_id <> source.agent_id
+ AND EXISTS (
+     SELECT 1
+     FROM squad_member direct_member
+     WHERE direct_member.squad_id = direct_squad.id
+       AND direct_member.member_type = 'agent'
+       AND direct_member.member_id = source.agent_id
+ )
+JOIN agent source_agent ON source_agent.id = COALESCE(direct_squad.leader_id, source.agent_id)
 LEFT JOIN issue_status source_status
   ON source_status.workspace_id = source_issue.workspace_id
  AND source_status.key = source_issue.status
@@ -2164,6 +2183,7 @@ WHERE recovery.author_type = 'system'
   AND source.autopilot_run_id IS NULL
   AND source.issue_id IS NOT NULL
   AND source.agent_id <> failed.agent_id
+  AND source_agent.id <> failed.agent_id
   -- Match canDispatchDelegatedFailureRecovery: lifecycle permits recovery only
   -- for open work; parking belongs exclusively to the fixed Backlog status.
   -- Built-ins resolve without catalog rows; unknown custom states stay pending.
@@ -2192,7 +2212,7 @@ WHERE recovery.author_type = 'system'
       SELECT 1
       FROM agent_task_queue covering
       WHERE covering.issue_id = source_issue.id
-        AND covering.agent_id = source.agent_id
+        AND covering.agent_id = source_agent.id
         AND (
             recovery.id = ANY(covering.delivered_comment_ids)
             OR (

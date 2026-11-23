@@ -436,8 +436,6 @@ describe("SquadDetailPage", () => {
     expect(screen.queryByTestId("avatar-upload")).toBeNull();
     expect(within(section("Collaboration")).getByRole("radio", { name: /Members hand off directly/ })).toBeDisabled();
     expect(screen.queryByRole("heading", { level: 2, name: "What members receive" })).toBeNull();
-    expect(within(section("Collaboration")).getByRole("radio", { name: /Members hand off directly/ })).toBeDisabled();
-    expect(screen.queryByRole("heading", { level: 2, name: "What members receive" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "More actions" }));
     expect(await screen.findByRole("menuitem", { name: "Copy link" })).toBeInTheDocument();

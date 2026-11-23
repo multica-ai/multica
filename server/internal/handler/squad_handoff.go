@@ -178,6 +178,12 @@ func (h *Handler) applyDirectSquadHandoff(ctx context.Context, issue db.Issue, a
 		}
 	}
 	if redirect == "" {
+		for _, trigger := range kept {
+			if trigger.Source == commentTriggerSourceMentionAgent && trigger.Agent.ID == author.squad.LeaderID {
+				plan.add(squadHandoffRecord{kind: squadHandoffKindLeader, toType: "agent", toID: author.squad.LeaderID, agentID: author.squad.LeaderID})
+				break
+			}
+		}
 		return kept, targets
 	}
 	for _, trigger := range kept {

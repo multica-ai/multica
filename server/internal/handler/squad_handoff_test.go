@@ -166,6 +166,24 @@ func TestDirectSquadHandoffRouting(t *testing.T) {
 		}
 	})
 
+	t.Run("mentioning the leader is recorded and ends the round", func(t *testing.T) {
+		f := newSquadHandoffFixture(t, service.SquadHandoffModeDirect)
+		f.seedMemberHandoff(t, f.memberA, f.memberB)
+		f.seedMemberHandoff(t, f.memberB, f.memberA)
+		f.postAsMemberA(t, handoffMention("agent", "Leader", f.leaderID)+" the spec contradicts itself, please decide")
+		if f.queuedTasks(t, f.leaderID) != 1 {
+			t.Fatal("an explicit leader mention must reach the leader")
+		}
+		got := f.handoffs(t)
+		if got[0]["kind"] != "leader" || got[0]["to_id"] != f.leaderID || got[0]["reason"] != "" {
+			t.Fatalf("handoff records = %+v", got)
+		}
+		f.postAsMemberA(t, handoffMention("agent", "Reviewer", f.memberB)+" decided, please review")
+		if got := f.handoffs(t); got[0]["kind"] != "member" || got[0]["round"] != "" {
+			t.Fatalf("a pass after going to the leader must start at round 1, got %+v", got[0])
+		}
+	})
+
 	t.Run("second round is recorded", func(t *testing.T) {
 		f := newSquadHandoffFixture(t, service.SquadHandoffModeDirect)
 		f.seedMemberHandoff(t, f.memberA, f.memberB)
