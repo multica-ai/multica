@@ -141,7 +141,6 @@ function PaletteBody({
   return (
     <PaletteContext.Provider value={api}>
       <PaletteFrame
-        active={active}
         stack={stack}
         setStack={setStack}
         pageQuery={pageQuery}
@@ -154,14 +153,12 @@ function PaletteBody({
 
 /** Everything that reads the palette API lives under its provider. */
 function PaletteFrame({
-  active,
   stack,
   setStack,
   pageQuery,
   setPageQuery,
   recordIntent,
 }: {
-  active: boolean;
   stack: PaletteStackEntry[];
   setStack: React.Dispatch<React.SetStateAction<PaletteStackEntry[]>>;
   pageQuery: string;
@@ -175,7 +172,10 @@ function PaletteFrame({
   const current = stack[stack.length - 1] ?? null;
   const inputValue = current ? pageQuery : rawQuery;
 
-  const model = useRootModel(rawQuery, contexts, { active });
+  // Base UI's DialogPortal only mounts PaletteBody while open or exiting, so
+  // keeping `active: true` does not fetch while closed and prevents recent
+  // items and search results from clearing on frame 1 of the exit animation.
+  const model = useRootModel(rawQuery, contexts, { active: true });
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     // cmdk's root handler intercepts Home/End for list navigation; stop
