@@ -65,7 +65,7 @@ export function createJaDict(): LandingDict {
         {
           version: "0.12.0",
           date: "2026-11-23",
-          title: "すべての通知を受信トレイページで処理、進捗予測付きのプロジェクト概要、Codex と Claude Code のターンを高速化",
+          title: "受信トレイを一本化、進捗予測付きのプロジェクト概要、Codex と Claude Code の実行を高速化",
           changes: [],
           features: [
             "すべての通知が受信トレイページで開き、作業パネルの受信トレイに「受信トレイ」「スヌーズ中」「アーカイブ済み」のタブが加わりました。",

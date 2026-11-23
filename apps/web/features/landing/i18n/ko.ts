@@ -64,7 +64,7 @@ export function createKoDict(): LandingDict {
         {
           version: "0.12.0",
           date: "2026-11-23",
-          title: "모든 알림을 받은 항목 페이지에서 처리, 진행 예측이 있는 프로젝트 개요, 더 빨라진 Codex와 Claude Code 턴",
+          title: "하나로 모은 받은 항목, 진행 예측이 있는 프로젝트 개요, 더 빨라진 Codex와 Claude Code 실행",
           changes: [],
           features: [
             "모든 알림이 받은 항목 페이지에서 열리고, 작업 패널의 받은 항목에 '받은 항목', '미뤄둔 항목', '보관됨' 탭이 생겼습니다.",

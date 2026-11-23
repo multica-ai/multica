@@ -304,7 +304,7 @@ export function createEnDict(): LandingDict {
       {
         version: "0.12.0",
         date: "2026-11-23",
-        title: "One Inbox page for every notification, project overviews with progress forecasts, and faster Codex and Claude Code turns",
+        title: "A unified Inbox, project overviews with progress forecasts, and faster Codex and Claude Code runs",
         changes: [],
         features: [
           "Every notification opens on the Inbox page, and the Work panel's Inbox has Inbox, Snoozed, and Archived tabs.",

@@ -288,7 +288,7 @@ export function createZhDict(): LandingDict {
       {
         version: "0.12.0",
         date: "2026-11-23",
-        title: "通知统一在收件箱页面处理、项目概览与进度预测，Codex 和 Claude Code 回合更快",
+        title: "统一的收件箱、带进度预测的项目概览，Codex 和 Claude Code 运行更快",
         changes: [],
         features: [
           "所有通知都在收件箱页面处理，工作面板的收件箱新增「已延后」「已归档」页签。",
