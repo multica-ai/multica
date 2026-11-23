@@ -300,6 +300,15 @@ func (d Definition) HandsOffAnywhere() bool {
 // NextStatus is where a step's handler moves the issue when done: the step's
 // own choice, or else the next status on the board that is not blocked.
 func (d Definition) NextStatus(key string) string {
+	return d.nextStatus(key, nil)
+}
+
+// nextStatus is NextStatus that also passes over closed statuses on the
+// board: custom statuses sit before blocked / done / cancelled, so a custom
+// closed one such as wont_fix would otherwise be where finished work goes
+// (MUL-9913). effective resolves a key to its canonical behavior; nil leaves
+// every key as itself. A step's own choice is kept as configured.
+func (d Definition) nextStatus(key string, effective func(string) string) string {
 	step, ok := d.Step(key)
 	if !ok {
 		return ""
@@ -312,12 +321,19 @@ func (d Definition) NextStatus(key string) string {
 			continue
 		}
 		for _, next := range d.Steps[i+1:] {
-			if next.StatusKey != issuestatus.Blocked {
+			if next.StatusKey != issuestatus.Blocked && effectiveOf(effective, next.StatusKey) != issuestatus.Cancelled {
 				return next.StatusKey
 			}
 		}
 	}
 	return ""
+}
+
+func effectiveOf(effective func(string) string, key string) string {
+	if effective == nil {
+		return key
+	}
+	return effective(key)
 }
 
 // handlerlessSpan is the stretch of work an assignee owns from a step that
@@ -342,8 +358,9 @@ type handlerlessSpan struct {
 // issue there. Otherwise it reaches the end of the board, and delivering sets
 // the last status before done other than in_progress, leaving done to a
 // human as without a workflow; only when no such status exists does it set
-// what follows (done).
-func (d Definition) handlerlessSpan(key string) handlerlessSpan {
+// what follows (done). A custom done or closed status ends the walk the way
+// done does; effective resolves it as nextStatus does.
+func (d Definition) handlerlessSpan(key string, effective func(string) string) handlerlessSpan {
 	current, ok := d.Step(key)
 	if !ok || current.HandsOff() {
 		return handlerlessSpan{}
@@ -357,13 +374,13 @@ func (d Definition) handlerlessSpan(key string) handlerlessSpan {
 	var passed []string
 	seen := map[string]bool{key: true}
 	for at := key; ; {
-		next := d.NextStatus(at)
+		next := d.nextStatus(at, effective)
 		if next == "" || seen[next] {
 			break
 		}
 		seen[next] = true
 		step, _ := d.Step(next)
-		if step.HandsOff() || next == issuestatus.Done || next == issuestatus.Cancelled {
+		if behavior := effectiveOf(effective, next); step.HandsOff() || behavior == issuestatus.Done || behavior == issuestatus.Cancelled {
 			span.until = next
 			break
 		}
@@ -804,7 +821,7 @@ func Brief(in BriefInput) string {
 	// keeps the per-step wording rather than add a second in_progress rule.
 	var span handlerlessSpan
 	if !stepMoved && !in.Observer && !in.LegacyRuntimeRules && !terminal {
-		span = in.Workflow.handlerlessSpan(in.StatusKey)
+		span = in.Workflow.handlerlessSpan(in.StatusKey, in.EffectiveStatus)
 	}
 	if in.LegacyRuntimeRules && !stepMoved {
 		b.WriteString("This workflow replaces the status rules in your runtime instructions: use only the status keys below")
@@ -895,7 +912,7 @@ func Brief(in BriefInput) string {
 	default:
 		next := step.NextStatusKey
 		if !terminal {
-			next = in.Workflow.NextStatus(in.StatusKey)
+			next = in.Workflow.nextStatus(in.StatusKey, in.EffectiveStatus)
 		}
 		if next != "" {
 			fmt.Fprintf(&b, "Step done      → multica issue status %s %s%s\n", in.IssueIdentifier, next, handsOffTo(next))

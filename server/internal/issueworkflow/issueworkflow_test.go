@@ -686,3 +686,78 @@ func blockedOnlyDefault() Definition {
 	return withHandoffs(Definition{Name: DefaultName, IsDefault: true, Steps: stepsFor(BuiltInDefaultKeys())},
 		[]Step{{StatusKey: "blocked", Handler: Handler{Type: HandlerProjectLead}}})
 }
+
+// Custom statuses sit before blocked / done / cancelled on the board, so a
+// custom closed status follows the handler-less steps; finished work must not
+// be filed there, while a custom done status ends the work as done does
+// (MUL-9913).
+func TestBriefNeverDeliversToACustomClosedStatus(t *testing.T) {
+	effective := func(key string) string {
+		switch key {
+		case "wont_fix":
+			return "cancelled"
+		case "shipped":
+			return "done"
+		}
+		return key
+	}
+	cases := []struct {
+		name    string
+		keys    []string
+		status  string
+		want    []string
+		wantNot []string
+	}{
+		{
+			name:    "closed after in_review",
+			keys:    []string{"in_progress", "in_review", "wont_fix", "blocked"},
+			status:  "in_progress",
+			want:    []string{"Step done      → multica issue status MUL-7 in_review\n"},
+			wantNot: []string{"MUL-7 wont_fix"},
+		},
+		{
+			name:    "closed right after in_progress",
+			keys:    []string{"in_progress", "wont_fix"},
+			status:  "todo",
+			want:    []string{"Starting work  → multica issue status MUL-7 in_progress\n", "Step done      → multica issue status MUL-7 done\n"},
+			wantNot: []string{"MUL-7 wont_fix"},
+		},
+		{
+			name:    "done-category custom ends the work like done",
+			keys:    []string{"in_progress", "shipped"},
+			status:  "in_progress",
+			want:    []string{"Step done      → multica issue status MUL-7 shipped\n"},
+			wantNot: []string{"MUL-7 done"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			def := Definition{Name: "Plain", Steps: stepsFor(ArrangeKeys(tc.keys))}
+			brief := Brief(BriefInput{Workflow: def, StatusKey: tc.status, IssueIdentifier: "MUL-7", EffectiveStatus: effective})
+			for _, want := range tc.want {
+				if !strings.Contains(brief, want) {
+					t.Errorf("brief is missing %q:\n%s", want, brief)
+				}
+			}
+			for _, not := range tc.wantNot {
+				if strings.Contains(brief, not) {
+					t.Errorf("brief carries %q:\n%s", not, brief)
+				}
+			}
+		})
+	}
+
+	// A step that hands off falls back to the board too, and skips the
+	// closed status the same way; its author's own choice is kept.
+	reviewed := Definition{Name: "Reviewed", Steps: stepsFor(ArrangeKeys([]string{"in_progress", "code_review", "wont_fix"}))}
+	reviewed = withHandoffs(reviewed, []Step{{StatusKey: "code_review", Handler: Handler{Type: HandlerProjectLead}}})
+	brief := Brief(BriefInput{Workflow: reviewed, StatusKey: "code_review", IssueIdentifier: "MUL-7", EffectiveStatus: effective})
+	if !strings.Contains(brief, "Step done      → multica issue status MUL-7 done\n") || strings.Contains(brief, "MUL-7 wont_fix") {
+		t.Fatalf("a step that hands off must skip the closed status on the board:\n%s", brief)
+	}
+	reviewed = withHandoffs(reviewed, []Step{{StatusKey: "code_review", Handler: Handler{Type: HandlerProjectLead}, NextStatusKey: "wont_fix"}})
+	brief = Brief(BriefInput{Workflow: reviewed, StatusKey: "code_review", IssueIdentifier: "MUL-7", EffectiveStatus: effective})
+	if !strings.Contains(brief, "Step done      → multica issue status MUL-7 wont_fix\n") {
+		t.Fatalf("a configured Next must be kept:\n%s", brief)
+	}
+}
