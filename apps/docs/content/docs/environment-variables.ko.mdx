@@ -397,6 +397,9 @@ multica config show
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
 | `auto_update_check_interval` | `6h` | 업데이트 확인 간격 |
 | `disable_auto_reload` | 환경을 따름 | `true`는 디스크에서 교체된 바이너리 추적을 끔. `false`는 로컬 덮어쓰기를 지움. `disable_auto_update`와 별도로 해석됨 |
+| `daemon_log_max_size_mb` | `20` | `daemon.log`를 순환할 크기(MB). [데몬 로그](#daemon-logs) 참고 |
+| `daemon_log_max_backups` | `5` | 보관할 순환 파일의 최대 개수 |
+| `daemon_log_max_age_days` | `30` | 순환 파일을 보관할 일수 |
 
 값에는 다음 규칙이 적용됩니다.
 

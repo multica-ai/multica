@@ -397,6 +397,9 @@ multica config show
 | `disable_auto_update` | 跟随环境 | `true` 关闭自动更新；`false` 清除本地覆盖，回到环境变量或默认 |
 | `auto_update_check_interval` | `6h` | 检查更新的间隔 |
 | `disable_auto_reload` | 跟随环境 | `true` 让守护进程不再跟随磁盘上被替换的二进制；`false` 清除本地覆盖。与 `disable_auto_update` 分开解析 |
+| `daemon_log_max_size_mb` | `20` | `daemon.log` 达到多少 MB 时轮转，见[守护进程日志](#daemon-logs) |
+| `daemon_log_max_backups` | `5` | 最多保留几个轮转文件 |
+| `daemon_log_max_age_days` | `30` | 轮转文件保留的天数 |
 
 几条取值规则：
 

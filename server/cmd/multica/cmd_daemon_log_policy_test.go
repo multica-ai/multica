@@ -128,7 +128,9 @@ func TestDaemonLogProfilePersistenceAndWriter(t *testing.T) {
 		t.Fatalf("profile did not reach actual writer: %#v", r)
 	}
 	payload := bytes.Repeat([]byte("x"), 700*1024)
-	for range 8 {
+	// Each write after the first rotates (700 KiB + 700 KiB > 1 MiB), so four
+	// writes produce three backups and MaxBackups=2 must prune one.
+	for range 4 {
 		// lumberjack uses millisecond archive names. Separate real writes so
 		// this test exercises retention rather than same-timestamp replacement.
 		time.Sleep(2 * time.Millisecond)

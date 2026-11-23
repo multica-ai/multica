@@ -293,8 +293,11 @@ func assignDaemonLogInt(dst *int, key, value string, max int64) error {
 		return nil
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || n <= 0 || int64(n) > max {
-		return fmt.Errorf("%s must be a positive integer <= %d; use `config set %s \"\"` to clear it", key, max, key)
+	if err != nil || n <= 0 {
+		return fmt.Errorf("%s must be a positive integer; use `config set %s \"\"` to clear it", key, key)
+	}
+	if int64(n) > max {
+		return fmt.Errorf("%s must be at most %d", key, max)
 	}
 	*dst = n
 	return nil

@@ -403,6 +403,9 @@ Supported keys:
 | `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
 | `auto_update_check_interval` | `6h` | Update check interval |
 | `disable_auto_reload` | follows environment | `true` stops the daemon following a binary replaced on disk; `false` clears the local override. Resolved separately from `disable_auto_update` |
+| `daemon_log_max_size_mb` | `20` | Size in MB at which `daemon.log` rotates; see [Daemon logs](#daemon-logs) |
+| `daemon_log_max_backups` | `5` | Maximum number of rotated log files kept |
+| `daemon_log_max_age_days` | `30` | Days rotated log files are kept |
 
 A few value rules:
 

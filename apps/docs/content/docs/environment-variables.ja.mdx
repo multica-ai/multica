@@ -397,6 +397,9 @@ multica config show
 | `disable_auto_update` | 環境に従う | `true` で自動更新を無効化。`false` はローカルの上書きをクリアし、環境変数またはデフォルトに戻します |
 | `auto_update_check_interval` | `6h` | 更新チェックの間隔 |
 | `disable_auto_reload` | 環境に従う | `true` でディスク上の置き換えへの追従を停止。`false` はローカルの上書きをクリア。`disable_auto_update` とは別に解決されます |
+| `daemon_log_max_size_mb` | `20` | `daemon.log` をローテーションするサイズ（MB）。[デーモンのログ](#daemon-logs)を参照 |
+| `daemon_log_max_backups` | `5` | 残すローテーション済みファイルの最大数 |
+| `daemon_log_max_age_days` | `30` | ローテーション済みファイルを残す日数 |
 
 値のルール:
 

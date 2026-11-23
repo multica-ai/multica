@@ -394,6 +394,9 @@ Clés prises en charge :
 | `disable_auto_update` | suit l'environnement | `true` désactive la mise à jour automatique ; `false` efface la surcharge locale et revient à la variable d'environnement ou à la valeur par défaut |
 | `auto_update_check_interval` | `6h` | Intervalle de vérification des mises à jour |
 | `disable_auto_reload` | suit l'environnement | `true` empêche le daemon de suivre un binaire remplacé sur disque ; `false` efface la surcharge locale. Résolu indépendamment de `disable_auto_update` |
+| `daemon_log_max_size_mb` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne ; voir [Journaux du daemon](#daemon-logs) |
+| `daemon_log_max_backups` | `5` | Nombre maximal de fichiers de journaux tournés conservés |
+| `daemon_log_max_age_days` | `30` | Nombre de jours de conservation des fichiers tournés |
 
 Quelques règles concernant les valeurs :
 
