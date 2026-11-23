@@ -5,9 +5,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../collapsi
 
 afterEach(() => {
   cleanup();
-  // Base UI shares one frame scheduler across panels; a frame left queued by
-  // one test would swallow the next test's frame requests.
-  flushRaf();
   delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
   delete (HTMLElement.prototype as { scrollHeight?: unknown }).scrollHeight;
 });
