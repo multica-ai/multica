@@ -133,6 +133,45 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           },
         },
       },
+      {
+        id: "squad-usage",
+        icon: Gauge,
+        action: { kind: "route", to: (p) => p.usage() },
+        copy: {
+          en: {
+            title: "See usage by squad",
+            body: "On Analytics, pick a squad in the Attribution filter to scope every chart to it, or group the leaderboard and errors by squad. Expand a squad to see what each member spent.",
+          },
+          "zh-Hans": {
+            title: "按小队查看用量",
+            body: "在「统计」页的「归属」筛选里选一个小队，所有图表就只看它；也可以把排行榜和错误按小队分组。展开小队能看到每个成员的消耗。",
+          },
+          "zh-Hant": {
+            title: "按小隊查看用量",
+            body: "在「統計」頁的「歸屬」篩選裡選一個小隊，所有圖表就只看它；也可以把排行榜和錯誤按小隊分組。展開小隊能看到每個成員的消耗。",
+          },
+          ja: {
+            title: "スクワッド別に使用量を確認",
+            body: "「分析」ページの「帰属」フィルターでスクワッドを選ぶと、すべてのグラフがそのスクワッドに絞られます。ランキングとエラーもスクワッド別にまとめられ、スクワッドを展開するとメンバーごとの消費がわかります。",
+          },
+          ko: {
+            title: "스쿼드별 사용량 보기",
+            body: "'분석' 페이지의 '귀속' 필터에서 스쿼드를 고르면 모든 차트가 그 스쿼드 기준으로 바뀝니다. 순위와 오류도 스쿼드별로 묶을 수 있고, 스쿼드를 펼치면 멤버별 사용량을 볼 수 있습니다.",
+          },
+          fr: {
+            title: "Consultez l'utilisation par squad",
+            body: "Dans Statistiques, choisissez un squad dans le filtre Attribution pour limiter tous les graphiques à ce squad, ou regroupez le classement et les erreurs par squad. Dépliez un squad pour voir la part de chaque membre.",
+          },
+          es: {
+            title: "Consulta el uso por squad",
+            body: "En Analítica, elige un squad en el filtro Atribución para que todos los gráficos muestren solo ese squad, o agrupa la clasificación y los errores por squad. Despliega un squad para ver lo que gastó cada miembro.",
+          },
+          ru: {
+            title: "Расход по командам",
+            body: "В разделе «Аналитика» выберите команду в фильтре «Принадлежность», чтобы все графики показывали только её, или сгруппируйте рейтинг и ошибки по командам. Разверните команду, чтобы увидеть расход каждого участника.",
+          },
+        },
+      },
     ],
   },
   {
