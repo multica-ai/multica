@@ -141,6 +141,8 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
+`issue comment add`가 시간 초과되거나 연결이 끊겨도 댓글은 이미 저장되었을 수 있습니다. 에이전트 실행 안에서는 같은 명령을 그대로 다시 실행해도 안전합니다. CLI가 실행, 이슈, 상위 댓글, 내용, 첨부 파일로 멱등 키를 만들고, 서버는 저장된 댓글을 돌려줄 뿐 다시 게시하지 않습니다. 그 밖의 경우에는 시도할 때마다 같은 `--idempotency-key <key>`를 넘기면 같은 보호를 받습니다. 이전 버전 서버는 이 키를 무시합니다.
+
 같은 프로젝트, 같은 상위 태스크 아래에 제목이 같은(대소문자와 여분의 공백은 구분하지 않음) 닫히지 않은 태스크가 이미 있으면 `issue create`는 생성을 거부하고 그 태스크를 알려 줍니다. 그래도 만들려면 `--allow-duplicate`를 붙이세요. 한 태스크를 다른 태스크의 중복으로 표시하려면 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`을 실행합니다.
 
 여러 PR을 순서대로 만드는 태스크는 `issue create --title "..." --pr-auto-complete off` 또는 `issue update <id> --pr-auto-complete off`로 병합 후에도 상태를 유지할 수 있습니다. `--pr-auto-complete on`으로 워크스페이스 규칙을 복원하면 다음 PR 이벤트부터 적용됩니다. `issue pull-requests <id>`는 연결된 PR이 없어도 태스크 설정, 워크스페이스 설정, 대상 상태와 판단 결과를 표시합니다. 지원 서버는 생성 트랜잭션 안에서 설정을 저장하고, 이전 서버에는 추가 PUT을 보냅니다. 실패하면 생성된 태스크 ID와 재시도할 update 명령이 표시되므로 create를 반복하지 마세요.

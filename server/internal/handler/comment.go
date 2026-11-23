@@ -1847,6 +1847,16 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Idempotency is checked after every guard above, so a replay is only
+	// served to a request that would itself be allowed to post the comment.
+	idem, ok := commentIdempotencyFromRequest(w, r, issue, parentID, req.Type, authorType, authorID)
+	if !ok {
+		return
+	}
+	if h.replayIdempotentComment(w, r, idem) {
+		return
+	}
+
 	createParams := db.CreateCommentParams{
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
@@ -1886,13 +1896,18 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
+		// The receipt is claimed before anything else is locked, so a
+		// same-key retry waits here holding nothing.
+		err = idem.claim(r.Context(), qtx, createParams.ID)
 		var unboundIDs []pgtype.UUID
-		unboundIDs, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
-			WorkspaceID:   issue.WorkspaceID,
-			AttachmentIds: attachmentIDs,
-			UploaderType:  authorType,
-			UploaderID:    parseUUID(authorID),
-		})
+		if err == nil {
+			unboundIDs, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
+				WorkspaceID:   issue.WorkspaceID,
+				AttachmentIds: attachmentIDs,
+				UploaderType:  authorType,
+				UploaderID:    parseUUID(authorID),
+			})
+		}
 		if err == nil {
 			created, err = qtx.CreateComment(r.Context(), createParams)
 		}
@@ -1919,8 +1934,19 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		created, err = wakeupWrite(h, r, func(q *db.Queries) (db.CreateCommentRow, error) {
+			if err := idem.claim(r.Context(), q, createParams.ID); err != nil {
+				return db.CreateCommentRow{}, err
+			}
 			return q.CreateComment(r.Context(), createParams)
 		})
+	}
+	if errors.Is(err, errCommentIdempotencyClaimed) {
+		// A concurrent request with the same key committed first. Its
+		// transaction has finished, so its receipt is readable now.
+		if !h.replayIdempotentComment(w, r, idem) {
+			writeError(w, http.StatusConflict, "a request with this Idempotency-Key is still being processed; retry")
+		}
+		return
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The issue was deleted, possibly while this waited for its row lock.
