@@ -1101,7 +1101,7 @@ export function InboxPage() {
   ) : detailItem ? (
     <>
     {keptNotice}
-    <div className="p-6">
+    <div key={detailItem.id} className="animate-inbox-enter-fade p-6">
       <h2 className="text-title font-semibold">
         {isAutopilotQuotaNotice(detailItem.type)
           ? typeLabels[detailItem.type]

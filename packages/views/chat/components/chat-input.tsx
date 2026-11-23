@@ -2,6 +2,9 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { Scan, TriangleAlert, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { toast } from "sonner";
@@ -41,6 +44,7 @@ import {
   VoiceMicButton,
   VoiceSetupDialog,
   VoiceStrip,
+  type ComposerVoice,
 } from "../../voice";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
@@ -905,13 +909,16 @@ export function ChatInput({
             className="mx-2 mb-1"
           />
         )}
-        {voice.showStrip && (
-          <div className="absolute inset-x-1.5 bottom-1 flex items-center">
-            <VoiceStrip voice={voice} />
-          </div>
-        )}
-        {!voice.showStrip && (uploadEnabled || projectSelectionEnabled || leftAdornment) && (
-          <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
+        <ChatInputVoiceOverlay voice={voice} />
+        {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
+          <div
+            aria-hidden={voice.showStrip || undefined}
+            inert={voice.showStrip}
+            className={cn(
+              "absolute bottom-1.5 left-1.5 flex items-center gap-1 transition-opacity duration-150 motion-reduce:transition-none",
+              voice.showStrip && "pointer-events-none opacity-0",
+            )}
+          >
             {(uploadEnabled || projectSelectionEnabled) && (
               <ChatAddMenu
                 onSelectFile={uploadEnabled
@@ -926,7 +933,14 @@ export function ChatInput({
             {leftAdornment}
           </div>
         )}
-        <div className={cn("absolute bottom-1 right-1.5 flex items-center gap-1", voice.showStrip && "hidden")}>
+        <div
+          aria-hidden={voice.showStrip || undefined}
+          inert={voice.showStrip}
+          className={cn(
+            "absolute bottom-1 right-1.5 flex items-center gap-1 transition-opacity duration-150 motion-reduce:transition-none",
+            voice.showStrip && "pointer-events-none opacity-0",
+          )}
+        >
           <VoiceMicButton voice={voice} />
           {pageContext && (
             <IconButton
@@ -983,5 +997,30 @@ export function ChatInput({
       </div>
     </div>
     </>
+  );
+}
+
+function ChatInputVoiceOverlay({ voice }: { voice: ComposerVoice }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <AnimatePresence initial={false}>
+      {voice.showStrip && (
+        <motion.div
+          key="voice-strip"
+          initial={reduceMotion ? false : { opacity: 0 }}
+          animate={{
+            opacity: 1,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+          }}
+          exit={{
+            opacity: 0,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+          }}
+          className="absolute inset-x-1.5 bottom-1 flex items-center"
+        >
+          <VoiceStrip voice={voice} />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

@@ -813,7 +813,28 @@ const InboxRow = memo(function InboxRow({
       <IssueAgentBadge agents={agents} />
     </span>
   );
-  const dot = <span data-mc="unread-dot" aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand" />;
+  const isPresent = useIsPresent();
+  const reduceMotion = useReducedMotion();
+  const dot = (
+    <AnimatePresence initial={false}>
+      {unread && (
+        <motion.span
+          key="unread-dot"
+          data-mc="unread-dot"
+          aria-hidden
+          initial={false}
+          animate={{ opacity: 1, scale: 1, width: 6 }}
+          exit={{
+            opacity: 0,
+            scale: 0,
+            width: 0,
+            transition: { duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT },
+          }}
+          className="h-1.5 shrink-0 rounded-full bg-brand"
+        />
+      )}
+    </AnimatePresence>
+  );
   // Leads the row like a Pinned or tree issue row. Display only: the link
   // covers the row, and the hover card already names the status.
   const statusIcon = status && (
@@ -843,8 +864,6 @@ const InboxRow = memo(function InboxRow({
     </ShimmerText>
   );
 
-  const isPresent = useIsPresent();
-  const reduceMotion = useReducedMotion();
   const rowChildren = (
     <>
       <HoverCard
@@ -910,7 +929,10 @@ const InboxRow = memo(function InboxRow({
                 ) : unread ? (
                   <span className={cn("flex shrink-0 items-center", yields)}>{dot}</span>
                 ) : (
-                  !agents && time
+                  <>
+                    <span className={cn("flex shrink-0 items-center", yields)}>{dot}</span>
+                    {!agents && time}
+                  </>
                 )}
               </>
             ) : (
@@ -936,7 +958,7 @@ const InboxRow = memo(function InboxRow({
                   </span>
                   {/* The agents hold the title line's time slot, so the time moves down. */}
                   {agents && <span className={timeClass}>{timeAgo(at)}</span>}
-                  {unread && dot}
+                  {dot}
                 </span>
               </>
             )}
@@ -985,7 +1007,7 @@ const InboxRow = memo(function InboxRow({
               className={cn(
                 rowButtonClass(compact),
                 "right-7",
-                snoozeOpen && "flex bg-surface-selected text-foreground",
+                snoozeOpen && "pointer-events-auto opacity-100 bg-surface-selected text-foreground",
               )}
               onClick={(event) => event.stopPropagation()}
             >
@@ -999,7 +1021,7 @@ const InboxRow = memo(function InboxRow({
           <button
             type="button"
             aria-label={archiveLabel}
-            className={cn(rowButtonClass(compact), "right-1.5", snoozeOpen && "flex")}
+            className={cn(rowButtonClass(compact), "right-1.5", snoozeOpen && "pointer-events-auto opacity-100")}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -1124,15 +1146,17 @@ function SnoozedSectionList({
   return (
     <>
       <PanelList data-sidebar-list={INBOX_LIST}>
-        {shown.map((entry) => (
-          <SnoozedSectionRow
-            key={entry.issue_id}
-            wsId={wsId}
-            entry={entry}
-            active={entry.issue_id === openKey}
-            onUnsnooze={() => unsnooze(entry.item_id, entry.issue_id)}
-          />
-        ))}
+        <AnimatePresence initial={false}>
+          {shown.map((entry) => (
+            <SnoozedSectionRow
+              key={entry.issue_id}
+              wsId={wsId}
+              entry={entry}
+              active={entry.issue_id === openKey}
+              onUnsnooze={() => unsnooze(entry.item_id, entry.issue_id)}
+            />
+          ))}
+        </AnimatePresence>
       </PanelList>
       {more && <SectionMoreButton expanded={expanded} hidden={list.rows.length - limit} onToggle={toggle} />}
     </>
@@ -1158,8 +1182,23 @@ function SnoozedSectionRow({
   const backAt = formatSnoozeTime(new Date(entry.snoozed_until), new Date(), locale);
   const title = issue?.title ?? entry.issue_identifier ?? "";
   const unsnoozeLabel = t(($) => $.snooze.unsnooze);
+  const isPresent = useIsPresent();
+  const reduceMotion = useReducedMotion();
   return (
-    <li data-inbox-snoozed-row className="group/inbox relative">
+    <motion.li
+      data-inbox-snoozed-row={isPresent ? "" : undefined}
+      aria-hidden={!isPresent || undefined}
+      initial={false}
+      exit={{
+        opacity: 0,
+        height: 0,
+        marginTop: 0,
+        marginBottom: 0,
+        overflow: "hidden",
+        transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      className={cn("group/inbox relative", !isPresent && "pointer-events-none")}
+    >
       <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative")}>
         <span aria-hidden className="flex size-3.5 shrink-0">
           {issue && (
@@ -1203,7 +1242,7 @@ function SnoozedSectionRow({
           <AlarmClock className="size-3" />
         </button>
       </TooltipHint>
-    </li>
+    </motion.li>
   );
 }
 
@@ -1246,14 +1285,16 @@ function ArchivedSectionList({
   return (
     <>
       <PanelList data-sidebar-list={INBOX_LIST}>
-        {shown.map((item) => (
-          <ArchivedSectionRow
-            key={item.id}
-            item={item}
-            active={inboxRowKey(item) === openKey}
-            onRestore={() => restore(item)}
-          />
-        ))}
+        <AnimatePresence initial={false}>
+          {shown.map((item) => (
+            <ArchivedSectionRow
+              key={item.id}
+              item={item}
+              active={inboxRowKey(item) === openKey}
+              onRestore={() => restore(item)}
+            />
+          ))}
+        </AnimatePresence>
       </PanelList>
       {more && <SectionMoreButton expanded={expanded} hidden={items.length - limit} onToggle={toggle} />}
       {expanded && query.hasNextPage && (
@@ -1289,8 +1330,23 @@ function ArchivedSectionRow({
   const status = item.issue_status;
   const restoreLabel = t(($) => $.detail.restore);
   const requestLanding = useInboxSelectionStore((s) => s.requestLanding);
+  const isPresent = useIsPresent();
+  const reduceMotion = useReducedMotion();
   return (
-    <li data-inbox-archived-row className="group/inbox relative">
+    <motion.li
+      data-inbox-archived-row={isPresent ? "" : undefined}
+      aria-hidden={!isPresent || undefined}
+      initial={false}
+      exit={{
+        opacity: 0,
+        height: 0,
+        marginTop: 0,
+        marginBottom: 0,
+        overflow: "hidden",
+        transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      className={cn("group/inbox relative", !isPresent && "pointer-events-none")}
+    >
       <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative")}>
         {status ? (
           <span aria-hidden className="flex shrink-0">
@@ -1338,14 +1394,14 @@ function ArchivedSectionRow({
           <ArchiveRestore className="size-3" />
         </button>
       </TooltipHint>
-    </li>
+    </motion.li>
   );
 }
 
 /** A row's hover button. */
 function rowButtonClass(compact: boolean) {
   return cn(
-    "absolute z-10 hidden size-5 items-center justify-center rounded-md text-muted-foreground group-hover/inbox:flex group-focus-within/inbox:flex hover:bg-surface-selected hover:text-foreground",
+    "pointer-events-none absolute z-10 flex size-5 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-100 group-hover/inbox:pointer-events-auto group-hover/inbox:opacity-100 group-focus-within/inbox:pointer-events-auto group-focus-within/inbox:opacity-100 hover:bg-surface-selected hover:text-foreground motion-reduce:transition-none",
     // On the title's line, where the time was.
     compact ? "top-1/2 -translate-y-1/2" : "top-1.5",
   );
