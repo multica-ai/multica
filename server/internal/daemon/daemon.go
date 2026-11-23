@@ -9489,7 +9489,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"inline_system_prompt", execOpts.SystemPrompt != "",
 		"resume_session", execOpts.ResumeSessionID != "",
 		"timeout", execOpts.Timeout,
-		"idle_watchdog", execOpts.IdleWatchdogTimeout,
+		"idle_watchdog_override", execOpts.IdleWatchdogTimeout,
 	)
 
 	// MUL-9013: record what this run is being handed, before it starts, so a
@@ -10402,6 +10402,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
 	defer stopWatchdog()
 	if idleWindow > 0 {
+		taskLog.Debug("idle watchdog armed", "window", idleWindow)
 		go d.runIdleWatchdog(watchdogCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
 	}
 
