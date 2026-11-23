@@ -122,7 +122,7 @@
     "reset_order": "デフォルトの順序に戻す",
     "copy_workspace_link": "ワークスペースのリンクをコピー",
     "workspace_meta_other": "{{slug}} · メンバー {{count}} 人",
-    "docs": "ドキュメント"
+    "docs": "文書"
   },
   "bottom_bar": {
     "label": "ステータスバー",
