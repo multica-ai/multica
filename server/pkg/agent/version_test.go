@@ -25,6 +25,21 @@ func TestTaskSupplementVersionGate(t *testing.T) {
 	}
 }
 
+func TestExternalRuntimeConfigVersionGate(t *testing.T) {
+	for _, tc := range []struct {
+		provider, version string
+		want              bool
+	}{
+		{"claude", "2.1.281 (Claude Code)", true}, {"claude", "2.1.280", false},
+		{"codex", "codex-cli 0.169.0", true}, {"codex", "0.168.0", false},
+		{"claude", "", false}, {"codex", "unknown", false}, {"pi", "9.0.0", false},
+	} {
+		if got := SupportsExternalRuntimeConfig(tc.provider, tc.version); got != tc.want {
+			t.Errorf("%s %s = %t", tc.provider, tc.version, got)
+		}
+	}
+}
+
 func TestParseSemver(t *testing.T) {
 	tests := []struct {
 		input   string

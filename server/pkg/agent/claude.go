@@ -1448,6 +1448,9 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}
+	if opts.ClaudeRuntimeDir != "" {
+		args = append(args, "--add-dir", opts.ClaudeRuntimeDir)
+	}
 	// SystemPrompt is intentionally not forwarded as --append-system-prompt:
 	// Claude Code loads the per-task CLAUDE.md the daemon writes into the
 	// workdir, so inlining the same runtime brief would duplicate it on every

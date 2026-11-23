@@ -39,6 +39,30 @@ var MinVersions = map[string]string{
 	"opencode": "1.1.54",
 }
 
+// ExternalRuntimeConfigMinVersions are the CLI versions verified, with the
+// real CLI, to load a local worktree task's runtime instructions from outside
+// the checkout: Claude Code from an --add-dir directory's CLAUDE.md and
+// .claude/skills, Codex app-server from the task CODEX_HOME's AGENTS.md. They
+// are tested floors, not the earliest vendor releases. Older or unknown
+// versions keep writing into the checkout (MUL-9445).
+var ExternalRuntimeConfigMinVersions = map[string]string{
+	"claude": "2.1.281",
+	"codex":  "0.169.0",
+}
+
+func SupportsExternalRuntimeConfig(provider, version string) bool {
+	minimum, ok := ExternalRuntimeConfigMinVersions[provider]
+	if !ok {
+		return false
+	}
+	v, err := parseSemver(version)
+	if err != nil {
+		return false
+	}
+	floor, err := parseSemver(minimum)
+	return err == nil && !v.lessThan(floor)
+}
+
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
 // the multica CLI version reported by the daemon at registration time. The
 // quick-create prompt that the agent runs depends on CLI behavior introduced

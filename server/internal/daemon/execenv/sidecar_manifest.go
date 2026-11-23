@@ -184,10 +184,26 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 // realistic state. Returning an error in that case forces the caller
 // to surface the problem instead of looping forever.
 func allocateCollisionFreeSkillDir(skillsParent, baseSlug string) (slug, dir string, err error) {
+	return allocateCollisionFreeSkillDirAcrossRoots(skillsParent, baseSlug, nil)
+}
+
+func allocateCollisionFreeSkillDirAcrossRoots(skillsParent, baseSlug string, reservedRoots []string) (slug, dir string, err error) {
 	const maxAttempts = 64
 	for i := 0; i < maxAttempts; i++ {
 		candidate := skillSlugCandidate(baseSlug, i)
 		path := filepath.Join(skillsParent, candidate)
+		reserved := false
+		for _, root := range reservedRoots {
+			if _, statErr := os.Lstat(filepath.Join(root, candidate)); statErr == nil {
+				reserved = true
+				break
+			} else if !errors.Is(statErr, fs.ErrNotExist) {
+				return "", "", statErr
+			}
+		}
+		if reserved {
+			continue
+		}
 		if _, statErr := os.Lstat(path); statErr != nil {
 			if errors.Is(statErr, fs.ErrNotExist) {
 				return candidate, path, nil
