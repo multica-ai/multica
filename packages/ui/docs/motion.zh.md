@@ -110,7 +110,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 | 详情的上一项和下一项 | `.animate-inbox-enter-next`、`-prev`、`-fade` | `packages/ui/styles/base.css` |
 | 虚拟列表中的实时到达 | `useNewRunIds`、`useRunCommentMotion`、`useRunDisclosureMotion` | `packages/views/issues/components/use-run-comment-motion.ts` |
 | 变化的数字 | `NumberFlow` | `packages/ui/components/ui/number-flow.tsx` |
-| 复制确认 | `CopyCheckIcon` | `packages/ui/components/common/` |
+| 复制确认 | `CopyCheckIcon` | `packages/ui/components/common/copy-check-icon.tsx` |
 | 加载占位 | `.animate-skeleton` | `packages/ui/styles/base.css` |
 
 新增原语时在表中加一行，并让上面的规则指向它。

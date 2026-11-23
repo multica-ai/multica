@@ -110,7 +110,7 @@ These stay instant:
 | Next and previous detail | `.animate-inbox-enter-next`, `-prev`, `-fade` | `packages/ui/styles/base.css` |
 | Live arrivals in virtualized lists | `useNewRunIds`, `useRunCommentMotion`, `useRunDisclosureMotion` | `packages/views/issues/components/use-run-comment-motion.ts` |
 | Changing numbers | `NumberFlow` | `packages/ui/components/ui/number-flow.tsx` |
-| Copy confirmation | `CopyCheckIcon` | `packages/ui/components/common/` |
+| Copy confirmation | `CopyCheckIcon` | `packages/ui/components/common/copy-check-icon.tsx` |
 | Loading placeholder | `.animate-skeleton` | `packages/ui/styles/base.css` |
 
 Add a row when you add a primitive, and point the rules above at it.
