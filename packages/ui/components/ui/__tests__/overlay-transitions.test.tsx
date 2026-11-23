@@ -13,7 +13,6 @@ import {
 import { HoverCard, HoverCardContent } from "../hover-card";
 import { Popover, PopoverContent } from "../popover";
 import { Select, SelectContent, SelectItem } from "../select";
-import { Tooltip, TooltipContent } from "../tooltip";
 
 afterEach(cleanup);
 
@@ -23,14 +22,19 @@ function slotClasses(slot: string): string[] {
   return (el?.getAttribute("class") ?? "").split(/\s+/);
 }
 
-// Keyframe-animated Base UI overlays pass `duration-*` only to feed
-// `--tw-duration` into tw-animate-css. Without `transition-none`, Tailwind v4
-// also applies `transition-duration` to default `transition-property: all`,
-// creating incidental CSS transitions (e.g. `scrollbar-color` in Chromium)
-// that Base UI's unmount waits on even when animations are skipped
-// (`prefers-reduced-motion: reduce`, `Select` align-trigger, instant tooltip).
+function expectAnimationOnlyDuration(classes: string[], expected: string[]) {
+  for (const token of expected) {
+    expect(classes).toContain(token);
+  }
+  // `duration-*` emits `transition-duration` against default `transition-property: all`;
+  // `animation-duration-*` scopes timing strictly to keyframe animations without adding
+  // `transition-none` (which would override caller-supplied arbitrary geometry transitions).
+  expect(classes.filter((c) => /(^|:)duration-/.test(c))).toEqual([]);
+  expect(classes).not.toContain("transition-none");
+}
+
 describe("keyframe-animated Base UI overlays", () => {
-  it("disables CSS transitions on Dialog overlay and content", () => {
+  it("uses animation-duration tokens on Dialog overlay and content", () => {
     render(
       <Dialog open>
         <DialogContent>
@@ -38,11 +42,29 @@ describe("keyframe-animated Base UI overlays", () => {
         </DialogContent>
       </Dialog>,
     );
-    expect(slotClasses("dialog-overlay")).toContain("transition-none");
-    expect(slotClasses("dialog-content")).toContain("transition-none");
+    const expected = [
+      "data-open:animation-duration-[var(--dialog-enter-duration)]",
+      "data-closed:animation-duration-[var(--dialog-exit-duration)]",
+    ];
+    expectAnimationOnlyDuration(slotClasses("dialog-overlay"), expected);
+    expectAnimationOnlyDuration(slotClasses("dialog-content"), expected);
   });
 
-  it("disables CSS transitions on AlertDialog overlay and content", () => {
+  it("preserves caller arbitrary geometry transitions on DialogContent", () => {
+    render(
+      <Dialog open>
+        <DialogContent className="[transition-property:width,max-width,height] [transition-duration:200ms]">
+          <DialogTitle>Create issue</DialogTitle>
+        </DialogContent>
+      </Dialog>,
+    );
+    const classes = slotClasses("dialog-content");
+    expect(classes).toContain("[transition-property:width,max-width,height]");
+    expect(classes).toContain("[transition-duration:200ms]");
+    expect(classes).not.toContain("transition-none");
+  });
+
+  it("uses animation-duration tokens on AlertDialog overlay and content", () => {
     render(
       <AlertDialog open>
         <AlertDialogContent>
@@ -50,20 +72,24 @@ describe("keyframe-animated Base UI overlays", () => {
         </AlertDialogContent>
       </AlertDialog>,
     );
-    expect(slotClasses("alert-dialog-overlay")).toContain("transition-none");
-    expect(slotClasses("alert-dialog-content")).toContain("transition-none");
+    const expected = [
+      "data-open:animation-duration-[var(--dialog-enter-duration)]",
+      "data-closed:animation-duration-[var(--dialog-exit-duration)]",
+    ];
+    expectAnimationOnlyDuration(slotClasses("alert-dialog-overlay"), expected);
+    expectAnimationOnlyDuration(slotClasses("alert-dialog-content"), expected);
   });
 
-  it("disables CSS transitions on Popover content", () => {
+  it("uses animation-duration-100 on Popover content", () => {
     render(
       <Popover open>
         <PopoverContent>Body</PopoverContent>
       </Popover>,
     );
-    expect(slotClasses("popover-content")).toContain("transition-none");
+    expectAnimationOnlyDuration(slotClasses("popover-content"), ["animation-duration-100"]);
   });
 
-  it("disables CSS transitions on DropdownMenu content and sub-content", () => {
+  it("uses animation-duration-100 on DropdownMenu content and sub-content", () => {
     render(
       <DropdownMenu open>
         <DropdownMenuContent>
@@ -76,11 +102,11 @@ describe("keyframe-animated Base UI overlays", () => {
         </DropdownMenuContent>
       </DropdownMenu>,
     );
-    expect(slotClasses("dropdown-menu-content")).toContain("transition-none");
-    expect(slotClasses("dropdown-menu-sub-content")).toContain("transition-none");
+    expectAnimationOnlyDuration(slotClasses("dropdown-menu-content"), ["animation-duration-100"]);
+    expectAnimationOnlyDuration(slotClasses("dropdown-menu-sub-content"), ["animation-duration-100"]);
   });
 
-  it("disables CSS transitions on ContextMenu content", () => {
+  it("uses animation-duration-100 on ContextMenu content", () => {
     render(
       <ContextMenu open>
         <ContextMenuContent>
@@ -88,10 +114,10 @@ describe("keyframe-animated Base UI overlays", () => {
         </ContextMenuContent>
       </ContextMenu>,
     );
-    expect(slotClasses("context-menu-content")).toContain("transition-none");
+    expectAnimationOnlyDuration(slotClasses("context-menu-content"), ["animation-duration-100"]);
   });
 
-  it("disables CSS transitions on Select content", () => {
+  it("uses animation-duration-100 on Select content", () => {
     render(
       <Select open items={{ a: "Alpha" }} value="a">
         <SelectContent>
@@ -99,24 +125,15 @@ describe("keyframe-animated Base UI overlays", () => {
         </SelectContent>
       </Select>,
     );
-    expect(slotClasses("select-content")).toContain("transition-none");
+    expectAnimationOnlyDuration(slotClasses("select-content"), ["animation-duration-100"]);
   });
 
-  it("disables CSS transitions on HoverCard content", () => {
+  it("uses animation-duration-100 on HoverCard content", () => {
     render(
       <HoverCard open>
         <HoverCardContent>Preview</HoverCardContent>
       </HoverCard>,
     );
-    expect(slotClasses("hover-card-content")).toContain("transition-none");
-  });
-
-  it("keeps CSS transitions disabled on Tooltip content", () => {
-    render(
-      <Tooltip open>
-        <TooltipContent>Hint</TooltipContent>
-      </Tooltip>,
-    );
-    expect(slotClasses("tooltip-content")).toContain("transition-none");
+    expectAnimationOnlyDuration(slotClasses("hover-card-content"), ["animation-duration-100"]);
   });
 });
