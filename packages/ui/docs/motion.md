@@ -17,6 +17,7 @@ Motion explains a change where it happens: where the selection went, what opened
 - Keep UI motion at 200ms or less. An exit is shorter than its entry.
 - Never block input. A click during an animation acts on the end state, and the animation retargets from where it is.
 - In class names, write the curve as `ease-[cubic-bezier(0.23,1,0.32,1)]`; in JavaScript, use the constants.
+- In Tailwind v4, `translate-*`, `scale-*` and `rotate-*` write the standalone `translate`, `scale` and `rotate` properties, not `transform`. A hand-written transition names them, as in `transition-[translate,opacity]`; with `transition-[transform,opacity]` they snap. `transition` and `transition-transform` already cover all four. The 3D `rotate-x/y/z-*` still compose `transform`. `pnpm check:ui-transitions` reports the mix-up.
 
 ## Rules by interaction
 
@@ -27,6 +28,7 @@ Dialog, AlertDialog, Sheet, Popover, DropdownMenu, ContextMenu, Select, HoverCar
 - Enter: fade and scale from 95% toward the trigger (Sheet slides in from its edge), 100–150ms, `UI_EASE_OUT`. Exit: reverse, at most as long.
 - Use the components in `packages/ui/components/ui/` as they are. Dialog timing lives in the `--dialog-*` tokens (`dialog.md`); do not override an overlay's animation at a call site.
 - Keep the content mounted until the exit finishes. Do not gate the popup's children with `{open && …}`, and do not unmount the root when it closes. Base UI's Portal unmounts after the exit. A host that renders one modal at a time keeps the last modal and its data until `onOpenChangeComplete(false)`.
+- Keep the content and its data unchanged during the exit, too. `open` turns false on the exit's first frame: do not pass it to a data hook, a query's `enabled`, or an effect that resets state, or the list empties and the panel shrinks while it fades. Use `open` only to stop input, such as key listeners. The palette in `packages/views/search/search-command.tsx` calls `useRootModel(…, { active: true })` and lets the Portal unmount it after the exit.
 - Tooltips that open instantly while the pointer moves across a toolbar skip their animation (`data-[instant]:animate-none`).
 
 ### Expand and collapse

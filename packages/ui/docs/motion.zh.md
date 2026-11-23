@@ -17,6 +17,7 @@
 - 界面动效不超过 200ms。退场比进场短。
 - 不阻塞输入。动画过程中的点击按终点状态生效，动画从当前位置转向新目标。
 - 在 class 中写成 `ease-[cubic-bezier(0.23,1,0.32,1)]`；在 JavaScript 中使用常量。
+- Tailwind v4 中，`translate-*`、`scale-*` 和 `rotate-*` 写的是独立的 `translate`、`scale`、`rotate` 属性，不是 `transform`。手写过渡时要写出这些属性名，比如 `transition-[translate,opacity]`；写成 `transition-[transform,opacity]` 时它们会直接跳变。`transition` 和 `transition-transform` 已经包含这四个属性。3D 的 `rotate-x/y/z-*` 仍然走 `transform`。`pnpm check:ui-transitions` 会报出这类写错。
 
 ## 按交互类型的规则
 
@@ -27,6 +28,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 - 进场：淡入，并朝触发元素从 95% 缩放到 100%（Sheet 从所在边滑入），100–150ms，`UI_EASE_OUT`。退场反向，时长不超过进场。
 - 直接使用 `packages/ui/components/ui/` 中的组件。Dialog 的时长和曲线在 `--dialog-*` token 中（见 `dialog.md`）；不要在调用处覆盖浮层动画。
 - 退场结束前保持内容挂载。不要用 `{open && …}` 包住弹层内容，也不要在关闭时卸载根组件；Base UI 的 Portal 会在退场后卸载。一次只渲染一个弹窗的宿主，要保留上一个弹窗及其数据，直到 `onOpenChangeComplete(false)`。
+- 退场期间，内容和数据也要保持不变。`open` 在退场第一帧就变为 false：不要把它传给数据 hook、查询的 `enabled` 或会重置状态的 effect，否则列表会被清空，面板在淡出过程中变矮。`open` 只用来停掉输入，比如键盘监听。`packages/views/search/search-command.tsx` 中的命令面板调用 `useRootModel(…, { active: true })`，由 Portal 在退场后卸载它。
 - 指针扫过工具栏时立即打开的 Tooltip 跳过动画（`data-[instant]:animate-none`）。
 
 ### 展开折叠
