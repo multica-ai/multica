@@ -90,7 +90,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 - 只在尺寸变化期间裁切。常驻的 `overflow-hidden` 会裁掉里面各行的焦点环和拖放 ring。用 motion 时，把 `overflow: "hidden"` 放在 `initial` 和 `exit` 中，`animate` 以 `transitionEnd: { overflow: "visible" }` 收尾，参考 `packages/views/layout/panel-nav.tsx` 中的 `PanelDisclosure` 和 `packages/views/chat/components/chat-bar.tsx` 中的 `ChatBarChip`。`CollapsibleContent` 已经只在高度变化期间裁切。本身就要裁切的容器，比如从边缘滑入的抽屉、带圆角的卡片，要把行放在它们自己的滚动区域里，并给焦点环留出空间。
 - 正在退场的内容不接受点击，也不能获得焦点。在 `AnimatePresence` 渲染的组件中读取 `useIsPresent()`，给退场元素加 `inert={!isPresent}`。只加 `pointer-events-none` 时，Tab 仍然能落到它上面。`CollapsibleContent` 在折叠期间是 inert 的。
 - motion 动画的尺寸，全程由 motion 接管。motion 把 `width` 和 `height` 写成内联样式，优先级高于同一属性的 Tailwind class，比如 `max-md:w-full`。尺寸随断点变化时，按断点选择 motion 的目标值（`useIsMobile()`），参考 `packages/views/common/task-transcript/agent-transcript-dialog.tsx` 中的 `StepInspectorDrawer`。
-- 焦点环先要画得出来，才谈得上完整。在 Tailwind v4 中，`outline-none` 同时会把 `--tw-outline-style` 设为 `none`，而 `focus-visible:outline-2` 读取的正是这个变量，两者在同一个元素上什么都画不出来。要加上 `focus-visible:outline-solid`，参考 `packages/views/layout/panel-nav.tsx` 中的 `PANEL_ROW_CLASS`。画在 `::after` 上的焦点环（`focus-visible:after:outline-2`）不受影响，因为这个变量不继承。
+- 焦点环先要画得出来，才谈得上完整。在 Tailwind v4 中，`outline-none` 同时会把 `--tw-outline-style` 设为 `none`，而 `focus-visible:outline-2` 读取的正是这个变量，两者在同一个元素上什么都画不出来。要加上 `focus-visible:outline-solid`，参考 `packages/views/layout/panel-nav.tsx` 中的 `PANEL_ROW_CLASS`。画在 `::after` 上的焦点环（`focus-visible:after:outline-2`）不受影响，因为这个变量不继承。`pnpm check:ui-outlines` 会报出缺了样式的宽度写法。
 
 ## 减少动态效果
 

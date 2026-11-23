@@ -1318,7 +1318,7 @@ function ArchivedSectionList({
           <span className="min-w-0 flex-1 truncate">{t(($) => $.filters.empty)}</span>
           <button
             type="button"
-            className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
             onClick={() => clearFilters(wsId)}
           >
             {t(($) => $.filters.clear)}
