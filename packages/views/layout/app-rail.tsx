@@ -246,7 +246,7 @@ function RailSpaceLink({
       aria-current={active ? "page" : undefined}
       onContextMenu={openInNewTab ? rowMenu.openAtPointer : undefined}
       {...peekHandlers}
-      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-rail-item text-rail-item transition-colors outline-none hover:bg-rail-item-hover hover:text-rail-item-active-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-rail-item-active aria-[current=page]:font-medium aria-[current=page]:text-rail-item-active-foreground"
+      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-rail-item text-rail-item transition-colors outline-none hover:bg-rail-item-hover hover:text-rail-item-active-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring aria-[current=page]:bg-rail-item-active aria-[current=page]:font-medium aria-[current=page]:text-rail-item-active-foreground"
     >
       <Icon className="size-5" />
       <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>

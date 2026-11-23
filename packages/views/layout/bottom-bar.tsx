@@ -56,7 +56,7 @@ function TeamStatus({ wsId }: { wsId: string }) {
           >
             <AppLink
               href={teamHref}
-              className="inline-flex h-[22px] min-w-0 items-center gap-1.5 rounded-md bg-page-canvas pr-2 pl-1.5 text-caption font-medium text-foreground ring-1 ring-surface-border outline-none transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-ring"
+              className="inline-flex h-[22px] min-w-0 items-center gap-1.5 rounded-md bg-page-canvas pr-2 pl-1.5 text-caption font-medium text-foreground ring-1 ring-surface-border outline-none transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
             >
               <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-warning" />
               <span className="truncate">{t(($) => $.panels.team.stuck, { count: waitingTasks })}</span>

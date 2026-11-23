@@ -457,7 +457,7 @@ export function DocTree() {
         title={
           <AppLink
             href={p.docs()}
-            className="min-w-0 truncate rounded-md outline-none focus-visible:outline-2 focus-visible:outline-ring"
+            className="min-w-0 truncate rounded-md outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
           >
             {t(($) => $.kb)}
           </AppLink>

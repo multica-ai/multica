@@ -149,7 +149,7 @@ function ChatBarChip({
         type="button"
         aria-label={closeLabel}
         onClick={onClose}
-        className="absolute top-1 right-1 flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-surface-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/chip:opacity-100 motion-reduce:transition-none [&_svg]:size-3"
+        className="absolute top-1 right-1 flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-surface-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring group-hover/chip:opacity-100 motion-reduce:transition-none [&_svg]:size-3"
       >
         <X aria-hidden />
       </button>

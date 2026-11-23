@@ -388,7 +388,7 @@ export function InboxSection({
             <button
               type="button"
               disabled={list.retrying}
-              className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+              className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
               onClick={list.retry}
             >
               {tInbox(($) => $.list.retry)}
@@ -399,7 +399,7 @@ export function InboxSection({
             <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.filters.empty)}</span>
             <button
               type="button"
-              className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
               onClick={() => clearFilters(wsId)}
             >
               {tInbox(($) => $.filters.clear)}
@@ -1129,7 +1129,7 @@ function SectionNote({ children, retry }: { children: ReactNode; retry?: { label
         <button
           type="button"
           disabled={retry.busy}
-          className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+          className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
           onClick={retry.run}
         >
           {retry.label}
