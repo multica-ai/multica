@@ -1235,7 +1235,8 @@
     "save_failed_toast": "Не удалось сохранить текущие настройки",
     "saved_toast": "Текущие настройки сохранены",
     "strategy_custom": "Пользовательская",
-    "strategy_recommended": "Рекомендуемая"
+    "strategy_recommended": "Рекомендуемая",
+    "template_model_reset_toast": "Model {{model}} is no longer in this runtime's catalog. Cleared to follow the runtime default."
   },
   "runtime_policy": {
     "smart": "Умный"

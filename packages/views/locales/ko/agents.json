@@ -1142,7 +1142,8 @@
     "save_failed_toast": "현재 설정을 저장하지 못했습니다",
     "saved_toast": "현재 설정을 저장했습니다",
     "strategy_custom": "사용자 지정",
-    "strategy_recommended": "권장"
+    "strategy_recommended": "권장",
+    "template_model_reset_toast": "Model {{model}} is no longer in this runtime's catalog. Cleared to follow the runtime default."
   },
   "runtime_policy": {
     "smart": "스마트"

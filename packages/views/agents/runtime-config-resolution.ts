@@ -38,14 +38,33 @@ export function runtimeConfigResolutionMessageFromError(
   err: unknown,
   t: AgentsT,
 ): string | null {
+  const payload = runtimeConfigResolutionPayloadFromError(err);
+  return payload ? runtimeConfigResolutionMessage(payload, t) : null;
+}
+
+/**
+ * Machine-readable resolution status carried by a 409 conflict error, for
+ * callers that branch on the refusal kind rather than its copy — e.g. the
+ * custom-mode save retry that clears the template model.
+ */
+export function runtimeConfigResolutionStatusFromError(
+  err: unknown,
+): RuntimeConfigResolutionStatus | null {
+  return runtimeConfigResolutionStatus(
+    runtimeConfigResolutionPayloadFromError(err),
+  );
+}
+
+// The one place that knows the shape of a resolution conflict error, so the
+// message and status readers can never disagree about what counts as one.
+function runtimeConfigResolutionPayloadFromError(
+  err: unknown,
+): RuntimeConfigResolutionPayload | null {
   if (!err || typeof err !== "object") return null;
   const candidate = err as { body?: unknown; status?: unknown };
   if (candidate.status !== undefined && candidate.status !== 409) return null;
   if (!candidate.body || typeof candidate.body !== "object") return null;
-  return runtimeConfigResolutionMessage(
-    candidate.body as RuntimeConfigResolutionPayload,
-    t,
-  );
+  return candidate.body as RuntimeConfigResolutionPayload;
 }
 
 function runtimeConfigResolutionStatus(

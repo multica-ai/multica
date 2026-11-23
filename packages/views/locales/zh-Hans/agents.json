@@ -1142,7 +1142,8 @@
     "save_failed_toast": "保存当前配置失败",
     "saved_toast": "已保存我的当前配置",
     "strategy_custom": "自定义",
-    "strategy_recommended": "推荐"
+    "strategy_recommended": "推荐",
+    "template_model_reset_toast": "模型 {{model}} 已不在该运行时的模型目录中，已清空并跟随运行时默认。"
   },
   "runtime_policy": {
     "smart": "智能"

@@ -34,6 +34,7 @@ import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import {
   runtimeConfigResolutionMessage,
   runtimeConfigResolutionMessageFromError,
+  runtimeConfigResolutionStatusFromError,
 } from "../runtime-config-resolution";
 
 interface CurrentRuntimeConfigSectionProps {
@@ -94,6 +95,12 @@ export function CurrentRuntimeConfigSection({
     );
   };
 
+  const saveFailedMessage = (failure: unknown) =>
+    runtimeConfigResolutionMessageFromError(failure, t) ??
+    (failure instanceof Error
+      ? failure.message
+      : t(($) => $.runtime_config.save_failed_toast));
+
   const updateCurrentRuntimeConfig = async (
     patch: Partial<UpdateAgentRuntimeCurrentConfigRequest>,
   ) => {
@@ -107,12 +114,7 @@ export function CurrentRuntimeConfigSection({
         cacheRuntimeConfigSummary(summary);
         toast.success(t(($) => $.runtime_config.saved_toast));
       } catch (err) {
-        toast.error(
-          runtimeConfigResolutionMessageFromError(err, t) ??
-            (err instanceof Error
-              ? err.message
-              : t(($) => $.runtime_config.save_failed_toast)),
-        );
+        toast.error(saveFailedMessage(err));
       } finally {
         setSavingRuntimeConfig(false);
       }
@@ -147,12 +149,47 @@ export function CurrentRuntimeConfigSection({
       cacheRuntimeConfigSummary(summary);
       toast.success(t(($) => $.runtime_config.saved_toast));
     } catch (err) {
-      toast.error(
-        runtimeConfigResolutionMessageFromError(err, t) ??
-          (err instanceof Error
-            ? err.message
-            : t(($) => $.runtime_config.save_failed_toast)),
-      );
+      // The first custom-mode save carries the recommended template
+      // config. When the template model has left the runtime's live catalog,
+      // that save is refused — and refusing it deadlocks the screen, because
+      // picking a new model requires entering custom mode first. Retry once
+      // without the runtime-native template fields (model/thinking/speed),
+      // the same reset switching runtimes already does, and say what
+      // happened. Only when this request did not explicitly pick a model: a
+      // hand-picked model id keeps its named-model refusal, so the user
+      // learns that id itself was rejected.
+      if (
+        patch.model === undefined &&
+        request.model !== "" &&
+        runtimeConfigResolutionStatusFromError(err) === "model_unavailable"
+      ) {
+        try {
+          const fallbackSummary = await api.updateAgentRuntimeCurrentConfig(
+            agent.id,
+            {
+              ...request,
+              model: "",
+              thinking_level: patch.thinking_level ?? "",
+              service_tier: patch.service_tier ?? "",
+            },
+          );
+          cacheRuntimeConfigSummary(fallbackSummary);
+          toast.warning(
+            t(($) => $.runtime_config.template_model_reset_toast, {
+              model: request.model,
+            }),
+          );
+          return;
+        } catch (retryErr) {
+          // The retry is what stands between the user and custom mode now.
+          // The "model left the catalog" copy is stale once the model has
+          // been cleared, so an offline runtime, a dropped network or a 500
+          // on the retry must be reported as itself.
+          toast.error(saveFailedMessage(retryErr));
+          return;
+        }
+      }
+      toast.error(saveFailedMessage(err));
     } finally {
       setSavingRuntimeConfig(false);
     }

@@ -1142,7 +1142,8 @@
     "save_failed_toast": "現在の設定を保存できませんでした",
     "saved_toast": "現在の設定を保存しました",
     "strategy_custom": "カスタム",
-    "strategy_recommended": "推奨"
+    "strategy_recommended": "推奨",
+    "template_model_reset_toast": "Model {{model}} is no longer in this runtime's catalog. Cleared to follow the runtime default."
   },
   "runtime_policy": {
     "smart": "スマート"

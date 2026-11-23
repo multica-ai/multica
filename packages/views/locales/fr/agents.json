@@ -1173,7 +1173,8 @@
     "save_failed_toast": "Impossible d’enregistrer la configuration actuelle",
     "saved_toast": "Configuration actuelle enregistrée",
     "strategy_custom": "Personnalisée",
-    "strategy_recommended": "Recommandée"
+    "strategy_recommended": "Recommandée",
+    "template_model_reset_toast": "Model {{model}} is no longer in this runtime's catalog. Cleared to follow the runtime default."
   },
   "runtime_policy": {
     "smart": "Intelligent"
