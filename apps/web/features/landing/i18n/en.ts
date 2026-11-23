@@ -318,13 +318,14 @@ export function createEnDict(): LandingDict {
           "Automatic archiving keeps you on the Issue you're reading, so the After archiving setting is gone.",
           "Agents follow project workflows more reliably and no longer move finished Issues into closed statuses like Won't Fix.",
           "Archive all asks for confirmation first, and snoozed Issues stay snoozed.",
+          "On a new device, the Work panel's Inbox starts with compact one-line rows; existing settings are kept.",
         ],
         fixes: [
           "Follow-up instructions sent to a running Antigravity agent now reach it instead of starting a new run.",
           "Desktop Issue tabs return to where you were reading, even in the middle of a comment.",
           "Switching Inbox tabs keeps the open Issue, and notifications from other tabs no longer linger in the Inbox.",
           "Duplicate marks no longer reveal private Issues in live updates or after the original Issue is deleted.",
-          "Fixed jumps when dropping dragged items, clipped focus rings, and closing panels that still took clicks.",
+          "Fixed jumps when dropping dragged items, clipped focus rings, lingering tooltips, and closing panels that still took clicks.",
         ],
       },
       {
