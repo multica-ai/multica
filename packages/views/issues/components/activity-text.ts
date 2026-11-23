@@ -1,6 +1,6 @@
 import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
 import { formatDateOnly } from "@multica/core/issues/date";
-import type { TimelineEntry } from "@multica/core/types";
+import { SQUAD_HANDOFF_ROUND_LIMIT, type TimelineEntry } from "@multica/core/types";
 import type { useT } from "../../i18n";
 import { priorityLabel } from "../utils/priority-label";
 
@@ -152,6 +152,19 @@ export function formatActivity(
           return t(($) => $.activity.squad_leader_evaluated);
       }
     }
+    case "squad_handoff": {
+      const name = details.to_id && details.to_type && resolveActorName
+        ? resolveActorName(details.to_type, details.to_id)
+        : "?";
+      switch (details.kind) {
+        case "human":
+          return t(($) => $.activity.squad_handoff_human, { name });
+        case "leader":
+          return t(($) => $.activity.squad_handoff_leader, { name });
+        default:
+          return t(($) => $.activity.squad_handoff_to, { name });
+      }
+    }
     case "environment_controlled": {
       const name = details.label || details.name || "?";
       switch (details.action) {
@@ -166,4 +179,47 @@ export function formatActivity(
     default:
       return entry.action ?? "";
   }
+}
+
+/**
+ * The side note on a squad handoff row: which round a member-to-member
+ * handoff is in, or why the issue went back to the leader.
+ */
+export function squadHandoffNote(entry: ActivityTextEntry, t: ActivityT): string | null {
+  const details = (entry.details ?? {}) as Record<string, string>;
+  if (details.kind === "leader") {
+    switch (details.reason) {
+      case "round_limit":
+        return t(($) => $.activity.squad_handoff_reason_round_limit, { limit: SQUAD_HANDOFF_ROUND_LIMIT });
+      case "daily_limit":
+        return t(($) => $.activity.squad_handoff_reason_daily_limit);
+      case "run_failed":
+        return t(($) => $.activity.squad_handoff_reason_run_failed);
+      default:
+        return null;
+    }
+  }
+  const round = Number(details.round);
+  return round >= 2 ? t(($) => $.activity.squad_handoff_round, { round }) : null;
+}
+
+/**
+ * The round of the newest squad handoff when it passed the issue between
+ * members for the second time or more — the header chip appends it to the
+ * running agent. Any newer handoff (to a person, back to the leader) ends it.
+ */
+export function latestSquadHandoffRound(
+  entries: readonly Pick<TimelineEntry, "type" | "action" | "details" | "created_at">[],
+): { agentId: string; round: number } | null {
+  let latest: (typeof entries)[number] | null = null;
+  for (const entry of entries) {
+    if (entry.type !== "activity" || entry.action !== "squad_handoff") continue;
+    if (!latest || entry.created_at >= latest.created_at) latest = entry;
+  }
+  const details = (latest?.details ?? {}) as Record<string, string>;
+  const round = Number(details.round);
+  if (details.kind !== "member" || details.to_type !== "agent" || !details.to_id || !(round >= 2)) {
+    return null;
+  }
+  return { agentId: details.to_id, round };
 }
