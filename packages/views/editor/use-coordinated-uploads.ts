@@ -69,7 +69,7 @@ const EMPTY_ATTACHMENTS: Attachment[] = [];
  * method must go through the store's `getState()` (never captured React
  * state): settle handlers call them after the owning component is gone.
  */
-export interface UploadDraftBinding {
+interface UploadDraftRecords {
   /**
    * Identity for the live-editor registry — unique per composer target
    * (e.g. `comment:new:{issueId}`, `issue-create:manual`). A reopened
@@ -82,11 +82,17 @@ export interface UploadDraftBinding {
   settleUpload: (clientUploadId: string, attachment: Attachment) => void;
   failUpload: (clientUploadId: string, error?: string) => void;
   removeUpload: (clientUploadId: string) => void;
+}
+
+interface InlineUploadDraftBinding extends UploadDraftRecords {
+  placement?: "inline";
   /** The draft body reference-filtering binds against at submit time. */
   getBody: () => string;
   /** Append a markdown fragment to the persisted body. */
   appendToBody: (markdown: string) => void;
 }
+
+export type UploadDraftBinding = InlineUploadDraftBinding | (UploadDraftRecords & { placement: "tray" });
 
 // The editor currently showing each registry key. Lets a settle handler whose
 // own mount is gone (the upload outlived the composer) hand the finished link
@@ -131,7 +137,7 @@ const DELIVER_MAX_TRIES = 100; // ~5s — editor init is a passive effect away
  * way) before writing.
  */
 function deliverFinishedUpload(
-  binding: UploadDraftBinding,
+  binding: InlineUploadDraftBinding,
   clientUploadId: string,
   attachment: Attachment,
   tries = 0,
@@ -184,7 +190,7 @@ function deliverFinishedUpload(
  * persisted body otherwise.
  */
 function deliverPastedTextBack(
-  binding: UploadDraftBinding | undefined,
+  binding: InlineUploadDraftBinding | undefined,
   editorRef: RefObject<ContentEditorRef | null>,
   text: string,
 ): void {
@@ -294,7 +300,9 @@ export function useCoordinatedUploads(
 
   // Registration only exists for a persisted target; a liveRegistryKey with
   // no binding would register an editor nothing can ever look up.
-  const registryKey = binding ? (opts?.liveRegistryKey ?? binding.registryKey) : undefined;
+  const registryKey = binding && binding.placement !== "tray"
+    ? (opts?.liveRegistryKey ?? binding.registryKey)
+    : undefined;
   // Layout effect for the same reason as mountedRef: chat's adopt swaps the
   // editor's document (and its loaded key) synchronously during commit, and a
   // passive re-registration one task later leaves a settle window where the
@@ -405,7 +413,7 @@ export function useCoordinatedUploads(
         // Never enters the coordinator, and never enters the draft either —
         // see the settle handler below for why a failure leaves no placeholder.
         const reason = "File exceeds 100 MB limit";
-        if (pastedText !== undefined) {
+        if (pastedText !== undefined && target?.placement !== "tray") {
           // A paste has no on-disk copy to re-attach from, so the text goes
           // back into the composer instead of being lost with the upload.
           deliverPastedTextBack(target, editorRef, pastedText);
@@ -439,7 +447,7 @@ export function useCoordinatedUploads(
                   // mount is alive: resolving the promise below drives the
                   // normal inline blob→URL swap, and a placeholder the user
                   // deleted mid-upload must stay deleted.
-                  if (!mountedRef.current) {
+                  if (!mountedRef.current && target.placement !== "tray") {
                     deliverFinishedUpload(target, clientUploadId, outcome.attachment);
                   }
                 }
@@ -472,7 +480,7 @@ export function useCoordinatedUploads(
                   target.removeUpload(clientUploadId);
                   // Paste-as-file has no on-disk copy to re-attach from, so
                   // its text goes back into the composer.
-                  if (pastedText !== undefined) {
+                  if (pastedText !== undefined && target.placement !== "tray") {
                     deliverPastedTextBack(target, editorRef, pastedText);
                   }
                 }

@@ -7,6 +7,7 @@ export interface ReplyAnnotation {
   sourceRevision?: number;
   quote: string;
   note: string;
+  attachmentUploadIds?: string[];
   /** Offsets refer to normalized rendered text, never Markdown or a live Range. */
   start: number;
   prefix: string;
@@ -17,14 +18,21 @@ export const MAX_REPLY_ANNOTATIONS = 20;
 export const MAX_ANNOTATION_QUOTE_LENGTH = 4000;
 export const EMPTY_REPLY_ANNOTATIONS: ReplyAnnotation[] = [];
 
-export function normalizeReplyAnnotations(value: unknown): ReplyAnnotation[] {
+export function hasAnnotationContent(annotation: ReplyAnnotation): boolean {
+  return !!annotation.note.trim() || !!annotation.attachmentUploadIds?.length;
+}
+
+export function normalizeReplyAnnotations(value: unknown, { allowEmptyNote = false } = {}): ReplyAnnotation[] {
   if (!Array.isArray(value)) return EMPTY_REPLY_ANNOTATIONS;
   const valid = value.filter((a): a is ReplyAnnotation =>
     a != null && typeof a === "object" &&
     typeof a.id === "string" && typeof a.sourceCommentId === "string" &&
     typeof a.sourceActorName === "string" && typeof a.quote === "string" &&
     a.quote.trim().length > 0 && a.quote.length <= MAX_ANNOTATION_QUOTE_LENGTH &&
-    typeof a.note === "string" && a.note.trim().length > 0 && Number.isInteger(a.start) && a.start >= 0 &&
+    typeof a.note === "string" &&
+    (a.attachmentUploadIds === undefined || (Array.isArray(a.attachmentUploadIds) &&
+      a.attachmentUploadIds.every((id: unknown) => typeof id === "string" && id.length > 0))) &&
+    (allowEmptyNote || hasAnnotationContent(a)) && Number.isInteger(a.start) && a.start >= 0 &&
     typeof a.prefix === "string" && typeof a.suffix === "string" &&
     (a.sourceRevision === undefined || Number.isInteger(a.sourceRevision)),
   ).slice(0, MAX_REPLY_ANNOTATIONS);

@@ -5,11 +5,17 @@ import { ArrowUp, Loader2, Trash2 } from "@multica/ui/icons";
 import { createShortcutChord } from "@multica/core/shortcuts";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { MAX_REPLY_ANNOTATIONS, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
+import type { CommentDraftKey } from "@multica/core/issues/stores";
 import { ContentEditor, type ContentEditorRef } from "../../editor";
+import { dedupFiles } from "../../editor/extensions/file-upload";
 import { EditorOverlayOwnerContext } from "../../editor/overlay-owner";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
+import { useAnnotationUploads } from "./use-annotation-uploads";
+import { AnnotationAttachments } from "./annotation-attachments";
 import {
   useComposerVoice,
   VoiceErrorRow,
@@ -33,7 +39,7 @@ export interface AnnotationSendControls {
 
 export interface AnnotationComposerSlot {
   pending: ReplyAnnotation;
-  render: (controls?: AnnotationSendControls) => ReactNode;
+  render: (controls?: AnnotationSendControls, allowAttachments?: boolean) => ReactNode;
 }
 
 export function annotationsWithPending(annotations: readonly ReplyAnnotation[], pending?: ReplyAnnotation): readonly ReplyAnnotation[] {
@@ -46,7 +52,7 @@ const ENTER = createShortcutChord("Enter");
 const SEND = createShortcutChord("Enter", { primary: true });
 
 export function AnnotationComposer({
-  issueId, owner, annotation, existing, number, editorRef, controls,
+  issueId, owner, annotation, existing, number, editorRef, controls, attachmentDraftKey,
   sourceMissing, sourceChanged, canSave, onChange, onSave, onRemove, onBusyChange,
 }: {
   issueId?: string;
@@ -56,6 +62,7 @@ export function AnnotationComposer({
   number: number;
   editorRef: RefObject<ContentEditorRef | null>;
   controls?: AnnotationSendControls;
+  attachmentDraftKey?: CommentDraftKey;
   sourceMissing: boolean;
   sourceChanged: boolean;
   canSave: boolean;
@@ -69,23 +76,29 @@ export function AnnotationComposer({
   const [sending, setSending] = useState(false);
   const inFlight = useRef(false);
   const busy = sending || controls?.submitting === true;
+  const { uploads, handleUpload, removeUpload, removedAllAttachments, gate, storageRefusal, dismissStorageRefusal } =
+    useAnnotationUploads(attachmentDraftKey, annotation, existing, editorRef);
   const otherAnnotations = controls?.annotations.filter((a) => a.id !== annotation.id).length ?? 0;
   const hasBody = !!controls?.draftContent.trim();
   const sendAll = otherAnnotations > 0 || hasBody;
-  const sendDisabled = !annotation.note.trim() || !canSave || busy || !!controls?.uploading || !!controls?.targetMissing;
+  const hasFiles = uploads.length > 0;
+  const hasContent = !!annotation.note.trim() || hasFiles;
+  const blocked = !canSave || busy || gate.uploading;
+  const saveDisabled = (!hasContent && !removedAllAttachments) || blocked;
+  const sendDisabled = !hasContent || blocked || !!controls?.uploading || !!controls?.targetMissing;
   const save = () => {
-    if (busy || inFlight.current || !canSave) return;
+    if (busy || inFlight.current || !canSave || gate.isBlocked()) return;
     const note = editorRef.current?.getMarkdown() ?? "";
-    if (!note.trim()) return;
+    if (!note.trim() && !hasFiles && !removedAllAttachments) return;
     // Cancel any armed 100ms debounce so a late onUpdate cannot write a stale
     // pendingAnnotation after confirmNote clears it.
     editorRef.current?.flushPendingUpdate?.();
     onSave(note, true);
   };
   const send = async () => {
-    if (!controls || controls.targetMissing || busy || inFlight.current || !canSave) return;
+    if (!controls || controls.targetMissing || busy || inFlight.current || !canSave || gate.isBlocked()) return;
     const note = editorRef.current?.getMarkdown() ?? "";
-    if (!note.trim()) return;
+    if (!note.trim() && !hasFiles) return;
     // Cancel any armed 100ms debounce before confirmNote + submit snapshot,
     // matching ReplyInput/CommentInput so a late onUpdate cannot mutate the
     // draft entry mid-flight and defeat the post-submit cleanup guard.
@@ -108,11 +121,29 @@ export function AnnotationComposer({
     scope: annotation.id,
     disabled: busy,
   });
+  const stage = (file: File) => { void handleUpload(file); };
 
   return <EditorOverlayOwnerContext.Provider value={owner}>
     <div ref={voice.rootRef} onFocusCapture={voice.onFocusCapture}
-      className="relative flex w-96 max-w-[calc(100vw-26px)] flex-col gap-1" aria-busy={busy || undefined}>
-      <div className={busy ? "pointer-events-none opacity-60" : undefined} inert={busy || undefined}>
+      className="relative flex w-96 max-w-[calc(100vw-26px)] flex-col gap-1" aria-busy={busy || gate.uploading || undefined}>
+      <div className={busy ? "pointer-events-none opacity-60" : undefined} inert={busy || undefined}
+        onPasteCapture={attachmentDraftKey ? (event) => {
+          const files = dedupFiles(event.clipboardData.files);
+          if (files.length === 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (!busy) files.forEach(stage);
+        } : undefined}
+        onDragOver={attachmentDraftKey ? (event) => {
+          if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+        } : undefined}
+        onDropCapture={attachmentDraftKey ? (event) => {
+          const files = dedupFiles(event.dataTransfer.files);
+          if (files.length === 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (!busy) files.forEach(stage);
+        } : undefined}>
         <ContentEditor ref={editorRef} defaultValue={initialNote}
           ariaLabel={t(($) => $.reply.annotations.note_label)}
           placeholder={t(($) => $.reply.annotations.note_placeholder)}
@@ -120,10 +151,12 @@ export function AnnotationComposer({
           currentIssueId={issueId} showBubbleMenu={false} debounceMs={100}
           flushPendingOnUnmount
           onUpdate={onChange} onEnter={save} onSubmit={send} />
+        <AnnotationAttachments uploads={uploads} onRemove={removeUpload} />
       </div>
       <VoiceHud voice={voice} />
       <VoiceSetupDialog voice={voice} />
       <VoiceErrorRow voice={voice} className="mx-1" />
+      {storageRefusal && <StorageLimitNotice refusal={storageRefusal} onDismiss={dismissStorageRefusal} className="mx-1" />}
       {(sourceMissing || sourceChanged) && <p role={sourceMissing ? "alert" : undefined} className="px-2 text-caption text-muted-foreground">
         {t(($) => $.reply.annotations.source_changed)}
       </p>}
@@ -142,6 +175,7 @@ export function AnnotationComposer({
         {existing && onRemove && <IconButton variant="ghost" size="icon-sm"
           className="text-muted-foreground hover:text-destructive" label={t(($) => $.reply.annotations.remove, { number })}
           disabled={busy} onClick={onRemove}><Trash2 /></IconButton>}
+        {attachmentDraftKey && <FileUploadButton multiple disabled={busy} onSelect={stage} />}
         <div className="min-w-0 flex-1">{controls?.recipients}</div>
         <div className="ml-auto flex items-center gap-1">
           <VoiceMicButton voice={voice} />
@@ -157,7 +191,7 @@ export function AnnotationComposer({
               disabled={sendDisabled} onClick={send} aria-busy={busy || undefined}>
               {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
             </IconButton>)}
-          <Button size="sm" disabled={!annotation.note.trim() || !canSave || busy} onClick={save}
+          <Button size="sm" disabled={saveDisabled} onClick={save}
             aria-label={t(($) => existing ? $.reply.annotations.save : $.reply.annotations.confirm_add)}>
             {t(($) => existing ? $.reply.annotations.save_short : $.reply.annotations.confirm_add_short)}
             <ShortcutKeycaps shortcut={ENTER} decorative />

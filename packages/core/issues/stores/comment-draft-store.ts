@@ -1,4 +1,4 @@
-import { type ReplyAnnotation, EMPTY_REPLY_ANNOTATIONS, MAX_REPLY_ANNOTATIONS, MAX_ANNOTATION_QUOTE_LENGTH, normalizeReplyAnnotations } from "../../drafts/reply-annotation";
+import { type ReplyAnnotation, EMPTY_REPLY_ANNOTATIONS, MAX_REPLY_ANNOTATIONS, MAX_ANNOTATION_QUOTE_LENGTH, hasAnnotationContent, normalizeReplyAnnotations } from "../../drafts/reply-annotation";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
@@ -11,6 +11,7 @@ import {
   normalizeStoredUploads,
   uploadedAttachments,
 } from "../../drafts/draft-upload";
+import { contentReferencesAttachment } from "../../types/attachment-url";
 import type { Attachment } from "../../types";
 
 /**
@@ -83,7 +84,7 @@ interface CommentDraftStore {
   removeUpload: (key: CommentDraftKey, clientUploadId: string) => void;
   getAnnotations: (key: CommentDraftKey) => ReplyAnnotation[];
   addAnnotation: (key: CommentDraftKey, annotation: ReplyAnnotation) => string | undefined;
-  updateAnnotation: (key: CommentDraftKey, id: string, note: string) => void;
+  updateAnnotation: (key: CommentDraftKey, id: string, note: string, attachmentUploadIds?: string[]) => void;
   removeAnnotation: (key: CommentDraftKey, id: string) => void;
   getPendingAnnotation: (key: CommentDraftKey) => PendingAnnotationDraft | undefined;
   setPendingAnnotation: (key: CommentDraftKey, draft: PendingAnnotationDraft) => void;
@@ -129,12 +130,25 @@ function isMeaningful(
   return content.trim().length > 0 || uploads.length > 0 || annotations.length > 0 || !!pendingAnnotation;
 }
 
-function normalizePendingAnnotation(value: unknown): PendingAnnotationDraft | undefined {
+function retainAvailableAnnotationIds(annotation: ReplyAnnotation, uploads: DraftUpload[]): ReplyAnnotation {
+  if (!annotation.attachmentUploadIds?.length) return annotation;
+  const attachmentUploadIds = annotation.attachmentUploadIds.filter((id) => uploads.some((upload) => upload.clientUploadId === id));
+  return attachmentUploadIds.length === annotation.attachmentUploadIds.length
+    ? annotation : { ...annotation, attachmentUploadIds };
+}
+
+function normalizePendingAnnotation(value: unknown, uploads: DraftUpload[]): PendingAnnotationDraft | undefined {
   if (!value || typeof value !== "object") return undefined;
   const candidate = value as { annotation?: unknown; existing?: unknown };
   if (typeof candidate.existing !== "boolean") return undefined;
-  const annotation = normalizeReplyAnnotations([candidate.annotation])[0];
-  return annotation ? { annotation, existing: candidate.existing } : undefined;
+  const draft = candidate.annotation as Partial<ReplyAnnotation> | undefined;
+  const allowEmptyNote = candidate.existing && Array.isArray(draft?.attachmentUploadIds);
+  const normalized = normalizeReplyAnnotations([draft], { allowEmptyNote })[0];
+  if (!normalized) return undefined;
+  const annotation = retainAvailableAnnotationIds(normalized, uploads);
+  return allowEmptyNote || hasAnnotationContent(annotation)
+    ? { annotation, existing: candidate.existing }
+    : undefined;
 }
 
 function samePendingAnnotation(a?: PendingAnnotationDraft, b?: PendingAnnotationDraft): boolean {
@@ -148,10 +162,15 @@ function samePendingAnnotation(a?: PendingAnnotationDraft, b?: PendingAnnotation
     a.annotation.sourceRevision === b.annotation.sourceRevision &&
     a.annotation.quote === b.annotation.quote &&
     a.annotation.note === b.annotation.note &&
+    sameAttachmentIds(a.annotation.attachmentUploadIds, b.annotation.attachmentUploadIds) &&
     a.annotation.start === b.annotation.start &&
     a.annotation.prefix === b.annotation.prefix &&
     a.annotation.suffix === b.annotation.suffix
   );
+}
+
+function sameAttachmentIds(a?: string[], b?: string[]): boolean {
+  return a === b || (!!a && !!b && a.length === b.length && a.every((id, index) => id === b[index]));
 }
 
 // Shared writer for setDraft/setAttachments/upload mutations: an entry with
@@ -201,6 +220,20 @@ function uploadsOf(drafts: Record<string, CommentDraft>, key: string): DraftUplo
   return drafts[key]?.attachments ?? EMPTY_UPLOADS;
 }
 
+// Chat stores the main body in a separate draft. Its comment-draft uploads
+// belong to annotations, so closing the pending note keeps only saved links.
+function retainSavedAnnotationUploads(
+  key: string,
+  uploads: DraftUpload[],
+  annotations: readonly ReplyAnnotation[],
+): DraftUpload[] {
+  if (!key.startsWith("chat:") || uploads.length === 0) return uploads;
+  return uploads.filter((upload) =>
+    upload.status === "uploaded" &&
+    annotations.some(({ note, attachmentUploadIds }) =>
+      attachmentUploadIds?.includes(upload.clientUploadId) || contentReferencesAttachment(note, upload.attachment)));
+}
+
 function pruneStaleDrafts(drafts: Record<string, CommentDraft>): Record<string, CommentDraft> {
   const cutoff = Date.now() - TTL_MS;
   const out: Record<string, CommentDraft> = {};
@@ -208,9 +241,14 @@ function pruneStaleDrafts(drafts: Record<string, CommentDraft>): Record<string, 
     // Normalize every persisted draft: legacy `Attachment[]` becomes uploaded
     // placeholders, and any placeholder still `uploading` is dropped (the bytes
     // were never persisted, so the upload cannot resume).
-    const uploads = normalizeStoredUploads(v.attachments);
-    const annotations = normalizeReplyAnnotations(v.annotations);
-    const pendingAnnotation = normalizePendingAnnotation(v.pendingAnnotation);
+    const normalizedUploads = normalizeStoredUploads(v.attachments);
+    const annotations = normalizeReplyAnnotations(v.annotations)
+      .map((annotation) => retainAvailableAnnotationIds(annotation, normalizedUploads))
+      .filter(hasAnnotationContent);
+    const pendingAnnotation = normalizePendingAnnotation(v.pendingAnnotation, normalizedUploads);
+    const uploads = pendingAnnotation
+      ? normalizedUploads
+      : retainSavedAnnotationUploads(k, normalizedUploads, annotations);
     if (v.updatedAt >= cutoff && isMeaningful(v.content, uploads, annotations, pendingAnnotation)) {
       const first = annotations[0];
       const replyTarget = k.startsWith("reply:") && first ? (v.replyTarget && typeof v.replyTarget.commentId === "string" && typeof v.replyTarget.actorName === "string"
@@ -298,8 +336,9 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
           };
         }),
       getAnnotations: (key) => get().drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS,
-      addAnnotation: (key, annotation) => {
-        if ((!key.startsWith("reply:") && !key.startsWith("new:") && !key.startsWith("chat:")) || !annotation.note.trim() || !annotation.quote.trim() || annotation.quote.length > MAX_ANNOTATION_QUOTE_LENGTH) return undefined;
+      addAnnotation: (key, candidate) => {
+        const annotation = retainAvailableAnnotationIds(candidate, get().getUploads(key));
+        if ((!key.startsWith("reply:") && !key.startsWith("new:") && !key.startsWith("chat:")) || !hasAnnotationContent(annotation) || !annotation.quote.trim() || annotation.quote.length > MAX_ANNOTATION_QUOTE_LENGTH) return undefined;
         const current = get().getAnnotations(key);
         const duplicate = current.find((a) => a.sourceCommentId === annotation.sourceCommentId &&
           a.start === annotation.start && a.quote === annotation.quote && a.prefix === annotation.prefix && a.suffix === annotation.suffix);
@@ -313,11 +352,17 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
         });
         return annotation.id;
       },
-      updateAnnotation: (key, id, note) => set((s) => {
+      updateAnnotation: (key, id, note, attachmentUploadIds) => set((s) => {
         const current = s.drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS;
-        if (!current.some((a) => a.id === id && a.note !== note)) return s;
-        const annotations = note.trim()
-          ? current.map((a) => a.id === id ? { ...a, note } : a)
+        const original = current.find((a) => a.id === id);
+        if (!original) return s;
+        const updated = retainAvailableAnnotationIds(
+          { ...original, note, attachmentUploadIds: attachmentUploadIds ?? original.attachmentUploadIds },
+          uploadsOf(s.drafts, key),
+        );
+        if (original.note === note && sameAttachmentIds(original.attachmentUploadIds, updated.attachmentUploadIds)) return s;
+        const annotations = hasAnnotationContent(updated)
+          ? current.map((a) => a.id === id ? updated : a)
           : current.filter((a) => a.id !== id);
         return { drafts: writeDraft(s.drafts, key, s.drafts[key]?.content ?? "", uploadsOf(s.drafts, key), annotations) };
       }),
@@ -326,13 +371,15 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
         if (!current.some((a) => a.id === id)) return s;
         const pending = s.drafts[key]?.pendingAnnotation;
         const nextPending = pending?.annotation.id === id ? null : pending;
+        const annotations = current.filter((a) => a.id !== id);
+        const uploads = uploadsOf(s.drafts, key);
         return {
           drafts: writeDraft(
             s.drafts,
             key,
             s.drafts[key]?.content ?? "",
-            uploadsOf(s.drafts, key),
-            current.filter((a) => a.id !== id),
+            nextPending ? uploads : retainSavedAnnotationUploads(key, uploads, annotations),
+            annotations,
             undefined,
             nextPending,
           ),
@@ -341,30 +388,32 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
       getPendingAnnotation: (key) => get().drafts[key]?.pendingAnnotation,
       setPendingAnnotation: (key, draft) => {
         if (!key.startsWith("reply:") && !key.startsWith("new:") && !key.startsWith("chat:")) return;
-        const normalized = normalizePendingAnnotation(draft);
-        set((s) => ({
-          drafts: writeDraft(
+        set((s) => {
+          const uploads = uploadsOf(s.drafts, key);
+          const normalized = normalizePendingAnnotation(draft, uploads);
+          return { drafts: writeDraft(
             s.drafts,
             key,
             s.drafts[key]?.content ?? "",
-            uploadsOf(s.drafts, key),
+            uploads,
             s.drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS,
             key.startsWith("reply:") && (s.drafts[key]?.annotations?.length ?? 0) > 0
               ? s.drafts[key]?.replyTarget
               : undefined,
             normalized ?? null,
-          ),
-        }));
+          ) };
+        });
       },
       clearPendingAnnotation: (key) => set((s) => {
         if (!s.drafts[key]?.pendingAnnotation) return s;
+        const annotations = s.drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS;
         return {
           drafts: writeDraft(
             s.drafts,
             key,
             s.drafts[key]?.content ?? "",
-            uploadsOf(s.drafts, key),
-            s.drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS,
+            retainSavedAnnotationUploads(key, uploadsOf(s.drafts, key), annotations),
+            annotations,
             key.startsWith("reply:") && (s.drafts[key]?.annotations?.length ?? 0) > 0
               ? s.drafts[key]?.replyTarget
               : undefined,

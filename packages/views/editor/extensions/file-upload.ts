@@ -264,7 +264,7 @@ export async function uploadAndInsertFile(
 
 /** Deduplicate files from the same paste/drop event.
  *  macOS/Chrome can put the same file in the FileList twice. */
-function dedupFiles(files: FileList): File[] {
+export function dedupFiles(files: FileList): File[] {
   const seen = new Set<string>();
   return Array.from(files).filter((file) => {
     const key = `${file.name}\0${file.size}\0${file.type}`;

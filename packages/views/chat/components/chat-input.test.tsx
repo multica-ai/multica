@@ -446,6 +446,39 @@ describe("ChatInput annotations", () => {
     expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
   });
 
+  it("gates Chat while an annotation uploads and binds only referenced files on retry", async () => {
+    const fileUrl = "/api/attachments/annotation-file/download";
+    const attachment = makeUpload({ id: "annotation-file", link: fileUrl, filename: "reference.png" });
+    const deleted = makeUpload({ id: "deleted-file", link: "/api/attachments/deleted-file/download", filename: "deleted.png" });
+    const store = useCommentDraftStore.getState();
+    store.setAttachments(key, [attachment, deleted]);
+    store.updateAnnotation(key, annotation.id, "", [attachment.id]);
+    store.addUpload(key, { clientUploadId: "in-flight", status: "uploading", filename: "next.png", size: 10 });
+    const onSend = vi.fn<ChatInputOnSend>().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    renderInput({ onSend, annotations: slot });
+
+    expect(lastButton()).toHaveAttribute("aria-disabled", "true");
+    await act(async () => {
+      await (editorProps.last?.onSubmit as () => Promise<void>)();
+    });
+    expect(onSend).not.toHaveBeenCalled();
+
+    act(() => store.removeUpload(key, "in-flight"));
+    fireEvent.click(lastButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(lastButton()).not.toHaveAttribute("aria-disabled", "true"));
+    expect(store.getAnnotations(key)).toHaveLength(1);
+    expect(store.getAttachments(key)).toHaveLength(2);
+    fireEvent.click(lastButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    for (const [content, ids, , attachments] of onSend.mock.calls) {
+      expect(content).toContain(`![reference.png](${fileUrl})`);
+      expect(ids).toEqual([attachment.id]);
+      expect(attachments).toMatchObject([{ id: attachment.id }]);
+    }
+    expect(store.getAttachments(key)).toEqual([]);
+  });
+
   it("leaves sends untouched without an annotation slot", async () => {
     const onSend = vi.fn<ChatInputOnSend>(() => true);
     renderInput({ onSend });

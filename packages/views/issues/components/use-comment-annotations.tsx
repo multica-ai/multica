@@ -7,7 +7,7 @@ import { isImeComposing } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
-import { MAX_ANNOTATION_QUOTE_LENGTH, MAX_REPLY_ANNOTATIONS, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
+import { hasAnnotationContent, MAX_ANNOTATION_QUOTE_LENGTH, MAX_REPLY_ANNOTATIONS, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
 import { useT } from "../../i18n";
 import { annotationRange, captureCommentSelection, findAnnotationSource } from "./comment-annotation-selection";
 import { CommentSelectionBubble } from "./comment-selection-bubble";
@@ -303,14 +303,23 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
   const addSelection = useCallback(() => add(readSelection()), [add, readSelection]);
 
   const confirmNote = (note: string, dismissAfter: boolean): boolean => {
-    if (!editing || !note.trim()) return false;
+    if (!editing) return false;
     const store = useCommentDraftStore.getState();
-    const id = editingExisting ? editing.id : store.addAnnotation(draftKey, { ...editing, note });
+    const pending = store.getPendingAnnotation(draftKey);
+    const annotation = { ...(pending?.annotation.id === editing.id ? pending.annotation : editing), note };
+    if (!hasAnnotationContent(annotation)) {
+      if (!dismissAfter || !editingExisting || pending?.annotation.id !== editing.id ||
+          annotation.attachmentUploadIds?.length !== 0) return false;
+      store.removeAnnotation(draftKey, editing.id);
+      close(true);
+      return true;
+    }
+    const id = editingExisting ? editing.id : store.addAnnotation(draftKey, annotation);
     if (!id) { setError(true); return false; }
-    store.updateAnnotation(draftKey, id, note);
+    store.updateAnnotation(draftKey, id, note, annotation.attachmentUploadIds);
     store.clearPendingAnnotation(draftKey);
     if (dismissAfter) close(true);
-    else setEditor({ annotation: { ...editing, id, note }, existing: true });
+    else setEditor({ annotation: { ...annotation, id }, existing: true });
     if (!editingExisting) onAddedRef.current?.();
     return true;
   };
@@ -324,23 +333,27 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
     return () => { CSS.highlights.delete(name); };
   }, [enabled, selection, editingId, highlightName]);
 
-  const renderComposer = (controls?: AnnotationSendControls) => {
+  const renderComposer = (controls?: AnnotationSendControls, allowAttachments?: boolean) => {
     return enabled && selection ? <CommentSelectionBubble range={selection.range} source={selection.root} owner={draftKey} onPositioned={focusNote} keepVisibleWhenDetached={!!editing}>
         <div className="bubble-menu max-w-[calc(100vw-16px)] focus-within:outline-1 focus-within:outline-ring">
           {editing ? <AnnotationComposer key={`${draftKey}:${editing.id}`} issueId={issueId} owner={draftKey}
             annotation={editing} existing={editingExisting}
             number={annotations.findIndex((a) => a.id === editing.id) + 1}
-            editorRef={inputRef} controls={controls}
+            editorRef={inputRef} controls={controls} attachmentDraftKey={allowAttachments ? draftKey : undefined}
             sourceMissing={!sources.some((source) => source.id === editing.sourceCommentId)}
             sourceChanged={sources.some((source) => source.id === editing.sourceCommentId &&
               source.revision !== undefined && editing.sourceRevision !== undefined && source.revision !== editing.sourceRevision)}
             canSave={editingExisting || annotations.length < MAX_REPLY_ANNOTATIONS}
             onChange={(note) => {
               if (dismissedRef.current || submittingRef.current) return;
-              const nextAnnotation = { ...editing, note };
               const store = useCommentDraftStore.getState();
-              if (note.trim()) store.setPendingAnnotation(draftKey, { annotation: nextAnnotation, existing: editingExisting });
-              else store.clearPendingAnnotation(draftKey);
+              const pending = store.getPendingAnnotation(draftKey);
+              const nextAnnotation = { ...(pending?.annotation.id === editing.id ? pending.annotation : editing), note };
+              if (hasAnnotationContent(nextAnnotation) || (editingExisting && nextAnnotation.attachmentUploadIds)) {
+                store.setPendingAnnotation(draftKey, { annotation: nextAnnotation, existing: editingExisting });
+              } else {
+                store.clearPendingAnnotation(draftKey);
+              }
               if (mountedRef.current) {
                 setEditor({ annotation: nextAnnotation, existing: editingExisting });
                 setError(false);
