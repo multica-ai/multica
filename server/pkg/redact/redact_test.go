@@ -237,7 +237,7 @@ func TestRedactMulticaTokens(t *testing.T) {
 		if strings.Contains(got, token) || strings.Contains(got, hex40) {
 			t.Fatalf("%s token not redacted: %s", prefix, got)
 		}
-		if got != "retrying with --token [REDACTED MULTICA TOKEN] and moving on" {
+		if got != "retrying with --token [REDACTED_MULTICA_TOKEN] and moving on" {
 			t.Fatalf("%s: surrounding text not preserved: %s", prefix, got)
 		}
 	}
@@ -249,11 +249,11 @@ func TestRedactMulticaTokens(t *testing.T) {
 		"auth_token": token,
 		"args":       []any{"--token", token},
 	})
-	if got["auth_token"] != "[REDACTED MULTICA TOKEN]" {
+	if got["auth_token"] != "[REDACTED_MULTICA_TOKEN]" {
 		t.Fatalf("InputMap auth_token = %#v, want the Multica placeholder", got["auth_token"])
 	}
 	args, ok := got["args"].([]any)
-	if !ok || len(args) != 2 || args[1] != "[REDACTED MULTICA TOKEN]" {
+	if !ok || len(args) != 2 || args[1] != "[REDACTED_MULTICA_TOKEN]" {
 		t.Fatalf("InputMap args = %#v, want the flag value redacted", got["args"])
 	}
 
@@ -269,6 +269,33 @@ func TestRedactMulticaTokens(t *testing.T) {
 		if got := Text(input); got != input {
 			t.Fatalf("false positive redaction:\n  input:  %s\n  output: %s", input, got)
 		}
+	}
+}
+
+func TestRedactMulticaTokenContext(t *testing.T) {
+	t.Parallel()
+
+	const hex40 = "0123456789abcdef0123456789abcdef01234567"
+	token := asm("mat_", hex40)
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"environment assignment", "MULTICA_TOKEN=" + token, "MULTICA_[REDACTED CREDENTIAL]"},
+		{
+			name:  "escaped JSON",
+			input: `{"value":"line1\n` + token + `\t` + token + `"}`,
+			want:  `{"value":"line1\n[REDACTED_MULTICA_TOKEN]\t[REDACTED_MULTICA_TOKEN]"}`,
+		},
+		{"embedded in an identifier", "prefix_" + token, "prefix_" + token},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Text(tt.input); got != tt.want {
+				t.Errorf("Text() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
