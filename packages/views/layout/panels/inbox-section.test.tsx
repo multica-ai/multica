@@ -3,6 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
+import { useAppearanceStore } from "@multica/core/appearance";
 import { createQueryClient } from "@multica/core/query-client";
 import {
   DEFAULT_SIDEBAR_INBOX_SETTINGS,
@@ -490,8 +491,10 @@ describe("InboxSection", () => {
   it("names only the open tab on screen, and keeps focus on the tab the arrow keys move to", () => {
     renderSection([item({ id: "n1", issue_id: "issue-a" })]);
     const tablist = screen.getByRole("tablist");
-    expect(within(tablist).getByText("Inbox")).not.toHaveClass("sr-only");
-    expect(within(tablist).getByText("Snoozed")).toHaveClass("sr-only");
+    // A closed tab's name is folded away, still naming the tab for a screen reader.
+    const label = (name: string) => within(tablist).getByText(name).closest("[data-tab-label]");
+    expect(label("Inbox")).not.toHaveClass("opacity-0");
+    expect(label("Snoozed")).toHaveClass("w-0", "opacity-0");
 
     const inbox = screen.getByRole("tab", { name: /^Inbox/ });
     inbox.focus();
@@ -499,7 +502,8 @@ describe("InboxSection", () => {
     const snoozed = screen.getByRole("tab", { name: /^Snoozed/ });
     expect(snoozed).toHaveAttribute("aria-selected", "true");
     expect(snoozed).toHaveFocus();
-    expect(within(tablist).getByText("Snoozed")).not.toHaveClass("sr-only");
+    expect(label("Snoozed")).not.toHaveClass("opacity-0");
+    expect(label("Inbox")).toHaveClass("w-0", "opacity-0");
   });
 
   it("opens the display settings from their own button, as the other sections do", async () => {
@@ -652,13 +656,44 @@ describe("InboxSection", () => {
     expect(tab).toHaveTextContent("1");
     fireEvent.click(tab);
     expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("link", { name: /^MUL-26/ })).toHaveAttribute("href", "/acme/inbox?view=snoozed&issue=issue-z");
     expect(rows()).toHaveLength(0);
-    expect(screen.getByRole("link", { name: /^MUL-26/ })).toHaveAttribute("href", "/acme/inbox?view=snoozed&issue=issue-z");
     // The bulk actions act on the live Inbox and snoozed issues have no filter: no actions menu here.
     expect(screen.queryByRole("button", { name: "Inbox actions" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Bring back now" }));
     expect(state.unsnooze).toHaveBeenCalledWith(expect.objectContaining({ id: "z1" }));
+  });
+
+  it("swaps the lists at once with reduced motion", () => {
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    renderSection([item({ id: "n1", issue_id: "issue-a" })], null, "/acme/issues", [], [
+      { issue_id: "issue-z", issue_identifier: "MUL-26", item_id: "z1", snoozed_until: "2099-01-01T09:00:00Z", snoozed_at: "2026-11-10T09:00:00Z", updates: 0 },
+    ]);
+    try {
+      fireEvent.click(screen.getByRole("tab", { name: /^Snoozed/ }));
+      expect(rows()).toHaveLength(0);
+      expect(screen.getByRole("link", { name: /^MUL-26/ })).toBeInTheDocument();
+    } finally {
+      useAppearanceStore.getState().reset();
+    }
+  });
+
+  it("lets go of the list's height when another tab opens while the archive is still loading", async () => {
+    apiMock.listArchivedInboxPage.mockReturnValue(new Promise(() => {}));
+    renderSection([item({ id: "n1", issue_id: "issue-a" })], null, "/acme/issues", [], [
+      { issue_id: "issue-z", issue_identifier: "MUL-26", item_id: "z1", snoozed_until: "2099-01-01T09:00:00Z", snoozed_at: "2026-11-10T09:00:00Z", updates: 0 },
+    ]);
+    const body = () => document.querySelector<HTMLElement>("[data-inbox-body]")!;
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Archived/ }));
+    await waitFor(() => expect(rows()).toHaveLength(0));
+    expect(body()).toHaveClass("overflow-hidden");
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Snoozed/ }));
+    expect(await screen.findByRole("link", { name: /^MUL-26/ })).toBeInTheDocument();
+    await waitFor(() => expect(body()).not.toHaveClass("overflow-hidden"));
+    expect(body().style.height).not.toMatch(/px$/);
   });
 
   it("lists the archive in a tab, each row opening there and restoring from its button", async () => {

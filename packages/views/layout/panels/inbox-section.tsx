@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { useReducedMotion } from "@multica/core/appearance";
 import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, CheckCheck, Filter, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
-import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -284,6 +284,14 @@ export function InboxSection({
     />
   );
 
+  // Every tab shows rows or a note once it has loaded; until then it shows nothing.
+  const tabLoading =
+    tab === "inbox"
+      ? displayed.length === 0 && !list.filtered && list.load === "loading"
+      : tab === "snoozed"
+        ? snoozed.rows.length === 0 && snoozed.load === "loading"
+        : archived.items.length === 0 && !archived.query.isError && !archived.query.isSuccess;
+
   return (
     <PanelSection
       label={t(($) => $.nav.inbox)}
@@ -333,84 +341,142 @@ export function InboxSection({
         </div>
       }
     >
-      {tab === "snoozed" ? (
-        <SnoozedSectionList
-          wsId={wsId}
-          list={snoozed}
-          limit={limit}
-          openKey={pageTab === "snoozed" ? pageKey : null}
-        />
-      ) : tab === "archived" ? (
-        <ArchivedSectionList
-          archived={archived}
-          limit={limit}
-          openKey={pageTab === "archived" ? pageKey : null}
-        />
-      ) : displayed.length > 0 ? (
-        displayed.length > VIRTUALIZE_AFTER && scrollRef ? (
-          <VirtualInboxList items={displayed} compact={compact} renderRow={renderRow} />
-        ) : (
-          <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
-            <AnimatePresence initial={false}>
-              {displayed.map((item) => renderRow(item))}
-            </AnimatePresence>
-          </PanelList>
-        )
-      ) : list.load === "failed" ? (
-        // A list that never loaded is not an empty Inbox: say so and offer
-        // another try rather than "No notifications".
-        <div role="alert" className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
-          <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.errors.load_failed)}</span>
-          <button
-            type="button"
-            disabled={list.retrying}
-            className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
-            onClick={list.retry}
-          >
-            {tInbox(($) => $.list.retry)}
-          </button>
-        </div>
-      ) : list.filtered ? (
-        <div className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
-          <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.filters.empty)}</span>
-          <button
-            type="button"
-            className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            onClick={() => clearFilters(wsId)}
-          >
-            {tInbox(($) => $.filters.clear)}
-          </button>
-        </div>
-      ) : list.load === "loaded" ? (
-        <p className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
-          {t(($) => $.panels.work.inbox_empty)}
-        </p>
-      ) : null}
-      {tab === "inbox" && all.length > limit && (
-        <button
-          type="button"
-          aria-expanded={expanded}
-          className={cn(PANEL_ROW_CLASS, panelRowStateClass(false), "pl-[2.375rem] text-caption")}
-          onClick={() => setExpanded(!expanded)}
-        >
-          {expanded
-            ? t(($) => $.sidebar.show_fewer_pins)
-            : t(($) => $.sidebar.show_more_pins, { count: all.length - limit })}
-        </button>
-      )}
-      {/* The sidebar sits behind a drawer on a phone, so the full list keeps its page there. */}
-      {isCompact && (
-        <PanelList>
-          <PanelLink
-            href={inboxTabHref(p, tab)}
-            icon={<span className="size-4" aria-hidden />}
-            label={t(($) => $.panels.work.inbox_all)}
-            active={onInboxPage && !pageKey && pageTab === tab}
-            className="text-caption"
+      <InboxTabBody tab={tab} loading={tabLoading}>
+        {tab === "snoozed" ? (
+          <SnoozedSectionList
+            wsId={wsId}
+            list={snoozed}
+            limit={limit}
+            openKey={pageTab === "snoozed" ? pageKey : null}
           />
-        </PanelList>
-      )}
+        ) : tab === "archived" ? (
+          <ArchivedSectionList
+            archived={archived}
+            limit={limit}
+            openKey={pageTab === "archived" ? pageKey : null}
+          />
+        ) : displayed.length > 0 ? (
+          displayed.length > VIRTUALIZE_AFTER && scrollRef ? (
+            <VirtualInboxList items={displayed} compact={compact} renderRow={renderRow} />
+          ) : (
+            <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
+              <AnimatePresence initial={false}>
+                {displayed.map((item) => renderRow(item))}
+              </AnimatePresence>
+            </PanelList>
+          )
+        ) : list.load === "failed" ? (
+          // A list that never loaded is not an empty Inbox: say so and offer
+          // another try rather than "No notifications".
+          <div role="alert" className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+            <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.errors.load_failed)}</span>
+            <button
+              type="button"
+              disabled={list.retrying}
+              className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+              onClick={list.retry}
+            >
+              {tInbox(($) => $.list.retry)}
+            </button>
+          </div>
+        ) : list.filtered ? (
+          <div className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+            <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.filters.empty)}</span>
+            <button
+              type="button"
+              className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              onClick={() => clearFilters(wsId)}
+            >
+              {tInbox(($) => $.filters.clear)}
+            </button>
+          </div>
+        ) : list.load === "loaded" ? (
+          <p className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+            {t(($) => $.panels.work.inbox_empty)}
+          </p>
+        ) : null}
+        {tab === "inbox" && all.length > limit && (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            className={cn(PANEL_ROW_CLASS, panelRowStateClass(false), "pl-[2.375rem] text-caption")}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded
+              ? t(($) => $.sidebar.show_fewer_pins)
+              : t(($) => $.sidebar.show_more_pins, { count: all.length - limit })}
+          </button>
+        )}
+        {/* The sidebar sits behind a drawer on a phone, so the full list keeps its page there. */}
+        {isCompact && (
+          <PanelList>
+            <PanelLink
+              href={inboxTabHref(p, tab)}
+              icon={<span className="size-4" aria-hidden />}
+              label={t(($) => $.panels.work.inbox_all)}
+              active={onInboxPage && !pageKey && pageTab === tab}
+              className="text-caption"
+            />
+          </PanelList>
+        )}
+      </InboxTabBody>
     </PanelSection>
+  );
+}
+
+/**
+ * The open tab's list. A switch fades the old rows out and the new ones in;
+ * while the next tab loads the list keeps the height it had, then eases to
+ * the new one, so the sections below it do not jump.
+ */
+function InboxTabBody({ tab, loading, children }: { tab: InboxTab; loading: boolean; children: ReactNode }) {
+  const reduceMotion = useReducedMotion();
+  const ref = useRef<HTMLDivElement>(null);
+  // The height the list keeps from the switch until the next tab's rows are in.
+  const [held, setHeld] = useState<number | null>(null);
+  // The tab whose rows are in. A tab's rows mount once the previous rows have
+  // faded out, or at once when none were in (that tab was still loading).
+  const [shown, setShown] = useState<InboxTab | null>(loading ? null : tab);
+  const switchedTo = useRef(tab);
+
+  useLayoutEffect(() => {
+    if (switchedTo.current === tab) return;
+    switchedTo.current = tab;
+    if (!ref.current) return;
+    // Measured before paint, while the old rows are still in.
+    setHeld(ref.current.offsetHeight);
+  }, [tab, reduceMotion]);
+
+  if (reduceMotion) return <>{children}</>;
+  const holding = held !== null && (shown !== tab || loading);
+  return (
+    <motion.div
+      ref={ref}
+      data-inbox-body
+      initial={false}
+      animate={{ height: holding ? held : "auto" }}
+      transition={{ duration: holding ? 0 : UI_MOTION_DURATION.standard, ease: UI_EASE_OUT }}
+      onAnimationComplete={() => {
+        if (!holding) setHeld(null);
+      }}
+      className={cn(held !== null && "overflow-hidden")}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        {!loading && (
+          <motion.div
+            key={tab}
+            ref={(node) => {
+              if (node) setShown(tab);
+            }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT } }}
+            exit={{ opacity: 0, transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN } }}
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
