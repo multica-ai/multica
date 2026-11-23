@@ -918,6 +918,10 @@
         "label": "Comments",
         "description": "New comments on issues you follow"
       },
+      "squad_handoffs": {
+        "label": "Include squad handoffs",
+        "description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and statuses that need attention still arrive."
+      },
       "mentions": {
         "label": "Mentions",
         "description": "When someone @mentions you, including @all and @squad"

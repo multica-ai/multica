@@ -908,6 +908,10 @@
         "label": "댓글",
         "description": "팔로우 중인 태스크에 새 댓글이 달릴 때"
       },
+      "squad_handoffs": {
+        "label": "스쿼드 내부 인계 포함",
+        "description": "스쿼드 리더와 에이전트가 서로 작업을 넘기는 댓글입니다. @멘션, 에이전트 실행 실패, 확인이 필요한 상태는 계속 알림이 옵니다."
+      },
       "mentions": {
         "label": "멘션",
         "description": "누군가 나를 @멘션할 때(@all, @squad 포함)"

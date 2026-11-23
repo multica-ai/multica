@@ -908,6 +908,10 @@
         "label": "評論",
         "description": "你訂閱的任務有新評論時"
       },
+      "squad_handoffs": {
+        "label": "包含小隊內部交接",
+        "description": "小隊隊長指派工作給成員、成員向隊長回報的評論。@ 提及、AI 代理執行失敗和需要關注的狀態照常通知。"
+      },
       "mentions": {
         "label": "提及",
         "description": "有人 @ 你時，包括 @all 和 @squad"

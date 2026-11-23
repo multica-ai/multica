@@ -13,6 +13,7 @@ const PREFERENCE_DEFAULTS: { [K in PreferenceKey]-?: NonNullable<NotificationPre
   assignments: "all",
   status_changes: "muted",
   comments: "all",
+  squad_handoffs: "all",
   chat_replies: "all",
   mentions: "all",
   reactions: "all",

@@ -198,20 +198,38 @@ export function NotificationsTab() {
                   </Select>
                 </SettingsRow>
               )}
-              {category.groups.map((key) => (
-                <SettingsRow
-                  key={key}
-                  anchor={key}
-                  label={t(($) => $.notifications.groups[key].label)}
-                  description={t(($) => $.notifications.groups[key].description)}
-                >
-                  <Switch
-                    checked={notificationPreferenceValue(preferences, key) !== "muted"}
-                    aria-label={t(($) => $.notifications.groups[key].label)}
-                    onCheckedChange={(checked) => handleToggle(key, checked)}
-                  />
-                </SettingsRow>
-              ))}
+              {category.groups.map((key) => {
+                const enabled = notificationPreferenceValue(preferences, key) !== "muted";
+                return (
+                  <Fragment key={key}>
+                    <SettingsRow
+                      anchor={key}
+                      label={t(($) => $.notifications.groups[key].label)}
+                      description={t(($) => $.notifications.groups[key].description)}
+                    >
+                      <Switch
+                        checked={enabled}
+                        aria-label={t(($) => $.notifications.groups[key].label)}
+                        onCheckedChange={(checked) => handleToggle(key, checked)}
+                      />
+                    </SettingsRow>
+                    {key === "comments" && enabled && (
+                      <SettingsRow
+                        anchor="squad_handoffs"
+                        className="pl-8"
+                        label={t(($) => $.notifications.groups.squad_handoffs.label)}
+                        description={t(($) => $.notifications.groups.squad_handoffs.description)}
+                      >
+                        <Switch
+                          checked={notificationPreferenceValue(preferences, "squad_handoffs") !== "muted"}
+                          aria-label={t(($) => $.notifications.groups.squad_handoffs.label)}
+                          onCheckedChange={(checked) => handleToggle("squad_handoffs", checked)}
+                        />
+                      </SettingsRow>
+                    )}
+                  </Fragment>
+                );
+              })}
             </Fragment>
           ))}
         </SettingsCard>

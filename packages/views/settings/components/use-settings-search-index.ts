@@ -182,6 +182,13 @@ export function useSettingsSearchIndex(
         title: t(($) => $.notifications.groups[group].label),
         description: t(($) => $.notifications.groups[group].description),
       })),
+      // Lands on Comments: the row is hidden while comments are off.
+      {
+        tab: "notifications",
+        anchor: "comments",
+        title: t(($) => $.notifications.groups.squad_handoffs.label),
+        description: t(($) => $.notifications.groups.squad_handoffs.description),
+      },
       {
         tab: "notifications",
         anchor: "others_issues",
