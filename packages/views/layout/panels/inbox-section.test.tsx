@@ -274,7 +274,8 @@ describe("InboxSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
 
     expect(rows()).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Filter inbox" })).toBeInTheDocument();
+    // Unfiltered, the filter waits in the actions menu.
+    expect(screen.queryByRole("button", { name: "Filter inbox" })).toBeNull();
   });
 
   it("puts who did what under the title, or keeps one line when compact", () => {
@@ -501,12 +502,24 @@ describe("InboxSection", () => {
     expect(within(tablist).getByText("Snoozed")).not.toHaveClass("sr-only");
   });
 
-  it("opens the display settings from the actions menu", async () => {
+  it("opens the display settings from their own button, as the other sections do", async () => {
     renderSection([item({ id: "n1", issue_id: "issue-a" })]);
-    expect(screen.queryByRole("button", { name: "Inbox display" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Inbox display" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("opens the filter from the actions menu", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    expect(screen.queryByRole("button", { name: "Filter inbox" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
-    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Inbox display" }));
-    expect(await screen.findByRole("dialog", { name: "Inbox display" })).toBeInTheDocument();
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Filter" }));
+    expect(await screen.findByPlaceholderText("Filter by field or value...")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Read state/ }));
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Unread/ }));
+    expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]?.unreadOnly).toBe(true);
+    expect(screen.getByPlaceholderText("Filter by field or value...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1 active filter" })).toBeInTheDocument();
   });
 
   it("is the whole list on a wide screen: no link out to another one, and a plain line when empty", () => {
@@ -641,11 +654,8 @@ describe("InboxSection", () => {
     expect(tab).toHaveAttribute("aria-selected", "true");
     expect(rows()).toHaveLength(0);
     expect(screen.getByRole("link", { name: /^MUL-26/ })).toHaveAttribute("href", "/acme/inbox?view=snoozed&issue=issue-z");
-    // The bulk actions act on the live Inbox; the menu keeps only the display settings here.
-    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
-    expect(within(await screen.findByRole("menu")).getAllByRole("menuitem").map((el) => el.textContent)).toEqual([
-      "Inbox display",
-    ]);
+    // The bulk actions act on the live Inbox and snoozed issues have no filter: no actions menu here.
+    expect(screen.queryByRole("button", { name: "Inbox actions" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Bring back now" }));
     expect(state.unsnooze).toHaveBeenCalledWith(expect.objectContaining({ id: "z1" }));

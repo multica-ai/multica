@@ -6,7 +6,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useReducedMotion } from "@multica/core/appearance";
-import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, CheckCheck, ListChecks, MoreHorizontal, SlidersHorizontal } from "@multica/ui/icons";
+import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, CheckCheck, Filter, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
@@ -199,7 +199,14 @@ export function InboxSection({
   }, [list.notifications]);
 
   const actionsRef = useRef<HTMLButtonElement>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  // The filter is the open tab's: a switch, from here or the Inbox page's
+  // URL, closes it rather than reopening it on the next tab.
+  const [filterTab, setFilterTab] = useState(tab);
+  if (filterTab !== tab) {
+    setFilterTab(tab);
+    setFilterOpen(false);
+  }
 
   const scrollRef = usePanelScrollRef();
   // Rows are memoized and re-render only when their own props change, not on
@@ -302,23 +309,27 @@ export function InboxSection({
               activeIssueIds={list.activeIssueIds}
               archived={tab === "archived"}
               sectionTrigger={{
-                className: cn(TREE_ROW_BUTTON_CLASS, "text-muted-foreground", SECTION_SETTINGS_REVEAL_CLASS),
-                // A filtered list says so even while the section is not hovered.
-                activeClassName: "w-auto gap-0.5 px-1 text-brand opacity-100 hover:text-brand",
+                className: cn(TREE_ROW_BUTTON_CLASS, "text-muted-foreground"),
+                // Shown only while filters are set: a filtered list says so
+                // even while the section is not hovered.
+                activeClassName: "w-auto gap-0.5 px-1 text-brand hover:text-brand",
               }}
+              opener={{ open: filterOpen, onClose: () => setFilterOpen(false), anchor: actionsRef }}
             />
           )}
-          <InboxSectionActions
-            wsId={wsId}
-            rows={all}
-            openRowKey={openRowKey}
-            bulk={tab === "inbox"}
-            triggerRef={actionsRef}
-            settingsOpen={settingsOpen}
-            onOpenSettings={() => setSettingsOpen(true)}
-            className={SECTION_SETTINGS_REVEAL_CLASS}
-          />
-          <InboxSectionSettings opener={{ open: settingsOpen, onOpenChange: setSettingsOpen, anchor: actionsRef }} />
+          <InboxSectionSettings className={SECTION_SETTINGS_REVEAL_CLASS} />
+          {tab !== "snoozed" && (
+            <InboxSectionActions
+              wsId={wsId}
+              rows={all}
+              openRowKey={openRowKey}
+              bulk={tab === "inbox"}
+              triggerRef={actionsRef}
+              filterOpen={filterOpen}
+              onOpenFilter={() => setFilterOpen(true)}
+              className={SECTION_SETTINGS_REVEAL_CLASS}
+            />
+          )}
         </div>
       }
     >
@@ -502,8 +513,8 @@ function InboxSectionActions({
   openRowKey,
   bulk,
   triggerRef,
-  settingsOpen,
-  onOpenSettings,
+  filterOpen,
+  onOpenFilter,
   className,
 }: {
   wsId: string;
@@ -512,13 +523,14 @@ function InboxSectionActions({
   /** Offers the bulk actions, which act on the live Inbox. */
   bulk: boolean;
   triggerRef: Ref<HTMLButtonElement>;
-  /** The settings hang from this menu's button, which stays shown meanwhile. */
-  settingsOpen: boolean;
-  onOpenSettings: () => void;
+  /** The filter hangs from this menu's button, which stays shown meanwhile. */
+  filterOpen: boolean;
+  onOpenFilter: () => void;
   className?: string;
 }) {
   const { t } = useT("layout");
   const { t: tInbox } = useT("inbox");
+  const { t: tIssues } = useT("issues");
   const qc = useQueryClient();
   const leave = useLeaveInboxRow();
   const archiveWithUndo = useArchiveInboxBatchWithUndo();
@@ -577,7 +589,7 @@ function InboxSectionActions({
               "size-[var(--button-height-xs)]",
               "text-muted-foreground data-popup-open:bg-surface-selected data-popup-open:text-foreground data-popup-open:opacity-100",
               className,
-              settingsOpen && "bg-surface-selected text-foreground opacity-100",
+              filterOpen && "bg-surface-selected text-foreground opacity-100",
             )}
           />
         }
@@ -585,8 +597,13 @@ function InboxSectionActions({
         <MoreHorizontal className="size-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="right" align="start" className="w-auto min-w-48">
+        <DropdownMenuItem onClick={onOpenFilter}>
+          <Filter className="size-4" />
+          {tIssues(($) => $.filters.tooltip)}
+        </DropdownMenuItem>
         {bulk && (
           <>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() =>
                 markAllRead.mutate(undefined, { onError: onError(tInbox(($) => $.errors.mark_all_read_failed)) })
@@ -632,13 +649,8 @@ function InboxSectionActions({
               <Archive className="size-4" />
               {tInbox(($) => $.menu.archive_all)}
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
           </>
         )}
-        <DropdownMenuItem onClick={onOpenSettings}>
-          <SlidersHorizontal className="size-4" />
-          {t(($) => $.panels.work.inbox_settings)}
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
