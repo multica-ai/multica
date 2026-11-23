@@ -1282,11 +1282,11 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // completes a run for the issue. An explicit human action can start that run.
 var ErrIssueAgentConsecutiveFailures = errors.New("automatic dispatch paused after three consecutive failures for this issue and agent")
 
-func (s *TaskService) guardIssueAgentFailureStreak(ctx context.Context, issueID, agentID pgtype.UUID, humanAction bool) error {
-	if humanAction {
+func guardIssueAgentFailureStreak(ctx context.Context, q *db.Queries, issueID, agentID pgtype.UUID, humanAction bool) error {
+	if humanAction || !issueID.Valid {
 		return nil
 	}
-	paused, err := s.Queries.IssueAgentHasConsecutiveRunFailures(ctx, db.IssueAgentHasConsecutiveRunFailuresParams{
+	paused, err := q.IssueAgentHasConsecutiveRunFailures(ctx, db.IssueAgentHasConsecutiveRunFailuresParams{
 		IssueID: issueID,
 		AgentID: agentID,
 	})
@@ -1338,7 +1338,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	if err := s.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
-	if err := s.guardIssueAgentFailureStreak(ctx, issue.ID, agent.ID, attr.HumanAction); err != nil {
+	if err := guardIssueAgentFailureStreak(ctx, s.Queries, issue.ID, agent.ID, attr.HumanAction); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
 	originatorUserID := attr.UserID
@@ -1517,7 +1517,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	if err := s.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
-	if err := s.guardIssueAgentFailureStreak(ctx, issue.ID, agent.ID, attr.HumanAction); err != nil {
+	if err := guardIssueAgentFailureStreak(ctx, s.Queries, issue.ID, agent.ID, attr.HumanAction); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
 	originatorUserID := attr.UserID
@@ -5505,7 +5505,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// 'running' — so both a Triage issue and an unreadable status skip the
 		// retry instead of returning, exactly as the ErrNoRows case below does.
 		if createRetry {
-			if gerr := guardIssueNotInTriage(ctx, qtx, t.IssueID, OriginDerived); gerr != nil {
+			if gerr := guardAutomaticIssueRetry(ctx, qtx, t); gerr != nil {
 				slog.Info("fail task auto-retry skipped: issue does not run",
 					"task_id", util.UUIDToString(taskID),
 					"issue_id", util.UUIDToString(t.IssueID),
@@ -5929,6 +5929,13 @@ func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 	})
 }
 
+func guardAutomaticIssueRetry(ctx context.Context, q *db.Queries, parent db.AgentTaskQueue) error {
+	if err := guardIssueNotInTriage(ctx, q, parent.IssueID, OriginDerived); err != nil {
+		return err
+	}
+	return guardIssueAgentFailureStreak(ctx, q, parent.IssueID, parent.AgentID, false)
+}
+
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
@@ -6016,11 +6023,12 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
-	if err := guardIssueNotInTriage(ctx, qtx, parent.IssueID, OriginDerived); err != nil {
-		if errors.Is(err, ErrIssueInTriage) {
-			slog.Info("task auto-retry skipped: issue is in triage",
+	if err := guardAutomaticIssueRetry(ctx, qtx, parent); err != nil {
+		if errors.Is(err, ErrIssueInTriage) || errors.Is(err, ErrIssueAgentConsecutiveFailures) {
+			slog.Info("task auto-retry skipped: issue does not run",
 				"parent_task_id", util.UUIDToString(parent.ID),
-				"issue_id", util.UUIDToString(parent.IssueID))
+				"issue_id", util.UUIDToString(parent.IssueID),
+				"reason", err)
 			return nil, nil
 		}
 		return nil, err

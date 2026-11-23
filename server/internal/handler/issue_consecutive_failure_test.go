@@ -91,3 +91,58 @@ func TestIssueDispatchAfterConsecutiveFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueFailureStreakStopsAutomaticRetries(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := t.Context()
+	runtimeID := dbfx.Runtime(t, "Failure streak retry runtime")
+	agentID := dbfx.Agent(t, "Failure streak retry agent "+uuid.NewString(), runtimeID)
+
+	for _, path := range []string{"failure report", "orphan recovery"} {
+		t.Run(path, func(t *testing.T) {
+			issueID := dbfx.Issue(t, "Repeated infrastructure failure")
+			now := time.Now()
+			for _, minutesAgo := range []int{3, 2} {
+				at := now.Add(-time.Duration(minutesAgo) * time.Minute)
+				dbfx.Task(t, agentID, testutil.Cols{
+					"issue_id": issueID, "runtime_id": runtimeID,
+					"status": "failed", "failure_reason": "timeout",
+					"created_at": at, "started_at": at, "completed_at": at,
+				})
+			}
+			parent := testutil.Cols{
+				"issue_id": issueID, "runtime_id": runtimeID, "status": "running",
+				"started_at": now.Add(-time.Minute), "attempt": 1, "max_attempts": 2,
+			}
+			if path == "orphan recovery" {
+				parent["status"] = "failed"
+				parent["failure_reason"] = "timeout"
+				parent["completed_at"] = now
+			}
+			parentID := parseUUID(dbfx.Task(t, agentID, parent))
+			if path == "failure report" {
+				if _, err := testHandler.TaskService.FailTask(ctx, parentID, "execution timed out", "", "", "", "timeout", false, "", ""); err != nil {
+					t.Fatalf("report failure: %v", err)
+				}
+			} else {
+				task, err := testHandler.Queries.GetAgentTask(ctx, parentID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := testHandler.TaskService.MaybeRetryFailedTask(ctx, task); err != nil {
+					t.Fatalf("recover failed task: %v", err)
+				}
+			}
+			var status string
+			dbfx.QueryRow(t, "SELECT status FROM agent_task_queue WHERE id = $1", parentID).Scan(&status)
+			if status != "failed" {
+				t.Fatalf("failed parent status = %q", status)
+			}
+			if children := dbfx.Count(t, "SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1", parentID); children != 0 {
+				t.Fatalf("automatic retry created %d child runs after three failures", children)
+			}
+		})
+	}
+}
