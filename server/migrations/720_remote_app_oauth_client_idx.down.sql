@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_remote_app_oauth_client_app_redirect;

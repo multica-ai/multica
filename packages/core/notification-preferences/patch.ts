@@ -6,7 +6,8 @@ type PreferenceValues = Record<PreferenceKey, string | undefined>;
 /**
  * The value each key means when it is missing. Every key the settings UI can
  * write must be listed, or its change is silently never sent. Must match the
- * server's defaults (`mutedByDefault` in server/internal/inbox/registry.go).
+ * server's defaults (`mutedByDefault` in server/internal/inbox/registry.go,
+ * `autoArchiveOnByDefault` in server/internal/inbox/auto_archive.go).
  */
 const PREFERENCE_DEFAULTS: { [K in PreferenceKey]-?: NonNullable<NotificationPreferences[K]> } = {
   assignments: "all",
@@ -20,7 +21,16 @@ const PREFERENCE_DEFAULTS: { [K in PreferenceKey]-?: NonNullable<NotificationPre
   agent_activity: "all",
   system_notifications: "all",
   auto_archive_completed: "all",
+  auto_archive_on_agent_trigger: "all",
+  auto_archive_on_comment: "muted",
+  auto_archive_on_status: "muted",
+  auto_archive_on_assignee: "muted",
+  auto_archive_on_priority: "muted",
+  auto_archive_on_project: "muted",
+  auto_archive_on_dates: "muted",
+  auto_archive_on_labels: "muted",
   others_issues: "key_updates",
+  after_auto_archive: "stay",
 };
 
 const PREFERENCE_KEYS = Object.keys(PREFERENCE_DEFAULTS) as PreferenceKey[];

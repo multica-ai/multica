@@ -108,7 +108,7 @@
   },
   "profile_card": {
     "unavailable": "小隊不可用",
-    "detail_link": "詳情 →",
+    "detail_link": "檢視詳情 →",
     "archived": "已歸檔",
     "member_count_other": "{{count}} 名成員",
     "members_section": "成員",
@@ -124,7 +124,6 @@
     "mine": "我的小隊",
     "all": "全部小隊"
   },
-  "toolbar": {},
   "intro": {
     "title": "讓 AI 代理組隊，像團隊一樣做事",
     "description": "把任務交給小隊，隊長 AI 代理會讀懂需求，依成員的角色分派下一步，並追蹤到目標完成。你只需要對接一個入口。",

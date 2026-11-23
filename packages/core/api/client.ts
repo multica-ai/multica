@@ -10,6 +10,7 @@ import {
   DocSearchResponseSchema,
   DocCommentSchema,
   DocCommentListSchema,
+  DocCollabTicketSchema,
 } from "../docs/schemas";
 import type {
   Doc,
@@ -20,6 +21,7 @@ import type {
   CreateDocCommentRequest,
   DocTree,
   DocVersion,
+  DocCollabTicket,
   CreateDocRequest,
   UpdateDocRequest,
   CreateDocFolderRequest,
@@ -125,7 +127,6 @@ import type {
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
   TimelineEntry,
-  AssigneeFrequencyEntry,
   TaskMessagePayload,
   TaskContextReceiptResponse,
   RuntimeRateLimitsResponse,
@@ -145,6 +146,8 @@ import type {
   CancelTaskResponse,
   Project,
   ArchiveProjectResponse,
+  ProjectProgressDetail,
+  ProjectActivityPage,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -247,6 +250,7 @@ import type {
   IssueAppCall,
   AppRequestList,
   TeamAppImpact,
+  PersonalAppImpact,
   AppRequest,
   AgentApp,
   AppAccountScope,
@@ -430,6 +434,10 @@ import {
   SearchIssuesResponseSchema,
   ProjectSchema,
   ArchiveProjectResponseSchema,
+  ProjectProgressDetailSchema,
+  EMPTY_PROJECT_PROGRESS_DETAIL,
+  ProjectActivityPageSchema,
+  EMPTY_PROJECT_ACTIVITY_PAGE,
   ListProjectMembersResponseSchema,
   ListPrivateProjectsResponseSchema,
   ProjectSubscriptionSchema,
@@ -535,6 +543,7 @@ import {
   EMPTY_APPS_OVERVIEW,
   EMPTY_TEAM_APP_IMPACT,
   IssueAppCallsResponseSchema,
+  PersonalAppImpactSchema,
   TeamAppImpactSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
@@ -691,6 +700,23 @@ export interface ClientUsageRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+/** Response header carrying the plan's enforced dashboard history limit. */
+export const DASHBOARD_HISTORY_LIMIT_HEADER = "X-Dashboard-History-Limit-Days";
+
+/** A positive whole number of days, or null for absent or malformed. */
+export function parseDashboardHistoryLimit(value: string | null): number | null {
+  if (value === null || !/^\d+$/.test(value.trim())) return null;
+  const days = Number(value.trim());
+  return Number.isSafeInteger(days) && days > 0 ? days : null;
+}
+
+export interface DashboardRequestParams {
+  days?: number;
+  project_id?: string | null;
+  tz?: string;
+  onHistoryLimit?: (limitDays: number | null) => void;
 }
 
 function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
@@ -1087,6 +1113,31 @@ export class ApiClient {
       { versions: [] },
       { endpoint: "GET /api/docs/{id}/versions" },
     ).versions;
+  }
+  /** `state` also asks for the Yjs state saved with the doc, to show it
+   *  before the live session syncs. */
+  async createDocCollabTicket(id: string, options?: { state?: boolean }): Promise<DocCollabTicket> {
+    return parseWithFallback<DocCollabTicket>(
+      await this.fetch<unknown>(`/api/docs/${id}/collab-ticket`, {
+        method: "POST",
+        ...(options?.state ? { body: JSON.stringify({ state: true }) } : {}),
+      }),
+      DocCollabTicketSchema,
+      { enabled: false },
+      { endpoint: "POST /api/docs/{id}/collab-ticket" },
+    );
+  }
+  /** Joins the live session of an issue's description; same shape as a doc's. */
+  async createIssueCollabTicket(id: string, options?: { state?: boolean }): Promise<DocCollabTicket> {
+    return parseWithFallback<DocCollabTicket>(
+      await this.fetch<unknown>(`/api/issues/${id}/collab-ticket`, {
+        method: "POST",
+        ...(options?.state ? { body: JSON.stringify({ state: true }) } : {}),
+      }),
+      DocCollabTicketSchema,
+      { enabled: false },
+      { endpoint: "POST /api/issues/{id}/collab-ticket" },
+    );
   }
   async getDocVersion(id: string, number: number): Promise<DocVersion | null> {
     return parseWithFallback<DocVersion | null>(
@@ -2167,10 +2218,6 @@ export class ApiClient {
     });
   }
 
-  async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
-    return this.fetch("/api/assignee-frequency");
-  }
-
   async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}`, {
       method: "PUT",
@@ -2713,7 +2760,7 @@ export class ApiClient {
     return parseWithFallback<WorkspaceFeatures>(
       raw,
       WorkspaceFeaturesSchema,
-      { features: {} },
+      { features: {}, limits: { dashboardHistoryDays: null } },
       { endpoint: "GET /api/workspaces/:id/features" },
     );
   }
@@ -3185,110 +3232,86 @@ export class ApiClient {
     );
   }
 
-  // Workspace dashboard — three independent rollups for `/{slug}/dashboard`.
-  // Each accepts an optional `project_id` to narrow the scope to one project.
-  // Cost is computed client-side from the model pricing table (same contract
-  // as the per-runtime endpoints above).
-
-  async getDashboardUsageDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardUsageDaily[]> {
+  // Workspace dashboard — six rollups for `/{slug}/usage`. Each accepts an
+  // optional `project_id` to narrow the scope to one project and `tz` to cut
+  // its day boundary in the viewer's calendar. Cost is computed client-side
+  // from the model pricing table (same contract as the per-runtime endpoints
+  // above).
+  //
+  // `onHistoryLimit` receives the plan's enforced history limit the response
+  // was served under (X-Dashboard-History-Limit-Days), or null for none, so a
+  // page open across a plan change notices it (MUL-9490).
+  private async fetchDashboardRows<T>(
+    path: string,
+    params: DashboardRequestParams,
+    schema: ZodType,
+    endpoint: string,
+  ): Promise<T[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
-    return parseWithFallback<DashboardUsageDaily[]>(
-      raw,
+    const res = await this.fetchRaw(`${path}?${search}`, {
+      extraHeaders: { "Content-Type": "application/json" },
+    });
+    params.onHistoryLimit?.(
+      parseDashboardHistoryLimit(res.headers.get(DASHBOARD_HISTORY_LIMIT_HEADER)),
+    );
+    const raw: unknown = await res.json();
+    return parseWithFallback<T[]>(raw, schema, [], { endpoint });
+  }
+
+  async getDashboardUsageDaily(params: DashboardRequestParams): Promise<DashboardUsageDaily[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/daily",
+      params,
       DashboardUsageDailyListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/usage/daily" },
+      "GET /api/dashboard/usage/daily",
     );
   }
 
-  async getDashboardUsageByAgent(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardUsageByAgent[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
-    return parseWithFallback<DashboardUsageByAgent[]>(
-      raw,
+  async getDashboardUsageByAgent(params: DashboardRequestParams): Promise<DashboardUsageByAgent[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-agent",
+      params,
       DashboardUsageByAgentListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/usage/by-agent" },
+      "GET /api/dashboard/usage/by-agent",
     );
   }
 
-  async getDashboardAgentRunTime(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardAgentRunTime[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` aligns the "last N days" cutoff with the viewer's calendar,
-    // matching the per-agent token card.
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
-    return parseWithFallback<DashboardAgentRunTime[]>(
-      raw,
+  async getDashboardAgentRunTime(params: DashboardRequestParams): Promise<DashboardAgentRunTime[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/agent-runtime",
+      params,
       DashboardAgentRunTimeListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/agent-runtime" },
+      "GET /api/dashboard/agent-runtime",
     );
   }
 
-  async getDashboardRunTimeDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardRunTimeDaily[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` cuts the day buckets in the viewer's calendar so Time / Tasks
-    // align with the Cost / Tokens charts.
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/runtime/daily?${search}`);
-    return parseWithFallback<DashboardRunTimeDaily[]>(
-      raw,
+  async getDashboardRunTimeDaily(params: DashboardRequestParams): Promise<DashboardRunTimeDaily[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/runtime/daily",
+      params,
       DashboardRunTimeDailyListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/runtime/daily" },
+      "GET /api/dashboard/runtime/daily",
     );
   }
 
-  async getDashboardFailuresDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardFailureDaily[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` cuts the day buckets in the viewer's calendar so the Errors chart
-    // shares an x-axis with the other four metrics.
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/failures/daily?${search}`);
-    return parseWithFallback<DashboardFailureDaily[]>(
-      raw,
+  async getDashboardFailuresDaily(params: DashboardRequestParams): Promise<DashboardFailureDaily[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/failures/daily",
+      params,
       DashboardFailureDailyListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/failures/daily" },
+      "GET /api/dashboard/failures/daily",
     );
   }
 
-  async getDashboardFailuresByAgent(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardFailureByAgent[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/failures/by-agent?${search}`);
-    return parseWithFallback<DashboardFailureByAgent[]>(
-      raw,
+  async getDashboardFailuresByAgent(params: DashboardRequestParams): Promise<DashboardFailureByAgent[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/failures/by-agent",
+      params,
       DashboardFailureByAgentListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/failures/by-agent" },
+      "GET /api/dashboard/failures/by-agent",
     );
   }
 
@@ -3731,6 +3754,25 @@ export class ApiClient {
       NotificationPreferenceResponseSchema,
       EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
       { endpoint: "PATCH /api/notification-preferences" },
+    );
+  }
+
+  /**
+   * Answer the one-time auto-archive question for every workspace where it is
+   * pending. Answers with the active workspace's preferences.
+   */
+  async resolveAutoArchivePrompt(
+    preferences: NotificationPreferences,
+  ): Promise<NotificationPreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/notification-preferences/auto-archive-prompt", {
+      method: "POST",
+      body: JSON.stringify({ preferences }),
+    });
+    return parseWithFallback(
+      raw,
+      NotificationPreferenceResponseSchema,
+      EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
+      { endpoint: "POST /api/notification-preferences/auto-archive-prompt" },
     );
   }
 
@@ -4946,6 +4988,27 @@ export class ApiClient {
   async getProject(id: string): Promise<Project> {
     const raw = await this.fetch<unknown>(`/api/projects/${id}`);
     return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "GET /api/projects/:id" });
+  }
+
+  async getProjectProgress(id: string): Promise<ProjectProgressDetail> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/progress`);
+    return parseWithFallback(raw, ProjectProgressDetailSchema, EMPTY_PROJECT_PROGRESS_DETAIL, {
+      endpoint: "GET /api/projects/:id/progress",
+    });
+  }
+
+  async listProjectActivity(
+    id: string,
+    params: { before?: string; limit?: number } = {},
+  ): Promise<ProjectActivityPage> {
+    const search = new URLSearchParams();
+    if (params.before) search.set("before", params.before);
+    if (params.limit) search.set("limit", String(params.limit));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/activity${query ? `?${query}` : ""}`);
+    return parseWithFallback(raw, ProjectActivityPageSchema, EMPTY_PROJECT_ACTIVITY_PAGE, {
+      endpoint: "GET /api/projects/:id/activity",
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
@@ -6211,6 +6274,29 @@ export class ApiClient {
   async getTeamAppImpact(toolkitSlug: string): Promise<TeamAppImpact> {
     const raw = await this.fetch<unknown>(`/api/apps/team/impact?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
     return parseWithFallback(raw, TeamAppImpactSchema, EMPTY_TEAM_APP_IMPACT, { endpoint: "GET /api/apps/team/impact" });
+  }
+
+  /** Asks the workspace's admins to connect a team account for an app. */
+  async requestTeamApp(toolkitSlug: string, agentId?: string): Promise<void> {
+    await this.fetch(`/api/apps/team/requests`, {
+      method: "POST",
+      body: JSON.stringify({ toolkit_slug: toolkitSlug, ...(agentId ? { agent_id: agentId } : {}) }),
+    });
+  }
+
+  /** An admin declines every open team-account request for an app; a member
+   * withdraws their own. */
+  async dismissTeamAppRequests(toolkitSlug: string): Promise<void> {
+    await this.fetch(`/api/apps/team/requests?toolkit_slug=${encodeURIComponent(toolkitSlug)}`, { method: "DELETE" });
+  }
+
+  /** What disconnecting one of the caller's personal accounts would stop in
+   * its workspace. */
+  async getPersonalAppImpact(connectionId: string): Promise<PersonalAppImpact> {
+    const raw = await this.fetch<unknown>(`/api/integrations/composio/connections/${connectionId}/impact`);
+    return parseWithFallback(raw, PersonalAppImpactSchema, { agents: [] }, {
+      endpoint: "GET /api/integrations/composio/connections/:id/impact",
+    });
   }
 
   // Write responses parse to null when malformed; callers refetch instead of

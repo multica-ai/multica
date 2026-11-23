@@ -2284,3 +2284,145 @@ describe("workspace subscription contract", () => {
     );
   });
 });
+
+describe("dashboard history limit (MUL-9490)", () => {
+  const planPrices = (monthAmount: number, yearAmount: number) => ({
+    month: { currency: "usd", unit_amount: monthAmount, interval: "month", interval_count: 1 },
+    year: { currency: "usd", unit_amount: yearAmount, interval: "year", interval_count: 1 },
+  });
+  const prices = { pro: planPrices(1500, 14400), business: planPrices(3000, 28800) };
+
+  it("reads plan limits from prices, and drops them alone when malformed", async () => {
+    const client = new ApiClient("https://api.example.test");
+    stubFetchJson({
+      ...prices,
+      plan_limits: {
+        free: { dashboard_history_days: 30 },
+        pro: { dashboard_history_days: 90 },
+        business: { dashboard_history_days: 365 },
+      },
+    });
+    expect((await client.getWorkspaceSubscriptionPrices())?.planLimits).toEqual({
+      free: { dashboardHistoryDays: 30 },
+      pro: { dashboardHistoryDays: 90 },
+      business: { dashboardHistoryDays: 365 },
+    });
+
+    // An older Cloud sends none; the prices themselves stay usable.
+    stubFetchJson(prices);
+    const older = await client.getWorkspaceSubscriptionPrices();
+    expect(older?.pro.month.unitAmount).toBe(1500);
+    expect(older?.planLimits).toBeNull();
+
+    // A malformed block, or a missing plan, reads as no plan limits.
+    for (const planLimits of [
+      "30",
+      { free: { dashboard_history_days: 30 }, pro: { dashboard_history_days: 90 } },
+    ]) {
+      stubFetchJson({ ...prices, plan_limits: planLimits });
+      const parsed = await client.getWorkspaceSubscriptionPrices();
+      expect(parsed?.business.month.unitAmount).toBe(3000);
+      expect(parsed?.planLimits).toBeNull();
+    }
+
+    // A malformed day count is unknown for that plan only.
+    stubFetchJson({
+      ...prices,
+      plan_limits: {
+        free: { dashboard_history_days: "30" },
+        pro: { dashboard_history_days: 0 },
+        business: { dashboard_history_days: 365 },
+      },
+    });
+    expect((await client.getWorkspaceSubscriptionPrices())?.planLimits).toEqual({
+      free: { dashboardHistoryDays: null },
+      pro: { dashboardHistoryDays: null },
+      business: { dashboardHistoryDays: 365 },
+    });
+  });
+
+  it("reads the features limit and treats a missing or malformed one as none", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const ws = "11111111-1111-1111-1111-111111111111";
+    stubFetchJson({ features: {}, limits: { dashboard_history_days: 30 } });
+    expect((await client.getWorkspaceFeatures(ws)).limits).toEqual({ dashboardHistoryDays: 30 });
+
+    for (const body of [
+      { features: {} },
+      { features: {}, limits: null },
+      { features: {}, limits: { dashboard_history_days: null } },
+      { features: {}, limits: { dashboard_history_days: "30" } },
+      { features: {}, limits: { dashboard_history_days: -1 } },
+      { features: {}, limits: [] },
+    ]) {
+      stubFetchJson(body);
+      expect((await client.getWorkspaceFeatures(ws)).limits).toEqual({ dashboardHistoryDays: null });
+    }
+  });
+
+  it("reads the entitlement's history range when Cloud sends it", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const summary = (limits: Record<string, unknown>) => ({
+      entitlement: {
+        workspace_id: "11111111-1111-1111-1111-111111111111",
+        plan: "free",
+        status: "active",
+        seats: 1,
+        limits: { autopilot_runs: { mode: "limited", limit: 200 }, ...limits },
+        current_period_end: null,
+        snapshot_expires_at: null,
+        version: 1,
+      },
+      billing_interval: null,
+      human_members: 1,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: false,
+      available_actions: { checkout: true, portal: false, purchase_seats: false },
+    });
+    stubFetchJson(summary({ dashboard_history_days: { mode: "limited", limit: 30 } }));
+    expect((await client.getWorkspaceSubscriptionSummary())?.entitlement.limits.dashboardHistoryDays).toEqual({
+      mode: "limited",
+      limit: 30,
+    });
+    stubFetchJson(summary({}));
+    const older = await client.getWorkspaceSubscriptionSummary();
+    expect(older?.entitlement.limits.autopilotRuns).toEqual({ mode: "limited", limit: 200 });
+    expect(older?.entitlement.limits.dashboardHistoryDays).toBeNull();
+    stubFetchJson(summary({ dashboard_history_days: { mode: "limited", limit: "30" } }));
+    expect((await client.getWorkspaceSubscriptionSummary())?.entitlement.limits.dashboardHistoryDays).toBeNull();
+  });
+
+  it("reports the limit header every dashboard endpoint was served under", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const calls = [
+      client.getDashboardUsageDaily.bind(client),
+      client.getDashboardUsageByAgent.bind(client),
+      client.getDashboardAgentRunTime.bind(client),
+      client.getDashboardRunTimeDaily.bind(client),
+      client.getDashboardFailuresDaily.bind(client),
+      client.getDashboardFailuresByAgent.bind(client),
+    ];
+    for (const call of calls) {
+      for (const [header, want] of [
+        ["30", 30],
+        [null, null],
+        ["", null],
+        ["abc", null],
+        ["0", null],
+        ["-5", null],
+      ] as const) {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (header !== null) headers["X-Dashboard-History-Limit-Days"] = header;
+        const fetchMock = vi.fn().mockResolvedValue(new Response("[]", { status: 200, headers }));
+        vi.stubGlobal("fetch", fetchMock);
+        const seen: (number | null)[] = [];
+        const rows = await call({ days: 371, tz: "UTC", onHistoryLimit: (v) => seen.push(v) });
+        expect(rows).toEqual([]);
+        expect(seen).toEqual([want]);
+        expect(String(fetchMock.mock.calls[0]?.[0])).toContain("days=371");
+      }
+    }
+  });
+});

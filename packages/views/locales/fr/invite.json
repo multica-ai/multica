@@ -20,7 +20,7 @@
     "title": "Aucune invitation en attente",
     "hint": "Poursuivez pour configurer votre propre espace de travail.",
     "continue": "Passer à la configuration",
-    "go_to_dashboard": "Aller au tableau de bord"
+    "go_to_dashboard": "Aller à l'espace de travail"
   },
   "linked": {
     "not_found": "Cette invitation a peut-être expiré, été révoquée, ou n'appartient pas à votre compte.",
@@ -38,13 +38,13 @@
     "invalid": "Ce lien d'invitation n'est pas valide ou a expiré.",
     "joined_title": "C'est fait !",
     "redirecting": "Redirection vers votre espace de travail...",
-    "error_title": "Oups",
+    "error_title": "Impossible d'ouvrir l'invitation",
     "go_home": "Retour à l'accueil",
     "loading": "Chargement de l'invitation...",
     "title": "Vous êtes invité à rejoindre {{workspace}}",
     "invited_by": "Invitation de {{name}}",
     "join_as": "Vous rejoindrez cet espace de travail en tant que",
-    "role_admin": "Administrateur",
+    "role_admin": "Admin",
     "role_member": "Membre",
     "login_required": "Vous devez vous connecter pour rejoindre cet espace de travail.",
     "join": "Rejoindre l'espace de travail",

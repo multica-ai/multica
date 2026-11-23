@@ -17,15 +17,15 @@
     },
     "heading_dropdown": {
       "text": "Text",
-      "normal_text": "Normal Text",
+      "normal_text": "Text",
       "heading_1": "Heading 1",
       "heading_2": "Heading 2",
       "heading_3": "Heading 3"
     },
     "list_dropdown": {
-      "bullet_list": "Bullet List",
-      "ordered_list": "Ordered List",
-      "task_list": "Task List"
+      "bullet_list": "Bulleted list",
+      "ordered_list": "Numbered list",
+      "task_list": "Task list"
     },
     "sub_issue": {
       "tooltip": "Create sub-issue from selection",
@@ -44,7 +44,7 @@
     "image_copied": "Image copied",
     "copy_image_failed": "Couldn't copy image",
     "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size.",
-    "unavailable": "That image is no longer available — skipped it."
+    "unavailable": "This image is no longer available and was skipped."
   },
   "canvas": {
     "zoom_in": "Zoom in",
@@ -59,7 +59,7 @@
     "copy_failed": "Couldn't copy contents",
     "more_actions": "More actions",
     "preview": "Preview",
-    "preview_loading": "Loading preview…",
+    "preview_loading": "Loading preview...",
     "preview_failed": "Couldn't load preview",
     "preview_too_large": "File is too large to preview. Please download.",
     "preview_unsupported": "This file type can't be previewed.",
@@ -104,7 +104,7 @@
     "copy_failed": "Failed to copy"
   },
   "mention": {
-    "group_users": "Users",
+    "group_users": "Members",
     "group_issues": "Issues",
     "group_projects": "Projects",
     "group_docs": "Docs",
@@ -129,8 +129,6 @@
     "html_preview": "HTML preview",
     "close_preview": "Close",
     "copy_code": "Copy code",
-    "show_preview": "Show preview",
-    "show_source": "Show source",
     "fullscreen": "Fullscreen"
   },
   "dynamic_block": {
@@ -144,17 +142,20 @@
     "error_mermaid": "Couldn't draw this diagram",
     "error_at_line": "{{message}} (line {{line}})",
     "view_source": "View source",
-    "copy_error": "Copy error"
+    "copy_error": "Copy error",
+    "title": "Title",
+    "rename": "Rename",
+    "add_title": "Add title"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"
   },
   "upload": {
     "failed": "Couldn't upload {{filename}}: {{reason}}",
-    "in_progress": "Uploading…",
+    "in_progress": "Uploading...",
     "interrupted": "Upload interrupted — the file wasn’t saved. Attach it again.",
     "remove": "Remove",
-    "uploading_label": "Uploading {{filename}}…",
+    "uploading_label": "Uploading {{filename}}...",
     "failed_label": "Couldn’t upload {{filename}}"
   },
   "title_editor": {
@@ -163,7 +164,7 @@
   "mermaid": {
     "diagram_label": "Mermaid diagram",
     "render_error": "Unable to render Mermaid diagram.",
-    "rendering": "Rendering diagram…",
+    "rendering": "Rendering diagram...",
     "viewer_title": "Diagram",
     "canvas_label": "Diagram canvas. Drag to pan, scroll to zoom.",
     "open_viewer": "Open diagram viewer",
@@ -198,8 +199,8 @@
     "send": "Send",
     "retry": "Retry",
     "dismiss": "Dismiss",
-    "requesting": "Waiting for the microphone…",
-    "transcribing": "Transcribing…",
+    "requesting": "Waiting for the microphone...",
+    "transcribing": "Transcribing...",
     "release_to_insert": "Release to insert",
     "recording": "Recording",
     "errors": {

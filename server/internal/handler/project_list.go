@@ -177,11 +177,13 @@ func (q projectListQuery) page(resp []ProjectResponse) []ProjectResponse {
 	return resp
 }
 
+// projectProgress sorts by the same completed / scope ratio the list shows;
+// a project with nothing in scope sorts below every project that has work.
 func projectProgress(p ProjectResponse) float64 {
-	if p.IssueCount == 0 {
+	if p.Progress.Scope == 0 {
 		return -1
 	}
-	return float64(p.DoneCount) / float64(p.IssueCount)
+	return float64(p.Progress.Completed) / float64(p.Progress.Scope)
 }
 
 func compareOptionalDays(a, b *string, desc bool) int {

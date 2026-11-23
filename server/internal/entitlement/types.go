@@ -19,11 +19,18 @@ const (
 	// GateStorageBytes caps the attachment bytes a workspace holds. Like
 	// members it has no period: the limit is what the workspace may hold now.
 	GateStorageBytes GateName = "storage_bytes"
+	// GateDashboardHistoryDays caps how many calendar days back the workspace
+	// dashboard can read. Limit is a day count with no period.
+	GateDashboardHistoryDays GateName = "dashboard_history_days"
 )
+
+// MaxDashboardHistoryDays is the largest dashboard_history_days limit Cloud
+// may send. A larger value is a malformed gate.
+const MaxDashboardHistoryDays = 365
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateAutopilotRuns, GateMembers, GateStorageBytes:
+	case GateAutopilotRuns, GateMembers, GateStorageBytes, GateDashboardHistoryDays:
 		return true
 	default:
 		return false
@@ -89,8 +96,12 @@ type NotificationPolicy struct {
 // Decision carries enough source information for consumers to audit why a gate
 // was enforced, observed, or disabled without exposing Cloud's private inputs.
 type Decision struct {
-	Gate                Gate
-	Reason              Reason
+	Gate   Gate
+	Reason Reason
+	// Downgraded is set when Cloud sent enforce but the cached policy has gone
+	// stale, so Gate.Action was lowered to observe. It tells a configured
+	// observe apart from a Cloud outage, as FeatureDecision.Downgraded does.
+	Downgraded          bool
 	PolicyRevision      int64
 	SubscriptionVersion int64
 	CloudValidUntil     time.Time

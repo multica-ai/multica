@@ -138,7 +138,7 @@
   },
   "delegate": {
     "row": "Confier à un agent : « {{prompt}} »",
-    "hint": "Création rapide"
+    "hint": "Créer avec un agent"
   },
   "best": {
     "assign": "Assigner {{subject}} à {{name}}",

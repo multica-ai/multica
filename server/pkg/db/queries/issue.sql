@@ -1,10 +1,10 @@
 -- name: ListIssues :many
 -- involves_user_id widens the assignee filter to surface issues where the user
--- is *indirectly* the assignee — via an owned agent or a squad they belong to /
--- lead / have an agent inside. The semantics intentionally exclude direct
--- member assignment (`assignee_type='member' AND assignee_id=involves_user_id`)
--- because that is already the meaning of the `assignee_id` filter (tab 1
--- "Assigned to me"), and the two filters must produce disjoint result sets.
+-- is *indirectly* the assignee — via an owned agent or a squad led by an owned
+-- agent. The semantics intentionally exclude direct member assignment
+-- (`assignee_type='member' AND assignee_id=involves_user_id`) because that is
+-- already the meaning of the `assignee_id` filter (tab 1 "Assigned to me"),
+-- and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.requester_user_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
@@ -30,34 +30,15 @@ WHERE i.workspace_id = $1
            WHERE a.workspace_id = $1
              AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
     ))
-    -- (2)(3)(4) assignee is a squad related to the user — three relations
+    -- (2) assignee is a squad whose canonical leader is an agent owned by the
+    -- user. We read squad.leader_id directly rather than relying on a
+    -- squad_member row, because the leader copy in squad_member is best-effort
+    -- (see squad.go AddSquadMember error handling).
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          -- (2) the user is a human member of the squad
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'member'
-             AND sm.member_id   = sqlc.narg('involves_user_id')::uuid
-          UNION
-          -- (3) the squad's canonical leader is an agent owned by the user.
-          -- We read squad.leader_id directly rather than relying on a
-          -- squad_member row, because the leader copy in squad_member is
-          -- best-effort (see squad.go AddSquadMember error handling).
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
-             AND a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-          UNION
-          -- (4) the squad has an agent member owned by the user
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'agent'
              AND a.workspace_id = $1
              AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
     ))
@@ -154,6 +135,7 @@ SET description = CASE
         ELSE description || E'\n\n' || sqlc.arg(markdown)
     END,
     revision = revision + 1,
+    description_revision = description_revision + 1,
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND workspace_id = sqlc.arg(workspace_id)
@@ -301,6 +283,8 @@ UPDATE issue AS i SET
     stage = changed.next_stage,
     duplicate_of_issue_id = changed.next_duplicate_of_issue_id,
     revision = i.revision + changed.did_change::integer,
+    description_revision = i.description_revision
+        + (changed.next_description IS DISTINCT FROM changed.description)::integer,
     last_activity_at = CASE WHEN changed.did_activity
         THEN GREATEST(COALESCE(i.last_activity_at, i.updated_at), now())
         ELSE i.last_activity_at
@@ -521,11 +505,17 @@ cleared_environment_configs AS (
 -- so their receipts are swept here by the issue_id copied onto each row.
 cleared_task_context_receipts AS (
     DELETE FROM task_context_receipt WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_description_collab_state AS (
+    DELETE FROM issue_description_collab_state WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_description_revisions AS (
+    DELETE FROM issue_description_revision WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 
 -- name: ListOpenIssues :many
--- See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
+-- See ListIssues for the semantics of involves_user_id (mirrors the 2-branch
 -- filter; member-direct assignment is intentionally excluded).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.requester_user_id,
@@ -609,26 +599,10 @@ WHERE i.workspace_id = $1
              AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'member'
-             AND sm.member_id   = sqlc.narg('involves_user_id')::uuid
-          UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
-             AND a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-          UNION
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'agent'
              AND a.workspace_id = $1
              AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
     ))
@@ -658,26 +632,10 @@ WHERE i.workspace_id = $1
              AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'member'
-             AND sm.member_id   = sqlc.narg('involves_user_id')::uuid
-          UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
-             AND a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-          UNION
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'agent'
              AND a.workspace_id = $1
              AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
     ))

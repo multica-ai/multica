@@ -189,17 +189,20 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
   const isCurrent = (type: string, id: string) => currentType === type && currentId === id;
   const q = query.trim().toLowerCase();
 
-  // Agents ordered: assignable before not, online before offline. Search
-  // keeps that order inside each match tier.
+  // Only actors that can take the issue are listed; agents ordered online
+  // before offline. Search keeps that order inside each match tier.
   const availabilityRank: Record<string, number> = { online: 0, unstable: 1, offline: 2 };
-  const sortedAgents = [...agents].sort((a, b) => {
-    if (a.assignable !== b.assignable) return a.assignable ? -1 : 1;
+  const sortedAgents = agents.filter((entry) => entry.assignable).sort((a, b) => {
     const ra = a.availability ? (availabilityRank[a.availability] ?? 3) : 3;
     const rb = b.availability ? (availabilityRank[b.availability] ?? 3) : 3;
     return ra - rb;
   });
   const visibleAgents = filterByLabel(sortedAgents, q, (e) => e.agent.name);
-  const visibleSquads = filterByLabel(squads, q, (e) => e.squad.name);
+  const visibleSquads = filterByLabel(
+    squads.filter((entry) => entry.assignable),
+    q,
+    (e) => e.squad.name,
+  );
   const visibleMembers = filterByLabel(members, q, (m) => m.name, (m) => [m.email.toLowerCase()]);
   const unassignedLabel = tIssues(($) => $.pickers.assignee.trigger_unassigned);
   const showUnassigned = !q || scoreText(unassignedLabel, q) > 0;
@@ -237,17 +240,8 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
               name={entry.agent.name}
               query={query}
               showStatusDot
-              disabled={!entry.assignable}
               onSelect={() => select("agent", entry.agent.id)}
-              detail={
-                entry.assignable ? (
-                  <AgentPresenceText availability={entry.availability} runtimeLabel={entry.runtimeLabel} />
-                ) : (
-                  <span className="text-caption text-muted-foreground">
-                    {entry.deniedReason ?? tIssues(($) => $.pickers.assignee.agent_runtime_required)}
-                  </span>
-                )
-              }
+              detail={<AgentPresenceText availability={entry.availability} runtimeLabel={entry.runtimeLabel} />}
               trailing={
                 isCurrent("agent", entry.agent.id) ? (
                   <RowCheck label={t(($) => $.pages.current)} />
@@ -269,15 +263,7 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
               actorId={entry.squad.id}
               name={entry.squad.name}
               query={query}
-              disabled={!entry.runnable}
               onSelect={() => select("squad", entry.squad.id)}
-              detail={
-                entry.runnable ? undefined : (
-                  <span className="text-caption text-muted-foreground">
-                    {tIssues(($) => $.pickers.assignee.squad_runtime_required)}
-                  </span>
-                )
-              }
               trailing={isCurrent("squad", entry.squad.id) ? <RowCheck label={t(($) => $.pages.current)} /> : null}
             />
           ))}

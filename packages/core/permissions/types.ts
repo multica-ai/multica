@@ -22,6 +22,7 @@ export type DecisionReason =
   | "allowed"
   | "not_authenticated"
   | "not_member"
+  | "guest_role"
   | "not_owner_role"
   | "not_admin_role"
   | "not_resource_owner"

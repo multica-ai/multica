@@ -49,7 +49,8 @@
   "list": {
     "empty": "No issues match your filters",
     "count_other": "{{count}} issues",
-    "search_placeholder": "Search issues and projects"
+    "search_placeholder": "Search issues and projects",
+    "search_no_results": "No results for \"{{query}}\""
   },
   "detail": {
     "properties": "Properties",
@@ -59,6 +60,7 @@
     "reply": "Reply",
     "add_comment": "Add comment...",
     "description": "Description",
+    "no_description": "No description.",
     "add_description": "Add description...",
     "runs": "Runs",
     "copy_link": "Copy link",
@@ -154,7 +156,7 @@
     "cancel_task": "Cancel run",
     "waiting_for_connection": "Waiting for connection...",
     "stopping": "Stopping...",
-    "failed": "Couldn’t stop the run. Try again."
+    "failed": "Couldn't stop the run. Try again."
   },
   "form": {
     "discard_title": "Discard changes?",
@@ -170,7 +172,7 @@
     "squad": "Squad",
     "no_matches": "No matches.",
     "no_project": "No project",
-    "no_projects": "No projects in this workspace yet.\nCreate them on web.",
+    "no_projects": "No projects in this workspace yet.",
     "no_labels": "No labels in this workspace yet.",
     "create_label": "Create \"{{name}}\"",
     "no_members_agents": "No members or agents in this workspace yet.",
@@ -192,17 +194,19 @@
     "reply": "Reply",
     "react": "React...",
     "copy": "Copy",
-    "select_text": "Select Text",
-    "copy_link": "Copy Link",
-    "resolve": "Resolve Thread",
-    "unresolve": "Unresolve Thread",
+    "select_text": "Select text",
+    "copy_link": "Copy link",
+    "resolve": "Resolve thread",
+    "unresolve": "Reopen thread",
     "delete": "Delete",
     "delete_title": "Delete comment?",
     "delete_keep_replies": "This comment will be permanently deleted. Any replies to it stay in the thread. This cannot be undone.",
     "delete_with_replies": "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
     "more_reactions": "More reactions...",
+    "add_reaction": "Add reaction",
+    "deleted": "This comment was deleted",
     "fallback_actor": "comment",
-    "composer_placeholder": "Add a comment…",
+    "composer_placeholder": "Add a comment...",
     "composer_pill": "Add a comment, type @ to mention..."
   },
   "suggestions": {
@@ -233,6 +237,8 @@
     "url": "Repository URL",
     "branch": "Starting branch (optional)",
     "label": "Label (optional)",
+    "label_placeholder": "e.g. Backend",
+    "open_attachment": "Open {{filename}}",
     "attach": "Attach",
     "attaching": "Attaching...",
     "branch_hint": "Runs start from this branch and open their pull requests against it. Leave empty to use the repository default branch.",
@@ -246,7 +252,7 @@
   "runs": {
     "active": "Active",
     "past": "Past",
-    "title": "Agent Runs",
+    "title": "Agent runs",
     "open_transcript": "Open execution record for {{summary}}",
     "transcript": {
       "title": "Execution record",
@@ -277,23 +283,49 @@
       "cancelled": "Cancelled"
     },
     "failure_badge": {
-      "local_directory_missing": "Folder missing"
+      "queued_expired": "Queue expired",
+      "runtime_offline": "Runtime offline",
+      "runtime_access_revoked": "Access revoked",
+      "runtime_recovery": "Runtime recovery",
+      "timeout": "Timeout",
+      "iteration_limit": "Iteration limit",
+      "agent_blocked": "Needs input",
+      "api_invalid_request": "Request rejected",
+      "skill_bundle_unavailable": "Skill download failed",
+      "runtime_cli_timeout": "Runtime CLI timeout",
+      "environment_prepare_failed": "Environment setup failed",
+      "runtime_access_denied": "No runtime access",
+      "local_directory_missing": "Folder missing",
+      "agent_error_provider_auth_or_access": "Auth failed",
+      "agent_error_provider_quota_limit": "Quota exhausted",
+      "agent_error_provider_capacity_or_rate_limit": "Rate limited",
+      "agent_error_provider_server_error": "Provider error",
+      "agent_error_provider_network": "Network error",
+      "agent_error_process_failure": "Process crashed",
+      "agent_error_empty_or_unparseable_output": "No usable output",
+      "agent_error_agent_timeout": "Agent timeout",
+      "agent_error_context_overflow": "Context overflow",
+      "agent_error_missing_config": "Config missing",
+      "agent_error_model_not_found_or_unavailable": "Model unavailable",
+      "agent_error_runtime_version_unsupported": "CLI unsupported",
+      "agent_error_runtime_missing_executable": "CLI not installed",
+      "agent_error_unknown": "Agent error",
+      "agent_error": "Agent error",
+      "codex_semantic_inactivity": "Codex inactivity",
+      "manual": "Manual"
     }
   },
   "header_filter": "Filter",
   "new_badge": "New",
   "jump_a11y_one": "Jump to {{count}} new message",
   "jump_a11y_other": "Jump to {{count}} new messages",
+  "jump_new_one": "{{count}} new",
+  "jump_new_other": "{{count}} new",
   "a11y": {
     "agent_working": "Agent working — open runs",
     "remove_mention": "Remove mention {{name}}",
     "retry_upload": "Retry upload of {{name}}",
     "open_file": "Open {{name}}",
     "remove_file": "Remove {{name}}"
-  },
-  "summary.comment": "Comment run",
-  "summary.chat": "Chat run",
-  "summary.direct": "Run",
-  "cancel.title": "Cancel run?",
-  "cancel.cancel_task": "Cancel run"
+  }
 }

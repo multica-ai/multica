@@ -32,6 +32,36 @@ export function useDisconnectTeamApp() {
   });
 }
 
+/** Removes one of the caller's own accounts from every workspace. */
+export function useDisconnectPersonalApp() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (connectionId: string) => api.deleteComposioConnection(connectionId),
+    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
+  });
+}
+
+export function useRequestTeamApp() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (input: { slug: string; agentId?: string }) => api.requestTeamApp(input.slug, input.agentId),
+    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
+  });
+}
+
+/** An admin declines everything waiting for an app's team account; a member
+ * withdraws their own ask. */
+export function useDismissTeamAppRequests() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (slug: string) => api.dismissTeamAppRequests(slug),
+    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
+  });
+}
+
 /** Replaces an agent's apps. The legacy `composio_toolkit_allowlist` on the
  * agent follows server-side, so the agent list is refreshed too. */
 export function useUpdateAgentApps(agentId: string) {

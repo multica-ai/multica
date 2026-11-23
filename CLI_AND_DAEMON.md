@@ -233,7 +233,7 @@ multica daemon status
 multica daemon status --output json
 ```
 
-Shows PID, uptime, detected agents, and watched workspaces.
+Shows PID, uptime, detected agents (including why any detected agent was skipped), and watched workspaces.
 
 ### Logs
 
@@ -427,7 +427,7 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` for cleanup. The active-
 
 Configured patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The managed Codex cache is matched by its exact relative path, so a repository's own `.sandbox-bin` is not removed unless an operator explicitly adds that basename to `MULTICA_GC_ARTIFACT_PATTERNS`. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, including the managed Codex cache, set `MULTICA_GC_ARTIFACT_TTL=0`.
 
-`multica daemon disk-usage` reports the `.repos` footprint on its own line rather than folding it into the per-task totals — every task in a workspace checks out from that shared cache, so attributing it to individual task directories would double-count it. Note that the repo cache is reclaimed on the schedule above and not by any per-issue status change, so it is normal for it to persist after every task directory is gone.
+`multica daemon disk-usage` reports the `.repos` footprint on its own line rather than folding it into the per-task totals — every task in a workspace checks out from that shared cache, so attributing it to individual task directories would double-count it. In per-task output (`--by-task`), the `MODE` column marks runs that worked in place in a project's local directory as `in place` (`local_directory: true` in JSON when recorded in local metadata). Note that the repo cache is reclaimed on the schedule above and not by any per-issue status change, so it is normal for it to persist after every task directory is gone.
 
 Agent-specific overrides:
 
@@ -980,6 +980,50 @@ multica project get <id>
 multica project get <id> --output json
 ```
 
+The response includes `progress`: `scope` is every issue except cancelled ones,
+`completed` counts done issues, `started` issues are tracked but do not add to
+`percent`. The table output shows it as a PROGRESS column (`5/11 (45%)`).
+
+### Project Overview
+
+```bash
+multica project overview <id>                  # JSON by default
+multica project overview <id> --output table
+```
+
+Returns everything on the project page in one read:
+`{"project": ..., "progress": ..., "resources": [...], "working_agents": [...], "activity": [...]}`.
+`working_agents` lists the agents running a task on one of the project's issues
+right now, with the issue ids; `activity` is the 10 newest entries of
+`multica project activity`. New sections are added as new top-level keys.
+
+### Project Progress
+
+```bash
+multica project progress <id>                  # summary and forecast
+multica project progress <id> --history        # weekly scope / started / completed
+multica project progress <id> --by assignee    # per-assignee breakdown
+multica project progress <id> --by label       # per-label breakdown
+multica project progress <id> --output json    # everything above
+```
+
+The forecast is a completion date from the trailing 4-week completion rate;
+it is omitted when there is less than a week of history or nothing was
+completed recently.
+
+### Project Activity
+
+```bash
+multica project activity <id>                          # newest 30, table by default
+multica project activity <id> --limit 100 --output json
+multica project activity <id> --before <next_cursor>   # older entries
+```
+
+What changed on the project's issues, newest first: issue creation and status,
+assignee, priority, start/due date, title and duplicate changes. Each entry names
+the issue (`issue_identifier`, `issue_title`, `issue_status`), the actor and the
+`details` of the change. JSON output carries `next_cursor` until the last page.
+
 ### Create Project
 
 ```bash
@@ -1133,8 +1177,6 @@ To assign a squad instead, use `--squad` (name or ID) or `--squad-id` (canonical
 ```bash
 multica autopilot trigger <id>            # Fires the autopilot once, returns the run
 ```
-
-On Multica Cloud, a member running this command directly uses no automation quota. Runs triggered by an agent on a member's behalf, a schedule, or a webhook count toward the workspace quota. When an agent triggers a run after an enforced limit is reached, the API returns HTTP 429 with `reason_code: quota_exceeded` and a `Retry-After` header.
 
 The command exits non-zero unless the run actually started (`issue_created` or
 `running`). If a run is `skipped` (for example, the runtime is offline

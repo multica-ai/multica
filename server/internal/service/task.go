@@ -8301,18 +8301,19 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
 		// Mirrors handler.IssueResponse.DuplicateOf. Null is only true for a
 		// row with no live mark; IssueToMapResolved resolves it for the rest.
-		"duplicate_of":     nil,
-		"project_id":       util.UUIDToPtr(issue.ProjectID),
-		"position":         issue.Position,
-		"stage":            util.Int4ToPtr(issue.Stage),
-		"start_date":       util.DateToPtr(issue.StartDate),
-		"due_date":         util.DateToPtr(issue.DueDate),
-		"created_at":       util.TimestampToString(issue.CreatedAt),
-		"updated_at":       util.TimestampToString(issue.UpdatedAt),
-		"last_activity_at": util.TimestampToNanoPtr(issue.LastActivityAt),
-		"revision":         issue.Revision,
-		"metadata":         util.JSONObjectOrEmpty(issue.Metadata),
-		"properties":       util.JSONObjectOrEmpty(issue.Properties),
+		"duplicate_of":         nil,
+		"project_id":           util.UUIDToPtr(issue.ProjectID),
+		"position":             issue.Position,
+		"stage":                util.Int4ToPtr(issue.Stage),
+		"start_date":           util.DateToPtr(issue.StartDate),
+		"due_date":             util.DateToPtr(issue.DueDate),
+		"created_at":           util.TimestampToString(issue.CreatedAt),
+		"updated_at":           util.TimestampToString(issue.UpdatedAt),
+		"last_activity_at":     util.TimestampToNanoPtr(issue.LastActivityAt),
+		"revision":             issue.Revision,
+		"description_revision": issue.DescriptionRevision,
+		"metadata":             util.JSONObjectOrEmpty(issue.Metadata),
+		"properties":           util.JSONObjectOrEmpty(issue.Properties),
 	}
 }
 

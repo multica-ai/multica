@@ -10,6 +10,16 @@
     "all_projects": "Все проекты",
     "period_label": "Период"
   },
+  "history_limit": {
+    "note": "Ваш тариф охватывает последние {{days}} дн. Перейдите на другой тариф, чтобы увидеть более ранние данные. Данные не удаляются.",
+    "fell_back": "Показаны данные за последние {{days}} дн. — это лимит вашего текущего тарифа.",
+    "view_plans": "Посмотреть тарифы",
+    "locked": "Не входит в ваш тариф",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
   "kpi": {
     "cost_label": "Стоимость · {{days}} дн.",
     "tokens_label": "Токены · {{days}} дн.",
@@ -20,7 +30,7 @@
     "tasks_hint": "{{failed}} с ошибкой"
   },
   "dim": {
-    "label": "Измерение",
+    "label": "Интервал",
     "daily": "По дням",
     "weekly": "По неделям"
   },
@@ -50,7 +60,7 @@
     "kpi_failed_hint": "Из {{total}} запусков",
     "kpi_rate_label": "Доля ошибок · {{days}} дн.",
     "kpi_agents_label": "Затронуто агентов · {{days}} дн.",
-    "kpi_agents_hint": "Худший {{name}} · {{count}}",
+    "kpi_agents_hint": "Больше всего: {{name}} (ошибок: {{count}})",
     "tooltip_rate": "Доля ошибок",
     "class": {
       "auth": "Авторизация",
@@ -66,8 +76,8 @@
     "mix_title": "Структура сбоев · {{failed}}",
     "mix_label": "Структура сбоев",
     "codes_label": "Коды ошибок",
-    "by_agent": "Основные нарушители",
-    "sort_label": "Ранжировать нарушителей по",
+    "by_agent": "Ошибки по агентам",
+    "sort_label": "Сортировать агентов по",
     "sort_failed": "Сбоям",
     "sort_rate": "Доле",
     "header_agent": "Агент",

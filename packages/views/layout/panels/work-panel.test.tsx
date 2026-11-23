@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { EMPTY_ISSUE_VIEW_PREFERENCE } from "@multica/core/api/schemas";
@@ -31,7 +31,7 @@ import type {
 } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
-import { IssueInboxActions } from "../../issues/actions/issue-inbox-actions";
+import { IssueInboxBar } from "../../issues/actions/issue-inbox-actions";
 import { KeptRowsRelease, WorkPanel } from "./work-panel";
 
 const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn() }));
@@ -209,7 +209,7 @@ function renderPanel(
         {/* Each desktop tab mounts its own page. */}
         {desktop && pathname.startsWith("/acme/issues/") && (
           <div data-testid="issue-header">
-            <IssueInboxActions key={pathname} issueId={pathname.split("/").at(-1)!} onMarkDone={() => {}} />
+            <IssueInboxBar key={pathname} issueId={pathname.split("/").at(-1)!} />
           </div>
         )}
         {sheetOpen && spaceForPath(pathname) === "work" && <WorkPanel />}
@@ -300,10 +300,23 @@ function inboxItem(issue: Issue): InboxItem {
 }
 
 describe("WorkPanel sections", () => {
-  it("orders Inbox, Pinned, Views, Projects", () => {
+  const sections = () => Array.from(document.querySelectorAll<HTMLElement>("[data-mc='panel-section']"));
+  const labels = () => sections().map((section) => section.querySelector("h3")?.textContent);
+
+  it("orders Pinned, Inbox, Views, Projects", () => {
     renderPanel("/acme/my-issues", [PIN], [PROJECT]);
-    const labels = Array.from(document.querySelectorAll("[data-mc='panel-section'] h3"), (h) => h.textContent);
-    expect(labels).toEqual(["Inbox", "Pinned", "Views", "Projects"]);
+    expect(labels()).toEqual(["Pinned", "Inbox", "Views", "Projects"]);
+  });
+
+  // The panel body drops the top margin of a section that is its first child.
+  it("starts the panel with its first section, with or without pins", () => {
+    renderPanel("/acme/my-issues", [PIN], [PROJECT]);
+    expect(sections()[0]!.parentElement!.firstElementChild).toBe(sections()[0]);
+    cleanup();
+
+    renderPanel("/acme/my-issues", [], [PROJECT]);
+    expect(labels()[0]).toBe("Inbox");
+    expect(sections()[0]!.parentElement!.firstElementChild).toBe(sections()[0]);
   });
 });
 
@@ -855,5 +868,29 @@ describe("WorkPanel and the open issue's project", () => {
     });
     expect(litIssueRows()).toEqual([within(list).getByRole("link", { name: ISSUE.title })]);
     await waitFor(() => expect(useSidebarTreeStore.getState().locate).toBeNull());
+  });
+});
+
+describe("KeptRowsRelease Inbox Zero undo", () => {
+  const cleared = () => useInboxSelectionStore.getState().lastClearedByWorkspace["ws-1"];
+  const recordCleared = () =>
+    useInboxSelectionStore.getState().recordLastCleared("ws-1", {
+      kind: "archived",
+      itemId: `inbox-${ISSUE.id}`,
+      key: ISSUE.id,
+      label: ISSUE.identifier,
+      href: `/acme/issues/${ISSUE.identifier}`,
+      clearedAt: 1,
+    });
+
+  beforeEach(() => useInboxSelectionStore.setState({ lastClearedByWorkspace: {} }));
+
+  it("forgets it once the Inbox is left, even for the issue it cleared", () => {
+    recordCleared();
+    renderPanel("/acme/inbox");
+    expect(cleared()).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+    expect(cleared()).toBeUndefined();
   });
 });

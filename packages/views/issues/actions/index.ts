@@ -2,7 +2,7 @@ export { useIssueActions } from "./use-issue-actions";
 export type { UseIssueActionsResult } from "./use-issue-actions";
 export { IssueActionsDropdown, useIssuePageMenu } from "./issue-actions-dropdown";
 export { useArchivedInboxItemId } from "./inbox-restore";
-export { IssueInboxActions } from "./issue-inbox-actions";
+export { IssueInboxBar } from "./issue-inbox-actions";
 export {
   IssueActionsContextMenu,
   IssueContextMenuProvider,

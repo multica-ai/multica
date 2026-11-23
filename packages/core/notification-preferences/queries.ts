@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
 export const notificationPreferenceKeys = {
+  root: () => ["notification-preferences"] as const,
   all: (wsId: string) => ["notification-preferences", wsId] as const,
 };
 

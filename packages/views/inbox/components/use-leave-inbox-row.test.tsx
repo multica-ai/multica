@@ -100,9 +100,10 @@ describe("useArchiveInboxBatchWithUndo", () => {
   it("says how many it archived, and its undo restores each row it took", async () => {
     const archiveBatch = setup(useArchiveInboxBatchWithUndo, items);
     await act(() => archiveBatch.current(async () => ({ count: 3 }), isRead, "Failed", "issue-a"));
-    expect(toast.success).toHaveBeenCalledWith("3 notifications archived", {
-      action: { label: "Undo", onClick: expect.any(Function) },
-    });
+    expect(toast.success).toHaveBeenCalledWith(
+      "3 notifications archived",
+      expect.objectContaining({ duration: 10_000, action: { label: "Undo", onClick: expect.any(Function) } }),
+    );
 
     await act(async () => undoOf().onClick());
     expect(api.unarchiveInbox.mock.calls.map(([id]) => id)).toEqual(["n-a1", "n-notice"]);

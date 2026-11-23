@@ -5,10 +5,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useDevActionsStore } from "@multica/core/dev-actions";
-import { createShortcutChord, formatShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
+import { createShortcutChord, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { History, Pin, Play, Search, Zap } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import {
   blockedReason,
   commandTitle,
@@ -317,7 +318,7 @@ export function ActionsPanel({ wsId, onClose }: { wsId: string | null; onClose: 
           onKeyDown={onSearchKey}
           className="min-w-0 flex-1 bg-transparent text-body text-foreground outline-none placeholder:text-muted-foreground"
         />
-        <kbd className="shrink-0 font-mono text-micro text-muted-foreground">{formatShortcut(OPEN_SHORTCUT)}</kbd>
+        <ShortcutKeycaps shortcut={OPEN_SHORTCUT} decorative className="shrink-0" />
       </div>
       {query.trim() ? (
         <SearchResults

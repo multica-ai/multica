@@ -432,6 +432,7 @@ function EditConnectionDialog({
               value={token}
               required={needsToken}
               placeholder={
+                // eslint-disable-next-line no-restricted-syntax -- technical Qoder PAT prefix
                 needsToken ? "pt-…" : t(($) => $.qoder.keep_secret)
               }
               disabled={busy}

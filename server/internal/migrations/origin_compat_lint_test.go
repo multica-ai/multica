@@ -9,7 +9,7 @@ import (
 
 // historicalShareCRMOriginVersions are ledger keys already applied by older
 // ShareCRM releases. The runner stores the full filename, so these strings
-// are not 711/712. The files must not return: a database that never recorded
+// are not 732/733. The files must not return: a database that never recorded
 // that exact key would execute them again, and those numbers now belong to
 // other migrations. 681/682 are upstream's project_folder migrations.
 // 683/684 are upstream's entitlement_feature_attempt migrations.
@@ -18,8 +18,11 @@ import (
 // autopilot_run idempotency key and its unique index. 703-707 are
 // doc_comment and its keys. 708/709 are the attachment workspace size index
 // and the drop of idx_attachment_workspace. 710 adds
-// autopilot_quota_period.rejection_notified_limit. 685/686, 695/696, 697/698,
-// and 703/704 below are previous fork ShareCRM origin filenames.
+// autopilot_quota_period.rejection_notified_limit. 711/712 are
+// dashboard_range_view and its scope index. 713-731 are doc collab, inbox
+// auto-archive, remote apps, issue-description collab, and skill revisions.
+// 685/686, 695/696, 697/698, 703/704, and 711/712 below are previous fork
+// ShareCRM origin filenames.
 var historicalShareCRMOriginVersions = []string{
 	"649_issue_origin_sharecrm_chat",
 	"650_issue_origin_sharecrm_chat_validate",
@@ -43,11 +46,13 @@ var historicalShareCRMOriginVersions = []string{
 	"698_issue_origin_sharecrm_chat_validate",
 	"703_issue_origin_sharecrm_chat",
 	"704_issue_origin_sharecrm_chat_validate",
+	"711_issue_origin_sharecrm_chat",
+	"712_issue_origin_sharecrm_chat_validate",
 }
 
 func TestHistoricalShareCRMOriginFilesStayRetired(t *testing.T) {
 	dir := realMigrationsDir(t)
-	recorded := readMigrationFile(t, "711_issue_origin_sharecrm_chat.up.sql")
+	recorded := readMigrationFile(t, "732_issue_origin_sharecrm_chat.up.sql")
 	for _, version := range historicalShareCRMOriginVersions {
 		for _, suffix := range []string{".up.sql", ".down.sql"} {
 			path := filepath.Join(dir, version+suffix)
@@ -56,14 +61,14 @@ func TestHistoricalShareCRMOriginFilesStayRetired(t *testing.T) {
 			}
 		}
 		if !strings.Contains(recorded, version) {
-			t.Errorf("711 up migration must name retired ledger key %s", version)
+			t.Errorf("732 up migration must name retired ledger key %s", version)
 		}
 	}
 }
 
 func TestIssueOriginRepairDoesNotValidateInsideTheExclusiveSwap(t *testing.T) {
 	up667 := readMigrationFile(t, "667_issue_origin_weixin_chat.up.sql")
-	up703 := readMigrationFile(t, "711_issue_origin_sharecrm_chat.up.sql")
+	up703 := readMigrationFile(t, "732_issue_origin_sharecrm_chat.up.sql")
 	up668 := readMigrationFile(t, "668_issue_origin_weixin_chat_validate.up.sql")
 	for _, sql := range []string{up667, up703} {
 		if strings.Contains(sql, "VALIDATE CONSTRAINT") || strings.Contains(sql, "COMMIT") {
@@ -80,7 +85,7 @@ func TestIssueOriginRepairDoesNotValidateInsideTheExclusiveSwap(t *testing.T) {
 	}
 	for _, name := range []string{
 		"667_issue_origin_weixin_chat.down.sql",
-		"711_issue_origin_sharecrm_chat.down.sql",
+		"732_issue_origin_sharecrm_chat.down.sql",
 	} {
 		sql := readMigrationFile(t, name)
 		if strings.Contains(sql, "COMMIT") {

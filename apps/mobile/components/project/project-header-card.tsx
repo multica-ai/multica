@@ -1,6 +1,7 @@
 /**
  * Header card for the project detail screen. Large emoji icon centered above
- * the title, with the description shown in full (no truncation) below.
+ * the title, with the description rendered as Markdown, mention links
+ * included, in full (no truncation) below.
  *
  * Mirrors the visual emphasis of web's `project-header.tsx` but in a single
  * vertical stack instead of the web sidebar layout — phones don't have the
@@ -15,6 +16,8 @@ import { Pressable, View } from "react-native";
 import type { Project } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ProjectIcon } from "@/components/ui/project-icon";
+import { Markdown } from "@/lib/markdown";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   project: Project;
@@ -22,6 +25,7 @@ interface Props {
 }
 
 export function ProjectHeaderCard({ project, onEdit }: Props) {
+  const { t } = useT("projects");
   return (
     <Pressable
       onPress={onEdit}
@@ -36,16 +40,13 @@ export function ProjectHeaderCard({ project, onEdit }: Props) {
         >
           {project.title}
         </Text>
-        {project.description ? (
-          <Text
-            className="text-sm text-muted-foreground"
-            selectable
-          >
-            {project.description}
-          </Text>
+        {project.description?.trim() ? (
+          <View className="w-full">
+            <Markdown content={project.description} />
+          </View>
         ) : onEdit ? (
           <Text className="text-sm text-muted-foreground/60 italic">
-            Add a description
+            {t("detail.add_description")}
           </Text>
         ) : null}
         {project.issue_count > 0 ? (
@@ -60,12 +61,13 @@ export function ProjectHeaderCard({ project, onEdit }: Props) {
 }
 
 function ProgressSection({ done, total }: { done: number; total: number }) {
+  const { t } = useT("projects");
   const pct = Math.round((done / total) * 100);
   return (
     <View className="w-full pt-2 gap-1.5">
       <View className="flex-row items-center justify-between">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground">
-          Progress
+          {t("detail.progress")}
         </Text>
         <Text className="text-xs text-muted-foreground">
           {done} / {total} · {pct}%

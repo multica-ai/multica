@@ -128,6 +128,7 @@ var routeParamsOutsideProjects = map[string]outsideProjectParam{
 	"plugins/{installationId}":       {why: "a plugin installation"},
 	"packages/{packageId}":           {why: "a plugin package"},
 	"mcp/{hookKey}":                  {why: "a plugin MCP hook"},
+	"mcp/{app}":                      {why: "a built-in remote MCP app slug, reached with a task token"},
 	"surfaces/{surfaceKey}":          {why: "a plugin surface"},
 	"groups/{conversationId}":        {why: "a DingTalk group"},
 	"install/{sessionId}":            {why: "an integration install session"},

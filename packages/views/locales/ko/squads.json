@@ -108,7 +108,7 @@
   },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",
-    "detail_link": "자세히 →",
+    "detail_link": "자세히 보기 →",
     "archived": "보관됨",
     "member_count_other": "멤버 {{count}}명",
     "members_section": "멤버",
@@ -124,7 +124,6 @@
     "mine": "내 스쿼드",
     "all": "전체 스쿼드"
   },
-  "toolbar": {},
   "intro": {
     "title": "에이전트를 스쿼드로 묶어 팀처럼 일하게 하세요",
     "description": "태스크를 스쿼드에 할당하면 리더 에이전트가 내용을 읽고, 역할에 맞는 멤버에게 다음 단계를 맡기고, 목표를 이룰 때까지 챙깁니다. 소통할 창구는 하나뿐입니다.",

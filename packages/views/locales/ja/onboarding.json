@@ -18,14 +18,14 @@
     "headline_line2": "ひとつの",
     "headline_emphasis": "ワークスペースに。",
     "lede": "同僚に仕事を任せるようにタスクを割り当てるだけ。エージェントが引き受け、ステータスを更新し、完了したらコメントします。",
-    "lede_web": "デスクトップ版にはランタイムが同梱されており、何もインストールする必要はありません。ご自身の CLI を接続するには、ウェブで続けてください。",
+    "lede_web": "デスクトップ版にはローカルランタイムが内蔵されており、CLI の設定は不要です。ご自身の CLI を接続する場合は Web 版のまま続行してください。",
     "download_desktop": "デスクトップ版をダウンロード",
     "continue_on_web": "ウェブで続ける",
     "start_exploring": "探索を始める",
     "skip_existing": "以前にやったことがあります",
     "illustration": {
       "card1_actor_name": "あなた",
-      "card1_actor_initial": "N",
+      "card1_actor_initial": "あ",
       "card1_body_prefix": " 短いローンチ投稿の下書きをお願いできますか? ",
       "card1_body_suffix": " のインタビュー結果を参考にしてください。",
       "card1_mention_content": "@コンテンツエージェント",
@@ -222,7 +222,7 @@
   },
   "errors": {
     "skip_failed": "オンボーディングを完了できませんでした",
-    "guide_failed": "ランタイム案内のタスクを作成できませんでした。もう一度お試しください。",
+    "guide_failed": "セットアップガイドを作成できませんでした。もう一度お試しください。",
     "mika_setup_failed": "Mika ワークスペースを開始できませんでした"
   },
   "mika_intro": {
