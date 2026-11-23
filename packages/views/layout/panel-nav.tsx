@@ -207,7 +207,7 @@ export function PanelSection({
     <ChevronDown
       aria-hidden
       className={cn(
-        "size-3.5 shrink-0 transition-[transform,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+        "size-3.5 shrink-0 transition-[rotate,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
         collapsed
           ? "-rotate-90"
           : "opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100",

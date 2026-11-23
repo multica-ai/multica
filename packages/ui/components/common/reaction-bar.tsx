@@ -79,7 +79,7 @@ function ReactionBar({
                   type="button"
                   onClick={() => onToggle(g.emoji)}
                   className={cn(
-                    "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-caption transition-[background-color,border-color,color,transform] duration-100 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-brand/15 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100",
+                    "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-caption transition-[background-color,border-color,color,scale] duration-100 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-brand/15 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100",
                     g.reacted
                       ? "border-brand/30 bg-brand/8 text-brand"
                       : "border-brand/10 bg-brand/4 text-muted-foreground",
