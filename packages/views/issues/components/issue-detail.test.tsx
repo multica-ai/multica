@@ -3006,6 +3006,11 @@ describe("IssueDetail (shared)", () => {
       mockApiObj.listTasksByIssue.mockResolvedValue([]);
       renderIssueDetailWithHighlight(target.id);
 
+      // Wait phase by phase: page boot (issue + timeline queries, first
+      // commit), the jump mounting the target row, then the landing frames.
+      // On a loaded runner the three together outrun one waitFor's budget.
+      await screen.findByTestId("virtuoso-mock");
+      await waitFor(() => expect(document.getElementById(`comment-${target.id}`)).not.toBeNull());
       await waitFor(() => expect(hasHighlightedCommentBackground(
         document.getElementById(`comment-${target.id}`),
       )).toBe(true));
