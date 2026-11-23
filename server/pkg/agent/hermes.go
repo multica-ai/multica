@@ -1206,6 +1206,8 @@ type hermesClient struct {
 	// acceptNotification can drop ACP session updates before dispatching to
 	// handlers that mutate client state such as usage or pending tool calls.
 	acceptNotification func(updateType string) bool
+	// acceptSessionUpdate can restrict notifications to the bound session.
+	acceptSessionUpdate func(sessionID string) bool
 	// toolStartCarriesFinalInput marks a dialect whose tool_call start frame is
 	// the only place a call's input ever appears, so MessageToolUse can be
 	// emitted as soon as the call starts instead of being held until it
@@ -1246,6 +1248,9 @@ type hermesClient struct {
 	// it carries no output text at all); the content blocks hold what the tool
 	// printed.
 	toolOutputFromContent bool
+	// toolStartCanComplete handles an ACP tool first reported in a terminal
+	// state, with no subsequent tool_call_update.
+	toolStartCanComplete bool
 	// acceptUpdate can drop an individual session/update after the
 	// lifecycle gate above, with the update payload in hand. OpenCode 2.x
 	// uses it to keep a subagent's own text out of the parent's transcript.
@@ -1298,6 +1303,14 @@ func (c *hermesClient) writeLine(data []byte) error {
 
 func (c *hermesClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	return c.requestAndNotifySent(ctx, method, params, nil)
+}
+
+func (c *hermesClient) notify(method string, params any) error {
+	data, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+	if err != nil {
+		return err
+	}
+	return c.writeLine(append(data, '\n'))
 }
 
 // requestAndNotifySent runs afterWrite once the complete request has been
@@ -1835,13 +1848,21 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 }
 
 func (c *hermesClient) extractPromptResult(data json.RawMessage) {
+	if c.onPromptDone != nil {
+		if pr, err := parseACPPromptResult(data); err == nil {
+			c.onPromptDone(pr)
+		}
+	}
+}
+
+func parseACPPromptResult(data json.RawMessage) (hermesPromptResult, error) {
 	var resp struct {
 		StopReason string          `json:"stopReason"`
 		Usage      json.RawMessage `json:"usage"`
 		Meta       json.RawMessage `json:"_meta"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return
+		return hermesPromptResult{}, err
 	}
 
 	pr := hermesPromptResult{
@@ -1858,9 +1879,7 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 	// cache bucket or provider-reported cost.
 	pr.usage = usage.withFallback(parseACPTokenUsageSnapshotFromMeta(resp.Meta))
 
-	if c.onPromptDone != nil {
-		c.onPromptDone(pr)
-	}
+	return pr, nil
 }
 
 // acpTokenUsagePresent reports whether any token counter is non-zero.
@@ -1912,7 +1931,7 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	if p, ok := raw["params"]; ok {
 		_ = json.Unmarshal(p, &params)
 	}
-	if len(params.Update) == 0 {
+	if len(params.Update) == 0 || (c.acceptSessionUpdate != nil && !c.acceptSessionUpdate(params.SessionID)) {
 		return
 	}
 
@@ -1933,7 +1952,15 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	case "agent_thought_chunk":
 		c.handleAgentThought(updateData)
 	case "tool_call":
-		c.handleToolCallStart(updateData)
+		var status struct {
+			Status string `json:"status"`
+		}
+		if c.toolStartCanComplete && json.Unmarshal(updateData, &status) == nil &&
+			(status.Status == "completed" || status.Status == "failed") {
+			c.handleToolCallUpdate(updateData)
+		} else {
+			c.handleToolCallStart(updateData)
+		}
 	case "tool_call_update":
 		c.handleToolCallUpdate(updateData)
 	case "usage_update":

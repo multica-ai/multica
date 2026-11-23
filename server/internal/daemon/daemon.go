@@ -310,6 +310,24 @@ func antigravitySupplementHookCommand(env *execenv.Environment) ([]string, bool)
 	return workdirSupplementHookCommand(env, agent.AntigravityHooksInstallable, agent.AntigravityHookHelperArg)
 }
 
+func taskSupplementLaunch(provider, version string, env *execenv.Environment, customArgs []string) ([]string, bool) {
+	if !agent.SupportsTaskSupplement(provider, version) {
+		return nil, false
+	}
+	switch provider {
+	case "cursor":
+		return cursorSupplementHookCommand(env)
+	case "antigravity":
+		if agent.AntigravityUsesACP(customArgs) {
+			// ACP prompt replacement has no receipt for the previous turn.
+			return nil, false
+		}
+		return antigravitySupplementHookCommand(env)
+	default:
+		return nil, true
+	}
+}
+
 // workdirSupplementHookCommand gates hook-based steering. The provider's hooks
 // file lands in the workdir, so steering is offered only for daemon-managed
 // workdirs, never inside a user's own directory or worktree, and only when the
@@ -9071,17 +9089,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1)
 	}
 	var supplementHookCommand []string
-	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || task.ChatSessionID != "")
-	if supplementSupported {
-		switch provider {
-		case "cursor":
-			supplementHookCommand, supplementSupported = cursorSupplementHookCommand(env)
-		case "antigravity":
-			supplementHookCommand, supplementSupported = antigravitySupplementHookCommand(env)
+	if task.IssueID != "" || task.ChatSessionID != "" {
+		var supplementSupported bool
+		supplementHookCommand, supplementSupported = taskSupplementLaunch(provider, resolvedVersion, env, agentCustomArgs)
+		if supplementSupported {
+			taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityTaskSupplementV1)
 		}
-	}
-	if supplementSupported {
-		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityTaskSupplementV1)
 	}
 	taskSupplementNegotiated, err := d.client.StartTask(prepareCtx, task, taskCapabilities...)
 	if err != nil {

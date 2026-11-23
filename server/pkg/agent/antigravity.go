@@ -396,6 +396,9 @@ func readAntigravitySelectedModel(logPath, streamModel, configuredModel string) 
 }
 
 func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	if AntigravityUsesACP(opts.ExtraArgs, opts.CustomArgs) {
+		return b.executeACP(ctx, prompt, opts)
+	}
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "agy"

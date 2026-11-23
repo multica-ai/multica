@@ -613,7 +613,7 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 			// answers the prompt. The write runs on its own goroutine so a
 			// stalled pipe cannot hold the teardown, and the grace starts now.
 			go func() {
-				if err := opencodeACPNotify(c, "session/cancel", map[string]any{"sessionId": sessionID}); err != nil {
+				if err := c.notify("session/cancel", map[string]any{"sessionId": sessionID}); err != nil {
 					b.cfg.Logger.Warn("opencode: session/cancel could not be sent", "error", err)
 				}
 			}()
@@ -711,15 +711,6 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
-}
-
-// opencodeACPNotify writes a JSON-RPC notification (no id, no response).
-func opencodeACPNotify(c *hermesClient, method string, params any) error {
-	data, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
-	if err != nil {
-		return err
-	}
-	return c.writeLine(append(data, '\n'))
 }
 
 // opencodeACPTurnUsage sums the token usage of the assistant messages this turn
