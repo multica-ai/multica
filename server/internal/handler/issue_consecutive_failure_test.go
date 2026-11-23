@@ -163,3 +163,54 @@ func TestIssueFailureStreakStopsAutomaticRetries(t *testing.T) {
 		})
 	}
 }
+
+func TestConcurrentAutomaticSuccessesDoNotClearIssueFailurePause(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := t.Context()
+	runtimeID := dbfx.Runtime(t, "Concurrent failure streak runtime")
+	agentID := dbfx.Agent(t, "Concurrent failure streak agent "+uuid.NewString(), runtimeID)
+	issueID := dbfx.Issue(t, "Concurrent outcomes after a failure streak", testutil.Cols{
+		"assignee_type": "agent", "assignee_id": agentID,
+	})
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for _, minutesAgo := range []int{3, 2, 1} {
+		at := now.Add(-time.Duration(minutesAgo) * time.Minute)
+		dbfx.Task(t, agentID, testutil.Cols{
+			"issue_id": issue.ID, "runtime_id": runtimeID, "status": "failed",
+			"created_at": at, "started_at": at, "completed_at": at,
+		})
+	}
+	if _, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, issue); !errors.Is(err, service.ErrIssueAgentConsecutiveFailures) {
+		t.Fatalf("automatic dispatch before concurrent completions: %v", err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, minutesAgo := range []int{5, 4} {
+		at := now.Add(-time.Duration(minutesAgo) * time.Minute)
+		taskID := parseUUID(dbfx.Task(t, agentID, testutil.Cols{
+			"issue_id": issue.ID, "runtime_id": runtimeID, "status": "running",
+			"created_at": at, "started_at": at,
+		}))
+		go func() {
+			<-start
+			_, err := testHandler.TaskService.CompleteTask(ctx, taskID, []byte("{}"), "", "", "", false, "", "")
+			results <- err
+		}()
+	}
+	close(start)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Errorf("complete automatic task: %v", err)
+		}
+	}
+	if _, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, issue); !errors.Is(err, service.ErrIssueAgentConsecutiveFailures) {
+		t.Fatalf("automatic dispatch after concurrent completions: %v", err)
+	}
+}
