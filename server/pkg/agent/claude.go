@@ -224,6 +224,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			<-proc.procDone
 		}
 		turn.endInitializer()
+		// Detach before reading the turn's state or waiting on its control
+		// writes: a pooled process keeps emitting after its result event.
+		proc.setActiveTurn(nil)
 
 		turn.mu.Lock()
 		turn.coalescer.flushAll()
@@ -261,7 +264,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			terminalReasonError = fmt.Sprintf("claude input/control protocol failed: %v", writeErr)
 		}
 
-		proc.setActiveTurn(nil)
 		proc.clearTaskEnv()
 
 		scanErr, exitErr := proc.getErrors()

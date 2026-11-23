@@ -71,10 +71,15 @@ func (p *claudeProcess) setActiveTurn(t *claudeTurn) {
 	p.turnMu.Unlock()
 }
 
-func (p *claudeProcess) currentTurn() *claudeTurn {
+// dispatch hands an event to the active turn while holding turnMu, so once
+// setActiveTurn(nil) returns no event can touch the finished turn's channels
+// or WaitGroup. The handlers never block and never take turnMu.
+func (p *claudeProcess) dispatch(deliver func(*claudeTurn)) {
 	p.turnMu.Lock()
 	defer p.turnMu.Unlock()
-	return p.activeTurn
+	if p.activeTurn != nil {
+		deliver(p.activeTurn)
+	}
 }
 
 func (p *claudeProcess) getErrors() (scanErr, exitErr error) {
@@ -298,14 +303,10 @@ func (p *claudeProcess) readStdout() {
 		}
 		var msg claudeSDKMessage
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			if turn := p.currentTurn(); turn != nil {
-				turn.noteInvalidEvent()
-			}
+			p.dispatch((*claudeTurn).noteInvalidEvent)
 			continue
 		}
-		if turn := p.currentTurn(); turn != nil {
-			turn.handleMessage(msg)
-		}
+		p.dispatch(func(turn *claudeTurn) { turn.handleMessage(msg) })
 	}
 	scanErr := scanner.Err()
 	if scanErr != nil {
