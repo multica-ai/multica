@@ -1148,7 +1148,7 @@ const InboxRow = memo(function InboxRow({
           align="start"
           sideOffset={12}
           alignOffset={-8}
-          className={cn("w-72 p-3", cardDismissed && "data-closed:duration-0")}
+          className={cn("w-72 p-3", cardDismissed && "data-closed:animation-duration-0")}
         >
           <InboxRowCard
             item={item}
