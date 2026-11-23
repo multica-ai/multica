@@ -1,137 +1,165 @@
 ---
 title: Complete tutorial
-description: "Start from an empty workspace and walk a personal website project through all of Multica's core flows: creating agents, delivering with issues, forming a squad, building skills, and setting up automation."
+description: "Start from an empty workspace and walk a personal website project through Multica's full workflow: Spaces, runtimes, agents, issues, Environments, PR reviews, squads, skills, and Autopilots."
 ---
 
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica is a platform where people and AI agents work together. This tutorial starts from nothing and covers:
+Multica is a platform where people and AI agents work together. This tutorial starts from an empty workspace and walks through the entire lifecycle end to end:
 
-- setting up a workspace of your own
-- collaboration between people and agents, and automatic collaboration between agents
-- handing repetitive work to automation
-- turning what works into skills, and iterating on your agents over time
+- creating a workspace and navigating **Work**, **Team**, **Chat**, and **Autopilot**
+- connecting your computer and configuring agents (both manually and through chat)
+- delivering code through issues, inspecting runs, and previewing live with **Environments**
+- tuning agent instructions and pairing an **Engineer** with a read-only **Reviewer**
+- handing coordination to a **Squad**, reusing methods as **Skills**, and automating recurring checks with **Autopilots**
 
-The example project is a personal website, used to walk through Multica's overall flow and core features end to end.
+The example project is a personal photography portfolio website — concrete enough to show every core feature working together on real work.
 
 **Before you start:**
 
 - A Multica account (sign up at [multica.ai](https://multica.ai))
-- A computer with at least one AI coding tool installed and signed in, for example Claude Code or Codex. The full list of supported tools is in [Install AI coding tools](/install-agent-runtime).
+- A computer with at least one AI coding tool installed and signed in, such as Claude Code or Codex. The full list of supported tools is in [Install AI coding tools](/install-agent-runtime).
 
 ## Create a workspace
 
-A workspace is where a team works: issues, projects, and agents all belong to one. The onboarding after sign-up walks you through creating your first workspace. If you were invited to a team, signing in takes you straight into that team's workspace.
+A workspace is where a team works: issues, projects, agents, and run history all live inside one. Sign-up onboarding walks you through creating your first workspace; if you were invited to a team, signing in opens that team's workspace directly.
 
-This tutorial creates a new workspace for the walkthrough.
+This tutorial starts with a fresh workspace.
 
 <Steps>
 <Step>
 
-Click the workspace name at the top of the sidebar and choose **Create workspace**:
+Click the workspace icon at the top of the left app rail and choose **Create workspace**:
 
-![The create workspace entry point](/images/docs/tutorial-create-workspace-menu.webp)
-
-</Step>
-<Step>
-
-Fill in two fields:
-
-- **Name**: shown to members; it can be changed later.
-- **URL**: the slug in the workspace address — the `my-team` in `multica.ai/my-team`. It cannot be changed after creation.
-
-![The create workspace page](/images/docs/tutorial-create-workspace-form.webp)
+![Opening the workspace switcher in the app rail to create a workspace](/images/docs/tutorial-create-workspace-menu.webp)
 
 </Step>
 <Step>
 
-Creating it opens the new workspace. The sidebar on the left is where every later step starts; the issue list in the middle is still empty, and the next few steps get agents to fill it.
+Fill in three fields:
 
-![A newly created, empty workspace](/images/docs/tutorial-empty-workspace.webp)
+- **Workspace name**: shown to members; you can change it later.
+- **URL**: the slug in the workspace address — the `personal-site` in `multica.ai/personal-site`. This cannot be changed after creation.
+- **Issue prefix**: pre-filled from the URL and editable before creation — with `SITE`, issues are numbered `SITE-1`, `SITE-2`, and so on (changeable later in settings).
+
+![The create workspace form with name, URL, and issue prefix](/images/docs/tutorial-create-workspace-form.webp)
+
+</Step>
+<Step>
+
+Creating it opens the new workspace. Take a moment to note the layout:
+
+- **App rail (far left)**: your workspace switcher, **New issue** (`C`), **Search** (`⌘K`), the four main spaces (**Work**, **Team**, **Chat**, **Autopilot**), and **Settings** at the bottom.
+- **Work panel (beside the rail)**: **Inbox** at the top, followed by built-in and saved **Views** and **Projects**.
+- **Bottom status bar**: shows active agents on the left and **Ask Multica** quick chat (`⌘J`) on the right.
+
+The issue list is empty for now — the next steps bring agents in to populate it.
+
+![A newly created, empty workspace in the Work space](/images/docs/tutorial-empty-workspace.webp)
 
 </Step>
 </Steps>
 
 ## Connect your computer
 
-Agents execute work on the computers you connect, using the AI coding tools installed on those computers.
+Agents execute work on the computers you connect, using the AI coding tools installed there.
 
-This tutorial uses [Multica Desktop](https://multica.ai/download): after downloading and signing in, it registers this computer as a runtime automatically and detects the installed AI coding tools. Open **Runtimes** under **AI Team** in the sidebar and confirm the computer is online:
+This tutorial uses [Multica Desktop](https://multica.ai/download): after signing in, Desktop starts the local daemon automatically, registers your computer, and detects installed AI coding tools. Switch to **Team** in the app rail, open **Runtimes** under **Resources**, and confirm your computer shows as **Online**:
 
-![The runtime list with this computer online](/images/docs/tutorial-runtimes-list.webp)
+![Team space showing Runtimes with this computer online](/images/docs/tutorial-runtimes-list.webp)
 
-Open the computer to see each detected tool:
+Click your computer to see each detected AI coding tool and its status:
 
-![Runtime detail: the detected AI coding tools](/images/docs/tutorial-runtime-detail.webp)
+![Machine detail showing Claude Code and Codex online](/images/docs/tutorial-runtime-detail.webp)
 
-Desktop is not required: on the Runtimes page, click **Add**, choose **Other machine or server**, and follow the prompts to install from the command line. The daemon then runs in the background — see [Daemon and runtimes](/daemon-runtimes).
+Desktop is optional: on the **Runtimes** page, click **+** in the top right, choose **Other machine or server**, and run the install commands in a terminal. The daemon runs in the background — see [Daemon and runtimes](/daemon-runtimes).
 
 ## Create your first agent
 
-Agents are full members of a workspace: they can be assigned issues, post comments, and talk with you. The first agent is a helper that handles day-to-day workspace chores; a number of later steps in this tutorial are handed to it.
+Agents are full collaborators in a workspace: they can be assigned issues, reply in threads, and talk with you in chat. Start by creating a helper agent that handles day-to-day workspace chores — later steps in this tutorial delegate setup work to it.
 
-Open **Agents** under **AI Team** in the sidebar and click **New agent**. First choose the runtime: one of the AI coding tools on the computer connected in the previous step; this tutorial uses Claude. Then fill in three fields on the configuration page:
+In the **Team** space, click **+** in the panel header (or open **All agents** and click **New agent**).
 
-- **Name**: `Multica helper`.
-- **Model**: one of the models that tool supports. This tutorial uses Sonnet.
-- **Instructions**: the prompt provided to the agent on every run. State what it is responsible for and what it is not:
+<Steps>
+<Step>
+
+**Choose a runtime**: pick an online AI coding tool on the computer you connected — this tutorial uses **Claude Code**.
+
+</Step>
+<Step>
+
+**Configure the agent**: fill in the key fields (or click **Let AI write it** in the top right to let the Agent Builder draft them in a conversation):
+
+- **Name**: `Multica helper`
+- **Description**: `Handles workspace chores, agent setup, and status updates.`
+- **Instructions**: sent on every run; spell out what the agent owns and what it should leave alone:
 
 ```text
 You are the helper of this workspace.
 
 You handle what members ask for in issues and chat: create or update
-issues, adjust statuses, and answer questions about what is going on
-in the workspace.
+issues, adjust statuses, configure agents, squads, skills, and autopilots,
+and answer questions about what is going on in the workspace.
 
 Keep replies short. After finishing something, reply with a one-line
 summary of what you did. Do not touch code or repositories. If a
 request is ambiguous, ask before acting.
 ```
 
-![The create agent page](/images/docs/tutorial-create-agent-form.webp)
+Select a model (this tutorial uses Claude Sonnet) and leave **Access** at the default (**Only me**).
 
-Leave the remaining fields at their defaults and click **Create agent**. Back on the **Agents** page, Multica helper is online and can take work:
+![Configure step of agent creation with Multica helper filled in](/images/docs/tutorial-create-agent-form.webp)
 
-![Agent detail: Multica helper online](/images/docs/tutorial-agent-detail.webp)
+</Step>
+<Step>
+
+Click **Create agent**. On the agent detail page, **Multica helper** is **Online · Idle** and ready to take work:
+
+![Agent detail page showing Multica helper online](/images/docs/tutorial-agent-detail.webp)
+
+</Step>
+</Steps>
 
 ## A second agent, created through chat
 
-Building the site needs an engineer that can write code. This time there is no form to fill in: the workspace already has an agent, so creating the next one can be handed to it.
+Building the site calls for an engineer that writes code. You do not need to fill out another form: now that the workspace has an agent, you can ask it to configure the next one through the Multica CLI.
 
-Open **Chat** in the sidebar, select Multica helper, and tell it to create an agent named Engineer on the same runtime, with Opus as the model, responsible for building and maintaining the personal website. Multica helper performs the creation on that computer and replies with the new agent's name and model. By default only the creator can run a new agent; leave that as is for this tutorial.
+Switch to **Chat** in the app rail, pick **Multica helper**, and ask it to create an agent named **Engineer** on the same Claude Code runtime using **Claude Opus 5**, responsible for building and maintaining your personal photography portfolio website. Multica helper runs the creation on your computer and replies with a summary:
 
-![Asking the helper in chat to create Engineer](/images/docs/tutorial-chat-create-engineer.webp)
+![Asking Multica helper in Chat to create Engineer](/images/docs/tutorial-chat-create-engineer.webp)
 
-Open **Agents → Engineer** to check the result: the model is Opus, and the instructions were generated by Multica helper — scope of responsibility, how to get repository code, and requirements for submitting changes. They can be edited at any time.
+Open **Team → All agents → Engineer** to check the result: the model is `claude-opus-5`, Access is **Owner only**, and Multica helper wrote a full set of working instructions — which you can edit anytime:
 
-![Engineer's instructions](/images/docs/tutorial-engineer-instructions.webp)
+![Engineer agent detail page with generated instructions](/images/docs/tutorial-engineer-instructions.webp)
 
 ## Prepare the site repository
 
-The site's code lives in a GitHub repository. Creating and linking the repository also goes to an agent, provided this computer has the [GitHub CLI](https://cli.github.com) installed and signed in.
+The site's code lives in a GitHub repository. If your computer has the [GitHub CLI](https://cli.github.com) (`gh`) installed and signed in, an agent can create and register the repository for you too.
 
-In **Chat**, select Engineer and tell it to create an empty repository named `personal-website` under your GitHub account (the GitHub CLI is on this computer), then register it in this workspace with `multica repo add`. Engineer creates the repository locally, registers it in the workspace, and replies with the repository address. The message did not specify visibility, so it creates the repository with the default and says so in the reply; public or private makes no difference to the following steps.
+In **Chat**, start a conversation with **Engineer** and ask it to create an empty GitHub repository named `personal-website` under your account, then register it in this workspace with `multica repo add`. Engineer creates the repo, registers it, and replies with the URL:
 
-![Chat: Engineer replies that the repository is created and registered](/images/docs/tutorial-chat-create-repo.webp)
+![Engineer confirming personal-website was created and registered](/images/docs/tutorial-chat-create-repo.webp)
 
-Open **Settings → Code** to confirm: `personal-website` is in the list. Agents pick a repository from here when they start runs.
+Click the **Settings** gear at the bottom of the app rail and open **Code** under **Connections & extensions**. Confirm `personal-website` appears under **Repositories**, and click **Connect GitHub** to authorize the repository. Once connected:
 
-![The repository list in settings](/images/docs/tutorial-repo-settings.webp)
+- pull requests that reference an issue ID (such as `SITE-1`) link to the issue automatically;
+- PR diff stats and CI check status appear directly in the issue sidebar;
+- merging all linked PRs can automatically move the issue to **Done**.
 
-Without the GitHub CLI, you can create the repository on GitHub yourself and add it manually on the same page; the result is the same.
+![Settings -> Code with GitHub connected, personal-website registered, and PR auto-linking enabled](/images/docs/tutorial-repo-settings.webp)
 
-Finally, click **Connect GitHub** on the same page and authorize the repository as prompted. Once connected, pull requests that reference an issue identifier link to that issue automatically, and PR state and CI results show up in the issue.
+Without the GitHub CLI, create the repository on GitHub yourself and add it via **+ Add repository** on the same page.
 
 ## The first issue: build the site
 
-That completes the setup. From here on, this is how day-to-day work runs in Multica: requirements are written as issues and handed to agents.
+Setup is done. From here on, day-to-day work runs through **issues**: write requirements clearly, hand them to an agent, and track every run, comment, and PR on one timeline.
 
-The site starts from shadcn's official template: the template already brings the stack and the base configuration, and Engineer builds content and design on top of it.
+The site starts from shadcn's Next.js template so Engineer builds design and content on top of a clean foundation.
 
 <Steps>
 <Step>
 
-Click **New Issue** at the top of the sidebar (shortcut `C`). In the default agent mode there is no title to fill in: select Engineer under **Created by** and write the requirements straight into the description; the title is generated on creation. You can also switch to manual mode and write the title and body yourself. The description:
+Click **New issue** at the top of the app rail (shortcut `C`). In the default **Create with agent** mode, you do not need to write a title: pick **Engineer** under **Created by** and write your requirements directly into the prompt (you can click **Switch to Manual** at the bottom anytime):
 
 ```text
 Work in the personal-website repository registered in this workspace.
@@ -148,13 +176,13 @@ The site is for a photographer. It needs:
 - My work — a selection of photos
 - Contact — an email link that is easy to find
 - Pricing — decide where a pricing table fits and how to present it
-- Use placeholder images (Unsplash or picsum.photos) wherever a photo
-  belongs, and list where I should replace them with my own work
+- Use placeholder images wherever a photo belongs, and list where I
+  should replace them with my own work
 
 Design:
 
 - Pick a style that fits a photography portfolio. It should feel
-  refined and understated; express that through layout, typography
+  refined and understated; express that through layout, typography,
   and spacing, and never use words like "premium" or "high-end"
   in the copy.
 - Choose the fonts.
@@ -162,263 +190,241 @@ Design:
 Open a pull request when it is ready.
 ```
 
-The description carries three kinds of information: constraints (start from the specified template), content requirements (listed item by item), and open space (the style is left to Engineer to work out). Write the intent and the boundaries; leave the implementation to the agent.
+Notice the three ingredients of a strong prompt: hard constraints (start from the template), concrete content requirements, and deliberate open space (layout and typography left to Engineer). State intent and boundaries; leave implementation choices to the agent.
 
-![Agent mode in the new issue dialog, with Engineer selected as the creator](/images/docs/tutorial-new-issue-agent-mode.webp)
-
-</Step>
-<Step>
-
-After submitting, Multica creates the issue (`MUL-1`, with a generated title) and sets Engineer as the assignee. Engineer starts executing and the status moves to In Progress. The right side of the issue holds everything happening on it: status, assignee, linked pull requests, and the execution log.
-
-The run takes a few minutes, and there are two ways into its progress: the working-status badge next to the title, and **Execution log** on the right. Open the current run:
-
-![The two entry points for checking progress](/images/docs/tutorial-issue-engineer-working.webp)
+![New issue dialog in Create with agent mode with Engineer selected](/images/docs/tutorial-new-issue-agent-mode.webp)
 
 </Step>
 <Step>
 
-The execution log holds every step of the run: **Agent** rows are its own narration, and **Bash**, **Read**, and **Edit** are the commands it ran and the files it read and wrote. At the moment of this screenshot it is taking screenshots of the finished pages to check its own work, and has just found that the divider in the pricing table is misaligned. Click the ⓘ in the top right to see the computer, AI coding tool, and working directory used for the run.
+After submitting, Multica creates `SITE-1` with a generated title, assigns **Engineer**, and starts execution immediately. Status moves to **In Progress**. Everything happening on the issue lives in the right sidebar: **Properties**, **Wakeups**, **Pull requests**, **Environments**, and **Execution log**.
 
-![Execution log: every step Engineer took](/images/docs/tutorial-execution-log.webp)
+While Engineer works, you can watch live progress from the **Engineer is working** badge in the header or **Execution log** on the right. If you ever spot an agent heading in the wrong direction mid-run, you do not need to stop it — post a correction in the comment box with **Add to current run** to [steer it](/mentioning-agents#steer-a-running-agent) at its next step.
+
+![SITE-1 while Engineer is working, with active status badge and Execution log](/images/docs/tutorial-issue-engineer-working.webp)
+
+</Step>
+<Step>
+
+Hover the active run in **Execution log** and click **View transcript** to inspect every step: agent narration, **Bash** commands, **Read** and **Edit** calls, and timing. Click the **ⓘ** button in the top right to see the machine, AI coding tool, delivered skills, and working directory for this run:
+
+![Execution log transcript showing every command and edit Engineer ran](/images/docs/tutorial-execution-log.webp)
 
 </Step>
 </Steps>
 
-## Sign-off: talk it over in the issue
+## Preview and sign-off: Quick chat and Environments
 
-When the run ends, Engineer moves the status to In Review and a notification lands in your Inbox. It posted a completion comment on the issue with screenshots of the finished pages:
+When the run finishes, Engineer moves `SITE-1` to **In Review**, posts a structured summary comment listing where to replace placeholder images, and a notification lands in your **Inbox** at the top of the **Work** panel:
 
-![Engineer's completion comment with page screenshots](/images/docs/tutorial-issue-review-comment.webp)
+![SITE-1 in In Review showing Engineer's completion comment and Inbox notification](/images/docs/tutorial-issue-review-comment.webp)
 
-Screenshots give the gist, but a review still means opening the site in a browser. The site was built on your computer, so having Engineer start a local server is enough to reach it. The **Pull requests** area on the right is also still empty; the issue explicitly asked for a PR, so ask about that directly too.
-
-This time, use chat instead of the comment box:
+Before signing off, you want two things: inspect the live site in a browser, and see why **Pull requests** in the right sidebar is still empty. Rather than cluttering the issue timeline, use **Quick chat** from the bottom status bar:
 
 <Steps>
 <Step>
 
-There is a chat button in the bottom-right corner, available on any workspace page, and it is the same feature as **Chat** in the sidebar:
+Click **Ask Multica** at the bottom right of the status bar (or press `⌘J` / `⇧⌘J`), select **Engineer**, type `@SITE-1` to attach this issue's context, and ask both questions.
 
-![The chat button in the bottom-right corner](/images/docs/tutorial-chat-fab.webp)
+Engineer replies right inside the floating window: it started the dev server with `multica env start web`, and explains that PR #1 lacked `SITE-1` in its branch name and title so auto-linking missed it — it has now updated the PR title.
 
-</Step>
-<Step>
-
-Open it, select Engineer, and type `@` to reference the current issue, so the conversation carries that issue's context. Send both questions:
-
-![Asking in chat with the issue referenced](/images/docs/tutorial-chat-ask-in-issue.webp)
+![Floating Quick chat opened from the bottom status bar on SITE-1](/images/docs/tutorial-chat-ask-in-issue.webp)
 
 </Step>
 <Step>
 
-Engineer's reply has two parts: the local server is running, with the address to open; and the PR was in fact already submitted, but the title, branch name, and body all lacked `MUL-1`, so automatic linking had nothing to match. It then added the identifier to the PR title.
+Close Quick chat and look at the right sidebar of `SITE-1`. Two new cards are live:
 
-![Engineer's reply: the local address and why the PR was not linked](/images/docs/tutorial-chat-engineer-reply.webp)
+- **Pull requests**: `#1 Build photographer portfolio website` with `+648 -14` diff stats and the auto-complete note (`Moves to Done when #1 merges`).
+- **Environments**: `Web app · Running · localhost:41000` under `Maya's MacBook Pro`. Click it to open the site in one click, or manage restart, stop, and live logs from its menu — see [Environments](/environments).
 
-</Step>
-<Step>
-
-Open the address it gave in a browser to see the site:
-
-![The site's home page running locally](/images/docs/tutorial-site-localhost.webp)
+![SITE-1 right sidebar showing both the linked PR card and the running Environments preview](/images/docs/tutorial-issue-pr-and-env.webp)
 
 </Step>
 <Step>
 
-Back on the issue, a PR card now appears in the **Pull requests** area on the right, showing state and change size; clicking it opens the PR on GitHub. Repositories with CI configured also show check results:
+Click **Web app** in **Environments** to open `http://localhost:41000` in your browser and inspect the site:
 
-![The PR card on the right side of the issue](/images/docs/tutorial-issue-pr-linked.webp)
+![The photography portfolio site running locally at localhost:41000](/images/docs/tutorial-site-localhost.webp)
 
 </Step>
 </Steps>
 
 ## Write feedback into the instructions
 
-This round of review exposed two of Engineer's working habits: it checks its own work with repeated screenshots after finishing, which takes up a lot of run time; and it opens PRs without the issue identifier, so they don't link. Both are things it will repeat every time, so what needs changing is its instructions; this issue itself can stay as it is.
+This review uncovered two recurring habits: Engineer opened a PR without the issue ID (breaking auto-linking), and spent extra run time taking repetitive self-check screenshots when you prefer reviewing live in the browser via **Environments**.
 
-You don't have to edit the instructions by hand: an agent can update its own configuration with the multica CLI. In the same conversation, give Engineer two rules: no screenshot self-checks after finishing, since review happens in a browser; and the branch name or title of a PR must carry the issue identifier. Then have it write them into its own instructions:
+Because both apply to every future task, write them into Engineer's instructions rather than repeating them in future issues. An agent can update its own configuration through `multica agent update` — just ask it in the same chat:
 
-![Asking Engineer to write the rules into its own instructions](/images/docs/tutorial-chat-update-instructions.webp)
+![Asking Engineer in Chat to save both rules into its own instructions](/images/docs/tutorial-chat-update-instructions.webp)
 
-Engineer applies the update with `multica agent update`, adding a working-rules section to its instructions, and points out the cost of the first rule: with no screenshot self-checks, visual problems on the page are now yours to catch in the browser.
+Engineer updates its instructions and explicitly notes the trade-off: skipping screenshot self-checks means visual regressions now depend on your browser pass. Open **Team → All agents → Engineer** to confirm the new **Working rules** section is saved:
 
-Open **Agents → Engineer**, and both rules are in the instructions:
+![Engineer's updated instructions showing the new Working rules section](/images/docs/tutorial-engineer-updated-instructions.webp)
 
-![Engineer's updated instructions](/images/docs/tutorial-engineer-updated-instructions.webp)
-
-From then on, both rules take effect with the instructions on every run. That is basically how you tune an agent: when a problem keeps recurring, write the correction into the instructions so you don't have to repeat it each time.
+That is the core loop for tuning an agent: whenever a habit repeats across runs, encode the fix into its instructions once.
 
 ## A third agent: Reviewer
 
-Engineer delivered a first version, but there are problems it cannot see itself. Review goes to a new agent: a fresh context, dedicated to checking code quality against the issue's requirements.
+Engineer shipped a strong first pass, but an author rarely catches every blind spot in its own output. Bring in a second perspective: a dedicated **Reviewer** agent with a fresh context and a different tool and model.
 
 <Steps>
 <Step>
 
-Creation again goes to Multica helper: an agent named Reviewer, this time on Codex with the GPT-5.6 Sol model — a different tool and model from Engineer's; it only reviews and never edits code, and writes its conclusions as issue comments. The instructions are again generated by the helper — read the PR's actual state before reviewing, write findings as comments with file locations, and never modify code:
+Ask **Multica helper** in Chat to create **Reviewer** on **Codex** (`gpt-5.6-sol`) with read-only instructions: read the PR diff against both code conventions and the issue's requirements, post findings with file and line numbers, run read-only verification checks, and never modify code. Open **Team → All agents → Reviewer** to confirm:
 
-![Reviewer's configuration](/images/docs/tutorial-reviewer-detail.webp)
-
-</Step>
-<Step>
-
-Review needs no new issue and no change of assignee. Back in MUL-1's comment box, type `@Reviewer` to mention it, write what needs doing, and send. A hint below the box says that Reviewer starts executing once the comment is sent:
-
-![Starting a review by @-mentioning Reviewer in a comment](/images/docs/tutorial-comment-mention-reviewer.webp)
+![Reviewer agent detail page configured on Codex with read-only review rules](/images/docs/tutorial-reviewer-detail.webp)
 
 </Step>
 <Step>
 
-A few minutes later the review comment comes back, with the conclusion that changes are needed before merging. Five findings in two groups — three on code conventions, two on requirement conformance — each with a file and line number. The two conformance findings are exactly what Engineer could not see itself: the pricing table presents invented prices, deposits, and tax terms as real content with no placeholder marking, and the contact section carries an unverified Instagram link. The comment ends with what it verified itself: typecheck, lint, and build all pass.
+Review needs no separate issue and no assignee change. Back in `SITE-1`, type `@Reviewer` in the comment box and ask it to review PR #1. Notice the trigger preview directly below the composer (`Reviewer · Will start when sent`), confirming who will run on send:
+
+![Mentioning @Reviewer in SITE-1's comment box with the live trigger preview](/images/docs/tutorial-comment-mention-reviewer.webp)
 
 </Step>
 <Step>
 
-Fixing needs no new process: @Engineer in the comment box and ask it to clear all the findings. Engineer starts executing on send, visible both in the badge next to the title and in the execution log on the right:
+Reviewer comes back with **Changes requested before merge** and five concrete findings in two groups — including two requirement gaps Engineer missed (pricing presented as final terms without placeholder labels, and an unverified Instagram link) alongside three code conventions, all with file paths and line numbers.
 
-![Reviewer's findings, with @Engineer picking up the fixes](/images/docs/tutorial-reviewer-findings.webp)
+Reply in the same thread mentioning `@Engineer` to resolve all five findings. Engineer pushes the fixes to PR #1 and reports back item by item on the same timeline:
 
-A few minutes later Engineer reports back: all five fixed, pushed to the same PR. Both agents share one timeline, so the report only has to answer the findings one by one, with no need to restate the background:
-
-![Engineer's fix report](/images/docs/tutorial-engineer-fixed.webp)
+![Reviewer's structured findings followed by @Engineer picking up the fixes](/images/docs/tutorial-reviewer-findings.webp)
 
 </Step>
 <Step>
 
-Mention Reviewer again for a second pass: all five findings resolved, ready to merge, with two low-priority follow-up suggestions left:
+Mention `@Reviewer` again for a second pass. All five findings are verified fixed, checks pass, and Reviewer returns **Ready to merge** with two non-blocking follow-up ideas:
 
-![Reviewer's re-check passes](/images/docs/tutorial-reviewer-recheck.webp)
+![Reviewer's second-pass approval comment on SITE-1](/images/docs/tutorial-reviewer-recheck.webp)
 
 </Step>
 </Steps>
 
-One issue now carries two agents — Engineer implements, Reviewer reviews — and a few short comments from you keep development and review going round after round.
+One issue now hosts two specialized agents — Engineer builds and fixes, Reviewer audits — collaborating cleanly inside one thread.
 
 ## Merge and close out
 
-Merging is also issued as a comment: ask Engineer to merge the PR and make sure the issue moves to Done. It merges, deletes the branch, re-runs the checks on the merged main, and reports back. The issue status becomes Done, and a completion notification arrives in the Inbox:
+Ask `@Engineer` in a comment to merge PR #1 and close out the issue. Engineer merges into `main`, deletes the feature branch, re-verifies the build, and reports back. The PR card flips to **Merged**, the dev environment stops cleanly, and `SITE-1` moves to **Done** (with GitHub PR merge automation configured in **Settings → Code**):
 
-![The merge is complete and the issue moves to Done](/images/docs/tutorial-issue-done.webp)
+![SITE-1 marked Done with PR #1 merged and Engineer's confirmation comment](/images/docs/tutorial-issue-done.webp)
 
-That wraps up the first issue: every step from the requirement to the merge is recorded on one timeline.
+Every step — requirements, run logs, preview, review findings, fixes, approval, and merge — stays recorded on a single timeline.
 
 ## Form a squad
 
-The MUL-1 loop works, but every hand-off started with you: mention Reviewer after reviewing, mention Engineer after the review. Coordination itself became your job, and that can be handed off too, with a **squad**: a named group of agents and members led by a leader agent. When an issue is assigned to a squad, the leader takes it: reads the issue, delegates the work, and moves the status along. When a member replies, the leader is woken automatically and decides the next step; at the end it reports the deliverable to you, which is exactly what you were doing on MUL-1.
+The `SITE-1` loop worked smoothly, except every hand-off depended on you: mentioning Reviewer after build, mentioning Engineer after review, mentioning Reviewer again after fixes. You can hand coordination itself to a **Squad**: a named team of agents and humans led by a leader agent.
 
-A squad is the division of labor you already have, plus a leader:
+When an issue is assigned to a squad, the leader takes ownership: it reads the issue, delegates to the right member by `@`-mention, automatically wakes up whenever a member replies, routes the next step, and reports the finished deliverable back to you.
 
-- **Lead** (new): the leader, responsible for management: assigning work, moving the issue status along, and reporting deliverables to you, without doing the work itself;
-- **Engineer** (existing): development;
-- **Reviewer** (existing): reviews every PR;
-- **You**: final sign-off.
+Build **Website Team** around the division of labor you already have, plus a leader:
 
-Members are not limited to agents. Each member carries a one-line role description that the leader consults when delegating.
+- **Lead** (new, Claude Sonnet): coordinates scope, dispatches Engineer and Reviewer, moves status, and writes sign-off briefs — never edits code itself.
+- **Engineer** (existing): builds features, addresses review findings, and merges approved PRs.
+- **Reviewer** (existing): audits every PR before delivery (read-only).
+- **Maya Lin (You)**: final product sign-off.
 
-Describing this setup to Multica helper is enough: create the squad and its leader, give each member its job, attach one skill each to Lead and Engineer (covered in the next section), and put the workflow in the squad instructions — development goes to Engineer, delivery waits until the PR passes review, and Engineer merges after your sign-off. The helper applies the whole configuration in one pass with the CLI:
+Describe this setup to **Multica helper** in Chat — including two reusable skills (`tdd` for Engineer and `delivery-brief` for Lead, covered next) and the squad's delivery workflow. Multica helper configures the leader, squad, roles, instructions, and skill bindings in a single pass:
 
-![The helper configuring the whole squad in one pass](/images/docs/tutorial-helper-create-squad.webp)
+![Multica helper configuring the Website Team squad, Lead, and skills in one pass](/images/docs/tutorial-helper-create-squad.webp)
 
-Open **Squads → Website Team** in the sidebar to check the result: the leader, the members, and the role descriptions are all there. Squads can also be created from a form on this page; the full mechanism is in [Squads](/squads):
+Open **Team → Squads → Website Team** to inspect the roster, role descriptions, and delivery instructions (you can also create or edit squads directly on this page — see [Squads](/squads)):
 
-![Squad detail: leader, members, and roles](/images/docs/tutorial-squad-detail.webp)
+![Website Team squad detail showing leader, members, roles, and delivery instructions](/images/docs/tutorial-squad-detail.webp)
 
 ## Skills: reusable methods
 
-Writing feedback into instructions earlier only solved one agent's problem, because instructions belong to that agent alone. To share a method across several agents, or to borrow one someone else has already written, use a **skill**.
+Updating Engineer's instructions earlier solved rules unique to one agent. When a working method should be shared across multiple agents — or reused from a community package — store it as a **Skill**.
 
-A skill is a knowledge package for an agent: one `SKILL.md` plus optional supporting files, telling the agent how to think about and handle a kind of task. Multica follows the Anthropic Agent Skills open standard, so any skill that matches the spec can be imported directly; once attached to an agent, it syncs to the runtime at execution time. Open the **Skills** page — the two skills imported above are both there, with the agents they are attached to on the right:
+A skill follows the open Agent Skills standard: a `SKILL.md` file plus optional supporting references, templates, or scripts. Attach a skill to any agent and Multica syncs it to the runtime automatically on every run. Open **Team → Skills** under **Resources** to see the two skills configured above and which agents use them:
 
-![The workspace Skills page](/images/docs/tutorial-skills-list.webp)
+![Team -> Skills list showing delivery-brief attached to Lead and tdd attached to Engineer](/images/docs/tutorial-skills-list.webp)
 
-Opening one shows all of the skill's files:
+Click `tdd` to inspect its `SKILL.md` content, supporting files (`examples/test-first.md`, `references/checklist.md`), version history, and attached agents:
 
-![The file structure of the tdd skill](/images/docs/tutorial-skill-detail.webp)
+![Detail view of the tdd skill showing SKILL.md, supporting files, and attached agent](/images/docs/tutorial-skill-detail.webp)
 
-One of these two skills is about doing the work, the other about reporting it:
+The two skills shape two different parts of the workflow:
 
-- **tdd**, attached to Engineer, is an engineering method: write a failing test first, then the implementation that makes exactly that test pass;
-- **i-have-adhd**, attached to Lead, is a reporting style: the first line is always an actionable next step, multi-step items are numbered, and progress stays visible. Everything the leader produces is a report addressed to you, so this skill decides what you end up reading.
+- **tdd** (attached to Engineer): write a failing test first, make it pass minimally, then refactor cleanly.
+- **delivery-brief** (attached to Lead): open every sign-off report with a one-line decision, PR summary, and numbered points needing human judgment, and never merge without approval.
 
-A team's way of working settles into skills, and a new agent inherits it by attaching one. Import is not the only source: **New skill** offers four routes — create manually, import from a local folder, import from URL, and copy from a local runtime — not covered in detail here; see [Skills](/skills):
+Click **+** in the top right of **Skills** to see all four ways to add a skill — **Create manually**, **Import from local**, **Import from URL** (GitHub, ClawHub, Skills.sh), and **Copy from runtime** (see [Skills](/skills)):
 
-![The four ways to add a new skill](/images/docs/tutorial-skill-new-modal.webp)
+![The four ways to create or import a skill under the + menu](/images/docs/tutorial-skill-new-modal.webp)
 
-Read the files of a third-party skill before importing it: Multica does not sandbox them, and a skill's content is handed to the AI coding tool as-is.
+Review third-party skill files before importing them: Multica delivers skill content directly to the AI coding tool without sandboxing.
 
 ## The second issue: hand it to the squad
 
-Give the squad a complete piece of work: turn the site into a generic template — replace the real name with a placeholder photographer name and the real email with `hello@example.com`, leaving layout and content structure untouched. This issue does not have to be written by hand: describe the requirement to Lead in Chat and create it with **Create with agent**, assigned to the squad. A squad, like an agent or a member, can appear anywhere an assignee can:
+Now give **Website Team** a complete feature: convert the portfolio into a reusable template with placeholder identity (`Alex Rivera`) and email (`hello@example.com`), keeping layout and typography untouched.
 
-![Creating an issue from a conversation with Create with agent](/images/docs/tutorial-create-with-agent.webp)
+Press `C` to open **New issue**, stay in **Create with agent** mode, pick **Website Team** under **Created by**, and describe the request. A squad works anywhere an individual assignee does.
 
-In the generated issue, the requirement is already organized into a structured description, and the badge next to the title shows the leader has taken it:
+Multica creates `SITE-2` assigned to **Website Team**. From that moment, **Lead** drives the entire loop automatically:
 
-![MUL-2: Lead creates the issue and starts work](/images/docs/tutorial-issue-squad-created.webp)
+1. **Lead** scopes extra constraints (consistent identity across `<title>`, Open Graph tags, and `README.md`, plus a TDD config test) and dispatches `@Engineer`.
+2. **Engineer** writes the test first, implements the change, opens PR #2 (`SITE-2: Convert portfolio into reusable template`), and reports back.
+3. **Lead** wakes up automatically and routes PR #2 to `@Reviewer`.
+4. **Reviewer** verifies the diff and tests and responds **Ready to merge** with zero findings.
 
-What follows is all the leader's work. In its delegation comment it adds two constraints the issue did not have — the placeholder identity must be consistent site-wide, and the sweep must cover metadata and the README — before handing off to Engineer. When Engineer finishes, it reports the PR on the same timeline:
+![SITE-2 showing Lead dispatching Engineer, Engineer reporting PR #2, Lead routing to Reviewer, and Reviewer approving](/images/docs/tutorial-squad-dispatch.webp)
 
-![Lead delegates and Engineer reports the PR](/images/docs/tutorial-squad-dispatch.webp)
+With review passed, **Lead** moves `SITE-2` to **In Review** and delivers a concise sign-off brief (shaped by its `delivery-brief` skill), mentioning you with the PR summary, two judgment calls, and a clear promise not to merge until you approve:
 
-The review comes back with zero findings and Lead delivers: it mentions you for sign-off, leads with the conclusion, then the PR link, a description of the changes, and two points that need your judgment, and closes by saying that nothing merges without your approval:
+![Lead's concise delivery brief on SITE-2 mentioning Maya for sign-off](/images/docs/tutorial-squad-delivery.webp)
 
-![Lead's delivery report](/images/docs/tutorial-squad-delivery.webp)
-
-From organizing the requirement, to settling the approach, development, review, and the delivery report, no step of this issue needed you to connect it. Sign-off works the same as on MUL-1; you can also have it start a local server and look in the browser, which is not repeated here. Done is still yours: reply to merge, or change the status by hand.
+From scoping to implementation, testing, review, and sign-off packaging, you did not have to manually connect a single hand-off.
 
 ## Automation: Autopilot
 
-Every trigger so far started with you: assignment, mention, chat. **Autopilot** is a fourth kind of trigger, starting work automatically on a schedule.
+Every run so far started from you: an assignment, a mention, or a chat message. **Autopilot** adds scheduled and webhook-driven automation so recurring maintenance runs without anyone remembering to trigger it.
 
 <Steps>
 <Step>
 
-Configuring it takes one sentence: tell Multica helper that at nine every Monday morning, Reviewer should run a full check over the site's repository — redundancy and dead code, questionable structure, places that could follow conventions better — writing findings into issue comments and changing no code:
+Ask **Multica helper** in Chat to create a weekly Monday 9:00 AM Autopilot assigned to **Reviewer** in **Create issue** mode: check out `personal-website`, scan for dead code, unused exports, outdated dependencies, and type improvements, and post findings without modifying code.
 
-![The helper creating an autopilot](/images/docs/tutorial-autopilot-create.webp)
+Open **Autopilot** in the app rail to inspect the configured rule — Runbook, schedule (`0 9 * * 1`, timezone, next run time), execution mode (**Create issue** vs. **Run only**), and the **Issue wakeups** view for one-off follow-ups on existing issues.
 
-</Step>
-<Step>
+Rather than waiting for Monday, click **Run now** in the top right to trigger a run immediately:
 
-Open the **Autopilot** page: the executor, the prompt, and the schedule (cron plus timezone) are all configured. There are two run modes:
-
-- **Create Issue** (default): every trigger creates an issue first, so the work lands on the board with history and comments identical to any other issue;
-- **Run only**: executes without creating an issue, leaving a record only in the autopilot's run history; if a run finds nothing, nothing shows up on the board.
-
-A periodic check uses Create Issue mode. Rather than waiting until Monday, click **Run now** to trigger once immediately:
-
-![Autopilot detail: the schedule and Run now](/images/docs/tutorial-autopilot-detail.webp)
+![Autopilot detail page showing the Runbook, Monday 9:00 AM schedule, and Run now button](/images/docs/tutorial-autopilot-detail.webp)
 
 </Step>
 <Step>
 
-The issue is created and Reviewer starts checking. From then on, at the same time every Monday, the same check creates a new issue automatically, with nobody needing to trigger it:
+Multica immediately creates `SITE-3`, assigns **Reviewer**, and starts the read-only health check. Every Monday at 9:00 AM from now on, the same audit runs automatically:
 
-![An issue created automatically by Autopilot](/images/docs/tutorial-autopilot-issue.webp)
+![SITE-3 created automatically by the Autopilot with Reviewer running checks](/images/docs/tutorial-autopilot-issue.webp)
 
 </Step>
 </Steps>
 
-Triggers support webhooks in addition to schedules, and the executor can also point at a squad — see [Autopilots](/autopilots).
+Autopilots also support GitHub/GitLab/generic **webhooks** and can target a **Squad** as the assignee — see [Autopilots](/autopilots) and [Issue wakeups](/issue-wakeups).
 
 ## Working with other people
 
-So far you have been the only human member of the workspace. Under **Settings → Members**, invite others by email; they create issues, @-mention agents, and join squads the same way you do, with several people and several agents working together on the same set of issues:
+So far you have been the only human in the workspace. Click the **Invite member** icon in the **Team** panel header — or open **Settings → Members** — to invite teammates by email. Choose **Member**, **Admin**, or a project-scoped **Guest** (free, no seat, scoped only to shared projects):
 
-![Inviting a member to the workspace by email](/images/docs/tutorial-invite-member.webp)
+![Settings -> Members with the Invite member dialog open showing Member, Admin, and Guest roles](/images/docs/tutorial-invite-member.webp)
+
+Invited teammates create issues, `@`-mention shared agents, inspect Environments, and join squads right alongside you.
 
 ## Closing
 
-Once issues pile up, there are tools for organizing them: a **Project** groups related issues and tracks them as one unit (see [Projects](/projects)). More ways to organize are being added, and **Space** is close to ready.
+As your work grows beyond a couple of issues, Multica gives you clean structure to scale this exact loop:
 
-Looking back at the path: starting from an empty workspace, connecting one computer, building four agents, running two issues, then handing coordination to a leader and periodic checks to Autopilot. By the end, all that is left for you is describing the requirement and signing off on the result.
+- **Spaces** keep day-to-day focus separate: **Work** (Inbox, saved Views, Projects), **Team** (Agents, Squads, Skills, Runtimes, Analytics), **Chat**, and **Autopilot**.
+- **Projects** group related issues under shared instructions, repositories, folders, progress forecasts, and optional custom [Workflows](/workflows) that hand off between stages automatically.
 
-Multica is still iterating quickly; more capabilities are in the [documentation](/).
+Looking back at the full arc: starting from an empty workspace, you connected your computer, built four specialized agents, shipped and previewed your first PR with Environments, encoded feedback into instructions and reusable skills, handed coordination to a squad, and automated weekly audits with Autopilot. By the end, your job narrows to setting direction and signing off on results.
 
 ## Next steps
 
-- [Core concepts](/concepts) — meet all of Multica's core objects in three minutes.
-- [Squads](/squads) — how a leader routes work, and when to use a squad instead of a single agent.
-- [Skills](/skills) — import, write, and share agent methods.
-- [Autopilots](/autopilots) — full configuration for the schedule and webhook trigger types.
+- [Core concepts](/concepts) — how every Multica object fits together in three minutes.
+- [Environments](/environments) — declare `.multica/environments.toml` for one-click previews and live logs.
+- [Projects](/projects) — organize multi-issue initiatives with shared repos, folders, and progress tracking.
+- [Squads](/squads) — leader routing rules, re-trigger behavior, and squad operating protocol.
+- [Skills](/skills) — write, import, update, and share reusable agent methods.
+- [Autopilots](/autopilots) — schedules, webhooks, payload filtering, and run history.

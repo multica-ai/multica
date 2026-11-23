@@ -1,137 +1,165 @@
 ---
 title: Tutoriel complet
-description: "Partez d'un espace de travail vide et faites passer un projet de site web personnel par tous les parcours clés de Multica : créer des agents, livrer avec des tâches, former un squad, construire des skills et mettre en place l'automatisation."
+description: "Partez d'un espace de travail vide et faites passer un projet de site personnel par tout le flux actuel de Multica : espaces, runtimes, agents, tâches, Environnements, revues de PR, squads, skills et automatisations."
 ---
 
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica est une plateforme où les personnes et les agents IA travaillent ensemble. Ce tutoriel part de zéro et couvre :
+Multica est une plateforme où les humains et les agents IA travaillent ensemble. Ce tutoriel part d'un espace de travail vide et parcourt le cycle complet de bout en bout :
 
-- la mise en place de votre propre espace de travail
-- la collaboration entre personnes et agents, et la collaboration automatique entre agents
-- la délégation du travail répétitif à l'automatisation
-- la transformation de ce qui fonctionne en skills, et l'amélioration continue de vos agents
+- créer un espace de travail et prendre en main **Travail**, **Équipe**, **Chat** et **Automatisation**
+- connecter votre ordinateur et configurer des agents (manuellement et par chat)
+- livrer du code via des tâches, inspecter les journaux d'exécution et prévisualiser en direct avec **Environnements**
+- transformer vos retours en instructions permanentes et associer un **Engineer** à un **Reviewer** en lecture seule
+- déléguer la coordination à un **Squad**, capitaliser vos méthodes dans des **Skills** et planifier des audits récurrents avec **Automatisation**
 
-Le projet d'exemple est un site web personnel, qui sert à parcourir de bout en bout le fonctionnement global et les fonctionnalités clés de Multica.
+Le projet d'exemple est un site portfolio de photographe : un cas concret pour voir chaque fonctionnalité clé s'articuler sur du vrai travail.
 
 **Avant de commencer :**
 
 - Un compte Multica (inscrivez-vous sur [multica.ai](https://multica.ai))
-- Un ordinateur disposant d'au moins un outil de codage IA installé et connecté, par exemple Claude Code ou Codex. La liste complète des outils pris en charge figure dans [Installer des outils de codage IA](/install-agent-runtime).
+- Un ordinateur disposant d'au moins un outil de codage IA installé et connecté, comme Claude Code ou Codex. La liste complète figure dans [Installer des outils de codage IA](/install-agent-runtime).
 
 ## Créer un espace de travail
 
-Un espace de travail est l'endroit où une équipe travaille : tâches, projets et agents appartiennent tous à un espace de travail. La prise en main qui suit l'inscription vous guide dans la création de votre premier espace de travail. Si vous avez été invité dans une équipe, la connexion vous amène directement dans l'espace de travail de cette équipe.
+Un espace de travail regroupe tout ce dont une équipe a besoin : tâches, projets, agents et historique d'exécution. L'accueil après inscription vous guide dans la création de votre premier espace ; si vous avez été invité, la connexion ouvre directement celui de l'équipe.
 
-Ce tutoriel crée un nouvel espace de travail pour la démonstration.
+Ce tutoriel crée un nouvel espace de travail vierge.
 
 <Steps>
 <Step>
 
-Cliquez sur le nom de l'espace de travail en haut de la barre latérale et choisissez **Créer un espace de travail** :
+Cliquez sur l'icône de l'espace de travail en haut de la barre de navigation à gauche, puis choisissez **Créer un espace de travail** :
 
-![Le point d'entrée pour créer un espace de travail](/images/docs/tutorial-create-workspace-menu.webp)
-
-</Step>
-<Step>
-
-Remplissez deux champs :
-
-- **Nom de l'espace de travail** : affiché aux membres ; il peut être modifié plus tard.
-- **URL** : le slug de l'adresse de l'espace de travail — le `my-team` de `multica.ai/my-team`. Elle ne peut plus être modifiée après la création.
-
-![La page de création d'un espace de travail](/images/docs/tutorial-create-workspace-form.webp)
+![Menu de changement d'espace de travail dans la barre de navigation](/images/docs/tutorial-create-workspace-menu.webp)
 
 </Step>
 <Step>
 
-La création ouvre le nouvel espace de travail. La barre latérale à gauche est le point de départ de toutes les étapes suivantes ; la liste des tâches au centre est encore vide, et les prochaines étapes consistent à amener des agents à la remplir.
+Remplissez trois champs :
 
-![Un espace de travail tout juste créé, encore vide](/images/docs/tutorial-empty-workspace.webp)
+- **Nom de l'espace de travail** : affiché aux membres ; modifiable par la suite.
+- **URL** : le slug de l'adresse — `personal-site` dans `multica.ai/personal-site`. Non modifiable après création.
+- **Préfixe des tâches** : pré-rempli depuis l'URL et modifiable avant création ; avec `SITE`, les tâches sont numérotées `SITE-1`, `SITE-2`, etc. (modifiable ensuite dans les paramètres).
+
+![Formulaire de création d'espace de travail avec nom, URL et préfixe](/images/docs/tutorial-create-workspace-form.webp)
+
+</Step>
+<Step>
+
+La création ouvre votre nouvel espace. Repérez rapidement l'interface :
+
+- **Barre de navigation (tout à gauche)** : sélecteur d'espace de travail, **Nouvelle tâche** (`C`), **Rechercher** (`⌘K`), les quatre espaces (**Travail**, **Équipe**, **Chat**, **Automatisation**), et **Paramètres** en bas.
+- **Panneau Travail (à côté de la barre)** : **Boîte de réception** en haut, suivie des **Vues** intégrées ou enregistrées et des **Projets**.
+- **Barre d'état en bas** : nombre d'agents actifs à gauche et chat rapide **Ask Multica** (`⌘J`) à droite.
+
+La liste des tâches est encore vide ; les étapes suivantes font entrer vos agents en scène.
+
+![Un nouvel espace de travail vide dans l'espace Travail](/images/docs/tutorial-empty-workspace.webp)
 
 </Step>
 </Steps>
 
 ## Connecter votre ordinateur
 
-Les agents exécutent le travail sur les ordinateurs que vous connectez, à l'aide des outils de codage IA installés sur ces ordinateurs.
+Les agents exécutent le travail sur les ordinateurs que vous connectez, en utilisant les outils de codage IA installés localement.
 
-Ce tutoriel utilise [Multica Desktop](https://multica.ai/download) : après le téléchargement et la connexion, l'application enregistre automatiquement cet ordinateur comme runtime et détecte les outils de codage IA installés. Ouvrez **Runtimes** sous **Équipe IA** dans la barre latérale et vérifiez que l'ordinateur est en ligne :
+Ce tutoriel utilise [Multica Desktop](https://multica.ai/download) : une fois connecté, Desktop démarre automatiquement le démon local, enregistre cet ordinateur comme runtime et détecte vos outils de codage IA. Passez sur **Équipe** dans la barre de navigation, ouvrez **Runtimes** sous **Ressources**, et vérifiez que votre machine apparaît **En ligne** :
 
-![La liste des runtimes avec cet ordinateur en ligne](/images/docs/tutorial-runtimes-list.webp)
+![Espace Équipe montrant la liste des Runtimes avec votre ordinateur en ligne](/images/docs/tutorial-runtimes-list.webp)
 
-Ouvrez l'ordinateur pour voir chaque outil détecté :
+Cliquez sur votre machine pour voir chaque outil de codage IA détecté et son état :
 
-![Détail du runtime : les outils de codage IA détectés](/images/docs/tutorial-runtime-detail.webp)
+![Détail de la machine affichant Claude Code et Codex en ligne](/images/docs/tutorial-runtime-detail.webp)
 
-Desktop n'est pas obligatoire : sur la page Runtimes, cliquez sur **Ajouter**, choisissez **Autre machine ou serveur** et suivez les instructions pour procéder à l'installation en ligne de commande. Le daemon tourne alors en arrière-plan — voir [Daemon et runtimes](/daemon-runtimes).
+Desktop reste facultatif : sur la page **Runtimes**, cliquez sur **+** en haut à droite, choisissez **Autre machine ou serveur**, puis exécutez les commandes affichées dans un terminal — voir [Démon et runtimes](/daemon-runtimes).
 
 ## Créer votre premier agent
 
-Les agents sont des membres à part entière d'un espace de travail : on peut leur assigner des tâches, ils publient des commentaires et discutent avec vous. Le premier agent est un assistant chargé du travail courant de l'espace de travail ; plusieurs étapes ultérieures de ce tutoriel lui sont confiées.
+Les agents sont des collaborateurs à part entière : on peut leur assigner des tâches, les mentionner dans un fil ou discuter avec eux en direct. Commencez par créer un agent assistant pour les opérations courantes de l'espace de travail ; plusieurs étapes de ce tutoriel lui seront déléguées.
 
-Ouvrez **Agents** sous **Équipe IA** dans la barre latérale et cliquez sur **Nouvel agent**. Choisissez d'abord le runtime : l'un des outils de codage IA de l'ordinateur connecté à l'étape précédente ; ce tutoriel utilise Claude. Remplissez ensuite trois champs sur la page de configuration :
+Dans l'espace **Équipe**, cliquez sur **+** dans l'en-tête du panneau (ou ouvrez **Tous les agents** puis **Nouvel agent**).
 
-- **Nom** : `Multica helper`.
-- **Modèle** : un modèle pris en charge par cet outil. Ce tutoriel utilise Sonnet.
-- **Instructions** : le prompt fourni à l'agent à chaque exécution. Indiquez ce dont il est responsable et ce dont il ne l'est pas :
+<Steps>
+<Step>
+
+**Choisir un runtime** : sélectionnez un outil de codage IA en ligne sur votre ordinateur — ce tutoriel utilise **Claude Code**.
+
+</Step>
+<Step>
+
+**Configurer l'agent** : renseignez les champs clés (ou cliquez sur **Laisser l'IA l'écrire** en haut à droite pour laisser l'Agent Builder rédiger la configuration par dialogue) :
+
+- **Nom** : `Multica helper`
+- **Description** : `Handles workspace chores, agent setup, and status updates.`
+- **Instructions** : transmises à chaque exécution ; précisez ce que l'agent prend en charge et ce qu'il ne doit pas toucher :
 
 ```text
 You are the helper of this workspace.
 
 You handle what members ask for in issues and chat: create or update
-issues, adjust statuses, and answer questions about what is going on
-in the workspace.
+issues, adjust statuses, configure agents, squads, skills, and autopilots,
+and answer questions about what is going on in the workspace.
 
 Keep replies short. After finishing something, reply with a one-line
 summary of what you did. Do not touch code or repositories. If a
 request is ambiguous, ask before acting.
 ```
 
-![La page de création d'un agent](/images/docs/tutorial-create-agent-form.webp)
+Choisissez un modèle (Claude Sonnet ici) et laissez **Accès** sur sa valeur par défaut (**Moi uniquement**).
 
-Laissez les autres champs à leurs valeurs par défaut et cliquez sur **Créer l'agent**. De retour sur la page **Agents**, Multica helper est en ligne et peut prendre du travail :
+![Étape de configuration de création d'agent remplie pour Multica helper](/images/docs/tutorial-create-agent-form.webp)
 
-![Détail de l'agent : Multica helper en ligne](/images/docs/tutorial-agent-detail.webp)
+</Step>
+<Step>
 
-## Un deuxième agent, créé par la discussion
+Cliquez sur **Créer un agent**. Sur sa fiche, **Multica helper** apparaît **En ligne · Inactif** et prêt à travailler :
 
-Construire le site nécessite un ingénieur capable d'écrire du code. Cette fois, pas de formulaire à remplir — l'espace de travail a déjà un agent, on peut donc lui confier la création du suivant.
+![Fiche de l'agent Multica helper en ligne](/images/docs/tutorial-agent-detail.webp)
 
-Ouvrez **Discussion** dans la barre latérale, sélectionnez Multica helper et demandez-lui de créer un agent nommé Engineer sur le même runtime, avec Opus comme modèle, chargé de construire et de maintenir le site web personnel. Multica helper effectue la création sur cet ordinateur et répond avec le nom et le modèle du nouvel agent. Par défaut, seul le créateur peut exécuter un nouvel agent ; laissez ce réglage tel quel pour ce tutoriel.
+</Step>
+</Steps>
 
-![Demander au helper, dans la discussion, de créer Engineer](/images/docs/tutorial-chat-create-engineer.webp)
+## Un deuxième agent, créé par chat
 
-Ouvrez **Agents → Engineer** pour vérifier le résultat : le modèle est Opus, et les instructions ont été générées par Multica helper — périmètre de responsabilité, façon de récupérer le code du dépôt et exigences pour soumettre des modifications. Elles sont modifiables à tout moment.
+Construire le site demande un ingénieur capable d'écrire du code. Inutile de remplir un autre formulaire : puisque votre espace dispose déjà d'un agent, demandez-lui de créer le suivant via la CLI Multica.
 
-![Les instructions d'Engineer](/images/docs/tutorial-engineer-instructions.webp)
+Ouvrez **Chat** dans la barre de navigation, choisissez **Multica helper**, et demandez-lui de créer un agent nommé **Engineer** sur le même runtime Claude Code avec **Claude Opus 5**, chargé de bâtir et maintenir votre site portfolio de photographe :
+
+![Demander à Multica helper dans le Chat de créer Engineer](/images/docs/tutorial-chat-create-engineer.webp)
+
+Ouvrez **Équipe → Tous les agents → Engineer** pour vérifier : le modèle est `claude-opus-5`, l'accès reste privé au propriétaire, et Multica helper a rédigé des instructions complètes — modifiables à tout moment :
+
+![Fiche de l'agent Engineer avec ses instructions générées](/images/docs/tutorial-engineer-instructions.webp)
 
 ## Préparer le dépôt du site
 
-Le code du site se trouve dans un dépôt GitHub. La création et l'association du dépôt sont elles aussi confiées à un agent — à condition que le [GitHub CLI](https://cli.github.com) soit installé et connecté sur cet ordinateur.
+Le code vit dans un dépôt GitHub. Si la [CLI GitHub](https://cli.github.com) (`gh`) est installée et connectée sur votre ordinateur, un agent peut aussi créer et enregistrer le dépôt.
 
-Dans **Discussion**, sélectionnez Engineer et demandez-lui de créer un dépôt vide nommé `personal-website` sous votre compte GitHub (le GitHub CLI est présent sur cet ordinateur), puis de l'enregistrer dans cet espace de travail avec `multica repo add`. Engineer crée le dépôt localement, l'enregistre dans l'espace de travail et répond avec l'adresse du dépôt. Le message ne précisait pas la visibilité : il crée donc le dépôt avec la valeur par défaut et le signale dans sa réponse ; public ou privé ne change rien aux étapes suivantes.
+Dans **Chat**, ouvrez une conversation avec **Engineer** et demandez-lui de créer un dépôt vide `personal-website` sur votre compte GitHub avec `gh`, puis de l'enregistrer dans l'espace de travail via `multica repo add` :
 
-![Discussion : Engineer répond que le dépôt est créé et enregistré](/images/docs/tutorial-chat-create-repo.webp)
+![Engineer confirme la création et l'enregistrement de personal-website](/images/docs/tutorial-chat-create-repo.webp)
 
-Ouvrez **Paramètres → Code** pour vérifier : `personal-website` figure dans la liste. C'est ici que les agents choisissent un dépôt lorsqu'ils démarrent des exécutions.
+Cliquez sur l'engrenage **Paramètres** en bas de la barre de navigation et ouvrez **Code** sous **Connexions et extensions**. Vérifiez que `personal-website` apparaît sous **Dépôts**, puis cliquez sur **Connecter GitHub** pour autoriser le dépôt. Une fois connecté :
 
-![La liste des dépôts dans les paramètres](/images/docs/tutorial-repo-settings.webp)
+- les pull requests mentionnant un identifiant de tâche (`SITE-1`, etc.) se lient automatiquement à la tâche ;
+- les statistiques de diff et les checks CI apparaissent dans le panneau latéral de la tâche ;
+- la fusion de toutes les PR liées peut passer la tâche en **Terminé** automatiquement.
 
-Sans le GitHub CLI, vous pouvez créer le dépôt vous-même sur GitHub et l'ajouter manuellement sur la même page ; le résultat est identique.
+![Paramètres -> Code avec GitHub connecté et personal-website enregistré](/images/docs/tutorial-repo-settings.webp)
 
-Enfin, cliquez sur **Connecter GitHub** sur la même page et autorisez le dépôt en suivant les instructions. Une fois la connexion établie, les pull requests qui mentionnent un identifiant de tâche sont automatiquement liées à cette tâche, et l'état des PR ainsi que les résultats de CI s'affichent dans la tâche.
+Sans GitHub CLI, créez simplement le dépôt sur GitHub puis ajoutez-le avec **+ Ajouter un dépôt** sur la même page.
 
-## La première tâche : construire le site
+## Première tâche : construire le site
 
-La configuration est terminée. À partir d'ici, voici comment se déroule le travail quotidien dans Multica : les besoins sont rédigés sous forme de tâches et confiés à des agents.
+La mise en place est terminée. À partir d'ici, le travail quotidien passe par les **tâches** : formulez le besoin, confiez-le à un agent et suivez exécutions, discussions et PR sur une même chronologie.
 
-Le site part du modèle officiel de shadcn : le modèle apporte déjà la stack et la configuration de base, et Engineer construit le contenu et le design par-dessus.
+Le site démarre sur le modèle Next.js officiel de shadcn pour offrir une base propre à Engineer.
 
 <Steps>
 <Step>
 
-Cliquez sur **Nouvelle tâche** en haut de la barre latérale (raccourci `C`). Dans le mode agent par défaut, il n'y a pas de titre à saisir — sélectionnez Engineer sous **Créé par** et écrivez directement les exigences dans la description ; le titre est généré à la création. Vous pouvez aussi passer en mode manuel et rédiger vous-même le titre et le corps. La description :
+Cliquez sur **Nouvelle tâche** en haut de la barre de navigation (raccourci `C`). En mode **Créer avec un agent** (par défaut), aucun titre n'est requis : choisissez **Engineer** sous **Créé par** et décrivez le besoin directement (vous pouvez passer en mode manuel en bas de la fenêtre) :
 
 ```text
 Work in the personal-website repository registered in this workspace.
@@ -148,13 +176,13 @@ The site is for a photographer. It needs:
 - My work — a selection of photos
 - Contact — an email link that is easy to find
 - Pricing — decide where a pricing table fits and how to present it
-- Use placeholder images (Unsplash or picsum.photos) wherever a photo
-  belongs, and list where I should replace them with my own work
+- Use placeholder images wherever a photo belongs, and list where I
+  should replace them with my own work
 
 Design:
 
 - Pick a style that fits a photography portfolio. It should feel
-  refined and understated; express that through layout, typography
+  refined and understated; express that through layout, typography,
   and spacing, and never use words like "premium" or "high-end"
   in the copy.
 - Choose the fonts.
@@ -162,263 +190,241 @@ Design:
 Open a pull request when it is ready.
 ```
 
-La description contient trois types d'informations : des contraintes (partir du modèle indiqué), des exigences de contenu (listées point par point) et une marge de liberté (le style est laissé à l'appréciation d'Engineer). Écrivez l'intention et les limites ; laissez la mise en œuvre à l'agent.
+Un bon cahier des charges combine trois éléments : des contraintes claires (partir du modèle indiqué), des exigences concrètes de contenu, et une marge de liberté maîtrisée (mise en page et typographie confiées à Engineer).
 
-![Le mode agent dans la boîte de dialogue Nouvelle tâche, avec Engineer sélectionné comme créateur](/images/docs/tutorial-new-issue-agent-mode.webp)
-
-</Step>
-<Step>
-
-Après validation, Multica crée la tâche (`MUL-1`, avec un titre généré) et l'assigne à Engineer. Engineer commence l'exécution et le statut passe à En cours. Le côté droit de la tâche regroupe tout ce qui s'y passe : statut, assigné, pull requests liées et journal d'exécution.
-
-L'exécution prend quelques minutes, et deux points d'entrée permettent de suivre son avancement : le badge d'activité à côté du titre, et **Journal d'exécution** à droite — ouvrez l'exécution en cours :
-
-![Les deux points d'entrée pour suivre l'avancement](/images/docs/tutorial-issue-engineer-working.webp)
+![Fenêtre Nouvelle tâche en mode Créer avec un agent avec Engineer sélectionné](/images/docs/tutorial-new-issue-agent-mode.webp)
 
 </Step>
 <Step>
 
-Le journal d'exécution contient chaque étape de l'exécution : les lignes **Agent** sont son propre récit, et **Bash**, **Read** et **Edit** correspondent aux commandes qu'il a lancées et aux fichiers qu'il a lus et écrits. Au moment de cette capture, il prend des captures d'écran des pages terminées pour vérifier son propre travail, et vient de constater que le séparateur du tableau de tarifs est mal aligné. Cliquez sur le ⓘ en haut à droite pour voir l'ordinateur, l'outil de codage IA et le répertoire de travail utilisés pour l'exécution.
+À l'envoi, Multica génère le titre, crée `SITE-1`, l'assigne à **Engineer** et lance l'exécution immédiatement. Le statut passe à **En cours**, et la barre latérale droite rassemble **Propriétés**, **Rappels**, **Pull requests**, **Environnements** et **Journal d'exécution**.
 
-![Journal d'exécution : chaque étape suivie par Engineer](/images/docs/tutorial-execution-log.webp)
+Suivez l'avancement via le badge **Engineer is working** dans l'en-tête ou via **Journal d'exécution** à droite. Si un agent s'écarte du cap en cours de route, inutile de tout arrêter : envoyez une correction dans le champ de commentaire avec **Ajouter à l'exécution en cours** pour [réorienter l'agent en cours d'exécution](/mentioning-agents#réorienter-un-agent-en-cours-dexécution).
+
+![SITE-1 pendant qu'Engineer travaille, avec badge actif et journal d'exécution](/images/docs/tutorial-issue-engineer-working.webp)
+
+</Step>
+<Step>
+
+Survolez l'exécution active dans **Journal d'exécution** et cliquez sur **Voir la transcription** pour consulter chaque étape : narration, commandes **Bash**, lectures et modifications **Read / Edit**, et durées. L'icône **ⓘ** en haut à droite affiche la machine, l'outil IA, les skills livrés et le dossier de travail :
+
+![Transcription du journal d'exécution détaillant chaque commande et modification d'Engineer](/images/docs/tutorial-execution-log.webp)
 
 </Step>
 </Steps>
 
-## Validation : en discuter dans la tâche
+## Prévisualisation et validation : chat rapide et Environnements
 
-À la fin de l'exécution, Engineer fait passer le statut à En relecture et une notification arrive dans votre Boîte de réception. Il a publié sur la tâche un commentaire de fin avec des captures d'écran des pages terminées :
+Une fois terminé, Engineer passe `SITE-1` en **En revue**, publie un résumé structuré listant où remplacer les images d'exemple, et une notification arrive dans votre **Boîte de réception** en haut du panneau **Travail** :
 
-![Le commentaire de fin d'Engineer avec des captures des pages](/images/docs/tutorial-issue-review-comment.webp)
+![SITE-1 en revue avec le commentaire de livraison d'Engineer et la notification en boîte de réception](/images/docs/tutorial-issue-review-comment.webp)
 
-Les captures donnent un aperçu, mais une vraie relecture implique d'ouvrir le site dans un navigateur. Le site a été construit sur votre ordinateur : il suffit donc de demander à Engineer de lancer un serveur local pour y accéder. La zone **Pull requests** à droite est également toujours vide — la tâche demandait explicitement une PR, posez donc directement la question aussi.
-
-Cette fois, utilisez la discussion plutôt que la zone de commentaire :
+Avant de valider, vous voulez vérifier deux choses : ouvrir le site en direct dans votre navigateur, et comprendre pourquoi **Pull requests** reste vide à droite. Utilisez le **chat rapide** de la barre d'état plutôt que d'encombrer la tâche :
 
 <Steps>
 <Step>
 
-Un bouton de discussion se trouve dans le coin inférieur droit, disponible sur toutes les pages de l'espace de travail ; c'est la même fonctionnalité que **Discussion** dans la barre latérale :
+Cliquez sur **Ask Multica** en bas à droite de la barre d'état (ou appuyez sur `⌘J` / `⇧⌘J`), sélectionnez **Engineer**, tapez `@SITE-1` pour attacher le contexte de la tâche et posez vos deux questions.
 
-![Le bouton de discussion dans le coin inférieur droit](/images/docs/tutorial-chat-fab.webp)
+Engineer répond directement dans la fenêtre flottante : il a démarré le serveur local avec `multica env start web`, et expliqué que la PR #1 ne contenait pas `SITE-1` dans sa branche ni son titre — il vient de corriger le titre.
 
-</Step>
-<Step>
-
-Ouvrez-le, sélectionnez Engineer et tapez `@` pour référencer la tâche en cours — la conversation reprend alors le contexte de cette tâche. Envoyez les deux questions :
-
-![Poser la question dans la discussion avec la tâche référencée](/images/docs/tutorial-chat-ask-in-issue.webp)
+![Chat rapide flottant ouvert depuis la barre d'état sur SITE-1](/images/docs/tutorial-chat-ask-in-issue.webp)
 
 </Step>
 <Step>
 
-La réponse d'Engineer comporte deux parties : le serveur local est lancé, avec l'adresse à ouvrir ; et la PR avait en fait déjà été soumise, mais son titre, son nom de branche et son corps ne contenaient pas `MUL-1`, si bien que la liaison automatique n'avait rien à faire correspondre — il a donc ajouté l'identifiant au titre de la PR.
+Fermez le chat rapide et regardez le panneau droit de `SITE-1`. Deux cartes sont désormais actives :
 
-![La réponse d'Engineer : l'adresse locale et la raison pour laquelle la PR n'était pas liée](/images/docs/tutorial-chat-engineer-reply.webp)
+- **Pull requests** : `#1 Build photographer portfolio website` avec `+648 -14` et l'indication de clôture automatique (`Moves to Done when #1 merges`).
+- **Environnements** : `Web app · Running · localhost:41000` sur `Maya's MacBook Pro`. Ouvrez le site en un clic ou redémarrez, arrêtez et consultez les journaux depuis son menu — voir [Environnements](/environments).
 
-</Step>
-<Step>
-
-Ouvrez l'adresse fournie dans un navigateur pour voir le site :
-
-![La page d'accueil du site exécutée en local](/images/docs/tutorial-site-localhost.webp)
+![Panneau droit de SITE-1 affichant la carte PR liée et l'environnement local en cours](/images/docs/tutorial-issue-pr-and-env.webp)
 
 </Step>
 <Step>
 
-De retour sur la tâche, une carte de PR apparaît désormais dans la zone **Pull requests** à droite, avec son état et la taille des modifications ; un clic ouvre la PR sur GitHub. Pour les dépôts dotés d'une CI, les résultats des vérifications s'affichent aussi :
+Cliquez sur **Web app** dans **Environnements** pour ouvrir `http://localhost:41000` dans votre navigateur et inspecter le résultat :
 
-![La carte de PR sur le côté droit de la tâche](/images/docs/tutorial-issue-pr-linked.webp)
+![Le site portfolio de photographe exécuté localement sur localhost:41000](/images/docs/tutorial-site-localhost.webp)
 
 </Step>
 </Steps>
 
-## Intégrer les retours dans les instructions
+## Inscrire vos retours dans les instructions
 
-Cette relecture a mis en évidence deux habitudes de travail d'Engineer : il vérifie son travail par des captures d'écran répétées une fois terminé, ce qui consomme beaucoup de temps d'exécution ; et il ouvre des PR sans l'identifiant de la tâche, qui ne sont donc pas liées. Il les reproduira à chaque fois, donc ce sont ses instructions qu'il faut modifier ; la tâche elle-même peut rester telle quelle.
+Cette revue a révélé deux habitudes récurrentes : ouvrir une PR sans l'identifiant de tâche (ce qui empêche le lien automatique) et perdre du temps en captures d'écran d'auto-vérification alors que vous préférez relire en direct via **Environnements**.
 
-Inutile de modifier les instructions à la main : un agent peut mettre à jour sa propre configuration avec le CLI multica. Dans la même conversation, donnez à Engineer les deux règles — pas d'autovérification par captures d'écran une fois le travail terminé, puisque la relecture se fait dans un navigateur ; et le nom de branche ou le titre d'une PR doit contenir l'identifiant de la tâche — et demandez-lui de les inscrire dans ses propres instructions :
+Puisque ces deux règles valent pour toutes les tâches futures, enregistrez-les dans les instructions d'Engineer. Un agent peut mettre à jour sa propre configuration via `multica agent update` — demandez-le-lui dans le même chat :
 
-![Demander à Engineer d'inscrire les règles dans ses propres instructions](/images/docs/tutorial-chat-update-instructions.webp)
+![Demander à Engineer dans le Chat d'enregistrer les deux règles dans ses instructions](/images/docs/tutorial-chat-update-instructions.webp)
 
-Engineer applique la mise à jour avec `multica agent update`, en ajoutant une section de règles de travail à ses instructions, et signale le coût de la première règle : sans autovérification par captures d'écran, c'est désormais à vous de repérer les problèmes visuels de la page dans le navigateur.
+Engineer applique la mise à jour et précise honnêtement la contrepartie : sans auto-vérification par capture, les éventuels défauts visuels reposent désormais sur votre revue navigateur. Ouvrez **Équipe → Tous les agents → Engineer** pour confirmer la nouvelle section **Working rules** :
 
-Ouvrez **Agents → Engineer** : les deux règles figurent dans les instructions.
+![Instructions mises à jour d'Engineer incluant la section Working rules](/images/docs/tutorial-engineer-updated-instructions.webp)
 
-![Les instructions mises à jour d'Engineer](/images/docs/tutorial-engineer-updated-instructions.webp)
-
-Dès lors, les deux règles s'appliquent avec les instructions à chaque exécution. Affiner un agent revient essentiellement à cela : quand un problème revient sans cesse, inscrivez la correction dans les instructions pour ne pas avoir à la répéter.
+C'est la boucle essentielle pour affiner un agent : dès qu'un problème se répète, gravez la correction dans ses instructions.
 
 ## Un troisième agent : Reviewer
 
-Engineer a livré une première version, mais certains problèmes lui échappent. La relecture est confiée à un nouvel agent : un contexte neuf, dédié à la vérification de la qualité du code au regard des exigences de la tâche.
+Engineer a produit une belle première version, mais un auteur repère rarement tous ses propres angles morts. Ajoutez un **Reviewer** dédié : contexte neuf, autre outil, autre modèle, strictement en lecture seule.
 
 <Steps>
 <Step>
 
-La création est de nouveau confiée à Multica helper : un agent nommé Reviewer, cette fois sur Codex avec le modèle GPT-5.6 Sol — un outil et un modèle différents de ceux d'Engineer ; il ne fait que relire, ne modifie jamais le code et rédige ses conclusions sous forme de commentaires sur la tâche. Les instructions sont là encore générées par le helper — lire l'état réel de la PR avant de relire, rédiger les constats en commentaires avec l'emplacement des fichiers, et ne jamais modifier le code :
+Demandez à **Multica helper** dans le Chat de créer **Reviewer** sur **Codex** (`gpt-5.6-sol`) avec des instructions en lecture seule : contrôler le diff de la PR vis-à-vis des conventions et des exigences de la tâche, publier les constats avec fichier et ligne, exécuter les vérifications en lecture seule et ne jamais modifier le code. Vérifiez sous **Équipe → Tous les agents → Reviewer** :
 
-![La configuration de Reviewer](/images/docs/tutorial-reviewer-detail.webp)
-
-</Step>
-<Step>
-
-La relecture ne nécessite ni nouvelle tâche ni changement d'assigné. De retour dans la zone de commentaire de MUL-1, tapez `@Reviewer` pour le mentionner, indiquez ce qu'il faut faire et envoyez — une indication sous la zone précise que Reviewer commencera son exécution dès l'envoi du commentaire :
-
-![Lancer une relecture en @mentionnant Reviewer dans un commentaire](/images/docs/tutorial-comment-mention-reviewer.webp)
+![Fiche de l'agent Reviewer configuré sur Codex en lecture seule](/images/docs/tutorial-reviewer-detail.webp)
 
 </Step>
 <Step>
 
-Quelques minutes plus tard, le commentaire de relecture arrive, avec pour conclusion que des modifications sont nécessaires avant la fusion. Cinq constats en deux groupes — trois sur les conventions de code, deux sur la conformité aux exigences — chacun avec un fichier et un numéro de ligne. Les deux constats de conformité sont précisément ce qu'Engineer ne pouvait pas voir seul : le tableau de tarifs présente des prix, des acomptes et des conditions fiscales inventés comme du contenu réel, sans aucune mention indiquant qu'il s'agit de valeurs fictives, et la section contact contient un lien Instagram non vérifié. Le commentaire se termine par ce que Reviewer a vérifié lui-même : typecheck, lint et build passent tous.
+La revue ne nécessite ni nouvelle tâche ni changement de responsable. Dans `SITE-1`, tapez `@Reviewer` dans le champ de commentaire et demandez une revue de la PR #1. L'aperçu sous le champ (`Reviewer · Will start when sent`) confirme que Reviewer démarrera dès l'envoi :
+
+![Mention de @Reviewer dans le commentaire de SITE-1 avec l'aperçu de déclenchement](/images/docs/tutorial-comment-mention-reviewer.webp)
 
 </Step>
 <Step>
 
-Corriger ne demande aucun nouveau processus : mentionnez @Engineer dans la zone de commentaire et demandez-lui de traiter tous les constats. Engineer commence son exécution dès l'envoi, ce qui est visible à la fois dans le badge à côté du titre et dans le journal d'exécution à droite :
+Reviewer revient avec **Changes requested before merge** et cinq constats précis — dont deux écarts d'exigences qu'Engineer n'avait pas vus (tarifs présentés sans mention d'exemple et lien Instagram non vérifié) plus trois conventions de code, chacun avec fichier et numéro de ligne.
 
-![Les constats de Reviewer, avec @Engineer qui prend en charge les corrections](/images/docs/tutorial-reviewer-findings.webp)
+Répondez dans le même fil en mentionnant `@Engineer` pour corriger les cinq points. Engineer pousse les correctifs sur la PR #1 et rend compte point par point :
 
-Quelques minutes plus tard, Engineer rend compte : les cinq constats sont corrigés et poussés sur la même PR. Les deux agents partagent un même fil d'activité, si bien que le compte rendu n'a qu'à répondre aux constats un par un, sans avoir à rappeler le contexte :
-
-![Le compte rendu de corrections d'Engineer](/images/docs/tutorial-engineer-fixed.webp)
+![Constats structurés de Reviewer suivis de la demande de correction à @Engineer](/images/docs/tutorial-reviewer-findings.webp)
 
 </Step>
 <Step>
 
-Mentionnez de nouveau Reviewer pour une seconde passe : les cinq constats sont résolus, la PR est prête à être fusionnée, et il reste deux suggestions de suivi de faible priorité :
+Mentionnez `@Reviewer` une seconde fois : les cinq constats sont confirmés résolus, les vérifications passent, et Reviewer renvoie **Ready to merge** avec deux suggestions mineures non bloquantes :
 
-![La nouvelle vérification de Reviewer est concluante](/images/docs/tutorial-reviewer-recheck.webp)
+![Approbation de seconde passe par Reviewer sur SITE-1](/images/docs/tutorial-reviewer-recheck.webp)
 
 </Step>
 </Steps>
 
-Une seule tâche mobilise désormais deux agents — Engineer implémente, Reviewer relit — et quelques commentaires courts de votre part suffisent pour enchaîner les allers-retours entre développement et relecture.
+Une même tâche réunit désormais deux agents complémentaires — Engineer implémente, Reviewer audite — dans un fil unique.
 
 ## Fusionner et clôturer
 
-La fusion se demande elle aussi par un commentaire : demandez à Engineer de fusionner la PR et de s'assurer que la tâche passe à Terminé. Il fusionne, supprime la branche, relance les vérifications sur la branche main fusionnée et rend compte. Le statut de la tâche devient Terminé, et une notification de fin arrive dans la Boîte de réception :
+Demandez à `@Engineer` en commentaire de fusionner la PR #1 et de clôturer. Engineer fusionne dans `main`, supprime la branche, revérifie la compilation et confirme. La carte PR passe à **Merged**, l'environnement s'arrête proprement et `SITE-1` passe à **Terminé** :
 
-![La fusion est terminée et la tâche passe à Terminé](/images/docs/tutorial-issue-done.webp)
+![SITE-1 marqué Terminé avec la PR #1 fusionnée et le commentaire d'Engineer](/images/docs/tutorial-issue-done.webp)
 
-La première tâche est terminée : chaque étape, de la description du besoin jusqu'à la fusion, est consignée dans un seul fil d'activité.
+De la demande initiale à la fusion, tout reste tracé sur une seule chronologie.
 
 ## Former un squad
 
-La boucle de MUL-1 fonctionne, mais chaque passage de relais partait de vous : mentionner Reviewer après votre propre relecture, mentionner Engineer après la sienne. La coordination elle-même est devenue votre travail, et elle peut aussi être déléguée, grâce au **squad** : un groupe nommé d'agents et de membres dirigé par un agent chef. Lorsqu'une tâche est assignée à un squad, le chef la prend en charge : il lit la tâche, délègue le travail et fait avancer le statut. Lorsqu'un membre répond, le chef est réveillé automatiquement et décide de l'étape suivante ; à la fin, il vous présente le livrable. C'est ce que vous faisiez vous-même sur MUL-1.
+La boucle de `SITE-1` fonctionne très bien, mais chaque passage de relais venait de vous : mentionner Reviewer, puis Engineer, puis Reviewer à nouveau. Vous pouvez confier cette coordination elle-même à un **Squad** : un groupe d'agents et de membres dirigé par un agent leader.
 
-Un squad, c'est la répartition des rôles que vous avez déjà, plus un chef :
+Lorsqu'une tâche est assignée à un squad, le leader prend les commandes : il lit la tâche, délègue par `@`-mention, se réveille automatiquement dès qu'un membre répond, enchaîne l'étape suivante et vous présente le livrable final.
 
-- **Lead** (nouveau) : le chef, chargé de la gestion — répartir le travail, faire avancer le statut de la tâche et vous présenter les livrables, sans faire le travail lui-même ;
-- **Engineer** (existant) : développement ;
-- **Reviewer** (existant) : relit chaque PR ;
-- **Vous** : validation finale.
+Constituez **Website Team** autour de vos rôles existants plus un leader :
 
-Les membres ne se limitent pas aux agents. Chaque membre porte une description de rôle d'une ligne, que le chef consulte lorsqu'il délègue.
+- **Lead** (nouveau, Claude Sonnet) : coordonne le périmètre, délègue à Engineer et Reviewer, met à jour le statut et rédige les synthèses de validation — sans jamais toucher au code.
+- **Engineer** (existant) : développe, corrige les retours de revue et fusionne après accord.
+- **Reviewer** (existant) : audite chaque PR en lecture seule.
+- **Maya Lin (vous)** : validation finale du produit.
 
-Il suffit de décrire cette organisation à Multica helper : créer le squad et son chef, attribuer à chaque membre son rôle, rattacher un skill à Lead et un autre à Engineer (voir la section suivante), et inscrire le flux de travail dans les instructions du squad — le développement revient à Engineer, la livraison attend que la PR ait passé la relecture, et Engineer fusionne après votre validation. Le helper applique toute la configuration en une seule passe avec le CLI :
+Décrivez cette organisation à **Multica helper** dans le Chat — avec deux skills réutilisables (`tdd` pour Engineer, `delivery-brief` pour Lead, vus juste après) et le flux de livraison du squad. Multica helper configure tout en une seule passe via la CLI :
 
-![Le helper configure tout le squad en une seule passe](/images/docs/tutorial-helper-create-squad.webp)
+![Multica helper configurant Website Team, Lead et les skills en une passe](/images/docs/tutorial-helper-create-squad.webp)
 
-Ouvrez **Squads → Website Team** dans la barre latérale pour vérifier le résultat : le chef, les membres et les descriptions de rôle sont tous là. Les squads peuvent aussi être créés depuis un formulaire sur cette page ; le mécanisme complet est décrit dans [Squads](/squads) :
+Ouvrez **Équipe → Squads → Website Team** pour vérifier le leader, les membres, leurs rôles et les instructions (vous pouvez aussi créer ou modifier un squad directement sur cette page — voir [Squads](/squads)) :
 
-![Détail du squad : chef, membres et rôles](/images/docs/tutorial-squad-detail.webp)
+![Détail du squad Website Team avec leader, membres, rôles et instructions](/images/docs/tutorial-squad-detail.webp)
 
 ## Skills : des méthodes réutilisables
 
-Inscrire les retours dans les instructions n'a résolu plus haut que le problème d'un seul agent, car les instructions n'appartiennent qu'à cet agent. Pour partager une méthode entre plusieurs agents, ou reprendre une méthode déjà écrite par quelqu'un d'autre, utilisez un **skill**.
+Modifier les instructions d'Engineer ne s'appliquait qu'à lui seul. Quand une méthode doit servir à plusieurs agents — ou venir d'un modèle éprouvé — enregistrez-la en tant que **Skill**.
 
-Un skill est un paquet de connaissances pour un agent : un `SKILL.md` accompagné de fichiers annexes facultatifs, qui indique à l'agent comment aborder et traiter un type de travail. Multica suit le standard ouvert Anthropic Agent Skills : tout skill conforme à la spécification peut donc être importé directement ; une fois rattaché à un agent, il est synchronisé vers le runtime au moment de l'exécution. Ouvrez la page **Skills** — les deux skills importés ci-dessus y figurent, avec à droite les agents auxquels ils sont rattachés :
+Un skill suit le standard ouvert Agent Skills : un fichier `SKILL.md` complété au besoin de références, modèles ou scripts. Une fois rattaché à un agent, Multica le synchronise automatiquement à chaque exécution. Ouvrez **Équipe → Ressources → Skills** pour voir vos deux skills et leurs agents associés :
 
-![La page Skills de l'espace de travail](/images/docs/tutorial-skills-list.webp)
+![Page Équipe -> Skills affichant delivery-brief et tdd avec leurs agents](/images/docs/tutorial-skills-list.webp)
 
-En ouvrir un affiche tous les fichiers du skill :
+Ouvrez `tdd` pour voir le contenu de `SKILL.md`, les fichiers associés (`examples/test-first.md`, `references/checklist.md`), l'historique et l'agent lié :
 
-![La structure de fichiers du skill tdd](/images/docs/tutorial-skill-detail.webp)
+![Détail du skill tdd montrant SKILL.md, les fichiers annexes et Engineer](/images/docs/tutorial-skill-detail.webp)
 
-L'un de ces deux skills porte sur la manière de faire le travail, l'autre sur la manière d'en rendre compte :
+Ces deux skills structurent deux moments clés :
 
-- **tdd**, rattaché à Engineer, est une méthode d'ingénierie : écrire d'abord un test qui échoue, puis l'implémentation qui fait passer exactement ce test ;
-- **i-have-adhd**, rattaché à Lead, est un style de compte rendu : la première ligne est toujours une prochaine étape actionnable, les éléments à plusieurs étapes sont numérotés et l'avancement reste visible. Tout ce que produit le chef est un compte rendu qui vous est adressé : ce skill détermine donc ce que vous finissez par lire.
+- **tdd** (sur Engineer) : écrire d'abord un test qui échoue, l'implémentation minimale qui le fait passer, puis refactoriser proprement.
+- **delivery-brief** (sur Lead) : ouvrir chaque rapport par la décision attendue, résumer la PR et numéroter les points qui requièrent votre arbitrage, sans jamais fusionner sans feu vert.
 
-La façon de travailler d'une équipe se cristallise dans des skills, et un nouvel agent en hérite dès qu'on lui en rattache un. L'import n'est pas la seule source : **Nouveau skill** propose quatre voies — créer manuellement, importer depuis cet appareil (un dossier local), importer depuis une URL et copier depuis un runtime local — qui ne sont pas détaillées ici ; voir [Skills](/skills) :
+Cliquez sur **+** en haut à droite de **Skills** pour découvrir les quatre modes d'ajout — **Créer manuellement**, **Importer depuis le local**, **Importer depuis une URL** (GitHub, ClawHub, Skills.sh) et **Copier depuis un runtime** (voir [Skills](/skills)) :
 
-![Les quatre façons d'ajouter un nouveau skill](/images/docs/tutorial-skill-new-modal.webp)
+![Les quatre options pour créer ou importer un skill sous le menu +](/images/docs/tutorial-skill-new-modal.webp)
 
-Lisez les fichiers d'un skill tiers avant de l'importer : Multica ne les isole pas dans un bac à sable, et le contenu d'un skill est transmis tel quel à l'outil de codage IA.
+Relisez toujours les fichiers d'un skill tiers avant de l'importer : Multica ne les exécute pas en bac à sable et transmet leur contenu tel quel à l'outil IA.
 
-## La deuxième tâche : la confier au squad
+## Deuxième tâche : confier le travail au squad
 
-Confiez au squad un travail complet : transformer le site en modèle générique — remplacer le vrai nom par un nom de photographe fictif et la vraie adresse e-mail par `hello@example.com`, sans toucher à la mise en page ni à la structure du contenu. Cette tâche n'a pas besoin d'être rédigée à la main : décrivez le besoin à Lead dans Discussion et créez-la avec **Créer avec un agent**, en l'assignant au squad — un squad, comme un agent ou un membre, peut apparaître partout où un assigné est possible :
+Confiez maintenant un chantier complet à **Website Team** : transformer le portfolio en modèle réutilisable avec une identité d'exemple (`Alex Rivera`) et l'adresse `hello@example.com`, sans modifier la mise en page ni la typographie.
 
-![Créer une tâche depuis une conversation avec Créer avec un agent](/images/docs/tutorial-create-with-agent.webp)
+Appuyez sur `C` pour ouvrir **Nouvelle tâche**, restez en mode **Créer avec un agent**, choisissez **Website Team** sous **Créé par** et décrivez le besoin. Un squad s'utilise partout où un responsable peut être assigné.
 
-Dans la tâche générée, le besoin est déjà organisé en une description structurée, et le badge à côté du titre montre que le chef l'a prise en charge :
+Multica crée `SITE-2` assignée à **Website Team**. À partir de là, **Lead** orchestre toute la boucle sans intervention manuelle :
 
-![MUL-2 : Lead crée la tâche et se met au travail](/images/docs/tutorial-issue-squad-created.webp)
+1. **Lead** ajoute des garde-fous (cohérence de l'identité jusque dans `<title>`, Open Graph et `README.md`, plus un test unitaire selon `tdd`) et délègue à `@Engineer`.
+2. **Engineer** applique TDD, ouvre la PR #2 (`SITE-2: Convert portfolio into reusable template`) et rend compte.
+3. **Lead** se réveille automatiquement et confie la PR #2 à `@Reviewer`.
+4. **Reviewer** vérifie diff et tests puis répond **Ready to merge** avec zéro constat.
 
-La suite est entièrement le travail du chef. Dans son commentaire de délégation, il ajoute deux contraintes absentes de la tâche — l'identité fictive doit être cohérente sur tout le site, et le passage en revue doit couvrir les métadonnées et le README — avant de passer la main à Engineer. Quand Engineer a terminé, il signale la PR dans le même fil d'activité :
+![SITE-2 : Lead délègue à Engineer, Engineer livre la PR #2, Lead sollicite Reviewer qui approuve](/images/docs/tutorial-squad-dispatch.webp)
 
-![Lead délègue et Engineer signale la PR](/images/docs/tutorial-squad-dispatch.webp)
+La revue validée, **Lead** passe `SITE-2` en **En revue** et publie une synthèse courte formatée par `delivery-brief`, vous mentionnant avec le résumé de la PR, deux arbitrages et l'engagement de ne rien fusionner sans votre accord :
 
-La relecture revient avec zéro constat et Lead livre : il vous mentionne pour validation, commence par la conclusion, puis donne le lien de la PR, une description des modifications et deux points qui demandent votre jugement, et précise pour finir que rien n'est fusionné sans votre approbation :
+![Rapport de livraison concis de Lead sur SITE-2 mentionnant Maya pour validation](/images/docs/tutorial-squad-delivery.webp)
 
-![Le compte rendu de livraison de Lead](/images/docs/tutorial-squad-delivery.webp)
+Du cadrage au développement TDD, à la revue et au compte-rendu final, vous n'avez eu aucun relais manuel à assurer.
 
-De l'organisation du besoin au choix de l'approche, en passant par le développement, la relecture et le compte rendu de livraison, aucune étape de cette tâche n'a eu besoin de vous pour faire le lien. La validation fonctionne comme pour MUL-1 ; vous pouvez aussi lui faire lancer un serveur local et regarder dans le navigateur, ce qui n'est pas répété ici. Le passage à Terminé vous revient toujours : répondez pour demander la fusion, ou changez le statut à la main.
+## Automatisation : Autopilot
 
-## Automatisation
-
-Jusqu'ici, chaque déclenchement partait de vous — assignation, mention, discussion. L'**automatisation** est un quatrième type de déclencheur : lancer du travail automatiquement selon une planification.
+Jusqu'ici, chaque exécution partait de vous : assignation, mention ou chat. **Automatisation** ajoute les déclencheurs planifiés et webhooks pour exécuter la maintenance récurrente sans y penser.
 
 <Steps>
 <Step>
 
-Une phrase suffit pour la configurer : dites à Multica helper que chaque lundi à neuf heures du matin, Reviewer doit effectuer une vérification complète du dépôt du site — redondances et code mort, structure discutable, endroits qui pourraient mieux suivre les conventions — en consignant ses constats dans des commentaires de tâche, sans modifier le code :
+Demandez à **Multica helper** dans le Chat de créer une automatisation chaque lundi à 9 h 00 assignée à **Reviewer** en mode **Créer une tâche** : inspecter `personal-website` en lecture seule (code mort, exports inutilisés, dépendances obsolètes, typage) et consigner les constats en commentaire.
 
-![Le helper crée une automatisation](/images/docs/tutorial-autopilot-create.webp)
+Ouvrez **Automatisation** dans la barre de navigation pour vérifier le **Runbook**, le planning (`0 9 * * 1`, fuseau horaire, prochaine exécution), le mode (**Créer une tâche** ou **Exécuter uniquement**) ainsi que l'onglet **Rappels de tâches** pour les suivis ponctuels sur des tâches existantes.
 
-</Step>
-<Step>
+Sans attendre lundi, cliquez sur **Exécuter maintenant** en haut à droite pour tester aussitôt :
 
-Ouvrez la page **Automatisation** : l'assigné, l'invite et la planification (cron et fuseau horaire) sont tous configurés. Il existe deux modes d'exécution :
-
-- **Créer une tâche** (par défaut) : chaque déclenchement crée d'abord une tâche, si bien que le travail arrive sur le tableau avec un historique et des commentaires identiques à ceux de n'importe quelle autre tâche ;
-- **Exécution seule** : s'exécute sans créer de tâche et ne laisse de trace que dans l'historique des exécutions de l'automatisation ; si une exécution ne trouve rien, rien n'apparaît sur le tableau.
-
-Une vérification périodique utilise le mode Créer une tâche. Plutôt que d'attendre lundi, cliquez sur **Exécuter maintenant** pour la déclencher une fois immédiatement :
-
-![Détail de l'automatisation : la planification et Exécuter maintenant](/images/docs/tutorial-autopilot-detail.webp)
+![Détail d'une automatisation montrant le Runbook, le planning du lundi 9 h 00 et Exécuter maintenant](/images/docs/tutorial-autopilot-detail.webp)
 
 </Step>
 <Step>
 
-La tâche est créée et Reviewer commence la vérification. Désormais, chaque lundi à la même heure, la même vérification crée automatiquement une nouvelle tâche, sans que personne n'ait à la déclencher :
+Multica crée immédiatement `SITE-3` et lance l'audit en lecture seule de **Reviewer**. Chaque lundi à 9 h 00, la même vérification démarrera toute seule :
 
-![Une tâche créée automatiquement par une automatisation](/images/docs/tutorial-autopilot-issue.webp)
+![SITE-3 créée automatiquement par l'automatisation avec Reviewer en cours d'audit](/images/docs/tutorial-autopilot-issue.webp)
 
 </Step>
 </Steps>
 
-Les déclencheurs prennent en charge les webhooks en plus des planifications, et l'assigné peut aussi être un squad — voir [Automatisations](/autopilots).
+Les automatisations prennent aussi en charge les **webhooks** (GitHub, GitLab ou génériques) et peuvent cibler un **Squad** — voir [Automatisations](/autopilots) et [Rappels de tâches](/issue-wakeups).
 
 ## Travailler avec d'autres personnes
 
-Jusqu'ici, vous étiez le seul membre humain de l'espace de travail. Dans **Paramètres → Membres**, invitez d'autres personnes par e-mail ; elles créent des tâches, @mentionnent des agents et rejoignent des squads comme vous — plusieurs personnes et plusieurs agents travaillent ensemble sur le même ensemble de tâches :
+Jusqu'ici, vous étiez le seul humain de l'espace de travail. Cliquez sur l'icône **Inviter un membre** en haut du panneau **Équipe** — ou ouvrez **Paramètres → Membres** — pour inviter des collègues par e-mail avec le rôle **Membre**, **Admin** ou **Invité** (gratuit, limité aux projets partagés) :
 
-![Inviter un membre dans l'espace de travail par e-mail](/images/docs/tutorial-invite-member.webp)
+![Fenêtre d'invitation de membre dans Paramètres -> Membres avec les rôles Membre, Admin et Invité](/images/docs/tutorial-invite-member.webp)
 
-## Conclusion
+Vos collègues peuvent créer des tâches, `@`-mentionner les agents partagés, ouvrir les Environnements et rejoindre des squads à vos côtés.
 
-Quand les tâches s'accumulent, des outils permettent de les organiser : un **projet** regroupe des tâches liées et les suit comme un tout (voir [Projets](/projects)). D'autres façons d'organiser le travail arrivent, et **Space** est presque prêt.
+## Pour conclure
 
-Si l'on regarde le chemin parcouru : partir d'un espace de travail vide, connecter un ordinateur, créer quatre agents, mener deux tâches à terme, puis confier la coordination à un chef et les vérifications périodiques à l'automatisation. À la fin, il ne vous reste qu'à décrire le besoin et valider le résultat.
+À mesure que vos tâches se multiplient, Multica offre une structure prête à monter en charge :
 
-Multica évolue encore rapidement ; retrouvez d'autres fonctionnalités dans la [documentation](/).
+- **Quatre espaces** gardent chaque contexte lisible : **Travail** (Boîte de réception, Vues, Projets), **Équipe** (Agents, Squads, Skills, Runtimes, Statistiques), **Chat** et **Automatisation**.
+- **Projets** regroupe les tâches liées autour d'instructions partagées, de dépôts et dossiers, de prévisions d'avancement et de [Workflows](/workflows) personnalisés avec passage de relais automatique entre étapes.
+
+En résumé : parti d'un espace vide, vous avez connecté votre machine, bâti quatre agents spécialisés, prévisualisé et fusionné une première PR avec Environnements, capitalisé vos retours en instructions et en skills, délégué la coordination à un squad et automatisé les audits hebdomadaires. Il ne vous reste plus qu'à fixer le cap et valider le résultat.
 
 ## Étapes suivantes
 
-- [Concepts clés](/concepts) — découvrez en trois minutes tous les objets clés de Multica.
-- [Squads](/squads) — comment un chef répartit le travail, et quand utiliser un squad plutôt qu'un agent seul.
-- [Skills](/skills) — importer, écrire et partager des méthodes d'agent.
-- [Automatisations](/autopilots) — la configuration complète des types de déclencheurs Planification et Webhook.
+- [Concepts clés](/concepts) — comprendre l'ensemble des objets Multica en trois minutes.
+- [Environnements](/environments) — déclarer `.multica/environments.toml` pour des aperçus en un clic et des journaux en direct.
+- [Projets](/projects) — organiser vos initiatives multi-tâches avec dépôts partagés, dossiers et suivi d'avancement.
+- [Squads](/squads) — règles de routage du leader, réveils automatiques et protocole de fonctionnement.
+- [Skills](/skills) — écrire, importer, mettre à jour et partager des méthodes réutilisables.
+- [Automatisations](/autopilots) — planifications, webhooks, filtrage de payloads et historique des exécutions.
