@@ -312,8 +312,6 @@ export function createEnDict(): LandingDict {
           "Completing an Issue or starting an agent on it archives it from your Inbox; change this in Settings → Notifications.",
           "Projects have an Overview tab for the description, a sidebar with progress and recent activity, and an Activity tab.",
           "Project progress leaves out cancelled Issues and shows a weekly trend and forecast finish date, also in the CLI.",
-          "Where Connected Apps is enabled, manage team and personal accounts on the new Apps page and handle agents' app requests.",
-          "Connect Mobbin over OAuth, the first remote MCP app in Connected Apps.",
           "Self-hosted workspaces can invite guests who see only the projects shared with them.",
           "HTML and Mermaid blocks render while you edit, with a title bar you can rename.",
           "Send follow-up instructions to a running Antigravity agent.",
@@ -346,7 +344,7 @@ export function createEnDict(): LandingDict {
           "The CLI says when a secrets manager replaced its token, tells failed checks from expired sign-ins, and finishes slow downloads.",
           "Per-minute token limits and insufficient balance show the right failure reason, and newer Antigravity models are priced.",
           "Self-hosted install checks Docker Compose and busy ports first, and logs say when a secret key is set but invalid.",
-          "Fixed smaller issues with sign-in, private property counts, agent access labels, long project names, remote MCP, and Android scrolling.",
+          "Fixed smaller issues with sign-in, private property counts, agent access labels, long project names, and Android scrolling.",
         ],
       },
       {
