@@ -37,7 +37,10 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 
 - 高度和透明度一起过渡，150–200ms，`UI_EASE_OUT`。下方内容跟着移动，不跳变。
 - 用同样的时长把一个 `ChevronRight` 旋转 90°，不要切换两个图标。
-- 使用 `CollapsibleContent`。不在 Collapsible 中的条件内容，用 `grid-rows-[0fr]` → `grid-rows-[1fr]` 过渡（参考 `packages/views/modals/create-issue.tsx` 中的 `CreateRunHint`），或 motion 的 `height: "auto"`。
+- 在 Base UI 的 `Collapsible` 里，使用 `CollapsibleContent`：Issue 侧栏的各个区块、聊天里的工具调用行、对话框里的区块。`Collapsible` 会把触发按钮的 `aria-expanded` 和 `aria-controls` 关联到它。
+- 由 `open` prop 控制、没有 `Collapsible` 的区块，使用 `PanelDisclosure`，左侧面板和对象页都是这样用的：`PanelSection`、`work-tree.tsx` 和 `views-section.tsx` 中的树节点、`object-page.tsx` 中的分组。退场中的内容会设为 `inert`；开启减少动态效果时，同一帧内卸载。
+- 两者在收起后都会卸载内容，收起的列表会释放它的查询；内容会订阅数据的面板，不要传 `keepMounted` 或 `hiddenUntilFound`。两者都只在高度变化时裁切：静止的区块不能裁掉行的焦点描边。
+- 内部没有可聚焦元素的条件内容（比如行内提示），用 `grid-rows-[0fr]` → `grid-rows-[1fr]` 过渡，参考 `packages/views/modals/create-issue.tsx` 中的 `CreateRunHint`。它内层的 `overflow-hidden` 在静止时也会裁切。
 
 ### 列表增删行
 
@@ -46,6 +49,14 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 - 移除的行收起高度、外边距和透明度，150ms，`UI_EASE_OUT`，放在 `AnimatePresence initial={false}` 中。下方的行补上空位，不跳变。
 - 用户刚添加或实时到达的行淡入，最多向上移动 4px，150ms。
 - 首次渲染的行，以及虚拟列表滚动时挂载的行，一律不加动效。
+
+### 拖拽
+
+在看板、列表和泳道之间移动 Issue。
+
+- 拖拽过程中，浮层用 `ISSUE_DRAG_OVERLAY_CLASS` 抬起：倾斜 1°，放大到 101%，带阴影。它跟随指针，不加缓动。
+- 放下时，`createIssueDropAnimation` 让浮层滑入新位置并摆正，170ms，`UI_EASE_OUT`。浮层落定前，目标位置用 `visibility` 隐藏；用 `opacity` 隐藏会触发该位置自身的透明度过渡，造成闪烁。
+- 取消的拖拽、被拦截的拖拽（工作流阻止或交接、归档状态、按排序锁定视图中的无效移动），以及开启减少动态效果时的任何拖拽，都跳过滑入。在 `onDragStart` 中清除传给 `createIssueDropAnimation` 的 ref，移动没有生效时在 `onDragEnd` 或 `onDragCancel` 中设置它。
 
 ### 内容切换
 
@@ -102,7 +113,9 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 | --- | --- | --- |
 | 时长和曲线 | `UI_MOTION_DURATION`、`UI_EASE_OUT`、`UI_EASE_IN`、`UI_INDICATOR_SPRING`（选中态指示器） | `packages/ui/lib/motion.ts` |
 | 浮层进退场 | 浮层组件；Dialog 的 `--dialog-*` token | `packages/ui/components/ui/`、`packages/ui/styles/tokens.css` |
-| 展开折叠 | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
+| `Collapsible` 中的展开折叠 | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
+| 由 `open` prop 控制的展开折叠（面板区块、树节点、对象页分组） | `PanelDisclosure` | `packages/views/layout/panel-nav.tsx` |
+| Issue 拖拽抬起和放下落位（看板、列表、泳道） | `ISSUE_DRAG_OVERLAY_CLASS`、`createIssueDropAnimation` | `packages/views/issues/components/drag-drop-animation.ts` |
 | 标签指示器 | `Tabs` | `packages/ui/components/ui/tabs.tsx` |
 | 分段控件指示器 | `SegmentedToggle` | `packages/views/common/segmented-toggle.tsx` |
 | motion/react 的减少动态效果 | `MotionProvider`（挂在 web 和桌面端根部） | `packages/views/common/motion-provider.tsx` |
@@ -121,6 +134,12 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 ## 验证
 
 jsdom 没有布局，单元测试只能覆盖接线和减少动态效果的分支，测不了动画本身。静态截图也看不出跳变和冲过头。
+
+在 jsdom 中测试 motion/react：
+
+- 需要等动画结束的测试，用真实计时器配合 `waitFor`。Motion 的帧循环由整个测试文件共享：如果它第一次是在 `vi.useFakeTimers()` 下启动的，切回 `vi.useRealTimers()` 后仍会卡住，这个文件里之后的动画也都不会结束。假计时器只用于减少动态效果的分支，那里没有动画。
+- `duration: 0` 的值在 Motion 的下一帧才写到元素的 style 上，不在同一次提交里。断言前先等一帧。
+- jsdom 从不应用 `transitionEnd` 中的离散值，比如 `overflow`、`display`。这部分在真实应用里检查。
 
 UI PR 只要包含改变尺寸、位置或显示内容的交互，就附上这段交互的 GIF，以及在真实应用中逐帧采样的结果。`scripts/motion/capture.mjs` 在 `make up` 环境中完成这两件事；`scripts/motion/inbox-tabs.mjs` 是可以照着写的完整场景：
 

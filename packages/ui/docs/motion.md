@@ -37,7 +37,10 @@ Sections, tree nodes, disclosures, "Show N more", inline hints.
 
 - Animate height and opacity together, 150–200ms, `UI_EASE_OUT`. The content below moves with the change; it never jumps.
 - Rotate one `ChevronRight` by 90° on the same duration. Do not swap two icons.
-- Use `CollapsibleContent`. For a conditional block outside a Collapsible, use a `grid-rows-[0fr]` → `grid-rows-[1fr]` transition, as `CreateRunHint` in `packages/views/modals/create-issue.tsx` does, or motion's `height: "auto"`.
+- Inside a Base UI `Collapsible`, use `CollapsibleContent`: the issue sidebar sections, chat tool rows, sections in a dialog. `Collapsible` wires the trigger's `aria-expanded` and `aria-controls` to it.
+- Where an `open` prop drives the section and there is no `Collapsible`, use `PanelDisclosure`, as the left panels and object pages do: `PanelSection`, the tree rows in `work-tree.tsx` and `views-section.tsx`, the groups in `object-page.tsx`. It makes the exiting content `inert`, and under reduced motion unmounts it in the same frame.
+- Both unmount the content once it is closed, so a collapsed list releases its queries; do not pass `keepMounted` or `hiddenUntilFound` to a panel whose content subscribes to data. Both clip only while the height moves: a resting section must not cut off its rows' focus rings.
+- For a conditional block with nothing focusable in it, such as an inline hint, use a `grid-rows-[0fr]` → `grid-rows-[1fr]` transition, as `CreateRunHint` in `packages/views/modals/create-issue.tsx` does. Its inner `overflow-hidden` clips at rest too.
 
 ### List rows added and removed
 
@@ -46,6 +49,14 @@ Archive, complete, snooze, a new notification, a new run.
 - A removed row collapses its height, margins and opacity, 150ms, `UI_EASE_OUT`, inside `AnimatePresence initial={false}`. Rows below close the gap; they do not jump.
 - A row the user just added, or one that arrived live, fades in, with at most 4px of upward movement, 150ms.
 - Rows on first render and rows a virtual list mounts while scrolling never animate.
+
+### Drag and drop
+
+Moving issues on the board, in the list, and between swimlanes.
+
+- While dragging, the overlay is lifted with `ISSUE_DRAG_OVERLAY_CLASS`: tilted 1°, scaled to 101%, with a shadow. It follows the pointer with no easing.
+- On drop, `createIssueDropAnimation` glides the overlay into its new slot and straightens it, 170ms, `UI_EASE_OUT`. The slot stays hidden with `visibility` until the overlay lands; hiding it with `opacity` would set off the slot's own opacity transition and flash it.
+- A cancelled drop, an intercepted one (a workflow block or handoff, an archived status, a no-op in a sort-locked view), and any drop under reduced motion skip the glide. Clear the ref you pass to `createIssueDropAnimation` in `onDragStart`, and set it in `onDragEnd` or `onDragCancel` when the move does not land.
 
 ### Content switch
 
@@ -102,7 +113,9 @@ These stay instant:
 | --- | --- | --- |
 | Durations and curves | `UI_MOTION_DURATION`, `UI_EASE_OUT`, `UI_EASE_IN`, `UI_INDICATOR_SPRING` (selected-state indicators) | `packages/ui/lib/motion.ts` |
 | Overlay enter and exit | The overlay components; Dialog's `--dialog-*` tokens | `packages/ui/components/ui/`, `packages/ui/styles/tokens.css` |
-| Expand and collapse | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
+| Expand and collapse inside a `Collapsible` | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
+| Expand and collapse driven by an `open` prop (panel sections, tree rows, object page groups) | `PanelDisclosure` | `packages/views/layout/panel-nav.tsx` |
+| Issue drag lift and drop settle (board, list, swimlanes) | `ISSUE_DRAG_OVERLAY_CLASS`, `createIssueDropAnimation` | `packages/views/issues/components/drag-drop-animation.ts` |
 | Tabs indicator | `Tabs` | `packages/ui/components/ui/tabs.tsx` |
 | Segmented control indicator | `SegmentedToggle` | `packages/views/common/segmented-toggle.tsx` |
 | Reduced motion for motion/react | `MotionProvider` (mounted at the web and desktop roots) | `packages/views/common/motion-provider.tsx` |
@@ -121,6 +134,12 @@ Add a row when you add a primitive, and point the rules above at it.
 ## Verification
 
 jsdom has no layout, so unit tests cover wiring and the reduced-motion branch, not the animation. A static screenshot cannot show a jump or an overshoot either.
+
+Testing motion/react in jsdom:
+
+- Run tests that wait for an animation with real timers and `waitFor`. Motion's frame loop is shared by the whole test file: when it first starts under `vi.useFakeTimers()`, it stays stuck after `vi.useRealTimers()`, and later animations in that file never finish either. Keep fake timers to the reduced-motion branch, which does not animate.
+- A `duration: 0` value reaches the element's style on Motion's next frame, not in the same commit. Wait a frame before asserting it.
+- jsdom never applies discrete values from `transitionEnd`, such as `overflow` or `display`. Check those in the real app.
 
 A UI PR whose interaction changes size, position, or what is on screen attaches a GIF of it and the results of a frame-by-frame sample from the real app. `scripts/motion/capture.mjs` does both against a `make up` environment; `scripts/motion/inbox-tabs.mjs` is a complete scenario to copy:
 
