@@ -85,14 +85,11 @@ func StripActivityIssueRef(action string, details []byte) []byte {
 
 // redactHiddenActivityRefs strips, in place, the reference to another issue
 // from every activity unless the reader can be shown to see that issue. A
-// referenced issue that no longer exists is stripped too: its project is gone
-// with it, so it may have been private. A reader who sees every project keeps
-// every reference, a deleted issue's identifier included. actions[i] and
-// details[i] describe the same activity.
+// referenced issue that no longer exists is stripped for every reader: who
+// could see it went with its project, and seeing every project today says
+// nothing about a project deleted since. actions[i] and details[i] describe
+// the same activity.
 func (h *Handler) redactHiddenActivityRefs(r *http.Request, hidden projectaccess.Hidden, actions []string, details [][]byte) error {
-	if hidden.Empty() {
-		return nil
-	}
 	refs := make([]pgtype.UUID, len(actions))
 	named := make([]bool, len(actions))
 	var ids []pgtype.UUID

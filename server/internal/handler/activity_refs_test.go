@@ -2,10 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -203,5 +206,30 @@ func TestActivityRefsToDeletedIssuesAreRedacted(t *testing.T) {
 				t.Errorf("duplicate_unmarked = %v, want the deleted original redacted and the reason kept", d)
 			}
 		})
+	}
+}
+
+// A reader who sees every private project today learns nothing about one
+// deleted since, so a reference to an issue that is gone is stripped even
+// when nothing is hidden from them.
+func TestActivityRefsToDeletedIssuesAreRedactedWhenNothingIsHidden(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	visible := dbfx.Issue(t, fmt.Sprintf("visible original %d", time.Now().UnixNano()))
+	actions := []string{"duplicate_marked", "duplicate_unmarked"}
+	details := [][]byte{
+		[]byte(`{"original_id":"` + visible + `","original_identifier":"OPEN-1"}`),
+		[]byte(`{"original_id":"00000000-0000-0000-0000-00000000dead","original_identifier":"GONE-1","reason":"original_deleted"}`),
+	}
+	req := newRequest(http.MethodGet, "/api/issues/x/timeline", nil)
+	if err := testHandler.redactHiddenActivityRefs(req, projectaccess.Hidden{}, actions, details); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(details[0]); got != `{"original_id":"`+visible+`","original_identifier":"OPEN-1"}` {
+		t.Errorf("existing issue = %s, want it kept", got)
+	}
+	if got := string(details[1]); got != `{"reason":"original_deleted"}` {
+		t.Errorf("deleted issue = %s, want only the reason kept", got)
 	}
 }

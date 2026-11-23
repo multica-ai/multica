@@ -346,7 +346,8 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 			if err == nil {
 				refReaders, err = projectAudience.IssueRefReaders(ctx, e)
 			}
-			if err == nil && len(refReaders) > 0 && !private {
+			perReader := len(refReaders) > 0 && duplicateMarkMoved(e)
+			if err == nil && perReader && !private {
 				recipients, err = projectAudience.Members(ctx, e.WorkspaceID)
 			}
 			cancel()
@@ -354,10 +355,16 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 				logAudienceFailure(e, err)
 				return
 			}
-			if len(refReaders) > 0 {
+			if perReader {
 				realtime.M.RecordEvent(e.Type)
 				sendPerReader(b, e, data, recipients, refReaders)
 				return
+			}
+			if len(refReaders) > 0 {
+				if data, err = strippedFrame(e, true, func(id string) bool { return refReaders[id] != nil }); err != nil {
+					slog.Error("failed to marshal event", "event_type", e.Type, "error", err)
+					return
+				}
 			}
 			if private {
 				realtime.M.RecordEvent(e.Type)

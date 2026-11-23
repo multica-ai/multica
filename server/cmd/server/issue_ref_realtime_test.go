@@ -128,18 +128,56 @@ func TestRegisterListeners_DuplicateActivityReachesEachMemberAsTheyMayReadIt(t *
 		}
 	})
 
-	// A deleted original's project is unknown: only members of every private
-	// project, who would see it wherever it was, keep it.
+	// Who could see a deleted original went with its project: nobody keeps
+	// it, not even a member of every private project there is now.
 	t.Run("deleted original", func(t *testing.T) {
 		frames := framesByMember(t, activity(ppPublicIssue, "duplicate_unmarked",
 			map[string]string{"original_id": ppDeletedIssue, "original_identifier": "GONE-1", "reason": "original_deleted"}))
-		for userID, visible := range map[string]bool{ppShared: true, ppMember: false, ppOther: false, ppPlain: false} {
-			d := details(frames[userID])
-			if (d["original_identifier"] == "GONE-1") != visible || d["reason"] != "original_deleted" {
-				t.Errorf("%s: details = %v, want reference visible=%v and the reason kept", userID, d, visible)
+		if len(frames) != 4 {
+			t.Fatalf("delivered to %d members, want the 4 non-guest members", len(frames))
+		}
+		for userID, p := range frames {
+			if d := details(p); d["original_id"] != "" || d["original_identifier"] != "" || d["reason"] != "original_deleted" {
+				t.Errorf("%s: details = %v, want the reference stripped and the reason kept", userID, d)
 			}
 		}
 	})
+}
+
+// An edit that leaves the mark alone still names the original. Every client
+// already has it, or not, from its own reads, so one frame without it goes to
+// the whole workspace: the original is left out of the issue, which clients
+// merge as unchanged, and the unchanged ends are nulled.
+func TestRegisterListeners_UnmovedDuplicateMarkKeepsOneFrame(t *testing.T) {
+	fb := publishPrivateAudience(events.Event{Type: protocol.EventIssueUpdated, Payload: map[string]any{
+		"issue": map[string]any{"id": ppPublicIssue, "project_id": ppPublic, "title": "renamed",
+			"duplicate_of": map[string]any{"id": ppSecretIssue, "identifier": "SECRET-1", "title": "secret title"}},
+		"title_changed":              true,
+		"duplicate_of_issue_id":      ppSecretIssue,
+		"prev_duplicate_of_issue_id": ppSecretIssue,
+	}})
+	if len(fb.workspaceCalls) != 1 || len(privateAudienceScopes(fb)) != 0 {
+		t.Fatalf("workspace=%d scoped=%v, want one workspace broadcast", len(fb.workspaceCalls), privateAudienceScopes(fb))
+	}
+	msg := fb.workspaceCalls[0].msg
+	if strings.Contains(string(msg), ppSecretIssue) || strings.Contains(string(msg), "SECRET-1") {
+		t.Fatalf("frame names the private original: %s", msg)
+	}
+	var frame struct {
+		Payload map[string]json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &frame); err != nil {
+		t.Fatal(err)
+	}
+	issue := jsonObject(frame.Payload["issue"])
+	if _, present := issue["duplicate_of"]; present || jsonString(issue["title"]) != "renamed" {
+		t.Errorf("issue = %s, want duplicate_of left out and the rest kept", frame.Payload["issue"])
+	}
+	for _, key := range duplicateMarkKeys {
+		if string(frame.Payload[key]) != "null" {
+			t.Errorf("%s = %s, want null", key, frame.Payload[key])
+		}
+	}
 }
 
 func TestRegisterListeners_ReadableDuplicateMarkKeepsWorkspaceFanout(t *testing.T) {

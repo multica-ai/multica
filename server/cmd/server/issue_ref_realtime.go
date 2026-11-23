@@ -19,9 +19,11 @@ import (
 
 // An event reaches the audience of the issue it is about, but a duplicate mark
 // (MUL-7349) also names a second issue, which can sit in a private project
-// part of that audience may not read (MUL-9932). Recipients who can read it
-// get the event as published; the rest get it with that reference stripped,
-// the way the HTTP reads strip it for them.
+// part of that audience may not read (MUL-9932). An event that moves the mark
+// reaches each recipient with only the references it may read. Any other
+// event names the original only because the issue still points at it, which
+// every client already has from its own reads, so one frame with those
+// references stripped serves everyone.
 
 // issueRefEvents may name issues other than the one they are about.
 var issueRefEvents = map[string]bool{
@@ -38,9 +40,11 @@ var duplicateMarkKeys = []string{"duplicate_of_issue_id", "prev_duplicate_of_iss
 // to an issue other than its own: a duplicate mark's ends and resolved
 // original on an issue event, a duplicate activity's other issue. "" stands
 // for an activity reference whose issue cannot be told from its details. A
-// reference strip returns true for is removed from top: an issue event's id or
-// original becomes null, an activity's details lose the id and identifier.
-func visitIssueRefs(eventType string, top map[string]json.RawMessage, strip func(id string) bool) {
+// reference strip returns true for is removed from top: an issue event's id
+// becomes null, its original null (or, with omitOriginal, absent, which
+// clients merging the issue into their cache read as unchanged), and an
+// activity's details lose the id and identifier.
+func visitIssueRefs(eventType string, top map[string]json.RawMessage, omitOriginal bool, strip func(id string) bool) {
 	if eventType == protocol.EventActivityCreated {
 		entry := jsonObject(top["entry"])
 		action := jsonString(entry["action"])
@@ -58,9 +62,31 @@ func visitIssueRefs(eventType string, top map[string]json.RawMessage, strip func
 	}
 	issue := jsonObject(top["issue"])
 	if id := jsonString(jsonObject(issue["duplicate_of"])["id"]); id != "" && strip(id) {
-		issue["duplicate_of"] = null
+		if omitOriginal {
+			delete(issue, "duplicate_of")
+		} else {
+			issue["duplicate_of"] = null
+		}
 		top["issue"], _ = json.Marshal(issue)
 	}
+}
+
+// duplicateMarkMoved reports whether e changes what an issue is a duplicate
+// of: a duplicate activity, or an issue event whose two ends differ.
+func duplicateMarkMoved(e events.Event) bool {
+	if e.Type == protocol.EventActivityCreated {
+		return true
+	}
+	top := jsonObject(e.Payload)
+	return jsonString(top[duplicateMarkKeys[0]]) != jsonString(top[duplicateMarkKeys[1]])
+}
+
+// strippedFrame marshals e for the wire with the references strip selects
+// removed (see visitIssueRefs).
+func strippedFrame(e events.Event, omitOriginal bool, strip func(id string) bool) ([]byte, error) {
+	payload := jsonObject(projectOutbound(e.Type, e.Payload))
+	visitIssueRefs(e.Type, payload, omitOriginal, strip)
+	return json.Marshal(map[string]any{"type": e.Type, "payload": payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
 }
 
 // jsonObject reads v, a payload value or its raw JSON, as a JSON object; nil
@@ -88,9 +114,9 @@ func jsonString(raw json.RawMessage) string {
 
 // IssueRefReaders maps each issue e names besides its own (visitIssueRefs)
 // that not every member may read to the user ids who may: the members of its
-// private project. A reference whose issue is gone, or cannot be told, goes to
-// members of every private project, the readers the HTTP reads keep it for.
-// nil means every recipient may read every reference.
+// private project. A reference whose issue is gone, or cannot be told, maps to
+// nobody, as in the HTTP reads. nil means every recipient may read every
+// reference.
 func (a *dbPrivateProjectAudience) IssueRefReaders(ctx context.Context, e events.Event) (map[string]map[string]bool, error) {
 	if !issueRefEvents[e.Type] || e.WorkspaceID == "" {
 		return nil, nil
@@ -100,7 +126,7 @@ func (a *dbPrivateProjectAudience) IssueRefReaders(ctx context.Context, e events
 		return nil, err
 	}
 	var refs []string
-	visitIssueRefs(e.Type, jsonObject(e.Payload), func(id string) bool {
+	visitIssueRefs(e.Type, jsonObject(e.Payload), false, func(id string) bool {
 		refs = append(refs, id)
 		return false
 	})
@@ -126,23 +152,12 @@ func (a *dbPrivateProjectAudience) IssueRefReaders(ctx context.Context, e events
 	var out map[string]map[string]bool
 	for _, ref := range refs {
 		projectID, found := projects[ref]
-		readers, private := ws.projects[projectID]
+		members, private := ws.projects[projectID]
 		if found && !private {
 			continue
 		}
-		if !found {
-			readers = nil
-			first := true
-			for _, members := range ws.projects {
-				if first {
-					readers, first = members, false
-				} else {
-					readers = intersect(readers, members)
-				}
-			}
-		}
-		set := make(map[string]bool, len(readers))
-		for _, userID := range readers {
+		set := make(map[string]bool, len(members))
+		for _, userID := range members {
 			set[userID] = true
 		}
 		if out == nil {
@@ -196,10 +211,7 @@ func sendPerReader(b realtime.Broadcaster, e events.Event, full []byte, recipien
 					hidden[ref] = true
 				}
 				var err error
-				payload := jsonObject(projectOutbound(e.Type, e.Payload))
-				visitIssueRefs(e.Type, payload, func(id string) bool { return hidden[id] })
-				frame, err = json.Marshal(map[string]any{"type": e.Type, "payload": payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
-				if err != nil {
+				if frame, err = strippedFrame(e, false, func(id string) bool { return hidden[id] }); err != nil {
 					slog.Error("failed to marshal event", "event_type", e.Type, "error", err)
 					return
 				}
