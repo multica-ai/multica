@@ -3981,12 +3981,11 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
               : cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] max-md:pb-chat-launcher md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]"),
             hideUnalignedLanding && "opacity-0",
             !hideUnalignedLanding &&
+              !reduceMotion &&
               activeInboxTransition &&
-              (reduceMotion
-                ? "animate-inbox-enter-fade"
-                : activeInboxTransition === "next"
-                  ? "animate-inbox-enter-next"
-                  : "animate-inbox-enter-prev"),
+              (activeInboxTransition === "next"
+                ? "animate-inbox-enter-next"
+                : "animate-inbox-enter-prev"),
           )}
         >
           <IssueDuplicateBanner

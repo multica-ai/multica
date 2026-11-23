@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import type { AgentTask } from "@multica/core/types";
 import { UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 
@@ -6,8 +7,7 @@ const EMPTY_IDS: ReadonlySet<string> = new Set();
 
 function reveal(element: HTMLElement | null, duration: number, translate = 0) {
   if (!element?.animate) return;
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  if (reduced) return;
+  if (prefersReducedMotion()) return;
   return element.animate(
     translate
       ? [{ opacity: 0, transform: `translateY(${translate}px)` }, { opacity: 1, transform: "translateY(0)" }]
@@ -91,8 +91,7 @@ export function useRunDisclosureMotion(open: boolean) {
       chevronRef.current?.closest<HTMLElement>("button, summary")?.focus({ preventScroll: true });
     }
     if (!requested) return;
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) return;
+    if (prefersReducedMotion()) return;
     const duration = (open ? UI_MOTION_DURATION.fast : UI_MOTION_DURATION.micro) * 1000;
     const arrow = chevronRef.current?.animate?.(
       [{ rotate: fromRotation.current }, { rotate: open ? "90deg" : "0deg" }],

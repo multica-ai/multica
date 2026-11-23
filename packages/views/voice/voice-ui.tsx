@@ -3,7 +3,7 @@
 import { useEffect, useRef, type PointerEvent, type SyntheticEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, Check, Mic, MicOff, RotateCcw, X } from "@multica/ui/icons";
-import { useReducedMotion } from "@multica/core/appearance";
+import { prefersReducedMotion, useReducedMotion } from "@multica/core/appearance";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
@@ -74,7 +74,7 @@ function Waveform({ density, className }: { density: keyof typeof WAVE_GEOMETRY;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     const { pitch, bar, fade } = WAVE_GEOMETRY[density];
-    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const still = prefersReducedMotion();
     const color = getComputedStyle(canvas).color;
     let width = 0;
     let height = 0;

@@ -21,6 +21,8 @@ import enIssues from "../../locales/en/issues.json";
 import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores/issue-sidebar-sections-store";
 import { useSubIssuesCollapseStore } from "@multica/core/issues/stores/sub-issues-collapse-store";
 import { configureShortcutPlatform } from "@multica/core/shortcuts";
+import { useAppearanceStore } from "@multica/core/appearance";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 
 const TEST_RESOURCES = { en: { agents: enAgents, common: enCommon, inbox: enInbox, issues: enIssues } };
 
@@ -1639,6 +1641,42 @@ describe("IssueDetail (shared)", () => {
 
       await screen.findByRole("button", { name: enCommon.more_actions });
       expect(screen.queryByRole("button", { name: enInbox.context_menu.archive })).not.toBeInTheDocument();
+    });
+
+    describe("advancing to the next notification", () => {
+      const entering = (container: HTMLElement) => container.querySelector("[class*='animate-inbox-enter']");
+      async function advance() {
+        useInboxSelectionStore.getState().recordTransition("ws-1", "issue-1", "next");
+        const view = renderWithArchive();
+        await screen.findByRole("button", { name: enCommon.more_actions });
+        await waitFor(() => expect(useInboxSelectionStore.getState().transitionByWorkspace["ws-1"]).toBeUndefined());
+        return view;
+      }
+      afterEach(() => {
+        useAppearanceStore.getState().reset();
+        vi.unstubAllGlobals();
+      });
+
+      it("slides the issue in from the direction of travel", async () => {
+        const { container } = await advance();
+        expect(entering(container)).toHaveClass("animate-inbox-enter-next");
+      });
+
+      it("shows the issue at once with the Appearance Reduce motion switch", async () => {
+        useAppearanceStore.getState().set({ reduceMotion: true });
+        const { container } = await advance();
+        expect(entering(container)).toBeNull();
+      });
+
+      it("shows the issue at once with the system reduced-motion setting", async () => {
+        vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+          matches: query === "(prefers-reduced-motion: reduce)",
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        })));
+        const { container } = await advance();
+        expect(entering(container)).toBeNull();
+      });
     });
 
     it("keeps pinning in the more-actions menu rather than the header", async () => {
