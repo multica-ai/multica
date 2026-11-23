@@ -744,7 +744,8 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			// cannot delete, and bulk sweeps need explicit confirmation.
 			file: "references/docs.md",
 			want: []string{
-				"`docs_disabled`",
+				"`--debug` shows\nthe server's `docs_disabled` code",
+				"Moves and folder commands do not take it",
 				"Prefer `doc edit` for a\ntargeted change",
 				"never retry the same body with a newer revision",
 				"multica doc comment list <doc-id>",

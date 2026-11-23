@@ -577,8 +577,12 @@ func TestRunDocRestoreSendsRestoreAction(t *testing.T) {
 	}
 
 	conflict = true
-	if err := runDocRestore(docRestoreCmd, []string{docID}); err == nil || !strings.Contains(err.Error(), "nothing was written") {
-		t.Fatalf("stale revision must explain recovery: %v", err)
+	err = runDocRestore(docRestoreCmd, []string{docID})
+	if err == nil || !strings.Contains(err.Error(), "nothing was restored") || !strings.Contains(err.Error(), "only if the whole doc should still go back") {
+		t.Fatalf("stale revision must ask to re-read before restoring again: %v", err)
+	}
+	if strings.Contains(err.Error(), "merge your change") {
+		t.Fatalf("a restore has no change to merge: %v", err)
 	}
 }
 

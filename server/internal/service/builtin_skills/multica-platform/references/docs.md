@@ -4,9 +4,10 @@ Docs are the workspace knowledge base: Markdown documents in a folder tree,
 edited live by people in the app while you work on them. `multica doc` reads
 and writes the same docs the app shows.
 
-Docs can be turned off for a deployment. Then every `multica doc` command
-answers `403` with `docs_disabled`; tell the person Docs are not available
-here instead of retrying.
+Docs can be turned off for a deployment. Then every `multica doc` command,
+`doc list` included, fails with the generic permission error; `--debug` shows
+the server's `docs_disabled` code. Tell the person Docs are not available here
+instead of retrying.
 
 ## Read first
 
@@ -38,14 +39,17 @@ People may be typing in the doc while you write. Prefer `doc edit` for a
 targeted change: it replaces the text you quote wherever it now is, and fails
 only when that text is gone or appears more than once (quote more context, or
 pass `--replace-all`). `doc update` replaces the whole doc and needs the
-`--base-revision` you read with `doc get`. Edits made since then are merged
-in; the update is refused with nothing written only when you and someone else
-changed the same paragraph. On that refusal, read the doc again and redo your
-change on top of it; never retry the same body with a newer revision, which
-would erase their work.
+`--base-revision` you read with `doc get`. Edits made since then are usually
+merged in, and the update is refused with nothing written when you and someone
+else changed the same paragraph. It is also refused, whatever paragraphs
+changed, when your revision is too old to merge from or the live-editing
+service is unavailable. On any refusal, read the doc again and redo your change
+on top of it; never retry the same body with a newer revision, which would
+erase their work.
 
-Pass `--message` on every write. It is what the doc's history shows next to
-your name, and your run and issue are recorded with it.
+Pass `--message` on every `create`, `edit`, `update` and `restore`. It is what
+the doc's history shows next to your name, and your run and issue are recorded
+with it. Moves and folder commands do not take it.
 
 ## Review comments
 
@@ -70,9 +74,13 @@ multica doc restore <doc-id> --version 3 --base-revision <revision> --message "w
 
 A restore saves the chosen version as a new version, so the content it
 replaces stays in the history. It replaces the whole doc, including every edit
-made after that version, by anyone, and what people are typing at that moment.
-To undo one change and keep the rest, use `doc edit` instead. Restore only a
-doc you broke, or when the person asked for that version back.
+made after that version, by anyone. To undo one change and keep the rest, use
+`doc edit` instead. Restore only a doc you broke, or when the person asked for
+that version back.
+
+A restore is refused with nothing written when the doc changed after the
+revision you pass, live edits included. Read the doc again and restore only if
+the whole doc should still go back.
 
 ## Human-only actions
 

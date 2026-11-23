@@ -29,8 +29,9 @@ var docCmd = &cobra.Command{
 		"People may be editing a doc while you work on it. For targeted changes prefer " +
 		"`multica doc edit`: it replaces text you quote and lands wherever that text now is. " +
 		"`multica doc update` replaces the whole doc and needs --base-revision, the revision you read " +
-		"with `multica doc get`; edits made since then are merged in, and the update is refused only " +
-		"when you and someone else changed the same paragraph. " +
+		"with `multica doc get`; edits made since then are usually merged in. The update is refused, with nothing " +
+		"written, when you and someone else changed the same paragraph, and also when your revision is too old " +
+		"to merge from or the live-editing service is unavailable. " +
 		"Pass --message to say what changed and why — it shows in the doc's history.",
 }
 
@@ -113,7 +114,8 @@ var docRestoreCmd = &cobra.Command{
 		"The restore is saved as a new version, so nothing is lost: the content it replaces stays in the history. " +
 		"It replaces the whole doc, including edits made after the version you restore; " +
 		"to undo one change and keep the rest, use `multica doc edit` instead. " +
-		"--base-revision is the revision from `multica doc get`.",
+		"--base-revision is the revision from `multica doc get`; when the doc changed after it, " +
+		"live edits included, nothing is restored.",
 	Args: exactArgs(1),
 	RunE: runDocRestore,
 }
@@ -275,6 +277,11 @@ func docWriteError(action string, base int64, err error) error {
 	var httpErr *cli.HTTPError
 	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
 		switch {
+		case action == "restore doc" && strings.Contains(httpErr.Body, "revision_conflict"):
+			return fmt.Errorf("%s: the doc changed since revision %d, so nothing was restored. "+
+				"A restore replaces the whole doc, including those newer edits: run `multica doc get` to read them, "+
+				"and retry with the new --base-revision only if the whole doc should still go back to that version (%s)",
+				action, base, httpErr.Body)
 		case strings.Contains(httpErr.Body, "revision_conflict"):
 			return fmt.Errorf("%s: the doc changed since revision %d, so nothing was written. "+
 				"Run `multica doc get` for the latest content and revision, merge your change into it, and retry with the new --base-revision (%s)",
