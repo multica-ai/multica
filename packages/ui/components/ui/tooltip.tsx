@@ -55,8 +55,25 @@ function TooltipProvider({
   )
 }
 
-function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+// Tooltips in Multica carry non-interactive labels, shortcuts, and timestamps
+// (hover-interactive previews use HoverCard). Disabling the hoverable popup by
+// default puts `pointer-events: none` on the positioner and skips Base UI's
+// safe-polygon bridge, so moving upward across a dense column of triggers
+// (Activity timestamps, sidebar rows, inbox actions) switches to the row above
+// instead of getting caught on the previous tooltip's popup. Callers can still
+// pass `disableHoverablePopup={false}` when a tooltip needs to stay open while
+// hovered.
+function Tooltip({
+  disableHoverablePopup = true,
+  ...props
+}: TooltipPrimitive.Root.Props) {
+  return (
+    <TooltipPrimitive.Root
+      data-slot="tooltip"
+      disableHoverablePopup={disableHoverablePopup}
+      {...props}
+    />
+  )
 }
 
 function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
