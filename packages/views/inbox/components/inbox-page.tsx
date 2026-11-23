@@ -678,7 +678,7 @@ export function InboxPage() {
     });
   };
 
-  const { cause: settledCause, autoAdvance: settledAutoAdvance } = useMoveOnAfterAutoArchive({
+  const settledCause = useMoveOnAfterAutoArchive({
     settled: settledRow,
     next: settledRow ? nextInboxRow(listedItems, settledRow.key) : null,
     onNext: () => {
@@ -1022,7 +1022,6 @@ export function InboxPage() {
         }
         next={nextInboxRow(listedItems, settledRow.key)}
         onNext={() => advanceSelectionPast(settledRow.item.id, listedItems)}
-        autoAdvance={settledAutoAdvance}
       />
     ) : null;
 

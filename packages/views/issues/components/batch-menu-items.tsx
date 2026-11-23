@@ -68,6 +68,19 @@ export function sharedPropertyValue(issues: readonly Issue[], propertyId: string
   return issues.every((issue) => JSON.stringify(issue.properties?.[propertyId]) === key) ? first : undefined;
 }
 
+/** Copies the selected issues' links, one per line. */
+export function useCopyIssueLinks(issues: readonly Issue[]) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  const { getShareableUrl } = useNavigation();
+  return () => {
+    const links = issues.map((issue) => getShareableUrl(paths.issueDetail(issueRouteRef(issue))));
+    void copyText(links.join("\n")).then((ok) => {
+      if (ok) toast.success(t(($) => $.batch.links_copied, { count: issues.length }));
+    });
+  };
+}
+
 interface BatchMenuItemsProps {
   primitives: MenuPrimitives;
   /** `more` is the toolbar's overflow menu; `context` is the right-click menu, which repeats the toolbar's own fields. */
@@ -77,6 +90,10 @@ interface BatchMenuItemsProps {
   projectId: string | null;
   allowedStatuses: ReadonlySet<string> | null;
   disabled: boolean;
+  /** False for a guest, who edits no issue: only copying links and clearing the selection remain. */
+  editable: boolean;
+  /** False for a viewer who can delete no issue at all (a guest): the entry is left out. */
+  offersDelete: boolean;
   canDelete: boolean;
   onStatus: (status: string) => void;
   onAssignee: (updates: Partial<UpdateIssueRequest>) => void;
@@ -98,6 +115,8 @@ export function BatchMenuItems({
   projectId,
   allowedStatuses,
   disabled,
+  editable,
+  offersDelete,
   canDelete,
   onStatus,
   onAssignee,
@@ -113,8 +132,6 @@ export function BatchMenuItems({
   const { t } = useT("issues");
   const { t: tLayout } = useT("layout");
   const wsId = useWorkspaceId();
-  const paths = useWorkspacePaths();
-  const { getShareableUrl } = useNavigation();
   const { data: properties = [] } = useQuery(propertyListOptions(wsId));
   const count = issues.length;
   const anyParent = issues.some((issue) => !!issue.parent_issue_id);
@@ -122,12 +139,7 @@ export function BatchMenuItems({
   const sharedStage = issues.every((issue) => issue.stage === issues[0]?.stage) ? (issues[0]?.stage ?? null) : null;
   const maxStage = issues.reduce((max, issue) => Math.max(max, issue.stage ?? 0), 0);
 
-  const copyLinks = () => {
-    const links = issues.map((issue) => getShareableUrl(paths.issueDetail(issueRouteRef(issue))));
-    void copyText(links.join("\n")).then((ok) => {
-      if (ok) toast.success(t(($) => $.batch.links_copied, { count }));
-    });
-  };
+  const copyLinks = useCopyIssueLinks(issues);
 
   const dateItems = (field: "start_date" | "due_date") => {
     const hasValue = issues.some((issue) => !!issue[field]);
@@ -163,14 +175,43 @@ export function BatchMenuItems({
 
   const activeProperties = properties.filter((property) => !property.archived);
 
+  const header = variant === "context" && (
+    <>
+      <div className="px-2 pt-1 pb-1.5 text-caption text-muted-foreground">
+        {t(($) => $.batch.selected, { count })}
+      </div>
+      <P.Separator />
+    </>
+  );
+  const selectionItems = (
+    <>
+      <P.Item onClick={copyLinks}>
+        <Link2 className="h-3.5 w-3.5" />
+        {t(($) => $.batch.copy_links)}
+      </P.Item>
+      {onClearSelection && (
+        <P.Item onClick={onClearSelection}>
+          <X className="h-3.5 w-3.5" />
+          {tLayout(($) => $.collection.clear_selection)}
+        </P.Item>
+      )}
+    </>
+  );
+
+  if (!editable) {
+    return (
+      <>
+        {header}
+        {selectionItems}
+      </>
+    );
+  }
+
   return (
     <>
+      {header}
       {variant === "context" && (
         <>
-          <div className="px-2 pt-1 pb-1.5 text-caption text-muted-foreground">
-            {t(($) => $.batch.selected, { count })}
-          </div>
-          <P.Separator />
           <StatusSub P={P} projectId={projectId} allowedStatuses={allowedStatuses} common={common} disabled={disabled} onStatus={onStatus} />
           <P.Sub>
             <P.SubTrigger disabled={disabled}>
@@ -289,26 +330,21 @@ export function BatchMenuItems({
       )}
 
       <P.Separator />
-      <P.Item onClick={copyLinks}>
-        <Link2 className="h-3.5 w-3.5" />
-        {t(($) => $.batch.copy_links)}
-      </P.Item>
-      {onClearSelection && (
-        <P.Item onClick={onClearSelection}>
-          <X className="h-3.5 w-3.5" />
-          {tLayout(($) => $.collection.clear_selection)}
-        </P.Item>
+      {selectionItems}
+      {offersDelete && (
+        <>
+          <P.Separator />
+          <P.Item
+            variant="destructive"
+            disabled={disabled || !canDelete}
+            title={!canDelete ? t(($) => $.batch.delete_restricted) : undefined}
+            onClick={onDelete}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t(($) => $.batch.delete_count, { count })}
+          </P.Item>
+        </>
       )}
-      <P.Separator />
-      <P.Item
-        variant="destructive"
-        disabled={disabled || !canDelete}
-        title={!canDelete ? t(($) => $.batch.delete_restricted) : undefined}
-        onClick={onDelete}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-        {t(($) => $.batch.delete_count, { count })}
-      </P.Item>
     </>
   );
 }

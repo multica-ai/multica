@@ -295,23 +295,37 @@ type terminalReportSendFunc func(context.Context, terminalTaskReport, []time.Dur
 type executionEnvironmentCommand func() ([]string, error)
 
 // cursorSupplementHookCommand returns the hook relay a steerable Cursor run
-// installs in .cursor/hooks.json. That file lands in the workdir, so steering
-// is offered only for daemon-managed workdirs, never inside a user's own
-// directory or worktree, and only when the workdir has no hooks.json of its
-// own. Windows is excluded because Cursor runs hooks there through PowerShell,
-// whose quoting the relay command is not verified against.
+// installs in .cursor/hooks.json. Windows is excluded because Cursor runs hooks
+// there through PowerShell, whose quoting the relay command is not verified
+// against.
 func cursorSupplementHookCommand(env *execenv.Environment) ([]string, bool) {
+	return workdirSupplementHookCommand(env, agent.CursorHooksInstallable, agent.CursorHookHelperArg)
+}
+
+// antigravitySupplementHookCommand returns the hook relay a steerable
+// Antigravity run installs in .agents/hooks.json. Windows is excluded because
+// agy runs hooks there through cmd /c, whose quoting the relay command is not
+// verified against.
+func antigravitySupplementHookCommand(env *execenv.Environment) ([]string, bool) {
+	return workdirSupplementHookCommand(env, agent.AntigravityHooksInstallable, agent.AntigravityHookHelperArg)
+}
+
+// workdirSupplementHookCommand gates hook-based steering. The provider's hooks
+// file lands in the workdir, so steering is offered only for daemon-managed
+// workdirs, never inside a user's own directory or worktree, and only when the
+// workdir has no hooks file of its own.
+func workdirSupplementHookCommand(env *execenv.Environment, installable func(string) error, helperArg string) ([]string, bool) {
 	if runtime.GOOS == "windows" || env == nil || env.LocalDirectory || env.LocalWorktree != nil {
 		return nil, false
 	}
-	if agent.CursorHooksInstallable(env.WorkDir) != nil {
+	if installable(env.WorkDir) != nil {
 		return nil, false
 	}
 	executable, err := resolveSelfExecutable()
 	if err != nil {
 		return nil, false
 	}
-	return []string{executable, agent.CursorHookHelperArg}, true
+	return []string{executable, helperArg}, true
 }
 
 func defaultExecutionEnvironmentCommand() ([]string, error) {
@@ -4693,7 +4707,16 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	// automatically on the next tick — that is the fallback the WS path
 	// relies on.
 	if d.wsHeartbeatRecentlyAcked(rid) {
-		d.logger.Debug("heartbeat: skipping HTTP tick, WS recently acked", "runtime_id", rid)
+		// No log line here on purpose. This is the steady state for a healthy
+		// daemon: every registered runtime takes this branch on every tick, so
+		// logging it costs one line per runtime per interval — forever, and even
+		// when the daemon is idle. With the handful of provider CLIs a typical
+		// developer machine has installed that is a continuous ~1 line/s into
+		// daemon.log, which dominated the file (~97% of its bytes) and kept
+		// writing to disk around the clock for a condition that needs no
+		// attention. The transition that actually matters — WS heartbeat going
+		// quiet and HTTP taking over — is still observable via the "HTTP tick"
+		// line below.
 		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
@@ -5047,7 +5070,15 @@ func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID
 		})
 		return
 	}
-	mcpServers, mcpSupported, err := listRuntimeLocalMcpServers(rt.Provider)
+	var cliVersion string
+	if rt.Provider == "opencode" {
+		if spec, ok := d.customProfileLaunchForRuntime(rt.ID); ok {
+			cliVersion = spec.version
+		} else if rt.ProfileID == "" {
+			cliVersion = d.agentVersion(rt.Provider)
+		}
+	}
+	mcpServers, mcpSupported, err := listRuntimeLocalMcpServers(rt.Provider, cliVersion)
 	if err != nil {
 		d.logger.Warn("runtime local MCP discovery failed", "runtime_id", rt.ID, "provider", rt.Provider, "error", err)
 		mcpServers = []runtimeLocalMcpServerSummary{}
@@ -6502,7 +6533,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}
 		return nil, true
 	}
-	if err := validateLocalPath(assignment.AbsPath); err != nil {
+	reportInvalidPath := func(err error) {
 		taskLog.Error("local_directory: path validation failed", "error", err)
 		failureReason := "local_directory_error"
 		if errors.Is(err, errLocalDirectoryMissing) {
@@ -6516,6 +6547,9 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
+	}
+	if err := validateLocalPath(assignment.AbsPath); err != nil {
+		reportInvalidPath(err)
 		return nil, true
 	}
 
@@ -6687,6 +6721,15 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
 		}
 		return nil, true
+	}
+	// The linked directory can move while this task is queued. Check again
+	// before execution setup creates context files at the old path.
+	if waitCounted {
+		if err := validateLocalPath(assignment.AbsPath); err != nil {
+			release()
+			reportInvalidPath(err)
+			return nil, true
+		}
 	}
 	taskLog.Info("local_directory: lock acquired")
 	return release, false
@@ -8544,7 +8587,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
 		effectiveMcpConfig = agentMcpConfig
-		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, agentMcpConfig); mergeErr != nil {
+		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, resolvedVersion, agentMcpConfig); mergeErr != nil {
 			taskLog.Warn("mcp_config: runtime merge failed; using agent configuration only",
 				"provider", provider,
 				"error", mergeErr,
@@ -9026,10 +9069,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "museapp" {
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1)
 	}
-	var cursorHookCommand []string
+	var supplementHookCommand []string
 	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || task.ChatSessionID != "")
-	if supplementSupported && provider == "cursor" {
-		cursorHookCommand, supplementSupported = cursorSupplementHookCommand(env)
+	if supplementSupported {
+		switch provider {
+		case "cursor":
+			supplementHookCommand, supplementSupported = cursorSupplementHookCommand(env)
+		case "antigravity":
+			supplementHookCommand, supplementSupported = antigravitySupplementHookCommand(env)
+		}
 	}
 	if supplementSupported {
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityTaskSupplementV1)
@@ -9392,7 +9440,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	execOpts := agent.ExecOptions{
 		SkillInvocation:            skillInvocation,
 		EnableTaskSupplement:       taskSupplementNegotiated,
-		CursorHookCommand:          cursorHookCommand,
+		SupplementHookCommand:      supplementHookCommand,
 		Cwd:                        env.WorkDir,
 		PiSkillPaths:               env.PiSkillPaths,
 		Model:                      model,
@@ -9501,7 +9549,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"inline_system_prompt", execOpts.SystemPrompt != "",
 		"resume_session", execOpts.ResumeSessionID != "",
 		"timeout", execOpts.Timeout,
-		"idle_watchdog", execOpts.IdleWatchdogTimeout,
+		"idle_watchdog_override", execOpts.IdleWatchdogTimeout,
 	)
 
 	// MUL-9013: record what this run is being handed, before it starts, so a
@@ -10432,6 +10480,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
 	defer stopWatchdog()
 	if idleWindow > 0 {
+		taskLog.Debug("idle watchdog armed", "window", idleWindow)
 		go d.runIdleWatchdog(watchdogCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
 	}
 

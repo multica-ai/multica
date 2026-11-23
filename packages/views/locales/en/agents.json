@@ -864,7 +864,7 @@
     "workspace_title": "Entire workspace",
     "workspace_desc": "All workspace members can run this agent",
     "members_title": "Specific people",
-    "members_desc": "Only the people you pick can run this agent",
+    "members_desc": "You and the people you pick can run this agent",
     "team_title": "Public to team",
     "team_desc": "Grant access to a whole team",
     "team_coming_soon": "Coming soon",

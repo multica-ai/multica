@@ -148,7 +148,7 @@ Claude Code と Codex のランタイムのページには**利用上限**も表
 | Claude Code | `~/.claude.json` の `mcpServers` と、有効なプラグインの MCP サーバー |
 | Codex | `$CODEX_HOME/config.toml`（既定は `~/.codex/config.toml`）の `mcp_servers` |
 | Cursor Agent | `~/.cursor/mcp.json` の `mcpServers` |
-| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json`（既定は `~/.config/opencode/opencode.json`）の `mcp` |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json` と、同じディレクトリの `opencode.jsonc` の `mcp`（既定は `~/.config/opencode/`）。JSONC ファイルが優先されます。 |
 | OpenClaw | `$CLAWDBOT_CONFIG_PATH`、または `$OPENCLAW_STATE_DIR/openclaw.json`（既定は `~/.openclaw/openclaw.json`）の `mcp.servers` |
 | CodeArts | `~/.codeartsdoer/codearts_cli.json` または `codearts_cli.jsonc` の `mcp` |
 
@@ -332,7 +332,10 @@ multica runtime profile set-path <profile-id> --path /absolute/path/to/command
 multica runtime profile unset-path <profile-id>
 ```
 
-プロファイルの変更は、それ以降に取得される実行にのみ影響します。プロファイルを削除する前に、対応するランタイムにまだ紐づいているアクティブなエージェントを先に処理してください。あるコンピュータ上のランタイムインスタンスだけを削除してもプロファイルは消えず、実行中のデーモンが再登録します。
+プロファイルの変更は、それ以降に取得される実行にのみ影響します。
+
+- **特定のマシンの利用を終了する。** カスタムプロファイルが残っている間は、ランタイムインスタンスを直接削除できません。対象マシンのデーモンを停止して、インスタンスが再登録されないようにします。オフラインになってから 7 日が経過し、アクティブなエージェントや未完了のタスクがなくなったインスタンスは、自動クリーンアップの対象になります。旧形式のプロファイルで作成者のマシンにインスタンスが残っている場合は、プロファイルを編集して、インスタンスを残すマシンを選択します。
+- **プロファイルの利用を終了する。** プロファイルを削除すると、登録されているすべてのマシンから、そのプロファイルのランタイムが削除されます。先にアクティブなエージェントをこのプロファイルに属さないランタイムに移すか、不要なエージェントをアーカイブします。削除を妨げているエージェントを管理できない場合は、所有者に移動またはアーカイブを依頼してください。
 
 ## Qoder Cloud Agents リモートランタイム
 

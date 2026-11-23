@@ -38,7 +38,7 @@ const FIXTURE_WORKER_NAME = "Fixture Worker";
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
 const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issue | task | sidebar | guest | app-request | app-resume>...
-         [--queued] [--hold] [--app SLUG] [--member] [--json]
+         [--queued] [--hold] [--app SLUG] [--member] [--guest-email EMAIL] [--json]
 
   chat      a chat session: a user message and an assistant reply with a table, code and a long log line
   builder   an Agent Builder session with the same kind of reply and a filled-in draft
@@ -46,8 +46,9 @@ const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issu
   task      an issue assigned to the Fixture Worker agent whose task stays running, with an execution log
   sidebar   a Work panel in use: 11 issues in 3 projects, read and unread notifications from 3 agents,
             pinned issues and a pinned project, and 2 saved views
-  guest     guest@localhost as a guest of a shared project, with an issue, a sub-issue, an assigned
-            issue and unread notifications; a second project stays hidden from it. Prints the guest's token
+  guest     guest@localhost as a guest of three shared projects (workspace-visible, private and
+            archived), with an issue, a sub-issue, an assigned issue and unread notifications; a fourth
+            project stays hidden from it. Prints the guest's token
   all       chat, builder, issue and task
   app-request  an issue assigned to the Fixture Agent whose run asks for an app account through
             apps_request_connection, then ends its turn; needs \`node scripts/fake-composio.mjs up\`
@@ -58,6 +59,8 @@ const USAGE = `Usage: node scripts/dev-fixtures.mjs <all | chat | builder | issu
   --app     app-request: the app slug to ask for (default googlecalendar)
   --member  app-request: start the run as Alice (alice@localhost), a plain member of the workspace;
             --json adds her member_token for signing a browser in as her
+  --guest-email  guest: the guest's email (default guest@localhost); a new one gets a fresh user,
+            clear of the per-recipient invitation limit
   --json    print the created ids and URLs as JSON instead of text; task adds task_id, auth_token and agent_id,
             guest adds guest_token and guest_user_id
 
@@ -82,6 +85,7 @@ function parseCli(argv) {
   let hold = false;
   let app;
   let member = false;
+  let guestEmail;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "-h" || arg === "--help") {
@@ -94,6 +98,9 @@ function parseCli(argv) {
     else if (arg === "--app") {
       app = argv[++i];
       if (!app) fail(`--app needs an app slug.\n\n${USAGE}`);
+    } else if (arg === "--guest-email") {
+      guestEmail = argv[++i];
+      if (!guestEmail?.includes("@")) fail(`--guest-email needs an email address.\n\n${USAGE}`);
     } else if (arg === "all") ALL_KINDS.forEach((kind) => kinds.add(kind));
     else if (KINDS.includes(arg)) kinds.add(arg);
     else fail(`unknown argument ${arg}\n\n${USAGE}`);
@@ -101,7 +108,16 @@ function parseCli(argv) {
   if (kinds.size === 0) fail(`name at least one fixture.\n\n${USAGE}`);
   if ((queued || hold) && !kinds.has("task")) fail(`--queued and --hold apply to the task fixture.\n\n${USAGE}`);
   if ((app || member) && !kinds.has("app-request")) fail(`--app and --member apply to the app-request fixture.\n\n${USAGE}`);
-  return { kinds: KINDS.filter((kind) => kinds.has(kind)), json, queued, hold, app: app ?? "googlecalendar", member };
+  if (guestEmail && !kinds.has("guest")) fail(`--guest-email applies to the guest fixture.\n\n${USAGE}`);
+  return {
+    kinds: KINDS.filter((kind) => kinds.has(kind)),
+    json,
+    queued,
+    hold,
+    app: app ?? "googlecalendar",
+    member,
+    guestEmail: guestEmail?.toLowerCase() ?? GUEST_EMAIL,
+  };
 }
 
 function loadProfile(env) {
@@ -437,7 +453,8 @@ const SIDEBAR_SCRIPTS = [
 ];
 
 // The guest fixture's cast. The guest signs in with the dev verification code
-// like dev@localhost, and is a guest of the shared project only.
+// like dev@localhost, and is a guest of the shared projects only: one visible
+// to the workspace, one private and one archived.
 const GUEST_EMAIL = "guest@localhost";
 const GUEST_NAME = "Gina Guest";
 const GUEST_CAPABILITIES = { "X-Client-Capabilities": "workspace-guests-v1" };
@@ -445,15 +462,33 @@ const GUEST_CAPABILITIES = { "X-Client-Capabilities": "workspace-guests-v1" };
 const GUEST_PROJECTS = {
   shared: {
     title: "Client portal",
-    description: "Shared with guest@localhost by scripts/dev-fixtures.mjs.",
+    description: "Shared with the guest by scripts/dev-fixtures.mjs.",
     status: "in_progress",
     priority: "high",
+    sharedWithGuest: true,
+  },
+  private: {
+    title: "Client contracts",
+    description: "A private project shared with the guest by scripts/dev-fixtures.mjs.",
+    status: "in_progress",
+    priority: "medium",
+    visibility: "private",
+    sharedWithGuest: true,
+  },
+  archived: {
+    title: "Client portal v1",
+    description: "An archived project shared with the guest by scripts/dev-fixtures.mjs.",
+    status: "completed",
+    priority: "low",
+    sharedWithGuest: true,
+    archived: true,
   },
   internal: {
     title: "Internal planning",
-    description: "Not shared with guest@localhost; the guest must not see it or its issues.",
+    description: "Not shared with the guest; the guest must not see it or its issues.",
     status: "planned",
     priority: "medium",
+    sharedWithGuest: false,
   },
 };
 
@@ -478,6 +513,20 @@ const GUEST_ISSUES = {
     description: "Clients want their invoices as CSV for their own bookkeeping.",
     status: "todo",
     priority: "medium",
+  },
+  contract: {
+    project: "private",
+    title: "Countersign the support contract",
+    description: "The client signed the renewed support contract; it needs our countersignature.",
+    status: "in_review",
+    priority: "medium",
+  },
+  migration: {
+    project: "archived",
+    title: "Move v1 clients to the new portal",
+    description: "Every v1 client now signs in through the new portal.",
+    status: "done",
+    priority: "low",
   },
   pricing: {
     project: "internal",
@@ -921,40 +970,52 @@ function createSidebarIssue(request, spec, projects, agent) {
 // send-code is rate-limited to 5 a minute, so the guest's token is kept in the
 // environment's profile directory and a rerun signs in again only when that
 // token no longer works. `make destroy` removes it with the profile.
-async function guestSession(profile) {
+async function guestSession(profile, email) {
   const file = join(profile.dir, "guest.json");
   try {
     const { token } = JSON.parse(readFileSync(file, "utf8"));
     const me = await client({ ...profile, token })("GET", "/api/me");
-    if (me?.email === GUEST_EMAIL) return { token, user: me };
+    if (me?.email === email) return { token, user: me };
   } catch {
     // No saved token, or it stopped working: sign in below.
   }
 
   const anonymous = client({ ...profile, token: "" });
-  await anonymous("POST", "/auth/send-code", { email: GUEST_EMAIL });
-  const verified = await anonymous("POST", "/auth/verify-code", { email: GUEST_EMAIL, code: devCode() });
+  await anonymous("POST", "/auth/send-code", { email });
+  const verified = await anonymous("POST", "/auth/verify-code", { email, code: devCode() });
   const created = await client({ ...profile, token: verified.token })("POST", "/api/tokens", {
     name: "dev-fixtures guest",
     expires_in_days: 365,
   });
   const asGuest = client({ ...profile, token: created.token });
   const user = await asGuest("PATCH", "/api/me", { name: GUEST_NAME });
-  writeFileSync(file, `${JSON.stringify({ email: GUEST_EMAIL, token: created.token }, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(file, `${JSON.stringify({ email, token: created.token }, null, 2)}\n`, { mode: 0o600 });
   return { token: created.token, user };
 }
 
-// Invites the guest to the shared project and accepts as the guest, the way
+// An archived project takes no new issues, so one an earlier run archived is
+// restored here and archived again once this run's issues are in.
+async function ensureGuestProject(request, existing, { sharedWithGuest: _shared, archived, ...project }) {
+  const found = existing.find((p) => p.title === project.title && (archived || !p.archived_at));
+  if (!found) return request("POST", "/api/projects", project);
+  if (found.archived_at) await request("POST", `/api/projects/${found.id}/restore`);
+  return found;
+}
+
+// Invites the guest to the shared projects and accepts as the guest, the way
 // the web app does. On a rerun the guest is already a member and keeps its
-// other projects, but always has the shared one and never the internal one.
-async function ensureGuestMember({ request, asGuest, workspaceId, guest, shared, internal }) {
+// other projects, but always has the shared ones and never the internal one.
+async function ensureGuestMember({ request, asGuest, workspaceId, guest, email, projects }) {
+  const sharedIds = Object.keys(GUEST_PROJECTS)
+    .filter((key) => GUEST_PROJECTS[key].sharedWithGuest)
+    .map((key) => projects[key].id);
   const workspaces = (await asGuest("GET", "/api/workspaces")) ?? [];
   if (!workspaces.some((ws) => ws.id === workspaceId)) {
     try {
       await request("POST", `/api/workspaces/${workspaceId}/members`, {
-        email: GUEST_EMAIL,
+        email,
         role: "guest",
-        project_ids: [shared.id],
+        project_ids: sharedIds,
       });
     } catch (error) {
       // An interrupted run can leave its invitation pending; accept that one.
@@ -962,7 +1023,7 @@ async function ensureGuestMember({ request, asGuest, workspaceId, guest, shared,
     }
     const invitations = listOf(await asGuest("GET", "/api/invitations"), "invitations");
     const invitation = invitations.find((inv) => inv.workspace_id === workspaceId);
-    if (!invitation) throw new Error(`no pending invitation for ${GUEST_EMAIL} in workspace ${workspaceId}`);
+    if (!invitation) throw new Error(`no pending invitation for ${email} in workspace ${workspaceId}`);
     await asGuest("POST", `/api/invitations/${invitation.id}/accept`);
   }
 
@@ -972,27 +1033,28 @@ async function ensureGuestMember({ request, asGuest, workspaceId, guest, shared,
   );
   const member = members.find((m) => m.user_id === guest.id);
   if (member?.role !== "guest") {
-    throw new Error(`${GUEST_EMAIL} is a ${member?.role ?? "missing"} member of this workspace, not a guest`);
+    throw new Error(`${email} is a ${member?.role ?? "missing"} member of this workspace, not a guest`);
   }
   const current = member.project_ids ?? [];
-  const wanted = [...current.filter((id) => id !== internal.id && id !== shared.id), shared.id];
-  if (current.length !== wanted.length || !current.includes(shared.id)) {
+  const fixtureIds = new Set(Object.values(projects).map((project) => project.id));
+  const wanted = [...current.filter((id) => !fixtureIds.has(id)), ...sharedIds];
+  if (current.length !== wanted.length || !wanted.every((id) => current.includes(id))) {
     await request("PUT", `/api/workspaces/${workspaceId}/members/${member.id}/projects`, { project_ids: wanted });
   }
   return member;
 }
 
-async function seedGuest({ request, profile, appUrl, slug }) {
-  const existingProjects = listOf(await request("GET", "/api/projects"), "projects");
+async function seedGuest({ request, profile, appUrl, slug, guestEmail }) {
+  const existingProjects = listOf(await request("GET", "/api/projects?include_archived=true"), "projects");
   const projects = {};
   for (const [key, project] of Object.entries(GUEST_PROJECTS)) {
-    projects[key] = await ensureProject(request, existingProjects, project);
+    projects[key] = await ensureGuestProject(request, existingProjects, project);
   }
 
-  const session = await guestSession(profile);
+  const session = await guestSession(profile, guestEmail);
   const guest = session.user;
   const asGuest = client({ ...profile, token: session.token });
-  await ensureGuestMember({ request, asGuest, workspaceId: profile.workspaceId, guest, ...projects });
+  await ensureGuestMember({ request, asGuest, workspaceId: profile.workspaceId, guest, email: guestEmail, projects });
 
   const issues = {};
   for (const [key, spec] of Object.entries(GUEST_ISSUES)) {
@@ -1021,11 +1083,15 @@ async function seedGuest({ request, profile, appUrl, slug }) {
   });
   await request("PUT", `/api/issues/${issues.export.id}`, { assignee_type: "member", assignee_id: guest.id });
 
+  for (const [key, spec] of Object.entries(GUEST_PROJECTS)) {
+    if (spec.archived) await request("POST", `/api/projects/${projects[key].id}/archive`);
+  }
+
   const inbox = listOf(await asGuest("GET", "/api/inbox"), "items");
   const issueUrl = (issue) => `${appUrl}/${slug}/issues/${issue.identifier}`;
   return {
     url: `${appUrl}/${slug}/inbox`,
-    guest_email: GUEST_EMAIL,
+    guest_email: guestEmail,
     guest_code: devCode(),
     guest_user_id: guest.id,
     guest_token: session.token,
@@ -1034,7 +1100,14 @@ async function seedGuest({ request, profile, appUrl, slug }) {
     projects: Object.fromEntries(
       Object.entries(projects).map(([key, project]) => [
         key,
-        { id: project.id, title: project.title, url: `${appUrl}/${slug}/projects/${project.id}` },
+        {
+          id: project.id,
+          title: project.title,
+          url: `${appUrl}/${slug}/projects/${project.id}`,
+          visibility: GUEST_PROJECTS[key].visibility ?? "workspace",
+          archived: !!GUEST_PROJECTS[key].archived,
+          visible_to_guest: GUEST_PROJECTS[key].sharedWithGuest,
+        },
       ]),
     ),
     issues: Object.fromEntries(
@@ -1043,8 +1116,9 @@ async function seedGuest({ request, profile, appUrl, slug }) {
         {
           id: issue.id,
           identifier: issue.identifier,
+          title: issue.title,
           url: issueUrl(issue),
-          visible_to_guest: GUEST_ISSUES[key].project === "shared",
+          visible_to_guest: GUEST_PROJECTS[GUEST_ISSUES[key].project].sharedWithGuest,
         },
       ]),
     ),
@@ -1067,14 +1141,14 @@ async function holdRuntime(request, runtime) {
 }
 
 async function main() {
-  const { kinds, json, queued, hold, app, member } = parseCli(process.argv.slice(2));
+  const { kinds, json, queued, hold, app, member, guestEmail } = parseCli(process.argv.slice(2));
   const profile = loadProfile(process.env);
   const request = client(profile);
 
   const workspaces = (await request("GET", "/api/workspaces")) ?? [];
   const workspace = workspaces.find((ws) => ws.id === profile.workspaceId);
   if (!workspace) fail(`the profile's workspace ${profile.workspaceId} is not visible to its token.`);
-  const context = { request, profile, appUrl: profile.appUrl, slug: workspace.slug, queued, app, member };
+  const context = { request, profile, appUrl: profile.appUrl, slug: workspace.slug, queued, app, member, guestEmail };
 
   if (kinds.some((kind) => !RUNTIMELESS_KINDS.includes(kind))) {
     context.runtime = await ensureRuntime(request, profile.workspaceId);

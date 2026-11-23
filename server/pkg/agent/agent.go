@@ -158,11 +158,12 @@ type ExecOptions struct {
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
 	ClaudeSettingsPath string
-	// CursorHookCommand is the argv of the multica hook relay (the daemon's own
-	// binary followed by CursorHookHelperArg). The cursor backend needs it, with
-	// EnableTaskSupplement, to accept additional messages; other providers
-	// ignore it.
-	CursorHookCommand []string
+	// SupplementHookCommand is the argv of the provider's multica hook relay
+	// (the daemon's own binary followed by CursorHookHelperArg or
+	// AntigravityHookHelperArg). The cursor and antigravity backends need it,
+	// with EnableTaskSupplement, to accept additional messages; other
+	// providers ignore it.
+	SupplementHookCommand []string
 	// OnUsage optionally receives the backend's cumulative usage snapshot while
 	// the run is still live, keyed exactly like Result.Usage so a mid-run flush
 	// and the terminal report upsert the same (task, provider, model) rows

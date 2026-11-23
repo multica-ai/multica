@@ -86,6 +86,32 @@ func TestLatestPluginHookOccurrencePagesThroughLongOutage(t *testing.T) {
 	}
 }
 
+func TestLatestPluginHookOccurrenceNeverFiringCronReturns(t *testing.T) {
+	activated := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := activated.Add(9 * 24 * time.Hour)
+	type result struct {
+		latest time.Time
+		count  int
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		latest, count, err := latestPluginHookOccurrence("0 0 30 2 *", "UTC", activated, now)
+		done <- result{latest, count, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("enumerate occurrences: %v", got.err)
+		}
+		if got.count != 0 || !got.latest.IsZero() {
+			t.Fatalf("latest=%s count=%d, want no due occurrence", got.latest, got.count)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("latestPluginHookOccurrence did not return for a cron that never fires")
+	}
+}
+
 func TestPluginHookScheduleDeliveryIDIsStablePerOccurrence(t *testing.T) {
 	installation := util.MustParseUUID("11111111-1111-4111-8111-111111111111")
 	generation := util.MustParseUUID("22222222-2222-4222-8222-222222222222")

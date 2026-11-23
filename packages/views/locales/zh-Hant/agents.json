@@ -840,7 +840,7 @@
     "workspace_title": "整個工作區",
     "workspace_desc": "預設允許工作區內所有成員執行該 AI 代理",
     "members_title": "指定成員",
-    "members_desc": "只有你選擇的人可以執行該 AI 代理",
+    "members_desc": "你和所選成員可以執行該 AI 代理",
     "team_title": "公開給團隊",
     "team_desc": "向整個團隊授予訪問權限",
     "team_coming_soon": "即將推出",

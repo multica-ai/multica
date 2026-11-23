@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -4730,6 +4731,45 @@ func TestExecuteAndDrain_IdleWatchdog_HappyPathDoesNotFire(t *testing.T) {
 	}
 	if result.Output != "done" {
 		t.Fatalf("expected output preserved, got %q", result.Output)
+	}
+}
+
+func TestExecuteAndDrain_LogsEffectiveIdleWatchdog(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name     string
+		global   time.Duration
+		override time.Duration
+		want     string
+	}{
+		{name: "global window", global: 15 * time.Minute, want: "window=15m0s"},
+		{name: "shorter override", global: 15 * time.Minute, override: 5 * time.Minute, want: "window=5m0s"},
+		{name: "longer override", global: 5 * time.Minute, override: 15 * time.Minute, want: "window=5m0s"},
+		{name: "globally disabled", override: 5 * time.Minute},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := newTestDaemon(t)
+			d.cfg.AgentIdleWatchdog = tt.global
+			backend := &fakeBackend{results: []agent.Result{{Status: "completed"}}}
+			var logs bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+			_, _, err := d.executeAndDrain(context.Background(), backend, "p",
+				agent.ExecOptions{IdleWatchdogTimeout: tt.override}, log, "t-idle-log", "", new(atomic.Int32))
+			if err != nil {
+				t.Fatalf("run backend: %v", err)
+			}
+
+			line := "msg=\"idle watchdog armed\""
+			if tt.want == "" {
+				if strings.Contains(logs.String(), line) {
+					t.Fatalf("disabled watchdog logged as armed: %s", &logs)
+				}
+			} else if !strings.Contains(logs.String(), line+" "+tt.want) {
+				t.Fatalf("missing armed watchdog with %s: %s", tt.want, &logs)
+			}
+		})
 	}
 }
 

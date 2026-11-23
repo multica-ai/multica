@@ -287,7 +287,7 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		})
 	case "opencode":
 		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
-			return discovered(discoverOpenCodeModels(callCtx, runtimeCmd))
+			return discoverOpenCodeModels(callCtx, runtimeCmd)
 		})
 	case "codearts":
 		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
@@ -874,20 +874,23 @@ func isOpenAIReasoningSeriesID(id string) bool {
 // discoverOpenCodeModels reads model metadata using the installed CLI's contract:
 // the model API on 2.x, and verbose model rows on 1.x. Plain IDs remain a
 // fallback when metadata discovery fails; no reasoning levels are invented.
-func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
-	if runtimeCmd.Path == "" {
-		runtimeCmd.Path = "opencode"
-	}
-	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
-		return []Model{}, nil
-	}
+func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) (Catalog, error) {
 	// Newer opencode (1.15+) syncs its hosted free-model catalog over the
 	// network on `opencode models`, which can take ~6s; the previous 5s cap
 	// timed out and returned an empty list, so the runtime showed online but
 	// the model picker was empty. See multica-ai/multica#3627.
-	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	version, _ := detectCLIVersion(runCtx, runtimeCmd)
+	return discoverOpenCodeModelsWithin(ctx, runtimeCmd, 15*time.Second)
+}
+
+func discoverOpenCodeModelsWithin(ctx context.Context, runtimeCmd Command, attemptTimeout time.Duration) (Catalog, error) {
+	if runtimeCmd.Path == "" {
+		runtimeCmd.Path = "opencode"
+	}
+	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
+		return Catalog{Models: []Model{}}, nil
+	}
+	metadataCtx, cancelMetadata := context.WithTimeout(ctx, attemptTimeout)
+	version, _ := detectCLIVersion(metadataCtx, runtimeCmd)
 	parsed, versionErr := parseSemver(version)
 	var models []Model
 	if versionErr == nil && parsed.Major >= 2 {
@@ -901,29 +904,38 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 			if server == "" && !standalone {
 				args = append(args, "--standalone")
 			}
-			cmd := runtimeCmd.exec(runCtx, args...)
+			cmd := runtimeCmd.exec(metadataCtx, args...)
 			hideAgentWindow(cmd)
 			if out, err := outputOwned(cmd, runtimeCmd.logger); err == nil {
 				models = parseOpenCodeV2Models(out)
 			}
 		}
 	} else {
-		cmd := runtimeCmd.exec(runCtx, "models", "--verbose")
+		cmd := runtimeCmd.exec(metadataCtx, "models", "--verbose")
 		hideAgentWindow(cmd)
 		// A stale config can produce a non-zero exit with a usable catalog.
 		out, _ := outputOwned(cmd, runtimeCmd.logger)
 		models = parseOpenCodeModels(string(out))
 	}
-	if len(models) == 0 {
-		cmd := runtimeCmd.exec(runCtx, "models")
-		hideAgentWindow(cmd)
-		out, _ := outputOwned(cmd, runtimeCmd.logger)
-		models = parseOpenCodeModels(string(out))
+	metadataTimedOut := metadataCtx.Err() == context.DeadlineExceeded
+	cancelMetadata()
+	if len(models) > 0 {
+		return Catalog{Models: models}, nil
 	}
+
+	// A timed-out metadata probe must not expire the plain listing.
+	fallbackCtx, cancelFallback := context.WithTimeout(ctx, attemptTimeout)
+	defer cancelFallback()
+	cmd := runtimeCmd.exec(fallbackCtx, "models")
+	hideAgentWindow(cmd)
+	out, _ := outputOwned(cmd, runtimeCmd.logger)
+	models = parseOpenCodeModels(string(out))
 	if len(models) == 0 {
-		return []Model{}, nil
+		return Catalog{Models: []Model{}}, nil
 	}
-	return models, nil
+	// After a timeout, the plain IDs can populate the picker but cannot
+	// validate saved variants or replace an existing complete catalog.
+	return Catalog{Models: models, Fallback: metadataTimedOut}, nil
 }
 
 // OpenCode 2.x GET /api/model returns Location.response(Model.Info[]): an
