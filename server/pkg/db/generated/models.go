@@ -2094,6 +2094,8 @@ type TaskUsageHourly struct {
 	UncostedOutputTokens     pgtype.Int8 `json:"uncosted_output_tokens"`
 	UncostedCacheReadTokens  pgtype.Int8 `json:"uncosted_cache_read_tokens"`
 	UncostedCacheWriteTokens pgtype.Int8 `json:"uncosted_cache_write_tokens"`
+	// Triggering squad UUID (copied from agent_task_queue.squad_id). NULL for standalone non-squad runs and legacy pre-backfill buckets.
+	SquadID pgtype.UUID `json:"squad_id"`
 }
 
 type TaskUsageHourlyDirty struct {
@@ -2105,6 +2107,7 @@ type TaskUsageHourlyDirty struct {
 	Provider    string             `json:"provider"`
 	Model       string             `json:"model"`
 	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
+	SquadID     pgtype.UUID        `json:"squad_id"`
 }
 
 type TaskUsageHourlyRollupState struct {

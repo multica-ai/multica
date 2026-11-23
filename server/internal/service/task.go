@@ -816,6 +816,33 @@ func attributionCreateParams(attr attribution.Result) (source pgtype.Text, deleg
 	return
 }
 
+// resolveInheritedSquadID propagates squad attribution along delegation chains
+// (leader comment @mention -> member task, multi-hop delegation, and squad-
+// created sub-issues) while leaving direct standalone human triggers unattributed.
+// Callers keep is_leader_task=false for inherited tasks so daemon claim never
+// injects a squad-leader briefing onto member runs.
+func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issue, explicitSquadID, delegatedFromTaskID pgtype.UUID) pgtype.UUID {
+	if explicitSquadID.Valid {
+		return explicitSquadID
+	}
+	if s == nil || s.Queries == nil {
+		return pgtype.UUID{}
+	}
+	if delegatedFromTaskID.Valid {
+		if sourceTask, err := s.Queries.GetAgentTask(ctx, delegatedFromTaskID); err == nil && sourceTask.SquadID.Valid {
+			return sourceTask.SquadID
+		}
+	}
+	if issue.OriginType.Valid &&
+		(issue.OriginType.String == "agent_create" || issue.OriginType.String == "quick_create") &&
+		issue.OriginID.Valid {
+		if originTask, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil && originTask.SquadID.Valid {
+			return originTask.SquadID
+		}
+	}
+	return pgtype.UUID{}
+}
+
 // RecordHumanDelegation notes that attr's member personally started an agent
 // run, for the self-host telemetry "delegating member" counts. Call it once the
 // run row (or the fold into a queued row) is committed, with the attribution
@@ -1320,6 +1347,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	inheritedSquadID := s.resolveInheritedSquadID(ctx, issue, pgtype.UUID{}, attrDelegatedFrom)
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -1331,6 +1359,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
 		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
+		SquadID:              inheritedSquadID,
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
 		RuleVersionID:        attr.RuleVersionID,
@@ -1496,6 +1525,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	resolvedSquadID := s.resolveInheritedSquadID(ctx, issue, squadID, attrDelegatedFrom)
 	params := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
@@ -1508,7 +1538,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
-		SquadID:              squadID,
+		SquadID:              resolvedSquadID,
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
 		RuleVersionID:        attr.RuleVersionID,
@@ -1706,6 +1736,7 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		RuntimeID:            agent.RuntimeID,
 		Priority:             priorityToInt("high"),
 		Context:              contextJSON,
+		SquadID:              squadID,
 		OriginatorUserID:     requesterID,
 		AccountableUserID:    attr.AccountableUserID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
