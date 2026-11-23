@@ -440,6 +440,10 @@ export function ChatWindow() {
         agentAccessRevoked={c.isAgentAccessRevoked}
         agentRuntimeRequired={!c.isAgentRuntimeBound}
         agentName={activeAgent?.name}
+        directoryWorkspaceId={wsId}
+        directoryRuntime={c.directorySelection.runtime}
+        workingDirectory={c.directorySelection.workingDirectory}
+        onWorkingDirectoryChange={c.directorySelection.onChange}
         projects={c.projects}
         projectId={c.activeProjectId}
         onProjectChange={c.handleProjectChange}

@@ -345,13 +345,19 @@ describe("chat store — Ask Multica agent", () => {
     expect(s().newChatRequest).toBe(2);
   });
 
-  it("starts the new chat with the current agent when none is set", () => {
+  it("starts the new chat with the current agent but not the previous directory when no agent is set", () => {
     const store = createChatStore({ storage: memStorage() });
     store.getState().setSelectedAgentId("agent-1");
+    store.getState().setWorkingDirectoryDraft({
+      agentId: "agent-1",
+      runtimeId: "runtime-1",
+      directory: { daemon_id: "daemon-1", path: "/example/previous" },
+    });
 
     store.getState().startNewChat();
 
     expect(store.getState().selectedAgentId).toBe("agent-1");
+    expect(store.getState().workingDirectoryDraft).toBeNull();
   });
 });
 
@@ -496,5 +502,21 @@ describe("chat store — draft upload ops", () => {
     expect(store.getState().inputDrafts["session-2"]).toBe(
       "[doc.pdf](/api/attachments/att-2/download)",
     );
+  });
+});
+
+describe("chat working-directory draft", () => {
+  it("preserves the directory when attaching project context and clears it when changing agent", () => {
+    const store = createChatStore({ storage: memStorage() });
+    store.getState().setSelectedAgentId("agent-1");
+    const selection = { agentId: "agent-1", runtimeId: "rt", directory: { daemon_id: "d", path: "/home/me/项目 files" } };
+    store.getState().setWorkingDirectoryDraft(selection);
+    store.getState().setSelectedAgentId("agent-1");
+    expect(store.getState().workingDirectoryDraft).toEqual(selection);
+    store.getState().setSelectedAgentId("agent-2");
+    expect(store.getState().workingDirectoryDraft).toBeNull();
+    store.getState().setWorkingDirectoryDraft(selection);
+    store.getState().setSelectedProjectId("project-1");
+    expect(store.getState().workingDirectoryDraft).toEqual(selection);
   });
 });
