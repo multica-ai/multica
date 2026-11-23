@@ -1,5 +1,9 @@
 "use client";
 
+import { useId } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_INDICATOR_SPRING } from "@multica/ui/lib/motion";
 import {
   NumberFlow,
   NumberFlowGroup,
@@ -83,27 +87,43 @@ export function Segmented<T extends string | number>({
   options: readonly { label: string; value: T }[];
   label: string;
 }) {
+  const indicatorId = useId();
+  const prefersReducedMotion = useReducedMotion();
+  const transition = prefersReducedMotion ? { duration: 0 } : UI_INDICATOR_SPRING;
+
   return (
     <div
       role="group"
       aria-label={label}
       className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
     >
-      {options.map((o) => (
-        <button
-          key={String(o.value)}
-          type="button"
-          aria-pressed={o.value === value}
-          onClick={() => onChange(o.value)}
-          className={`rounded-sm px-2.5 py-1 text-caption font-medium transition-colors ${
-            o.value === value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={String(o.value)}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(o.value)}
+            className={`relative rounded-sm px-2.5 py-1 text-caption font-medium transition-colors ${
+              active
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {active && (
+              <motion.span
+                layoutId={indicatorId}
+                transition={transition}
+                aria-hidden="true"
+                data-slot="segmented-indicator"
+                className="pointer-events-none absolute inset-0 rounded-sm bg-background shadow-sm"
+              />
+            )}
+            <span className="relative z-10">{o.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -30,16 +30,15 @@ import {
 } from "react";
 import {
   AppWindow,
-  Check,
   ChevronDown,
   CodeXml,
-  Copy,
   Maximize2,
   RotateCw,
   TriangleAlert,
   Workflow,
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -322,7 +321,7 @@ export function DynamicBlock({
             onClick={handleCopy}
             label={t(($) => $.dynamic_block.copy_source)}
           >
-            {copied ? <Check /> : <Copy />}
+            <CopyCheckIcon copied={copied} />
           </IconButton>
         </div>
       </div>
@@ -598,7 +597,7 @@ function DynamicBlockErrorPanel({
             {t(($) => $.dynamic_block.view_source)}
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={handleCopyError}>
-            {copied ? <Check /> : <Copy />}
+            <CopyCheckIcon copied={copied} />
             {t(($) => $.dynamic_block.copy_error)}
           </Button>
         </div>

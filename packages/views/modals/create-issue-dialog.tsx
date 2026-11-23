@@ -1,7 +1,10 @@
 "use client";
 
 import { useLayoutEffect, useState } from "react";
+import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { Dialog, DialogContent } from "@multica/ui/components/ui/dialog";
 import {
@@ -36,11 +39,15 @@ import { useWorkspaceId } from "@multica/core/hooks";
  * create-mode store, so the dialog reopens at the size it was last left at.
  */
 export function CreateIssueDialog({
+  open = true,
   onClose,
+  onOpenChangeComplete,
   initialMode,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
 }) {
@@ -50,23 +57,37 @@ export function CreateIssueDialog({
   if (anchorCommentId) {
     return (
       <SourceContextCreateIssueDialog
+        open={open}
         onClose={onClose}
+        onOpenChangeComplete={onOpenChangeComplete}
         initialMode={initialMode}
         data={data}
         anchorCommentId={anchorCommentId}
       />
     );
   }
-  return <CreateIssueDialogBody onClose={onClose} initialMode={initialMode} data={data} />;
+  return (
+    <CreateIssueDialogBody
+      open={open}
+      onClose={onClose}
+      onOpenChangeComplete={onOpenChangeComplete}
+      initialMode={initialMode}
+      data={data}
+    />
+  );
 }
 
 function SourceContextCreateIssueDialog({
+  open,
   onClose,
+  onOpenChangeComplete,
   initialMode,
   data,
   anchorCommentId,
 }: {
+  open: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
   anchorCommentId: string;
@@ -86,7 +107,9 @@ function SourceContextCreateIssueDialog({
 
   return (
     <CreateIssueDialogBody
+      open={open}
       onClose={onClose}
+      onOpenChangeComplete={onOpenChangeComplete}
       initialMode={initialMode}
       data={data}
       sourceContextExpanded={sourceContextExpanded}
@@ -107,20 +130,26 @@ function SourceContextCreateIssueDialog({
 }
 
 function CreateIssueDialogBody({
+  open,
   onClose,
+  onOpenChangeComplete,
   initialMode,
   data,
   sourceContextData,
   sourceContextExpanded = false,
 }: {
+  open: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
   sourceContextData?: Record<string, unknown>;
   sourceContextExpanded?: boolean;
 }) {
+  const prefersReducedMotion = useReducedMotion();
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const [mode, setMode] = useState<CreateMode>(initialMode);
+  const [modeSwitchCount, setModeSwitchCount] = useState(0);
   const [manualOpened, setManualOpened] = useState(initialMode === "manual");
   const [panelData, setPanelData] = useState(data ?? null);
   // Remembered across opens: the dialog reopens at the size it was left at.
@@ -145,6 +174,7 @@ function CreateIssueDialogBody({
       assignee_id: data.assignee_id,
     } : carry ?? null);
     if (next === "manual") setManualOpened(true);
+    setModeSwitchCount((count) => count + 1);
     setMode(next);
   };
 
@@ -153,9 +183,9 @@ function CreateIssueDialogBody({
       ? cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2",
-          // Smooth size transition when switching modes — the manual mode
-          // uses the same easing.
-          "!transition-all !duration-300 !ease-out",
+          // Geometry-only transition so DialogContent's enter/exit animation
+          // keeps its own duration & easing without being overridden.
+          "[interpolate-size:allow-keywords] [transition-property:width,max-width,height] [transition-duration:200ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] motion-reduce:[transition-duration:0ms]",
           // Phone gutter. The widths below are `!important` so they beat
           // DialogContent's own sizing — which also made them beat its
           // `max-w-[calc(100%-2rem)]` safety margin, leaving the card flush
@@ -180,29 +210,41 @@ function CreateIssueDialogBody({
         );
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <DialogContent
         finalFocus={false}
         showCloseButton={false}
         className={className}
       >
-        {mode === "agent" ? (
-          <AgentCreatePanel
-            onClose={onClose}
-            onSwitchMode={switchTo("manual")}
-            data={effectiveData}
-            isExpanded={isExpanded}
-            setIsExpanded={setIsExpanded}
-          />
-        ) : (
-          <ManualCreatePanel
-            onClose={onClose}
-            onSwitchMode={switchTo("agent")}
-            data={effectiveData}
-            isExpanded={isExpanded}
-            setIsExpanded={setIsExpanded}
-          />
-        )}
+        <motion.div
+          key={mode}
+          initial={modeSwitchCount > 0 && !prefersReducedMotion ? { opacity: 0 } : false}
+          animate={{ opacity: 1 }}
+          transition={{ duration: prefersReducedMotion ? 0 : 0.13, ease: UI_EASE_OUT }}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          {mode === "agent" ? (
+            <AgentCreatePanel
+              onClose={onClose}
+              onSwitchMode={switchTo("manual")}
+              data={effectiveData}
+              isExpanded={isExpanded}
+              setIsExpanded={setIsExpanded}
+            />
+          ) : (
+            <ManualCreatePanel
+              onClose={onClose}
+              onSwitchMode={switchTo("agent")}
+              data={effectiveData}
+              isExpanded={isExpanded}
+              setIsExpanded={setIsExpanded}
+            />
+          )}
+        </motion.div>
       </DialogContent>
     </Dialog>
   );

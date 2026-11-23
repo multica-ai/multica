@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { motion } from "motion/react";
 import {
   AlertCircle,
   Building2,
@@ -20,7 +21,9 @@ import {
   UserRound,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
+import { useReducedMotion } from "@multica/core/appearance";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { UI_INDICATOR_SPRING } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -360,37 +363,55 @@ export function SettingsViewTabs<T extends string>({
   value: T;
   onChange: (value: T) => void;
 }) {
+  const indicatorId = useId();
+  const prefersReducedMotion = useReducedMotion();
+  const transition = prefersReducedMotion ? { duration: 0 } : UI_INDICATOR_SPRING;
+
   return (
     <div
       role="tablist"
       aria-label={label}
       className="inline-flex w-fit items-center gap-0.5 rounded-lg bg-muted p-0.5"
     >
-      {items.map((item) => (
-        <button
-          key={item.value}
-          type="button"
-          role="tab"
-          aria-selected={value === item.value}
-          onClick={() => onChange(item.value)}
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-label font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-            value === item.value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {item.label}
-          {item.count !== undefined ? (
-            <>
-              {" "}
-              <span className="text-caption font-normal tabular-nums text-muted-foreground">
-                {item.count}
-              </span>
-            </>
-          ) : null}
-        </button>
-      ))}
+      {items.map((item) => {
+        const active = value === item.value;
+        return (
+          <button
+            key={item.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(item.value)}
+            className={cn(
+              "relative inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-label font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+              active
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {active && (
+              <motion.span
+                layoutId={indicatorId}
+                transition={transition}
+                aria-hidden="true"
+                data-slot="settings-view-tabs-indicator"
+                className="pointer-events-none absolute inset-0 rounded-md bg-background shadow-sm"
+              />
+            )}
+            <span className="relative z-10 inline-flex items-center gap-1.5">
+              {item.label}
+              {item.count !== undefined ? (
+                <>
+                  {" "}
+                  <span className="text-caption font-normal tabular-nums text-muted-foreground">
+                    {item.count}
+                  </span>
+                </>
+              ) : null}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

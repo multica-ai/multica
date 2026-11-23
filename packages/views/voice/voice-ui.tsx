@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useRef, type PointerEvent, type SyntheticEvent } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, Check, Mic, MicOff, RotateCcw, X } from "@multica/ui/icons";
+import { useReducedMotion } from "@multica/core/appearance";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { createShortcutChord } from "@multica/core/shortcuts";
 import {
@@ -287,31 +290,51 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
  */
 export function VoiceHud({ voice }: { voice: ComposerVoice }) {
   const { t } = useT("editor");
+  const prefersReducedMotion = useReducedMotion();
   const phase = voice.session?.phase;
-  if (!voice.showHud) return null;
   return (
     <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 -translate-x-1/2">
-      <div
-        role="status"
-        className="flex h-10 items-center gap-2.5 whitespace-nowrap rounded-full bg-multica-ink pl-3.5 pr-4 text-multica-paper shadow-[var(--floating-shadow)] animate-in fade-in zoom-in-95 slide-in-from-bottom-2"
-      >
-        {phase === "recording" ? (
-          <>
-            <RecDot className="bg-[#ff5a52]" />
-            <span className="sr-only">{t(($) => $.voice.recording)}</span>
-            <Waveform density="hud" className="w-[86px]" />
-            <Elapsed className="opacity-70" />
-            <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
-          </>
-        ) : (
-          <>
-            <Mic className="size-4 opacity-70" />
-            <span className="text-caption opacity-80">
-              {phase === "transcribing" ? t(($) => $.voice.transcribing) : t(($) => $.voice.requesting)}
-            </span>
-          </>
+      <AnimatePresence>
+        {voice.showHud && (
+          <motion.div
+            key="voice-hud"
+            role="status"
+            initial={{
+              opacity: 0,
+              y: prefersReducedMotion ? 0 : 6,
+              scale: prefersReducedMotion ? 1 : 0.96,
+            }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{
+              opacity: 0,
+              y: prefersReducedMotion ? 0 : 6,
+              scale: prefersReducedMotion ? 1 : 0.96,
+            }}
+            transition={{
+              duration: prefersReducedMotion ? 0 : UI_MOTION_DURATION.fast,
+              ease: UI_EASE_OUT,
+            }}
+            className="flex h-10 items-center gap-2.5 whitespace-nowrap rounded-full bg-multica-ink pl-3.5 pr-4 text-multica-paper shadow-[var(--floating-shadow)]"
+          >
+            {phase === "recording" ? (
+              <>
+                <RecDot className="bg-[#ff5a52]" />
+                <span className="sr-only">{t(($) => $.voice.recording)}</span>
+                <Waveform density="hud" className="w-[86px]" />
+                <Elapsed className="opacity-70" />
+                <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
+              </>
+            ) : (
+              <>
+                <Mic className="size-4 opacity-70" />
+                <span className="text-caption opacity-80">
+                  {phase === "transcribing" ? t(($) => $.voice.transcribing) : t(($) => $.voice.requesting)}
+                </span>
+              </>
+            )}
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
     </div>
   );
 }
