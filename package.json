@@ -29,6 +29,7 @@
     "knip": "knip",
     "check:ui-exports": "node scripts/check-ui-wildcard-exports.mjs",
     "check:ui-radii": "node scripts/check-ui-radius-tokens.mjs",
+    "check:ui-transitions": "node scripts/check-ui-transition-properties.mjs",
     "check:deps-catalog": "node scripts/check-dependency-catalog.mjs",
     "theme:check": "node scripts/theme-check.mjs",
     "theme:preview": "node scripts/theme-preview.mjs",
