@@ -488,7 +488,6 @@
     "section_parent_issue": "親タスク",
     "section_pull_requests": "Pull requests",
     "section_metadata": "メタデータ",
-    "section_details": "詳細",
     "sidebar_settings": {
       "open": "サイドバーをカスタマイズ",
       "title": "サイドバー",
@@ -543,9 +542,6 @@
     "prop_project": "プロジェクト",
     "prop_labels": "ラベル",
     "add_property_action": "プロパティを追加",
-    "prop_created_by": "作成者",
-    "prop_created": "作成日",
-    "prop_updated": "更新日",
     "activity_section": "アクティビティ",
     "subscribe": "購読",
     "unsubscribe": "購読解除",
@@ -572,8 +568,6 @@
     "quick_jump_label": "クイックナビゲーション",
     "description_nav_label": "タスクの説明",
     "sub_issues_nav_progress": "{{done}}/{{total}} 完了",
-    "sub_issues_show_more_other": "さらに {{count}} 件表示",
-    "sub_issues_show_less": "折りたたむ",
     "thread_nav_label": "スレッドへ移動",
     "thread_nav_resolved_label": "{{title}}（解決済み）",
     "thread_nav_reply_label": "{{author}}：{{title}}",
@@ -599,7 +593,27 @@
     "workdir_path_unavailable": "ローカル作業ディレクトリはまだありません — このタスクはローカルエージェントで実行されていません",
     "pull_requests_empty_title": "関連する PR はありません。",
     "guest_readonly_note": "ゲストは閲覧とコメントのみ可能で、タスクのプロパティは変更できません。",
-    "open_issue_page": "タスクページで開く"
+    "open_issue_page": "タスクページで開く",
+    "add_row": {
+      "wakeups": "ウェイクアップを追加",
+      "pull_requests": "Pull request を追加",
+      "environments": "環境を追加",
+      "wakeups_pull_requests": "ウェイクアップまたは Pull request を追加",
+      "wakeups_environments": "ウェイクアップまたは環境を追加",
+      "pull_requests_environments": "Pull request または環境を追加",
+      "all": "ウェイクアップ、Pull request、環境を追加",
+      "menu": {
+        "wakeups": "ウェイクアップ",
+        "pull_requests": "Pull request",
+        "environments": "環境"
+      }
+    },
+    "footer": {
+      "created": "{{creator}} が {{date}} に作成",
+      "created_for": "{{creator}} が {{requester}} の代理で {{date}} に作成",
+      "created_at": "作成: {{time}}",
+      "updated_at": "更新: {{time}}"
+    }
   },
   "timeline": {
     "loading": "読み込み中...",
@@ -891,8 +905,6 @@
     "summary_runs_other": "{{count}} 回の実行",
     "open_timeline": "タイムラインを開く",
     "more_runs_other": "残り {{count}} 件を表示",
-    "strip_aria": "実行ごとの費用 — 実行タイムラインを開く",
-    "strip_no_usage": "使用量の記録なし",
     "queued_count_other": "{{count}} 件待機中"
   },
   "runs_timeline": {
@@ -1410,12 +1422,6 @@
       "badge": "システム",
       "title_stage": "ステージ {{stage}} のサブタスクがすべて終わったとき",
       "title_all": "サブタスクがすべて終わったとき",
-      "wake_assignee": "担当者 {{name}} を起こす",
-      "remaining_other": "残り {{count}} 件",
-      "blocked_backlog": "バックログ中のため起こしません",
-      "blocked_member": "担当者がメンバーのため、受信トレイに通知します",
-      "blocked_none": "エージェントの担当者がいないため起こしません",
-      "turned_off": "このタスクではオフ",
       "target_title": "起こす対象",
       "target_current": "担当者（現在 {{name}}）",
       "target_none": "担当者：エージェントやスクワッドは起こし、メンバーには通知します",
@@ -1430,14 +1436,19 @@
       "save_error": "システムルールを保存できませんでした。",
       "default_on": "ワークスペースでは既定でオン。",
       "default_off": "ワークスペースでは既定でオフ。",
-      "notify_member": "{{name}} に受信トレイで通知",
       "instruction": "起きたあとにすること",
       "instruction_edit": "指示を編集",
       "instruction_default": "このタスクでは未設定のため、既定の指示を使います：",
       "instruction_placeholder": "空欄のままなら既定の指示を使います",
       "instruction_invalid": "指示は 4,000 バイト未満にしてください。",
       "paused": "一時停止中：{{reason}}",
-      "default_change": "既定値を変更"
+      "default_change": "既定値を変更",
+      "chip_wake": "完了後に {{name}} を起動",
+      "chip_notify": "完了後に {{name}} に通知",
+      "chip_assignee": "完了後に担当者を起動",
+      "chip_off": "完了後の起動はオフ",
+      "blocked_backlog": "バックログ中のため起こしません",
+      "blocked_none": "エージェントの担当者がいないため起こしません"
     },
     "cond": {
       "status": "ステータスが{{status}}になったとき",
@@ -1510,7 +1521,14 @@
       "loop": "別のルールと互いに起こし合っていました",
       "rate": "1 時間に 12 回を超えて起動"
     },
-    "upcoming_other": "有効なルール {{count}} 件"
+    "upcoming_other": "有効なルール {{count}} 件",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "指定時刻",
+      "hourly": "毎時",
+      "every_hours": "{{hours}} 時間ごと",
+      "every_seconds": "{{seconds}} 秒ごと"
+    }
   },
   "duplicates": {
     "banner_prefix": "重複元:",
@@ -1545,7 +1563,8 @@
     "not_merged_action": "外す",
     "all_merged_to": "PR はすべてマージ済みです。次に PR がマージされると {{status}} に変更します。",
     "issue_disabled": "このタスクは PR マージでステータスを変えません",
-    "issue_disabled_action": "再開"
+    "issue_disabled_action": "再開",
+    "on_merge_to": "マージ後 → {{status}}"
   },
   "deliverables": {
     "section_title": "成果物",

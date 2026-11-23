@@ -488,7 +488,6 @@
     "section_parent_issue": "父任务",
     "section_pull_requests": "Pull Request",
     "section_metadata": "元数据",
-    "section_details": "详情",
     "sidebar_settings": {
       "open": "自定义侧边栏",
       "title": "侧边栏",
@@ -543,9 +542,6 @@
     "prop_project": "项目",
     "prop_labels": "标签",
     "add_property_action": "添加属性",
-    "prop_created_by": "创建者",
-    "prop_created": "创建时间",
-    "prop_updated": "更新时间",
     "activity_section": "动态",
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",
@@ -570,8 +566,6 @@
     "quick_jump_label": "快捷跳转",
     "description_nav_label": "任务描述",
     "sub_issues_nav_progress": "已完成 {{done}}/{{total}}",
-    "sub_issues_show_more_other": "再显示 {{count}} 条",
-    "sub_issues_show_less": "收起",
     "thread_nav_label": "快速跳转到讨论",
     "thread_nav_resolved_label": "{{title}}（已解决）",
     "thread_nav_reply_label": "{{author}}：{{title}}",
@@ -599,7 +593,27 @@
     "subscription_update_failed": "无法更新订阅状态，请重试。",
     "pull_requests_empty_title": "暂无关联 PR。",
     "guest_readonly_note": "访客可以查看和评论，不能修改任务属性。",
-    "open_issue_page": "在任务页打开"
+    "open_issue_page": "在任务页打开",
+    "add_row": {
+      "wakeups": "添加唤醒",
+      "pull_requests": "添加 Pull Request",
+      "environments": "添加环境",
+      "wakeups_pull_requests": "添加唤醒或 Pull Request",
+      "wakeups_environments": "添加唤醒或环境",
+      "pull_requests_environments": "添加 Pull Request 或环境",
+      "all": "添加唤醒、Pull Request 或环境",
+      "menu": {
+        "wakeups": "唤醒",
+        "pull_requests": "Pull Request",
+        "environments": "环境"
+      }
+    },
+    "footer": {
+      "created": "{{creator}} 创建于 {{date}}",
+      "created_for": "{{creator}} 代表 {{requester}} 创建于 {{date}}",
+      "created_at": "创建于 {{time}}",
+      "updated_at": "更新于 {{time}}"
+    }
   },
   "timeline": {
     "loading": "加载中...",
@@ -891,8 +905,6 @@
     "summary_runs_other": "{{count}} 次运行",
     "open_timeline": "打开时间线",
     "more_runs_other": "显示其余 {{count}} 次运行",
-    "strip_aria": "每次运行的费用——打开运行时间线",
-    "strip_no_usage": "没有用量记录",
     "queued_count_other": "{{count}} 个排队中"
   },
   "runs_timeline": {
@@ -1410,12 +1422,6 @@
       "badge": "系统",
       "title_stage": "当第 {{stage}} 阶段的子任务全部结束时",
       "title_all": "当子任务全部结束时",
-      "wake_assignee": "唤醒负责人 {{name}}",
-      "remaining_other": "还差 {{count}} 个",
-      "blocked_backlog": "任务在待规划中，暂不唤醒",
-      "blocked_member": "负责人是成员，会收到收件箱通知",
-      "blocked_none": "没有智能体负责人，不会唤醒",
-      "turned_off": "已在此任务上关闭",
       "target_title": "唤醒",
       "target_current": "负责人（当前 {{name}}）",
       "target_none": "负责人：智能体或小队会被唤醒，成员会收到通知",
@@ -1430,14 +1436,19 @@
       "save_error": "无法保存系统规则。",
       "default_on": "工作区默认开启。",
       "default_off": "工作区默认关闭。",
-      "notify_member": "通过收件箱通知 {{name}}",
       "instruction": "唤醒后要做什么",
       "instruction_edit": "编辑指令",
       "instruction_default": "此任务未设置，使用默认指令：",
       "instruction_placeholder": "留空则使用默认指令",
       "instruction_invalid": "指令长度不能超过 4,000 字节。",
       "paused": "已暂停：{{reason}}",
-      "default_change": "修改默认值"
+      "default_change": "修改默认值",
+      "chip_wake": "结束后唤醒 {{name}}",
+      "chip_notify": "结束后通知 {{name}}",
+      "chip_assignee": "结束后唤醒负责人",
+      "chip_off": "结束后唤醒已关闭",
+      "blocked_backlog": "任务在待规划中，暂不唤醒",
+      "blocked_none": "没有智能体负责人，不会唤醒"
     },
     "cond": {
       "status": "当状态变为{{status}}时",
@@ -1510,7 +1521,14 @@
       "loop": "与其他唤醒规则互相触发",
       "rate": "1 小时内触发超过 12 次"
     },
-    "upcoming_other": "已开启 {{count}} 条唤醒规则"
+    "upcoming_other": "已开启 {{count}} 条唤醒规则",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "指定时间",
+      "hourly": "每小时",
+      "every_hours": "每 {{hours}} 小时",
+      "every_seconds": "每 {{seconds}} 秒"
+    }
   },
   "duplicates": {
     "banner_prefix": "重复于",
@@ -1545,7 +1563,8 @@
     "not_merged_action": "移除",
     "all_merged_to": "PR 均已合并。之后有新 PR 合并时会改为 {{status}}。",
     "issue_disabled": "此任务合并后不改状态",
-    "issue_disabled_action": "恢复"
+    "issue_disabled_action": "恢复",
+    "on_merge_to": "合并后 → {{status}}"
   },
   "deliverables": {
     "section_title": "产物",

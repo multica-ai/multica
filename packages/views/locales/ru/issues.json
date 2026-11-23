@@ -508,7 +508,6 @@
     "section_parent_issue": "Родительская задача",
     "section_pull_requests": "Pull request'ы",
     "section_metadata": "Метаданные",
-    "section_details": "Детали",
     "sidebar_settings": {
       "open": "Настроить боковую панель",
       "title": "Боковая панель",
@@ -567,9 +566,6 @@
     "prop_project": "Проект",
     "prop_labels": "Метки",
     "add_property_action": "Добавить свойство",
-    "prop_created_by": "Создано",
-    "prop_created": "Создано",
-    "prop_updated": "Обновлено",
     "activity_section": "Активность",
     "subscribe": "Подписаться",
     "unsubscribe": "Отписаться",
@@ -596,11 +592,6 @@
     "quick_jump_label": "Быстрая навигация",
     "description_nav_label": "Описание задачи",
     "sub_issues_nav_progress": "Завершено: {{done}}/{{total}}",
-    "sub_issues_show_more_one": "Показать ещё {{count}}",
-    "sub_issues_show_more_few": "Показать ещё {{count}}",
-    "sub_issues_show_more_many": "Показать ещё {{count}}",
-    "sub_issues_show_more_other": "Показать ещё {{count}}",
-    "sub_issues_show_less": "Свернуть",
     "thread_nav_label": "Перейти к треду комментариев",
     "thread_nav_resolved_label": "{{title}} (решено)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -634,7 +625,27 @@
     "load_failed": "Не удалось загрузить задачу.",
     "load_retry": "Повторить",
     "guest_readonly_note": "Гости могут просматривать и комментировать, но не могут менять свойства задачи.",
-    "open_issue_page": "Открыть страницу задачи"
+    "open_issue_page": "Открыть страницу задачи",
+    "add_row": {
+      "wakeups": "Добавить будильник",
+      "pull_requests": "Добавить pull request",
+      "environments": "Добавить окружение",
+      "wakeups_pull_requests": "Добавить будильник или pull request",
+      "wakeups_environments": "Добавить будильник или окружение",
+      "pull_requests_environments": "Добавить pull request или окружение",
+      "all": "Добавить будильник, pull request или окружение",
+      "menu": {
+        "wakeups": "Будильник",
+        "pull_requests": "Pull request",
+        "environments": "Окружение"
+      }
+    },
+    "footer": {
+      "created": "Автор: {{creator}} · {{date}}",
+      "created_for": "Автор: {{creator}} от имени {{requester}} · {{date}}",
+      "created_at": "Создана: {{time}}",
+      "updated_at": "Обновлена: {{time}}"
+    }
   },
   "timeline": {
     "loading": "Загрузка...",
@@ -1004,8 +1015,6 @@
     "open_timeline": "Открыть таймлайн",
     "more_runs_one": "Показать ещё {{count}}",
     "more_runs_other": "Показать ещё {{count}}",
-    "strip_aria": "Стоимость каждого запуска — открыть хронологию запусков",
-    "strip_no_usage": "Использование не зафиксировано",
     "queued_count_one": "В очереди: {{count}}",
     "queued_count_other": "В очереди: {{count}}",
     "included_comments_few": "Включает {{count}} комментария",
@@ -1595,13 +1604,6 @@
       "badge": "Системное",
       "title_stage": "Когда все подзадачи этапа {{stage}} завершатся",
       "title_all": "Когда все подзадачи завершатся",
-      "wake_assignee": "Разбудить исполнителя {{name}}",
-      "remaining_one": "Осталось: {{count}}",
-      "remaining_other": "Осталось: {{count}}",
-      "blocked_backlog": "Задача в бэклоге — пробуждение пока не сработает",
-      "blocked_member": "Исполнитель — участник; он получит уведомление во входящих",
-      "blocked_none": "Нет исполнителя-агента — будить некого",
-      "turned_off": "Выключено для этой задачи",
       "target_title": "Будит",
       "target_current": "Исполнитель (сейчас {{name}})",
       "target_none": "Исполнителя: агента или команду будит, участнику отправляет уведомление",
@@ -1616,16 +1618,19 @@
       "save_error": "Не удалось сохранить системное правило.",
       "default_on": "По умолчанию включено в этом рабочем пространстве.",
       "default_off": "По умолчанию выключено в этом рабочем пространстве.",
-      "notify_member": "Уведомить {{name}} во входящих",
       "instruction": "Что делать при пробуждении",
       "instruction_edit": "Изменить инструкцию",
       "instruction_default": "Не задано для этой задачи; используется значение по умолчанию:",
       "instruction_placeholder": "Оставьте пустым, чтобы использовать значение по умолчанию",
       "instruction_invalid": "Размер инструкций должен быть меньше 4 000 байт.",
       "paused": "Приостановлено: {{reason}}",
-      "remaining_few": "Осталось: {{count}}",
-      "remaining_many": "Осталось: {{count}}",
-      "default_change": "Изменить значение по умолчанию"
+      "default_change": "Изменить значение по умолчанию",
+      "chip_wake": "Разбудит {{name}} по завершении",
+      "chip_notify": "Уведомит {{name}} по завершении",
+      "chip_assignee": "Разбудит исполнителя по завершении",
+      "chip_off": "Будильник по завершении выключен",
+      "blocked_backlog": "Задача в бэклоге — пробуждение пока не сработает",
+      "blocked_none": "Нет исполнителя-агента — будить некого"
     },
     "cond": {
       "status": "Когда эта задача переходит в статус {{status}}",
@@ -1704,7 +1709,14 @@
     "upcoming_one": "{{count}} активное правило пробуждения",
     "upcoming_few": "{{count}} включённых правил будильника",
     "upcoming_many": "{{count}} включённых правил будильника",
-    "upcoming_other": "{{count}} включённых правил будильника"
+    "upcoming_other": "{{count}} включённых правил будильника",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "В назначенное время",
+      "hourly": "Каждый час",
+      "every_hours": "Каждые {{hours}} ч",
+      "every_seconds": "Каждые {{seconds}} с"
+    }
   },
   "duplicates": {
     "banner_prefix": "Дубликат",
@@ -1742,7 +1754,8 @@
     "issue_disabled": "Слияние PR не изменит эту задачу",
     "issue_disabled_action": "Включить",
     "waiting_to_few": "Переходит в статус {{status}}, когда {{prs}} будут смёржены",
-    "waiting_to_many": "Переходит в статус {{status}}, когда {{prs}} будут смёржены"
+    "waiting_to_many": "Переходит в статус {{status}}, когда {{prs}} будут смёржены",
+    "on_merge_to": "После мёржа → {{status}}"
   },
   "deliverables": {
     "section_title": "Результаты",

@@ -29,7 +29,7 @@ describe("resolveIssueSidebarOrder", () => {
 
 describe("resolveIssueSidebarHidden", () => {
   it("keeps known sections once and never hides properties", () => {
-    expect(resolveIssueSidebarHidden(["details", "details", "properties", "nope"])).toEqual(["details"]);
+    expect(resolveIssueSidebarHidden(["apps", "apps", "properties", "nope"])).toEqual(["apps"]);
   });
 });
 
@@ -47,12 +47,12 @@ describe("useIssueSidebarSectionsStore", () => {
 
   it("hides and shows sections", () => {
     const { setHidden } = useIssueSidebarSectionsStore.getState();
-    setHidden("details", true);
+    setHidden("deliverables", true);
     setHidden("metadata", true);
     setHidden("properties", true);
-    expect(useIssueSidebarSectionsStore.getState().hidden).toEqual(["details", "metadata"]);
+    expect(useIssueSidebarSectionsStore.getState().hidden).toEqual(["deliverables", "metadata"]);
 
-    setHidden("details", false);
+    setHidden("deliverables", false);
     expect(useIssueSidebarSectionsStore.getState().hidden).toEqual(["metadata"]);
   });
 

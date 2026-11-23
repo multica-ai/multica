@@ -56,7 +56,8 @@ export function DeliverablesSection({
 
   return (
     <div>
-      <IssueSidebarSectionHeader title={t(($) => $.deliverables.section_title)} open={open} onOpenChange={setOpen} count={files.length} actions={
+      <IssueSidebarSectionHeader title={t(($) => $.deliverables.section_title)} open={open} onOpenChange={setOpen} count={files.length}
+        countWhenOpen={images.length + others.length < files.length} actions={
         <IconButton size="icon-xs" label={t(($) => $.deliverables.view_all, { count: files.length })} onClick={onOpenOverview}><LayoutGrid /></IconButton>
       } />
       <IssueSidebarCollapsible open={open}>

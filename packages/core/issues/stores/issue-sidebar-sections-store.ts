@@ -11,14 +11,12 @@ export const ISSUE_SIDEBAR_SECTIONS = [
   "wakeups",
   "plugins",
   "parent",
-  "sub_issues",
   "duplicates",
   "pull_requests",
   "environments",
   "deliverables",
   "apps",
   "execution_log",
-  "details",
   "metadata",
 ] as const;
 
