@@ -171,6 +171,18 @@ describe("AppsPage", () => {
     expect(replace).toHaveBeenLastCalledWith("/acme/apps");
   });
 
+  it("title-cases category names Multica has no label for", async () => {
+    vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "all", apps: ["a", "b", "c"].map((slug) => ({
+      slug, name: slug.toUpperCase(), curated: false, category: "ai web scraping",
+    })) });
+    overview = { ...overview, team: [], agent_apps: [] };
+    nav.search = "tab=all";
+    renderPage();
+    const rail = await screen.findByRole("navigation", { name: "App categories" });
+    expect(within(rail).getByRole("button", { name: /^AI Web Scraping/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "A" }).closest("li")).toHaveTextContent("AI Web Scraping");
+  });
+
   it("shows a long catalog a page at a time", async () => {
     vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "all", apps: Array.from({ length: 75 }, (_, i) => ({
       slug: `app${i}`, name: `App ${String(i).padStart(2, "0")}`, curated: false,

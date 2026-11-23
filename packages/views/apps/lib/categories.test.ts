@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AppCatalogEntry } from "@multica/core/types";
-import { groupAppsByCategory, knownCategory, normalizeCategory } from "./categories";
+import { formatCategoryName, groupAppsByCategory, knownCategory, normalizeCategory } from "./categories";
 
 const app = (slug: string, entry: Partial<AppCatalogEntry> = {}) => ({
   slug,
@@ -14,6 +14,17 @@ describe("app categories", () => {
     expect(knownCategory({ slug: "a", name: "a", curated: false, category_id: "e-commerce" })).toBe("ecommerce");
     expect(knownCategory({ slug: "a", name: "a", curated: false, category: "Social Media" })).toBe("marketing_social");
     expect(knownCategory({ slug: "a", name: "a", curated: false, category_id: "x", category: "CRM" })).toBe("crm");
+  });
+
+  it("title-cases Composio's lowercase names and keeps acronyms and its own casing", () => {
+    expect(formatCategoryName("artificial intelligence")).toBe("Artificial Intelligence");
+    expect(formatCategoryName("ai web scraping")).toBe("AI Web Scraping");
+    expect(formatCategoryName("phone & sms")).toBe("Phone & SMS");
+    expect(formatCategoryName("sales & crm")).toBe("Sales & CRM");
+    expect(formatCategoryName("web search and research")).toBe("Web Search and Research");
+    expect(formatCategoryName("e-commerce for ai/ml")).toBe("E-commerce for AI/ML");
+    expect(formatCategoryName(" the model  context protocol ")).toBe("The Model Context Protocol");
+    expect(formatCategoryName("Developer Tools & DevOps")).toBe("Developer Tools & DevOps");
   });
 
   it("sorts categories by size, keeps sizeable unknown ones and puts the rest in Other", () => {

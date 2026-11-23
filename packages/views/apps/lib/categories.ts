@@ -84,6 +84,33 @@ export function normalizeCategory(value: string): string {
     .join("_");
 }
 
+// Composio's long-tail category names arrive lowercase ("ai web scraping",
+// "phone & sms"); these words keep their usual casing once title-cased.
+const UPPERCASE_WORDS = new Set([
+  "3d", "ai", "api", "apis", "ats", "b2b", "bi", "ci", "cms", "crm", "erp", "gis", "hr",
+  "hris", "iot", "it", "kyc", "llm", "lms", "mcp", "ml", "nlp", "ocr", "pdf", "rpa",
+  "saas", "sdk", "seo", "sms", "sql", "ui", "ux", "voip", "vpn",
+]);
+const LOWERCASE_WORDS = new Set(["a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "the", "to", "via", "with"]);
+
+/** Title-cases a category name Multica has no label for, so it reads like the translated ones. */
+export function formatCategoryName(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .map((word, index) => {
+      // Words Composio already cased ("DevOps", "CRM") stay as they are.
+      if (word !== word.toLowerCase()) return word;
+      if (index > 0 && LOWERCASE_WORDS.has(word)) return word;
+      const cased = word
+        .split(/([-/])/)
+        .map((part) => (UPPERCASE_WORDS.has(part) ? part.toUpperCase() : part))
+        .join("");
+      return cased.charAt(0).toUpperCase() + cased.slice(1);
+    })
+    .join(" ");
+}
+
 export function knownCategory(entry: AppCatalogEntry | undefined): KnownAppCategory | null {
   for (const raw of [entry?.category_id, entry?.category]) {
     if (!raw) continue;
