@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { api } from "../api";
 import type { IssueView } from "../api/schemas";
 import { pinListOptions } from "../pins/queries";
 import type { PinnedItem } from "../types";
@@ -41,6 +42,16 @@ export function migrateSidebarViewOrder(order: readonly string[]): string[] {
 }
 
 export const SIDEBAR_VIEWS_SCOPE = { scope_type: "sidebar" } as const;
+
+/** The starred list a workspace's creator starts with; the rest stay under All views. */
+export const NEW_WORKSPACE_SIDEBAR_VIEW_ORDER = [builtinViewItemId("all_issues"), builtinViewItemId("my_work")];
+
+export function seedNewWorkspaceSidebarViews(workspaceSlug: string) {
+  return api.putIssueViewPreference(
+    { ...SIDEBAR_VIEWS_SCOPE, prefs: { order: NEW_WORKSPACE_SIDEBAR_VIEW_ORDER } },
+    workspaceSlug,
+  );
+}
 
 export type SidebarViewItem =
   | { id: string; kind: "builtin"; key: BuiltinViewKey }

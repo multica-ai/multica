@@ -46,6 +46,11 @@ vi.mock("@multica/core/api", () => ({
   api: { getBaseUrl: () => "http://127.0.0.1:8080" },
 }));
 
+const mockSeedSidebar = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("@multica/core/issue-views", () => ({
+  seedNewWorkspaceSidebarViews: mockSeedSidebar,
+}));
+
 import { StepWorkspace } from "./step-workspace";
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -60,17 +65,19 @@ function renderStep({
   existing,
   disabled,
   daemonAppUrl = "",
+  onCreated = vi.fn(),
 }: {
   existing: Workspace | null;
   disabled: boolean;
   daemonAppUrl?: string;
+  onCreated?: (workspace: Workspace) => void;
 }) {
   mockUseConfigStore.mockImplementation(
     (selector: (state: MockConfigState) => unknown) =>
       selector({ workspaceCreationDisabled: disabled, daemonAppUrl }),
   );
   return render(
-    <StepWorkspace existing={existing} onCreated={vi.fn()} />,
+    <StepWorkspace existing={existing} onCreated={onCreated} />,
     { wrapper: I18nWrapper },
   );
 }
@@ -326,5 +333,18 @@ describe("StepWorkspace — issue prefix", () => {
     expect(mockCreateMutate.mock.calls[0]![0]).toMatchObject({
       issue_prefix: "ACME",
     });
+  });
+
+  it("starts the creator's sidebar with a short list of views", () => {
+    mockCreateMutate.mockClear();
+    mockSeedSidebar.mockClear();
+    const onCreated = vi.fn();
+    renderStep({ existing: null, disabled: false, onCreated });
+    fireEvent.change(screen.getByLabelText("Workspace name"), { target: { value: "Acme Inc" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Create Acme Inc$/ }));
+    const created = { ...EXISTING_WORKSPACE, slug: "acme-inc" };
+    mockCreateMutate.mock.calls[0]![1].onSuccess(created);
+    expect(mockSeedSidebar).toHaveBeenCalledWith("acme-inc");
+    expect(onCreated).toHaveBeenCalledWith(created);
   });
 });

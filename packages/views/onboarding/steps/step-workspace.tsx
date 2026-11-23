@@ -13,6 +13,7 @@ import {
   FieldLabel,
 } from "@multica/ui/components/ui/field";
 import { cn } from "@multica/ui/lib/utils";
+import { seedNewWorkspaceSidebarViews } from "@multica/core/issue-views";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
@@ -210,7 +211,11 @@ export function StepWorkspace({
         issue_prefix: effectivePrefix,
       },
       {
-        onSuccess: onCreated,
+        onSuccess: (workspace) => {
+          // Best effort: a failed write leaves the full default list.
+          void seedNewWorkspaceSidebarViews(workspace.slug).catch(() => undefined);
+          return onCreated(workspace);
+        },
         onError: (error) => {
           if (isWorkspaceSlugConflict(error)) {
             setSlugServerError(t(($) => $.step_workspace.slug_taken_error));
