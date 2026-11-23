@@ -10,6 +10,8 @@ import (
 
 type failedPiProcessTracker struct{ signalled, closed bool }
 
+func (*failedPiProcessTracker) unobservedTools() bool { return false }
+
 func (*failedPiProcessTracker) snapshot(bool) error {
 	return errors.New("cannot inspect process identity")
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -147,5 +148,32 @@ func TestPiCleanupInProcessToolCancelIsConfirmed(t *testing.T) {
 				t.Fatalf("status = %s: %s", result.Status, result.Error)
 			}
 		})
+	}
+}
+
+func TestPiCleanupRuntimeExitBeforeToolOwnershipConfirmed(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	configureProcessGroup(cmd)
+	if err := startOwnedProcessTree(cmd, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Wait()
+
+	cleanup := newPiRunCleanup(cmd)
+	closeNothing := func() {}
+	defer cleanup.complete(closeNothing, closeNothing)
+	cleanup.observe("tool_execution_start")
+
+	// Wait for the runtime to exit without reaping it, as Execute does.
+	select {
+	case <-cleanup.exited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runtime exit was not observed")
+	}
+	if err := cleanup.finish(cmd, closeNothing, closeNothing, 0); err != nil {
+		t.Fatalf("final cleanup checks failed: %v", err)
+	}
+	if err := cleanup.toolOwnershipError(); err == nil {
+		t.Fatal("unfinished tool ownership was reported as confirmed after runtime exit")
 	}
 }
