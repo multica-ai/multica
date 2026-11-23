@@ -86,7 +86,7 @@
       "signup_allowed_domains": "登録を許可するドメイン",
       "vcs_integration": "セルフホスト Git 連携",
       "billing_workspace_subscriptions": "ワークスペースのサブスクリプション",
-      "composio_mcp_apps": "Composio MCP アプリ",
+      "composio_mcp_apps": "MCP アプリ",
       "plugins_v1": "プラグイン",
       "triage_v1": "トリアージ",
       "local_search_index": "ローカル検索インデックス",

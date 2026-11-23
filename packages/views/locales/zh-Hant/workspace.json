@@ -86,7 +86,7 @@
       "signup_allowed_domains": "註冊網域允許清單",
       "vcs_integration": "自架 Git 整合",
       "billing_workspace_subscriptions": "工作區訂閱",
-      "composio_mcp_apps": "Composio MCP 應用程式",
+      "composio_mcp_apps": "MCP 應用",
       "plugins_v1": "外掛",
       "triage_v1": "分流",
       "local_search_index": "本機搜尋索引",

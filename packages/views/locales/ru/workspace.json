@@ -86,7 +86,7 @@
       "signup_allowed_domains": "Разрешённые домены для регистрации",
       "vcs_integration": "Интеграция с собственным Git",
       "billing_workspace_subscriptions": "Подписки рабочих пространств",
-      "composio_mcp_apps": "Приложения Composio MCP",
+      "composio_mcp_apps": "Приложения MCP",
       "plugins_v1": "Плагины",
       "triage_v1": "Разбор задач",
       "local_search_index": "Локальный поисковый индекс",

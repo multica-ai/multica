@@ -86,7 +86,7 @@
       "signup_allowed_domains": "Dominios autorizados para el registro",
       "vcs_integration": "Integración Git autohospedada",
       "billing_workspace_subscriptions": "Suscripciones de espacios",
-      "composio_mcp_apps": "Aplicaciones MCP de Composio",
+      "composio_mcp_apps": "Aplicaciones MCP",
       "plugins_v1": "Complementos",
       "triage_v1": "Triaje",
       "local_search_index": "Índice de búsqueda local",

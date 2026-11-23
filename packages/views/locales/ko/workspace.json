@@ -86,7 +86,7 @@
       "signup_allowed_domains": "가입을 허용할 도메인 목록",
       "vcs_integration": "자체 호스팅 Git 연동",
       "billing_workspace_subscriptions": "워크스페이스 구독",
-      "composio_mcp_apps": "Composio MCP 앱",
+      "composio_mcp_apps": "MCP 앱",
       "plugins_v1": "플러그인",
       "triage_v1": "트리아지",
       "local_search_index": "로컬 검색 인덱스",
