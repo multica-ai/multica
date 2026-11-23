@@ -200,6 +200,8 @@
     "edit_description_title": "Editar descripción",
     "description_placeholder": "¿Qué hace este agente?",
     "cancel": "Cancelar",
+    "prop_wait_timeout": "Tiempo de espera",
+    "save": "Guardar",
     "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents."
   },
   "overview": {
@@ -242,7 +244,12 @@
     "service_tier_standard_description": "Velocidad estándar y uso estándar",
     "service_tier_tooltip": "Velocidad · {{value}}",
     "service_tier_clear": "Predeterminado del runtime",
-    "service_tier_clear_title": "Quitar la sobreescritura de velocidad y dejar que la configuración local de Codex decida"
+    "service_tier_clear_title": "Quitar la sobreescritura de velocidad y dejar que la configuración local de Codex decida",
+    "wait_timeout_global": "Global",
+    "wait_timeout_minutes_value": "{{value}} min",
+    "wait_timeout_tooltip": "Tiempo de espera · {{value}}",
+    "wait_timeout_input_label": "Tiempo de espera de la cola (minutos)",
+    "wait_timeout_helper": "El tiempo empieza cuando la tarea entra en la cola. Si ningún runtime la reclama e inicia antes de este límite, la tarea falla automáticamente. Solo afecta al tiempo de espera en cola, no al tiempo de espera una vez iniciada la ejecución. Déjalo vacío o usa 0 para aplicar el valor predeterminado del sistema."
   },
   "model_dropdown": {
     "label": "Modelo",

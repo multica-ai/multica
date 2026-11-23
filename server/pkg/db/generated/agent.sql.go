@@ -3253,7 +3253,7 @@ WITH victims AS (
           )
       )
       AND (
-          t.runtime_id IS NULL
+          runtime_id IS NULL
           OR NOT EXISTS (
               SELECT 1 FROM agent_runtime r WHERE r.id = t.runtime_id
           )
@@ -9127,18 +9127,18 @@ UPDATE agent SET
     runtime_id = COALESCE($7, runtime_id),
     visibility = COALESCE($8, visibility),
     permission_mode = COALESCE($9, permission_mode),
-    queued_ttl_seconds = COALESCE($10, queued_ttl_seconds),
-    status = COALESCE($11, status),
-    max_concurrent_tasks = COALESCE($12, max_concurrent_tasks),
-    instructions = COALESCE($13, instructions),
-    custom_env = COALESCE($14, custom_env),
-    custom_args = COALESCE($15, custom_args),
-    mcp_config = COALESCE($16, mcp_config),
-    model = COALESCE($17, model),
-    thinking_level = COALESCE($18, thinking_level),
-    service_tier = COALESCE($19, service_tier),
-    conversation_starters = COALESCE($20, conversation_starters),
-    composio_toolkit_allowlist = COALESCE($21::text[], composio_toolkit_allowlist),
+    status = COALESCE($10, status),
+    max_concurrent_tasks = COALESCE($11, max_concurrent_tasks),
+    instructions = COALESCE($12, instructions),
+    custom_env = COALESCE($13, custom_env),
+    custom_args = COALESCE($14, custom_args),
+    mcp_config = COALESCE($15, mcp_config),
+    model = COALESCE($16, model),
+    thinking_level = COALESCE($17, thinking_level),
+    service_tier = COALESCE($18, service_tier),
+    conversation_starters = COALESCE($19, conversation_starters),
+    composio_toolkit_allowlist = COALESCE($20::text[], composio_toolkit_allowlist),
+    queued_ttl_seconds = COALESCE($21, queued_ttl_seconds),
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, queued_ttl_seconds
@@ -9154,7 +9154,6 @@ type UpdateAgentParams struct {
 	RuntimeID                pgtype.UUID   `json:"runtime_id"`
 	Visibility               pgtype.Text   `json:"visibility"`
 	PermissionMode           pgtype.Text   `json:"permission_mode"`
-	QueuedTtlSeconds         pgtype.Float8 `json:"queued_ttl_seconds"`
 	Status                   pgtype.Text   `json:"status"`
 	MaxConcurrentTasks       pgtype.Int4   `json:"max_concurrent_tasks"`
 	Instructions             pgtype.Text   `json:"instructions"`
@@ -9166,6 +9165,7 @@ type UpdateAgentParams struct {
 	ServiceTier              pgtype.Text   `json:"service_tier"`
 	ConversationStarters     []byte        `json:"conversation_starters"`
 	ComposioToolkitAllowlist []string      `json:"composio_toolkit_allowlist"`
+	QueuedTtlSeconds         pgtype.Float8 `json:"queued_ttl_seconds"`
 }
 
 // composio_toolkit_allowlist is set wholesale: the API layer is responsible
@@ -9185,7 +9185,6 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.RuntimeID,
 		arg.Visibility,
 		arg.PermissionMode,
-		arg.QueuedTtlSeconds,
 		arg.Status,
 		arg.MaxConcurrentTasks,
 		arg.Instructions,
@@ -9197,6 +9196,7 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.ServiceTier,
 		arg.ConversationStarters,
 		arg.ComposioToolkitAllowlist,
+		arg.QueuedTtlSeconds,
 	)
 	var i Agent
 	err := row.Scan(

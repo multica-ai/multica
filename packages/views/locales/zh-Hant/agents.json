@@ -192,7 +192,8 @@
     "edit_description_title": "編輯描述",
     "description_placeholder": "這個 AI 代理做什麼？",
     "cancel": "取消",
-    "prop_wait_timeout": "等待超時"
+    "prop_wait_timeout": "等待超時",
+    "save": "儲存"
   },
   "overview": {
     "attention_title": "需要處理的執行",
