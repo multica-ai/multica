@@ -196,15 +196,26 @@ export function AgentPropertiesPanel({
         {appsEnabled && <AgentAppsProperty agent={agent} />}
 
         <ObjectProperty label={t(($) => $.panel.runs_7d)}>
-          <Value>
-            <span className="tabular-nums">{week.totalRuns}</span>
-            {week.totalRuns > 0 ? (
-              <>
-                <span className="text-faint-foreground" aria-hidden="true">·</span>
-                <SuccessRate rate={week.successRate} labelled />
-              </>
+          <span className="flex min-w-0 flex-col">
+            <span className="flex min-h-8 min-w-0 items-center gap-1.5 px-1.5">
+              <span className="tabular-nums">{week.totalRuns}</span>
+              {week.totalRuns > 0 ? (
+                <>
+                  <span className="text-faint-foreground" aria-hidden="true">·</span>
+                  <SuccessRate rate={week.successRate} labelled />
+                </>
+              ) : null}
+            </span>
+            {/* The rate leaves cancelled runs out; name them on their own line
+                so the total is not read as that many successes. */}
+            {week.totalCancelled > 0 ? (
+              <span className="truncate px-1.5 pb-2 text-muted-foreground">
+                {t(($) => $.tab_body.activity.cancelled_count, {
+                  count: week.totalCancelled,
+                })}
+              </span>
             ) : null}
-          </Value>
+          </span>
         </ObjectProperty>
 
         <ObjectProperty label={t(($) => $.inspector.prop_created)}>
