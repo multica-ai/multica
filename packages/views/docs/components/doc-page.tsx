@@ -580,7 +580,7 @@ function DocEditor({ doc }: { doc: Doc }) {
             <aside className="hidden w-56 shrink-0 py-8 pr-6 @5xl:block">
               <DocOutline
                 headings={outline.headings}
-                activeIndex={outline.activeIndex}
+                scrollRef={scrollRef}
                 onSelect={outline.scrollTo}
               />
             </aside>
