@@ -133,6 +133,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Give each behavior one canonical test layer: helper tests own parsing/state matrices; component tests cover wiring, accessibility, happy paths, and named regressions. Prefer a failing regression test before behavioral fixes.
 - DOM-free `.test.ts` files start with `// @vitest-environment node`; do not use it if it would silently switch the code under test to an SSR path.
 - Every workspace with jsdom suites loads `@multica/vitest-setup/web-storage` in its Vitest setup; do not add per-package `localStorage` shims.
+- A test that reads files outside its package and that package's workspace dependencies declares them as `$TURBO_ROOT$/...` in the package's `turbo.json` `tasks.test.inputs`, and in the CI path group that runs it (`.github/ci-paths.json`); otherwise CI replays a cached pass when only those files change. `scripts/check-test-cache-inputs.mjs` enforces this.
 - Views tests must not mock `next/*` or `react-router-dom`. Mock stores with their Zustand callable shape plus `getState`; mock API calls at `@multica/core/api`.
 - E2E setup/teardown uses `TestApiClient`.
 - DB-backed Go tests use `server/internal/testutil` fixtures (`dbfx.Issue`, `dbfx.Task`, `dbfx.Insert`) and `testutil.Call(h, req).Want(status).JSON(&out)`. Keep product assertions and case-specific diagnostics in the test, not fixture helpers.

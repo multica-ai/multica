@@ -25,6 +25,10 @@ runs:
       shell: bash
       run: node scripts/check-ui-focus-outlines.mjs
 
+    - name: Check tests declare the files they read outside their package
+      shell: bash
+      run: node scripts/check-test-cache-inputs.mjs
+
     - name: Check shared dependencies use the pnpm catalog
       shell: bash
       run: node scripts/check-dependency-catalog.mjs
