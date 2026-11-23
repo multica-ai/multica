@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, type ReactNode, useState } from "react";
+import { useRef, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlarmClock, Archive, CalendarClock } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -18,7 +18,6 @@ import type { InboxItem } from "@multica/core/types";
 import { findSnoozedInboxIssue, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { nextInboxRow } from "@multica/core/inbox/open-row";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useIsGuest } from "@multica/core/permissions";
 import { InboxArchiveButton, InboxBar, InboxBarButton, InboxBarStatus, InboxOpenBar } from "../../inbox/components/inbox-bar";
 import { inboxRowHref } from "../../inbox/components/inbox-display";
 import { InboxKeptActions, InboxNextButton, useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
@@ -28,7 +27,6 @@ import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
 import { useInboxShortcut } from "../../inbox/components/use-inbox-shortcut";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
-import { inboxTabHref } from "../../inbox/components/inbox-view";
 import { useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import { useAutoArchiveCause } from "../../inbox/components/use-auto-archive-cause";
 import {
@@ -37,8 +35,6 @@ import {
   useLeaveInboxRow,
   useRestoreInbox,
 } from "../../inbox/components/use-leave-inbox-row";
-import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
-import { useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
 
 /**
@@ -74,10 +70,7 @@ export function IssueInboxBar({
   const { t } = useT("inbox");
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
-  const { push } = useNavigation();
-  const builtinNav = useBuiltinViewNavigation();
-  const guest = useIsGuest(wsId);
-  const { rows, kept, filtered } = useFilteredInboxRows(wsId, isSnoozedView ? null : issueId, !isSnoozedView);
+  const { rows, kept } = useFilteredInboxRows(wsId, isSnoozedView ? null : issueId, !isSnoozedView);
   const index = rows.findIndex((row) => row.issue_id === issueId);
   const row = index >= 0 ? rows[index]! : null;
   // A row kept after it left the Inbox on its own is no longer there to act on.
@@ -99,10 +92,6 @@ export function IssueInboxBar({
   const { snooze, unsnooze } = useInboxSnooze();
   const { data: snoozedList } = useQuery(snoozedInboxOptions(wsId));
   const snoozed = item ? undefined : findSnoozedInboxIssue(snoozedList, issueId);
-  const activeSnoozedCount = useMemo(() => {
-    const now = Date.now();
-    return (snoozedList ?? []).filter((entry) => new Date(entry.snoozed_until).getTime() > now).length;
-  }, [snoozedList]);
   const keptText = useKeptInboxRowText(wsId);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
 
@@ -206,7 +195,6 @@ export function IssueInboxBar({
       }
       return null;
     }
-    const inboxCleared = !next && !filtered;
     // An agent at work says so in the header (`IssueAgentHeaderChip`), not here.
     const status = keptText.status(settled, cause, archiveReason === "agent_triggered");
     return (
@@ -217,17 +205,6 @@ export function IssueInboxBar({
         onUndo={() => restore(settled.item.id, { quiet: true })}
         next={next}
         onNext={moveOn}
-        inboxCleared={inboxCleared}
-        snoozedCount={inboxCleared ? activeSnoozedCount : 0}
-        onSnoozedClick={inboxCleared ? () => push(inboxTabHref(p, "snoozed")) : undefined}
-        onGoToMyWork={
-          inboxCleared && !guest
-            ? () => {
-                builtinNav.prepare("my_work");
-                push(builtinNav.hrefFor("my_work"));
-              }
-            : undefined
-        }
       />
     );
   }

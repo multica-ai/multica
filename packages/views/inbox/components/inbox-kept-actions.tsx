@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Archive, ArrowDown, ArrowRight, CheckCircle2, Undo2 } from "@multica/ui/icons";
+import { Archive, ArrowDown, Undo2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -113,53 +113,27 @@ export function InboxKeptActions({
   onUndo,
   next,
   onNext,
-  inboxCleared = false,
-  snoozedCount = 0,
-  onSnoozedClick,
-  onGoToMyWork,
 }: {
   /** What happened, in a word ("Archived"); `hint` says the rest on hover. */
   label: ReactNode;
   hint?: ReactNode;
-  /** Defaults to the archive icon (or a success check when the Inbox is cleared). */
+  /** Defaults to the archive icon. */
   icon?: ReactNode;
   issueActions?: ReactNode;
   onUndo?: () => void;
   /** The notification `onNext` opens; without one there is nothing to move on to. */
   next: InboxItem | null;
   onNext: () => void;
-  /** True when archiving this row emptied the entire unfiltered Inbox (stay-in-place mode). */
-  inboxCleared?: boolean;
-  snoozedCount?: number;
-  onSnoozedClick?: () => void;
-  onGoToMyWork?: () => void;
 }) {
   const { t } = useT("inbox");
   useInboxUndoShortcut(onUndo ?? null);
-  const statusIcon =
-    icon ?? (inboxCleared ? <CheckCircle2 className="text-success" /> : <Archive />);
   const undoLabel = t(($) => $.toasts.undo);
-  const goToMyWorkLabel = t(($) => $.zero.go_to_my_work);
 
   return (
     <InboxBar settled>
       {issueActions}
       {issueActions && <InboxBarSeparator />}
-      <InboxBarStatus
-        icon={statusIcon}
-        label={inboxCleared ? t(($) => $.zero.cleared_title) : label}
-        hint={hint}
-      />
-      {inboxCleared && snoozedCount > 0 && onSnoozedClick && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="shrink-0 text-muted-foreground @max-[32rem]/inbox-bar:hidden"
-          onClick={onSnoozedClick}
-        >
-          {t(($) => $.zero.bar_snoozed, { count: snoozedCount })}
-        </Button>
-      )}
+      <InboxBarStatus icon={icon ?? <Archive />} label={label} hint={hint} />
       {onUndo && (
         <TooltipHint label={undoLabel} shortcut={<ActionShortcutKeycaps action="undoInboxAction" />} side="top">
           <Button size="sm" variant="ghost" aria-label={undoLabel} className="shrink-0 text-muted-foreground" onClick={onUndo}>
@@ -169,16 +143,7 @@ export function InboxKeptActions({
           </Button>
         </TooltipHint>
       )}
-      {next ? (
-        <InboxNextButton next={next} onNext={onNext} />
-      ) : inboxCleared && onGoToMyWork ? (
-        <TooltipHint label={goToMyWorkLabel} side="top">
-          <Button size="sm" aria-label={goToMyWorkLabel} className="shrink-0" onClick={onGoToMyWork}>
-            <span className="@max-[32rem]/inbox-bar:hidden">{goToMyWorkLabel}</span>
-            <ArrowRight />
-          </Button>
-        </TooltipHint>
-      ) : null}
+      {next && <InboxNextButton next={next} onNext={onNext} />}
     </InboxBar>
   );
 }

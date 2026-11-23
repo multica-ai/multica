@@ -185,7 +185,7 @@ describe("IssueInboxBar", () => {
 
     // Still reading the issue (now still in Inbox), a later side-effect archive keeps it.
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
-    expect(await screen.findByText("Inbox cleared")).toBeInTheDocument();
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
   });
 
@@ -204,7 +204,7 @@ describe("IssueInboxBar", () => {
     expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
 
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
-    expect(await screen.findByText("Inbox cleared")).toBeInTheDocument();
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
   });
 
@@ -489,7 +489,7 @@ describe("IssueInboxBar", () => {
     await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
   });
 
-  it("shows an Inbox cleared bar with My work and moves to Inbox Zero on E when the last row auto-archives in place", async () => {
+  it("says only that the last row was archived when it auto-archives in place, and moves to Inbox Zero on E", async () => {
     const until = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
     const nav = setup({
       rows: [{ ...ROWS[0]!, issue_identifier: "MUL-9790" }],
@@ -497,10 +497,11 @@ describe("IssueInboxBar", () => {
     });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
 
-    expect(await screen.findByText("Inbox cleared")).toBeInTheDocument();
-    expect(screen.getByText("Returns to Inbox on new activity")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "1 snoozed" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Go to My work" })).toBeInTheDocument();
+    const bar = await screen.findByRole("status");
+    expect(bar).toHaveTextContent("Archived");
+    expect(bar).not.toHaveTextContent("Inbox cleared");
+    expect(bar).not.toHaveTextContent("snoozed");
+    expect(within(bar).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["Undo"]);
 
     fireEvent.keyDown(document, { key: "e", code: "KeyE" });
     expect(nav.push).toHaveBeenCalledWith("/acme/inbox");
@@ -509,16 +510,6 @@ describe("IssueInboxBar", () => {
       itemId: "n-1",
       label: "MUL-9790",
     });
-  });
-
-  it("does not show Inbox cleared on the settled bar when filters are active", async () => {
-    useInboxFilterStore.getState().toggleUnreadOnly("ws");
-    const nav = setup({ rows: [{ ...ROWS[0]!, read: false }] });
-    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
-
-    expect(await screen.findByText("Archived")).toBeInTheDocument();
-    expect(screen.queryByText("Inbox cleared")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Go to My work" })).toBeNull();
   });
 
   it("moves on to the next notification the Work panel lists under its filters", () => {
@@ -606,7 +597,7 @@ describe("IssueInboxBar once an action is undone", () => {
     await screen.findByRole("button", { name: "Archive" });
     // The user continues reading the same issue; a later status change archives it.
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
-    expect(await screen.findByText("Inbox cleared")).toBeInTheDocument();
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
   });
 
   it("keeps the group up while handing off to the next notification", async () => {
