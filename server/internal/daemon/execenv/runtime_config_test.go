@@ -2455,12 +2455,13 @@ func TestBriefCarriesTheWhenToSplitRule(t *testing.T) {
 }
 
 // TestBriefBatchesTheOpeningReads pins MUL-9919: the independent reads of
-// workflow steps 1–2 go out in one tool call, and the rule sits under step 2
-// (after both reads it covers, before step 3) for every provider.
+// workflow steps 1–2 go out in one turn without truncated output, and the rule
+// sits under step 2 (after both reads it covers, before step 3) for every
+// provider.
 func TestBriefBatchesTheOpeningReads(t *testing.T) {
 	t.Parallel()
 
-	const rule = "so issue them together in ONE tool call (chained in one shell command, or parallel calls in the same turn), not one read per turn."
+	const rule = "so issue them together in ONE turn, not one read per turn: prefer parallel tool calls, which keep each output whole, and chain them in one shell command only when parallel calls are unavailable. Never cut these reads short with `head -c` or similar"
 	for _, provider := range []string{"claude", "codex"} {
 		out := buildMetaSkillContent(provider, TaskContextForEnv{IssueID: "issue-1", TriggerCommentID: "comment-1"})
 		at := strings.Index(out, rule)
