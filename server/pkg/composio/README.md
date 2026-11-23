@@ -129,6 +129,21 @@ go test ./server/pkg/composio/...
 
 Current coverage: **82.2 %**.
 
+Test servers and fake SDKs never hand-write Composio responses. `composiotest`
+embeds the response schemas of every endpoint this package calls, snapshotted
+from Composio's v3.1 OpenAPI spec into `composiotest/openapi-v3.1.json`:
+
+- `composiotest.Example(t, op, overlay)` builds a response body from the
+  spec's own example with the test's values merged in, and fails if the result
+  leaves the spec.
+- `composiotest.CheckFields(op, v)` fails when a value a fake SDK returns sets a
+  field that endpoint does not have.
+
+`scripts/fake-composio.test.mjs` holds `scripts/fake-composio.mjs` to the same
+snapshot. When a new endpoint is called, add it to `OPERATIONS` in
+`scripts/composio-spec.mjs`; to pick up Composio's latest spec, run
+`node scripts/composio-spec.mjs update` and review the diff.
+
 ## Design notes
 
 - **Standalone.** Zero coupling to Multica internals — depend on this package
