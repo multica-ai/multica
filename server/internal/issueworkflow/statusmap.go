@@ -11,13 +11,13 @@ import (
 // builtInMeanings say what each built-in status means for the issue. Custom
 // statuses carry their catalog description instead.
 var builtInMeanings = map[string]string{
-	issuestatus.Backlog:    "Parked; not planned yet.",
+	issuestatus.Backlog:    "Not planned yet.",
 	issuestatus.Todo:       "Not started.",
-	issuestatus.InProgress: "The issue's work is underway.",
-	issuestatus.InReview:   "The issue's work is delivered and awaits review or acceptance.",
-	issuestatus.Blocked:    "Can't proceed without something that is missing.",
+	issuestatus.InProgress: "Work underway.",
+	issuestatus.InReview:   "Delivered; awaiting review or acceptance.",
+	issuestatus.Blocked:    "Can't proceed; something is missing.",
 	issuestatus.Done:       "Finished and accepted.",
-	issuestatus.Cancelled:  "Will not be done: dropped, or a duplicate of another issue.",
+	issuestatus.Cancelled:  "Won't be done: dropped or a duplicate.",
 }
 
 // maxEntryHintRunes caps the line a step's instructions lend to its map
@@ -74,7 +74,7 @@ func statusMapBrief(in BriefInput) string {
 	if terminal && !terminalMoves {
 		return b.String()
 	}
-	fmt.Fprintf(&b, "\nSet a status with: multica issue status %s <status>\n", in.IssueIdentifier)
+	fmt.Fprintf(&b, "\nSet one with: multica issue status %s <status>\n", in.IssueIdentifier)
 	return b.String()
 }
 
@@ -98,26 +98,26 @@ func writeStatusMapEntry(b *strings.Builder, in BriefInput, s Step) {
 	b.WriteString("\n")
 
 	if who := in.handlerOf(s.StatusKey); who != "" {
-		fmt.Fprintf(b, "    Entering hands off to %s.", who)
+		fmt.Fprintf(b, "    Hands off to %s.", who)
 		// The current step's instructions are printed in full above; for any
 		// other step, their first line says what its handler expects to
 		// receive, which a workspace-wide description cannot.
 		if s.StatusKey != in.StatusKey {
 			if hint := firstLine(s.Instructions); hint != "" {
-				fmt.Fprintf(b, " Their instructions begin: %s", hint)
+				fmt.Fprintf(b, " Their step: %s", hint)
 			}
 		}
 		b.WriteString("\n")
 	}
 	var routes []string
 	if next := in.routedNext(s); next != "" {
-		routes = append(routes, fmt.Sprintf("its work done → `%s`", next))
+		routes = append(routes, fmt.Sprintf("next `%s`", next))
 	}
 	if s.BackStatusKey != "" {
-		routes = append(routes, fmt.Sprintf("needs changes → `%s`", s.BackStatusKey))
+		routes = append(routes, fmt.Sprintf("send back `%s`", s.BackStatusKey))
 	}
 	if len(routes) > 0 {
-		fmt.Fprintf(b, "    From here: %s.\n", strings.Join(routes, "; "))
+		fmt.Fprintf(b, "    Routes: %s.\n", strings.Join(routes, ", "))
 	}
 }
 

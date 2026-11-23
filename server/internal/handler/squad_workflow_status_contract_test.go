@@ -102,7 +102,7 @@ func TestOwningLeaderInStatusMapMovesByTheMap(t *testing.T) {
 			"move it to the status the map gives for that step's finished work",
 			"do it even when no comment asked you to",
 			"The parent stays at its current step while members work",
-			"a dispatch turn leaves the parent at its current step",
+			"dispatching members is not delivery — move the parent on only on a later turn",
 		} {
 			if !strings.Contains(combined, want) {
 				t.Errorf("%s: status-map leader instructions missing %q", provider, want)

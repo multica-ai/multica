@@ -56,23 +56,23 @@ func TestStatusMapDescribesEveryStatus(t *testing.T) {
 		"This project's workflow — Delivery (Payments)\n",
 		`MUL-7 is at "in_progress", which has no handler: the work the issue asks for is yours until it reaches a status that hands off.` + "\n",
 		"\nStatus map:\n",
-		"- `in_progress` (started) — The issue's work is underway.   ← current\n",
-		"- `in_review` (started) — The issue's work is delivered and awaits review or acceptance.\n" +
-			"    Entering hands off to Sentinel. Their instructions begin: Review the PR: tests and scope.\n" +
-			"    From here: its work done → `done`; needs changes → `in_progress`.\n",
+		"- `in_progress` (started) — Work underway.   ← current\n",
+		"- `in_review` (started) — Delivered; awaiting review or acceptance.\n" +
+			"    Hands off to Sentinel. Their step: Review the PR: tests and scope.\n" +
+			"    Routes: next `done`, send back `in_progress`.\n",
 		// The custom status carries its category and catalog description, so
 		// the agent can tell when it fits.
 		"- `wont_fix` Won't Fix (closed) — Decided not to do: duplicate or out of scope.\n",
 		"- `done` (done) — Finished and accepted.\n",
-		"- `cancelled` (closed) — Will not be done: dropped, or a duplicate of another issue.\n",
-		"\nSet a status with: multica issue status MUL-7 <status>\n",
+		"- `cancelled` (closed) — Won't be done: dropped or a duplicate.\n",
+		"\nSet one with: multica issue status MUL-7 <status>\n",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief is missing %q:\n%s", want, brief)
 		}
 	}
 	// No move is computed for the agent: nothing routes work into wont_fix.
-	for _, unwanted := range []string{"Your moves:", "Step done", "Starting work", "→ `wont_fix`", "ignored for built-ins"} {
+	for _, unwanted := range []string{"Your moves:", "Step done", "Starting work", "`wont_fix`.", "ignored for built-ins"} {
 		if strings.Contains(brief, unwanted) {
 			t.Errorf("brief carries %q:\n%s", unwanted, brief)
 		}
@@ -86,13 +86,13 @@ func TestStatusMapForTheStepYouHandle(t *testing.T) {
 	for _, want := range []string{
 		`You are handling the "in_review" step of MUL-7.` + "\n",
 		"\nStep instructions:\n> Review the PR:\ttests and scope.\n> Then approve.\n",
-		"awaits review or acceptance.   ← current\n    Entering hands off to Sentinel.\n",
+		"awaiting review or acceptance.   ← current\n    Hands off to Sentinel.\n",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief is missing %q:\n%s", want, brief)
 		}
 	}
-	if strings.Contains(brief, "Their instructions begin") {
+	if strings.Contains(brief, "Their step:") {
 		t.Errorf("the current step's instructions are already printed in full:\n%s", brief)
 	}
 }
@@ -103,15 +103,15 @@ func TestStatusMapRoutesOnlyWhatItsAuthorOrABoardStageDecides(t *testing.T) {
 	// A step that hands off falls back to the next stage on the board,
 	// passing over the closed status; an author's own choice is kept.
 	in.Workflow = withHandoffs(in.Workflow, []Step{{StatusKey: "in_review", Handler: Handler{Type: HandlerAgent, ID: testAgentID}}})
-	if brief := Brief(in); !strings.Contains(brief, "    From here: its work done → `done`.\n") {
+	if brief := Brief(in); !strings.Contains(brief, "    Routes: next `done`.\n") {
 		t.Errorf("board fallback must skip the closed status:\n%s", brief)
 	}
 	in.Workflow = withHandoffs(in.Workflow, []Step{{StatusKey: "in_review", Handler: Handler{Type: HandlerAgent, ID: testAgentID}, NextStatusKey: "wont_fix"}})
-	if brief := Brief(in); !strings.Contains(brief, "    From here: its work done → `wont_fix`.\n") {
+	if brief := Brief(in); !strings.Contains(brief, "    Routes: next `wont_fix`.\n") {
 		t.Errorf("a configured Next must be kept:\n%s", brief)
 	}
 	// Statuses without a handler route nothing: their owner works on.
-	if brief := Brief(in); strings.Contains(brief, "underway.   ← current\n    From here") {
+	if brief := Brief(in); strings.Contains(brief, "underway.   ← current\n    Routes") {
 		t.Errorf("a status without a handler must not route work:\n%s", brief)
 	}
 }
@@ -142,7 +142,7 @@ func TestStatusMapForObserversAndTerminalStatuses(t *testing.T) {
 			t.Errorf("observer brief is missing %q:\n%s", want, observer)
 		}
 	}
-	if strings.Contains(observer, "Set a status") || strings.Contains(observer, "Step instructions") {
+	if strings.Contains(observer, "Set one with") || strings.Contains(observer, "Step instructions") {
 		t.Errorf("observer brief must leave the status to the assignee:\n%s", observer)
 	}
 
@@ -151,7 +151,7 @@ func TestStatusMapForObserversAndTerminalStatuses(t *testing.T) {
 	terminal := Brief(in)
 	if !strings.Contains(terminal, `MUL-7 has reached the terminal status "Won't Fix" (wont_fix). Leave the issue at this status`) ||
 		!strings.Contains(terminal, "(closed) — Decided not to do: duplicate or out of scope.   ← current\n") ||
-		strings.Contains(terminal, "Set a status") {
+		strings.Contains(terminal, "Set one with") {
 		t.Errorf("terminal brief must keep the issue where it is:\n%s", terminal)
 	}
 }
@@ -164,7 +164,7 @@ func TestStatusMapCutsLongInstructionHints(t *testing.T) {
 		Instructions: strings.Repeat("a", maxEntryHintRunes+20) + "\x01",
 	}})
 	brief := Brief(in)
-	want := "Their instructions begin: " + strings.Repeat("a", maxEntryHintRunes-1) + "…\n"
+	want := "Their step: " + strings.Repeat("a", maxEntryHintRunes-1) + "…\n"
 	if !strings.Contains(brief, want) {
 		t.Fatalf("hint must be cut to %d runes:\n%s", maxEntryHintRunes, brief)
 	}

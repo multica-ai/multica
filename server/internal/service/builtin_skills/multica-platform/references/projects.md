@@ -224,7 +224,7 @@ reference (`in_progress` on start, `in_review` on delivery) do not apply.
   handler is assigned and runs nothing. Nothing advances the status when a run
   ends: finishing a step means moving the issue to the next status yourself.
   The block is a status map — each status's category, meaning, handler and
-  where its author routes finished work ("From here") — and you set the
+  where its author routes finished work ("Routes") — and you set the
   status that matches where the issue stands; an older runtime gets the
   commands to run instead. A column can also name a "needs changes" status
   that sends the issue back.

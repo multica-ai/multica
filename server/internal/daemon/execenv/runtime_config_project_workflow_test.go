@@ -117,13 +117,13 @@ func TestBriefWithStatusMapStatesTheMapRules(t *testing.T) {
 		}
 		for _, want := range []string{
 			"3. Complete the task within your Agent Identity boundaries",
-			"5. Before exiting, confirm the issue sits on the status in `[Project workflow]` that matches where things actually stand.",
-			"`[Project workflow]` in the per-turn message is this issue's status map",
-			"Entering a status that hands off reassigns the issue to its handler and starts their run",
-			"A status without a handler hands nothing off and starts no run",
-			`where the map's "From here" line routes it`,
-			"A `done`-category status means finished and accepted",
-			"a `closed`-category status whose meaning fits. Comment why first",
+			"5. Before exiting, confirm the issue's status in `[Project workflow]` matches where things actually stand.",
+			"`[Project workflow]` in the per-turn message is this issue's status map.",
+			"Entering a status that hands off reassigns the issue and starts its handler's run",
+			"A status without a handler starts nothing",
+			"follows that step's Routes line",
+			"Leave `done`-category statuses to a human unless Routes leads there",
+			"a `closed`-category status that fits; comment why first",
 			"add no wakeup for that",
 			"This issue's status map is in `[Project workflow]`",
 			"--duplicate-of",
@@ -136,7 +136,7 @@ func TestBriefWithStatusMapStatesTheMapRules(t *testing.T) {
 		// The command form's wording would point at lines the map lacks.
 		// The map is the only status list, and no built-in key is named.
 		for _, stale := range []string{
-			"Step done", "Needs changes", "Can't proceed", "Move this issue only with its commands", "statuses and commands are in",
+			"Step done", "Needs changes", "Can't proceed  →", "Move this issue only with its commands", "statuses and commands are in",
 			"`wont_fix`", "`in_progress`", "`in_review`",
 		} {
 			if strings.Contains(out, stale) {
@@ -148,7 +148,7 @@ func TestBriefWithStatusMapStatesTheMapRules(t *testing.T) {
 		}
 	}
 	leader := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1", HasProjectWorkflow: true, ProjectWorkflowStatusMap: true, IsSquadLeader: true})
-	if !strings.Contains(leader, "a dispatch turn leaves the parent at its current step, and you move it on only on the later turn") {
+	if !strings.Contains(leader, "dispatching members is not delivery — move the parent on only on a later turn") {
 		t.Errorf("leader status-map brief must keep dispatch-is-not-delivery\n---\n%s", leader)
 	}
 }

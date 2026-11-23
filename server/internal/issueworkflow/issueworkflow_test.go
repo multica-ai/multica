@@ -400,7 +400,7 @@ func TestBriefForMovedStep(t *testing.T) {
 					}
 					for _, leak := range append(leaks,
 						"Implement it.", "Step instructions:", "You are handling", "Your moves:", "multica issue status",
-						"Set a status", "unless you are explicitly asked", "Before your run ends, either run",
+						"Set one with", "unless you are explicitly asked", "Before your run ends, either run",
 						"Lin\n", "\x01",
 					) {
 						if strings.Contains(brief, leak) {

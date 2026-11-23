@@ -566,7 +566,7 @@ func TestStatusChangeHandsOffOnDefaultProject(t *testing.T) {
 		t.Fatalf("handoff note = %q, want none: the brief rides the claim", tasks[0].HandoffNote.String)
 	}
 	brief := claimBriefForTest(t, issueID, tasks[0])
-	for _, want := range []string{"Implement it and open a PR.", "This project's workflow — Default (Workflow handoff project)", "Set a status with: multica issue status"} {
+	for _, want := range []string{"Implement it and open a PR.", "This project's workflow — Default (Workflow handoff project)", "Set one with: multica issue status"} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("claim brief is missing %q:\n%s", want, brief)
 		}
@@ -1011,7 +1011,7 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 		"Implement it and open a PR.",
 		"\nStatus map:\n",
 		"   ← current",
-		"Set a status with: multica issue status",
+		"Set one with: multica issue status",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("assignee brief is missing %q:\n%s", want, brief)
@@ -1221,7 +1221,7 @@ func TestPreviewIssueWorkflowBriefUsesTheDraft(t *testing.T) {
 		"status_key": "in_progress", "handler": map[string]any{"type": "agent", "id": agentID}, "instructions": "Draft step.",
 		"project_id": projectID,
 	}).Want(http.StatusOK).JSON(&got)
-	for _, want := range []string{"Default (Workflow brief project)", "Draft step.", "← current", "    From here: its work done → `in_review`.\n"} {
+	for _, want := range []string{"Default (Workflow brief project)", "Draft step.", "← current", "    Routes: next `in_review`.\n"} {
 		if !strings.Contains(got.Brief, want) {
 			t.Fatalf("draft brief is missing %q:\n%s", want, got.Brief)
 		}
