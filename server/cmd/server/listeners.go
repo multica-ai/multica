@@ -348,7 +348,8 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 			if err == nil {
 				refReaders, err = projectAudience.IssueRefReaders(ctx, e)
 			}
-			perReader := len(refReaders) > 0 && duplicateMarkMoved(e)
+			moved := len(refReaders) > 0 && duplicateMarkMoved(e)
+			perReader := moved && anyRefReader(refReaders)
 			if err == nil && perReader && !private {
 				recipients, err = projectAudience.Members(ctx, e.WorkspaceID)
 			}
@@ -363,7 +364,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 				return
 			}
 			if len(refReaders) > 0 {
-				if data, err = strippedFrame(e, true, func(id string) bool { return refReaders[id] != nil }); err != nil {
+				if data, err = strippedFrame(e, !moved, func(id string) bool { return refReaders[id] != nil }); err != nil {
 					slog.Error("failed to marshal event", "event_type", e.Type, "error", err)
 					return
 				}
