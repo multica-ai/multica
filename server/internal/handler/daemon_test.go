@@ -2695,6 +2695,126 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	}
 }
 
+func TestClaimTaskByRuntime_AgentProviderDrift(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name           string
+		targetProvider string
+		model          string
+		wantConflict   bool
+	}{
+		{"changed provider and model", "claude", "claude-opus-5-5", true},
+		{"changed provider with default model", "claude", "", true},
+		{"incompatible model on reclaimed dispatch", "", "claude-opus-5-5", true},
+		{"same provider runtime switch", "codex", "gpt-6.2-astra", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			insert := func(sql string, args ...any) string {
+				t.Helper()
+				var id string
+				if err := testPool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+					t.Fatal(err)
+				}
+				return id
+			}
+			exec := func(sql string, args ...any) {
+				t.Helper()
+				if _, err := testPool.Exec(ctx, sql, args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			newRuntime := func(provider string) string {
+				return insert(`INSERT INTO agent_runtime (workspace_id, owner_id, name, runtime_mode, provider, status)
+					VALUES ($1, $2, 'Claim provider test', 'cloud', $3, 'online') RETURNING id`, testWorkspaceID, testUserID, provider)
+			}
+			runtimeID := newRuntime("codex")
+			targetRuntimeID := runtimeID
+			if tc.targetProvider != "" {
+				targetRuntimeID = newRuntime(tc.targetProvider)
+			}
+			agentID := insert(`INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id, visibility, owner_id, model)
+				VALUES ($1, 'Claim provider test', 'cloud', $2, 'workspace', $3, 'gpt-6-luna') RETURNING id`, testWorkspaceID, runtimeID, testUserID)
+			issueID := insert(`INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+				VALUES ($1, 'Claim provider test', 'todo', 'medium', $2,  'member', 77002, 0) RETURNING id`, testWorkspaceID, testUserID)
+			taskID := insert(`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+				VALUES ($1, $2, $3, 'queued', 2) RETURNING id`, agentID, runtimeID, issueID)
+			t.Cleanup(func() {
+				exec("DELETE FROM agent_task_queue WHERE id = $1", taskID)
+				exec("DELETE FROM issue WHERE id = $1", issueID)
+				exec("DELETE FROM agent WHERE id = $1", agentID)
+				exec("DELETE FROM agent_runtime WHERE id IN ($1, $2)", runtimeID, targetRuntimeID)
+			})
+			exec("UPDATE agent SET runtime_id = $2, model = NULLIF($3, '') WHERE id = $1", agentID, targetRuntimeID, tc.model)
+			if tc.targetProvider == "" {
+				exec("UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() - interval '1 hour' WHERE id = $1", taskID)
+			}
+
+			request := func(path, param, id string, body any, handler http.HandlerFunc) *httptest.ResponseRecorder {
+				t.Helper()
+				w := httptest.NewRecorder()
+				req := newDaemonTokenRequest(http.MethodPost, path, body, testWorkspaceID, "provider-test-daemon")
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add(param, id)
+				handler(w, req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
+				return w
+			}
+			claim := request("/api/daemon/runtimes/"+runtimeID+"/claim", "runtimeId", runtimeID, nil, testHandler.ClaimTaskByRuntime)
+			if tc.wantConflict {
+				if claim.Code != http.StatusConflict || !strings.Contains(claim.Body.String(), "incompatible") {
+					t.Fatalf("claim: expected provider conflict, got %d: %s", claim.Code, claim.Body)
+				}
+				var status, reason string
+				var tokens, tasks int
+				if err := testPool.QueryRow(ctx, `SELECT status, failure_reason,
+					(SELECT count(*) FROM task_token WHERE task_id = q.id),
+					(SELECT count(*) FROM agent_task_queue WHERE agent_id = q.agent_id)
+					FROM agent_task_queue q WHERE id = $1`, taskID).Scan(&status, &reason, &tokens, &tasks); err != nil {
+					t.Fatal(err)
+				}
+				if status != "failed" || reason != "runtime_provider_mismatch" || tokens != 0 || tasks != 1 {
+					t.Fatalf("rejected claim: status=%q reason=%q tokens=%d tasks=%d", status, reason, tokens, tasks)
+				}
+				return
+			}
+			if claim.Code != http.StatusOK {
+				t.Fatalf("claim: expected success, got %d: %s", claim.Code, claim.Body)
+			}
+			var resp struct {
+				Task *struct {
+					ID    string        `json:"id"`
+					Agent TaskAgentData `json:"agent"`
+				} `json:"task"`
+			}
+			if err := json.Unmarshal(claim.Body.Bytes(), &resp); err != nil || resp.Task == nil || resp.Task.ID != taskID || resp.Task.Agent.Model != tc.model {
+				t.Fatalf("claim: wrong task or model: %v", err)
+			}
+			taskPath := "/api/daemon/tasks/" + taskID
+			start := request(taskPath+"/start", "taskId", taskID, nil, testHandler.StartTask)
+			if start.Code != http.StatusOK {
+				t.Fatalf("start: %d: %s", start.Code, start.Body)
+			}
+			claudeRuntimeID := newRuntime("claude")
+			defer func() {
+				exec("UPDATE agent SET runtime_id = $2, model = $3 WHERE id = $1", agentID, targetRuntimeID, tc.model)
+				exec("DELETE FROM agent_runtime WHERE id = $1", claudeRuntimeID)
+			}()
+			exec("UPDATE agent SET runtime_id = $2, model = 'claude-opus-5-5' WHERE id = $1", agentID, claudeRuntimeID)
+			updated, err := testHandler.TaskService.FailDispatchedTask(ctx, parseUUID(taskID), "late claim rejection", "runtime_provider_mismatch")
+			if err != nil || updated == nil || updated.Status != "running" {
+				t.Fatalf("late claim rejection interrupted running task: %v", err)
+			}
+			complete := request(taskPath+"/complete", "taskId", taskID, TaskCompleteRequest{}, testHandler.CompleteTask)
+			if complete.Code != http.StatusOK {
+				t.Fatalf("complete after provider change: %d: %s", complete.Code, complete.Body)
+			}
+			var status string
+			if err := testPool.QueryRow(ctx, "SELECT status FROM agent_task_queue WHERE id = $1", taskID).Scan(&status); err != nil || status != "completed" {
+				t.Fatalf("completed task: status=%q error=%v", status, err)
+			}
+		})
+	}
+}
+
 // Regression test for MUL-1198: comment-triggered tasks that finish without
 // the agent posting any comment must still deliver a synthesized result
 // comment, threaded under the trigger. Before the fix, CompleteTask exempted

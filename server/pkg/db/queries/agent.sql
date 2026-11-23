@@ -551,6 +551,7 @@ SET status = 'failed',
     prepare_lease_expires_at = NULL,
     running_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  AND (NOT sqlc.arg(dispatched_only)::boolean OR status = 'dispatched')
 RETURNING *;
 
 -- name: UpdateAgentTaskSession :exec

@@ -1512,6 +1512,16 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string) (*db.AgentTaskQueue, error) {
+	return s.failTask(ctx, taskID, errMsg, sessionID, workDir, failureReason, false)
+}
+
+// FailDispatchedTask records a claim rejection without interrupting a task
+// that started concurrently with recovery of a stale claim response.
+func (s *TaskService) FailDispatchedTask(ctx context.Context, taskID pgtype.UUID, errMsg, failureReason string) (*db.AgentTaskQueue, error) {
+	return s.failTask(ctx, taskID, errMsg, "", "", failureReason, true)
+}
+
+func (s *TaskService) failTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string, dispatchedOnly bool) (*db.AgentTaskQueue, error) {
 	// MUL-2946: synthesise a refined reason from the error text whenever the
 	// caller didn't supply one. This is the last write-path guard against
 	// "agent_error" coarse rows ending up in agent_task_queue.failure_reason
@@ -1525,11 +1535,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
-			ID:            taskID,
-			Error:         pgtype.Text{String: errMsg, Valid: true},
-			FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},
-			SessionID:     pgtype.Text{String: sessionID, Valid: sessionID != ""},
-			WorkDir:       pgtype.Text{String: workDir, Valid: workDir != ""},
+			DispatchedOnly: dispatchedOnly,
+			ID:             taskID,
+			Error:          pgtype.Text{String: errMsg, Valid: true},
+			FailureReason:  pgtype.Text{String: failureReason, Valid: failureReason != ""},
+			SessionID:      pgtype.Text{String: sessionID, Valid: sessionID != ""},
+			WorkDir:        pgtype.Text{String: workDir, Valid: workDir != ""},
 		})
 		if err != nil {
 			return err
@@ -1560,7 +1571,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	}); err != nil {
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				slog.Info("fail task: already finalized",
+				slog.Info("fail task: state no longer eligible",
 					"task_id", util.UUIDToString(taskID),
 					"current_status", existing.Status,
 					"agent_id", util.UUIDToString(existing.AgentID),

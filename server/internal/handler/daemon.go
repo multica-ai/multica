@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -1425,7 +1426,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
-	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+	agentConfig, agentErr := h.Queries.GetAgent(r.Context(), task.AgentID)
+	if agentErr == nil {
+		agent := agentConfig
 		useSkillRefs := requestHasDaemonCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
@@ -2013,6 +2016,43 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				"task_id", uuidToString(task.ID), "error", cerr)
 		}
 		writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
+		return
+	}
+
+	// The queue preserves its runtime while the agent can change providers.
+	// Check the same agent snapshot used for the payload before issuing a task token.
+	if agentErr != nil {
+		outcome = "error_agent_config"
+		slog.Error("task claim: failed to load agent configuration", "task_id", uuidToString(task.ID), "error", agentErr)
+		writeError(w, http.StatusInternalServerError, "failed to load task agent configuration")
+		return
+	}
+	configuredProvider := runtime.Provider
+	if agentConfig.RuntimeID != runtime.ID {
+		var ok bool
+		configuredProvider, ok = h.resolveAgentProvider(r, runtime.WorkspaceID, agentConfig.RuntimeID)
+		if !ok {
+			outcome = "error_agent_runtime"
+			writeError(w, http.StatusInternalServerError, "failed to resolve task agent runtime")
+			return
+		}
+	}
+	if configuredProvider != runtime.Provider || agent.ModelKnownIncompatibleWithProvider(runtime.Provider, agentConfig.Model.String) {
+		const reason = "runtime_provider_mismatch"
+		const message = "Task runtime provider is incompatible with the current agent configuration. Review the agent runtime and model before requesting a new run."
+		outcome = reason
+		failed, err := h.TaskService.FailDispatchedTask(r.Context(), task.ID, message, reason)
+		if err != nil {
+			slog.Error("task claim: failed to record provider mismatch", "task_id", uuidToString(task.ID), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to record task provider mismatch")
+			return
+		}
+		if failed.Status == "failed" {
+			if err := h.Queries.DeleteTaskTokensByTask(r.Context(), task.ID); err != nil {
+				slog.Warn("task claim: failed to revoke task tokens", "task_id", uuidToString(task.ID), "error", err)
+			}
+		}
+		writeError(w, http.StatusConflict, message)
 		return
 	}
 

@@ -791,6 +791,20 @@ always at least this value, so raising it takes effect across all commands.
 MULTICA_HTTP_TIMEOUT=60s multica issue list
 ```
 
+### Queued tasks after an agent provider change
+
+A task keeps its queued runtime. At claim time, the server compares that
+runtime's provider with the current agent configuration and checks the model
+using the same compatibility rules as agent updates. A mismatch produces
+HTTP 409, records `runtime_provider_mismatch` on the failed task, and issues
+no task token. The server does not retry this failure automatically.
+
+Before requesting a new run, an operator should verify that the agent's
+current runtime and model are compatible and that the requester still has
+permission to initiate the work. Use the normal issue rerun or task submission
+flow so the server can apply current authorization and execution policy. Tasks
+already running can report completion through their existing runtime.
+
 ## Task token usage
 
 `multica issue runs <issue-id> --output json` includes a `usage` array on every
