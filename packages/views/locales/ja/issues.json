@@ -1446,7 +1446,9 @@
       "chip_wake": "完了後に {{name}} を起動",
       "chip_notify": "完了後に {{name}} に通知",
       "chip_assignee": "完了後に担当者を起動",
-      "chip_off": "完了後の起動はオフ"
+      "chip_off": "完了後の起動はオフ",
+      "blocked_backlog": "バックログ中のため起こしません",
+      "blocked_none": "エージェントの担当者がいないため起こしません"
     },
     "cond": {
       "status": "ステータスが{{status}}になったとき",

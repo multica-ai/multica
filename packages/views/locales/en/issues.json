@@ -1507,7 +1507,9 @@
       "chip_wake": "Wakes {{name}} when all finish",
       "chip_notify": "Notifies {{name}} when all finish",
       "chip_assignee": "Wakes the assignee when all finish",
-      "chip_off": "Sub-issue wakeup off"
+      "chip_off": "Sub-issue wakeup off",
+      "blocked_backlog": "Issue is in backlog; no wakeup for now",
+      "blocked_none": "No agent assignee; nobody is woken"
     },
     "cond": {
       "status": "When this issue moves to {{status}}",

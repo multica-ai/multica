@@ -21,7 +21,7 @@ function fillSlots(sentence: string, nodes: Record<string, ReactNode>): ReactNod
 }
 
 const nameClass =
-  "cursor-default rounded-xs text-foreground/80 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
+  "cursor-default rounded-xs text-foreground focus-visible:outline-2 focus-visible:outline-ring";
 
 function ActorName({ type, id }: { type: string; id: string }) {
   const { getActorName } = useActorName();
@@ -31,7 +31,7 @@ function ActorName({ type, id }: { type: string; id: string }) {
       : type === "member" ? <MemberProfileCard userId={id} />
         : type === "squad" ? <SquadProfileCard squadId={id} />
           : null;
-  if (!card) return <span className="text-foreground/80">{name}</span>;
+  if (!card) return <span className="text-foreground">{name}</span>;
   return (
     <HoverCard>
       <HoverCardTrigger render={<span />} tabIndex={0} className={nameClass}>

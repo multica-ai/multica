@@ -7,8 +7,10 @@ import type {
   IssuePullRequestsResponse,
   IssueWakeup,
   ListGitHubInstallationsResponse,
+  ListVCSConnectionsResponse,
 } from "@multica/core/types";
 import { githubInstallationsOptions, issuePullRequestsOptions } from "@multica/core/github";
+import { vcsConnectionsOptions } from "@multica/core/vcs/queries";
 import { issueEnvironmentsOptions } from "@multica/core/issues/queries";
 import { issueWakeupsOptions } from "@multica/core/issues";
 import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores";
@@ -24,12 +26,16 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
 const declared = { environments: [], configs: [{ environments: [{ name: "web" }] }], pending_starts: [], failed_starts: [] };
 const noPullRequests = { pull_requests: [], auto_complete: { state: "none", pull_request_ids: [], issue_disabled: false, workspace_enabled: true } };
 
-function seed(overrides: { wakeups?: unknown; prs?: unknown; environments?: unknown } = {}) {
+function seed(overrides: { wakeups?: unknown; prs?: unknown; environments?: unknown; vcsConnections?: unknown[] } = {}) {
   // Seeded and never stale, so the hook reads exactly what each section would.
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(issueWakeupsOptions("ws-1", "issue-1").queryKey, (overrides.wakeups ?? []) as IssueWakeup[]);
   client.setQueryData(issuePullRequestsOptions("issue-1").queryKey, (overrides.prs ?? noPullRequests) as IssuePullRequestsResponse);
   client.setQueryData(githubInstallationsOptions("ws-1").queryKey, { installations: [] } as unknown as ListGitHubInstallationsResponse);
+  client.setQueryData(
+    vcsConnectionsOptions("ws-1").queryKey,
+    { connections: overrides.vcsConnections ?? [] } as unknown as ListVCSConnectionsResponse,
+  );
   client.setQueryData(
     issueEnvironmentsOptions("ws-1", "issue-1").queryKey,
     (overrides.environments ?? declared) as IssueEnvironmentsResponse,
@@ -80,6 +86,11 @@ describe("useIssueSidebarAddables", () => {
     expect(addables({ pullRequestsAvailable: false })).toEqual(["wakeups", "environments"]);
     repos = [];
     expect(addables()).toEqual(["wakeups", "environments"]);
+  });
+
+  it("offers pull requests to a workspace that only connects a self-hosted VCS", () => {
+    repos = [];
+    expect(addables({}, { vcsConnections: [{ id: "gitlab-1" }] })).toEqual(["wakeups", "pull_requests", "environments"]);
   });
 
   it("offers an environment only when a run declared one and nothing is starting", () => {

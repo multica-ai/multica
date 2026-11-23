@@ -1507,7 +1507,9 @@
       "chip_wake": "Réveille {{name}} à la fin",
       "chip_notify": "Prévient {{name}} à la fin",
       "chip_assignee": "Réveille le responsable à la fin",
-      "chip_off": "Réveil de fin désactivé"
+      "chip_off": "Réveil de fin désactivé",
+      "blocked_backlog": "Tâche en backlog ; pas de réveil pour l’instant",
+      "blocked_none": "Aucun agent responsable ; personne n’est réveillé"
     },
     "cond": {
       "status": "Quand cette tâche passe à {{status}}",

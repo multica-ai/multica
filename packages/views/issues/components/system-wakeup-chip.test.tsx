@@ -74,6 +74,13 @@ describe("SystemWakeupChips", () => {
     await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: true, instruction: "" }));
   });
 
+  it("explains in the popover why a backlog issue wakes nobody yet", async () => {
+    rules = [childDone({ blocked: "backlog" })];
+    renderWithI18n(<SystemWakeupChips workspaceId="ws" issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: "Wakes Emacs when all finish" }));
+    expect(await screen.findByText("Issue is in backlog; no wakeup for now")).toBeVisible();
+  });
+
   it("says a member assignee is notified instead of woken", () => {
     rules = [childDone({ target: { type: "member", id: "u", name: "Jiayuan" }, blocked: "member_assignee" })];
     renderWithI18n(<SystemWakeupChips workspaceId="ws" issueId="issue" />);

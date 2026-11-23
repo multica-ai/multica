@@ -11,6 +11,7 @@ import {
 import { githubInstallationsOptions, issuePullRequestsOptions } from "@multica/core/github";
 import { issueEnvironmentsOptions } from "@multica/core/issues/queries";
 import { issueWakeupsOptions } from "@multica/core/issues";
+import { vcsConnectionsOptions } from "@multica/core/vcs/queries";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -56,11 +57,16 @@ export function useIssueSidebarAddables({
   const wakeups = useQuery({ ...issueWakeupsOptions(wsId, issueId), enabled: enabled && !!wsId });
   const prs = useQuery({ ...issuePullRequestsOptions(issueId), enabled: enabled && pullRequestsAvailable });
   const installations = useQuery({ ...githubInstallationsOptions(wsId), enabled: enabled && pullRequestsAvailable && !!wsId });
+  const vcsConnections = useQuery({ ...vcsConnectionsOptions(wsId), enabled: enabled && pullRequestsAvailable && !!wsId });
   const environments = useQuery({ ...issueEnvironmentsOptions(wsId, issueId), enabled: enabled && !!wsId });
   if (!enabled) return [];
 
-  // A workspace with no repository to open a pull request against has none to link.
-  const hostsCode = (workspace?.repos?.length ?? 0) > 0 || (installations.data?.installations.length ?? 0) > 0;
+  // A workspace with no repository to open a pull request against has none to
+  // link. Self-hosted GitLab / Gitea / Forgejo merge requests link by URL too.
+  const hostsCode =
+    (workspace?.repos?.length ?? 0) > 0 ||
+    (installations.data?.installations?.length ?? 0) > 0 ||
+    (vcsConnections.data?.connections?.length ?? 0) > 0;
   const env = environments.data;
   const can: Record<IssueSidebarAddable, boolean> = {
     wakeups: !closed && wakeups.isSuccess && wakeups.data.length === 0,

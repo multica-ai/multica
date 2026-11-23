@@ -59,6 +59,7 @@ import { PickerEmpty, PickerItem, PickerSection, PropertyPicker } from "./picker
 import { IssuePickerModal } from "../../modals/issue-picker-modal";
 import { useStatusLabel } from "../utils/status-label";
 import { useWakeupText } from "./wakeup-presentation";
+import { useReopenOnReveal } from "./use-sidebar-reveal-motion";
 import {
   WAKEUP_EVENT_TYPES,
   WAKEUP_MAX_FIRES,
@@ -97,6 +98,7 @@ export function WakeupCreate({
 }) {
   const { t } = useT("issues");
   const [open, setOpenState] = useState(defaultOpen);
+  useReopenOnReveal(defaultOpen, () => setOpenState(true));
   const busy = useRef(false);
   const setOpen = (next: boolean) => {
     setOpenState(next);

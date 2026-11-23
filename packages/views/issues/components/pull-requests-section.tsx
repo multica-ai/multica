@@ -28,7 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { PullRequestList } from "./pull-request-list";
-import { useSidebarRevealMotion } from "./use-sidebar-reveal-motion";
+import { useReopenOnReveal, useSidebarRevealMotion } from "./use-sidebar-reveal-motion";
 
 /**
  * The issue sidebar's Pull requests section: the linked PRs, what merging them
@@ -106,6 +106,7 @@ function LinkPullRequestPopover({
   const { t } = useT("issues");
   const { autoLinkPRs } = useGitHubSettings();
   const [open, setOpenState] = useState(defaultOpen);
+  useReopenOnReveal(defaultOpen, () => setOpenState(true));
   const setOpen = (next: boolean) => {
     setOpenState(next);
     if (!next) onClosed?.();

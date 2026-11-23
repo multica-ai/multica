@@ -1446,7 +1446,9 @@
       "chip_wake": "结束后唤醒 {{name}}",
       "chip_notify": "结束后通知 {{name}}",
       "chip_assignee": "结束后唤醒负责人",
-      "chip_off": "结束后唤醒已关闭"
+      "chip_off": "结束后唤醒已关闭",
+      "blocked_backlog": "任务在待规划中，暂不唤醒",
+      "blocked_none": "没有智能体负责人，不会唤醒"
     },
     "cond": {
       "status": "当状态变为{{status}}时",

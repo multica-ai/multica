@@ -70,6 +70,15 @@ function SystemWakeupChip({
         reason: text.pausedReason({ paused_reason: rule.paused_reason, max_fires: null, fire_count: 0 }) ?? "",
       })
     : null;
+  // Why an enabled rule will not wake anyone right now. A member assignee is
+  // already named on the chip ("Notifies …").
+  const blocked = rule.enabled && !paused
+    ? rule.blocked === "backlog"
+      ? t(($) => $.wakeups.system.blocked_backlog)
+      : rule.blocked === "no_assignee"
+        ? t(($) => $.wakeups.system.blocked_none)
+        : null
+    : null;
   const label = !rule.enabled
     ? t(($) => $.wakeups.system.chip_off)
     : !rule.target
@@ -93,12 +102,16 @@ function SystemWakeupChip({
             aria-busy={update.isPending}
             className={cn(
               "inline-flex h-6 min-w-0 shrink items-center gap-1 rounded-md px-1.5 text-caption transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring data-popup-open:bg-accent",
-              paused ? "text-warning" : rule.enabled ? "text-muted-foreground" : "text-faint-foreground",
+              paused ? "text-warning" : "text-muted-foreground",
             )}
           />
         }
       >
-        {rule.enabled ? <Bell className="size-3.5 shrink-0" aria-hidden="true" /> : <BellOff className="size-3.5 shrink-0" aria-hidden="true" />}
+        {rule.enabled ? (
+          <Bell className="size-3.5 shrink-0" aria-hidden="true" />
+        ) : (
+          <BellOff className="size-3.5 shrink-0 text-faint-foreground" aria-hidden="true" />
+        )}
         <span className="truncate">{label}</span>
       </PopoverTrigger>
       <PopoverContent align="start" className="max-h-[70dvh] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto" keepMounted>
@@ -107,6 +120,7 @@ function SystemWakeupChip({
           <SystemBadge />
         </div>
         {paused && <p className="break-words text-caption text-warning">{paused}</p>}
+        {blocked && <p className="break-words text-caption text-muted-foreground">{blocked}</p>}
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-caption">
           <dt className="text-muted-foreground">{t(($) => $.wakeups.system.target_title)}</dt>
           <dd>

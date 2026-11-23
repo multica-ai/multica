@@ -19,6 +19,19 @@ function fold(element: HTMLElement | null, open: boolean) {
 }
 
 /**
+ * Opens a revealed section's form again when the reader picks the section
+ * while it is still folding away: it stays mounted then, so its initial open
+ * state has already been used. `open` must set the caller's own state.
+ */
+export function useReopenOnReveal(reveal: boolean, open: () => void) {
+  const [revealed, setRevealed] = useState(reveal);
+  if (reveal !== revealed) {
+    setRevealed(reveal);
+    if (reveal) open();
+  }
+}
+
+/**
  * Height motion for a section the add row reveals while it is empty. Its slot
  * grows open with it, and when the reveal ends with the section still empty
  * the slot folds shut before the section goes, so the rows below slide

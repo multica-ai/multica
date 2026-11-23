@@ -63,6 +63,18 @@ describe("WakeupCreate", () => {
     fireEvent.keyDown(form, { key: "Escape" });
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
+
+  it("opens again when revealed again before it unmounts", async () => {
+    const view = (defaultOpen: boolean) => (
+      <WakeupCreate workspaceId="ws" issueId="issue" defaultAgentId="emacs" defaultOpen={defaultOpen} />
+    );
+    const { rerender } = renderWithI18n(view(true), { locale: "zh-Hans" });
+    fireEvent.keyDown(await screen.findByRole("form", { name: "新建唤醒" }), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("form", { name: "新建唤醒" })).not.toBeInTheDocument());
+    rerender(view(false));
+    rerender(view(true));
+    expect(await screen.findByRole("form", { name: "新建唤醒" })).toBeInTheDocument();
+  });
 });
 
 describe("WakeupCreateForm", () => {

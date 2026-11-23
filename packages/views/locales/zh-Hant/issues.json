@@ -1446,7 +1446,9 @@
       "chip_wake": "結束後喚醒 {{name}}",
       "chip_notify": "結束後通知 {{name}}",
       "chip_assignee": "結束後喚醒負責人",
-      "chip_off": "結束後喚醒已關閉"
+      "chip_off": "結束後喚醒已關閉",
+      "blocked_backlog": "任務在待規劃中，暫不喚醒",
+      "blocked_none": "沒有 AI 代理負責人，不會喚醒"
     },
     "cond": {
       "status": "當狀態變為{{status}}時",

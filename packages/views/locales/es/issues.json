@@ -1421,7 +1421,9 @@
       "chip_wake": "Activa a {{name}} al terminar",
       "chip_notify": "Avisa a {{name}} al terminar",
       "chip_assignee": "Activa al responsable al terminar",
-      "chip_off": "Activación al terminar desactivada"
+      "chip_off": "Activación al terminar desactivada",
+      "blocked_backlog": "La tarea está en backlog; sin activación por ahora",
+      "blocked_none": "No hay agente asignado; nadie se activa"
     },
     "cond": {
       "status": "Cuando esta tarea pasa a {{status}}",

@@ -1446,7 +1446,9 @@
       "chip_wake": "모두 끝나면 {{name}} 깨우기",
       "chip_notify": "모두 끝나면 {{name}}에게 알림",
       "chip_assignee": "모두 끝나면 담당자 깨우기",
-      "chip_off": "완료 후 깨우기 꺼짐"
+      "chip_off": "완료 후 깨우기 꺼짐",
+      "blocked_backlog": "백로그 상태라 지금은 깨우지 않음",
+      "blocked_none": "에이전트 담당자가 없어 깨우지 않음"
     },
     "cond": {
       "status": "상태가 {{status}}(으)로 바뀌면",
