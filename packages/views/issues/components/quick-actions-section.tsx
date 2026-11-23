@@ -29,7 +29,7 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 import { useT } from "../../i18n";
 
 // Quick Actions sidebar section (MUL-5465).
@@ -79,7 +79,7 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
   return (
     <div>
       <IssueSidebarSectionHeader title={t(($) => $.detail.section_quick_actions)} count={actions.length} open={open} onOpenChange={setOpen} />
-      {open ? (
+      <IssueSidebarCollapsible open={open}>
         <div className="space-y-0.5 px-2">
           {isError && <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onClick={() => void refetch()}>
             {t(($) => $.detail.section_load_failed_retry)}
@@ -102,7 +102,7 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
             </button>
           )}
         </div>
-      ) : null}
+      </IssueSidebarCollapsible>
 
       <QuickActionBlockedDialog action={blocked} onClose={() => setBlocked(null)} />
     </div>

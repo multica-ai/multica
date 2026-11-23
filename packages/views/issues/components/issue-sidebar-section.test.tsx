@@ -1,8 +1,12 @@
 import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("issue sidebar disclosure", () => {
   it("keeps an empty title static while its add action remains available", () => {
@@ -42,5 +46,30 @@ describe("issue sidebar disclosure", () => {
     expect(screen.queryByText("Linked item")).not.toBeInTheDocument();
     await userEvent.keyboard("{Enter}");
     expect(screen.getByText("Linked item")).toBeVisible();
+  });
+
+  it("toggles IssueSidebarCollapsible content and honors reduced motion", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    function CollapsibleExample() {
+      const [open, setOpen] = useState(true);
+      return <>
+        <IssueSidebarSectionHeader title="Details" open={open} onOpenChange={setOpen} />
+        <IssueSidebarCollapsible open={open}>
+          <p>Detail row</p>
+        </IssueSidebarCollapsible>
+      </>;
+    }
+    const { container } = render(<CollapsibleExample />);
+    expect(screen.getByText("Detail row")).toBeVisible();
+    const panel = container.querySelector('[data-slot="collapsible-content"]');
+    expect(panel?.className).toContain("transition-none");
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.queryByText("Detail row")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByText("Detail row")).toBeVisible();
   });
 });

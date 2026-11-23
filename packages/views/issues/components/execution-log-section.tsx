@@ -24,7 +24,7 @@ import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
 import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 import { useT } from "../../i18n";
 import { compareActiveIssueTasks } from "./active-task-order";
 import { formatDuration as formatAgentTime } from "../../dashboard/utils";
@@ -177,7 +177,7 @@ export function ExecutionLogSection({
           </span>
         ) : undefined}
       />
-      {open && (
+      <IssueSidebarCollapsible open={open}>
         <div className="space-y-2 px-2">
           {(timeline.pricedCount > 0 || timeline.agentMs > 0) && (
             <div className="space-y-0.5 pt-2">
@@ -226,7 +226,7 @@ export function ExecutionLogSection({
             </div>
           )}
         </div>
-      )}
+      </IssueSidebarCollapsible>
       <IssueRunsDialog
         open={runsOpen}
         onOpenChange={setRunsOpen}

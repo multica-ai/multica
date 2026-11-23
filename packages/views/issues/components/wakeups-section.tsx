@@ -1,6 +1,6 @@
 "use client";
 
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -443,7 +443,7 @@ export function WakeupsSection({
         collapsible={hasContent}
         actions={!closed ? <WakeupCreate workspaceId={workspaceId} issueId={issueId} defaultAgentId={defaultAgentId} /> : undefined}
       />
-      {open && hasContent && (
+      <IssueSidebarCollapsible open={open && hasContent}>
         <div className="px-2">
           {isError && (
             <button
@@ -467,24 +467,22 @@ export function WakeupsSection({
                 type="button"
                 aria-expanded={historyOpen}
                 onClick={() => setHistoryOpen(!historyOpen)}
-                className="flex min-h-9 w-full items-center gap-1 rounded-md px-2 py-1 text-label text-muted-foreground hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex min-h-9 w-full items-center gap-1 rounded-md px-2 py-1 text-label text-muted-foreground transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
               >
                 <ChevronRight
-                  className={`size-3 ${historyOpen ? "rotate-90" : ""}`}
+                  className={`size-3 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${historyOpen ? "rotate-90" : ""}`}
                   aria-hidden="true"
                 />
                 {t(($) => $.wakeups.ended, { count: historyCount })}
               </button>
-              {historyOpen && (
-                <>
-                  {offSystemRules.map(systemRow)}
-                  {history.map(row)}
-                </>
-              )}
+              <IssueSidebarCollapsible open={historyOpen}>
+                {offSystemRules.map(systemRow)}
+                {history.map(row)}
+              </IssueSidebarCollapsible>
             </>
           )}
         </div>
-      )}
+      </IssueSidebarCollapsible>
     </section>
   );
 }

@@ -112,7 +112,7 @@ function ListRowContent({
         data-peeked={peeked ? "" : undefined}
         style={containerStyle}
         {...containerProps}
-        className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-[var(--issue-row-padding-x,1rem)] text-body transition-colors ${
+        className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-[var(--issue-row-padding-x,1rem)] text-body transition-[background-color,color,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
           selected
             ? "bg-issue-row-selected hover:not-data-[popup-open]:bg-issue-row-selected data-[popup-open]:bg-issue-row-selected"
             : "hover:not-data-[popup-open]:bg-issue-row-hover data-[popup-open]:bg-issue-row-hover"
@@ -125,15 +125,21 @@ function ListRowContent({
           {storeProperties.priority && issue.priority !== "none" && (
             <PriorityIcon
               priority={issue.priority}
-              className={selected ? "hidden" : "group-hover/row:hidden"}
+              className={`transition-opacity duration-100 motion-reduce:transition-none ${
+                selected
+                  ? "opacity-0"
+                  : "group-hover/row:opacity-0 group-focus-within/row:opacity-0"
+              }`}
             />
           )}
           <input
             type="checkbox"
             checked={selected}
             onChange={() => toggle(issue.id)}
-            className={`absolute inset-0 cursor-pointer accent-primary ${
-              selected ? "" : "hidden group-hover/row:block"
+            className={`absolute inset-0 cursor-pointer accent-primary transition-opacity duration-100 motion-reduce:transition-none ${
+              selected
+                ? "opacity-100"
+                : "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
             }`}
           />
         </div>

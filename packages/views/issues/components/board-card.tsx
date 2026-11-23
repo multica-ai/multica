@@ -404,7 +404,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         data-peeked={peeked ? "" : undefined}
         {...attributes}
         {...listeners}
-        className={`group/card ${isDragging ? "opacity-30" : ""}`}
+        className={`group/card transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${isDragging ? "opacity-30" : ""}`}
         onKeyDown={
           peek
             ? (e) => {

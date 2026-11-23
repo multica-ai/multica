@@ -468,11 +468,11 @@ describe("InboxSection", () => {
     expect(header()).not.toHaveTextContent("3");
   });
 
-  it("collapses from the section label", () => {
+  it("collapses from the section label", async () => {
     renderSection([item({ id: "n1", issue_id: "issue-a" })]);
     fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
     expect(useSidebarTreeStore.getState().inboxCollapsed).toBe(true);
-    expect(rows()).toHaveLength(0);
+    await waitFor(() => expect(rows()).toHaveLength(0));
   });
 
   it("collapses from its open tab, and a closed tab opens the section on that list", () => {

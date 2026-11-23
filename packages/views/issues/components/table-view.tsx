@@ -741,11 +741,12 @@ export function InlineTitle({
               }}
               onAuxClick={stopRowNavigation}
             >
-              {row.collapsed ? (
-                <ChevronRight className="size-3.5" />
-              ) : (
-                <ChevronDown className="size-3.5" />
-              )}
+              <ChevronRight
+                className={cn(
+                  "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+                  !row.collapsed && "rotate-90",
+                )}
+              />
             </button>
           }
         />
@@ -925,11 +926,12 @@ export function IssueTableGroupRow({
           type="button"
           className="sticky left-4 flex w-fit items-center gap-2 text-caption font-medium"
         >
-          {group.collapsed ? (
-            <ChevronRight className="size-3.5" />
-          ) : (
-            <ChevronDown className="size-3.5" />
-          )}
+          <ChevronRight
+            className={cn(
+              "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+              !group.collapsed && "rotate-90",
+            )}
+          />
           {group.label}
           <span className="font-normal tabular-nums text-muted-foreground">
             {group.count}

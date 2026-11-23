@@ -1,6 +1,6 @@
 "use client";
 
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -64,11 +64,11 @@ export function PullRequestsSection({
           <AutoCompleteMenu issueId={issueId} disabled={data?.auto_complete?.issue_disabled ?? false} workspaceEnabled={data?.auto_complete?.workspace_enabled ?? true} />
         </> : undefined}
       />
-      {open && (count > 0 || isLoading || isError) && (
+      <IssueSidebarCollapsible open={open && (count > 0 || isLoading || isError)}>
         <div className="px-2">
           <PullRequestList issueId={issueId} identifier={identifier} />
         </div>
-      )}
+      </IssueSidebarCollapsible>
     </div>
   );
 }

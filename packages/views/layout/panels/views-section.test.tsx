@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
@@ -89,14 +89,14 @@ beforeEach(() => {
 });
 
 describe("ViewsSection", () => {
-  it("collapses from the section label", () => {
+  it("collapses from the section label", async () => {
     renderSection();
     expect(screen.getByText("All views")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Views" }));
     expect(useSidebarTreeStore.getState().viewsCollapsed).toBe(true);
-    expect(screen.queryByText("All views")).toBeNull();
     expect(screen.getByRole("button", { name: "Views" })).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(screen.queryByText("All views")).toBeNull());
   });
 
   it("opens again to show a new view, named in the page header", () => {
