@@ -1,10 +1,13 @@
 "use client";
 
 import type { ComponentProps, ReactNode } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { Archive, ArchiveRestore } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import type { ShortcutActionId } from "@multica/core/shortcuts";
 import type { InboxItem } from "@multica/core/types";
@@ -26,17 +29,26 @@ import { useTimeAgo } from "./inbox-list-item";
  * first, then the notification's actions, the time, and the issue's values.
  */
 export function InboxBar({ settled = false, children }: { settled?: boolean; children: ReactNode }) {
+  const reduceMotion = useReducedMotion();
   return (
     <div
       role={settled ? "status" : undefined}
       data-inbox-bar={settled ? "settled" : "open"}
       className={cn(
-        "@container/inbox-bar relative flex h-10 shrink-0 items-center gap-1 border-b",
+        "@container/inbox-bar relative flex h-10 shrink-0 items-center border-b transition-colors duration-150 motion-reduce:transition-none",
         settled && "bg-muted/40",
         PAGE_GUTTER,
       )}
     >
-      {children}
+      <motion.div
+        key={settled ? "settled" : "open"}
+        initial={reduceMotion ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT }}
+        className="flex min-w-0 flex-1 items-center gap-1"
+      >
+        {children}
+      </motion.div>
     </div>
   );
 }

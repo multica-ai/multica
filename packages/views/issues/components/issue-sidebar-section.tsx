@@ -1,8 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronRight } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
+import { Collapsible, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { cn } from "@multica/ui/lib/utils";
 
 /**
@@ -36,7 +38,7 @@ export function IssueSidebarSectionHeader({
         className={cn("min-w-0 flex-1 shrink justify-start px-[7px] font-medium aria-expanded:bg-transparent active:not-aria-[haspopup]:translate-y-0", !open && "text-muted-foreground")}
       >
         <span className="truncate">{title}</span>
-        <ChevronRight aria-hidden="true" className={cn("!size-3 shrink-0 text-faint-foreground transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+        <ChevronRight aria-hidden="true" className={cn("!size-3 shrink-0 text-faint-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", open && "rotate-90")} />
         {count !== undefined && count > 0 && (
           <>
             {" "}
@@ -51,6 +53,27 @@ export function IssueSidebarSectionHeader({
       {status}
       {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
     </div>
+  );
+}
+
+/** Shared smooth height + opacity collapse for issue sidebar & detail sections. */
+export function IssueSidebarCollapsible({
+  open,
+  children,
+  className,
+}: {
+  open: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <Collapsible open={open}>
+      <CollapsibleContent className={cn(reduceMotion && "transition-none", className)}>
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

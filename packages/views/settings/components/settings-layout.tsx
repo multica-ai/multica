@@ -8,7 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import {
   AlertCircle,
   Building2,
@@ -462,12 +463,12 @@ export function SettingsSaveState({
   savedLabel: string;
   errorLabel: string;
 }) {
-  if (status === "idle") return null;
+  const reduceMotion = useReducedMotion();
 
   const content =
     status === "saving" ? (
       <>
-        <Loader2 className="size-3 animate-spin" />
+        <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
         {savingLabel}
       </>
     ) : status === "saved" ? (
@@ -475,22 +476,37 @@ export function SettingsSaveState({
         <Check className="size-3 text-success" />
         {savedLabel}
       </>
-    ) : (
+    ) : status === "error" ? (
       <>
         <AlertCircle className="size-3 text-destructive" />
         {errorLabel}
       </>
-    );
+    ) : null;
 
   return (
-    <span
-      role="status"
-      className={cn(
-        "inline-flex items-center gap-1.5 text-caption text-muted-foreground",
-        status === "error" && "text-destructive",
+    <AnimatePresence mode="wait" initial={false}>
+      {status !== "idle" && (
+        <motion.span
+          key={status}
+          role="status"
+          initial={reduceMotion ? false : { opacity: 0, y: 2 }}
+          animate={{
+            opacity: 1,
+            y: 0,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+          }}
+          exit={{
+            opacity: 0,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+          }}
+          className={cn(
+            "inline-flex items-center gap-1.5 text-caption text-muted-foreground",
+            status === "error" && "text-destructive",
+          )}
+        >
+          {content}
+        </motion.span>
       )}
-    >
-      {content}
-    </span>
+    </AnimatePresence>
   );
 }

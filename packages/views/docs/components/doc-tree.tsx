@@ -1,8 +1,11 @@
 "use client";
-import { useMemo, useState, type DragEvent } from "react";
+import { useMemo, useState, type DragEvent, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useReducedMotion } from "@multica/core/appearance";
 import {
+  ChevronRight,
   FileText,
   Folder,
   FolderInput,
@@ -11,6 +14,7 @@ import {
   Plus,
   Trash2,
 } from "@multica/ui/icons";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
@@ -385,46 +389,31 @@ export function DocTree() {
       {tree.data?.folders
         .filter((f) => f.parentId === parent && !ancestors.has(f.id))
         .map((folder) => (
-          <li key={folder.id}>
-            <details open>
-              <summary
-                {...dragProps({ kind: "folder", item: folder })}
-                {...dropProps(folder.id)}
-                className={cn(
-                  PANEL_ROW_CLASS,
-                  panelRowStateClass(false),
-                  "group/row cursor-pointer",
-                  dropTarget === folder.id && "bg-nav-item-hover ring-1 ring-ring",
-                )}
-              >
-                <Folder className="size-4 shrink-0" />
-                <TruncatedTooltip content={folder.title} side="right">
-                  <span className="min-w-0 flex-1 truncate">{folder.title}</span>
-                </TruncatedTooltip>
+          <DocFolderItem
+            key={folder.id}
+            folderId={folder.id}
+            title={folder.title}
+            isDropTarget={dropTarget === folder.id}
+            dragProps={dragProps({ kind: "folder", item: folder })}
+            dropProps={dropProps(folder.id)}
+            actions={
+              <>
                 <button
                   type="button"
                   aria-label={t(($) => $.tree.new_doc_in, { title: folder.title })}
                   title={t(($) => $.actions.new_doc)}
                   className={ROW_ACTION_CLASS}
                   disabled={createDoc.isPending}
-                  onClick={(event) => {
-                    // Inside <summary>: a click would also fold the folder.
-                    event.preventDefault();
-                    void newDoc(folder.id);
-                  }}
+                  onClick={() => void newDoc(folder.id)}
                 >
                   <Plus className="size-3.5" />
                 </button>
                 {menu({ kind: "folder", item: folder })}
-              </summary>
-              <div
-                className="ml-5 border-l border-surface-border pl-[5px]"
-                {...dropProps(folder.id)}
-              >
-                {branch(folder.id, new Set([...ancestors, folder.id]))}
-              </div>
-            </details>
-          </li>
+              </>
+            }
+          >
+            {branch(folder.id, new Set([...ancestors, folder.id]))}
+          </DocFolderItem>
         ))}
       {tree.data?.docs
         .filter((d) => d.folderId === parent)
@@ -580,5 +569,86 @@ export function DocTree() {
         }}
       />
     </>
+  );
+}
+
+function DocFolderItem({
+  folderId,
+  title,
+  isDropTarget,
+  dragProps,
+  dropProps,
+  actions,
+  children,
+}: {
+  folderId: string;
+  title: string;
+  isDropTarget: boolean;
+  dragProps: Record<string, unknown>;
+  dropProps: Record<string, unknown>;
+  actions: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <li>
+      <div
+        data-doc-folder={folderId}
+        {...dragProps}
+        {...dropProps}
+        className={cn(
+          PANEL_ROW_CLASS,
+          panelRowStateClass(false),
+          "group/row relative transition-[background-color,box-shadow] duration-150 motion-reduce:transition-none",
+          isDropTarget && "bg-nav-item-hover ring-1 ring-ring",
+        )}
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className={cn(
+            "size-3 shrink-0 text-faint-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            open && "rotate-90",
+          )}
+        />
+        <Folder className="size-4 shrink-0" />
+        <TruncatedTooltip content={title} side="right">
+          {/* Stretched over the row, under its actions, so the whole row
+              toggles the folder while the actions stay sibling controls. */}
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className="min-w-0 flex-1 cursor-pointer truncate text-left outline-none after:absolute after:inset-0 after:rounded-nav-item focus-visible:after:outline-2 focus-visible:after:outline-ring"
+          >
+            {title}
+          </button>
+        </TruncatedTooltip>
+        {actions}
+      </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="folder-branch"
+            initial={reduceMotion ? false : { opacity: 0, height: 0, overflow: "hidden" }}
+            animate={{
+              opacity: 1,
+              height: "auto",
+              transitionEnd: { overflow: "visible" },
+            }}
+            exit={{ opacity: 0, height: 0, overflow: "hidden" }}
+            transition={{ duration: reduceMotion ? 0 : 0.16, ease: UI_EASE_OUT }}
+          >
+            <div
+              className="ml-5 border-l border-surface-border pl-[5px]"
+              {...dropProps}
+            >
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </li>
   );
 }
