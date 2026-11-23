@@ -27,9 +27,16 @@
 //
 // `serve [--port N]` runs it in the foreground without touching any
 // environment, for setups other than `make up`.
+//
+// Every response has the shape Composio's v3.1 OpenAPI spec gives it, down to
+// the fields it leaves out: `node --test scripts/fake-composio.test.mjs` calls
+// each endpoint and checks the answer against the snapshot of that spec in
+// server/pkg/composio/composiotest/openapi-v3.1.json. Refresh the snapshot with
+// `node scripts/composio-spec.mjs update`, then rerun the test; a new endpoint
+// goes into OPERATIONS in scripts/composio-spec.mjs first.
 
 import { spawn, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -113,15 +120,90 @@ const TOOLKITS = [
 ].map(([slug, name, category, auth]) => ({
   slug,
   name,
-  meta: {
-    logo: `https://logos.composio.dev/api/${slug}`,
-    description: `${name} through the local Composio stand-in.`,
-    categories: [{ id: category.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: category }],
-  },
-  no_auth: auth === "none",
-  auth_schemes: auth === "managed" ? ["oauth2"] : auth === "none" ? [] : [auth],
-  composio_managed_auth_schemes: auth === "managed" ? ["oauth2"] : [],
+  category: { id: category.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: category },
+  managed: auth === "managed",
+  // Upper-case auth modes, as auth_config_details and auth configs name them.
+  modes: auth === "managed" ? ["OAUTH2"] : auth === "none" ? ["NO_AUTH"] : [auth.toUpperCase()],
 }));
+
+const VERSION = "20250905_00";
+const EPOCH = "2025-01-01T00:00:00.000Z";
+const logoOf = (slug) => `https://logos.composio.dev/api/${slug}`;
+
+function toolkitMeta(toolkit) {
+  return {
+    created_at: EPOCH,
+    updated_at: EPOCH,
+    description: `${toolkit.name} through the local Composio stand-in.`,
+    logo: logoOf(toolkit.slug),
+    triggers_count: 0,
+    tools_count: toolsOf(toolkit.slug).length,
+    version: VERSION,
+  };
+}
+
+// The list reports auth schemes as lower-case auth_schemes and its categories
+// as {id, name}.
+function listedToolkit(toolkit) {
+  const noAuth = toolkit.modes[0] === "NO_AUTH";
+  return {
+    slug: toolkit.slug,
+    name: toolkit.name,
+    type: "native",
+    app: toolkit.name,
+    toolkit_type: "api",
+    auth_schemes: noAuth ? [] : toolkit.modes.map((mode) => mode.toLowerCase()),
+    composio_managed_auth_schemes: toolkit.managed ? ["oauth2"] : [],
+    is_local_toolkit: false,
+    no_auth: noAuth,
+    deprecated: { toolkitId: `tk_${toolkit.slug}` },
+    meta: { ...toolkitMeta(toolkit), categories: [toolkit.category] },
+  };
+}
+
+function credentialField(mode) {
+  const [name, displayName] = mode === "BEARER_TOKEN" ? ["token", "Token"] : mode === "BASIC" ? ["password", "Password"] : ["generic_api_key", "API Key"];
+  return { name, displayName, type: "string", description: `Your ${displayName}.`, required: true, default: null, is_secret: true, user_visible: true };
+}
+
+// A single toolkit has no auth_schemes or no_auth: each scheme is an
+// auth_config_details entry. Its categories are {name, slug}.
+function toolkitDetails(toolkit) {
+  return {
+    slug: toolkit.slug,
+    name: toolkit.name,
+    type: "native",
+    toolkit_type: "api",
+    enabled: true,
+    composio_managed_auth_schemes: toolkit.managed ? ["oauth2"] : [],
+    composio_managed_auth: toolkit.managed
+      ? [{ managed_app_id: `ma_${toolkit.slug}`, is_default: true, mode: "OAUTH2", scopes: { available: [] } }]
+      : [],
+    is_local_toolkit: false,
+    auth_config_details: toolkit.modes.map((mode) => ({
+      mode,
+      name: `${toolkit.slug}_${mode.toLowerCase()}`,
+      required_scopes: [],
+      is_connection_revoke_supported: mode === "OAUTH2",
+      fields: {
+        auth_config_creation: { required: [], optional: [] },
+        connected_account_initiation: {
+          required: mode === "OAUTH2" || mode === "NO_AUTH" ? [] : [credentialField(mode)],
+          optional: [],
+        },
+      },
+    })),
+    docs_url: null,
+    meta: {
+      ...toolkitMeta(toolkit),
+      categories: [{ name: toolkit.category.name, slug: toolkit.category.id }],
+      available_versions: [VERSION],
+    },
+    deprecated: { toolkitId: `tk_${toolkit.slug}`, rawProxyInfoByAuthSchemes: [] },
+  };
+}
+
+const page = (items) => ({ items, next_cursor: null, total_pages: 1, current_page: 1, total_items: items.length });
 
 // Slugs follow Composio's VERB_OBJECT naming, which is what the gateway
 // classifies into read / write / send / delete.
@@ -180,13 +262,20 @@ const toolView = (slug, [toolSlug, name, description]) => ({
   slug: toolSlug,
   name,
   description,
-  version: "latest",
-  tags: [],
-  toolkit: { slug, name: TOOLKITS.find((t) => t.slug === slug)?.name ?? slug },
+  toolkit: { slug, name: TOOLKITS.find((t) => t.slug === slug)?.name ?? slug, logo: logoOf(slug) },
   input_parameters: {
     type: "object",
     properties: { query: { type: "string", description: "Free text the fake echoes back." } },
   },
+  output_parameters: { type: "object", properties: {} },
+  no_auth: false,
+  version: VERSION,
+  available_versions: [VERSION],
+  scopes: [],
+  scope_requirements: null,
+  tags: [],
+  is_deprecated: false,
+  deprecated: { displayName: name, version: VERSION, available_versions: [VERSION], is_deprecated: false, toolkit: { logo: logoOf(slug) } },
 });
 
 function findTool(toolSlug) {
@@ -215,13 +304,18 @@ function cannedResult(toolSlug, args) {
 
 // ------------------------------------------------------------------- server ---
 
+// Credentials a connected account's state carries, per auth scheme: the spec
+// requires them on an ACTIVE or INACTIVE account.
+const STATE_CREDENTIALS = {
+  OAUTH2: { access_token: "fake-access-token", token_type: "Bearer" },
+  BEARER_TOKEN: { token: "fake-token" },
+  BASIC: { username: "fake-user" },
+  API_KEY: {},
+};
+
 function serve({ port, stateFile, watchFile }) {
-  const authConfigs = new Map(
-    TOOLKITS.filter((t) => t.composio_managed_auth_schemes.length > 0).map((t) => [
-      t.slug,
-      { id: `ac_${t.slug}`, scheme: "OAUTH2", managed: true },
-    ]),
-  );
+  const newAuthConfig = (slug, scheme, managed) => ({ id: `ac_${slug}`, uuid: randomUUID(), scheme, managed, created_at: new Date().toISOString() });
+  const authConfigs = new Map(TOOLKITS.filter((t) => t.managed).map((t) => [t.slug, newAuthConfig(t.slug, "OAUTH2", true)]));
   const links = new Map();
   const accounts = new Map();
   let seq = 1;
@@ -233,6 +327,47 @@ function serve({ port, stateFile, watchFile }) {
   function send(res, code, body) {
     res.writeHead(code, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
+  }
+
+  function sendError(res, code, slug, message) {
+    send(res, code, { error: { message, code, slug, status: code } });
+  }
+
+  function authConfigView(slug, config) {
+    return {
+      id: config.id,
+      uuid: config.uuid,
+      type: config.managed ? "default" : "custom",
+      toolkit: { slug, logo: logoOf(slug) },
+      name: `${toolkitName(slug)} (fake)`,
+      auth_scheme: config.scheme,
+      is_composio_managed: config.managed,
+      managed_app_id: config.managed ? `ma_${slug}` : null,
+      status: "ENABLED",
+      created_at: config.created_at,
+      last_updated_at: config.created_at,
+      no_of_connections: [...accounts.values()].filter((account) => account.auth_config_id === config.id).length,
+      tool_access_config: {},
+    };
+  }
+
+  function accountView(account) {
+    const credentials = account.status === "ACTIVE" || account.status === "INACTIVE" ? STATE_CREDENTIALS[account.scheme] : {};
+    return {
+      id: account.id,
+      user_id: account.user_id,
+      toolkit: { slug: account.slug },
+      auth_config: { id: account.auth_config_id, auth_scheme: account.scheme, is_composio_managed: account.managed, is_disabled: false },
+      status: account.status,
+      status_reason: null,
+      is_disabled: false,
+      word_id: null,
+      alias: account.alias ?? null,
+      state: { authScheme: account.scheme, val: { status: account.status, ...credentials } },
+      data: {},
+      created_at: account.created_at,
+      updated_at: account.updated_at,
+    };
   }
 
   function readBody(req) {
@@ -289,30 +424,31 @@ ${body}
     if (path === "/connect") {
       const token = url.searchParams.get("token") ?? "";
       const link = links.get(token);
-      if (!link) return send(res, 404, { error: { message: "unknown connect link" } });
+      if (!link) return sendError(res, 404, "NOT_FOUND", "unknown connect link");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       return res.end(connectPage(token, link));
     }
     if (path === "/connect/finish") {
       const link = links.get(url.searchParams.get("token") ?? "");
-      if (!link) return send(res, 404, { error: { message: "unknown connect link" } });
+      if (!link) return sendError(res, 404, "NOT_FOUND", "unknown connect link");
       const callback = new URL(link.callback_url);
       if (url.searchParams.get("ok") === "1") {
-        const id = `ca_${link.slug}_${seq++}`;
         const now = new Date().toISOString();
         const config = authConfigs.get(link.slug);
-        accounts.set(id, {
-          id,
+        accounts.set(link.account_id, {
+          id: link.account_id,
           user_id: link.user_id,
+          alias: link.alias,
           auth_config_id: link.auth_config_id,
-          auth_config: { id: link.auth_config_id, auth_scheme: config?.scheme ?? "OAUTH2", is_composio_managed: Boolean(config?.managed) },
-          toolkit: { slug: link.slug },
+          scheme: config?.scheme ?? "OAUTH2",
+          managed: Boolean(config?.managed),
+          slug: link.slug,
           status: "ACTIVE",
           created_at: now,
           updated_at: now,
         });
         callback.searchParams.set("status", "success");
-        callback.searchParams.set("connected_account_id", id);
+        callback.searchParams.set("connected_account_id", link.account_id);
       } else {
         callback.searchParams.set("status", "failed");
       }
@@ -320,77 +456,55 @@ ${body}
       return res.end();
     }
 
-    if (!path.startsWith(`${API_PREFIX}/`)) return send(res, 404, { error: { message: "not found" } });
+    if (!path.startsWith(`${API_PREFIX}/`)) return sendError(res, 404, "NOT_FOUND", "not found");
     const api = path.slice(API_PREFIX.length);
 
     if (method === "GET" && api === "/toolkits") {
       const category = url.searchParams.get("category");
-      const items = category ? TOOLKITS.filter((t) => t.meta.categories.some((c) => c.id === category)) : TOOLKITS;
-      return send(res, 200, { items, total_items: items.length });
+      return send(res, 200, page(TOOLKITS.filter((t) => !category || t.category.id === category).map(listedToolkit)));
     }
     if (method === "GET" && api.startsWith("/toolkits/")) {
       const slug = decodeURIComponent(api.slice("/toolkits/".length)).toLowerCase();
       const toolkit = TOOLKITS.find((t) => t.slug === slug);
-      if (!toolkit) return send(res, 404, { error: { message: "toolkit not found" } });
-      // Unlike the list, the single-toolkit response has no auth_schemes or
-      // no_auth: each scheme is an auth_config_details entry.
-      const { auth_schemes: schemes, no_auth: noAuth, ...rest } = toolkit;
-      const modes = noAuth ? ["NO_AUTH"] : schemes.map((s) => s.toUpperCase());
-      return send(res, 200, {
-        ...rest,
-        auth_config_details: modes.map((mode) => ({
-          mode,
-          name: `${slug}_${mode.toLowerCase()}`,
-          fields: {
-            auth_config_creation: { required: [], optional: [] },
-            connected_account_initiation: {
-              required: mode === "OAUTH2" || mode === "NO_AUTH" ? [] : [{ name: "generic_api_key", displayName: "API Key", type: "string", required: true, default: null }],
-              optional: [],
-            },
-          },
-        })),
-      });
+      if (!toolkit) return sendError(res, 404, "TOOLKIT_NOT_FOUND", "toolkit not found");
+      return send(res, 200, toolkitDetails(toolkit));
     }
     if (method === "GET" && api === "/auth_configs") {
       const wanted = (url.searchParams.get("toolkit_slug") ?? "").split(",").filter(Boolean);
       const items = [...authConfigs.entries()]
         .filter(([slug]) => wanted.length === 0 || wanted.includes(slug))
-        .map(([slug, config]) => ({
-          id: config.id,
-          name: `${toolkitName(slug)} (fake)`,
-          toolkit: { slug },
-          auth_scheme: config.scheme,
-          is_composio_managed: config.managed,
-          status: "ENABLED",
-          last_updated_at: "2026-01-01T00:00:00Z",
-        }));
-      return send(res, 200, { items, total_items: items.length });
+        .map(([slug, config]) => authConfigView(slug, config));
+      return send(res, 200, page(items));
     }
     if (method === "POST" && api === "/auth_configs") {
       const body = await readBody(req);
       const slug = body?.toolkit?.slug;
       const toolkit = TOOLKITS.find((t) => t.slug === slug);
-      if (!toolkit) return send(res, 400, { error: { message: "toolkit.slug must name a known toolkit" } });
+      if (!toolkit) return sendError(res, 400, "INVALID_INPUT", "toolkit.slug must name a known toolkit");
       const custom = body.auth_config?.type === "use_custom_auth";
       const scheme = custom ? String(body.auth_config.authScheme ?? "").toUpperCase() : "OAUTH2";
-      const offered = custom ? toolkit.auth_schemes : toolkit.composio_managed_auth_schemes;
-      if (!offered.some((s) => s.toUpperCase() === scheme)) {
-        return send(res, 400, { error: { message: `${slug} does not offer ${custom ? scheme : "managed"} auth` } });
+      if (custom ? !toolkit.modes.includes(scheme) || scheme === "NO_AUTH" : !toolkit.managed) {
+        return sendError(res, 400, "INVALID_INPUT", `${slug} does not offer ${custom ? scheme : "managed"} auth`);
       }
-      const config = { id: `ac_${slug}`, scheme, managed: !custom };
+      const config = newAuthConfig(slug, scheme, !custom);
       authConfigs.set(slug, config);
-      return send(res, 201, { auth_config: { id: config.id, auth_scheme: scheme, is_composio_managed: config.managed }, toolkit: { slug } });
+      return send(res, 201, {
+        toolkit: { slug },
+        auth_config: { id: config.id, auth_scheme: scheme, is_composio_managed: config.managed, managed_app_id: config.managed ? `ma_${slug}` : null },
+      });
     }
     if (method === "POST" && api === "/connected_accounts/link") {
       const body = await readBody(req);
       const slug = slugOfAuthConfig(body.auth_config_id);
-      if (!slug) return send(res, 404, { error: { message: "auth config not found" } });
+      if (!slug) return sendError(res, 404, "AUTH_CONFIG_NOT_FOUND", "auth config not found");
       const token = `lk_${seq++}`;
-      links.set(token, { ...body, slug });
+      const accountID = `ca_${slug}_${seq++}`;
+      links.set(token, { ...body, slug, account_id: accountID });
       return send(res, 201, {
         link_token: token,
         redirect_url: `${baseURL}/connect?token=${token}`,
         expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+        connected_account_id: accountID,
       });
     }
     if (method === "GET" && api === "/connected_accounts") {
@@ -404,21 +518,25 @@ ${body}
       const items = [...accounts.values()].filter(
         (account) =>
           Object.entries(filters).every(([key, values]) => values.length === 0 || values.includes(account[key])) &&
-          (slugs.length === 0 || slugs.includes(account.toolkit.slug)),
+          (slugs.length === 0 || slugs.includes(account.slug)),
       );
-      return send(res, 200, { items, total_items: items.length });
+      return send(res, 200, page(items.map(accountView)));
     }
     let match = /^\/connected_accounts\/([^/]+)\/revoke$/.exec(api);
     if (method === "POST" && match) {
       const account = accounts.get(decodeURIComponent(match[1]));
-      if (!account) return send(res, 404, { error: { message: "connected account not found" } });
+      if (!account) return sendError(res, 404, "CONNECTED_ACCOUNT_NOT_FOUND", "connected account not found");
       account.status = "INACTIVE";
-      return send(res, 200, { success: true });
+      account.updated_at = new Date().toISOString();
+      return send(res, 200, {
+        revoked_tokens: account.scheme === "OAUTH2" ? ["access_token", "refresh_token"] : ["credential"],
+        connected_account: { id: account.id, status: account.status },
+      });
     }
     match = /^\/connected_accounts\/([^/]+)$/.exec(api);
     if (method === "DELETE" && match) {
       if (!accounts.delete(decodeURIComponent(match[1]))) {
-        return send(res, 404, { error: { message: "connected account not found" } });
+        return sendError(res, 404, "CONNECTED_ACCOUNT_NOT_FOUND", "connected account not found");
       }
       return send(res, 200, { success: true });
     }
@@ -428,12 +546,12 @@ ${body}
       const items = toolsOf(slug)
         .map((tool) => toolView(slug, tool))
         .filter((tool) => !search || `${tool.slug} ${tool.description}`.toLowerCase().includes(search));
-      return send(res, 200, { items, total_items: items.length });
+      return send(res, 200, page(items));
     }
     if (method === "POST" && api.startsWith("/tools/execute/")) {
       const toolSlug = decodeURIComponent(api.slice("/tools/execute/".length)).toUpperCase();
       const body = await readBody(req);
-      if (!findTool(toolSlug)) return send(res, 404, { error: { message: "tool not found" } });
+      if (!findTool(toolSlug)) return sendError(res, 404, "TOOL_NOT_FOUND", "tool not found");
       // Accounts issued before a restart are unknown here but still live in
       // Multica's database; only an account revoked since is refused.
       const account = accounts.get(body.connected_account_id);
@@ -441,22 +559,28 @@ ${body}
         return send(res, 200, { successful: false, error: "connected account is not active", data: {} });
       }
       log(`execute ${toolSlug} as ${body.connected_account_id ?? body.user_id ?? "?"}`);
-      return send(res, 200, { successful: true, data: cannedResult(toolSlug, body.arguments ?? {}), log_id: `log_${seq++}` });
+      return send(res, 200, { successful: true, error: null, data: cannedResult(toolSlug, body.arguments ?? {}), log_id: `log_${seq++}` });
     }
     if (method === "GET" && api.startsWith("/tools/")) {
       const tool = findTool(decodeURIComponent(api.slice("/tools/".length)));
-      return tool ? send(res, 200, tool) : send(res, 404, { error: { message: "tool not found" } });
+      return tool ? send(res, 200, tool) : sendError(res, 404, "TOOL_NOT_FOUND", "tool not found");
     }
     // An empty MCP URL tells Multica there is no session to attach.
     if (method === "POST" && api === "/tool_router/session") {
-      await readBody(req);
-      return send(res, 200, { session_id: `trs_${seq++}`, mcp: { type: "http", url: "" } });
+      const body = await readBody(req);
+      return send(res, 201, {
+        session_id: `trs_${seq++}`,
+        mcp: { type: "http", url: "" },
+        tool_router_tools: [],
+        config: { user_id: String(body.user_id ?? ""), instant: false, preload: { tools: [] }, search: {}, execute: {} },
+        config_version: 1,
+      });
     }
-    return send(res, 404, { error: { message: `the fake does not implement ${method} ${api}` } });
+    return sendError(res, 404, "NOT_FOUND", `the fake does not implement ${method} ${api}`);
   }
 
   const server = http.createServer((req, res) => {
-    route(req, res).catch((error) => send(res, 500, { error: { message: String(error) } }));
+    route(req, res).catch((error) => sendError(res, 500, "INTERNAL_SERVER_ERROR", String(error)));
     if (req.url !== "/health") log(`${req.method} ${req.url}`);
   });
 

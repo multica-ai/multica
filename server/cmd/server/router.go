@@ -490,6 +490,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Error("live doc editing disabled", "error", err)
 	}
 	h.Collab = collabClient
+	if collabClient != nil {
+		registerCollabListeners(bus, collabClient)
+	}
 	h.ThemeStore = themeStoreFromEnv()
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics

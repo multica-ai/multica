@@ -221,6 +221,25 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(HeaderTimelineTruncated, kinds)
 	}
 
+	// Reading this issue does not mean reading every issue its activity names:
+	// a duplicate mark points at an issue that may sit in a private project.
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(issue.WorkspaceID))
+	if !ok {
+		return
+	}
+	actions := make([]string, len(activities))
+	details := make([][]byte, len(activities))
+	for i, a := range activities {
+		actions[i], details[i] = a.Action, a.Details
+	}
+	if err := h.redactHiddenActivityRefs(r, hidden, actions, details); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list activities")
+		return
+	}
+	for i := range activities {
+		activities[i].Details = details[i]
+	}
+
 	entries := h.mergeTimeline(r, comments, activities, !wantWrapped)
 	// The current-member directory deliberately excludes departed members, but
 	// timeline attribution must remain readable after they leave. Hydrate only

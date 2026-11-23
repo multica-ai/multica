@@ -21,13 +21,23 @@ type catalogFakeSDK struct {
 }
 
 // GetToolkit answers like GET /toolkits/{slug}: schemes come only as
-// auth_config_details, without auth_schemes or no_auth.
+// auth_config_details, without auth_schemes or no_auth, and categories as
+// {name, slug} rather than the list's {id, name}.
 func (f *catalogFakeSDK) GetToolkit(_ context.Context, slug string) (*sdk.Toolkit, error) {
 	for _, listed := range f.toolkits {
 		if listed.Slug != slug {
 			continue
 		}
-		tk := sdk.Toolkit{Slug: listed.Slug, Name: listed.Name, Meta: listed.Meta, ComposioManagedAuthSchemes: listed.ComposioManagedAuthSchemes}
+		var meta map[string]any
+		if listedCategories, ok := listed.Meta["categories"].([]any); ok {
+			categories := make([]any, 0, len(listedCategories))
+			for _, c := range listedCategories {
+				category, _ := c.(map[string]any)
+				categories = append(categories, map[string]any{"name": category["name"], "slug": category["id"]})
+			}
+			meta = map[string]any{"categories": categories}
+		}
+		tk := sdk.Toolkit{Slug: listed.Slug, Name: listed.Name, Meta: meta, ComposioManagedAuthSchemes: listed.ComposioManagedAuthSchemes}
 		for _, scheme := range listed.AuthSchemes {
 			detail := sdk.ToolkitAuthConfigDetail{Mode: strings.ToUpper(scheme)}
 			if strings.EqualFold(f.projectFields[slug], scheme) {
@@ -35,7 +45,7 @@ func (f *catalogFakeSDK) GetToolkit(_ context.Context, slug string) (*sdk.Toolki
 			}
 			tk.AuthConfigDetails = append(tk.AuthConfigDetails, detail)
 		}
-		return &tk, nil
+		return matchSpec(&f.fakeSDK, "GET /toolkits/{slug}", &tk), nil
 	}
 	return nil, &sdk.APIError{HTTPStatus: 404}
 }

@@ -606,3 +606,110 @@ describe("issue descriptions", () => {
     expect(result.status).toBe(404);
   });
 });
+
+describe("access after joining", () => {
+  let access: ReturnType<typeof createCollabServer>;
+  let accessUrl = "";
+
+  beforeAll(async () => {
+    access = createCollabServer(
+      { port: 0, secret: SECRET, apiUrl, cdnDomain: "", storeDebounceMs: 100, storeMaxDebounceMs: 400 },
+      codec,
+      silent,
+      { refreshLeadMs: 1500, revalidateGraceMs: 300, sweepMs: 50 },
+    );
+    await access.server.listen(0);
+    accessUrl = `ws://127.0.0.1:${access.server.address.port}`;
+  });
+
+  afterAll(async () => {
+    await access.server.destroy();
+  });
+
+  /** Joins with a ticket expiring in `ttl` seconds; later tickets come from
+   *  `next`, which may refuse by throwing. */
+  async function join(actor: Actor, ttl: number, next: () => string) {
+    let calls = 0;
+    const reasons: string[] = [];
+    const provider = new HocuspocusProvider({
+      url: accessUrl,
+      name: NAME,
+      document: new Y.Doc(),
+      token: () => {
+        calls += 1;
+        if (calls > 1) return next();
+        return signTicket(
+          { document: NAME, workspaceId: "ws", actor, readOnly: false, expiresAt: Math.floor(Date.now() / 1000) + ttl },
+          SECRET,
+        );
+      },
+      onClose: ({ event }) => reasons.push(event.reason),
+    });
+    providers.push(provider);
+    await waitFor(() => provider.isSynced);
+    return { provider, reasons, calls: () => calls };
+  }
+
+  const connections = () => access.server.hocuspocus.documents.get(NAME)?.getConnectionsCount() ?? 0;
+
+  it("renews a connection's ticket before it expires", async () => {
+    resetDoc("Hello");
+    const a = await join(ada, 2, () => ticket(ada));
+    await waitFor(() => a.calls() >= 2);
+    // Past the first ticket's expiry, the connection is still in.
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    expect(a.reasons).toEqual([]);
+    expect(connections()).toBe(1);
+  });
+
+  it("closes a connection that shows no fresh ticket by the time its ticket expires", async () => {
+    resetDoc("Hello");
+    const a = await join(ada, 2, () => {
+      throw new Error("access revoked");
+    });
+    await waitFor(() => a.reasons.includes("reauthenticate"), 4000);
+    expect(connections()).toBe(0);
+  });
+
+  it("refuses a fresh ticket issued to someone else", async () => {
+    resetDoc("Hello");
+    const a = await join(ada, 2, () => ticket(bob));
+    await waitFor(() => a.reasons.includes("reauthenticate"));
+    expect(connections()).toBe(0);
+  });
+
+  it("revalidates only the connections a revocation names", async () => {
+    resetDoc("Hello");
+    let allowed = true;
+    const a = await join(ada, 60, () => {
+      if (!allowed) throw new Error("access revoked");
+      return ticket(ada);
+    });
+    const b = await join(bob, 60, () => ticket(bob));
+    const revalidate = (body: unknown) =>
+      fetch(`http://127.0.0.1:${access.server.address.port}/internal/revalidate`, {
+        method: "POST",
+        headers: { "X-Collab-Secret": SECRET, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    // Still allowed in: a fresh ticket keeps the connection.
+    const kept = await revalidate({ workspace_id: "ws", actor: { type: "member", id: ada.id } });
+    expect(await kept.json()).toEqual({ asked: 1 });
+    await waitFor(() => a.calls() >= 2);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(a.reasons).toEqual([]);
+
+    // Revoked: no ticket comes, and the connection is closed after the grace
+    // period. Others in the doc are untouched.
+    allowed = false;
+    await revalidate({ workspace_id: "ws", actor: { type: "member", id: ada.id } });
+    await waitFor(() => a.reasons.includes("reauthenticate"));
+    expect(b.reasons).toEqual([]);
+    expect(b.calls()).toBe(1);
+    expect(connections()).toBe(1);
+
+    expect((await revalidate({ workspace_id: "other" })).status).toBe(200);
+    expect((await revalidate({})).status).toBe(400);
+  });
+});
