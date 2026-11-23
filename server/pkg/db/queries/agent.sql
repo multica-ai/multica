@@ -2205,10 +2205,11 @@ WHERE recovery.author_type = 'system'
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
-  -- Keep paused signals out of the bounded batch, using the same outcome
-  -- window as IssueAgentHasConsecutiveRunFailures.
-  AND (
-      SELECT count(*) FILTER (WHERE status = 'failed') < 3
+  -- A pause blocks another run, but exhausted signals still need their
+  -- terminal explanation and settlement. The offset is the recovery attempt
+  -- budget (delegatedFailureRecoveryMaxTaskAttempts) minus one.
+  AND CASE WHEN (
+      SELECT count(*) FILTER (WHERE status = 'failed') = 3
       FROM (
           SELECT status
           FROM agent_task_queue outcome
@@ -2219,7 +2220,13 @@ WHERE recovery.author_type = 'system'
           ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
           LIMIT 3
       ) recent_outcomes
-  )
+  ) THEN EXISTS (
+      SELECT 1
+      FROM agent_task_queue attempt
+      WHERE attempt.trigger_evidence_kind = 'delegated_failure'
+        AND attempt.trigger_evidence_ref_id = failed.id
+      OFFSET 2
+  ) ELSE TRUE END
   AND NOT EXISTS (
       SELECT 1
       FROM agent_task_queue retry
