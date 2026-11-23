@@ -302,6 +302,33 @@ export function createEnDict(): LandingDict {
     },
     entries: [
       {
+        version: "0.12.1",
+        date: "2026-11-24",
+        title: "Triage the Inbox with J, K, and U, follow agent runs in place, and smoother animations",
+        changes: [],
+        features: [
+          "Trigger an agent from the Inbox and the Issue stays open, with the agent's live status in the bar and sidebar.",
+          "On the Inbox page, press J and K to move between notifications and U to mark one unread.",
+          "Right-click a notification in the Work panel to mark it unread, archive, or delete it.",
+          "New in the CLI: multica quick-action to manage quick actions and run one on an Issue.",
+        ],
+        improvements: [
+          "Dialogs, collapsible sections, tabs, drag and drop, desktop tab closing, and ⌘K drill-down animate more smoothly.",
+          "With reduced motion on, the Inbox, chat sessions, and run comments switch instantly, and image uploads stop pulsing.",
+          "Automatic archiving keeps you on the Issue you're reading, so the After archiving setting is gone.",
+          "Agents follow project workflows more reliably and no longer move finished Issues into closed statuses like Won't Fix.",
+          "Archive all asks for confirmation first, and snoozed Issues stay snoozed.",
+          "On a new device, the Work panel's Inbox starts with compact one-line rows; existing settings are kept.",
+        ],
+        fixes: [
+          "Follow-up instructions sent to a running Antigravity agent now reach it instead of starting a new run.",
+          "Desktop Issue tabs return to where you were reading, even in the middle of a comment.",
+          "Switching Inbox tabs keeps the open Issue, and notifications from other tabs no longer linger in the Inbox.",
+          "Duplicate marks no longer reveal private Issues in live updates or after the original Issue is deleted.",
+          "Fixed jumps when dropping dragged items, clipped focus rings, lingering tooltips, and closing panels that still took clicks.",
+        ],
+      },
+      {
         version: "0.12.0",
         date: "2026-11-23",
         title: "A unified Inbox, project overviews with progress forecasts, and faster Codex and Claude Code runs",

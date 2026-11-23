@@ -2,7 +2,7 @@ import { AlarmClock, BellOff, CircleDot, CodeXml, Command, Folder, FolderKanban,
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
-import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, INBOX_TABS_HERO, PROJECT_FOLDERS_HERO, PROJECT_OVERVIEW_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
+import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, INBOX_TABS_HERO, INBOX_TRIAGE_HERO, PROJECT_FOLDERS_HERO, PROJECT_OVERVIEW_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -51,6 +51,52 @@ export type CompleteWhatsNewRelease = Omit<WhatsNewRelease, "highlights"> & {
 };
 
 export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
+  {
+    version: "0.12.1",
+    date: "2026-11-24",
+    highlights: [
+      {
+        id: "inbox-triage",
+        icon: Inbox,
+        hero: INBOX_TRIAGE_HERO,
+        action: { kind: "route", to: (p) => p.inbox() },
+        copy: {
+          en: {
+            title: "Triage the Inbox from the keyboard",
+            body: "On the Inbox page, press J and K to move to the next or previous notification without archiving, and U to mark the open one unread. Right-click a notification in the Work panel's Inbox to mark it unread, archive, or delete it.",
+          },
+          "zh-Hans": {
+            title: "用键盘处理收件箱",
+            body: "在收件箱页面按 J、K 切换到下一条或上一条通知，不会归档；按 U 把当前通知标为未读。在「工作」面板的收件箱里右键一条通知，可以标为未读、归档或删除。",
+          },
+          "zh-Hant": {
+            title: "用鍵盤處理收件箱",
+            body: "在收件箱頁面按 J、K 切換到下一則或上一則通知，不會歸檔；按 U 把目前的通知標為未讀。在「工作」面板的收件箱裡右鍵一則通知，可以標為未讀、歸檔或刪除。",
+          },
+          ja: {
+            title: "キーボードでインボックスを整理",
+            body: "インボックスページでは J と K でアーカイブせずに次や前の通知へ移動し、U で開いている通知を未読にできます。「作業」パネルのインボックスで通知を右クリックすると、未読にする、アーカイブ、削除を選べます。",
+          },
+          ko: {
+            title: "키보드로 인박스 정리하기",
+            body: "인박스 페이지에서 J와 K로 보관하지 않고 다음·이전 알림으로 이동하고, U로 열린 알림을 읽지 않음으로 표시합니다. '작업' 패널의 인박스에서 알림을 우클릭하면 읽지 않음으로 표시, 보관, 삭제할 수 있습니다.",
+          },
+          fr: {
+            title: "Triez la boîte de réception au clavier",
+            body: "Sur la page Boîte de réception, appuyez sur J et K pour passer à la notification suivante ou précédente sans archiver, et sur U pour marquer celle qui est ouverte comme non lue. Faites un clic droit sur une notification dans la boîte de réception du panneau Travail pour la marquer comme non lue, l'archiver ou la supprimer.",
+          },
+          es: {
+            title: "Gestiona la bandeja de entrada con el teclado",
+            body: "En la página de la bandeja de entrada, pulsa J y K para pasar a la notificación siguiente o anterior sin archivar, y U para marcar como no leída la que tienes abierta. Haz clic derecho en una notificación de la bandeja de entrada del panel Trabajo para marcarla como no leída, archivarla o eliminarla.",
+          },
+          ru: {
+            title: "Разбирайте «Входящие» с клавиатуры",
+            body: "На странице «Входящие» нажимайте J и K, чтобы перейти к следующему или предыдущему уведомлению без архивации, и U, чтобы отметить открытое уведомление непрочитанным. Щёлкните правой кнопкой по уведомлению во «Входящих» на панели «Работа», чтобы отметить его непрочитанным, архивировать или удалить.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.12.0",
     date: "2026-11-23",

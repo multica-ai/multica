@@ -30,6 +30,7 @@ describe("What's new hero art", () => {
     ["project-folders", ["Projects", "Atlas", "Orbit", "API"]],
     ["inbox-tabs", ["Inbox", "3", "Snoozed", "Archived"]],
     ["project-overview", ["Overview", "Issues", "Activity", "Progress", "8 of 12 issues done"]],
+    ["inbox-triage", ["Inbox", "Mark as unread", "Archive", "Delete", "J", "K", "U"]],
   ])("draws %s from the product's own strings", (id, texts) => {
     const { container } = renderHero(id, "en");
     for (const text of texts) expect(container).toHaveTextContent(text);
