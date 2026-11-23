@@ -69,9 +69,38 @@ func (q *Queries) GetIssueShareToken(ctx context.Context, arg GetIssueShareToken
 }
 
 const getSharedIssue = `-- name: GetSharedIssue :one
-SELECT (w.issue_prefix || '-' || i.number::text)::text AS identifier,
-       i.title, i.description, i.status,
-       COALESCE(st.name, '')::text AS status_label
+SELECT jsonb_build_object(
+    'identifier', w.issue_prefix || '-' || i.number::text,
+    'title', i.title,
+    'description', i.description,
+    'status', i.status,
+    'status_label', COALESCE(st.name, ''),
+    'comments', COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+            'id', c.id, 'author_type', c.author_type,
+            'content', c.content, 'created_at', c.created_at
+        ) ORDER BY c.created_at, c.id)
+        FROM comment c
+        WHERE c.issue_id = i.id AND c.workspace_id = i.workspace_id
+          AND c.deleted_at IS NULL AND c.quick_action_id IS NULL
+          AND c.author_type IN ('member', 'agent') AND c.type = 'comment'
+          AND (c.source_task_id IS NULL OR EXISTS (
+              SELECT 1 FROM agent_task_queue source
+              WHERE source.id = c.source_task_id AND source.issue_id = i.id
+                AND source.chat_session_id IS NULL
+          ))
+    ), '[]'::jsonb),
+    'runs', COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+            'id', r.id, 'status', r.status, 'completed_at', r.completed_at
+        ) ORDER BY r.completed_at DESC, r.id)
+        FROM agent_task_queue r
+        WHERE r.issue_id = i.id AND r.chat_session_id IS NULL
+          AND r.status IN ('completed', 'failed', 'cancelled')
+          AND r.completed_at IS NOT NULL
+          AND NOT (r.escalation_for_task_id IS NOT NULL AND r.started_at IS NULL AND r.status = 'cancelled')
+    ), '[]'::jsonb)
+)::jsonb AS shared_issue
 FROM issue_share s
 JOIN issue i ON i.id = s.issue_id AND i.workspace_id = s.workspace_id
 JOIN workspace w ON w.id = i.workspace_id
@@ -85,25 +114,11 @@ type GetSharedIssueParams struct {
 	Token    string      `json:"token"`
 }
 
-type GetSharedIssueRow struct {
-	Identifier  string      `json:"identifier"`
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Status      string      `json:"status"`
-	StatusLabel string      `json:"status_label"`
-}
-
-func (q *Queries) GetSharedIssue(ctx context.Context, arg GetSharedIssueParams) (GetSharedIssueRow, error) {
+func (q *Queries) GetSharedIssue(ctx context.Context, arg GetSharedIssueParams) ([]byte, error) {
 	row := q.db.QueryRow(ctx, getSharedIssue, arg.ViewerID, arg.Token)
-	var i GetSharedIssueRow
-	err := row.Scan(
-		&i.Identifier,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.StatusLabel,
-	)
-	return i, err
+	var shared_issue []byte
+	err := row.Scan(&shared_issue)
+	return shared_issue, err
 }
 
 const revokeIssueShare = `-- name: RevokeIssueShare :execrows

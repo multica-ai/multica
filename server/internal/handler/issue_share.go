@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -126,7 +127,7 @@ func (h *Handler) GetSharedIssue(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "failed to load shared issue")
 	default:
-		writeJSON(w, http.StatusOK, issue)
+		writeJSON(w, http.StatusOK, json.RawMessage(issue))
 	}
 }
 
