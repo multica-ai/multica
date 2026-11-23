@@ -376,15 +376,14 @@ export function ChatPage() {
   ) : null;
   const hasActiveWakeup =
     !!c.activeSessionId && wakeups.some((w) => w.status === "active");
-  const emptyEnterClass = activeTransition
-    ? reduceMotion
-      ? "animate-chat-enter-fade"
-      : activeTransition === "next"
+  const emptyEnterClass =
+    activeTransition && !reduceMotion
+      ? activeTransition === "next"
         ? "animate-chat-enter-next"
         : activeTransition === "prev"
           ? "animate-chat-enter-prev"
           : "animate-chat-enter-fade"
-    : undefined;
+      : undefined;
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession ? (
@@ -577,7 +576,7 @@ export function ChatPage() {
           <div
             className={cn(
               "flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground",
-              activeTransition && "animate-chat-enter-fade",
+              activeTransition && !reduceMotion && "animate-chat-enter-fade",
             )}
           >
             <MessageSquare className="h-10 w-10 text-faint-foreground" />

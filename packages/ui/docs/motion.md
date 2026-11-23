@@ -99,6 +99,7 @@ The Appearance setting "Reduce motion" and the system's `prefers-reduced-motion`
 - The Appearance setting zeroes CSS animation and transition durations for the whole document. The system setting reaches CSS only through media queries, so every CSS animation or transition also carries `motion-reduce:animate-none` or `motion-reduce:transition-none`.
 - JavaScript motion (motion/react, WAAPI) reads `useReducedMotion()` from `@multica/core/appearance`, or `prefersReducedMotion()` outside render, which cover both settings. With either set, pass `duration: 0` or skip the animation. motion's own `useReducedMotion` and a bare `matchMedia` check see only the system setting. `MotionProvider` at the app root makes motion/react skip transform and layout animation under either setting, but opacity and color still animate, so the `duration: 0` above still applies.
 - Test the reduced branch: with reduced motion, the end state is there in the same frame.
+- Two checks enforce this. The `NO_SYSTEM_ONLY_REDUCED_MOTION` lint rule rejects a `prefers-reduced-motion` query string in `packages/views`, `apps/web` and `apps/desktop`. `packages/ui/styles/reduced-motion.test.ts` fails when a class in `base.css` starts an animation and no `@media (prefers-reduced-motion: reduce)` rule stops it; the few exceptions are listed in that test, each with its reason.
 
 ## Do not animate
 
