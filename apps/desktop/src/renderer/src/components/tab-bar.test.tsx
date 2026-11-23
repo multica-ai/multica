@@ -242,7 +242,7 @@ describe("TabBar hover action buttons", () => {
       ...getAllByLabelText("Pin tab"),
       ...getAllByLabelText("Close tab"),
     ]) {
-      expect(button).toHaveClass("hidden", "group-hover:flex", "group-active:flex");
+      expect(button).toHaveClass("opacity-0", "group-hover:opacity-100", "group-active:opacity-100");
     }
   });
 

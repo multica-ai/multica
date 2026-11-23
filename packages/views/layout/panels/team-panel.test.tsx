@@ -178,7 +178,7 @@ describe("TeamPanel agent previews", () => {
     expect(working.getAllByRole("link")).toHaveLength(5);
   });
 
-  it("previews and collapses each status independently, retaining collapse state on remount", () => {
+  it("previews and collapses each status independently, retaining collapse state on remount", async () => {
     seedAgents(7);
     seedAgents(8, "queued");
     const runtimes = [runtime(), runtime({ id: "rt-offline", status: "offline" })];
@@ -193,7 +193,7 @@ describe("TeamPanel agent previews", () => {
     expect(working.getAllByRole("link")).toHaveLength(5);
 
     fireEvent.click(working.getByRole("button", { name: "Working now" }));
-    expect(working.queryAllByRole("link")).toHaveLength(0);
+    await waitFor(() => expect(working.queryAllByRole("link")).toHaveLength(0));
     expect(working.getByText("7")).toBeInTheDocument();
     expect(attention.getAllByRole("link")).toHaveLength(8);
     fireEvent.click(attention.getByRole("button", { name: "Needs attention" }));
