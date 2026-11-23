@@ -1017,6 +1017,46 @@ oneline_up "$oneline_checkout" GO_ENV_LOG="$oneline_env_log" > "$out" 2>&1 || st
   grep -Fq "DROP DATABASE IF EXISTS \"$DB_NAME\"" "$psql_log" || fail "destroy did not drop the slot database"
 )
 
+# An explicit TTL renewal must reuse this checkout even after its previous
+# expiry. The automatic collection of another checkout still takes place.
+renewal_checkout="$tmp_dir/renewal-checkout"
+status=0
+oneline_up "$renewal_checkout" > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "renewal fixture unexpectedly started a backend"
+require_contains "$out" "Migrations failed"
+(
+  export MULTICA_DEV_HOME="$tmp_dir/dev-renewal-checkout"
+  export PATH="$oneline_bin:$PATH"
+  manifests=("$MULTICA_DEV_HOME"/envs/*/manifest.env)
+  manifest="${manifests[0]}"
+  # shellcheck disable=SC1090
+  . "$manifest"
+  expired=2000-01-01T00:00:00Z
+  printf 'EXPIRES_AT=%s\n' "$expired" >> "$manifest"
+  neighbor="expired-neighbor-$((OFFSET + 1))"
+  neighbor_checkout="$tmp_dir/expired-neighbor"
+  mkdir -p "$neighbor_checkout"
+  write_manifest "$neighbor" "$neighbor_checkout" "$((OFFSET + 1))"
+  printf 'TTL_HOURS=24\nEXPIRES_AT=%s\n' "$expired" >> "$MULTICA_DEV_HOME/envs/$neighbor/manifest.env"
+
+  cd "$renewal_checkout"
+  psql_log="$tmp_dir/psql-renewal.log"
+  status=0
+  PSQL_LOG="$psql_log" bash scripts/dev-env.sh up --components api --ttl 48 > "$out" 2>&1 || status=$?
+  [ "$status" -ne 0 ] || fail "renewal fixture unexpectedly started a backend"
+  require_contains "$out" "Migrations failed"
+  require_contains "$out" "Reusing environment $NAME"
+  if grep -Fq "DROP DATABASE IF EXISTS \"$DB_NAME\"" "$psql_log"; then
+    fail "renewing an expired environment dropped its database"
+  fi
+  [ ! -f "$MULTICA_DEV_HOME/envs/$neighbor/manifest.env" ] \
+    || fail "renewal prevented collecting another expired environment"
+  # shellcheck disable=SC1090
+  . "$manifest"
+  [ "$TTL_HOURS" = 48 ] && [ "$EXPIRES_AT" != "$expired" ] \
+    || fail "renewal did not update the recorded expiration"
+)
+
 # A setting the rewrite does not own can still win when the file is loaded
 # back; `up` must refuse rather than register the shared port.
 status=0
