@@ -3,6 +3,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { QRCode } from "react-qr-code";
 import { inboxSnoozeOptions, type InboxSnoozePreset } from "@multica/core/inbox/snooze";
+import { createShortcutChord } from "@multica/core/shortcuts";
 import {
   AlarmClock,
   AppWindow,
@@ -27,10 +28,12 @@ import {
   Server,
   Square,
   Trash2,
+  Users,
   WeChat,
 } from "@multica/ui/icons";
 import { Kbd } from "@multica/ui/components/ui/kbd";
 import { cn } from "@multica/ui/lib/utils";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useLocale, useT } from "../i18n";
 import { formatSnoozeTime } from "../inbox/components/inbox-snooze-time";
 
@@ -746,6 +749,60 @@ function InboxTriageArt() {
   );
 }
 
+/* ── Create with agent: frequent agent and squad chips, ⌥1–⌥3 ──────── */
+
+const QUICK_SWITCH_ACTORS = [
+  { name: SAMPLE.agent, squad: false },
+  { name: "Scout", squad: false },
+  { name: "Atlas", squad: true },
+];
+
+function ActorChipArt({ name, squad, selected }: { name: string; squad: boolean; selected?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-6 items-center gap-1.5 rounded-md pr-2 pl-1",
+        selected ? "bg-surface-selected font-medium text-surface-selected-foreground" : "text-muted-foreground",
+      )}
+    >
+      <span className="grid size-4 place-items-center rounded-full bg-brand/10 text-brand">
+        {squad ? <Users className="size-2.5" /> : <Bot className="size-2.5" />}
+      </span>
+      {name}
+    </span>
+  );
+}
+
+function QuickSwitchArt() {
+  const { t } = useT("modals");
+  return (
+    <>
+      <Surface className="top-6 left-6 w-[24rem]">
+        <div className="px-4 pt-3 text-caption text-muted-foreground">{t(($) => $.create_issue.agent_breadcrumb)}</div>
+        <div className="px-3 pt-2 pb-3">
+          <TextLine words={[44, 30, 58, 36, 48]} />
+          <TextLine words={[52, 34]} />
+        </div>
+        <div className="flex items-center gap-2 px-4 pb-12 text-caption whitespace-nowrap">
+          <span className="text-muted-foreground">{t(($) => $.create_issue.agent.created_by)}</span>
+          <span className="flex items-center gap-0.5">
+            {QUICK_SWITCH_ACTORS.map((actor, i) => (
+              <ActorChipArt key={actor.name} name={actor.name} squad={actor.squad} selected={i === 1} />
+            ))}
+          </span>
+          <span className="grid size-6 place-items-center text-muted-foreground">
+            <ChevronDown className="size-3.5" />
+          </span>
+        </div>
+      </Surface>
+      <div className="dark absolute top-[5.1rem] left-[10.5rem] z-10 inline-flex items-center gap-1.5 rounded-tooltip bg-(--tooltip) py-1 pr-1.5 pl-2.5 text-caption whitespace-nowrap text-tooltip-foreground shadow-(--tooltip-shadow)">
+        {QUICK_SWITCH_ACTORS[1]!.name}
+        <ShortcutKeycaps shortcut={createShortcutChord("2", { alt: true })} decorative />
+      </div>
+    </>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
@@ -758,3 +815,4 @@ export const PROJECT_FOLDERS_HERO: WhatsNewHero = { ground: "brand", Art: Projec
 export const INBOX_TABS_HERO: WhatsNewHero = { ground: "lime", Art: InboxTabsArt };
 export const PROJECT_OVERVIEW_HERO: WhatsNewHero = { ground: "ice", Art: ProjectOverviewArt };
 export const INBOX_TRIAGE_HERO: WhatsNewHero = { ground: "orange", Art: InboxTriageArt };
+export const QUICK_SWITCH_HERO: WhatsNewHero = { ground: "lime", Art: QuickSwitchArt };
