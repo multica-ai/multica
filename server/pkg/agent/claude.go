@@ -233,7 +233,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		sawResult := turn.sawResult
 		resultIsError := turn.resultIsError
 		terminalReasonError := turn.terminalReasonError
-		sawAsyncLaunch := turn.sawAsyncLaunch
+		backgroundLaunched := turn.background.launched
+		backgroundUnread := turn.background.outstanding()
 		sessionID := turn.sessionID
 		lastAssistantText := turn.lastAssistantText
 		finalResultText := turn.finalResultText
@@ -271,7 +272,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			sawResult &&
 			!resultIsError &&
 			terminalReasonError == "" &&
-			!sawAsyncLaunch &&
+			backgroundUnread == 0 &&
 			!cancelledOrTimedOut &&
 			writeErr == nil &&
 			scanErr == nil &&
@@ -289,7 +290,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			// stdin EOF instead of blocking for the error result grace window.
 			// A one-shot process has already exited; this releases its temp files.
 			proc.Close()
-			scanErr, exitErr = proc.getErrors()
+			// Closing a process with background work still running kills its
+			// group; that exit is ours, and the guard below reports the cause.
+			if backgroundUnread == 0 {
+				scanErr, exitErr = proc.getErrors()
+			}
 		}
 
 		duration := time.Since(startTime)
@@ -304,9 +309,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 		}
 
+		// Background work is fine when the turn reads its result. Otherwise
+		// the result is orphaned: the run is over, and the process that owns
+		// the work was closed above rather than parked.
 		completionGuardError := ""
-		if sawAsyncLaunch {
-			completionGuardError = "claude launched an async background task; Multica-managed runs require foreground execution"
+		if backgroundUnread > 0 {
+			completionGuardError = fmt.Sprintf("claude ended its turn with %d background task(s) whose results it never read; a Multica-managed run ends with its turn, so those results were discarded. Wait for background results before ending the turn", backgroundUnread)
 		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
 			"claude",
@@ -357,6 +365,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			"warm_hit", warmHit,
 			"parked", parked,
 			"status", finalStatus,
+			"background_launched", backgroundLaunched,
+			"background_unread", backgroundUnread,
 			"duration", duration.Round(time.Millisecond).String(),
 		)
 
@@ -430,7 +440,7 @@ type claudeTurn struct {
 	sessionID                string
 	lastUsageResult          *claudeSDKMessage
 	lastRawModelUsage        map[string]TokenUsage
-	sawAsyncLaunch           bool
+	background               claudeBackgroundTasks
 	usage                    map[string]TokenUsage
 	seenUsage                map[string]struct{}
 	eventCount               int
@@ -451,6 +461,9 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 		t.mu.Unlock()
 	case "assistant":
 		t.assistantEventCount++
+		if msg.ParentToolUseID == "" {
+			t.background.assistant()
+		}
 		turn := t.backend.handleAssistantWithStream(msg, t.msgCh, t.usage, t.seenUsage, t.coalescer)
 		t.toolUseCount += turn.toolUses
 		if !turn.understood {
@@ -460,8 +473,16 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 		t.mu.Unlock()
 	case "user":
 		t.coalescer.flushAll()
-		if t.backend.handleUser(msg, t.msgCh) {
-			t.sawAsyncLaunch = true
+		legacyAsync := t.backend.handleUser(msg, t.msgCh)
+		// A subagent's tool results and launches are its own; the turn only
+		// answers for what its main thread started and read.
+		if msg.ParentToolUseID == "" {
+			t.background.collect()
+			if id, ok := claudeBackgroundLaunchID(msg.ToolUseResult); ok {
+				t.background.start(id)
+			} else if legacyAsync {
+				t.background.start("")
+			}
 		}
 		t.mu.Unlock()
 	case "rate_limit_event":
@@ -474,11 +495,20 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 		if msg.SessionID != "" {
 			t.sessionID = msg.SessionID
 		}
+		switch msg.Subtype {
+		case "task_started":
+			if msg.IsBackgrounded && !msg.OwnedBySubagent {
+				t.background.start(msg.TaskID)
+			}
+		case "task_notification":
+			t.background.finish(msg.TaskID)
+		}
 		sid := t.sessionID
 		t.mu.Unlock()
 		trySend(t.msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sid})
 	case "result":
 		t.coalescer.flushAll()
+		t.background.result()
 		t.sawResult = true
 		t.finalResultText = msg.ResultText
 		t.resultIsError = msg.IsError
@@ -891,12 +921,6 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	if inputMap == nil {
 		inputMap = map[string]any{}
 	}
-	if forceClaudeToolInputForeground(inputMap) {
-		b.cfg.Logger.Info("claude: forced foreground tool execution",
-			"request_id", msg.RequestID,
-			"tool", req.ToolName,
-		)
-	}
 
 	response := map[string]any{
 		"type": "control_response",
@@ -921,14 +945,135 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	}
 }
 
-func forceClaudeToolInputForeground(input map[string]any) bool {
-	if runInBackground, ok := input["run_in_background"].(bool); ok && runInBackground {
-		input["run_in_background"] = false
-		return true
-	}
-	return false
+// claudeBackgroundTasks tracks the work a turn started in the background (an
+// Agent or Bash call with run_in_background) until the turn has read its result.
+//
+// Claude Code ends its turn with a result while that work keeps running, then
+// starts a turn of its own once the work completes. A Multica-managed run ends
+// at the first result, so a result the turn never read is lost: the run is
+// over, and a pooled process would spend tokens on it while parked (MUL-9919).
+// Work whose result the turn read is ordinary tool use.
+//
+// Reading the completion notice is not observable directly. Claude sends its
+// next request as soon as a tool result comes back and attaches queued notices
+// to it, so a notice followed by another main-thread tool result was read; one
+// that arrives after the last tool result was not, even when it precedes the
+// turn's final message (that request was already in flight). A one-shot process
+// also reads them in the turn Claude starts after its result to deliver them.
+//
+// The daemon runs Claude with bypassPermissions, so no can_use_tool request
+// arrives to veto a background launch; this tracker observes it instead.
+type claudeBackgroundTasks struct {
+	// state holds each named task's progress. A notice can be read before the
+	// tool result that names the launch, so a known id is never restarted.
+	state       map[string]claudeBackgroundState
+	unnamed     bool
+	launched    int
+	afterResult bool
 }
 
+type claudeBackgroundState int
+
+const (
+	claudeBackgroundRunning claudeBackgroundState = iota
+	claudeBackgroundNotified
+	claudeBackgroundCollected
+)
+
+// start records a background launch. An empty id comes from an older CLI that
+// reports the launch without naming it; it can never be matched to a notice,
+// so it stays outstanding.
+func (b *claudeBackgroundTasks) start(id string) {
+	if id == "" {
+		b.unnamed = true
+		b.launched++
+		return
+	}
+	if _, seen := b.state[id]; seen {
+		return
+	}
+	if b.state == nil {
+		b.state = make(map[string]claudeBackgroundState)
+	}
+	b.state[id] = claudeBackgroundRunning
+	b.launched++
+}
+
+// finish records a task_notification. Notices also arrive for a subagent's
+// foreground tools, which were never started here.
+func (b *claudeBackgroundTasks) finish(id string) {
+	if st, seen := b.state[id]; seen && st == claudeBackgroundRunning {
+		b.state[id] = claudeBackgroundNotified
+	}
+}
+
+// result records the end of a model turn. A one-shot process keeps streaming
+// after it: Claude starts a turn of its own to deliver notices that arrive
+// later, and that turn's first message has read them.
+func (b *claudeBackgroundTasks) result() {
+	b.afterResult = true
+}
+
+// assistant records a main-thread assistant message.
+func (b *claudeBackgroundTasks) assistant() {
+	if b.afterResult {
+		b.afterResult = false
+		b.collect()
+	}
+}
+
+// collect marks every notice received so far as read; call it on each
+// main-thread tool result.
+func (b *claudeBackgroundTasks) collect() {
+	for id, st := range b.state {
+		if st == claudeBackgroundNotified {
+			b.state[id] = claudeBackgroundCollected
+		}
+	}
+}
+
+// outstanding counts the launches whose result the turn has not read.
+func (b *claudeBackgroundTasks) outstanding() int {
+	n := 0
+	for _, st := range b.state {
+		if st != claudeBackgroundCollected {
+			n++
+		}
+	}
+	if b.unnamed {
+		n++
+	}
+	return n
+}
+
+// claudeBackgroundLaunchID reads a user event's tool_use_result, the structured
+// result Claude Code sends next to message.content. A background Agent reports
+// status "async_launched" with its agentId; a background Bash reports its
+// backgroundTaskId. Both ids match the task_id of the later task_notification.
+func claudeBackgroundLaunchID(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var result struct {
+		Status           string `json:"status"`
+		AgentID          string `json:"agentId"`
+		BackgroundTaskID string `json:"backgroundTaskId"`
+	}
+	if json.Unmarshal(raw, &result) != nil {
+		return "", false
+	}
+	switch {
+	case result.Status == "async_launched":
+		return result.AgentID, true
+	case result.BackgroundTaskID != "":
+		return result.BackgroundTaskID, true
+	}
+	return "", false
+}
+
+// claudeToolResultHasAsyncLaunch detects the launch shape older Claude Code
+// releases put in the tool result content itself. Current releases report it
+// in tool_use_result instead (claudeBackgroundLaunchID).
 func claudeToolResultHasAsyncLaunch(raw json.RawMessage) bool {
 	if len(raw) == 0 {
 		return false
@@ -986,6 +1131,14 @@ type claudeSDKMessage struct {
 	NumTurns       int                               `json:"num_turns,omitempty"`
 	Usage          *claudeUsage                      `json:"usage,omitempty"`
 	ModelUsage     map[string]claudeResultModelUsage `json:"modelUsage,omitempty"`
+
+	// user fields: the tool's structured result, sent next to message.content
+	ToolUseResult json.RawMessage `json:"tool_use_result,omitempty"`
+
+	// system task lifecycle fields (task_started, task_notification)
+	TaskID          string `json:"task_id,omitempty"`
+	IsBackgrounded  bool   `json:"is_backgrounded,omitempty"`
+	OwnedBySubagent bool   `json:"owned_by_subagent,omitempty"`
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`

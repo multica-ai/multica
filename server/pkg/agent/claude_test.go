@@ -238,50 +238,97 @@ func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 	}
 }
 
-func TestClaudeHandleControlRequestForcesBackgroundToolsForeground(t *testing.T) {
+// The tool_use_result shapes below were captured from Claude Code 2.1.280 in
+// stream-json mode: a background Agent, a background Bash, and two ordinary
+// results that must not count as launches.
+func TestClaudeBackgroundLaunchIDReadsToolUseResult(t *testing.T) {
 	t.Parallel()
 
-	for _, toolName := range []string{"Bash", "Agent"} {
-		t.Run(toolName, func(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		raw    string
+		wantID string
+		wantOK bool
+	}{
+		{name: "agent", raw: `{"isAsync":true,"status":"async_launched","agentId":"afad322625c40b613","description":"Run sleep"}`, wantID: "afad322625c40b613", wantOK: true},
+		{name: "bash", raw: `{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false,"backgroundTaskId":"baa0paa5b"}`, wantID: "baa0paa5b", wantOK: true},
+		{name: "foreground bash", raw: `{"stdout":"done","stderr":"","interrupted":false}`},
+		{name: "read", raw: `{"type":"text","file":{"filePath":"/tmp/x","content":"status: async_launched"}}`},
+		{name: "absent", raw: ``},
+		{name: "not an object", raw: `"async_launched"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
-			b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
-
-			var written bytes.Buffer
-
-			msg := claudeSDKMessage{
-				Type:      "control_request",
-				RequestID: "req-42",
-				Request: mustMarshal(t, claudeControlRequestPayload{
-					Subtype:  "tool_use",
-					ToolName: toolName,
-					Input: mustMarshal(t, map[string]any{
-						"command":           "sleep 60",
-						"run_in_background": true,
-					}),
-				}),
-			}
-
-			b.handleControlRequest(msg, &written)
-
-			var resp map[string]any
-			if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
-				t.Fatalf("unmarshal response: %v", err)
-			}
-
-			respInner := resp["response"].(map[string]any)
-			innerResp := respInner["response"].(map[string]any)
-			if innerResp["behavior"] != "allow" {
-				t.Fatalf("expected behavior allow, got %v", innerResp["behavior"])
-			}
-			updatedInput := innerResp["updatedInput"].(map[string]any)
-			if updatedInput["run_in_background"] != false {
-				t.Fatalf("expected run_in_background=false, got %v", updatedInput["run_in_background"])
-			}
-			if updatedInput["command"] != "sleep 60" {
-				t.Fatalf("expected original command to be preserved, got %v", updatedInput["command"])
+			id, ok := claudeBackgroundLaunchID(json.RawMessage(tc.raw))
+			if id != tc.wantID || ok != tc.wantOK {
+				t.Fatalf("claudeBackgroundLaunchID(%s) = (%q, %v), want (%q, %v)", tc.raw, id, ok, tc.wantID, tc.wantOK)
 			}
 		})
+	}
+}
+
+func TestClaudeBackgroundTasksOutstanding(t *testing.T) {
+	t.Parallel()
+
+	var b claudeBackgroundTasks
+	if b.outstanding() != 0 {
+		t.Fatalf("empty tracker outstanding = %d", b.outstanding())
+	}
+
+	// task_started and the tool result both name the same launch.
+	b.start("agent-1")
+	b.start("agent-1")
+	b.start("bash-1")
+	if b.outstanding() != 2 || b.launched != 2 {
+		t.Fatalf("after two launches: outstanding = %d, launched = %d", b.outstanding(), b.launched)
+	}
+
+	// A notice is not read until a later main-thread tool result; a subagent's
+	// foreground tool also reports one, for a task never started here.
+	b.finish("subagent-foreground")
+	b.finish("agent-1")
+	if b.outstanding() != 2 {
+		t.Fatalf("after agent-1 notice: outstanding = %d, want 2 (not read yet)", b.outstanding())
+	}
+	b.collect()
+	if b.outstanding() != 1 {
+		t.Fatalf("after reading agent-1: outstanding = %d, want 1", b.outstanding())
+	}
+
+	// A notice read before the tool result that names the launch must not
+	// reopen the task.
+	b.finish("bash-1")
+	b.start("bash-1")
+	b.collect()
+	if b.outstanding() != 0 || b.launched != 2 {
+		t.Fatalf("after reading bash-1: outstanding = %d, launched = %d", b.outstanding(), b.launched)
+	}
+
+	// An unnamed launch can never be matched to a notice.
+	b.start("")
+	b.finish("")
+	b.collect()
+	if b.outstanding() != 1 || b.launched != 3 {
+		t.Fatalf("after unnamed launch: outstanding = %d, launched = %d", b.outstanding(), b.launched)
+	}
+}
+
+// Claude starts a turn of its own after a result to deliver notices that
+// arrive later; its first main-thread message has read them.
+func TestClaudeBackgroundTasksReadAfterResult(t *testing.T) {
+	t.Parallel()
+
+	var b claudeBackgroundTasks
+	b.start("agent-1")
+	b.assistant()
+	b.result()
+	b.finish("agent-1")
+	if b.outstanding() != 1 {
+		t.Fatalf("notice after result: outstanding = %d, want 1", b.outstanding())
+	}
+	b.assistant()
+	if b.outstanding() != 0 {
+		t.Fatalf("after the delivery turn: outstanding = %d, want 0", b.outstanding())
 	}
 }
 
