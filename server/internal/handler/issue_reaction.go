@@ -78,7 +78,7 @@ func (h *Handler) AddIssueReaction(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	reaction, err := wakeupWrite(h, r, func(q *db.Queries) (db.AddIssueReactionRow, error) {
-		if _, err := q.LockIssueForReactionWrite(r.Context(), db.LockIssueForReactionWriteParams{
+		if _, err := q.LockIssueForWrite(r.Context(), db.LockIssueForWriteParams{
 			ID:          issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 		}); err != nil {
@@ -147,7 +147,7 @@ func (h *Handler) RemoveIssueReaction(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	removed, err := wakeupWrite(h, r, func(q *db.Queries) (db.RemoveIssueReactionRow, error) {
-		if _, err := q.LockIssueForReactionWrite(r.Context(), db.LockIssueForReactionWriteParams{
+		if _, err := q.LockIssueForWrite(r.Context(), db.LockIssueForWriteParams{
 			ID:          issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 		}); err != nil {
