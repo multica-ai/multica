@@ -442,6 +442,7 @@ func issueViewTableQuery(view db.IssueView, today string, activeProperties map[s
 		Negate:            negate,
 		WorkingOnly:       issueViewBool(query["agentRunningFilter"]),
 	}
+	filters.IdleOnly = !filters.WorkingOnly && issueViewBool(query["agentIdleFilter"])
 	// An explicitly empty assignee list means "match none" to the table query.
 	if len(assignees) > 0 {
 		filters.Assignees = assignees
