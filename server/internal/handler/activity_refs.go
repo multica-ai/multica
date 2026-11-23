@@ -27,23 +27,30 @@ var activityIssueRefs = map[string]activityIssueRef{
 	"duplicate_removed":  {id: "duplicate_id", identifier: "duplicate_identifier"},
 }
 
-// referencedIssueID returns the other issue an activity names, if any.
-func referencedIssueID(action string, details []byte) (pgtype.UUID, bool) {
+// ActivityIssueRef returns the other issue an activity names. named reports
+// whether the details carry a reference at all; id is invalid when they do
+// but its issue cannot be told from them, which leaves its visibility
+// unknown.
+func ActivityIssueRef(action string, details []byte) (id pgtype.UUID, named bool) {
 	ref, ok := activityIssueRefs[action]
 	if !ok || len(details) == 0 {
 		return pgtype.UUID{}, false
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(details, &fields); err != nil {
+		return pgtype.UUID{}, true
+	}
+	rawID, hasID := fields[ref.id]
+	if _, hasIdentifier := fields[ref.identifier]; !hasID && !hasIdentifier {
 		return pgtype.UUID{}, false
 	}
-	var id string
-	if err := json.Unmarshal(fields[ref.id], &id); err != nil || id == "" {
-		return pgtype.UUID{}, false
+	var s string
+	if err := json.Unmarshal(rawID, &s); err != nil {
+		return pgtype.UUID{}, true
 	}
-	parsed, err := util.ParseUUID(id)
+	parsed, err := util.ParseUUID(s)
 	if err != nil {
-		return pgtype.UUID{}, false
+		return pgtype.UUID{}, true
 	}
 	return parsed, true
 }
@@ -77,34 +84,33 @@ func StripActivityIssueRef(action string, details []byte) []byte {
 }
 
 // redactHiddenActivityRefs strips, in place, the reference to another issue
-// from every activity whose referenced issue sits in a project hidden from
-// the reader. actions[i] and details[i] describe the same activity. A
-// referenced issue that no longer exists keeps its reference: activities
-// carry a deleted issue's identifier on purpose so the row still reads.
+// from every activity unless the reader can be shown to see that issue. A
+// referenced issue that no longer exists is stripped for every reader: who
+// could see it went with its project, and seeing every project today says
+// nothing about a project deleted since. actions[i] and details[i] describe
+// the same activity.
 func (h *Handler) redactHiddenActivityRefs(r *http.Request, hidden projectaccess.Hidden, actions []string, details [][]byte) error {
-	if hidden.Empty() {
-		return nil
-	}
 	refs := make([]pgtype.UUID, len(actions))
+	named := make([]bool, len(actions))
 	var ids []pgtype.UUID
 	for i, action := range actions {
-		if id, ok := referencedIssueID(action, details[i]); ok {
-			refs[i] = id
-			ids = append(ids, id)
+		refs[i], named[i] = ActivityIssueRef(action, details[i])
+		if refs[i].Valid {
+			ids = append(ids, refs[i])
 		}
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	hiddenIssues, err := h.hiddenIssueIDs(r, hidden, ids)
-	if err != nil {
-		return err
-	}
-	for i, id := range refs {
-		if !id.Valid {
-			continue
+	visible := map[pgtype.UUID]bool{}
+	if len(ids) > 0 {
+		rows, err := h.Queries.ListIssueProjectIDs(r.Context(), ids)
+		if err != nil {
+			return err
 		}
-		if _, isHidden := hiddenIssues[id]; isHidden {
+		for _, row := range rows {
+			visible[row.ID] = hidden.CanSeeProject(row.ProjectID)
+		}
+	}
+	for i := range actions {
+		if named[i] && !visible[refs[i]] {
 			details[i] = StripActivityIssueRef(actions[i], details[i])
 		}
 	}

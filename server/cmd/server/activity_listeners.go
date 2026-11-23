@@ -388,10 +388,7 @@ func publishActivityEvent(bus *events.Bus, original events.Event, activity db.Ac
 				"actor_type": actorType,
 				"actor_id":   util.UUIDToString(activity.ActorID),
 				"action":     action,
-				// Realtime fans out by this issue's audience, which need not
-				// see an issue the details name; clients refetch the timeline,
-				// where the reference is redacted per reader.
-				"details":    json.RawMessage(handler.StripActivityIssueRef(action, activity.Details)),
+				"details":    json.RawMessage(activity.Details),
 				"created_at": util.TimestampToString(activity.CreatedAt),
 			},
 		},
