@@ -43,6 +43,7 @@ import {
   type RunTimeline,
 } from "./issue-run-timeline";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
+import { canRerunInFreshSession, FreshSessionRunButton } from "./fresh-session-run-button";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useFormatSpend, useStatusLabel, useTriggerText } from "./task-run-labels";
 import { WakeupRunLabel } from "./wakeup-source-chip";
@@ -748,6 +749,7 @@ function PastRow({ task, issueId, showIssue = false }: { task: AgentTask; issueI
           <RowActions>
             <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
             {canRetryRun(task) && <RetryRunButton task={task} issueId={issueId} />}
+            {canRerunInFreshSession(task) && <FreshSessionRunButton task={task} />}
           </RowActions>
         </div>
         {reason && (

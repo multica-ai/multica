@@ -892,6 +892,7 @@
     "retry_task_aria": "Retry run",
     "retry_failed": "Failed to retry run",
     "retry_blocked": "Not retried — you don't have permission to use this agent",
+    "fresh_session_tooltip": "Rerun in a new session",
     "transcript_tooltip": "View transcript",
     "jump_to_run": "Go to run",
     "cancel_failed": "Failed to cancel run",
@@ -1011,6 +1012,14 @@
     "running_note": " Running work may take a few seconds to fully halt.",
     "keep": "Keep running",
     "confirm": "Stop run"
+  },
+  "fresh_session_dialog": {
+    "title": "Rerun in a new session?",
+    "body": "The agent starts over without this run's conversation, in a new working directory. Earlier runs and comments stay on the issue. If the agent is still running on this issue, the new run waits for it to finish.",
+    "cancel": "Cancel",
+    "confirm": "Rerun",
+    "started": "Rerun queued in a new session",
+    "failed": "Failed to rerun in a new session"
   },
   "batch": {
     "delete_restricted": "You can delete issues you created or that your agents created. Workspace owners and admins can delete any issue.",

@@ -855,6 +855,7 @@
     "retry_task_aria": "重試執行",
     "retry_failed": "重試執行失敗",
     "retry_blocked": "未重試——你沒有該 AI 代理的使用權限",
+    "fresh_session_tooltip": "在新工作階段中重新執行",
     "transcript_tooltip": "檢視記錄",
     "jump_to_run": "跳到執行",
     "cancel_failed": "取消執行失敗",
@@ -964,6 +965,14 @@
     "running_note": "進行中的執行可能需要幾秒才能完全停止。",
     "keep": "保留執行",
     "confirm": "停止執行"
+  },
+  "fresh_session_dialog": {
+    "title": "在新工作階段中重新執行？",
+    "body": "智能體將不帶本次執行的對話，在新的工作目錄中從頭開始。先前的執行和留言仍保留在任務中。如果智能體仍在這個任務上執行，新的執行會等它結束後開始。",
+    "cancel": "取消",
+    "confirm": "重新執行",
+    "started": "已在新工作階段中排入重新執行",
+    "failed": "在新工作階段中重新執行失敗"
   },
   "batch": {
     "delete_restricted": "你可以刪除本人或本人擁有的智慧體建立的任務。工作區 owner 和 admin 可以刪除任意任務。",

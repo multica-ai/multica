@@ -816,6 +816,38 @@ describe("execution log past runs", () => {
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
   });
 
+  it("reruns a finished run in a new session after confirmation", async () => {
+    renderSection([past(1)]);
+    const client = new ApiClient("https://api.example.test");
+    setApiInstance(client);
+    const rerun = vi.spyOn(client, "rerunTask").mockResolvedValue({} as never);
+
+    fireEvent.click(screen.getByRole("button", { name: "Rerun in a new session" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText(/in a new working directory/)).toBeInTheDocument();
+    expect(rerun).not.toHaveBeenCalled();
+
+    await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Rerun" })); });
+    expect(rerun).toHaveBeenCalledWith("past-1", { fresh: true });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps the dialog open when a new-session rerun fails", async () => {
+    renderSection([past(1, { status: "failed" })]);
+    const client = new ApiClient("https://api.example.test");
+    setApiInstance(client);
+    vi.spyOn(client, "rerunTask").mockRejectedValue(new Error("boom"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rerun in a new session" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Rerun" })); });
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+  });
+
+  it("offers no new-session rerun while a run is still active", () => {
+    renderSection([makeTask({ id: "active", status: "running" })]);
+    expect(screen.queryByRole("button", { name: "Rerun in a new session" })).not.toBeInTheDocument();
+  });
+
   it("skips the bars when no run recorded usage — there are no costs to compare", () => {
     renderSection([past(1, { usage: [] }), past(2, { usage: [] })]);
     expect(screen.queryByRole("button", { name: /Cost per run/ })).not.toBeInTheDocument();
