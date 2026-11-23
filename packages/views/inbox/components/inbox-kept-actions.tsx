@@ -11,6 +11,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxItem } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
+import type { IssueAgentState } from "../../issues/surface/use-issue-agent-state";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { formatSnoozeTime } from "./inbox-snooze-time";
 import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "./inbox-display";
@@ -23,6 +24,7 @@ import { useInboxUndoShortcut } from "./use-inbox-shortcut";
  */
 export function useKeptInboxRowText(wsId: string) {
   const { t } = useT("inbox");
+  const { t: tIssues } = useT("issues");
   const locale = useLocale();
   const { categoryOf } = useIssueStatuses(wsId);
   const statusLabelOf = useStatusLabel(wsId);
@@ -34,6 +36,22 @@ export function useKeptInboxRowText(wsId: string) {
     if (!status) return null;
     const category = categoryOf(status);
     return category === "done" || category === "closed" ? statusLabelOf(status) : null;
+  };
+  const agentLabel = (agents: IssueAgentState) => {
+    if (!agents || agents.agentIds.length === 0) return null;
+    if (agents.agentIds.length === 1) {
+      return tIssues(
+        ($) => (agents.running ? $.agent_live.is_working : $.agent_live.is_queued),
+        { name: getActorName("agent", agents.agentIds[0] ?? "") },
+      );
+    }
+    return tIssues(
+      ($) =>
+        agents.running
+          ? $.agent_activity.hover_header
+          : $.agent_activity.hover_header_queued,
+      { count: agents.agentIds.length },
+    );
   };
   const backAt = (item: InboxItem) =>
     item.snoozed_until
@@ -52,12 +70,17 @@ export function useKeptInboxRowText(wsId: string) {
     }
   };
   return {
-    line: (kept: KeptInboxRow) => {
+    isFinished: (item: InboxItem) => finished(item) !== null,
+    agentLabel,
+    line: (kept: KeptInboxRow, agents?: IssueAgentState) => {
       if (kept.reason === "filtered") return t(($) => $.kept.filtered);
-      const why = kept.reason === "snoozed" ? backAt(kept.item) : (finished(kept.item) ?? t(($) => $.kept.archived));
+      const why =
+        kept.reason === "snoozed"
+          ? backAt(kept.item)
+          : (finished(kept.item) ?? agentLabel(agents ?? null) ?? t(($) => $.kept.archived));
       return `${why} · ${t(($) => $.kept.leaves)}`;
     },
-    /** `cause` is the bar action that archived it (`useMoveOnAfterAutoArchive`). */
+    /** `cause` is the bar action that archived it (`useAutoArchiveCause`). */
     notice: (kept: KeptInboxRow, cause?: InboxBarAction | null) => {
       if (kept.reason === "snoozed") return backAt(kept.item);
       const why = (cause && kept.reason === "archived" ? did(cause) : null) ?? finished(kept.item);
@@ -105,9 +128,9 @@ export function InboxKeptActions({
     icon ?? (inboxCleared ? <CheckCircle2 className="text-success" /> : <Archive />);
   const statusLabel = inboxCleared ? (
     <span className="flex min-w-0 items-center gap-1.5 truncate">
-      <span className="font-medium text-foreground">{t(($) => $.zero.cleared_title)}</span>
+      <span className="shrink-0 font-medium text-foreground">{t(($) => $.zero.cleared_title)}</span>
       <span aria-hidden className="text-faint-foreground">·</span>
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 truncate">{label}</span>
       {snoozedCount > 0 && onSnoozedClick && (
         <>
           <span aria-hidden className="text-faint-foreground @max-[34rem]/inbox-bar:hidden">·</span>

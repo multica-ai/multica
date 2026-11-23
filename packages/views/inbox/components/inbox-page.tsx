@@ -114,7 +114,7 @@ import { InboxEmptyState } from "./inbox-empty-state";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
 import { inboxListLoad, useFilteredInboxRows } from "./use-filtered-inbox-rows";
 import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
-import { useMoveOnAfterAutoArchive } from "./use-move-on-after-auto-archive";
+import { useAutoArchiveCause } from "./use-auto-archive-cause";
 import {
   clearedLabelForItem,
   collectBatchArchiveIds,
@@ -703,24 +703,10 @@ export function InboxPage() {
     void restoreInbox(id);
   };
 
-  // An issue's bar (`IssueInboxBar`) says, and moves on, when its row left
-  // the Inbox on its own; the page does for a notification without an issue.
+  // An issue's bar (`IssueInboxBar`) says when its row left the Inbox on its
+  // own; the page does for a notification without an issue.
   const settledNotice = settledRow && !settledRow.item.issue_id ? settledRow : null;
-  const settledCause = useMoveOnAfterAutoArchive({
-    settled: settledNotice,
-    next: settledNotice ? nextInboxRow(listedItems, settledNotice.key) : null,
-    onNext: () => {
-      if (!settledNotice) return;
-      advanceSelectionPast(settledNotice.item.id, listedItems, {
-        kind: "archived",
-        itemId: settledNotice.item.id,
-        key: settledNotice.key,
-        label: clearedLabelForItem(settledNotice.item),
-        href: inboxRowHref(wsPaths, settledNotice.item),
-        clearedAt: Date.now(),
-      });
-    },
-  });
+  const { cause: settledCause } = useAutoArchiveCause(settledNotice);
 
   const unsubscribable = useInboxUnsubscribable(wsId);
   const unsubscribeArchive = useUnsubscribeArchive();

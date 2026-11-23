@@ -151,6 +151,8 @@
     "reassigned": "{{name}} に再割り当て",
     "unassigned": "割り当て解除",
     "ran_quick_action": "{{name}} を実行",
+    "agent_triggered": "エージェントを起動しました",
+    "returns_on_activity": "新しい動きがあるとインボックスに戻ります",
     "next": "次へ",
     "next_tooltip": "次を開く：{{title}}"
   },

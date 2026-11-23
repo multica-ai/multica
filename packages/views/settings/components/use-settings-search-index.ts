@@ -194,13 +194,6 @@ export function useSettingsSearchIndex(
         title: t(($) => $.notifications.leaving.auto_label),
         description: t(($) => $.notifications.leaving.auto_description),
       },
-      // Lands on the row above: this one is hidden while auto-archive is off.
-      {
-        tab: "notifications",
-        anchor: "auto_archive_completed",
-        title: t(($) => $.notifications.leaving.after_label),
-        description: t(($) => $.notifications.leaving.after_description),
-      },
       {
         tab: "notifications",
         anchor: "archived",
