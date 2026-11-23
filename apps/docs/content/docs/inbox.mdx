@@ -10,11 +10,11 @@ The inbox collects the work activity that concerns you and flags where something
 
 ## Where to find it
 
-The inbox is a section of the **Work** panel, below Pinned and above Views and Projects; with nothing pinned, it is the first section. The unread count shows next to the section title and as a badge on **Work** in the app rail; right-click **Work** for **Mark all as read**.
+The inbox is a section of the **Work** panel, below Pinned and above Views and Projects; with nothing pinned, it is the first section. Its header holds three tabs: **Inbox**, **Snoozed** and **Archived**. The unread count shows next to **Inbox** and as a badge on **Work** in the app rail; right-click **Work** for **Mark all as read**.
 
-The section lists one row per issue, newest first, read and unread alike. A row shows the issue's status, its title and time, and who did what; a dot marks it unread. Hover a row for a card with the full title, the comment, and **Open**, **Mark as read**, and **Archive**.
+The **Inbox** tab lists one row per issue, newest first, read and unread alike. A row shows the issue's status, its title and time; a dot marks it unread. Turn off **Compact rows** in the display settings to add who did what on a second line. Hover a row for a card with the full title, the comment, and **Open**, **Mark as read**, and **Archive**.
 
-On a phone, the Work panel sits in the drawer. Its Inbox section ends with **All notifications**, which opens the Inbox page with its own list and filters.
+On a phone, the Work panel sits in the drawer. Its Inbox section ends with **All notifications**, which opens the Inbox page with its own list, the same three tabs, and filters.
 
 ## What lands in the inbox
 
@@ -90,11 +90,11 @@ An authorized agent run uses its task credential for all of this; it never falls
 
 ## Handle notifications
 
-Click a row to open its issue at the comment the notification is about. The row stays lit while the issue is open, and clicking it again takes you back to that spot. Opening the issue marks the notification read, and the row stays in the list. Notifications without an issue, such as autopilot pauses and quick-create results, open on the Inbox page instead.
+Click a row to open the notification on the Inbox page, at the comment it is about. Every notification opens there, including those without an issue, such as autopilot pauses and quick-create results. The row stays lit while it is open, and clicking it again takes you back to that spot. Opening it marks the notification read, and the row stays in the list. Above the issue, **Inbox** leads back to the list, and **Open issue page** (↗) opens the issue on a page of its own, without the inbox bar.
 
 <InboxDemo />
 
-An issue opened from the inbox shows a bar under its header. It says who did what, and when, then offers what usually settles the notification:
+The issue shows a bar under its header. It says who did what, and when, then offers what usually settles the notification:
 
 - **Status**, **Assignee** and **Quick actions** change the issue itself, as its properties do. Quick actions appear once your workspace has some.
 - **Snooze** (`H`) takes the issue out of your inbox until a time you pick, and opens the next one. See [Snooze an issue](#snooze-an-issue) below.
@@ -105,14 +105,14 @@ The next one is the next row the section lists under its current filters, so you
 
 The filter button in the section header narrows the list by notification type, when it was received, and who it is from, or by the issue's status and priority. A filtered section keeps the button visible, and **Clear filters** resets it.
 
-The section's ⋯ menu holds **View archived** and the bulk actions:
+On the **Inbox** tab, the section's ⋯ menu holds the bulk actions:
 
 - **Mark all as read**;
 - **Archive all read**;
 - **Archive completed**, for issues in the `done` or `closed` category;
 - **Archive all**.
 
-**View archived** opens the archived notifications. More records load as you scroll, and filters apply to the entire archive, including records that have not loaded yet. Archived notifications keep their read state, so **Unarchive** (or `E`) brings one back exactly as you left it.
+The **Archived** tab lists the archived notifications. More records load as you scroll, and filters apply to the entire archive, including records that have not loaded yet. Archived notifications keep their read state, so **Move back to Inbox**, on the row or in the bar of an open one (or `E`), brings one back exactly as you left it.
 
 ## Snooze an issue
 
@@ -123,11 +123,11 @@ While an issue is snoozed:
 - new notifications on it wait with it and don't count toward the unread badge. When it comes back, the row says **Snooze ended** and how many updates arrived meanwhile;
 - it comes back early when someone mentions you by name, it is assigned to you, a run fails, or all its sub-issues finish. `@all` mentions don't wake it;
 - **Mark all as read** and the archive-all actions leave it alone. Archiving it ends the snooze, and so does completing the issue yourself while **Archive issues you handle** counts completing (it does by default);
-- opening the issue from anywhere else doesn't read it or end the snooze. Its inbox bar shows when it comes back; **Change time** there brings it back now (`H`) or picks another time.
+- opening the issue's own page doesn't read it or end the snooze. Open it from the **Snoozed** tab and its bar shows when it comes back; **Change time** there brings it back now (`H`) or picks another time.
 
-Snooze is personal: it only changes your own inbox. Everything you've snoozed is in the **Snoozed** view under Views, also reachable from **View snoozed** in the inbox menu.
+Snooze is personal: it only changes your own inbox. Everything you've snoozed is on the **Snoozed** tab, where the button on each row brings it back now.
 
-If the Snoozed view can't load, choose **Retry**. Previously loaded items stay visible if a refresh fails.
+If the **Snoozed** tab can't load, choose **Retry**. Previously loaded items stay visible if a refresh fails.
 
 ## When a notification leaves the inbox
 
@@ -152,7 +152,7 @@ A later notification on the issue lands in the inbox again.
 The sliders button in the Inbox section header opens its display settings, which are saved on this device:
 
 - **Rows shown**: 5, 10, or 20; a **Show more** row lists the rest.
-- **Compact rows**: one line per row instead of two.
+- **Compact rows**: one line per row, on by default; turned off, rows add who did what on a second line.
 - **Unread count**: the number next to the section title.
 - **Unread badge on Work**: the badge on Work in the app rail.
 
