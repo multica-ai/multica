@@ -314,6 +314,7 @@ export function createEnDict(): LandingDict {
         improvements: [
           "Inbox actions sit above the reply box, and after you archive the last notification, it still shows Archived with Undo.",
           "A squad working on an Issue shows as one squad avatar in headers, sidebars, and Working now.",
+          "The Issue sidebar hides empty sections behind one Add row, and sub-issues move to the main column.",
           "Jump to latest moves to the right and counts new comments, in the Inbox and on Issue pages.",
         ],
         fixes: [

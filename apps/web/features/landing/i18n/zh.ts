@@ -298,6 +298,7 @@ export function createZhDict(): LandingDict {
         improvements: [
           "收件箱操作移到回复框上方，归档最后一条通知后仍显示「已归档」并可撤销。",
           "小队处理 Issue 时，页头、侧栏和「正在工作」里合并显示为一个小队头像。",
+          "Issue 侧栏只显示有内容的分区，空分区收进「添加」行，子 Issue 移到正文区。",
           "「跳到最新」移到右侧并显示新评论数，收件箱和 Issue 页面都适用。",
         ],
         fixes: [
