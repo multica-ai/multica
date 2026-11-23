@@ -44,9 +44,10 @@
  *   frames, so frame counts from a recorded pass are wrong.
  * - Headless Chromium runs animation frames at 120Hz: a 200ms tween spans
  *   about 24 sampled frames.
- * - A 2x screenshot costs tens of milliseconds, more on a busy machine. The
- *   GIF keeps the real timing whatever the rate, and the log prints the rate
- *   reached; below ~30fps, record again when the machine is quieter.
+ * - A 2x screenshot of a panel-sized region takes about 40ms, so GIFs come
+ *   out at roughly 20–25fps, fewer on a busy machine. The GIF keeps the real
+ *   timing whatever the rate, and the log prints the rate reached. Judge
+ *   smoothness from the samples, not the GIF. A shot without a clip is 1x.
  * - Web only. For Desktop, drive the app with scripts/desktop-cdp.mjs.
  */
 import { createRequire } from "node:module";
