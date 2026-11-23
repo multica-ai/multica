@@ -35,7 +35,7 @@ Sections, tree nodes, disclosures, "Show N more", inline hints.
 
 - Animate height and opacity together, 150–200ms, `UI_EASE_OUT`. The content below moves with the change; it never jumps.
 - Rotate one `ChevronRight` by 90° on the same duration. Do not swap two icons.
-- Use `CollapsibleContent`. For a conditional block outside a Collapsible, use a `grid-rows-[0fr]` → `grid-rows-[1fr]` transition, as `AgentRunHint` in `packages/views/modals/create-issue.tsx` does, or motion's `height: "auto"`.
+- Use `CollapsibleContent`. For a conditional block outside a Collapsible, use a `grid-rows-[0fr]` → `grid-rows-[1fr]` transition, as `CreateRunHint` in `packages/views/modals/create-issue.tsx` does, or motion's `height: "auto"`.
 
 ### List rows added and removed
 
@@ -59,7 +59,7 @@ Tabs, views, a filter that changes a list, the next or previous item in a detail
 Tabs and segmented controls.
 
 - The indicator moves from the old option to the new one; the labels stay put. Use the indicator the shared control renders (`Tabs`, `SegmentedToggle`), with the transition it ships. Do not build a per-call-site indicator.
-- Controls whose labels change width during the switch, such as tabs that show only an icon while closed, or a header that gains or loses a button, cannot use a layout animation: it measures a box that is still moving and overshoots. Measure the start and end of every part once before paint, animate them all on one curve, and derive the indicator from that same progress. `useTabSwitchMotion` in `packages/views/inbox/components/inbox-tabs.tsx` is the reference.
+- Controls whose labels change width during the switch, such as tabs that show only an icon while closed, or a header that gains or loses a button, cannot use a layout animation: it measures a box that is still moving and overshoots. Measure the start and end of every part once before paint, animate them all on one curve, and tween the indicator on that same curve and duration from where it is straight to the new tab's measured end box. Do not derive it from the boxes while they move: blending moving boxes bulges past the end when the new tab starts far from where it settles. `useTabSwitchMotion` in `packages/views/inbox/components/inbox-tabs.tsx` is the reference.
 
 ### State and value feedback
 

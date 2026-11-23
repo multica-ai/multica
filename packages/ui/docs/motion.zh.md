@@ -35,7 +35,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 
 - 高度和透明度一起过渡，150–200ms，`UI_EASE_OUT`。下方内容跟着移动，不跳变。
 - 用同样的时长把一个 `ChevronRight` 旋转 90°，不要切换两个图标。
-- 使用 `CollapsibleContent`。不在 Collapsible 中的条件内容，用 `grid-rows-[0fr]` → `grid-rows-[1fr]` 过渡（参考 `packages/views/modals/create-issue.tsx` 中的 `AgentRunHint`），或 motion 的 `height: "auto"`。
+- 使用 `CollapsibleContent`。不在 Collapsible 中的条件内容，用 `grid-rows-[0fr]` → `grid-rows-[1fr]` 过渡（参考 `packages/views/modals/create-issue.tsx` 中的 `CreateRunHint`），或 motion 的 `height: "auto"`。
 
 ### 列表增删行
 
@@ -59,7 +59,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 标签和分段控件。
 
 - 指示器从旧选项移到新选项，标签文字不动。使用共享控件（`Tabs`、`SegmentedToggle`）自带的指示器和过渡，不要在调用处自己做指示器。
-- 切换时标签宽度会变的控件，不能用 layout 动画。比如关闭时只显示图标的标签，或 header 多出、少了一个按钮。layout 动画量到的是仍在移动的盒子，会冲过头。应在绘制前一次性量好每个部分的起点和终点，所有部分走同一条曲线，指示器由同一个进度推出。参考 `packages/views/inbox/components/inbox-tabs.tsx` 中的 `useTabSwitchMotion`。
+- 切换时标签宽度会变的控件，不能用 layout 动画。比如关闭时只显示图标的标签，或 header 多出、少了一个按钮。layout 动画量到的是仍在移动的盒子，会冲过头。应在绘制前一次性量好每个部分的起点和终点，所有部分走同一条曲线；指示器用同一条曲线和时长，从当前位置直接过渡到新标签量好的终点。不要跟着移动中的盒子推算指示器：混合移动中的盒子，在新标签起点离终点较远时会冲过头。参考 `packages/views/inbox/components/inbox-tabs.tsx` 中的 `useTabSwitchMotion`。
 
 ### 状态与数值反馈
 
