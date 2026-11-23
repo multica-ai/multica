@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -60,6 +61,167 @@ func newIssueMetadataDeleteTestCmd() *cobra.Command {
 	return c
 }
 
+func TestParseMetadataValue(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		forcedType string
+		want       string
+		wantErr    bool
+	}{
+		{name: "nested array", raw: `["frontend",{"release":{"ready":true}}]`, want: `["frontend",{"release":{"ready":true}}]`},
+		{name: "nested object", raw: `{"workstreams":[],"qa":{"passed":true}}`, want: `{"workstreams":[],"qa":{"passed":true}}`},
+		{name: "empty array", raw: `[]`, want: `[]`},
+		{name: "empty object", raw: `{}`, want: `{}`},
+		{name: "invalid JSON remains string", raw: `{"broken":`, want: `"{\"broken\":"`},
+		{name: "bare string remains string", raw: `waiting`, want: `"waiting"`},
+		{name: "bool", raw: `true`, want: `true`},
+		{name: "number preserves spelling", raw: `9007199254740993`, want: `9007199254740993`},
+		{name: "forced JSON-looking string", raw: `{"nested":true}`, forcedType: "string", want: `"{\"nested\":true}"`},
+		{name: "forced null-looking string", raw: `null`, forcedType: "string", want: `"null"`},
+		{name: "null rejected", raw: `null`, wantErr: true},
+		{name: "whitespace null rejected", raw: " \n null\t", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseMetadataValue(tt.raw, tt.forcedType)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseMetadataValue(%q, %q) returned %s, want error", tt.raw, tt.forcedType, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseMetadataValue(%q, %q): %v", tt.raw, tt.forcedType, err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("parseMetadataValue(%q, %q) = %s, want %s", tt.raw, tt.forcedType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildMetadataFilterQueryParamPreservesStructuredValuesAndNumbers(t *testing.T) {
+	got, err := buildMetadataFilterQueryParam([]string{
+		`workstreams=["frontend",{"release":{"ready":true}}]`,
+		`sequence=9007199254740993`,
+	})
+	if err != nil {
+		t.Fatalf("buildMetadataFilterQueryParam: %v", err)
+	}
+	want := `{"sequence":9007199254740993,"workstreams":["frontend",{"release":{"ready":true}}]}`
+	if got != want {
+		t.Fatalf("filter = %s, want %s", got, want)
+	}
+}
+
+func TestRunIssueMetadataRoundTripsStructuredAndForcedStringValues(t *testing.T) {
+	tests := []struct {
+		name       string
+		value      string
+		forcedType string
+		wantRaw    string
+		wantValue  any
+	}{
+		{
+			name:      "structured",
+			value:     `{"checks":[],"summary":{"passed":true}}`,
+			wantRaw:   `{"checks":[],"summary":{"passed":true}}`,
+			wantValue: map[string]any{"checks": []any{}, "summary": map[string]any{"passed": true}},
+		},
+		{
+			name:       "forced string",
+			value:      `{"checks":[]}`,
+			forcedType: "string",
+			wantRaw:    `"{\"checks\":[]}"`,
+			wantValue:  `{"checks":[]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var received json.RawMessage
+			_, _ = metadataTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPut:
+					var body struct {
+						Value json.RawMessage `json:"value"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Fatalf("decode metadata request: %v", err)
+					}
+					received = append(received[:0], body.Value...)
+				case http.MethodGet:
+					// Return the value captured from PUT so list and get exercise the
+					// same JSON decoding path used against a real API.
+				default:
+					t.Fatalf("metadata method = %s, want PUT or GET", r.Method)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"metadata": map[string]json.RawMessage{"payload": received},
+				})
+			})
+
+			cmd := newIssueMetadataSetTestCmd()
+			_ = cmd.Flags().Set("key", "payload")
+			_ = cmd.Flags().Set("value", tt.value)
+			_ = cmd.Flags().Set("output", "json")
+			if tt.forcedType != "" {
+				_ = cmd.Flags().Set("type", tt.forcedType)
+			}
+
+			out, err := captureStdout(t, func() error {
+				return runIssueMetadataSet(cmd, []string{testIssueUUID})
+			})
+			if err != nil {
+				t.Fatalf("runIssueMetadataSet: %v", err)
+			}
+			if string(received) != tt.wantRaw {
+				t.Fatalf("request value = %s, want %s", received, tt.wantRaw)
+			}
+			var response map[string]any
+			if err := json.Unmarshal([]byte(out), &response); err != nil {
+				t.Fatalf("decode command output: %v\n%s", err, out)
+			}
+			if !reflect.DeepEqual(response["payload"], tt.wantValue) {
+				t.Fatalf("output payload = %#v, want %#v", response["payload"], tt.wantValue)
+			}
+
+			listCmd := newIssueMetadataListTestCmd()
+			listOut, err := captureStdout(t, func() error {
+				return runIssueMetadataList(listCmd, []string{testIssueUUID})
+			})
+			if err != nil {
+				t.Fatalf("runIssueMetadataList: %v", err)
+			}
+			var listed map[string]any
+			if err := json.Unmarshal([]byte(listOut), &listed); err != nil {
+				t.Fatalf("decode list output: %v\n%s", err, listOut)
+			}
+			if !reflect.DeepEqual(listed["payload"], tt.wantValue) {
+				t.Fatalf("listed payload = %#v, want %#v", listed["payload"], tt.wantValue)
+			}
+
+			getCmd := newIssueMetadataGetTestCmd()
+			_ = getCmd.Flags().Set("key", "payload")
+			getOut, err := captureStdout(t, func() error {
+				return runIssueMetadataGet(getCmd, []string{testIssueUUID})
+			})
+			if err != nil {
+				t.Fatalf("runIssueMetadataGet: %v", err)
+			}
+			var gotValue any
+			if err := json.Unmarshal([]byte(getOut), &gotValue); err != nil {
+				t.Fatalf("decode get output: %v\n%s", err, getOut)
+			}
+			if !reflect.DeepEqual(gotValue, tt.wantValue) {
+				t.Fatalf("get payload = %#v, want %#v", gotValue, tt.wantValue)
+			}
+		})
+	}
+}
+
 // captureStdout used in this file is the (string, error) helper defined
 // in cmd_skill_test.go.
 
@@ -88,7 +250,9 @@ func metadataTestServer(t *testing.T, metadataHandler http.HandlerFunc) (*httpte
 	t.Cleanup(srv.Close)
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
+	// Use the task-token shape so these tests also run inside a daemon-managed
+	// agent worktree, where newAPIClient enforces the scoped-token contract.
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 	return srv, &paths
 }
 
