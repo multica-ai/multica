@@ -430,8 +430,10 @@ export function PreviewSequenceProvider({
     lastViewerOver.current = viewerOver;
   }, [viewerOver]);
 
+  // Not mounted under the full-window viewer: a video or an HTML page would
+  // keep playing behind it, and alongside the viewer's own copy.
   const pane =
-    inPane && current && dock?.target
+    inPane && current && dock?.target && !viewerOver
       ? createPortal(
           <AttachmentPreviewPane
             source={toPreviewSource(current)}
@@ -445,7 +447,6 @@ export function PreviewSequenceProvider({
             copyLink={details?.copyLink}
             onOpenOverview={openOverview}
             focusRequest={focusRequest}
-            suspended={viewerOver}
           />,
           dock.target,
         )

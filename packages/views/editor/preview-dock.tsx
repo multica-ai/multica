@@ -177,16 +177,32 @@ export function PreviewDock({
     for (const item of [...parked].reverse()) item.restore();
   }, []);
 
+  const closePane = useCallback(() => {
+    if (!openRef.current) return;
+    openRef.current = false;
+    setOpen(false);
+    if (expectedTimer.current) clearTimeout(expectedTimer.current);
+    expectedTimer.current = null;
+    expectedRef.current = null;
+    setExpected(null);
+    restoreParked();
+  }, [restoreParked]);
+
   const openPane = useCallback(() => {
     const root = rootRef.current;
     if (!root) return false;
     const room = Math.max(root.getBoundingClientRect().width, expectedRef.current ?? 0);
-    const candidates = yieldsRef.current.filter(
-      (item): item is PreviewDockYield => item !== null && !parkedRef.current.includes(item),
-    );
+    // A parked yield the reader took back (⌘/ while the pane is up) is
+    // asked again: it reports its width only while it is out.
+    const candidates = yieldsRef.current.filter((item): item is PreviewDockYield => item !== null);
     const reclaim = candidates.map((item) => Math.max(0, item.reclaimable()));
     const most = reclaim.reduce((sum, value) => sum + value, room);
-    if (fitPaneWidth(PREVIEW_PANE_MIN_WIDTH, most) === 0) return false;
+    if (fitPaneWidth(PREVIEW_PANE_MIN_WIDTH, most) === 0) {
+      // The file goes to the full-window viewer; a folded pane left behind
+      // would come back later as an empty frame.
+      closePane();
+      return false;
+    }
 
     // Already showing at a usable width: the reader only switched files.
     if (openRef.current && fitPaneWidth(widthRef.current, room) > 0) return true;
@@ -197,7 +213,8 @@ export function PreviewDock({
       const gain = reclaim[index] ?? 0;
       if (gain <= 0) return;
       item.park();
-      parkedRef.current.push(item);
+      // Re-parked: it moves to the end, so it is still given back first.
+      parkedRef.current = [...parkedRef.current.filter((parked) => parked !== item), item];
       next += gain;
     });
     if (next > room) {
@@ -212,15 +229,7 @@ export function PreviewDock({
     openRef.current = true;
     setOpen(true);
     return true;
-  }, []);
-
-  const closePane = useCallback(() => {
-    if (!openRef.current) return;
-    openRef.current = false;
-    setOpen(false);
-    setExpected(null);
-    restoreParked();
-  }, [restoreParked]);
+  }, [closePane]);
 
   const controller = useMemo<PreviewDockController>(
     () => ({ open: openPane, close: closePane, target: slot }),

@@ -741,8 +741,6 @@ interface AttachmentPreviewPaneProps {
   onOpenOverview?: () => void;
   /** Bumped each time the reader opens a file from the page: focus moves in. */
   focusRequest?: number;
-  /** The full-window viewer is open over the pane and owns the keys. */
-  suspended?: boolean;
 }
 
 /**
@@ -762,7 +760,6 @@ export function AttachmentPreviewPane({
   copyLink,
   onOpenOverview,
   focusRequest,
-  suspended = false,
 }: AttachmentPreviewPaneProps) {
   const { t } = useT("editor");
   const state = normalize(source);
@@ -774,20 +771,18 @@ export function AttachmentPreviewPane({
   // pane's own keys (Esc, ← →) only work once focus is in it.
   useEffect(() => {
     const root = rootRef.current;
-    if (suspended || !root || root.contains(document.activeElement)) return;
+    if (!root || root.contains(document.activeElement)) return;
     root.focus({ preventScroll: true });
-  }, [focusRequest, suspended]);
+  }, [focusRequest]);
 
   return (
     <PreviewPaneSurfaceContext value={true}>
       <section
         ref={rootRef}
         tabIndex={-1}
-        inert={suspended || undefined}
         aria-label={t(($) => $.attachment.preview_pane, { filename: state.filename })}
         className="flex h-full min-h-0 flex-col bg-background text-foreground outline-none"
         onKeyDown={(e) =>
-          !suspended &&
           handlePreviewKeys(e, {
             onClose,
             onPrev: sequence?.onPrev,

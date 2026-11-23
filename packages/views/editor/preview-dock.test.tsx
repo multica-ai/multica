@@ -90,6 +90,7 @@ import {
   usePreviewSequence,
 } from "./preview-sequence-context";
 import {
+  PREVIEW_DOCK_SETTLE_MS,
   PREVIEW_MAIN_MIN_WIDTH,
   PREVIEW_PANE_DEFAULT_WIDTH,
   PREVIEW_PANE_MIN_WIDTH,
@@ -132,11 +133,35 @@ const THREE = [imageAttachment(1), imageAttachment(2), imageAttachment(3)];
 const ITEMS = collectPreviewSequence(THREE.map((a) => ({ attachments: [a] })));
 
 // jsdom lays nothing out: the dock's root reports whatever room a test gives
-// it, everything else reports no size.
+// it, everything else reports no size. `resizeDock` stands in for the window
+// or a neighbouring panel changing the dock's width.
 let dockWidth = 0;
 const realRect = HTMLElement.prototype.getBoundingClientRect;
+const observers = new Set<ResizeObserverCallback>();
+class FakeResizeObserver {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe() {
+    observers.add(this.callback);
+  }
+  unobserve() {}
+  disconnect() {
+    observers.delete(this.callback);
+  }
+}
+function resizeDock(width: number) {
+  dockWidth = width;
+  act(() => {
+    for (const callback of observers) {
+      callback([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver);
+    }
+  });
+}
+// The yields parked on open have finished moving out.
+const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, PREVIEW_DOCK_SETTLE_MS + 20)));
 beforeEach(() => {
   dockWidth = 0;
+  observers.clear();
+  vi.stubGlobal("ResizeObserver", FakeResizeObserver);
   localStorage.clear();
   getAttachmentMock.mockImplementation(async (id: string) => imageAttachment(Number(id[0])));
   HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
@@ -146,11 +171,20 @@ beforeEach(() => {
 });
 afterEach(() => {
   HTMLElement.prototype.getBoundingClientRect = realRect;
+  vi.unstubAllGlobals();
 });
 
-function fakeYield(name: string, width: number, log: string[]): PreviewDockYield {
+function fakeYield(
+  name: string,
+  width: number,
+  log: string[],
+): PreviewDockYield & { takeBack: () => void } {
   let parked = false;
   return {
+    // The reader reopens it themselves (⌘/) while the pane is up.
+    takeBack: () => {
+      parked = false;
+    },
     reclaimable: () => (parked ? 0 : width),
     park: () => {
       parked = true;
@@ -290,6 +324,66 @@ describe("PreviewDock", () => {
     expect(log).toEqual(["park nav", "park sidebar"]);
   });
 
+  it("asks a yield the reader took back again when a file opens into the folded pane", async () => {
+    dockWidth = 700;
+    const log: string[] = [];
+    const sidebar = fakeYield("sidebar", 320, log);
+    render(<Surface yields={[fakeYield("nav", 280, log), sidebar]} />);
+    act(() => {
+      fireEvent.click(screen.getByText("open"));
+    });
+    resizeDock(1300);
+    await settle();
+    expect(log).toEqual(["park nav", "park sidebar"]);
+
+    // ⌘/ brings the sidebar back; 980 has no room for the pane, so it folds.
+    sidebar.takeBack();
+    resizeDock(980);
+    expect(document.querySelector("[data-preview-pane]")).toHaveAttribute("data-preview-pane", "folded");
+
+    act(() => {
+      fireEvent.click(screen.getByText("open third"));
+    });
+    expect(log).toEqual(["park nav", "park sidebar", "park sidebar"]);
+    expect(pane()).toHaveAccessibleName("Preview of shot-3.png");
+    resizeDock(1300);
+    expect(document.querySelector("[data-preview-pane]")).toHaveAttribute("data-preview-pane", "open");
+
+    act(() => {
+      fireEvent.keyDown(pane()!, { key: "Escape" });
+    });
+    expect(log).toEqual(["park nav", "park sidebar", "park sidebar", "restore sidebar", "restore nav"]);
+  });
+
+  it("closes a folded pane when the next file has to open full screen", async () => {
+    dockWidth = 1000;
+    const log: string[] = [];
+    render(<Surface yields={[fakeYield("nav", 280, log)]} />);
+    act(() => {
+      fireEvent.click(screen.getByText("open"));
+    });
+    resizeDock(1280);
+    await settle();
+    // The window narrows past what the pane needs, even with the nav parked.
+    resizeDock(700);
+    expect(document.querySelector("[data-preview-pane]")).toHaveAttribute("data-preview-pane", "folded");
+
+    act(() => {
+      fireEvent.click(screen.getByText("open third"));
+    });
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-label", "shot-3.png");
+    expect(log).toEqual(["park nav", "restore nav"]);
+
+    act(() => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // Widening again brings back nothing: no empty pane without a header.
+    resizeDock(1400);
+    expect(document.querySelector("[data-preview-pane]")).not.toBeInTheDocument();
+    expect(pane()).not.toBeInTheDocument();
+  });
+
   it("pages with the arrow keys while focus is in the pane", () => {
     dockWidth = 1300;
     render(<Surface />);
@@ -313,6 +407,8 @@ describe("PreviewDock", () => {
       fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
     });
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-label", "shot-2.png");
+    // Not left running underneath: a video there would keep playing.
+    expect(pane()).not.toBeInTheDocument();
 
     act(() => {
       fireEvent.keyDown(document, { key: "Escape" });
