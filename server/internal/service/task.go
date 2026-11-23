@@ -6830,6 +6830,10 @@ type delegatedFailureRecoveryTarget struct {
 	issue   db.Issue
 	agent   db.Agent
 	comment db.Comment
+	// leaderSquad is set when the failure goes to a direct-handoff squad's
+	// leader instead of the member that handed the work over; agent is then
+	// that leader and the recovery run carries its leader role.
+	leaderSquad *db.Squad
 }
 
 // IsDelegatedFailureRecoveryComment identifies the durable platform signal
@@ -6898,17 +6902,22 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 		}
 		return nil, fmt.Errorf("load source issue: %w", err)
 	}
-	agent, err := q.GetAgent(ctx, source.AgentID)
+	coordinatorID := source.AgentID
+	leaderSquad := squadDirectHandoffLeader(ctx, q, issue, failed, source)
+	if leaderSquad != nil {
+		coordinatorID = leaderSquad.LeaderID
+	}
+	agent, err := q.GetAgent(ctx, coordinatorID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("load source agent: %w", err)
 	}
-	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID {
+	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID || agent.ID == failed.AgentID {
 		return nil, nil
 	}
-	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent}, nil
+	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent, leaderSquad: leaderSquad}, nil
 }
 
 // canDispatchDelegatedFailureRecovery matches the lifecycle predicate in
@@ -6934,6 +6943,7 @@ func canDispatchDelegatedFailureRecovery(ctx context.Context, q *db.Queries, iss
 // mention-notification side effects.
 func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context, failedID pgtype.UUID) (*delegatedFailureRecoveryTarget, bool, error) {
 	var target *delegatedFailureRecoveryTarget
+	var handoff db.ActivityLog
 	created := false
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		failed, err := qtx.GetAgentTaskForDelegatedFailureUpdate(ctx, failedID)
@@ -6972,12 +6982,21 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 		}
 		target.comment = createdComment.Comment()
 		created = true
+		if target.leaderSquad != nil {
+			handoff, err = createSquadFailureHandoff(ctx, qtx, target)
+			if err != nil {
+				return err
+			}
+		}
 		return nil
 	}); err != nil {
 		return nil, false, err
 	}
 	if target == nil {
 		return nil, false, nil
+	}
+	if handoff.ID.Valid {
+		s.publishSquadHandoffActivity(handoff)
 	}
 	if created && s.Bus != nil {
 		s.Bus.Publish(events.Event{
@@ -7243,6 +7262,10 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			return delegatedFailureRecoveryCovered, err
 		}
 		overlay := s.buildRuntimeMCPOverlay(ctx, originator, target.agent)
+		isLeader, squadID := target.source.IsLeaderTask, target.source.SquadID
+		if target.leaderSquad != nil {
+			isLeader, squadID = true, target.leaderSquad.ID
+		}
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 			ID:                   dbid.NewV7(),
 			AgentID:              target.agent.ID,
@@ -7251,8 +7274,8 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			Priority:             priorityToInt(target.issue.Priority),
 			TriggerCommentID:     target.comment.ID,
 			TriggerSummary:       s.buildCommentTriggerSummary(ctx, target.issue.WorkspaceID, target.comment.ID),
-			IsLeaderTask:         pgtype.Bool{Bool: target.source.IsLeaderTask, Valid: target.source.IsLeaderTask},
-			SquadID:              target.source.SquadID,
+			IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
+			SquadID:              squadID,
 			OriginatorUserID:     originator,
 			AccountableUserID:    accountable,
 			RuntimeMcpOverlay:    overlay.Overlay,

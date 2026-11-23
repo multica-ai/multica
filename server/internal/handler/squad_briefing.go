@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -255,6 +257,22 @@ const squadSteerRule = `- A worker already running on this issue gets a new comm
   the command reports per run whether it was. New work is still a normal
   delegation.`
 
+// squadLeaderDirectHandoff tells the leader of a direct-handoff squad which
+// replies still reach it. It narrows responsibility 4's re-trigger list; the
+// guard numbers are the server's (service.SquadHandoff*Limit).
+var squadLeaderDirectHandoff = fmt.Sprintf(`## Handoff Mode: Direct
+
+Members of this squad hand the issue to each other directly: when a member
+finishes, it @mentions the next member (or a person) in its result comment,
+and that handoff does NOT wake you. Delegate only the first step, then handle
+exceptions. You are woken when:
+- a member replies without naming a next step, or reports the issue done;
+- a member's run fails;
+- the same two members pass the issue back and forth more than %d rounds;
+- the issue exceeds %d member handoffs in 24 hours.
+When you delegate the next step after one of these, the round count starts over.`,
+	service.SquadHandoffRoundLimit, service.SquadHandoffDailyLimit)
+
 // squadOperatingProtocolFor assembles the protocol, selecting the parent-status
 // responsibility that matches this leader's actual authority over the issue
 // and, for an owner, whether the issue's project workflow governs its moves.
@@ -305,6 +323,10 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 	if steer {
 		sb.WriteString("\n")
 		sb.WriteString(squadSteerRule)
+	}
+	if squad.HandoffMode == service.SquadHandoffModeDirect {
+		sb.WriteString("\n\n")
+		sb.WriteString(squadLeaderDirectHandoff)
 	}
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
@@ -475,4 +497,141 @@ func formatRosterRow(name, kind, role, skills, mention string) string {
 // uses the mention:// scheme with the entity type and UUID.
 func formatMention(name, mentionType, id string) string {
 	return "[@" + name + "](mention://" + mentionType + "/" + id + ")"
+}
+
+// squadMemberHandoffLeader and squadMemberHandoffDirect are the "Handing Off"
+// section of a member brief, one per squad handoff mode. %s is the leader's
+// name; the direct text also takes the two guard limits.
+const squadMemberHandoffLeader = `## Handing Off
+
+This squad uses leader dispatch. When you finish your part, post your result
+as one comment on this issue. Your reply wakes the leader, %s, who decides
+the next step.`
+
+const squadMemberHandoffDirect = `## Handing Off
+
+Members of this squad hand the issue to each other directly. When you finish
+your part, decide the next step yourself and state it in your result comment:
+- Another member should continue or review the work: @mention exactly that
+  member, using the mention markdown under Your Squad. Never ask for a review
+  of your own work.
+- A person needs to decide: @mention that person. The leader is not woken;
+  the person replies on the issue.
+- You are blocked, the work is out of scope, or you are unsure what comes
+  next: do not @mention anyone and say why. Your reply goes to the leader, %s.
+- The whole issue is done: say so without @mentioning anyone. The leader
+  wraps it up.
+Name one next owner per comment. The same two members can pass the issue back
+and forth at most %d rounds, and an issue takes at most %d member handoffs in
+24 hours. Past either limit, or when a member's run fails, the issue goes back
+to the leader.`
+
+// buildSquadMemberBriefing composes the squad context appended to a member's
+// Instructions when it claims a non-leader task on an issue assigned to its
+// squad: who it is in the squad, the roster it can hand off to, the squad's
+// rules, and how it hands off under the squad's handoff mode.
+//
+// It must never contain squadBriefingMarker ("## Squad Operating Protocol"):
+// a daemon that predates leader_role_resolved infers the leader role from
+// that heading.
+func buildSquadMemberBriefing(ctx context.Context, q *db.Queries, squad db.Squad, self db.Agent) string {
+	leaderName := "the leader"
+	if leader, err := q.GetAgent(ctx, squad.LeaderID); err == nil {
+		leaderName = leader.Name
+	}
+	members, err := q.ListSquadMembers(ctx, squad.ID)
+	if err != nil {
+		members = nil
+	}
+	selfID := util.UUIDToString(self.ID)
+	role := ""
+	for _, m := range members {
+		if m.MemberType == "agent" && util.UUIDToString(m.MemberID) == selfID {
+			role = strings.TrimSpace(m.Role)
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Squad Member Brief\n\n")
+	sb.WriteString("You are working on this issue as ")
+	sb.WriteString(self.Name)
+	sb.WriteString(", a member of the squad \"")
+	sb.WriteString(squad.Name)
+	sb.WriteString("\". The squad leader, ")
+	sb.WriteString(leaderName)
+	sb.WriteString(", dispatches work and handles exceptions; you do your part and hand off.")
+	if role != "" {
+		sb.WriteString("\nYour role in this squad: \"")
+		sb.WriteString(role)
+		sb.WriteString("\".")
+	}
+	sb.WriteString("\n\n")
+	sb.WriteString(buildSquadMemberRoster(ctx, q, squad, leaderName, members, selfID))
+
+	if trimmed := strings.TrimSpace(squad.Instructions); trimmed != "" {
+		sb.WriteString("\n## Squad Rules (")
+		sb.WriteString(squad.Name)
+		sb.WriteString(")\n\n")
+		sb.WriteString(trimmed)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
+	if squad.HandoffMode == service.SquadHandoffModeDirect {
+		sb.WriteString(fmt.Sprintf(squadMemberHandoffDirect, leaderName, service.SquadHandoffRoundLimit, service.SquadHandoffDailyLimit))
+	} else {
+		sb.WriteString(fmt.Sprintf(squadMemberHandoffLeader, leaderName))
+	}
+	return sb.String()
+}
+
+// buildSquadMemberRoster is buildSquadRoster from a member's seat: the leader
+// row, then every other non-archived member. The member itself is left out so
+// it cannot pick itself as the next owner.
+func buildSquadMemberRoster(ctx context.Context, q *db.Queries, squad db.Squad, leaderName string, members []db.SquadMember, selfID string) string {
+	var sb strings.Builder
+	sb.WriteString("## Your Squad\n\nLeader:\n- ")
+	sb.WriteString(leaderName)
+	sb.WriteString(" — agent — `")
+	sb.WriteString(formatMention(leaderName, "agent", util.UUIDToString(squad.LeaderID)))
+	sb.WriteString("`\n")
+
+	leaderID := util.UUIDToString(squad.LeaderID)
+	skillNamesByAgentID, skillsLoaded := loadSquadMemberSkillNames(ctx, q, members, leaderID)
+	rows := make([]string, 0, len(members))
+	for _, m := range members {
+		id := util.UUIDToString(m.MemberID)
+		if m.MemberType == "agent" && (id == leaderID || id == selfID) {
+			continue
+		}
+		if row := renderMemberRow(ctx, q, m, skillNamesByAgentID, skillsLoaded); row != "" {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		sb.WriteString("\nOther members: (none)\n")
+		return sb.String()
+	}
+	sb.WriteString("\nOther members:\n")
+	for _, r := range rows {
+		sb.WriteString(r)
+	}
+	return sb.String()
+}
+
+// squadMemberBriefingForClaim returns the member brief for a non-leader claim
+// on an issue assigned to a squad the agent belongs to, or "" when the run is
+// not a squad member turn.
+func squadMemberBriefingForClaim(ctx context.Context, q *db.Queries, issue db.Issue, agent db.Agent) string {
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
+		return ""
+	}
+	squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID})
+	if err != nil || squad.ArchivedAt.Valid || squad.LeaderID == agent.ID {
+		return ""
+	}
+	isMember, err := q.IsSquadMember(ctx, db.IsSquadMemberParams{SquadID: squad.ID, MemberType: "agent", MemberID: agent.ID})
+	if err != nil || !isMember {
+		return ""
+	}
+	return buildSquadMemberBriefing(ctx, q, squad, agent)
 }
