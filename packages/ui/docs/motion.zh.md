@@ -99,7 +99,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 - 外观设置会把整个文档的 CSS 动画和过渡时长归零。系统设置只能通过媒体查询影响 CSS，所以每个 CSS 动画或过渡都要加 `motion-reduce:animate-none` 或 `motion-reduce:transition-none`。
 - JavaScript 动效（motion/react、WAAPI）读取 `@multica/core/appearance` 的 `useReducedMotion()`，渲染之外用 `prefersReducedMotion()`，两者都覆盖这两个设置。任一设置开启时传 `duration: 0` 或跳过动画。motion 自带的 `useReducedMotion` 和单独的 `matchMedia` 判断只能看到系统设置。应用根部的 `MotionProvider` 会让 motion/react 在任一设置开启时跳过位移和布局动画，但透明度和颜色仍会过渡，所以上面的 `duration: 0` 仍然需要。
 - 测试减少动态效果的分支：开启后，终点状态在同一帧出现。
-- 这两条由检查兜底。`NO_SYSTEM_ONLY_REDUCED_MOTION` lint 规则拦截 `packages/views`、`apps/web` 和 `apps/desktop` 里的 `prefers-reduced-motion` 查询字符串。`base.css` 里的类只要启动了动画，却没有 `@media (prefers-reduced-motion: reduce)` 规则把它停掉，`packages/ui/styles/reduced-motion.test.ts` 就会失败；少数例外列在这个测试里，每条都写明原因。
+- 这两条由检查兜底。`NO_SYSTEM_ONLY_REDUCED_MOTION` lint 规则拦截 `packages/views`、`apps/web` 和 `apps/desktop` 里的 `prefers-reduced-motion` 查询字符串。`packages/ui/styles/reduced-motion.test.ts` 读取 `packages/ui`、`packages/views`、`apps/desktop` 和 `apps/web`（营销站除外）里的全部样式文件，类只要启动了动画，同一文件里却没有 `@media (prefers-reduced-motion: reduce)` 规则把它停掉，测试就会失败；少数例外按「文件 + 类名」列在这个测试里，每条都写明原因。
 
 ## 不要加动效
 
