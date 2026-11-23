@@ -38,14 +38,18 @@ function compactRemainingLabel(value: number | null): string {
   return value === null ? "확인 불가" : `${value}%`;
 }
 
-function limitingReset(
+// 2026-11-23 대표님: "리셋 D-day 언제인지가 나와야지 몇 일 몇 시간 몇 분" — 사용률이 높은 창을 고르면
+// 5시간 창이 주간 창보다 높을 때 C가 "2시간 뒤"로 바뀌어 주간 리셋과 안 맞아 보였다.
+// 주간(7일) 리셋을 항상 우선하고, 없을 때만 다음 창으로 내려간다.
+function weeklyFirstReset(
   now: number,
-  ...windows: ReadonlyArray<readonly [number | null, string | null | undefined]>
+  ...resets: ReadonlyArray<string | null | undefined>
 ): string | null {
-  return windows
-    .map(([usage, reset]) => ({ usage: usage ?? -1, target: futureResetAt(reset, now) }))
-    .filter(({ target }) => target !== null)
-    .sort((a, b) => b.usage - a.usage)[0]?.target ?? null;
+  for (const reset of resets) {
+    const target = futureResetAt(reset, now);
+    if (target !== null) return target;
+  }
+  return null;
 }
 
 function ResetCountdown({ data }: { data: LlmLimitStatus }) {
@@ -56,8 +60,8 @@ function ResetCountdown({ data }: { data: LlmLimitStatus }) {
     return () => clearInterval(timer);
   }, []);
   const providers = [
-    ["C", limitingReset(now, [data.seven_day_pct, data.seven_day_resets_at], [data.sonnet_pct, data.sonnet_resets_at], [data.five_hour_pct, data.five_hour_resets_at])],
-    ["G", limitingReset(now, [data.gpt_seven_day_pct, data.gpt_seven_resets_at], [data.gpt_five_hour_pct, data.gpt_five_resets_at])],
+    ["C", weeklyFirstReset(now, data.seven_day_resets_at, data.sonnet_resets_at, data.five_hour_resets_at)],
+    ["G", weeklyFirstReset(now, data.gpt_seven_resets_at, data.gpt_five_resets_at)],
   ] as const;
   return (
     <div

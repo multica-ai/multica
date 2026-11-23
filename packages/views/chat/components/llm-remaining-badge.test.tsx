@@ -123,6 +123,20 @@ it("does not invent quota for malformed API data", async () => {
 
 
 describe("reset countdown", () => {
+  it("keeps the weekly D-day even when the five-hour window is more used", async () => {
+    const now = Date.parse("2026-11-23T12:40:00Z");
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({
+      five_hour_pct: 75, five_hour_resets_at: "2026-11-23T14:49:59Z",
+      seven_day_pct: 52, seven_day_resets_at: "2026-11-26T14:59:59Z",
+      gpt_five_hour_pct: 0, gpt_seven_day_pct: 65,
+      gpt_seven_resets_at: "2026-11-25T07:17:00Z",
+    }) })));
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    renderBadge();
+    const countdown = await screen.findByTestId("chat-reset-countdown");
+    expect(countdown.textContent).toBe("C 리셋까지 3일 2시간 19분 · G 리셋까지 1일 18시간 37분");
+  });
+
   it("shows one limiting reset per provider and falls back when its timestamp is missing", async () => {
     const now = Date.parse("2026-11-04T00:00:00Z");
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({
