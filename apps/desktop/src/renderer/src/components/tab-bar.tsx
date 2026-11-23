@@ -53,6 +53,9 @@ const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 const TAB_CLOSE_DURATION = 0.14;
 const TAB_GAP_PX = 6;
+const REDUCED_ADDED_HIGHLIGHT_MS = 180;
+const REDUCED_ATTENTION_HOLD_MS = 250;
+const REDUCED_EDGE_FEEDBACK_MS = 250;
 
 type TabSnapshot = {
   workspaceSlug: string | null;
@@ -273,6 +276,24 @@ function SortableTabItem({
     setShowAddedHighlight(false);
   }, [isDragging]);
 
+  useEffect(() => {
+    if (!showAddedHighlight || !shouldReduceMotion) return;
+    const timer = window.setTimeout(
+      () => setShowAddedHighlight(false),
+      REDUCED_ADDED_HIGHLIGHT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [showAddedHighlight, shouldReduceMotion]);
+
+  useEffect(() => {
+    if (attentionSequence <= 0 || !shouldReduceMotion) return;
+    const timer = window.setTimeout(
+      () => clearTabAttention(attentionSequence),
+      REDUCED_ATTENTION_HOLD_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [attentionSequence, shouldReduceMotion, clearTabAttention]);
+
   const tabButton = (
     <button
       type="button"
@@ -348,6 +369,7 @@ function SortableTabItem({
 
   return (
     <motion.div
+      inert={!isPresent}
       initial={false}
       exit={
         shouldReduceMotion
@@ -450,29 +472,43 @@ function SortableTabItem({
               </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
-          {showAddedHighlight && (
-            <motion.span
-              aria-hidden
-              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
-              initial={{ opacity: shouldReduceMotion ? 0.25 : 0.65 }}
-              animate={{ opacity: 0 }}
-              transition={{ duration: shouldReduceMotion ? 0.16 : 0.42 }}
-              onAnimationComplete={() => setShowAddedHighlight(false)}
-            />
-          )}
-          {attentionSequence > 0 && (
+          {showAddedHighlight &&
+            (shouldReduceMotion ? (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 opacity-40 ring-1 ring-inset ring-primary/20"
+              />
+            ) : (
+              <motion.span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
+                initial={{ opacity: 0.65 }}
+                animate={{ opacity: 0 }}
+                transition={{ duration: 0.42 }}
+                onAnimationComplete={() => setShowAddedHighlight(false)}
+              />
+            ))}
+          {attentionSequence > 0 &&
             // Keyed so each background open of this tab replays the flash.
-            <motion.span
-              key={attentionSequence}
-              aria-hidden
-              data-tab-attention
-              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 ring-2 ring-inset ring-brand/70"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: shouldReduceMotion ? [0.5, 0] : [0, 1, 0, 1, 0] }}
-              transition={{ duration: shouldReduceMotion ? 0.2 : 0.9, ease: "easeOut" }}
-              onAnimationComplete={() => clearTabAttention(attentionSequence)}
-            />
-          )}
+            (shouldReduceMotion ? (
+              <span
+                key={attentionSequence}
+                aria-hidden
+                data-tab-attention
+                className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 opacity-60 ring-2 ring-inset ring-brand/70"
+              />
+            ) : (
+              <motion.span
+                key={attentionSequence}
+                aria-hidden
+                data-tab-attention
+                className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 ring-2 ring-inset ring-brand/70"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: [0, 1, 0, 1, 0] }}
+                transition={{ duration: 0.9, ease: "easeOut" }}
+                onAnimationComplete={() => clearTabAttention(attentionSequence)}
+              />
+            ))}
         </motion.div>
       </div>
     </motion.div>
@@ -506,7 +542,27 @@ function NewTabEdgeFeedback({
     setSignal({ tabId: newTabId, sequence: sequenceRef.current });
   }, [newTabId, scrollerRef]);
 
+  useEffect(() => {
+    if (!signal || !shouldReduceMotion) return;
+    const { sequence } = signal;
+    const timer = window.setTimeout(() => {
+      setSignal((current) => (current?.sequence === sequence ? null : current));
+    }, REDUCED_EDGE_FEEDBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [signal, shouldReduceMotion]);
+
   if (!signal) return null;
+
+  if (shouldReduceMotion) {
+    return (
+      <div
+        key={`${signal.tabId}-${signal.sequence}`}
+        aria-hidden
+        data-new-tab-edge-feedback="true"
+        className="pointer-events-none absolute inset-y-1.5 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent opacity-50"
+      />
+    );
+  }
 
   return (
     <motion.div
@@ -514,22 +570,16 @@ function NewTabEdgeFeedback({
       aria-hidden
       data-new-tab-edge-feedback="true"
       className="pointer-events-none absolute inset-y-1.5 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
-      initial={{
-        opacity: shouldReduceMotion ? 0.45 : 0,
-        x: shouldReduceMotion ? 0 : 4,
-      }}
-      animate={{
-        opacity: shouldReduceMotion ? [0.45, 0] : [0, 0.8, 0],
-        x: 0,
-      }}
+      initial={{ opacity: 0, x: 4 }}
+      animate={{ opacity: [0, 0.8, 0], x: 0 }}
       transition={{
         opacity: {
-          duration: shouldReduceMotion ? 0.2 : 0.45,
-          times: shouldReduceMotion ? [0, 1] : [0, 0.18, 1],
+          duration: 0.45,
+          times: [0, 0.18, 1],
           ease: "easeOut",
         },
         x: {
-          duration: shouldReduceMotion ? 0 : 0.18,
+          duration: 0.18,
           ease: TAB_ENTRY_EASE,
         },
       }}
