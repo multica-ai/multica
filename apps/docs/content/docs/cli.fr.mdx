@@ -430,7 +430,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | `config` | Consulter ou modifier la configuration locale du profil CLI actuel |
 | `update`, `version` | Mettre à jour le CLI ou afficher la version |
 
-`multica chat` lit **la session de messagerie externe qu'un agent traite actuellement** ; elle sert surtout aux agents des intégrations de messagerie et n'est pas une commande générale pour parcourir n'importe quelle discussion de l'espace de travail.
+`multica chat history` et `multica chat thread` lisent **la session de messagerie externe qu'un agent traite actuellement** ; elles servent surtout aux agents des intégrations de messagerie et ne permettent pas de parcourir n'importe quelle discussion de l'espace de travail. `multica chat list` liste les sessions de chat que vous avez lancées, et `multica chat archive` / `multica chat restore` en archivent ou restaurent plusieurs à la fois ; ajoutez `--dry-run` pour voir d'abord ce qui changerait.
 
 ## ID et formats de sortie
 
@@ -559,7 +559,7 @@ Migration depuis l'ancien découpage CSV : remplacez `--attachment a,b` par `--a
 | `squad` | `list/get/create/update/delete` | Gérer les squads (`delete` archive) | |
 | | `member list/add/set-role/remove` | Gérer les membres d'un squad | |
 | | `activity <issue-id> <outcome>` | Enregistrer une évaluation du chef | |
-| `chat` | `history`, `thread [id]` | Lire la session de messagerie externe qu'un agent traite actuellement | `--limit`, `--before` |
+| `chat` | `history`, `thread [id]`, `list`, `archive <id>...`, `restore <id>...` | Lire la session de messagerie externe qu'un agent traite actuellement ; lister, archiver et restaurer vos sessions de chat | `--limit`, `--before`, `--status`, `--dry-run` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | Gérer le suivi dans l’exécution de chat en cours ; voir [Réveils de chat](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | [Lister vos notifications](/inbox) sans les marquer comme lues ; `--archived` ou `--snoozed` liste celles-ci à la place | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` ou `json`) ; `--archived` lit toutes les pages |
 | | `count` | Nombre de non-lus dans cet espace de travail et dans chacun de vos espaces ; une exécution d'agent ne voit que son propre espace | `--output` |

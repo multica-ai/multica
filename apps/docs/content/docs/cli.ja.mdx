@@ -430,7 +430,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | `config` | 現在の CLI プロファイルのローカル設定を表示・編集 |
 | `update`、`version` | CLI の更新とバージョンの表示 |
 
-`multica chat` が読み取るのは、**エージェントが現在処理している外部チャットセッション**です。主にチャット統合の中のエージェントが使うもので、任意のワークスペースの会話を閲覧するための汎用コマンドではありません。
+`multica chat history` と `multica chat thread` が読み取るのは、**エージェントが現在処理している外部チャットセッション**です。主にチャット統合の中のエージェントが使うもので、任意のワークスペースの会話を閲覧するためのものではありません。`multica chat list` は自分が始めたチャットセッションを一覧し、`multica chat archive` / `multica chat restore` で複数のセッションをまとめてアーカイブ・復元できます。先に `--dry-run` を付けると変更対象を確認できます。
 
 ## ID と出力形式
 
@@ -551,7 +551,7 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 | `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | |
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
-| `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
+| `chat` | `history`、`thread [id]`、`list`、`archive <id>...`、`restore <id>...` | エージェントが現在処理している外部チャットセッションを読み取り、自分のチャットセッションを一覧・アーカイブ・復元 | `--limit`、`--before`、`--status`、`--dry-run` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 現在のチャット実行の予定を管理。[チャットのウェイクアップ](#chat-wakeups)を参照 | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | 既読にせずに[通知を一覧表示](/inbox)。`--archived` または `--snoozed` ではそれらを一覧表示 | `--unread`、`--issue`、`--since`、`--project`、`--type`、`--output`（`table` または `json`）；`--archived` は全ページを読む |
 | | `count` | このワークスペースと所属する各ワークスペースの未読件数。エージェントの実行では自身のワークスペースのみ | `--output` |

@@ -430,7 +430,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | `config` | 查看或修改当前 CLI profile 的本地配置 |
 | `update`、`version` | 更新 CLI 或查看版本 |
 
-`multica chat` 读取的是**智能体当前正在处理的外部聊天会话**，主要供聊天集成中的智能体使用，不能用来浏览任意工作区对话。
+`multica chat history` 和 `multica chat thread` 读取的是**智能体当前正在处理的外部聊天会话**，主要供聊天集成中的智能体使用，不能用来浏览任意工作区对话。`multica chat list` 列出你发起的聊天会话，`multica chat archive` / `multica chat restore` 可一次归档或恢复多个会话；加 `--dry-run` 可先查看会改动哪些。
 
 ## ID 和输出格式
 
@@ -551,7 +551,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `squad` | `list/get/create/update/delete` | 管理小队（`delete` 为归档） | |
 | | `member list/add/set-role/remove` | 管理小队成员 | |
 | | `activity <issue-id> <outcome>` | 记录队长评价 | |
-| `chat` | `history`、`thread [id]` | 读取智能体当前正在处理的外部聊天会话 | `--limit`、`--before` |
+| `chat` | `history`、`thread [id]`、`list`、`archive <id>...`、`restore <id>...` | 读取智能体当前正在处理的外部聊天会话；列出、归档和恢复你的聊天会话 | `--limit`、`--before`、`--status`、`--dry-run` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 管理当前聊天运行的跟进；见[聊天唤醒](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | [列出通知](/inbox)，不标为已读；`--archived` 或 `--snoozed` 改为列出归档或稍后提醒的内容 | `--unread`、`--issue`、`--since`、`--project`、`--type`、`--output`（`table` 或 `json`）；`--archived` 读取全部分页 |
 | | `count` | 当前工作区及你所在各工作区的未读数；智能体运行时只返回所在工作区 | `--output` |
