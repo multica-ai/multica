@@ -261,7 +261,9 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
-		if descriptionChanged {
+		if liveEditors, live := payload["description_live_editors"].([]handler.DocContributor); descriptionChanged && live {
+			recordLiveDescriptionActivities(ctx, bus, queries, e, issue, liveEditors)
+		} else if descriptionChanged {
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
@@ -331,6 +333,42 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 
 // publishActivityEvent sends an activity:created event for WS broadcasting.
 // Payload matches frontend ActivityCreatedPayload: { issue_id, entry: TimelineEntry }
+// recordLiveDescriptionActivities records a live editing session as one
+// description_updated entry per editor rather than one per autosave: an editor
+// who already has a live entry from the last half hour gets no new one.
+func recordLiveDescriptionActivities(ctx context.Context, bus *events.Bus, queries *db.Queries, e events.Event, issue handler.IssueResponse, editors []handler.DocContributor) {
+	for _, editor := range editors {
+		recent, err := queries.HasRecentLiveDescriptionActivity(ctx, db.HasRecentLiveDescriptionActivityParams{
+			IssueID:   parseUUID(issue.ID),
+			ActorType: util.StrToText(editor.Type),
+			ActorID:   parseUUID(editor.ID),
+		})
+		if err != nil {
+			slog.Error("activity: failed to check live description activity",
+				"issue_id", issue.ID, "error", err)
+			continue
+		}
+		if recent {
+			continue
+		}
+		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+			ID:          dbid.NewV7(),
+			WorkspaceID: parseUUID(issue.WorkspaceID),
+			IssueID:     parseUUID(issue.ID),
+			ActorType:   util.StrToText(editor.Type),
+			ActorID:     parseUUID(editor.ID),
+			Action:      "description_updated",
+			Details:     []byte(`{"live":"true"}`),
+		})
+		if err != nil {
+			slog.Error("activity: failed to record live description change",
+				"issue_id", issue.ID, "error", err)
+			continue
+		}
+		publishActivityEvent(bus, e, activity)
+	}
+}
+
 func publishActivityEvent(bus *events.Bus, original events.Event, activity db.ActivityLog) {
 	actorType := ""
 	if activity.ActorType.Valid {

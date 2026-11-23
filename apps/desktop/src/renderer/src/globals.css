@@ -74,4 +74,5 @@ html[lang="zh-TW"] {
 @source "../../../../../packages/ui/**/*.tsx";
 @source "../../../../../packages/core/**/*.{ts,tsx}";
 @source "../../../../../packages/views/**/*.{ts,tsx}";
+@source "../../../../../packages/ee/**/*.{ts,tsx}";
 @source "./**/*.tsx";

@@ -37,7 +37,7 @@ test.describe("Authentication", () => {
     // Open the workspace dropdown menu
     await openAccountMenu(page);
 
-    await page.getByRole("menuitem", { name: "Log out" }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
 
     await page.waitForURL("**/login", { timeout: 10000, waitUntil: "domcontentloaded" });
     await waitForPageText(page, "Sign in to Multica");

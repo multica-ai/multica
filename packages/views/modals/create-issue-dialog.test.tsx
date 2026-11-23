@@ -37,9 +37,12 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
   },
 }));
 
+const mockSetExpanded = vi.hoisted(() => vi.fn());
 const mockCreateModeStore = {
   lastMode: "agent" as "agent" | "manual",
   setLastMode: mockSetLastMode,
+  expanded: false,
+  setExpanded: mockSetExpanded,
 };
 
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
@@ -92,11 +95,18 @@ vi.mock("./create-issue", () => ({
   ManualCreatePanel: ({
     data,
     onSwitchMode,
+    isExpanded,
+    setIsExpanded,
   }: {
     data?: Record<string, unknown> | null;
     onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+    isExpanded?: boolean;
+    setIsExpanded?: (v: boolean) => void;
   }) => (
     <div>
+      <button type="button" onClick={() => setIsExpanded?.(!isExpanded)}>
+        toggle size
+      </button>
       manual panel · {String(data?.anchor_comment_id ?? "ordinary")} · {data?.source_context_expanded ? "expanded" : "collapsed"}
       <span data-testid="manual-owner">{String(data?.assignee_id ?? "draft")}</span>
       <button type="button" onClick={() => onSwitchMode?.({ parent_issue_id: data?.parent_issue_id })}>
@@ -110,7 +120,8 @@ vi.mock("./create-issue", () => ({
       </button>
     </div>
   ),
-  manualDialogContentClass: () => "manual-dialog-class",
+  manualDialogContentClass: (isExpanded: boolean) =>
+    `manual-dialog-class ${isExpanded ? "manual-expanded" : "manual-compact"}`,
 }));
 
 // `cn` is deliberately NOT mocked here: the whole point of these assertions is
@@ -125,6 +136,24 @@ function contentClass() {
 describe("CreateIssueDialog sizing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCreateModeStore.expanded = false;
+  });
+
+  it("opens at the size the dialog was last left at", () => {
+    mockCreateModeStore.expanded = true;
+    render(<CreateIssueDialog onClose={vi.fn()} initialMode="manual" />);
+    expect(contentClass()).toContain("manual-expanded");
+
+    fireEvent.click(screen.getByRole("button", { name: "toggle size" }));
+    expect(mockSetExpanded).toHaveBeenCalledWith(false);
+  });
+
+  it("opens compact when the dialog was last left compact", () => {
+    render(<CreateIssueDialog onClose={vi.fn()} initialMode="manual" />);
+    expect(contentClass()).toContain("manual-compact");
+
+    fireEvent.click(screen.getByRole("button", { name: "toggle size" }));
+    expect(mockSetExpanded).toHaveBeenCalledWith(true);
   });
 
   it("leaves ordinary create outside the isolated source-context path", () => {

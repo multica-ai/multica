@@ -14,6 +14,10 @@ import type { Theme } from "./themes";
  * folder: `syncFolder` replaces them whenever it changes, and `folders`
  * remembers which folder each one was read from, so a folder that stops
  * passing the checks keeps its last good version.
+ *
+ * Themes installed from the theme store are installed the same way, and
+ * `fromStore` remembers which release each one is, so the store can offer
+ * an update.
  */
 
 export const INSTALLED_THEMES_STORAGE_KEY = "multica_installed_themes";
@@ -30,8 +34,12 @@ interface InstalledThemesState {
   themes: Theme[];
   /** Theme id to the themes-folder entry it came from. */
   folders: Readonly<Record<string, string>>;
+  /** Theme id to the store release it was installed from. */
+  fromStore: Readonly<Record<string, string>>;
   /** Adds the theme, or replaces the installed one with the same id. */
   install: (theme: Theme) => void;
+  /** Installs a theme from the theme store, as release `version`. */
+  installFromStore: (theme: Theme, version: string) => void;
   uninstall: (id: string) => void;
   /** Makes the folder themes match the themes folder's current contents. */
   syncFolder: (entries: readonly ThemeFolderEntry[]) => void;
@@ -40,7 +48,7 @@ interface InstalledThemesState {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-function revalidate(stored: unknown): Pick<InstalledThemesState, "themes" | "folders"> {
+function revalidate(stored: unknown): Pick<InstalledThemesState, "themes" | "folders" | "fromStore"> {
   const record = isRecord(stored) ? stored : {};
   const list = Array.isArray(record.themes) ? record.themes : [];
   const themes: Theme[] = [];
@@ -54,25 +62,51 @@ function revalidate(stored: unknown): Pick<InstalledThemesState, "themes" | "fol
       if (typeof folder === "string" && themes.some((t) => t.id === id)) folders[id] = folder;
     }
   }
-  return { themes, folders };
+  const fromStore: Record<string, string> = {};
+  if (isRecord(record.fromStore)) {
+    for (const [id, version] of Object.entries(record.fromStore)) {
+      if (typeof version === "string" && !(id in folders) && themes.some((t) => t.id === id)) fromStore[id] = version;
+    }
+  }
+  return { themes, folders, fromStore };
 }
+
+const without = <T,>(record: Readonly<Record<string, T>>, id: string): Record<string, T> => {
+  const { [id]: _removed, ...rest } = record;
+  return rest;
+};
 
 export const useInstalledThemesStore = create<InstalledThemesState>()(
   persist(
     (set) => ({
       themes: [],
       folders: {},
+      fromStore: {},
       install: (theme) =>
         set((state) => {
           const others = state.themes.filter((t) => t.id !== theme.id);
-          const { [theme.id]: _replaced, ...folders } = state.folders;
-          return { themes: [...others, theme].slice(-MAX_INSTALLED_THEMES), folders };
+          return {
+            themes: [...others, theme].slice(-MAX_INSTALLED_THEMES),
+            folders: without(state.folders, theme.id),
+            fromStore: without(state.fromStore, theme.id),
+          };
+        }),
+      installFromStore: (theme, version) =>
+        set((state) => {
+          const others = state.themes.filter((t) => t.id !== theme.id);
+          const themes = [...others, theme].slice(-MAX_INSTALLED_THEMES);
+          return {
+            themes,
+            folders: without(state.folders, theme.id),
+            fromStore: { ...state.fromStore, [theme.id]: version },
+          };
         }),
       uninstall: (id) =>
-        set((state) => {
-          const { [id]: _removed, ...folders } = state.folders;
-          return { themes: state.themes.filter((t) => t.id !== id), folders };
-        }),
+        set((state) => ({
+          themes: state.themes.filter((t) => t.id !== id),
+          folders: without(state.folders, id),
+          fromStore: without(state.fromStore, id),
+        })),
       syncFolder: (entries) =>
         set((state) => {
           const fromFolder = new Map<string, Theme>();
@@ -97,13 +131,16 @@ export const useInstalledThemesStore = create<InstalledThemesState>()(
           return {
             themes,
             folders: Object.fromEntries(Object.entries(folders).filter(([id]) => kept.has(id))),
+            fromStore: Object.fromEntries(
+              Object.entries(state.fromStore).filter(([id]) => kept.has(id) && !(id in folders)),
+            ),
           };
         }),
     }),
     {
       name: INSTALLED_THEMES_STORAGE_KEY,
       storage: createJSONStorage(() => defaultStorage),
-      partialize: (state) => ({ themes: state.themes, folders: state.folders }),
+      partialize: (state) => ({ themes: state.themes, folders: state.folders, fromStore: state.fromStore }),
       merge: (persisted, current) => ({ ...current, ...revalidate(persisted) }),
     },
   ),

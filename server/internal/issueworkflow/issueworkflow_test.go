@@ -292,6 +292,88 @@ func TestBriefNamesStepCommandsAndHandlers(t *testing.T) {
 	}
 }
 
+func TestBriefOmitsMovesAtTerminalStatuses(t *testing.T) {
+	for _, status := range []string{"done", "cancelled"} {
+		for _, legacy := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/legacy=%v", status, legacy), func(t *testing.T) {
+				brief := Brief(BriefInput{
+					Workflow:           blockedOnlyDefault(),
+					StatusKey:          status,
+					IssueIdentifier:    "MUL-7",
+					LegacyRuntimeRules: legacy,
+				})
+				for _, unwanted := range []string{"Your moves:", "multica issue status", "Before your run ends, either run one of them"} {
+					if strings.Contains(brief, unwanted) {
+						t.Fatalf("terminal brief carries %q:\n%s", unwanted, brief)
+					}
+				}
+				for _, want := range []string{
+					"- `" + status + "`   ← current",
+					"Leave the issue at this status unless a member explicitly asks you to reopen it.",
+				} {
+					if !strings.Contains(brief, want) {
+						t.Errorf("terminal brief is missing %q:\n%s", want, brief)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestBriefKeepsConfiguredMovesAtCustomTerminalStatus(t *testing.T) {
+	verifying := func(next, back string) Definition {
+		def := Definition{Name: "Release", Steps: stepsFor(ArrangeKeys([]string{"in_progress", "verifying", "blocked"}))}
+		return withHandoffs(def, []Step{{
+			StatusKey: "verifying", Handler: Handler{Type: HandlerAgent, ID: testAgentID},
+			Instructions: "Check the deploy.", NextStatusKey: next, BackStatusKey: back,
+		}})
+	}
+	for _, tc := range []struct {
+		name, next, back string
+		want, unwanted   []string
+	}{
+		{
+			name: "next and back", next: "done", back: "in_progress",
+			want: []string{
+				"Step done      → multica issue status DEP-42 done\n",
+				"Needs changes  → multica issue status DEP-42 in_progress\n",
+				"Can't proceed  → comment why, then run Needs changes\n",
+			},
+		},
+		{
+			// Without a configured Next, the status after verifying on the
+			// board (done) is not offered.
+			name: "back only", back: "in_progress",
+			want:     []string{"Needs changes  → multica issue status DEP-42 in_progress\n"},
+			unwanted: []string{"Step done"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			brief := Brief(BriefInput{
+				Workflow:        verifying(tc.next, tc.back),
+				StatusKey:       "verifying",
+				IssueIdentifier: "DEP-42",
+				EffectiveStatus: func(key string) string {
+					if key == "verifying" {
+						return "done"
+					}
+					return key
+				},
+			})
+			for _, want := range append([]string{`You are handling the "verifying" step of DEP-42.`, "> Check the deploy.\n"}, tc.want...) {
+				if !strings.Contains(brief, want) {
+					t.Errorf("brief is missing %q:\n%s", want, brief)
+				}
+			}
+			for _, unwanted := range append([]string{"blocked, then comment why", "has reached the terminal status"}, tc.unwanted...) {
+				if strings.Contains(brief, unwanted) {
+					t.Errorf("brief carries %q:\n%s", unwanted, brief)
+				}
+			}
+		})
+	}
+}
+
 func TestBriefForMovedStep(t *testing.T) {
 	for _, current := range []string{"implement", "todo"} {
 		for _, observer := range []bool{false, true} {

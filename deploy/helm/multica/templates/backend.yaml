@@ -1,6 +1,7 @@
 {{- $backendImageTag := default .Chart.AppVersion .Values.images.backend.tag -}}
 {{- /* `helm upgrade --reuse-values` from a chart without extraCACerts carries no such key. */ -}}
 {{- $extraCACerts := (default dict .Values.backend.extraCACerts).configMap -}}
+{{- $collabEnabled := include "multica.collab.enabled" . -}}
 {{- if .Values.backend.uploads.persistence.enabled -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -74,7 +75,7 @@ spec:
                 name: {{ .Release.Name }}-config
             - secretRef:
                 name: {{ .Values.existingSecret }}
-          {{- if or (not .Values.postgres.external.enabled) $extraCACerts }}
+          {{- if or (not .Values.postgres.external.enabled) $extraCACerts $collabEnabled }}
           env:
             {{- if not .Values.postgres.external.enabled }}
             - name: DATABASE_URL
@@ -86,6 +87,18 @@ spec:
             # so the system directory stays in it alongside the extra CAs.
             - name: SSL_CERT_DIR
               value: /etc/ssl/certs:/etc/multica/ca-certs
+            {{- end }}
+            {{- if $collabEnabled }}
+            - name: COLLAB_INTERNAL_URL
+              value: {{ printf "http://%s:8095" (include "multica.collab.fullname" .) | quote }}
+            # Optional so a missing key leaves live editing off instead of
+            # keeping the API from starting.
+            - name: COLLAB_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: COLLAB_SECRET
+                  optional: true
             {{- end }}
           {{- end }}
           {{- if or .Values.backend.uploads.persistence.enabled $extraCACerts }}

@@ -39,7 +39,7 @@ import { useViewBaseline } from "../surface/view-baseline-context";
 import { filterIssues, type IssueFilters } from "../utils/filter";
 import { getMoveAnchors } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -233,7 +233,7 @@ interface LaneGroup {
   title: string;
   identifier: string;
   /** Parent issue (parent grouping only) — drives the open-parent link + status icon in the header. */
-  parentIssue: Pick<Issue, "id" | "status"> | null;
+  parentIssue: Pick<Issue, "id" | "identifier" | "status"> | null;
   /** Project metadata (project grouping only) — drives the icon in the header. */
   project: Project | null;
   /** Actor (assignee grouping only) — drives the avatar in the header. */
@@ -576,7 +576,7 @@ function buildServerLanes(
           (unavailable ? labels.otherParents : labels.noParent),
         identifier: value.parent?.identifier ?? "",
         parentIssue: value.parent
-          ? { id: value.parent.id, status: value.parent.status as IssueStatus }
+          ? { id: value.parent.id, identifier: value.parent.identifier, status: value.parent.status as IssueStatus }
           : null,
         project: null,
         actor: null,
@@ -670,6 +670,8 @@ function SwimLaneViewImpl({
     // Extra children are not part of the server-grouped page yet, so apply
     // the same running-task issue ids returned by `/api/working-agents`.
     agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
+    agentIdleFilter: activeFiltersProp?.agentIdleFilter ?? false,
+    activeIssueIds: activeFiltersProp?.activeIssueIds,
     runningIssueIds: activeFiltersProp?.runningIssueIds,
     unreadFilter: activeFiltersProp?.unreadFilter ?? false,
     unreadIssueIds: activeFiltersProp?.unreadIssueIds,
@@ -990,10 +992,23 @@ function SwimLaneViewImpl({
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   // The outer scroll box is the customScrollParent for the lane Virtuoso.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const laneListRef = useRef<HTMLDivElement>(null);
   // Pull-based scroll restoration (MUL-4741): same wiring as board/list/
   // issue-detail — ref-attach assigns the saved offset pre-paint, and the
-  // lane Virtuoso is born at it via initialScrollTop.
+  // lane Virtuoso starts at it via an initial item offset. Unlike
+  // initialScrollTop, this also restores a single tall lane.
   const restoredScrollTop = useRestoredScrollOffset("swimlane");
+  const initialLaneLocation = useMemo(() => {
+    const list = laneListRef.current;
+    if (restoredScrollTop === undefined || !scrollEl || !list) return 0;
+    // Item offsets are relative to the lane list, while the memento includes
+    // the outer padding and sticky status header above it.
+    const listTop =
+      list.getBoundingClientRect().top -
+      scrollEl.getBoundingClientRect().top +
+      scrollEl.scrollTop;
+    return { index: 0, offset: restoredScrollTop - listTop };
+  }, [restoredScrollTop, scrollEl]);
   const restoreScrollRef = useRestoredScrollRef("swimlane");
   const attachScroller = useCallback(
     (el: HTMLDivElement | null) => {
@@ -1537,25 +1552,27 @@ function SwimLaneViewImpl({
               settled after a remount, so the lane area never paints blank; once
               it's set, mount the Virtuoso with a matching `initialItemCount` to
               survive the measurement frame (MUL-4750). */}
-          {scrollEl ? (
-            <Virtuoso
-              customScrollParent={scrollEl}
-              data={orderedLanes}
-              computeItemKey={computeLaneKey}
-              initialScrollTop={restoredScrollTop}
-              initialItemCount={Math.min(orderedLanes.length, SWIMLANE_LANE_SEED_COUNT)}
-              increaseViewportBy={{ top: 600, bottom: 600 }}
-              components={laneComponents}
-              itemContent={renderLane}
-            />
-          ) : (
-            <VirtuosoSeed
-              data={orderedLanes}
-              itemContent={renderLane}
-              computeItemKey={computeLaneKey}
-              count={SWIMLANE_LANE_SEED_COUNT}
-            />
-          )}
+          <div ref={laneListRef}>
+            {scrollEl ? (
+              <Virtuoso
+                customScrollParent={scrollEl}
+                data={orderedLanes}
+                computeItemKey={computeLaneKey}
+                initialTopMostItemIndex={initialLaneLocation}
+                initialItemCount={Math.min(orderedLanes.length, SWIMLANE_LANE_SEED_COUNT)}
+                increaseViewportBy={{ top: 600, bottom: 600 }}
+                components={laneComponents}
+                itemContent={renderLane}
+              />
+            ) : (
+              <VirtuosoSeed
+                data={orderedLanes}
+                itemContent={renderLane}
+                computeItemKey={computeLaneKey}
+                count={SWIMLANE_LANE_SEED_COUNT}
+              />
+            )}
+          </div>
         </SortableContext>
         </div>
       </div>
@@ -1705,7 +1722,7 @@ function DraggableSwimLane({
             content={t(($) => $.swimlane.open_parent)}
             trigger={
               <AppLink
-                href={paths.issueDetail(lane.parentIssue.id)}
+                href={paths.issueDetail(issueRouteRef(lane.parentIssue))}
                 aria-label={t(($) => $.swimlane.open_parent)}
                 className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               >

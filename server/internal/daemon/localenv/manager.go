@@ -40,7 +40,8 @@ const (
 	outputFile = "output.log"
 
 	// An ended environment stays in the snapshot long enough to be reported
-	// as ended, then only its log is kept.
+	// as ended. Its record stays on disk with its log, so it can still be
+	// restarted or read from the sidebar.
 	endedRetention = time.Hour
 	logRetention   = 7 * 24 * time.Hour
 	readyTimeout   = 10 * time.Minute
@@ -54,6 +55,13 @@ var ErrUnsupported = errors.New("local environments are not supported on this pl
 // ErrNotFound means no live environment of that name belongs to the task.
 var ErrNotFound = errors.New("no running environment with that name")
 
+// ErrUnknown means this daemon has no record of the environment, or no
+// longer keeps it.
+var ErrUnknown = errors.New("this machine no longer has a record of the environment")
+
+// ErrGone means the code an environment ran from has been cleaned up.
+var ErrGone = errors.New("the code this environment ran from has been cleaned up")
+
 // Task identifies who asks for an environment. RootDir is the task's own
 // directory; an environment can only be started from inside it.
 type Task struct {
@@ -65,10 +73,14 @@ type Task struct {
 
 // Environment is one environment as the daemon reports and the CLI prints it.
 type Environment struct {
-	Key       string     `json:"key"`
-	TaskID    string     `json:"task_id"`
-	IssueID   string     `json:"issue_id"`
-	Source    string     `json:"source"`
+	Key     string `json:"key"`
+	TaskID  string `json:"task_id"`
+	IssueID string `json:"issue_id"`
+	Source  string `json:"source"`
+	Kind    string `json:"kind,omitempty"`
+	// Repo names the checkout a declared environment runs from, as
+	// DiscoverDeclared does, so two repositories can declare the same name.
+	Repo      string     `json:"repo,omitempty"`
 	Name      string     `json:"name"`
 	Label     string     `json:"label"`
 	URL       string     `json:"url"`
@@ -78,10 +90,17 @@ type Environment struct {
 	StartedAt time.Time  `json:"started_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	LogPath   string     `json:"log_path,omitempty"`
+	// Excerpt is the last lines a crashed environment printed, so the
+	// sidebar can say why it crashed; the server redacts it before storing.
+	Excerpt string `json:"excerpt,omitempty"`
 	// Dir is the directory the environment runs from, kept local so GC can
 	// leave it in place; it is never reported.
 	Dir  string `json:"-"`
 	pgid int
+	// pid names a detected environment's process, for Stop and Focus; bundle
+	// names a detected app for Focus. Like Dir they never leave this machine.
+	pid    int
+	bundle string
 }
 
 // record is what survives a daemon restart, in <dir>/<id>/state.json.
@@ -101,9 +120,14 @@ type record struct {
 	Path        string     `json:"path"`
 	State       string     `json:"state"`
 	Detail      string     `json:"detail"`
+	Excerpt     string     `json:"excerpt,omitempty"`
 	StartedAt   time.Time  `json:"started_at"`
 	ExpiresAt   time.Time  `json:"expires_at"`
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
+	// Adopted lists the sessions of environments of the same checkout that
+	// ended while this one ran. What is left of them, such as an API both
+	// used, is still in use and still declared.
+	Adopted []int `json:"adopted,omitempty"`
 }
 
 type entry struct {
@@ -164,12 +188,20 @@ func (m *Manager) Load() error {
 		if err := json.Unmarshal(data, &rec); err != nil || rec.ID != d.Name() {
 			continue
 		}
-		e := &entry{rec: rec}
-		if e.live() && !groupAlive(rec.PID) {
+		if rec.EndedAt != nil && m.now().Sub(*rec.EndedAt) > endedRetention {
+			continue
+		}
+		m.envs[rec.ID] = &entry{rec: rec}
+	}
+	// Every record is loaded before any is ended, so a dead environment's
+	// sessions can pass to a live one of the same checkout.
+	for _, e := range m.envs {
+		if e.live() && !groupAlive(e.rec.PID) {
 			m.endLocked(e, StateExited, "stopped while the daemon was not running")
 		}
-		m.envs[rec.ID] = e
-		if e.live() && rec.State == StateStarting {
+	}
+	for _, e := range m.envs {
+		if e.live() && e.rec.State == StateStarting {
 			go m.probe(e)
 		}
 	}
@@ -339,7 +371,6 @@ func (m *Manager) Tick() {
 			m.endLocked(e, StateExited, "")
 		case !e.live() && now.Sub(*e.rec.EndedAt) > endedRetention:
 			delete(m.envs, id)
-			os.Remove(filepath.Join(m.dir, id, stateFile))
 		}
 	}
 	sweepLogs := now.Sub(m.lastLogSwep) > time.Hour
@@ -355,17 +386,26 @@ func (m *Manager) Tick() {
 	}
 }
 
-// Owns reports whether pgid is the process group of a live environment this
-// manager started, so detection does not list it a second time.
-func (m *Manager) Owns(pgid int) bool {
+// Owner returns the key of the live environment that pid belongs to, or ""
+// when it belongs to none, so detection does not list an environment's own
+// servers a second time. A process belongs to an environment through its
+// process group or, once a script has detached it into a group of its own,
+// through its session.
+func (m *Manager) Owner(pid int) string {
+	pgid, sid := processGroup(pid), processSession(pid)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.envs {
-		if e.live() && e.rec.PID == pgid {
-			return true
+		if !e.live() {
+			continue
+		}
+		for _, leader := range append([]int{e.rec.PID}, e.rec.Adopted...) {
+			if leader > 0 && (leader == pgid || leader == sid) {
+				return "config:" + e.rec.ID
+			}
 		}
 	}
-	return false
+	return ""
 }
 
 func (e *entry) leaderGone() bool {
@@ -506,7 +546,31 @@ func (m *Manager) endLocked(e *entry, state, detail string) {
 	e.rec.State = state
 	e.rec.Detail = detail
 	e.rec.EndedAt = &now
+	if state == StateExited {
+		e.rec.Excerpt = logExcerpt(filepath.Join(m.dir, e.rec.ID, outputFile))
+	}
 	m.persistLocked(e)
+	if heir := m.heirLocked(e); heir != nil {
+		heir.rec.Adopted = append(heir.rec.Adopted, e.rec.PID)
+		heir.rec.Adopted = append(heir.rec.Adopted, e.rec.Adopted...)
+		m.persistLocked(heir)
+	}
+}
+
+// heirLocked picks the live environment that takes over an ended one's
+// sessions: the earliest started from the same checkout, for the same owner.
+func (m *Manager) heirLocked(ended *entry) *entry {
+	owner := Task{TaskID: ended.rec.TaskID, IssueID: ended.rec.IssueID, WorkspaceID: ended.rec.WorkspaceID}
+	var heir *entry
+	for _, e := range m.envs {
+		if e == ended || !e.live() || e.rec.RepoRoot != ended.rec.RepoRoot || !sameOwner(e.rec, owner) {
+			continue
+		}
+		if heir == nil || e.rec.StartedAt.Before(heir.rec.StartedAt) {
+			heir = e
+		}
+	}
+	return heir
 }
 
 func (m *Manager) persistLocked(e *entry) {
@@ -529,8 +593,8 @@ func (m *Manager) viewLocked(e *entry) Environment {
 	rec := e.rec
 	view := Environment{
 		Key: "config:" + rec.ID, TaskID: rec.TaskID, IssueID: rec.IssueID,
-		Source: SourceConfig, Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
-		State: rec.State, Detail: rec.Detail, StartedAt: rec.StartedAt,
+		Source: SourceConfig, Kind: KindServer, Repo: filepath.Base(rec.RepoRoot), Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
+		State: rec.State, Detail: rec.Detail, Excerpt: rec.Excerpt, StartedAt: rec.StartedAt,
 		LogPath: filepath.Join(m.dir, rec.ID, outputFile), Dir: rec.RepoRoot, pgid: rec.PID,
 	}
 	if e.live() {

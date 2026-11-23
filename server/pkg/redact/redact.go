@@ -47,6 +47,12 @@ var patterns = []secretPattern{
 	// GitLab personal access tokens
 	{regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`), "[REDACTED GITLAB TOKEN]"},
 
+	// Multica user PATs, daemon tokens, task tokens, and cloud-node PATs.
+	// Preserve short JSON control escapes that act as token separators.
+	// The space-free placeholder lets the generic TOKEN= rule below
+	// replace it in one piece.
+	{regexp.MustCompile(`(?:\b|(\\[bfnrt]))(?:mat|mul|mdt|mcn)_[0-9a-fA-F]{40}\b`), "${1}[REDACTED_MULTICA_TOKEN]"},
+
 	// Google API keys always start with the AIza prefix and are 39 chars total
 	// (AIza + 35). Capture and restore the trailing delimiter so keys ending in
 	// a non-word character such as '-' are still redacted.

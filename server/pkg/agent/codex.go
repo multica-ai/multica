@@ -89,10 +89,10 @@ const (
 	// chunk rather than split at an arbitrary byte boundary.
 	codexAgentMessageAggregateBytes = agentStreamMaxLineBytes / 64
 	// codexAgentMessageFlushInterval is how long pending agent text may wait
-	// before the next delta hands it off. It matches the daemon's 500 ms report
-	// batch, so a long answer streams at the rate the server can show it while
-	// a token burst still costs at most one channel slot per interval.
-	codexAgentMessageFlushInterval = 500 * time.Millisecond
+	// before the next delta hands it off. Kept at 50 ms so streamed tokens reach
+	// the daemon reporter without perceptible stall while bursts still coalesce
+	// into bounded channel entries.
+	codexAgentMessageFlushInterval = 50 * time.Millisecond
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
 	// a context-cancel kill. A clean exit lets codex run its shutdown path and
@@ -1080,6 +1080,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 }
 
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
+	if b.cfg.WarmPool != nil {
+		return b.executeWarmOnce(ctx, prompt, opts, attempt)
+	}
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "codex"
@@ -1285,6 +1288,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		notificationProtocol:     "unknown",
 		acceptNotification:       turnNotificationGate.accept,
 		guardianRateLimitCircuit: &codexGuardianRateLimitCircuit{},
+		rateLimits:               newRateLimitTracker(opts.OnRateLimits),
 		onGuardianRateLimit: func() {
 			guardianRateLimitTripped.Store(true)
 			b.cfg.Logger.Warn("codex Guardian approval rate-limit circuit opened",
@@ -1569,6 +1573,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			finalStatus = "failed"
 			stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
 			finalError = err.Error()
+			// No turn has started, so a reaped process tree makes the timeout safe
+			// for the daemon's bounded retry path.
+			retrySafe := timedOut && cleanupConfirmed
+			if retrySafe {
+				finalStatus = "timeout"
+			} else if timedOut {
+				finalError += "; retry suppressed: process cleanup/reap not confirmed"
+			}
 			if c.threadSetupMethod != "" {
 				classification := classifyCodexStartupStderr(stderrTail, timedOut)
 				b.cfg.Logger.Warn("codex lifecycle",
@@ -1583,7 +1595,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"latency_ms", time.Since(c.threadSetupStarted).Milliseconds(),
 					"cleanup_confirmed", cleanupConfirmed,
 					"reaped", cleanupConfirmed,
-					"retry_safe", false,
+					"retry_safe", retrySafe,
 					"retry_attempted", false,
 					"stderr_model_refresh_failure_count", classification.modelRefreshFailure,
 					"stderr_model_refresh_timeout_count", classification.modelRefreshTimeout,
@@ -1617,9 +1629,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// Whether that notice asks the agent to tell the USER is the caller's
 		// call, not ours: it depends on whether this surface's conversation is
 		// still readable, which this package cannot see (MUL-5722).
+		turnPrompt := b.skillTurnPrompt(runCtx, c, prompt, opts)
 		turnParams := map[string]any{
 			"threadId": threadID,
-			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
+			"input":    codexTurnInput(turnPrompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
 		}
 		// Per-turn reasoning override. Mirrors the per-thread injection in
 		// startOrResumeThread; keeping both in sync is enforced by the
@@ -2404,9 +2417,12 @@ func describeCodexSemanticActivity(msg Message) string {
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg                    Config
-	stdin                  interface{ Write([]byte) (int, error) }
-	mu                     sync.Mutex
+	cfg   Config
+	stdin interface{ Write([]byte) (int, error) }
+	mu    sync.Mutex
+	// hookMu serializes turn-state attachment/detachment on pooled warm clients
+	// against the persistent stdout reader goroutine's notification dispatch.
+	hookMu                 sync.Mutex
 	nextID                 int
 	pending                map[int]*pendingRPC
 	processDone            chan struct{}
@@ -2438,6 +2454,9 @@ type codexClient struct {
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
 	onGuardianRateLimit      func()
+	// rateLimits merges account/rateLimits/updated notifications; nil when
+	// the caller does not collect rate limits.
+	rateLimits *rateLimitTracker
 	// onFinalAnswer fires only for an agent message the app-server itself
 	// labelled `phase: "final_answer"` — the turn's deliverable, as opposed to
 	// the intermediate agent messages that narrate work between tool calls.
@@ -2614,6 +2633,10 @@ type pendingRPC struct {
 type rpcResult struct {
 	result json.RawMessage
 	err    error
+	// processExited marks the error codexClient.markProcessExited hands to
+	// every pending request. It is not an answer from the server, so a caller
+	// whose context has already ended reports that instead.
+	processExited bool
 }
 
 type codexHandshakeTimeoutError struct {
@@ -2769,11 +2792,16 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 
 	select {
 	case res := <-pr.ch:
+		if res.processExited && requestCtx.Err() != nil {
+			return nil, codexRequestContextError(requestCtx)
+		}
 		return res.result, res.err
 	case <-processDone:
 		select {
 		case res := <-pr.ch:
-			return res.result, res.err
+			if !res.processExited {
+				return res.result, res.err
+			}
 		default:
 		}
 		c.mu.Lock()
@@ -2852,7 +2880,7 @@ func (c *codexClient) markProcessExited(err error) {
 		}
 	}
 	for id, pr := range c.pending {
-		pr.ch <- rpcResult{err: err}
+		pr.ch <- rpcResult{err: err, processExited: true}
 		delete(c.pending, id)
 	}
 }
@@ -2918,14 +2946,18 @@ func (c *codexClient) handleLine(line string) {
 		}
 		// Server request (has id + method)
 		if _, hasMethod := raw["method"]; hasMethod {
+			c.hookMu.Lock()
 			c.handleServerRequest(raw)
+			c.hookMu.Unlock()
 			return
 		}
 	}
 
 	// Notification (no id, has method)
 	if _, hasMethod := raw["method"]; hasMethod {
+		c.hookMu.Lock()
 		c.handleNotification(raw)
+		c.hookMu.Unlock()
 	}
 }
 
@@ -3031,6 +3063,14 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	var params map[string]any
 	if p, ok := raw["params"]; ok {
 		_ = json.Unmarshal(p, &params)
+	}
+	// Rate limits belong to the account, not to a thread or turn, so they are
+	// read before the thread filter and the current-turn gate. The
+	// notification then continues down the usual path unchanged.
+	if method == "account/rateLimits/updated" {
+		if update, ok := parseCodexRateLimitsUpdated(params); ok {
+			c.rateLimits.apply(update)
+		}
 	}
 	// Filter multiplexed subagent threads before the current-turn gate. The
 	// gate mutates started/turnID on turn/started; letting another thread reach

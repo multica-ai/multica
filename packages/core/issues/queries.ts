@@ -193,9 +193,6 @@ export const issueKeys = {
   /** PREFIX — the picker hook appends a signature of the prospective write. */
   issueTriggerPreview: (signature: string) =>
     [...issueKeys.issueTriggerPreviewAll(), signature] as const,
-  reactionsAll: () => ["issues", "reactions"] as const,
-  reactions: (issueId: string) =>
-    [...issueKeys.reactionsAll(), issueId] as const,
   subscribersAll: () => ["issues", "subscribers"] as const,
   subscribers: (issueId: string) =>
     [...issueKeys.subscribersAll(), issueId] as const,
@@ -207,8 +204,6 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
-  deliverables: (issueId: string) =>
-    [...issueKeys.attachments(issueId), "deliverables"] as const,
   /** Prefix for reconnects and task events without an issue scope. */
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
@@ -236,6 +231,7 @@ export type MyIssuesFilter = Pick<
   | "assignee_ids"
   | "assignee_types"
   | "creator_id"
+  | "created_by_user_id"
   | "project_id"
   | "involves_user_id"
 >;
@@ -675,6 +671,46 @@ export function issueTimelineOptions(issueId: string) {
   });
 }
 
+/**
+ * The issue a link names by UUID or identifier, also cached under its UUID,
+ * the key the issue page reads it by once an identifier URL has resolved
+ * through the identifier-keyed entry (`useCanonicalIssue`).
+ */
+export async function fetchIssueByRef(qc: QueryClient, wsId: string, ref: string): Promise<Issue> {
+  const issue = await qc.fetchQuery(issueDetailOptions(wsId, ref));
+  if (issue.id !== ref) {
+    qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) => old ?? issue);
+  }
+  return issue;
+}
+
+/**
+ * Warm what the issue page holds its first paint and a comment landing on: the
+ * issue, its timeline, its runs and its sub-issues, so opening it renders from
+ * cache instead of waiting on a request chain. All four are fetched in
+ * parallel. With an `identifier`, the issue is fetched under the key an
+ * identifier URL resolves through and mirrored to its UUID, so a link to that
+ * URL warming the same issue shares the request. prefetchQuery honours each
+ * query's staleTime: a warm entry costs nothing. `runs: false` leaves out the
+ * runs, for a viewer whose issue page shows none (a guest).
+ */
+export async function prefetchIssuePage(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  identifier?: string | null,
+  { runs = true }: { runs?: boolean } = {},
+): Promise<void> {
+  await Promise.all([
+    identifier
+      ? fetchIssueByRef(qc, wsId, identifier).catch(() => undefined)
+      : qc.prefetchQuery(issueDetailOptions(wsId, issueId)),
+    qc.prefetchQuery(issueTimelineOptions(issueId)),
+    runs && qc.prefetchQuery(issueTasksOptions(issueId)),
+    qc.prefetchQuery(childIssuesOptions(wsId, issueId)),
+  ]);
+}
+
 export function issueCommentThreadOptions(issueId: string, commentId: string) {
   return queryOptions({
     queryKey: issueKeys.commentThread(issueId, commentId),
@@ -688,16 +724,6 @@ export function issueCommentThreadOptions(issueId: string, commentId: string) {
   });
 }
 
-export function issueReactionsOptions(issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.reactions(issueId),
-    queryFn: async () => {
-      const issue = await api.getIssue(issueId);
-      return issue.reactions ?? [];
-    },
-  });
-}
-
 export function issueSubscribersOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.subscribers(issueId),
@@ -706,13 +732,21 @@ export function issueSubscribersOptions(issueId: string) {
 }
 
 // Reports arrive over realtime; the interval only re-derives "unreachable"
-// once a daemon goes quiet, which no event announces.
+// once a daemon goes quiet, and a command expiring when its machine never
+// answers, which no event announces.
 export function issueEnvironmentsOptions(wsId: string, issueId: string) {
   return queryOptions({
     queryKey: issueKeys.environments(wsId, issueId),
     queryFn: () => api.listIssueEnvironments(issueId),
     enabled: !!wsId && !!issueId,
-    refetchInterval: 60_000,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      const pending = !!data && (
+        data.pending_starts.length > 0 ||
+        data.environments.some((env) => env.pending_action?.status === "pending")
+      );
+      return pending ? 5_000 : 60_000;
+    },
   });
 }
 
@@ -734,10 +768,3 @@ export function issueAttachmentsOptions(issueId: string) {
   });
 }
 
-/** Complete attachment inventory; independent of the bounded discussion feed. */
-export function issueDeliverablesOptions(issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.deliverables(issueId),
-    queryFn: () => api.listIssueDeliverables(issueId),
-  });
-}

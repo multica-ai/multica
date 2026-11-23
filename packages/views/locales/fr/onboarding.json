@@ -18,14 +18,14 @@
     "headline_line2": "dans",
     "headline_emphasis": "un seul espace de travail.",
     "lede": "Confiez-leur du travail comme à un collègue — ils s'en saisissent, mettent à jour le statut et commentent une fois terminé.",
-    "lede_web": "L'application de bureau embarque le runtime — rien à installer. Continuez sur le web pour connecter votre propre CLI.",
+    "lede_web": "L'application de bureau inclut le runtime local — aucune configuration CLI requise. Continuez sur le web pour connecter votre propre CLI.",
     "download_desktop": "Télécharger l'application de bureau",
     "continue_on_web": "Continuer sur le web",
     "start_exploring": "Commencer l'exploration",
     "skip_existing": "Je l'ai déjà fait",
     "illustration": {
       "card1_actor_name": "Vous",
-      "card1_actor_initial": "N",
+      "card1_actor_initial": "V",
       "card1_body_prefix": " peut-il rédiger un court billet de lancement ? À partir des conclusions d'entretiens de ",
       "card1_body_suffix": ".",
       "card1_mention_content": "@Content Agent",
@@ -224,7 +224,7 @@
   },
   "errors": {
     "skip_failed": "Échec de la finalisation de la prise en main",
-    "guide_failed": "Le guide de runtime n'a pas été créé. Veuillez réessayer.",
+    "guide_failed": "Impossible de créer le guide de configuration. Veuillez réessayer.",
     "mika_setup_failed": "Impossible de démarrer votre espace de travail Mika"
   },
   "mika_intro": {

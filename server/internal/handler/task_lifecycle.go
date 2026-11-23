@@ -203,6 +203,11 @@ func (h *Handler) RerunTaskByUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
+	// A run in a private project the caller cannot see is a missing run
+	// (MUL-8472), before its issue's own lookup can answer for it.
+	if !h.requireTaskVisible(w, r, uuidToString(workspaceID), source, http.StatusNotFound, "task not found") {
+		return
+	}
 	if !source.IssueID.Valid {
 		writeError(w, http.StatusBadRequest, "only issue-linked runs can be rerun with this endpoint")
 		return
@@ -265,6 +270,7 @@ func (h *Handler) rerunIssue(w http.ResponseWriter, r *http.Request, issue db.Is
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	h.archiveActorInboxOnAgentTrigger(r.Context(), workspaceID, uuidToString(issue.ID), actorType, actorID)
 	resp := taskToResponse(*task, uuidToString(issue.WorkspaceID))
 	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
 	writeJSON(w, http.StatusAccepted, resp)
@@ -294,9 +300,16 @@ func (h *Handler) RetrySourceContextQuickCreate(w http.ResponseWriter, r *http.R
 	canInvoke := func(agent db.Agent) bool {
 		return h.canInvokeAgent(r.Context(), agent, "member", userID, userID, uuidToString(workspaceID))
 	}
-	task, err := h.TaskService.RetrySourceContextQuickCreate(r.Context(), workspaceID, requesterID, taskID, canInvoke)
-	if writeIssueLimitReached(w, err) {
-		return
+	var task *db.AgentTaskQueue
+	hidden, err := h.taskInHiddenProject(r, workspaceID, taskID)
+	if err == nil {
+		if hidden {
+			// The requester may have lost access to the project the context
+			// was captured from since (MUL-8472); the run is gone for them.
+			err = service.ErrSourceContextRetryUnavailable
+		} else {
+			task, err = h.TaskService.RetrySourceContextQuickCreate(r.Context(), workspaceID, requesterID, taskID, canInvoke)
+		}
 	}
 	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)

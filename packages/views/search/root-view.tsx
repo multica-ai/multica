@@ -1,26 +1,34 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Clock, Loader2, MessageSquare, Sparkles, SquarePen, UserPlus, Zap, type IconComponent } from "@multica/ui/icons";
+import { Clock, FileText, Layers, Loader2, MessageSquare, Sparkles, SquarePen, UserPlus, Zap, type IconComponent } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
 import { useQuery } from "@tanstack/react-query";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { inboxUnreadSummaryOptions, unreadWorkspaceIds } from "@multica/core/inbox/queries";
-import { paths, useWorkspacePaths } from "@multica/core/paths";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { issueViewTarget } from "@multica/core/issue-views/view-target";
+import { paths, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
+import { projectListOptions } from "@multica/core/projects/queries";
 import type { InboxWorkspaceUnread } from "@multica/core/types";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
+import { useIsGuest } from "@multica/core/permissions";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../common/actor-avatar";
+import { BUILTIN_VIEW_ICON, useBuiltinViewNavigation } from "../issue-views/builtin-views";
 import { routeIconForPath } from "../layout/route-icon-components";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { useT } from "../i18n";
 import { HighlightText } from "./highlight-text";
+import { stripMentionMarkdown } from "../issues/utils/strip-mention-markdown";
 import { useIssueTargetWriter } from "./issue-target";
 import { usePalette } from "./palette-context";
 import { CommandGroupView, CommandRow, PaletteGroup, ROW_CLASS, ROW_ICON_CLASS, RowHint } from "./rows";
 import { ActorRow, AgentPresenceText, IssueResultRow, ObjectRow, ProjectResultRow } from "./result-rows";
 import type { IssueTarget } from "./types";
+import type { PaletteView } from "./use-object-search";
 import type { BestMatch, HandToAgentSeed, RootModel } from "./use-root-model";
 
 const EMPTY_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
@@ -29,11 +37,13 @@ const EMPTY_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 const TYPE_ORDER = [
   "context",
   "pages",
+  "views",
   "commands",
   "agents",
   "squads",
   "members",
   "projects",
+  "docs",
   "issues",
   "autopilots",
   "chats",
@@ -54,6 +64,8 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
   const p = useWorkspacePaths();
   const { data: unreadSummary = EMPTY_UNREAD_SUMMARY } = useQuery(inboxUnreadSummaryOptions());
   const unreadWsIds = unreadWorkspaceIds(unreadSummary);
+  // A guest (MUL-9420) can neither create issues, assign them nor hand work to an agent.
+  const guest = useIsGuest(useWorkspaceId());
   const { server, partitioned, objects, text } = model;
   const query = text;
 
@@ -91,6 +103,8 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
             const PageIcon = routeIconForPath(p[page.key]());
             return (
               <CommandPrimitive.Item
+                data-mc="palette-item"
+                data-type="page"
                 key={page.key}
                 value={`page:${page.key}`}
                 onSelect={() => palette.navigate(p[page.key]())}
@@ -103,6 +117,24 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               </CommandPrimitive.Item>
             );
           })}
+        </PaletteGroup>
+      ),
+    });
+  }
+  if (objects.views.length > 0) {
+    groups.push({
+      key: "views",
+      type: "views",
+      score: objects.views[0]!.score,
+      node: (
+        <PaletteGroup key="views" heading={t(($) => $.groups.views)}>
+          {objects.views.map(({ item }) => (
+            <ViewResultRow
+              key={item.kind === "builtin" ? `builtin:${item.key}` : item.view.id}
+              view={item}
+              query={query}
+            />
+          ))}
         </PaletteGroup>
       ),
     });
@@ -243,7 +275,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               issue={issue}
               query={server.results.query}
               disabled={server.stale}
-              onSelect={() => palette.navigate(p.issueDetail(issue.id))}
+              onSelect={() => palette.navigate(p.issueDetail(issueRouteRef(issue)))}
             />
           ))}
         </PaletteGroup>
@@ -314,6 +346,30 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
       ),
     });
   }
+  if (objects.docs.length > 0) {
+    groups.push({
+      key: "docs",
+      type: "docs",
+      score: objects.docs[0]!.score,
+      node: (
+        <PaletteGroup key="docs" heading={t(($) => $.groups.docs)}>
+          {objects.docs.map(({ item: { doc, folder, snippet, stale } }) => (
+            <ObjectRow
+              key={doc.id}
+              disabled={stale}
+              value={`doc:${doc.id}`}
+              icon={<FileText className={ROW_ICON_CLASS} />}
+              title={doc.title || t(($) => $.untitled_doc)}
+              query={query}
+              // A content hit says why it matched; a title hit says where it lives.
+              detail={snippet ? stripMentionMarkdown(snippet) : (folder ?? undefined)}
+              onSelect={() => palette.navigate(p.docDetail(doc.id))}
+            />
+          ))}
+        </PaletteGroup>
+      ),
+    });
+  }
   if (objects.workspaces.length > 0) {
     groups.push({
       key: "workspaces",
@@ -323,6 +379,8 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
         <PaletteGroup key="workspaces" heading={t(($) => $.groups.workspaces)}>
           {objects.workspaces.map(({ item: ws }) => (
             <CommandPrimitive.Item
+              data-mc="palette-item"
+              data-type="workspace"
               key={ws.id}
               value={`workspace:${ws.id}`}
               // Web lands on the target's Issues; the desktop adapter reads
@@ -354,7 +412,14 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
 
   return (
     <>
-      {best && <BestMatchGroups best={best} query={query} target={model.primaryIssueTarget} />}
+      {best && (
+        <BestMatchGroups
+          best={best}
+          query={query}
+          target={guest ? null : model.primaryIssueTarget}
+          canCreateIssue={!guest}
+        />
+      )}
       {groups.map((group) => group.node)}
       {partitioned.hasCancelled && (
         <PaletteGroup heading={t(($) => $.groups.cancelled)}>
@@ -373,7 +438,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               issue={issue}
               query={server.results.query}
               disabled={server.stale}
-              onSelect={() => palette.navigate(p.issueDetail(issue.id))}
+              onSelect={() => palette.navigate(p.issueDetail(issueRouteRef(issue)))}
             />
           ))}
         </PaletteGroup>
@@ -392,8 +457,54 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
       {!server.isLoading && nothing && (
         <div className="py-10 text-center text-body text-muted-foreground">{t(($) => $.empty.no_results)}</div>
       )}
-      {model.handToAgent && <HandToAgentRow seed={model.handToAgent} disabled={server.stale} />}
+      {model.handToAgent && !guest && <HandToAgentRow seed={model.handToAgent} disabled={server.stale} />}
     </>
+  );
+}
+
+/**
+ * Opens a view the way its sidebar row does: the view's link, and the
+ * active-view write that makes an already-open page switch to it.
+ */
+function ViewResultRow({ view, query }: { view: PaletteView; query: string }) {
+  const { t } = useT("issues");
+  const palette = usePalette();
+  const wsId = useWorkspaceId();
+  const p = useWorkspacePaths();
+  const builtinNav = useBuiltinViewNavigation();
+  const setActive = useActiveIssueViewStore((s) => s.setActive);
+  const projectId = view.kind === "view" && view.view.scope_type === "project" ? (view.view.scope_id ?? null) : null;
+  const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: !!projectId });
+
+  if (view.kind === "builtin") {
+    const { key } = view;
+    return (
+      <ObjectRow
+        value={`view:builtin:${key}`}
+        icon={<span className="flex text-muted-foreground">{BUILTIN_VIEW_ICON[key]}</span>}
+        title={view.name}
+        query={query}
+        onSelect={() => palette.navigate(builtinNav.hrefFor(key), () => builtinNav.prepare(key))}
+      />
+    );
+  }
+
+  const saved = view.view;
+  const target = issueViewTarget(wsId, saved, p);
+  const location = projectId
+    ? (projects?.find((project) => project.id === projectId)?.title ?? t(($) => $.views.directory.location_project))
+    : saved.scope_type === "my"
+      ? t(($) => $.views.builtin.my_issues)
+      : t(($) => $.views.builtin.all_issues);
+  return (
+    <ObjectRow
+      value={`view:${saved.id}`}
+      icon={<Layers className={ROW_ICON_CLASS} />}
+      title={view.name}
+      query={query}
+      detail={location}
+      onSelect={() => palette.navigate(target.href, () => setActive(target.containerKey, saved.id))}
+    />
   );
 }
 
@@ -409,6 +520,8 @@ function HandToAgentRow({ seed, disabled }: { seed: HandToAgentSeed; disabled: b
   return (
     <div className="px-2 py-1">
       <CommandPrimitive.Item
+        data-mc="palette-item"
+        data-type="command"
         // cmdk picks a default selection only when an item mounts, so the row
         // remounts on enable to become the selection when nothing else matched.
         key={disabled ? "disabled" : "enabled"}
@@ -440,10 +553,12 @@ function BestMatchGroups({
   best,
   query,
   target,
+  canCreateIssue,
 }: {
   best: BestMatch;
   query: string;
   target: IssueTarget | null;
+  canCreateIssue: boolean;
 }) {
   const { t } = useT("search");
   const palette = usePalette();
@@ -500,7 +615,7 @@ function BestMatchGroups({
         trailing={<RowHint>{t(($) => $.types.squad)}</RowHint>}
       />
     );
-    if (best.entry.runnable && target && subject) {
+    if (best.entry.assignable && target && subject) {
       actions.push({
         id: "assign",
         label: t(($) => $.best.assign, { subject, name: squad.name }),
@@ -538,15 +653,17 @@ function BestMatchGroups({
         trailing={<RowHint>{t(($) => $.types.project)}</RowHint>}
       />
     );
-    actions.push({
-      id: "new-issue",
-      label: t(($) => $.best.new_issue_in, { name: project.title }),
-      icon: SquarePen,
-      run: () => {
-        palette.close();
-        openCreateIssueWithPreference({ project_id: project.id });
-      },
-    });
+    if (!project.archived_at && canCreateIssue) {
+      actions.push({
+        id: "new-issue",
+        label: t(($) => $.best.new_issue_in, { name: project.title }),
+        icon: SquarePen,
+        run: () => {
+          palette.close();
+          openCreateIssueWithPreference({ project_id: project.id });
+        },
+      });
+    }
   }
 
   return (
@@ -559,6 +676,8 @@ function BestMatchGroups({
               <AssignActionRow key={action.id} label={action.label} target={target} best={best} query={query} />
             ) : (
               <CommandPrimitive.Item
+                data-mc="palette-item"
+                data-type="command"
                 key={action.id}
                 value={`best-action:${action.id}`}
                 onSelect={action.run}
@@ -592,6 +711,8 @@ function AssignActionRow({
   const writer = useIssueTargetWriter(target);
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="command"
       value="best-action:assign"
       onSelect={() => {
         palette.close();
@@ -641,11 +762,13 @@ function EmptyState({ model }: { model: RootModel }) {
       {model.contextGroups.map((group) => (
         <CommandGroupView key={group.id} group={group} query="" />
       ))}
-      <PaletteGroup heading={t(($) => $.groups.new)}>
-        {model.newCommands.map((command) => (
-          <CommandRow key={command.id} command={command} query="" />
-        ))}
-      </PaletteGroup>
+      {model.newCommands.length > 0 && (
+        <PaletteGroup heading={t(($) => $.groups.new)}>
+          {model.newCommands.map((command) => (
+            <CommandRow key={command.id} command={command} query="" />
+          ))}
+        </PaletteGroup>
+      )}
       {model.recent.length > 0 && (
         <PaletteGroup
           heading={
@@ -663,7 +786,7 @@ function EmptyState({ model }: { model: RootModel }) {
                     key={`issue:${item.id}`}
                     issue={item.issue}
                     query=""
-                    onSelect={() => palette.navigate(p.issueDetail(item.id))}
+                    onSelect={() => palette.navigate(p.issueDetail(issueRouteRef(item.issue)))}
                     trailing={<RowHint>{t(($) => $.types.issue)}</RowHint>}
                   />
                 );

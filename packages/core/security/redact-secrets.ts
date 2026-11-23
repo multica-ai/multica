@@ -18,6 +18,8 @@ const patterns: { re: RegExp; replacement: string }[] = [
   { re: /\bAIza[0-9A-Za-z_-]{35}([^0-9A-Za-z_-]|$)/g, replacement: "[REDACTED GOOGLE API KEY]$1" },
   // GitLab personal access tokens
   { re: /\bglpat-[A-Za-z0-9_-]{20,}\b/g, replacement: "[REDACTED GITLAB TOKEN]" },
+  // Match the server's Multica token rule and preserve short JSON control escapes.
+  { re: /(?:\b|(\\[bfnrt]))(?:mat|mul|mdt|mcn)_[0-9a-fA-F]{40}\b/g, replacement: "$1[REDACTED_MULTICA_TOKEN]" },
   // OpenAI / Anthropic API keys
   { re: /\bsk-[A-Za-z0-9_-]{20,}\b/g, replacement: "[REDACTED API KEY]" },
   // Slack tokens

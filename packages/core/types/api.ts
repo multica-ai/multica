@@ -96,6 +96,46 @@ export interface UpdateIssueRequest {
   duplicate_of_issue_id?: string;
 }
 
+/** Label changes for a batch update; add and remove leave other labels alone, clear removes every label not being added. */
+export interface BatchIssueLabelOps {
+  add?: string[];
+  remove?: string[];
+  clear?: boolean;
+}
+
+/** Custom property changes for a batch update, keyed by property id. */
+export interface BatchIssuePropertyOps {
+  set?: IssuePropertyValues;
+  unset?: string[];
+}
+
+export type BatchIssueOutcome =
+  | "updated"
+  | "unchanged"
+  | "skipped"
+  | "would_update"
+  | "deleted"
+  | "would_delete";
+
+/** One issue's outcome in a batch write; skipped results carry a reason code. */
+export interface BatchIssueResult {
+  issue_id: string;
+  identifier?: string;
+  outcome: BatchIssueOutcome;
+  code?: string;
+  message?: string;
+}
+
+export interface BatchUpdateIssuesResponse {
+  /** Issues that now hold the requested values (updated or already unchanged). */
+  updated: number;
+  /** Absent on servers that predate per-issue results. */
+  results?: BatchIssueResult[];
+  dry_run?: boolean;
+  /** The response could not be read, so which issues changed is unknown. */
+  unconfirmed?: boolean;
+}
+
 /** Both sides of an issue's duplicate relation (MUL-7349). */
 export interface IssueDuplicates {
   /** The original this issue duplicates, when it is marked as a duplicate. */
@@ -175,6 +215,7 @@ export interface ListIssuesParams {
    */
   assignee_types?: IssueAssigneeType[];
   creator_id?: string;
+  created_by_user_id?: string;
   project_id?: string;
   /** Actor-aware table facets. OR within each field. */
   assignee_filters?: IssueActorRef[];
@@ -194,9 +235,8 @@ export interface ListIssuesParams {
   ids?: string[];
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
-   * assignee — assignee is one of the user's owned agents, or a squad that
-   * involves the user (human member / leader-via-owned-agent / agent member
-   * owned by the user). Direct member assignment is intentionally excluded:
+   * assignee — assignee is one of the user's owned agents, or a squad led by
+   * an agent the user owns. Direct member assignment is intentionally excluded:
    * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
    * disjoint result sets by construction.
    */
@@ -248,6 +288,7 @@ export interface ListGroupedIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
+  created_by_user_id?: string;
   project_id?: string;
   /** See `ListIssuesParams.involves_user_id` — same semantics. */
   involves_user_id?: string;
@@ -294,11 +335,6 @@ export interface IssueAssigneeGroup {
   assignee_id: string | null;
   issues: Issue[];
   total: number;
-}
-
-/** Raw backend response shape for `GET /api/issues/grouped?group_by=assignee`. */
-export interface GroupedIssuesResponse {
-  groups: IssueAssigneeGroup[];
 }
 
 // Server-authoritative Table query contract. Membership, grouping and counts
@@ -378,6 +414,8 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** No visible running or queued work, matching the Inbox Idle filter. */
+  idle_only?: boolean;
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];
@@ -673,10 +711,14 @@ export interface UpdateMeRequest {
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;
+  /** Required for a guest: the projects it can access. */
+  project_ids?: string[];
 }
 
 export interface UpdateMemberRequest {
   role: MemberRole;
+  /** Required when the member becomes a guest. */
+  project_ids?: string[];
 }
 
 // Personal Access Tokens

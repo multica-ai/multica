@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { nextRowMenuState, usePointAnchor, type RowMenuState } from "./point-menu";
 
 export interface RowActionItem {
   key: string;
@@ -76,22 +77,67 @@ export function RowActionsMenu({
         }
       />
       <DropdownMenuContent align="end" className="w-auto">
-        {filled.map((group, index) => (
-          <Fragment key={group[0]!.key}>
-            {index > 0 && <DropdownMenuSeparator />}
-            {group.map((item) => (
-              <DropdownMenuItem
-                key={item.key}
-                variant={item.danger ? "destructive" : "default"}
-                onClick={item.onSelect}
-              >
-                {item.icon}
-                {item.label}
-              </DropdownMenuItem>
-            ))}
-          </Fragment>
-        ))}
+        <RowActionGroups groups={filled} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+/**
+ * The same actions as a right-click menu at the cursor. A list keeps one for
+ * all its rows and holds on to the last point after closing, so the menu does
+ * not jump while it animates out.
+ */
+export function RowActionsPointMenu({
+  menu,
+  onOpenChange,
+  groups,
+  trailing,
+  finalFocus,
+}: {
+  menu: RowMenuState;
+  onOpenChange: (open: boolean) => void;
+  groups: RowActionItem[][];
+  /** Rendered after the groups, e.g. the surrounding object's submenu. */
+  trailing?: ReactNode;
+  finalFocus?: () => boolean;
+}) {
+  const anchor = usePointAnchor(menu.point);
+  const filled = groups.filter((group) => group.length > 0);
+
+  return (
+    <DropdownMenu
+      open={menu.open && filled.length > 0}
+      onOpenChange={(open, details) => {
+        if (!nextRowMenuState(menu, open, details.reason)) {
+          details.cancel();
+          return;
+        }
+        onOpenChange(open);
+      }}
+    >
+      <DropdownMenuContent align="start" anchor={anchor} finalFocus={finalFocus} className="w-auto">
+        <RowActionGroups groups={filled} />
+        {trailing}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function RowActionGroups({ groups }: { groups: RowActionItem[][] }) {
+  return groups.map((group, index) => (
+    <Fragment key={group[0]!.key}>
+      {index > 0 && <DropdownMenuSeparator />}
+      {group.map((item) => (
+        <DropdownMenuItem
+          key={item.key}
+          variant={item.danger ? "destructive" : "default"}
+          onClick={item.onSelect}
+        >
+          {item.icon}
+          {item.label}
+        </DropdownMenuItem>
+      ))}
+    </Fragment>
+  ));
 }

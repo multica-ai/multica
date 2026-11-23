@@ -297,7 +297,8 @@ const MODEL_PRICING: Record<
   "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },
   "gpt-5.3-codex":      { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 1.75 },
 
-  // -- Google: https://ai.google.dev/gemini-api/docs/pricing (2026-10-19).
+  // -- Google: https://ai.google.dev/gemini-api/docs/pricing (2026-10-19;
+  //    Gemini 4 Neon and Hydrogen 2026-11-23).
   //    Standard API-equivalent token estimates, not subscription charges.
   //    Argon's intro rate ends 2026-11-30; Flash 3.6/3.8, Robotics and
   //    3.8 TTS promotions end 2026-12-31. Update the static rows at expiry.
@@ -310,7 +311,11 @@ const MODEL_PRICING: Record<
   //    Speech-only SKUs have one input/output rate; mixed-modality Live,
   //    Image, Omni and Embedding SKUs stay unmapped because aggregate tokens
   //    cannot distinguish their rates. Mirror server/internal/metrics/pricing.go. --
+  "gemini-4-neon": { input: 3, output: 15, cacheRead: 0.15, cacheWrite: 3 },
+  "gemini-4-hydrogen": { input: 1.5, output: 7.5, cacheRead: 0.075, cacheWrite: 1.5 },
   "gemini-4-argon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
+  // Gemini 4 Carbon shares Argon's intro rate through 2026-11-30 (checked 2026-11-11).
+  "gemini-4-carbon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
   "gemini-3.8-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "gemini-3.7-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "gemini-3.6-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
@@ -335,6 +340,15 @@ const MODEL_PRICING: Record<
   "gemini-3.5-transcribe": { input: 2, output: 12, cacheRead: 0, cacheWrite: 0 },
   "gemini-3.5-transcribe-live": { input: 3.5, output: 21, cacheRead: 0, cacheWrite: 0 },
   "gemini-3.5-live-translate-preview": { input: 3.5, output: 21, cacheRead: 0, cacheWrite: 0 },
+
+  // -- Antigravity serves GPT-OSS 120B from Google Cloud: Vertex AI's list
+  //    rate (https://cloud.google.com/model-garden/partner-models/pricing,
+  //    2026-11-23), which has no cache-hit rate, so cached tokens bill as
+  //    input. Provider-qualified because other runtimes reach gpt-oss
+  //    through hosts with their own rates. Orchestrator stays unmapped: it
+  //    splits a turn between a planner and an executor model. Mirror
+  //    server/internal/metrics/pricing.go. --
+  "antigravity/gpt-oss-120b": { input: 0.09, output: 0.36, cacheRead: 0.09, cacheWrite: 0.09 },
 
   // -- OpenAI: GPT-5 family (Codex CLI's default is gpt-5-codex; -codex/-mini/-nano variants priced per OpenAI tiers) --
   "gpt-5-codex":        { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
@@ -378,10 +392,24 @@ const MODEL_PRICING: Record<
   // Kimi Code CLI reports the same model as `kimi-code/k3`; provider-qualified
   // because `k3` is a generic id (see the provider-qualified keys note above).
   "kimi/k3":            { input: 3.0,  output: 15.0,  cacheRead: 0.30,   cacheWrite: 3.0 },
+  // Kimi K3.1 Pro (platform.kimi.ai/docs/pricing/chat via models.dev
+  // providers/moonshotai/models/kimi-k3.1-pro.toml, 2026-11-11); default 5m
+  // cache write is 1x input, like kimi-k3. `k3.1-pro` is generic, so it prices
+  // only under the provider-qualified `kimi/k3.1-pro` key (also covering
+  // Kimi Code's `kimi-code/k3.1-pro`); the highspeed SKU and CodeBuddy's
+  // `kimi-k3-1` stay unmapped.
+  "kimi-k3.1-pro":      { input: 2.0,  output: 10.0,  cacheRead: 0.20,   cacheWrite: 2.0 },
+  "kimi/k3.1-pro":      { input: 2.0,  output: 10.0,  cacheRead: 0.20,   cacheWrite: 2.0 },
+  // `kimi-for-coding` is a Kimi Code subscription route alias, not an API
+  // SKU with a published rate, so it stays unmapped.
 
   // -- Zhipu z.ai (docs.z.ai/guides/overview/pricing). Free flash tiers
   //    are priced at 0 so they resolve cleanly instead of falling through
   //    to the "unmapped" diagnostic. --
+  // GLM-5.3 and GLM-5.3-Flash (2026-11-11); the 5.3 Flash tier is paid,
+  // unlike the free 4.x flashes below.
+  "glm-5.3":            { input: 1.4,  output: 4.4,  cacheRead: 0.26,   cacheWrite: 1.4 },
+  "glm-5.3-flash":      { input: 0.15, output: 0.5,  cacheRead: 0.03,   cacheWrite: 0.15 },
   "glm-5.1":            { input: 1.4,  output: 4.4,  cacheRead: 0.26,   cacheWrite: 1.4 },
   "glm-5":              { input: 1.0,  output: 3.2,  cacheRead: 0.2,    cacheWrite: 1.0 },
   "glm-5-turbo":        { input: 1.2,  output: 4.0,  cacheRead: 0.24,   cacheWrite: 1.2 },
@@ -483,8 +511,10 @@ const MODEL_PRICING: Record<
   //    is the bill, so Cursor rows use it even where it differs from the
   //    vendor rows above — except temporary promotional rates, which are not
   //    used: GPT-5.6 Sol keeps its $5 / $30 list rate (Fast at 2x) rather
-  //    than the sheet's promo price. Keys are the Cursor base id
-  //    left by `cursorBaseModel`, which drops the effort / thinking / fast
+  //    than the sheet's promo price, and Gemini 4 Carbon its $4 / $20 rate
+  //    from 2026-12-01 rather than the introductory $2 / $10 (the bare
+  //    gemini-4-carbon row above still carries the intro rate). Keys are the
+  //    Cursor base id left by `cursorBaseModel`, which drops the effort / thinking / fast
   //    variant parts — effort and thinking don't change per-token rates.
   //    A `-fast` row exists only where a Fast rate is published: on Cursor's
   //    sheet, or (where Cursor offers a Fast variant its sheet doesn't price)
@@ -507,6 +537,7 @@ const MODEL_PRICING: Record<
   "cursor/claude-opus-4-7-fast": { input: 30,   output: 150,  cacheRead: 3,     cacheWrite: 37.5 },
   "cursor/claude-4.6-opus":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
   "cursor/claude-4.5-opus":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-fable-5-2":     { input: 8,    output: 40,   cacheRead: 0.2,   cacheWrite: 10 },
   "cursor/claude-fable-5-1":     { input: 10,   output: 50,   cacheRead: 0.25,  cacheWrite: 12.5 },
   "cursor/claude-fable-5":       { input: 10,   output: 50,   cacheRead: 1,     cacheWrite: 12.5 },
   "cursor/claude-sonnet-5-5":    { input: 2,    output: 10,   cacheRead: 0.1,   cacheWrite: 2.5 },
@@ -540,6 +571,8 @@ const MODEL_PRICING: Record<
   "cursor/gpt-5-fast":           { input: 2.5,  output: 20,   cacheRead: 0.25,  cacheWrite: 0 },
   "cursor/gpt-5-mini":           { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0 },
   "cursor/gemini-4-argon":       { input: 2,    output: 10,   cacheRead: 0.1,   cacheWrite: 0 },
+  "cursor/gemini-4-carbon":      { input: 4,    output: 20,   cacheRead: 0.2,   cacheWrite: 0 },
+  "cursor/gemini-4-hydrogen":    { input: 1.5,  output: 7.5,  cacheRead: 0.075, cacheWrite: 0 },
   "cursor/gemini-3.8-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
   "cursor/gemini-3.7-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
   // Cursor bills 3.6 / 3.5 Flash above Google's current (promotional /
@@ -630,6 +663,7 @@ function pricingCandidates(model: string, provider?: string): string[] {
   const p = normalizeProvider(provider);
   if (!p) return base;
   if (p === "cursor") return cursorPricingCandidates(model, base);
+  if (p === "antigravity") return antigravityPricingCandidates(model, base, p);
   return [...base.map((c) => qualify(p, c)), ...base];
 }
 
@@ -665,6 +699,37 @@ function cursorPricingCandidates(model: string, canonical: string[]): string[] {
   const qualified = canonical.map((c) => qualify("cursor", c));
   if (!base) return [...qualified, ...canonical];
   return [...new Set([...qualified, `cursor/${base}`, base, ...canonical])];
+}
+
+// Antigravity labels Claude models with the reasoning effort or its Thinking
+// mode, as a slug suffix (`claude-opus-5-5-high`, `claude-opus-4-6-thinking`)
+// or a display label (`Claude Opus 5.5 (High)`, `Claude Opus 5.5 (Thinking)`);
+// both select reasoning, not a SKU, so they price at the base tier like
+// canonGemini, scoped to antigravity — a bare `claude-opus-5-5-high`
+// elsewhere stays unmapped. GPT-OSS 120B arrives as `GPT-OSS 120B (Medium)`
+// or an effort-suffixed slug and resolves to `antigravity/gpt-oss-120b`.
+// Mirrors priceForAntigravityModel in pricing.go.
+const ANTIGRAVITY_CLAUDE_DISPLAY =
+  /^(?:[a-z][a-z0-9_-]*[/:])*claude (opus|sonnet|haiku|fable) (\d+(?:[.-]\d+)?)(?: \((?:minimal|low|medium|high|thinking)\))?$/i;
+const ANTIGRAVITY_CLAUDE_EFFORT =
+  /^(?:[a-z][a-z0-9_-]*[/:])*(claude-(?:opus|sonnet|haiku|fable)-\d+(?:[.-]\d+)?)-(?:minimal|low|medium|high|thinking)$/i;
+const ANTIGRAVITY_GPT_OSS_120B =
+  /^(?:[a-z][a-z0-9_-]*[/:])*gpt-oss(?:-120b(?:-(?:low|medium|high))?| 120b(?: \((?:low|medium|high)\))?)$/i;
+
+function antigravityBaseModel(model: string): string | undefined {
+  const id = model.trim().replace(/\[[^\]]+\]$/, "");
+  const display = ANTIGRAVITY_CLAUDE_DISPLAY.exec(id);
+  if (display) return `claude-${display[1]}-${display[2]!.replace(/\./g, "-")}`.toLowerCase();
+  const effort = ANTIGRAVITY_CLAUDE_EFFORT.exec(id);
+  if (effort) return effort[1]!.replace(/\./g, "-").toLowerCase();
+  return ANTIGRAVITY_GPT_OSS_120B.test(id) ? "gpt-oss-120b" : undefined;
+}
+// antigravityPricingCandidates appends the base id (one trailing context tag
+// tolerated), keeping the qualified-first lookup order.
+function antigravityPricingCandidates(model: string, base: string[], provider: string): string[] {
+  const resolved = antigravityBaseModel(model);
+  if (!resolved) return [...base.map((c) => qualify(provider, c)), ...base];
+  return [...base.map((c) => qualify(provider, c)), `${provider}/${resolved}`, ...base, resolved];
 }
 
 // The canonical storage/diagnostic key for a (model, provider) pair: the
@@ -771,10 +836,11 @@ function canonicalCandidates(model: string): string[] {
 
   // Antigravity's display labels and effort-suffixed IDs refer to the same
   // Gemini SKU. Match only recognized shapes; never strip arbitrary variants.
+  // Neon and Hydrogen add a fourth level: `Extra` in the picker, `xhigh` in ids.
   const canonGemini = (s: string) => {
-    const display = /^gemini (\d+(?:\.\d+)?) (flash(?:-lite)?|pro|argon)(?: \((?:minimal|low|medium|high)\))?$/i.exec(s);
+    const display = /^gemini (\d+(?:\.\d+)?) (flash(?:-lite)?|pro|argon|carbon|hydrogen|neon)(?: \((?:minimal|low|medium|high|extra)\))?$/i.exec(s);
     if (display) return `gemini-${display[1]}-${display[2]}`.toLowerCase();
-    const slug = /^(gemini-\d+(?:\.\d+)?-(?:flash(?:-lite)?|pro|argon))(?:-(?:minimal|low|medium|high))?$/i.exec(s);
+    const slug = /^(gemini-\d+(?:\.\d+)?-(?:flash(?:-lite)?|pro|argon|carbon|hydrogen|neon))(?:-(?:minimal|low|medium|high|xhigh))?$/i.exec(s);
     return slug ? slug[1]!.toLowerCase() : s;
   };
 
@@ -1283,6 +1349,9 @@ export function aggregateByWeek(
   usage: readonly WeeklyAggregable[],
   tz: string,
   weekCount: number,
+  // The first day the plan lets the dashboard read (MUL-9490); the leftmost
+  // week it cuts into is marked partial.
+  earliestDay: string | null = null,
 ): {
   weeklyTokens: WeeklyTokenData[];
   weeklyCostStack: WeeklyCostStackData[];
@@ -1314,6 +1383,9 @@ export function aggregateByWeek(
   }
 
   for (const u of usage) {
+    // Days before the plan's range never count, even when a response from a
+    // replica still on the old policy includes them.
+    if (earliestDay && u.date < earliestDay) continue;
     const wkStart = weekStartIso(u.date);
     if (wkStart < firstWeekStart || wkStart > currentWeekStart) continue;
     const tokens = tokenMap.get(wkStart);
@@ -1334,24 +1406,19 @@ export function aggregateByWeek(
 
   const decorate = (weekStart: string) => {
     const weekEnd = addDaysIso(weekStart, 6);
-    const partial = today < weekEnd;
-    // Inclusive count of how many days of this week have actually elapsed.
-    // Sits at 7 for closed weeks, 1..6 for the current week.
-    const elapsedDays = Math.min(
-      7,
-      Math.max(
-        1,
-        // Day index of `today` within [weekStart, weekEnd] + 1.
-        diffDaysIso(weekStart, today < weekStart ? weekStart : today < weekEnd ? today : weekEnd) + 1,
-      ),
-    );
+    // Inclusive count of the week's days that have elapsed and that the plan
+    // covers: 7 for a closed week, fewer for the current week or the leftmost
+    // week a history limit cuts into.
+    const from = earliestDay && earliestDay > weekStart ? earliestDay : weekStart;
+    const to = today < weekEnd ? today : weekEnd;
+    const daysCovered = Math.min(7, Math.max(1, diffDaysIso(from, to) + 1));
     return {
       weekStart,
       weekEnd,
       label: formatShortDate(weekStart),
       rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
-      partial,
-      daysCovered: partial ? elapsedDays : 7,
+      partial: daysCovered < 7,
+      daysCovered,
     };
   };
 
@@ -1390,9 +1457,11 @@ export function sliceWindow(
   days: number,
   tz: string,
 ): { filtered: RuntimeUsage[]; prevFiltered: RuntimeUsage[] } {
+  // `days` calendar days including today. The backend's `days=N` series
+  // starts one day earlier on purpose, so the cutoff must not be today - N.
   const today = todayIso(tz);
-  const isoCurrent = addDaysIso(today, -days);
-  const isoPrev = addDaysIso(today, -days * 2);
+  const isoCurrent = addDaysIso(today, -(days - 1));
+  const isoPrev = addDaysIso(today, -(days * 2 - 1));
   return {
     filtered: usage.filter((u) => u.date >= isoCurrent),
     prevFiltered: usage.filter(

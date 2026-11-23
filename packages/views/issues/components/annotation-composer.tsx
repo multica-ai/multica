@@ -10,6 +10,14 @@ import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { EditorOverlayOwnerContext } from "../../editor/overlay-owner";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
+import {
+  useComposerVoice,
+  VoiceErrorRow,
+  VoiceHud,
+  VoiceMicButton,
+  VoiceSetupDialog,
+  VoiceStrip,
+} from "../../voice";
 
 /** The existing reply/comment composer owns routing, uploads and submission. */
 export interface AnnotationSendControls {
@@ -68,12 +76,20 @@ export function AnnotationComposer({
   const save = () => {
     if (busy || inFlight.current || !canSave) return;
     const note = editorRef.current?.getMarkdown() ?? "";
-    if (note.trim()) onSave(note, true);
+    if (!note.trim()) return;
+    // Cancel any armed 100ms debounce so a late onUpdate cannot write a stale
+    // pendingAnnotation after confirmNote clears it.
+    editorRef.current?.flushPendingUpdate?.();
+    onSave(note, true);
   };
   const send = async () => {
     if (!controls || controls.targetMissing || busy || inFlight.current || !canSave) return;
     const note = editorRef.current?.getMarkdown() ?? "";
     if (!note.trim()) return;
+    // Cancel any armed 100ms debounce before confirmNote + submit snapshot,
+    // matching ReplyInput/CommentInput so a late onUpdate cannot mutate the
+    // draft entry mid-flight and defeat the post-submit cleanup guard.
+    editorRef.current?.flushPendingUpdate?.();
     inFlight.current = true;
     onBusyChange(true);
     setSending(true);
@@ -86,17 +102,28 @@ export function AnnotationComposer({
       setSending(false);
     }
   };
+  // No voice send: Enter saves the note here, so dictation only inserts.
+  const voice = useComposerVoice({
+    insert: (text) => editorRef.current?.insertText(text) ?? false,
+    scope: annotation.id,
+    disabled: busy,
+  });
 
   return <EditorOverlayOwnerContext.Provider value={owner}>
-    <div className="flex w-80 max-w-[calc(100vw-26px)] flex-col gap-1" aria-busy={busy || undefined}>
+    <div ref={voice.rootRef} onFocusCapture={voice.onFocusCapture}
+      className="relative flex w-96 max-w-[calc(100vw-26px)] flex-col gap-1" aria-busy={busy || undefined}>
       <div className={busy ? "pointer-events-none opacity-60" : undefined} inert={busy || undefined}>
         <ContentEditor ref={editorRef} defaultValue={initialNote}
           ariaLabel={t(($) => $.reply.annotations.note_label)}
           placeholder={t(($) => $.reply.annotations.note_placeholder)}
           className="min-h-8 max-h-32 overflow-y-auto px-2 py-1.5"
           currentIssueId={issueId} showBubbleMenu={false} debounceMs={100}
+          flushPendingOnUnmount
           onUpdate={onChange} onEnter={save} onSubmit={send} />
       </div>
+      <VoiceHud voice={voice} />
+      <VoiceSetupDialog voice={voice} />
+      <VoiceErrorRow voice={voice} className="mx-1" />
       {(sourceMissing || sourceChanged) && <p role={sourceMissing ? "alert" : undefined} className="px-2 text-caption text-muted-foreground">
         {t(($) => $.reply.annotations.source_changed)}
       </p>}
@@ -108,12 +135,16 @@ export function AnnotationComposer({
         {otherAnnotations ? t(($) => hasBody ? $.reply.annotations.send_with_annotations_and_body : $.reply.annotations.send_with_annotations, { count: otherAnnotations })
           : t(($) => $.reply.annotations.send_with_body)}
       </p>}
-      <div className="flex flex-wrap items-center gap-1 px-1 pb-1" inert={busy || undefined}>
+      {voice.showStrip ? <div className="flex items-center gap-1 px-1 pb-1">
+        {controls?.recipients && <div className="min-w-0 max-w-[60%] shrink-0 overflow-hidden">{controls.recipients}</div>}
+        <VoiceStrip voice={voice} />
+      </div> : <div className="flex flex-wrap items-center gap-1 px-1 pb-1" inert={busy || undefined}>
         {existing && onRemove && <IconButton variant="ghost" size="icon-sm"
           className="text-muted-foreground hover:text-destructive" label={t(($) => $.reply.annotations.remove, { number })}
           disabled={busy} onClick={onRemove}><Trash2 /></IconButton>}
         <div className="min-w-0 flex-1">{controls?.recipients}</div>
         <div className="ml-auto flex items-center gap-1">
+          <VoiceMicButton voice={voice} />
           {controls && (controls.restart
             // Stopping a run must stay spelled out, never an unlabeled icon.
             ? <Button size="sm" variant="destructive" disabled={sendDisabled} onClick={send} aria-busy={busy || undefined}>
@@ -132,7 +163,7 @@ export function AnnotationComposer({
             <ShortcutKeycaps shortcut={ENTER} decorative />
           </Button>
         </div>
-      </div>
+      </div>}
     </div>
   </EditorOverlayOwnerContext.Provider>;
 }

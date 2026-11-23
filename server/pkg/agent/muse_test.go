@@ -77,9 +77,7 @@ done
 	script = strings.ReplaceAll(script, "RESUME_BRANCH", resumeBranch)
 	script = strings.ReplaceAll(script, "SESSION_ID", fakeMuseSessionID)
 
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake muse: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	return bin, requests, args
 }
 

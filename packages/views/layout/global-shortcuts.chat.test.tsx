@@ -10,10 +10,18 @@ import { GlobalShortcuts } from "./global-shortcuts";
 // matters is not just "the chord calls toggle", but that it stays a no-op —
 // without swallowing the keypress — everywhere the overlay cannot exist.
 const h = vi.hoisted(() => ({
-  chat: { floatingChatEnabled: true, toggle: vi.fn() },
+  chat: {
+    floatingChatEnabled: true,
+    isOpen: false,
+    activeSessionId: null as string | null,
+    toggle: vi.fn(),
+    setOpen: vi.fn(),
+    startNewChat: vi.fn(),
+  },
   navigation: { pathname: "/acme/issues", push: vi.fn() },
   toggleSidebar: vi.fn(),
   searchToggle: vi.fn(),
+  guest: false,
 }));
 
 vi.mock("@multica/core/chat", () => ({
@@ -28,7 +36,9 @@ vi.mock("@multica/core/issues/stores", () => ({
 vi.mock("@multica/core/modals", () => ({
   useModalStore: { getState: () => ({ modal: null }) },
 }));
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => h.guest }));
 vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "ws-1" }),
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
     chat: () => "/acme/chat",
@@ -64,12 +74,28 @@ function pressToggleChat(target: EventTarget = document): boolean {
   return event.defaultPrevented;
 }
 
+/** Shift+Mod+J on macOS: Shift turns the logical key into "J". */
+function pressNewChat(target: EventTarget = document): boolean {
+  const event = new KeyboardEvent("keydown", {
+    key: "J",
+    metaKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  target.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
 beforeEach(() => {
   // Pin the platform: jsdom's user agent reports the host OS, so Command vs
   // Control would otherwise depend on where the suite runs.
   configureShortcutPlatform("macos");
   h.chat.floatingChatEnabled = true;
+  h.chat.isOpen = false;
+  h.chat.activeSessionId = null;
   h.navigation.pathname = "/acme/issues";
+  h.guest = false;
 });
 
 afterEach(() => {
@@ -100,6 +126,16 @@ describe("chat toggle shortcut", () => {
     expect(getByTestId("composer").parentElement).toHaveAttribute("inert");
     pressCreate();
     expect(openCreateIssueWithPreference).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves C unclaimed for a guest, who cannot create issues (MUL-9420)", () => {
+    h.guest = true;
+    render(<GlobalShortcuts />);
+    const event = new KeyboardEvent("keydown", { key: "c", bubbles: true, cancelable: true });
+    document.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(openCreateIssueWithPreference).not.toHaveBeenCalled();
   });
 
   it("toggles the floating window and consumes the chord", () => {
@@ -162,5 +198,61 @@ describe("chat toggle shortcut", () => {
     );
     expect(h.toggleSidebar).toHaveBeenCalledTimes(1);
     expect(h.chat.toggle).not.toHaveBeenCalled();
+  });
+});
+
+describe("new chat shortcut", () => {
+  it("starts a new chat instead of reopening the last one", () => {
+    h.chat.activeSessionId = "session-1";
+    render(<GlobalShortcuts />);
+
+    expect(pressNewChat()).toBe(true);
+    expect(h.chat.startNewChat).toHaveBeenCalledTimes(1);
+    expect(h.chat.toggle).not.toHaveBeenCalled();
+  });
+
+  it("switches an open window from another chat to a new one", () => {
+    h.chat.isOpen = true;
+    h.chat.activeSessionId = "session-1";
+    render(<GlobalShortcuts />);
+
+    expect(pressNewChat()).toBe(true);
+    expect(h.chat.startNewChat).toHaveBeenCalledTimes(1);
+    expect(h.chat.setOpen).not.toHaveBeenCalled();
+  });
+
+  it("closes the window while it shows the new chat, like Ask Multica", () => {
+    h.chat.isOpen = true;
+    h.chat.activeSessionId = null;
+    render(<GlobalShortcuts />);
+
+    expect(pressNewChat()).toBe(true);
+    expect(h.chat.setOpen).toHaveBeenCalledWith(false);
+    expect(h.chat.startNewChat).not.toHaveBeenCalled();
+  });
+
+  it("still fires while the caret is inside a text input", () => {
+    render(<GlobalShortcuts />);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+
+    expect(pressNewChat(input)).toBe(true);
+    expect(h.chat.startNewChat).toHaveBeenCalledTimes(1);
+
+    input.remove();
+  });
+
+  it("leaves the chord alone where the floating window is unavailable", () => {
+    h.navigation.pathname = "/acme/chat";
+    const { unmount } = render(<GlobalShortcuts />);
+    expect(pressNewChat()).toBe(false);
+    unmount();
+
+    h.navigation.pathname = "/acme/issues";
+    h.chat.floatingChatEnabled = false;
+    render(<GlobalShortcuts />);
+    expect(pressNewChat()).toBe(false);
+    expect(h.chat.startNewChat).not.toHaveBeenCalled();
   });
 });

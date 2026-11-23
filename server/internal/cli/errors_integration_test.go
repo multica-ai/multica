@@ -31,14 +31,14 @@ func TestDownloadFileInterruptedBodyIsClassified(t *testing.T) {
 		t.Fatalf("lost partial body or underlying error: data=%q err=%v", data, err)
 	}
 	var netErr *NetworkError
-	if !errors.As(err, &netErr) || netErr.Op != "GET /download" {
+	if !errors.As(err, &netErr) || netErr.Kind != KindNetworkIncompleteResponse || netErr.Op != "GET /download" {
 		t.Fatalf("expected download NetworkError, got %T: %v", err, err)
 	}
 	if got := ExitCodeFor(err); got != ExitNetwork {
 		t.Errorf("ExitCodeFor = %d, want %d", got, ExitNetwork)
 	}
-	if msg := FormatError(err, false); !strings.Contains(msg, "network connection") {
-		t.Errorf("FormatError = %q, want network guidance", msg)
+	if msg := FormatError(err, false); !strings.Contains(msg, "response ended before it was complete") {
+		t.Errorf("FormatError = %q, want incomplete response guidance", msg)
 	}
 	if requests.Load() != 1 {
 		t.Errorf("download sent %d requests, want one", requests.Load())
@@ -182,8 +182,8 @@ func TestUploadResponseErrorsAreClassified(t *testing.T) {
 					if !errors.Is(err, io.ErrUnexpectedEOF) {
 						t.Errorf("lost underlying unexpected EOF: %v", err)
 					}
-					if msg := FormatError(err, false); !strings.Contains(msg, "network connection") {
-						t.Errorf("FormatError = %q, want network guidance", msg)
+					if msg := FormatError(err, false); !strings.Contains(msg, "response ended before it was complete") {
+						t.Errorf("FormatError = %q, want incomplete response guidance", msg)
 					}
 				} else if tc.status >= 400 {
 					var httpErr *HTTPError

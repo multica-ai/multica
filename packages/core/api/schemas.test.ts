@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentTaskSchema,
+  IssueSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -41,17 +42,18 @@ import {
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   EMPTY_INBOX_ITEMS,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  EMPTY_SNOOZED_INBOX,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_USER,
   InboxItemListSchema,
   InboxUnreadSummarySchema,
+  SnoozedInboxListSchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
   RuntimeModelListRequestSchema,
   SearchProjectsResponseSchema,
-  RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
@@ -874,6 +876,13 @@ describe("ChatPendingTaskSchema", () => {
       status: "running",
     });
     expect(parsed.queued_tasks).toBeUndefined();
+    expect(parsed.can_supplement).toBeUndefined();
+  });
+
+  it("accepts explicit steering capability and ignores malformed values", () => {
+    expect(ChatPendingTaskSchema.parse({ can_supplement: true }).can_supplement).toBe(true);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: false }).can_supplement).toBe(false);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: "yes" }).can_supplement).toBeUndefined();
   });
 
   it("parses queued task summaries", () => {
@@ -929,6 +938,14 @@ describe("SendChatMessageResponseSchema", () => {
 
   it("ignores a malformed additive queue position without losing the accepted send", () => {
     expect(SendChatMessageResponseSchema.parse({ ...base, queued: "no" }).queued).toBeUndefined();
+  });
+
+  it("preserves steering acceptance and tolerates older or malformed metadata", () => {
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true }).steered).toBe(true);
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true, message_task_id: "root-task" }).message_task_id).toBe("root-task");
+    expect(SendChatMessageResponseSchema.parse(base).steered).toBeUndefined();
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: "yes", message_created_at: 42, message_task_id: 42 }))
+      .toMatchObject({ ...base, steered: undefined, message_created_at: undefined, message_task_id: undefined });
   });
 });
 
@@ -1270,7 +1287,6 @@ describe("dashboard + runtime usage schema drift", () => {
 
   it("coerces missing fields on every runtime usage schema", () => {
     expect(RuntimeUsageListSchema.parse([{ date: "2026-05-19" }])[0]?.input_tokens).toBe(0);
-    expect(RuntimeHourlyActivityListSchema.parse([{ hour: 9 }])[0]?.count).toBe(0);
     expect(RuntimeUsageByAgentListSchema.parse([{ model: "x" }])[0]?.agent_id).toBe("");
     expect(RuntimeUsageByHourListSchema.parse([{ hour: 9 }])[0]?.model).toBe("");
   });
@@ -1509,6 +1525,28 @@ describe("InboxUnreadSummarySchema", () => {
   });
 });
 
+describe("SnoozedInboxListSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/inbox/snoozed" };
+  const row = (overrides: Record<string, unknown> = {}) => ({
+    issue_id: "issue-1",
+    item_id: "inbox-1",
+    snoozed_until: "2026-06-16T08:00:00Z",
+    snoozed_at: "2026-06-15T08:00:00Z",
+    updates: 0,
+    ...overrides,
+  });
+
+  it("keeps a row whose issue identifier is missing or unusable", () => {
+    const parsed = parseWithFallback(
+      [row(), row({ issue_id: "issue-2", issue_identifier: 7 }), row({ issue_id: "issue-3", issue_identifier: "MUL-3" })],
+      SnoozedInboxListSchema,
+      EMPTY_SNOOZED_INBOX,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => item.issue_identifier)).toEqual([undefined, null, "MUL-3"]);
+  });
+});
+
 describe("InboxItemListSchema", () => {
   const ENDPOINT = { endpoint: "GET /api/inbox/archived" };
 
@@ -1568,6 +1606,16 @@ describe("InboxItemListSchema", () => {
     expect(
       parseWithFallback([withoutOptionals], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
     ).toHaveLength(1);
+  });
+
+  it("keeps the row when the issue identifier is unusable", () => {
+    const parsed = parseWithFallback(
+      [row({ issue_identifier: 7 }), row({ id: "inbox-2", issue_identifier: "MUL-7" })],
+      InboxItemListSchema,
+      EMPTY_INBOX_ITEMS,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => item.issue_identifier)).toEqual([null, "MUL-7"]);
   });
 
   it("returns the empty fallback when an issue projection is wrong-typed", () => {
@@ -2071,6 +2119,11 @@ describe("SidebarProjectPrefsDocSchema", () => {
 // dialog, the "ask your operator" state, the revoked-vs-active badge), so a
 // malformed response must degrade to the safe state rather than a broken one.
 describe("WeCom installation schemas", () => {
+  it("accepts the bot display name while remaining compatible with older servers", () => {
+    expect(WecomInstallationSchema.parse({ id: "i1", bot_name: "Support Bot" }).bot_name).toBe("Support Bot");
+    expect(WecomInstallationSchema.parse({ id: "i1" }).bot_name).toBeUndefined();
+    expect(WecomInstallationSchema.safeParse({ id: "i1", bot_name: 42 }).success).toBe(false);
+  });
   it("parses a well-formed installation", () => {
     const parsed = WecomInstallationSchema.parse({
       id: "i1",
@@ -2515,5 +2568,15 @@ describe("task usage credits", () => {
     });
     expect(parsed.usage).toHaveLength(1);
     expect(parsed.usage?.[0]?.credits_micros).toBeUndefined();
+  });
+});
+
+
+describe("Issue requester compatibility", () => {
+  it("preserves known null versus unknown legacy or malformed values", () => {
+    expect(IssueSchema.parse(baseIssue).requester_id).toBeUndefined();
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: null }).requester_id).toBeNull();
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: "member" }).requester_id).toBe("member");
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: 42 }).requester_id).toBeUndefined();
   });
 });

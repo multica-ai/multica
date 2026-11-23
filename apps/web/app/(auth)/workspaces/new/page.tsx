@@ -52,7 +52,7 @@ export default function Page() {
             );
           } else if (ws && destination?.kind === "issue") {
             router.push(
-              paths.workspace(ws.slug).issueDetail(destination.issueId),
+              paths.workspace(ws.slug).issueDetail(destination.issueRef),
             );
           } else if (ws) {
             router.push(paths.workspace(ws.slug).issues());

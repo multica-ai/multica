@@ -482,6 +482,12 @@ func TestRunAuthStatusTaskContextRequiresTaskToken(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "task-scoped mat_ token") {
 				t.Fatalf("runAuthStatus error = %v, want task token requirement", err)
 			}
+			if wantHint := tc.token != ""; strings.Contains(err.Error(), "--preserve-env=MULTICA_TOKEN") != wantHint {
+				t.Fatalf("runAuthStatus error = %v, want secrets manager hint = %v", err, wantHint)
+			}
+			if tc.token != "" && strings.Contains(err.Error(), tc.token) {
+				t.Fatalf("runAuthStatus error leaked the token: %v", err)
+			}
 			if requestCount != 0 {
 				t.Fatalf("auth status made %d request(s) without a task token", requestCount)
 			}
@@ -607,5 +613,76 @@ func TestValidateLoginTokenPrefix(t *testing.T) {
 		if !strings.Contains(err.Error(), p) {
 			t.Errorf("error %q does not mention prefix %q", err.Error(), p)
 		}
+	}
+}
+
+func TestRunAuthStatusDistinguishesVerificationFailure(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+	t.Setenv("MULTICA_DEBUG", "")
+
+	debugOption := rootCmd.PersistentFlags().Lookup("debug")
+	originalDebug, originalDebugChanged := debugFlag, debugOption.Changed
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+		debugFlag, debugOption.Changed = originalDebug, originalDebugChanged
+	})
+
+	for _, tc := range []struct {
+		name    string
+		status  int
+		message string
+		relogin bool
+		task    bool
+		debug   bool
+	}{
+		{"unauthorized", http.StatusUnauthorized, "Token is invalid or expired", true, false, false},
+		{"task unauthorized", http.StatusUnauthorized, "This task token was rejected", false, true, false},
+		{"unavailable", http.StatusServiceUnavailable, "Could not verify the token", false, false, false},
+		{"unavailable with debug", http.StatusServiceUnavailable, "Could not verify the token", false, false, true},
+		{"task unauthorized with debug", http.StatusUnauthorized, "This task token was rejected", false, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token := "mul_test_auth_status"
+			if tc.task {
+				token = "mat_test_auth_status"
+				t.Setenv("MULTICA_AGENT_ID", "agent-test")
+				t.Setenv("MULTICA_TASK_ID", "task-test")
+				t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+			}
+			t.Setenv("MULTICA_TOKEN", token)
+			const responseBody = "test verification failure"
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/me" {
+					t.Errorf("unexpected request path %q", r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, responseBody)
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			stderr := captureStderr(t)
+			defer stderr.restore()
+			args := []string{"auth", "status"}
+			debugFlag = false
+			if tc.debug {
+				args = append(args, "--debug")
+			}
+			rootCmd.SetArgs(args)
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			out := stderr.read()
+			if !strings.Contains(out, tc.message) || strings.Contains(out, "multica login") != tc.relogin || strings.Contains(out, token) {
+				t.Fatalf("unexpected auth status output: %q", out)
+			}
+			if tc.debug {
+				detail := fmt.Sprintf("[debug] http: GET /api/me status=%d body=%s", tc.status, responseBody)
+				if !strings.Contains(out, detail) {
+					t.Fatalf("expected %q in auth status output: %q", detail, out)
+				}
+			} else if strings.Contains(out, "[debug]") || strings.Contains(out, responseBody) {
+				t.Fatalf("unexpected debug details in auth status output: %q", out)
+			}
+		})
 	}
 }

@@ -2,23 +2,34 @@
 
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, BookOpenText, Bot, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
+import { ArrowUpRight, BarChart3, BookOpenText, Bot, MessageSquare, Monitor, Plug, Plus, User, UserPlus, Users } from "@multica/ui/icons";
+import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { agentTaskSnapshotOptions, type AgentPresenceDetail } from "@multica/core/agents";
 import { useAgentsViewStore } from "@multica/core/agents/stores";
 import { useAuthStore } from "@multica/core/auth";
+import { useChatStore } from "@multica/core/chat";
+import { appsOverviewOptions } from "@multica/core/connected-apps";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { memberListOptions, skillListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import type { Agent, AgentTask } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
+import { isFloatingChatRouteSuppressed } from "../../chat/floating-chat-visibility";
+import { AgentRowActions } from "../../agents/components/agent-row-actions";
+import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
+import { CollectionRowContext } from "../collection-list/row-context";
 import { availabilityConfig } from "../../agents/presence";
 import { useT } from "../../i18n";
+import { buildAppDirectory } from "../../apps/lib/directory";
+import { useComposioAvailable } from "../../common/use-composio-available";
+import { useViewerAppsOverview } from "../../common/use-viewer-apps-overview";
 import { buildRuntimeMachines, runtimeMachineCounts } from "../../runtimes/components/runtime-machines";
 import {
   PanelBody,
@@ -105,10 +116,98 @@ function AgentAvatar({ agent, detail }: { agent: Agent; detail: AgentPresenceDet
 }
 
 /** "MUL-8317 Redesign the sidebar" for the issue the agent is running, if any. */
-function useRunningIssueLabel(wsId: string, task: AgentTask | undefined) {
+function useRunningIssue(wsId: string, task: AgentTask | undefined) {
   const issueId = task?.issue_id ?? "";
   const { data: issue } = useQuery({ ...issueDetailOptions(wsId, issueId), enabled: !!issueId });
-  return issue ? `${issue.identifier} ${issue.title}` : null;
+  return issue ?? null;
+}
+
+/**
+ * An agent's row in the status sections. Right-click opens the agents page's
+ * row menu at the cursor; it mounts on the first right-click, so idle rows
+ * hold no menu.
+ */
+function AgentPanelLink({
+  agent,
+  detail,
+  active,
+  description,
+  canManage,
+  canChat,
+  currentIssue,
+}: {
+  agent: Agent;
+  detail: AgentPresenceDetail | undefined;
+  active: boolean;
+  description: ReactNode;
+  canManage: boolean;
+  canChat: boolean;
+  /** The issue the agent is working on, when it works on exactly one. */
+  currentIssue?: { id: string; identifier: string } | null;
+}) {
+  const { t } = useT("layout");
+  const { t: tChat } = useT("chat");
+  const p = useWorkspacePaths();
+  const { pathname, push } = useNavigation();
+  const rowMenu = useRowMenu();
+  const startChat = () => {
+    const chat = useChatStore.getState();
+    chat.setSelectedAgentId(agent.id);
+    chat.setSelectedProjectId(null);
+    chat.setActiveSession(null);
+    if (chat.floatingChatEnabled && !isFloatingChatRouteSuppressed(pathname, p.chat())) {
+      chat.setOpen(true);
+    } else {
+      push(p.chat());
+    }
+  };
+  const leading =
+    canChat || currentIssue ? (
+      <>
+        {canChat && (
+          <DropdownMenuItem onClick={startChat}>
+            <MessageSquare className="h-3.5 w-3.5" />
+            {tChat(($) => $.empty_state.chat_with_named, { name: agent.name })}
+          </DropdownMenuItem>
+        )}
+        {currentIssue && (
+          <DropdownMenuItem onClick={() => push(p.issueDetail(issueRouteRef(currentIssue)))}>
+            <ArrowUpRight className="h-3.5 w-3.5" />
+            {t(($) => $.panels.team.open_issue, { identifier: currentIssue.identifier })}
+          </DropdownMenuItem>
+        )}
+      </>
+    ) : undefined;
+  const rowMenuContext = useMemo(
+    () => ({ menu: rowMenu.menu, setMenu: rowMenu.setMenu }),
+    [rowMenu.menu, rowMenu.setMenu],
+  );
+  return (
+    <PanelLink
+      href={p.agentDetail(agent.id)}
+      label={agent.name}
+      active={active}
+      icon={<AgentAvatar agent={agent} detail={detail} />}
+      description={description}
+      onContextMenu={(event) => {
+        if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
+      }}
+      menu={
+        rowMenu.menu.point && (
+          <CollectionRowContext.Provider value={rowMenuContext}>
+            <AgentRowActions
+              agent={agent}
+              presence={detail}
+              canManage={canManage}
+              duplicateHref={`${p.newAgentManual()}?duplicate=${encodeURIComponent(agent.id)}`}
+              leading={leading}
+              triggerHidden
+            />
+          </CollectionRowContext.Provider>
+        )
+      }
+    />
+  );
 }
 
 function WorkingAgentRow({
@@ -117,26 +216,55 @@ function WorkingAgentRow({
   task,
   wsId,
   active,
+  canManage,
+  canChat,
 }: {
   agent: Agent;
   detail: AgentPresenceDetail | undefined;
   task: AgentTask | undefined;
   wsId: string;
   active: boolean;
+  canManage: boolean;
+  canChat: boolean;
 }) {
   const { t } = useT("layout");
-  const p = useWorkspacePaths();
-  const issueLabel = useRunningIssueLabel(wsId, task);
+  const issue = useRunningIssue(wsId, task);
+  const issueLabel = issue ? `${issue.identifier} ${issue.title}` : null;
   const running = detail?.runningCount ?? 0;
   return (
-    <PanelLink
-      href={p.agentDetail(agent.id)}
-      label={agent.name}
+    <AgentPanelLink
+      agent={agent}
+      detail={detail}
       active={active}
-      icon={<AgentAvatar agent={agent} detail={detail} />}
+      canManage={canManage}
+      canChat={canChat}
+      currentIssue={running === 1 ? issue : null}
       description={
         running > 1 || !issueLabel ? t(($) => $.panels.team.running_tasks, { count: running }) : issueLabel
       }
+    />
+  );
+}
+
+/** The Apps link, counting the apps that need someone to act. */
+function AppsPanelLink({ wsId }: { wsId: string }) {
+  const { t } = useT("layout");
+  const p = useWorkspacePaths();
+  const { pathname } = useNavigation();
+  const viewerId = useAuthStore((s) => s.user?.id ?? null);
+  const { data } = useQuery({ ...appsOverviewOptions(wsId), enabled: !!wsId });
+  const overview = useViewerAppsOverview(wsId, data);
+  const attention = useMemo(() => {
+    if (!overview) return 0;
+    return buildAppDirectory({ overview, catalog: [], viewerId }).attention.length;
+  }, [overview, viewerId]);
+  return (
+    <PanelLink
+      href={p.apps()}
+      icon={<Plug />}
+      label={t(($) => $.nav.apps)}
+      active={isPathWithin(pathname, p.apps())}
+      trailing={<PanelCount value={attention} />}
     />
   );
 }
@@ -172,6 +300,7 @@ export function TeamPanel() {
   const { data: members = [] } = useQuery({ ...memberListOptions(wsId), enabled: !!wsId });
   const { data: skills = [] } = useQuery({ ...skillListOptions(wsId), enabled: !!wsId });
   const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
+  const appsAvailable = useComposioAvailable();
   const machineCounts = useMemo(() => {
     const machines = buildRuntimeMachines(runtimes, { now: Date.now() }).filter(
       (machine) => !machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud"),
@@ -181,7 +310,11 @@ export function TeamPanel() {
 
   const mineCount = userId ? agents.filter((agent) => agent.owner_id === userId).length : 0;
   const myRole = members.find((member) => member.user_id === userId)?.role;
-  const canInvite = myRole === "owner" || myRole === "admin";
+  const isAdmin = myRole === "owner" || myRole === "admin";
+  const canInvite = isAdmin;
+  const canManageAgent = (agent: Agent) => isAdmin || (!!userId && agent.owner_id === userId);
+  const canChatWith = (agent: Agent) =>
+    !agent.archived_at && canAssignAgentToIssue(agent, { userId: userId ?? null, role: myRole ?? null }).allowed;
   const onAgents = pathname === p.agents();
   // Member pages live under /members/:id; the list itself is a Settings tab.
   const membersRoot = p.memberDetail("").replace(/\/$/, "");
@@ -220,12 +353,13 @@ export function TeamPanel() {
             renderAgent={(agent) => {
               const href = p.agentDetail(agent.id);
               return (
-                <PanelLink
+                <AgentPanelLink
                   key={agent.id}
-                  href={href}
-                  label={agent.name}
+                  agent={agent}
+                  detail={byAgent.get(agent.id)}
                   active={isPathWithin(pathname, href)}
-                  icon={<AgentAvatar agent={agent} detail={byAgent.get(agent.id)} />}
+                  canManage={canManageAgent(agent)}
+                  canChat={canChatWith(agent)}
                   description={
                     <span className="text-warning">
                       {t(($) => $.panels.team.stuck, { count: byAgent.get(agent.id)?.queuedCount ?? 0 })}
@@ -252,6 +386,8 @@ export function TeamPanel() {
                 task={runningTaskByAgent.get(agent.id)}
                 wsId={wsId}
                 active={isPathWithin(pathname, p.agentDetail(agent.id))}
+                canManage={canManageAgent(agent)}
+                canChat={canChatWith(agent)}
               />
             )}
           />
@@ -318,6 +454,7 @@ export function TeamPanel() {
               active={isPathWithin(pathname, p.skills())}
               trailing={<PanelCount value={skills.length} />}
             />
+            {appsAvailable && <AppsPanelLink wsId={wsId} />}
             <PanelLink
               href={p.runtimes()}
               icon={<Monitor />}

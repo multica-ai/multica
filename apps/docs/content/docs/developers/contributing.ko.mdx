@@ -11,7 +11,7 @@ Multica는 Go backend와 pnpm monorepo로 구성됩니다. 로컬에서 시작�
 
 - Node.js 22
 - pnpm 10.28.2
-- Go 1.26.6
+- Go 1.26.9
 - Docker Engine 또는 Docker Desktop
 - Git과 Make
 
@@ -70,12 +70,19 @@ worktree는 PostgreSQL 컨테이너만 공유하며 데이터베이스는 공유
 ### 전체 절차
 
 ```bash
-make dev              # 현재 checkout 준비 및 시작
-make start            # 기존 환경으로 API와 Web 시작
-make stop             # 현재 checkout의 프로세스 중지
+make up               # 현재 checkout의 환경 시작(C=api,collab,web,daemon,desktop)
+make status           # 실행 중인 구성 요소와 이 환경의 소유 여부 표시
+make list             # 이 컴퓨터의 모든 환경 목록 표시
+make down             # 프로세스를 중지하고 데이터베이스는 유지
+make down C=daemon    # 지정한 구성 요소만 중지
+make destroy          # 중지 후 데이터베이스를 삭제하고 슬롯 해제
+make gc               # 만료되었거나 디렉터리가 사라진 환경 정리
+make dev              # 현재 checkout을 포그라운드에서 준비 및 시작
 make check            # 전체 로컬 검증 절차 실행
 make build            # server, CLI, migrate binary 빌드
 ```
+
+`make up`은 환경을 이름이 있는 객체로 다룹니다. 잠금 아래에서 API, Web, Desktop 렌더러 포트와 데이터베이스 이름, CLI 프로필을 할당해 `~/.multica/dev/`에 기록하므로 두 checkout이 모른 채 같은 슬롯을 점유하지 않습니다. 데이터베이스는 `DATABASE_URL`로 검증하고 백엔드는 `pid`, `commit`, `started_at`을 반환하는 `GET /health`로 검증합니다(200 응답만으로는 같은 포트에 남아 있던 프로세스와 구분할 수 없습니다). `make destroy`는 데이터베이스, CLI 프로필, 데몬 작업 공간, Desktop userData, 레지스트리 항목을 삭제하며, 삭제에 실패하면 재시도할 수 있도록 레지스트리 항목을 유지합니다. 임시 환경은 TTL이 지난 뒤 다음 `make up`에서 최선 노력으로 정리됩니다.
 
 ### 프런트엔드
 
@@ -102,11 +109,21 @@ make migrate-down
 make sqlc
 ```
 
+`make test`는 Go 테스트를 실행하기 전에 데이터베이스를 준비하고 마이그레이션을 적용합니다. `.env`가 없는 워크트리에서는 `make`가 자동으로 `.env.worktree`를 선택합니다. `make test ENV_FILE=.env.worktree`로 명시적으로 지정할 수도 있습니다.
+
+`make test`, `make check`, `make check-worktree`를 실행하기 전에 같은 데이터베이스를 사용하는 개발 API를 중지하여 백그라운드 워커가 테스트 작업을 가져가지 않도록 하세요. 시작 방법에 맞는 중지 방법을 사용하세요.
+
+- `make up` → `make down C=api`.
+- `make start` / `make dev` → `make stop`; `make start-worktree` → `make stop-worktree`.
+- `make server` → 실행 중인 터미널에서 Ctrl-C를 누르세요.
+
 소스에서 CLI 명령을 실행하려면 다음을 사용합니다.
 
 ```bash
 make cli ARGS="issue list"
 ```
+
+아직 등록된 환경은 만료된 후에도 해당 체크아웃에서 `make up ARGS="--ttl 48"`을 실행해 갱신할 수 있습니다. 데이터는 유지되며 만료 시점은 실행 시점부터 48시간 뒤로 설정됩니다.
 
 ## 프런트엔드 기능 변경
 
@@ -186,7 +203,7 @@ make start
 
 ## GitHub Issue 등록
 
-- **[기능 요청](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/feature_request.yml):** **문제(Problem)**와 **목표(Goal)**를 설명합니다. 설계 개요(Proposal), 대안(Alternatives), 스크린샷(Screenshots)은 선택 사항이며, 해결책을 설계하지 않아도 문제를 제기할 수 있습니다.
+- **[기능 요청](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/feature_request.yml):** **문제**(Problem)와 **목표**(Goal)를 설명합니다. 설계 개요(Proposal), 대안(Alternatives), 스크린샷(Screenshots)은 선택 사항이며, 해결책을 설계하지 않아도 문제를 제기할 수 있습니다.
 - **[버그 보고](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml):** **문제**, **기대 동작**, **재현 단계**를 나누어 작성합니다. 간헐적으로 발생한다면 시도한 작업과 발생 빈도를 설명합니다. 스크린샷, 로그, 환경 정보는 선택 사항입니다.
 
 보고를 담당자에게 전달할 수 있도록 영향을 받는 영역을 선택합니다. 버그 보고에서는 배포 방식도 선택합니다. Issue 보고의 스크린샷은 선택 사항이며, UI나 상호작용을 변경하는 PR의 스크린샷 필수 규칙은 적용되지 않습니다.

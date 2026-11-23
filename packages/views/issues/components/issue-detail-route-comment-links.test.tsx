@@ -86,13 +86,17 @@ describe("IssueDetailRoute comment deep links", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
-  it("retains the adapter fragment when canonicalizing a UUID route", async () => {
-    render(route("#comment-adapter-comment", issueId));
+  it("retains the adapter fragment when canonicalizing a UUID route, and lands on the canonical page", async () => {
+    const { rerender } = render(route("#comment-adapter-comment", issueId));
     await waitFor(() => {
-      expectHighlight("adapter-comment");
       expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134#comment-adapter-comment");
     });
     expect(push).not.toHaveBeenCalled();
+    // The rewrite mounts a new page on web; landing on this one would be lost.
+    expectHighlight(undefined);
+
+    rerender(route("#comment-adapter-comment"));
+    expectHighlight("adapter-comment");
   });
 
   it("updates the highlight when only the adapter hash changes", async () => {

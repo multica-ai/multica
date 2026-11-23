@@ -1,5 +1,6 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
+import { useInboxSelectionStore } from "./selection-store";
 import type { InboxItem, IssueAssigneeType, IssuePriority, IssueStatus } from "../types";
 
 // Re-read a query because the server changed — in a way that is never answered
@@ -161,12 +162,46 @@ export async function onInboxIssueDeleted(
   patchInboxLists(qc, wsId, (items) =>
     items.filter((i) => i.issue_id !== issueId),
   );
+  // A row kept in place for the open issue must not bring a deleted issue back.
+  useInboxSelectionStore.getState().forgetRows(wsId, [issueId]);
   await Promise.all([
     onInboxSummaryInvalidate(qc),
     refreshInboxQuery(qc, inboxKeys.pages(wsId)),
     refreshInboxQuery(qc, inboxKeys.lookup(wsId)),
     refreshInboxQuery(qc, inboxKeys.facets(wsId)),
   ]);
+}
+
+// The delete mutations' own inbox cleanup. The deleting client cannot count
+// on its `issue:deleted` echo arriving (a proxied deployment can drop the
+// socket silently), and the inbox list it loaded before the delete keeps rows
+// whose issue no longer exists — clicking one routes to a 404. Mirrors
+// `onInboxIssueDeleted`'s DB-cascade prune for a batch, plus the mutation
+// write discipline the update mutations already follow: a list response that
+// was on the wire before the delete lands on top of the prune and
+// resurrects the rows, so the lists are cancelled first and owed a re-read
+// when that interrupted a request (see `cancelInboxLists`).
+export async function onInboxIssuesDeleted(
+  qc: QueryClient,
+  wsId: string,
+  issueIds: string[],
+) {
+  if (issueIds.length === 0) return;
+  const interrupted = cancelInboxLists(qc, wsId);
+  const deleted = new Set(issueIds);
+  patchInboxLists(qc, wsId, (items) => {
+    const next = items.filter((i) => i.issue_id === null || !deleted.has(i.issue_id));
+    return next.length === items.length ? items : next;
+  });
+  useInboxSelectionStore.getState().forgetRows(wsId, issueIds);
+  const refreshes: Promise<unknown>[] = [
+    onInboxSummaryInvalidate(qc),
+    refreshInboxQuery(qc, inboxKeys.pages(wsId)),
+    refreshInboxQuery(qc, inboxKeys.lookup(wsId)),
+    refreshInboxQuery(qc, inboxKeys.facets(wsId)),
+  ];
+  if (interrupted) refreshes.push(onInboxInvalidate(qc, wsId));
+  await Promise.all(refreshes);
 }
 
 // An issue field the archive filters and counts on changed. Loaded rows are

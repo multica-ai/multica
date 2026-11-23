@@ -172,9 +172,9 @@
     --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
     --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
 
-    /* The chat launcher is an overlay pinned to the dashboard's bottom-right
-       corner on every workspace page, so that corner is not available to page
-       content. Its geometry lives here rather than in the button so that the
+    /* Below `md` the chat launcher is an overlay pinned to the dashboard's
+       bottom-right corner on every workspace page, so that corner is not
+       available to page content. Its geometry lives here rather than in the button so that the
        clearance is derived from it: anything reaching that corner — a footer's
        action buttons, a floating toolbar — reserves --chat-launcher-clearance
        and stays correct if the launcher ever moves or changes size. */
@@ -271,6 +271,14 @@
     --find-match: oklch(0.92 0.15 100);
     --find-match-active: oklch(0.82 0.17 62);
     --find-match-foreground: oklch(0.22 0.03 92);
+}
+
+/* From `md` up quick chat lives in the bottom bar, outside the page card, and
+   the corner is free again. */
+@media (min-width: 48rem) {
+    :root {
+        --chat-launcher-clearance: 0px;
+    }
 }
 
 .dark {

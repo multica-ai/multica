@@ -48,6 +48,8 @@ import {
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { commentMentionCandidates } from "@/lib/comment-mention-candidates";
+import { useIsGuest } from "@/lib/use-is-guest";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 
@@ -76,9 +78,18 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
   const { t } = useT("issues");
   // Rows are icon-only here too — colour is what names a custom status.
   const catalog = useIssueStatuses();
+  // A guest (MUL-9420) mentions people only, so it skips the agent and squad
+  // lists the server would refuse it anyway.
+  const guest = useIsGuest();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: agents = [] } = useQuery({
+    ...agentListOptions(wsId),
+    enabled: !!wsId && !guest,
+  });
+  const { data: squads = [] } = useQuery({
+    ...squadListOptions(wsId),
+    enabled: !!wsId && !guest,
+  });
   const runnableAgentIds = useMemo(
     () =>
       new Set(
@@ -144,9 +155,6 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
   };
 
   const rows = useMemo<Row[]>(() => {
-    const q = query.trim().toLowerCase();
-    const matchName = (name: string) => !q || name.toLowerCase().includes(q);
-
     const out: Row[] = [];
 
     // People-style sections only render in comment mode. Chat is single-
@@ -154,29 +162,33 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
     // people. The Issues section IS useful in chat ("reference ticket
     // for context"), so it stays for both modes.
     if (mode === "comment") {
-      if (!q || "all".includes(q)) {
+      const candidates = commentMentionCandidates({
+        query,
+        members,
+        agents,
+        squads,
+        guest,
+      });
+      if (candidates.all) {
         out.push({ kind: "all" });
       }
-      const memberRows = [...members]
-        .filter((m) => matchName(m.name))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((m): Row => ({ kind: "member", member: m }));
-      if (memberRows.length > 0) {
-        out.push({ kind: "section", label: t("picker.people") }, ...memberRows);
+      if (candidates.members.length > 0) {
+        out.push(
+          { kind: "section", label: t("picker.people") },
+          ...candidates.members.map((m): Row => ({ kind: "member", member: m })),
+        );
       }
-      const agentRows = [...agents]
-        .filter((a) => matchName(a.name))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((a): Row => ({ kind: "agent", agent: a }));
-      if (agentRows.length > 0) {
-        out.push({ kind: "section", label: t("picker.agents") }, ...agentRows);
+      if (candidates.agents.length > 0) {
+        out.push(
+          { kind: "section", label: t("picker.agents") },
+          ...candidates.agents.map((a): Row => ({ kind: "agent", agent: a })),
+        );
       }
-      const squadRows = [...squads]
-        .filter((s) => !s.archived_at && matchName(s.name))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((s): Row => ({ kind: "squad", squad: s }));
-      if (squadRows.length > 0) {
-        out.push({ kind: "section", label: t("picker.squads") }, ...squadRows);
+      if (candidates.squads.length > 0) {
+        out.push(
+          { kind: "section", label: t("picker.squads") },
+          ...candidates.squads.map((s): Row => ({ kind: "squad", squad: s })),
+        );
       }
     }
 
@@ -187,7 +199,7 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
       }
     }
     return out;
-  }, [mode, members, agents, squads, issueResults, query, t]);
+  }, [mode, members, agents, squads, guest, issueResults, query, t]);
 
   const pick = (row: Row) => {
     let chip: MentionChipDraft | null = null;

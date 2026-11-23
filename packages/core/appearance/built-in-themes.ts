@@ -18,8 +18,9 @@ export const DEFAULT_THEME_ID = "default";
 
 const INK = "oklch(0.145 0 0)";
 const POP_YELLOW = "oklch(0.9 0.17 98)";
+const POP_PAPER_FRAME = "oklch(0.925 0.02 95)";
 
-/** Pop's frame is black in both modes, so what sits on it reads light tokens. */
+/** Tokens for what sits on Pop's black frame: always in dark mode, and in light mode with the ink frame. */
 const POP_FRAME: ThemeTokens = {
   foreground: "oklch(0.97 0 0)",
   "muted-foreground": "oklch(0.8 0 0)",
@@ -45,7 +46,7 @@ const POP_SIGNALS = {
   coral: "oklch(0.8 0.13 30)",
 };
 
-const POP_FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"])';
+const POP_FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"], [data-mc="bottom-bar"])';
 const POP_STATUS_BLOCKS: [string, string][] = [
   ['[data-status="backlog"], [data-status="todo"]', "oklch(0.88 0.035 250)"],
   ['[data-status="in_progress"]', "oklch(0.84 0.13 68)"],
@@ -54,6 +55,8 @@ const POP_STATUS_BLOCKS: [string, string][] = [
   ['[data-status="blocked"]', "oklch(0.78 0.13 28)"],
 ];
 const POP_SIGNAL_ON = ':root[data-theme-option-signal]:not([data-theme-option-signal="yellow"])';
+const POP_FRAME_IS = (frame: string) => `:root.theme-light[data-theme-option-frame="${frame}"]`;
+const POP_DARK_FRAME = ':is(.theme-dark, [data-theme-option-frame="ink"])';
 const POP_BUTTON = '[data-slot="button"][data-variant="default"]:not(:disabled):hover';
 const POP_GROUP = '[data-mc="issue-group-header"]';
 const POP_BLOCKED_STATUSES = POP_STATUS_BLOCKS.map(([status]) => status).join(", ");
@@ -72,6 +75,14 @@ const POP_SHARED: ThemeTokens = {
   "menu-item-radius": "0.125rem",
   "menu-item-hover-background": "var(--surface-selected)",
   "menu-item-hover-color": "var(--foreground)",
+  "display-chip-pressed-background": "var(--surface-selected)",
+  "display-chip-pressed-color": "var(--foreground)",
+  // --primary and --input are the same ink, so switches get their own fills.
+  "switch-checked-background": "var(--button-primary)",
+  "switch-unchecked-background": "var(--surface)",
+  "switch-checked-thumb": "var(--button-primary-foreground)",
+  "switch-unchecked-thumb": "var(--surface-border)",
+  "switch-border-color": "var(--surface-border)",
   "label-radius": "0.25rem",
   "board-column-radius": "0.25rem",
   "board-card-radius": "0.25rem",
@@ -117,7 +128,15 @@ const POP_CSS = [
     .map(([id, color]) => `:root[data-theme-option-signal="${id}"] { --pop-signal: ${color}; }`),
   `${POP_SIGNAL_ON} { --button-primary: var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 35%, oklch(1 0 0)); }`,
   `${POP_SIGNAL_ON}.theme-dark { --ring: var(--pop-signal); --floating-shadow: 6px 6px 0 var(--pop-signal); --menu-shadow: 4px 4px 0 var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 22%, oklch(0.2 0 0)); }`,
-  `${POP_SIGNAL_ON} ${POP_FRAME_ANCHORS} { --sidebar-accent-foreground: var(--pop-signal); --ring: var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 22%, oklch(0.2 0 0)); }`,
+  `${POP_SIGNAL_ON}${POP_DARK_FRAME} ${POP_FRAME_ANCHORS} { --sidebar-accent-foreground: var(--pop-signal); --ring: var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 22%, oklch(0.2 0 0)); }`,
+  "",
+  "/* Frame in light mode: paper by default, or ink or the signal colour. Dark mode keeps the black frame. */",
+  `${POP_FRAME_IS("paper")} ${POP_FRAME_ANCHORS} { --sidebar-accent: oklch(0.974 0.008 95); }`,
+  `${POP_FRAME_IS("paper")} [data-mc="app-rail"] [aria-current="page"] { box-shadow: inset 0 0 0 1px var(--surface-border); }`,
+  `${POP_FRAME_IS("ink")} { --app-shell: ${INK}; }`,
+  `${POP_FRAME_IS("ink")} ${POP_FRAME_ANCHORS} { ${Object.entries(POP_FRAME).map(([name, value]) => `--${name}: ${value};`).join(" ")} }`,
+  `${POP_FRAME_IS("signal")} { --app-shell: ${POP_SIGNAL}; }`,
+  `${POP_FRAME_IS("signal")} ${POP_FRAME_ANCHORS} { --muted-foreground: oklch(0.28 0.02 95); --faint-foreground: oklch(0.38 0.02 95); --sidebar-accent: ${INK}; --sidebar-accent-foreground: ${POP_SIGNAL}; --surface-hover: color-mix(in oklab, ${INK} 12%, transparent); --ring: ${INK}; }`,
   "",
   "/* Primary buttons lift onto a hard shadow on hover instead of darkening. */",
   `:root[data-theme-option-offset-shadow] ${POP_BUTTON} { background-color: var(--button-primary, var(--primary)); translate: -2px -2px; box-shadow: 3px 3px 0 var(--surface-border); }`,
@@ -144,8 +163,8 @@ const POP_CSS = [
 ].join("\n");
 
 /**
- * Pop: black frame, warm paper canvas, ink outlines, small radius, hard
- * offset shadows and a signal-colour primary. --primary stays ink because it
+ * Pop: paper, ink or signal-colour frame, warm paper canvas, ink outlines,
+ * small radius, hard offset shadows and a signal-colour primary. --primary stays ink because it
  * also paints text (`text-primary`); the signal colour reaches buttons
  * through --button-primary.
  */
@@ -156,7 +175,8 @@ const POP = builtInTheme({
     light: {
       ...POP_SHARED,
       "highlight-background": POP_SIGNAL,
-      "app-shell": INK,
+      "app-shell": POP_PAPER_FRAME,
+      "page-shadow": `3px 3px 0 ${INK}`,
       "page-canvas": "oklch(0.974 0.008 95)",
       surface: "oklch(1 0 0)",
       "surface-raised": "oklch(1 0 0)",
@@ -212,7 +232,7 @@ const POP = builtInTheme({
       "button-primary-border": "oklch(0.92 0 0)",
     },
   },
-  frame: { light: POP_FRAME, dark: POP_FRAME },
+  frame: { dark: POP_FRAME },
   options: [
     {
       id: "signal",
@@ -243,6 +263,27 @@ const POP = builtInTheme({
         { value: "mint", label: { en: "Mint", "zh-Hans": "薄荷", "zh-Hant": "薄荷", ja: "ミント", ko: "민트", es: "Menta", fr: "Menthe", ru: "Мятный" }, swatch: POP_SIGNALS.mint },
         { value: "sky", label: { en: "Sky", "zh-Hans": "天蓝", "zh-Hant": "天藍", ja: "スカイ", ko: "하늘", es: "Cielo", fr: "Ciel", ru: "Небесный" }, swatch: POP_SIGNALS.sky },
         { value: "coral", label: { en: "Coral", "zh-Hans": "珊瑚", "zh-Hant": "珊瑚", ja: "コーラル", ko: "코랄", es: "Coral", fr: "Corail", ru: "Коралловый" }, swatch: POP_SIGNALS.coral },
+      ],
+    },
+    {
+      id: "frame",
+      type: "select",
+      label: { en: "Frame", "zh-Hans": "外框", "zh-Hant": "外框", ja: "フレーム", ko: "프레임", es: "Marco", fr: "Cadre", ru: "Рамка" },
+      description: {
+        en: "The frame around the page in light mode. Dark mode keeps it black.",
+        "zh-Hans": "浅色模式下页面四周的外框。深色模式始终为黑色。",
+        "zh-Hant": "淺色模式下頁面四周的外框。深色模式一律為黑色。",
+        ja: "ライトモードでページを囲むフレーム。ダークモードでは常に黒です。",
+        ko: "라이트 모드에서 페이지를 둘러싼 프레임입니다. 다크 모드에서는 항상 검은색입니다.",
+        es: "El marco alrededor de la página en modo claro. En modo oscuro sigue siendo negro.",
+        fr: "Le cadre autour de la page en mode clair. En mode sombre, il reste noir.",
+        ru: "Рамка вокруг страницы в светлой теме. В тёмной теме она всегда чёрная.",
+      },
+      default: "paper",
+      choices: [
+        { value: "paper", label: { en: "Paper", "zh-Hans": "纸面", "zh-Hant": "紙面", ja: "ペーパー", ko: "종이", es: "Papel", fr: "Papier", ru: "Бумага" } },
+        { value: "ink", label: { en: "Ink", "zh-Hans": "墨黑", "zh-Hant": "墨黑", ja: "インク", ko: "잉크", es: "Tinta", fr: "Encre", ru: "Чернила" } },
+        { value: "signal", label: { en: "Signal", "zh-Hans": "信号色", "zh-Hant": "信號色", ja: "シグナル", ko: "시그널", es: "Señal", fr: "Signal", ru: "Сигнал" } },
       ],
     },
     {

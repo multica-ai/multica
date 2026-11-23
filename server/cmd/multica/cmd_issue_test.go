@@ -105,15 +105,15 @@ func newFlagTestCmd(name string) *cobra.Command {
 }
 
 func TestResolveTextFlag(t *testing.T) {
-	t.Run("inline value is unescaped", func(t *testing.T) {
+	t.Run("inline value is preserved literally", func(t *testing.T) {
 		c := newFlagTestCmd("description")
 		_ = c.Flags().Set("description", `para1\n\npara2`)
 		got, ok, err := resolveTextFlag(c, "description")
 		if err != nil || !ok {
 			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
 		}
-		if got != "para1\n\npara2" {
-			t.Errorf("got %q, want decoded paragraphs", got)
+		if got != `para1\n\npara2` {
+			t.Errorf("got %q, want literal backslashes", got)
 		}
 	})
 
@@ -751,7 +751,7 @@ func TestRunIssueCommentUpdateSendsExpectedRequest(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
-		if len(body) != 2 || body["content"] != "updated\ncomment" || body["expected_revision"] != float64(7) {
+		if len(body) != 2 || body["content"] != `updated\ncomment` || body["expected_revision"] != float64(7) {
 			t.Fatalf("body = %#v, want content plus expected revision", body)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -784,7 +784,7 @@ func TestRunIssueCommentUpdateSendsExpectedRequest(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode stdout JSON %q: %v", out, err)
 	}
-	if got["id"] != commentID || got["content"] != "updated\ncomment" {
+	if got["id"] != commentID || got["content"] != `updated\ncomment` {
 		t.Fatalf("stdout = %#v", got)
 	}
 }
@@ -3863,6 +3863,7 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().Int64("description-base-revision", 0, "")
 	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().StringArray("attachment", nil, "")
 	cmd.Flags().String("status", "", "")
@@ -4056,6 +4057,125 @@ func TestRunIssueUpdateSendsPosition(t *testing.T) {
 	}
 	if got := body["position"]; got != float64(7.5) {
 		t.Fatalf("position = %#v, want 7.5 in request body", got)
+	}
+}
+
+func TestRunIssueUpdateSendsDescriptionBaseRevision(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"code": "issue_description_merge_conflict", "conflicts": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("description", "new text")
+	_ = cmd.Flags().Set("description-base-revision", "4")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if got := body["description_base_revision"]; got != float64(4) {
+		t.Fatalf("description_base_revision = %#v, want 4", got)
+	}
+	if err == nil || !strings.Contains(err.Error(), "issue edit-description") {
+		t.Fatalf("err = %v, want a merge conflict pointing at issue edit-description", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsDescriptionBaseRevisionWithoutDescription(t *testing.T) {
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("description-base-revision", "4")
+	_ = cmd.Flags().Set("title", "x")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:1")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	if err := runIssueUpdate(cmd, []string{"MUL-1"}); err == nil || !strings.Contains(err.Error(), "needs a new description") {
+		t.Fatalf("err = %v, want a refusal before any request", err)
+	}
+}
+
+func newIssueEditDescriptionTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "edit-description"}
+	cmd.Flags().String("old", "", "")
+	cmd.Flags().String("old-file", "", "")
+	cmd.Flags().String("new", "", "")
+	cmd.Flags().String("new-file", "", "")
+	cmd.Flags().Bool("replace-all", false, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueEditDescriptionPostsEdit(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/description/edits":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "description_revision": 3})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueEditDescriptionTestCmd()
+	_ = cmd.Flags().Set("old", "Status: draft")
+	_ = cmd.Flags().Set("new", "Status: ready")
+	_ = cmd.Flags().Set("replace-all", "true")
+	if err := runIssueEditDescription(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueEditDescription: %v", err)
+	}
+	edits, _ := body["edits"].([]any)
+	if len(edits) != 1 {
+		t.Fatalf("edits = %#v, want one edit", body["edits"])
+	}
+	edit := edits[0].(map[string]any)
+	if edit["old_text"] != "Status: draft" || edit["new_text"] != "Status: ready" || edit["replace_all"] != true {
+		t.Fatalf("edit = %#v", edit)
+	}
+}
+
+func TestRunIssueEditDescriptionExplainsAMissingQuote(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"code": "issue_description_edit_failed", "failure": map[string]any{"reason": "not_found"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueEditDescriptionTestCmd()
+	_ = cmd.Flags().Set("old", "gone")
+	_ = cmd.Flags().Set("new", "x")
+	err := runIssueEditDescription(cmd, []string{"MUL-1"})
+	if err == nil || !strings.Contains(err.Error(), "does not match the description exactly once") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -4651,6 +4771,52 @@ func TestRunIssueListFieldsFiltersJSONOutput(t *testing.T) {
 				if _, ok := got[f]; !ok {
 					t.Fatalf("issue missing field %q; got keys %v", f, keysOf(got))
 				}
+			}
+		})
+	}
+}
+
+func TestRunIssueListRequesterFieldProjection(t *testing.T) {
+	requesterID := "user-requester"
+	for _, tc := range []struct {
+		name string
+		id   *string
+	}{
+		{"attributed", &requesterID},
+		{"unattributed", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issue := sampleIssueResponse()
+			issue.CreatorType = "agent"
+			issue.RequesterID = tc.id
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+			}))
+			defer srv.Close()
+			setCLITestServerEnv(t, srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("fields", "id,requester_id")
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+			var resp struct {
+				Issues []map[string]any `json:"issues"`
+			}
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				t.Fatalf("unmarshal output: %v", err)
+			}
+			var wantRequester any
+			if tc.id != nil {
+				wantRequester = *tc.id
+			}
+			want := []map[string]any{{"id": issue.ID, "requester_id": wantRequester}}
+			if !reflect.DeepEqual(resp.Issues, want) {
+				t.Fatalf("issues = %#v, want %#v", resp.Issues, want)
 			}
 		})
 	}
@@ -6217,5 +6383,156 @@ func TestIssueSearchCommandRegistration(t *testing.T) {
 	}
 	if got := issueSearchCmd.Flags().Lookup("project").Usage; got != "Filter by project ID" {
 		t.Errorf("project flag usage = %q, want %q", got, "Filter by project ID")
+	}
+}
+
+// issuePullRequestServer serves one issue's linked PRs and records the link and
+// unlink calls the CLI makes against it.
+type issuePullRequestServer struct {
+	linkBody   map[string]any
+	unlinkPath string
+}
+
+func (s *issuePullRequestServer) start(t *testing.T) {
+	t.Helper()
+	listed := map[string]any{
+		"pull_requests": []map[string]any{
+			{"id": "11111111-1111-1111-1111-111111111111", "number": float64(42), "state": "open", "title": "Fix the thing", "html_url": "https://github.com/acme/app/pull/42"},
+			{"id": "22222222-2222-2222-2222-222222222222", "number": float64(7), "state": "merged", "title": "API side", "html_url": "https://github.com/acme/api/pull/7"},
+			{"id": "33333333-3333-3333-3333-333333333333", "number": float64(7), "state": "open", "title": "Web side", "html_url": "https://github.com/acme/web/pull/7"},
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/issues/MUL-9" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-uuid", "identifier": "MUL-9"})
+		case r.URL.Path == "/api/issues/issue-uuid/pull-requests" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(listed)
+		case r.URL.Path == "/api/issues/issue-uuid/pull-requests" && r.Method == http.MethodPost:
+			_ = json.NewDecoder(r.Body).Decode(&s.linkBody)
+			if strings.Contains(fmt.Sprint(s.linkBody["url"]), "/pull/999") {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]any{"error": "pull request not found; it appears here once its repository is connected and the PR has been synced"})
+				return
+			}
+			json.NewEncoder(w).Encode(listed)
+		case strings.HasPrefix(r.URL.Path, "/api/issues/issue-uuid/pull-requests/") && r.Method == http.MethodDelete:
+			s.unlinkPath = r.URL.Path
+			json.NewEncoder(w).Encode(listed)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+}
+
+func runQuiet(t *testing.T, run func() error) (string, error) {
+	t.Helper()
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
+	err := run()
+	_ = w.Close()
+	os.Stdout = old
+	return string(<-drainCh), err
+}
+
+func TestRunIssuePullRequestsLinkPostsURL(t *testing.T) {
+	s := &issuePullRequestServer{}
+	s.start(t)
+
+	out, err := runQuiet(t, func() error {
+		return runIssuePullRequestsLink(newIssuePullRequestsTestCmd(), []string{"MUL-9", "https://github.com/acme/app/pull/42/files"})
+	})
+	if err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	// The server normalizes the URL; the CLI passes it through untouched.
+	if s.linkBody["url"] != "https://github.com/acme/app/pull/42/files" || s.linkBody["pull_request_id"] != nil {
+		t.Fatalf("link body = %#v", s.linkBody)
+	}
+	if !strings.Contains(out, "https://github.com/acme/app/pull/42") {
+		t.Fatalf("expected the updated PR list in the output:\n%s", out)
+	}
+}
+
+func TestRunIssuePullRequestsLinkByIDRestoresUnlinkedPR(t *testing.T) {
+	s := &issuePullRequestServer{}
+	s.start(t)
+
+	if _, err := runQuiet(t, func() error {
+		return runIssuePullRequestsLink(newIssuePullRequestsTestCmd(), []string{"MUL-9", "22222222-2222-2222-2222-222222222222"})
+	}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if s.linkBody["pull_request_id"] != "22222222-2222-2222-2222-222222222222" || s.linkBody["url"] != nil {
+		t.Fatalf("link body = %#v", s.linkBody)
+	}
+}
+
+func TestRunIssuePullRequestsUnlinkResolvesPR(t *testing.T) {
+	cases := []struct {
+		name, ref, wantID string
+	}{
+		{"by URL with a trailing page", "https://github.com/acme/app/pull/42/files?w=1", "11111111-1111-1111-1111-111111111111"},
+		{"by URL without a scheme, any case", "GitHub.com/acme/web/pull/7", "33333333-3333-3333-3333-333333333333"},
+		{"by unique number", "#42", "11111111-1111-1111-1111-111111111111"},
+		{"by id", "22222222-2222-2222-2222-222222222222", "22222222-2222-2222-2222-222222222222"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &issuePullRequestServer{}
+			s.start(t)
+			if _, err := runQuiet(t, func() error {
+				return runIssuePullRequestsUnlink(newIssuePullRequestsTestCmd(), []string{"MUL-9", tc.ref})
+			}); err != nil {
+				t.Fatalf("unlink: %v", err)
+			}
+			if want := "/api/issues/issue-uuid/pull-requests/" + tc.wantID; s.unlinkPath != want {
+				t.Fatalf("DELETE %s, want %s", s.unlinkPath, want)
+			}
+		})
+	}
+}
+
+func TestRunIssuePullRequestsUnlinkRefusesAmbiguousOrUnknownPR(t *testing.T) {
+	cases := []struct {
+		name, ref, wantErr string
+	}{
+		{"number shared by two repos", "7", "matches 2 linked PRs"},
+		{"number not linked", "99", "no linked pull request has number 99"},
+		{"URL not linked", "https://github.com/acme/app/pull/43", "is not linked to this issue"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &issuePullRequestServer{}
+			s.start(t)
+			_, err := runQuiet(t, func() error {
+				return runIssuePullRequestsUnlink(newIssuePullRequestsTestCmd(), []string{"MUL-9", tc.ref})
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want it to mention %q", err, tc.wantErr)
+			}
+			if s.unlinkPath != "" {
+				t.Fatalf("expected no DELETE, got %s", s.unlinkPath)
+			}
+		})
+	}
+}
+
+func TestRunIssuePullRequestsLinkExplainsUnsyncedPR(t *testing.T) {
+	s := &issuePullRequestServer{}
+	s.start(t)
+
+	_, err := runQuiet(t, func() error {
+		return runIssuePullRequestsLink(newIssuePullRequestsTestCmd(), []string{"MUL-9", "https://github.com/acme/app/pull/999"})
+	})
+	if err == nil || !strings.Contains(err.Error(), "not in this workspace yet") {
+		t.Fatalf("err = %v, want the not-synced explanation", err)
 	}
 }
