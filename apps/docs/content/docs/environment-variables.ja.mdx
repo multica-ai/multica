@@ -244,6 +244,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | 正常な WebSocket での claim 安全ポーリング上限。`MULTICA_DAEMON_POLL_INTERVAL` とは独立して設定され、下方向のジッターにより既定値は実際には `2m30s`–`2m45s` となり、旧 Server または結果が不確実な claim では通常のポーリング間隔を維持します |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | ハートビート間隔 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | デーモン 1 つあたりの同時実行上限 |
+| `MULTICA_CLAUDE_RESUME_CONTEXT_LIMIT` | `300000` | Claude セッションの直近の入力コンテキストがこのトークン数を超えたら、再開せず新しいセッションを始める。`0` で無効 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 1 回の実行の絶対時間上限。`0` は上限なし |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 出力もツール実行もない状態の静穏上限。`0` で watchdog 全体を無効化 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | 単一のツール呼び出しが静穏なままでいられる上限。モデルより長い余裕をツールに与えたい場合のみ設定し、`0` はツール実行中に強制停止しません。Cursor のバックグラウンドシェルは、起動したプロセスが終了するまで実行中として扱われます。この上限に達すると、デーモンはそれらのプロセスを停止し、Cursor が最終結果を出すための新しい watchdog 予算を与えます。プロセスの所有権やクリーンアップを検証できない場合は、通常の実行キャンセル方針に従います |

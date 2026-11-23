@@ -130,6 +130,8 @@ Les outils marqués ✓ permettent de poursuivre une session existante lors d'un
 
 Multica stocke l'identifiant de session renvoyé par l'outil. La prochaine fois que le travail se poursuit sur la même tâche, le runtime tente de reprendre cette session ; s'il n'y parvient pas, il crée une nouvelle session et continue. Pi stocke le chemin d'un fichier de session local ; il dépend donc davantage de l'ordinateur et du fichier d'origine.
 
+Si le dernier contexte d’entrée enregistré d’une session Claude dépasse 300 000 tokens, l’exécution suivante démarre une nouvelle session. L’agent est invité à reconstituer le contexte à partir des commentaires de l’issue ou de l’historique de chat disponible. Une session déjà compactée sous ce seuil reprend normalement ; si les données locales d’utilisation sont illisibles, le comportement habituel de reprise est conservé. Définissez `MULTICA_CLAUDE_RESUME_CONTEXT_LIMIT` sur le daemon pour modifier ce seuil, ou `0` pour désactiver ce comportement.
+
 Les règles de relance et de reprise de session se trouvent dans [Exécutions](/tasks#relance-manuelle).
 
 ## Configuration MCP

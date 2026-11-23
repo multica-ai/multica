@@ -91,6 +91,11 @@ const (
 	DefaultAutoUpdateCheckInterval = 6 * time.Hour // how often the daemon polls GitHub for a newer CLI release
 )
 
+// DefaultClaudeResumeContextLimit is the per-request input context (tokens)
+// above which a Claude session is started fresh instead of resumed; 0 disables
+// the check. See gateClaudeResumeToContextSize.
+const DefaultClaudeResumeContextLimit = 300_000
+
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
 // regenerable build artifacts. Kept conservative: only directories that are
 // always cheap to recreate (`pnpm install`, `next build`, `turbo build`). Things
@@ -114,6 +119,7 @@ type Config struct {
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
+	ClaudeResumeContextLimit       int64                 // start a fresh Claude session when the prior one's latest input context exceeds this many tokens (default: 300000; 0 disables)
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
@@ -493,6 +499,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		maxConcurrentTasks = overrides.MaxConcurrentTasks
 	}
 
+	claudeResumeContextLimit, err := intFromEnv("MULTICA_CLAUDE_RESUME_CONTEXT_LIMIT", DefaultClaudeResumeContextLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	if claudeResumeContextLimit < 0 {
+		return Config{}, fmt.Errorf("MULTICA_CLAUDE_RESUME_CONTEXT_LIMIT: must be 0 (disabled) or a positive token count, got %d", claudeResumeContextLimit)
+	}
+
 	// Profile
 	profile := overrides.Profile
 
@@ -671,6 +685,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AutoReloadEnabled:               autoReloadEnabled,
 		HealthPort:                      healthPort,
 		MaxConcurrentTasks:              maxConcurrentTasks,
+		ClaudeResumeContextLimit:        int64(claudeResumeContextLimit),
 		PollInterval:                    pollInterval,
 		WSClaimPollInterval:             wsClaimPollInterval,
 		HeartbeatInterval:               heartbeatInterval,

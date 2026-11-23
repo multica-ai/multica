@@ -392,6 +392,7 @@ Daemon behavior is configured via flags or environment variables:
 | Codex turn-interrupt timeout | — | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` (bounded grace period for `turn/interrupt` acknowledgement and `turn/completed`; tune from the logged interrupt latency on unusually slow hosts) |
 | OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
+| Claude resume context limit (tokens; `0` = off) | — | `MULTICA_CLAUDE_RESUME_CONTEXT_LIMIT` | `300000` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | Persistent UUID stored in `~/.multica/daemon.id` and shared across profiles |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
