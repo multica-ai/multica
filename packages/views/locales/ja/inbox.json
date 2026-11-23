@@ -243,8 +243,6 @@
     "just_unsubscribed": "{{label}} の購読を解除してアーカイブしました",
     "just_archived_many_other": "{{count}} 件の通知をアーカイブしました",
     "snoozed_summary_other": "スヌーズ中 {{count}} 件 · 最短 {{time}} に復帰",
-    "bar_snoozed_other": "スヌーズ中 {{count}} 件",
-    "go_to_my_work": "自分の作業へ",
     "filtered_title": "このフィルターの通知はすべて処理済みです",
     "filtered_remaining_other": "インボックスに他の通知が {{count}} 件あります",
     "clear_and_continue": "フィルターを解除して続ける",
