@@ -25,6 +25,7 @@ for (const [name, files, selected] of [
   ["docs test", ["apps/docs/lib/unrendered-bold.test.ts"], ["quality", "docs"]],
   ["AI traffic classifier", ["packages/core/ai-traffic/index.ts"], ["frontend", "quality", "docs", "e2e"]],
   ["self-hosting guide for agents", ["SELF_HOSTING_AI.md"], ["docs"]],
+  ["Vercel upload filter", [".vercelignore"], ["docs"]],
   ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality", "docs", "e2e"]],
   ["landing site copy", ["apps/web/features/landing/i18n/site-ko.ts"], ["frontend", "quality", "docs", "e2e"]],
   ["cloud page", ["apps/web/features/landing/site/cloud-page.tsx"], ["frontend", "quality", "docs", "e2e"]],
@@ -80,6 +81,9 @@ for (const [name, files, selected] of [
   ["E2E spec", ["e2e/guest.spec.ts"], ["e2e"]],
   ["Playwright config", ["playwright.config.ts"], ["e2e"]],
   ["dev fixtures", ["scripts/dev-fixtures.mjs"], ["quality", "e2e"]],
+  ["fake Composio", ["scripts/fake-composio.mjs"], ["quality", "scripts"]],
+  ["Composio spec tooling", ["scripts/composio-spec.mjs"], ["quality", "scripts"]],
+  ["Composio OpenAPI snapshot", ["server/pkg/composio/composiotest/openapi-v3.1.json"], ["backend", "runtime", "scripts", "e2e"]],
   ["CI configuration", [".github/ci-paths.json"], Object.keys(filters)],
 ]) {
   test(`PR and main select only affected scopes: ${name}`, () => {

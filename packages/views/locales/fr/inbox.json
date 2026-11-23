@@ -56,6 +56,7 @@
       "days": "{{count}} j"
     },
     "archived_title": "Archivées",
+    "snoozed_title": "Reportés",
     "archived_empty": "Aucune notification archivée",
     "unarchive_tooltip": "Désarchiver",
     "actions_aria": "Actions de notification",
@@ -65,6 +66,7 @@
   },
   "detail": {
     "select_prompt": "Sélectionnez une notification pour afficher les détails",
+    "restore": "Remettre dans la boîte de réception",
     "original_input": "Saisie d'origine",
     "retry_with_context": "Réessayer avec le contexte",
     "edit_advanced": "Ouvrir le formulaire complet",
@@ -217,9 +219,7 @@
     "failed": "Impossible de reporter",
     "unsnooze_failed": "Impossible de faire revenir",
     "view_empty": "Rien de reporté",
-    "view_empty_description": "Reportez une tâche depuis votre boîte de réception : elle attend ici jusqu'à son retour.",
-    "col_updates": "Pendant le report",
-    "col_back": "Retour"
+    "view_empty_description": "Reportez une tâche depuis votre boîte de réception : elle attend ici jusqu'à son retour."
   },
   "auto_archive_prompt": {
     "title": "Archiver les notifications une fois traitées",

@@ -54,6 +54,7 @@
       "days": "{{count}}일"
     },
     "archived_title": "보관됨",
+    "snoozed_title": "미뤄둔 항목",
     "archived_empty": "보관된 알림이 없습니다",
     "unarchive_tooltip": "보관 해제",
     "actions_aria": "알림 작업",
@@ -63,6 +64,7 @@
   },
   "detail": {
     "select_prompt": "자세히 볼 알림을 선택하세요",
+    "restore": "인박스로 되돌리기",
     "original_input": "원본 입력",
     "retry_with_context": "컨텍스트를 유지하여 재시도",
     "edit_advanced": "전체 양식 열기",
@@ -212,9 +214,7 @@
     "failed": "미루지 못했습니다",
     "unsnooze_failed": "되돌리지 못했습니다",
     "view_empty": "미뤄둔 항목이 없습니다",
-    "view_empty_description": "인박스에서 태스크를 미루면 돌아올 시간까지 여기에서 기다립니다.",
-    "col_updates": "미뤄둔 동안",
-    "col_back": "돌아오는 시간"
+    "view_empty_description": "인박스에서 태스크를 미루면 돌아올 시간까지 여기에서 기다립니다."
   },
   "auto_archive_prompt": {
     "title": "처리한 알림을 자동으로 보관하세요",

@@ -49,12 +49,13 @@ describe("parseTabSubject", () => {
       { kind: "runtime", machineId: "machine-1", runtimeId: "rt-2" },
     ],
     // Containers — selection (and archived sub-list) live in the query string
-    ["/acme/inbox", { kind: "inbox", selectedKey: null, archived: false }],
-    ["/acme/inbox?issue=MUL-9", { kind: "inbox", selectedKey: "MUL-9", archived: false }],
-    ["/acme/inbox?view=archived", { kind: "inbox", selectedKey: null, archived: true }],
+    ["/acme/inbox", { kind: "inbox", selectedKey: null, view: "inbox" }],
+    ["/acme/inbox?issue=MUL-9", { kind: "inbox", selectedKey: "MUL-9", view: "inbox" }],
+    ["/acme/inbox?view=archived", { kind: "inbox", selectedKey: null, view: "archived" }],
+    ["/acme/inbox?view=snoozed&issue=MUL-9", { kind: "inbox", selectedKey: "MUL-9", view: "snoozed" }],
     [
       "/acme/inbox?view=archived&issue=MUL-9",
-      { kind: "inbox", selectedKey: "MUL-9", archived: true },
+      { kind: "inbox", selectedKey: "MUL-9", view: "archived" },
     ],
     ["/acme/chat", { kind: "chat", sessionId: null }],
     ["/acme/chat?session=sess-1", { kind: "chat", sessionId: "sess-1" }],
@@ -105,10 +106,10 @@ describe("tabSubjectKey", () => {
   });
 
   it("distinguishes archived inbox and the attachment filename", () => {
-    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", archived: false })).toBe(
+    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", view: "inbox" })).toBe(
       "inbox:inbox:k",
     );
-    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", archived: true })).toBe(
+    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", view: "archived" })).toBe(
       "inbox:archived:k",
     );
     expect(

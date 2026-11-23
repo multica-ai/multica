@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { inboxKeys, snoozedInboxOptions } from "@multica/core/inbox/queries";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { useInboxSelectionStore, type InboxTab } from "@multica/core/inbox/selection-store";
 import type { SnoozedInboxIssue } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
@@ -46,7 +46,7 @@ const archivedEntry = {
 const pressZ = (target: Element = document.body) => fireEvent.keyDown(target, { key: "z", code: "KeyZ" });
 
 function renderEmpty({
-  isArchivedView = false,
+  tab = "inbox",
   visibleCount = 0,
   totalActiveCount = 0,
   hasActiveFilters = false,
@@ -55,7 +55,7 @@ function renderEmpty({
   snoozed = [],
   onClearFiltersAndContinue = vi.fn(),
 }: {
-  isArchivedView?: boolean;
+  tab?: InboxTab;
   visibleCount?: number;
   totalActiveCount?: number;
   hasActiveFilters?: boolean;
@@ -80,7 +80,7 @@ function renderEmpty({
       <NavigationProvider value={nav}>
         <InboxEmptyState
           wsId="ws"
-          isArchivedView={isArchivedView}
+          tab={tab}
           visibleCount={visibleCount}
           totalActiveCount={totalActiveCount}
           hasActiveFilters={hasActiveFilters}
@@ -99,7 +99,6 @@ beforeEach(() => {
   useInboxSelectionStore.setState({
     lastClearedByWorkspace: {},
     leftRowKeyByWorkspace: {},
-    sidebarIssueByWorkspace: {},
   });
 });
 afterEach(() => {
@@ -124,7 +123,7 @@ describe("InboxEmptyState", () => {
     expect(screen.queryByRole("button", { name: /New issue/ })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /1 snoozed/ }));
-    expect(nav.push).toHaveBeenCalledWith(expect.stringContaining("/acme/issues?view=snoozed"));
+    expect(nav.push).toHaveBeenCalledWith("/acme/inbox?view=snoozed");
   });
 
   it("offers inline undo for the just-archived notification and navigates back on click", async () => {
@@ -151,7 +150,6 @@ describe("InboxEmptyState", () => {
     expect(spies.restoreInbox).toHaveBeenCalledWith("n-1", { quiet: true });
     expect(nav.push).toHaveBeenCalledWith("/acme/issues/MUL-9790");
     expect(useInboxSelectionStore.getState().lastClearedByWorkspace.ws).toBeUndefined();
-    expect(useInboxSelectionStore.getState().sidebarIssueByWorkspace.ws).toBe("issue-1");
   });
 
   it("opens a restored notification only once it is back in the Inbox list", async () => {
@@ -280,7 +278,7 @@ describe("InboxEmptyState", () => {
 
   it("does not answer Z in the archived view", async () => {
     useInboxSelectionStore.setState({ lastClearedByWorkspace: { ws: archivedEntry } });
-    renderEmpty({ isArchivedView: true });
+    renderEmpty({ tab: "archived" });
     await act(async () => pressZ());
     expect(spies.restoreInbox).not.toHaveBeenCalled();
   });
@@ -303,8 +301,17 @@ describe("InboxEmptyState", () => {
   });
 
   it("keeps the archived empty state quiet and separate from Inbox Zero", () => {
-    renderEmpty({ isArchivedView: true });
+    renderEmpty({ tab: "archived" });
     expect(screen.getByText("No archived notifications")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Inbox cleared" })).toBeNull();
+  });
+
+  it("says nothing is snoozed on an empty Snoozed tab, without the Inbox Zero undo", async () => {
+    useInboxSelectionStore.setState({ lastClearedByWorkspace: { ws: archivedEntry } });
+    renderEmpty({ tab: "snoozed" });
+    expect(screen.getByText("Nothing snoozed")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Inbox cleared" })).toBeNull();
+    await act(async () => pressZ());
+    expect(spies.restoreInbox).not.toHaveBeenCalled();
   });
 });

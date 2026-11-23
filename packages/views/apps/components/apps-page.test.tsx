@@ -142,6 +142,61 @@ describe("AppsPage", () => {
     expect(within(screen.getAllByRole("list")[0]!).getAllByRole("link").map((l) => l.textContent)).toEqual(["Linear"]);
   });
 
+  it("narrows All apps to a category from the URL and names how each app connects", async () => {
+    vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "all", apps: [
+      { slug: "gmail", name: "Gmail", curated: true, category: "Collaboration & Communication", connect_method: "oauth" },
+      { slug: "openai", name: "OpenAI", curated: false, category: "AI & Machine Learning", category_id: "ai-machine-learning", connect_method: "key" },
+      { slug: "tavily", name: "Tavily", curated: false, category: "Data & Analytics", connect_method: "key" },
+      { slug: "gemini", name: "Gemini", curated: false, category_id: "ai_ml", connect_method: "key" },
+      { slug: "mistral", name: "Mistral", curated: false, category: "artificial intelligence", connect_method: "key" },
+    ] });
+    overview = { ...overview, team: [], agent_apps: [] };
+    const user = userEvent.setup();
+    nav.search = "tab=all";
+    renderPage();
+    const rail = await screen.findByRole("navigation", { name: "App categories" });
+    expect(within(rail).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "All5", "Featured1", "AI & Machine Learning3", "Collaboration & Communication1", "Data & Analytics1",
+    ]);
+    // Without a category, cards name theirs.
+    expect(screen.getByRole("link", { name: "Tavily" }).closest("li")).toHaveTextContent("Data & Analytics");
+
+    await user.click(within(rail).getByRole("button", { name: /AI & Machine Learning/ }));
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=all&category=ai_ml");
+    expect(screen.getByRole("heading", { name: /^AI & Machine Learning/ })).toHaveTextContent(/3$/);
+    const list = screen.getAllByRole("list")[0]!;
+    expect(within(list).getAllByRole("link").map((l) => l.textContent)).toEqual(["OpenAI", "Gemini", "Mistral"]);
+    expect(within(list).getAllByText("Uses an API key")).toHaveLength(3);
+
+    await user.click(screen.getByRole("tab", { name: /In use/ }));
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps");
+  });
+
+  it("title-cases category names Multica has no label for", async () => {
+    vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "all", apps: ["a", "b", "c"].map((slug) => ({
+      slug, name: slug.toUpperCase(), curated: false, category: "space exploration",
+    })) });
+    overview = { ...overview, team: [], agent_apps: [] };
+    nav.search = "tab=all";
+    renderPage();
+    const rail = await screen.findByRole("navigation", { name: "App categories" });
+    expect(within(rail).getByRole("button", { name: /^Space Exploration/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "A" }).closest("li")).toHaveTextContent("Space Exploration");
+  });
+
+  it("shows a long catalog a page at a time", async () => {
+    vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "all", apps: Array.from({ length: 75 }, (_, i) => ({
+      slug: `app${i}`, name: `App ${String(i).padStart(2, "0")}`, curated: false,
+    })) });
+    overview = { ...overview, team: [], agent_apps: [] };
+    const user = userEvent.setup();
+    nav.search = "tab=all";
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: /Show more/ }));
+    expect(within(screen.getAllByRole("list")[0]!).getAllByRole("link")).toHaveLength(75);
+    expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument();
+  });
+
   it("recovers an empty saved catalog only after an admin confirms", async () => {
     overview = { ...overview, catalog_mode: "custom", allowed_toolkits: [], can_manage: true };
     vi.mocked(api.updateAppSettings).mockImplementation(async () => {

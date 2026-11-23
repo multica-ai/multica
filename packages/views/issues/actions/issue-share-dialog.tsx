@@ -19,10 +19,14 @@ import { useT } from "../../i18n";
 
 export function IssueShareDialog({
   data,
+  open,
   onClose,
+  onOpenChangeComplete,
 }: {
   data: Record<string, unknown> | null;
+  open: boolean;
   onClose: () => void;
+  onOpenChangeComplete: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
   const { t: common } = useT("common");
@@ -61,7 +65,11 @@ export function IssueShareDialog({
   };
 
   return (
-    <AlertDialog open onOpenChange={(open) => { if (!open && !mutation.isPending) onClose(); }}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(nextOpen) => { if (!nextOpen && !mutation.isPending) onClose(); }}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{token ? t(($) => $.sharing.revoke) : t(($) => $.sharing.generate)}</AlertDialogTitle>

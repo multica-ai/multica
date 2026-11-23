@@ -19,12 +19,13 @@ import {
  * mounts again. Restoration is an INPUT to the view, not a post-hoc DOM
  * mutation from outside:
  *
- *   - virtualized lists feed the offset into `initialScrollTop`, so the
- *     list's first render already materializes the rows around the saved
- *     offset — no "start at top, then jump" and no fighting the list's own
- *     height model;
- *   - plain scroll containers assign the offset in their ref callback at
- *     attach time (pre-paint).
+ *   - virtualized lists that own their scroll element feed the offset into
+ *     their initial offset, so the list's first render already materializes
+ *     the rows around the saved offset — no "start at top, then jump" and no
+ *     fighting the list's own height model;
+ *   - plain scroll containers, including the custom scroll parent of a
+ *     Virtuoso, assign the offset in their ref callback at attach time
+ *     (pre-paint).
  *
  * Container keys mirror the `data-tab-scroll-root` attribute values the
  * capture side scans for; the platform scopes them per route + tab. On web
@@ -141,9 +142,12 @@ export function useRestoredScrollEntry(
 /**
  * The saved vertical scroll offset for a container key on the current route,
  * or undefined when there is none (an entry saved only for its horizontal
- * offset counts as none). Read it once at mount (e.g. into a Virtuoso
- * `initialScrollTop`) — it reflects the state captured when this route was
- * last left.
+ * offset counts as none). Read it once at mount (e.g. into a virtualizer
+ * that owns its scroll element, as its initial offset) — it reflects the
+ * state captured when this route was last left. Do not pass it to a
+ * Virtuoso with `customScrollParent` as `initialScrollTop`: Virtuoso counts
+ * that from the list's own top, not the container's, so any content above
+ * the list is added to the restored offset.
  */
 export function useRestoredScrollOffset(containerKey: string): number | undefined {
   const top = useRestoredScrollEntry(containerKey)?.top;

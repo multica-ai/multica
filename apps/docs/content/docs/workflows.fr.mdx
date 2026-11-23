@@ -42,7 +42,7 @@ Sélectionnez une colonne et choisissez ce qui se passe quand une tâche y entre
 </Step>
 <Step>
 
-Pour une étape confiée à un agent, écrivez ce qu’il doit faire, puis choisissez **Une fois terminé, passer à** (la colonne suivante si vous ne choisissez rien) et **En cas de rejet, renvoyer à** (quand cette étape juge le travail reçu insuffisant et qu’il doit être repris). Si l’étape ne peut pas continuer pour une raison extérieure, utilisez **Blocked** plutôt que le renvoi.
+Pour une étape confiée à un agent, écrivez ce qu’il doit faire, puis choisissez **Une fois terminé, passer à** (si vous ne choisissez rien, la colonne suivante, en sautant les colonnes de clôture comme Won't Fix ; une colonne Terminé ou Fermée ne mène nulle part par défaut) et **En cas de rejet, renvoyer à** (quand cette étape juge le travail reçu insuffisant et qu’il doit être repris). Si l’étape ne peut pas continuer pour une raison extérieure, utilisez **Blocked** plutôt que le renvoi ; l’étape renvoie la tâche à la place seulement si le workflow n’a pas de colonne Blocked, ou si elle est elle-même une colonne Terminé ou Fermée.
 
 </Step>
 <Step>

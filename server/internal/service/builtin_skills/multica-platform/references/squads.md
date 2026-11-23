@@ -176,7 +176,9 @@ Current behavior:
   and keep it there while members work; the leader moves the parent to
   `in_review` only when a later re-trigger confirms the overall goal is met.
   When the run carries a `[Project workflow]` block, the parent stays at its
-  current step instead and the leader runs that block's Step done command.
+  current step instead, and the leader moves it on with that block — its
+  Step done command, or the status its status map gives for the step's
+  finished work.
   Completing a leader task (including the first dispatch) does not itself
   change issue status;
 - that status authority is granted only when the issue's `assignee_type` /
@@ -257,7 +259,8 @@ These actions can trigger agent work or mutate durable state:
 - Backlog assignment does not immediately start work.
 - First leader dispatch is not parent completion — parent stays `in_progress`
   until the leader later confirms the overall goal and moves it to `in_review`
-  (under a `[Project workflow]` block: stays at its step until Step done).
+  (under a `[Project workflow]` block: stays at its step until the leader
+  moves it on through that block).
 - The server does not auto-flip parent status when child issues finish; it only
   wakes the leader with an explicit ask (including `in_review` when wrapping up).
 - Getting the leader briefing does NOT imply status authority. A squad

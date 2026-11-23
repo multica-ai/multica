@@ -510,16 +510,25 @@ const mockVirtualWindow = vi.hoisted(() => ({
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
-    { data, itemContent, computeItemKey, customScrollParent, totalListHeightChanged }: {
+    { data, itemContent, computeItemKey, customScrollParent, initialScrollTop, totalListHeightChanged }: {
       data: unknown[];
       itemContent: (i: number, item: unknown) => unknown;
       computeItemKey: (i: number, item: unknown) => React.Key;
       customScrollParent?: HTMLElement;
+      initialScrollTop?: number;
       totalListHeightChanged?: (height: number) => void;
     },
     ref: any,
   ) {
     const [windowStart, setWindowStart] = useState(0);
+    // Like Virtuoso, scroll to `initialScrollTop` once the rows are in, counted
+    // from the list's own top: under `customScrollParent` that adds whatever
+    // sits above the list (here a description 500px tall).
+    useEffect(() => {
+      if (initialScrollTop === undefined || !customScrollParent) return;
+      const timer = window.setTimeout(() => { customScrollParent.scrollTop = initialScrollTop + 500; }, 100);
+      return () => window.clearTimeout(timer);
+    }, [initialScrollTop, customScrollParent]);
     const correctionTimer = useRef<ReturnType<typeof setInterval> | null>(null);
     useEffect(() => {
       if (!mockVirtualWindow.holdAtIndex || !customScrollParent) return;
@@ -721,6 +730,7 @@ const mockTimeline: TimelineEntry[] = [
 // ---------------------------------------------------------------------------
 
 import { IssueDetail, groupSubIssuesByStage } from "./issue-detail";
+import { InboxArchiveButton, InboxOpenBar } from "../../inbox/components/inbox-bar";
 import { ScrollRestorationProvider, type ScrollRestorationAdapter } from "../../platform";
 import { READING_COLUMN } from "../../layout/reading-column";
 import {
@@ -1569,11 +1579,39 @@ describe("IssueDetail (shared)", () => {
       return render(
         <I18nProvider locale="en" resources={TEST_RESOURCES}>
           <QueryClientProvider client={queryClient}>
-            <IssueDetail issueId="issue-1" onArchive={onArchive} inboxItem={item ?? undefined} />
+            <IssueDetail
+              issueId="issue-1"
+              inbox={{
+                crumb: { href: "/test/inbox", label: "Inbox" },
+                item: item ?? undefined,
+                bar: (issueActions) =>
+                  item ? (
+                    <InboxOpenBar item={item} issueActions={issueActions}>
+                      <InboxArchiveButton onClick={onArchive} />
+                    </InboxOpenBar>
+                  ) : null,
+              }}
+            />
           </QueryClientProvider>
         </I18nProvider>,
       );
     }
+
+    it("leads with the way back to the Inbox and opens the issue page on its own", async () => {
+      renderWithArchive();
+
+      const open = await screen.findByRole("button", { name: enIssues.detail.open_issue_page });
+      expect(open).toHaveAttribute("href", "/test/issues/TES-1");
+      expect(screen.getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/test/inbox");
+    });
+
+    it("leaves the issue page without either", async () => {
+      renderIssueDetail();
+
+      await screen.findByRole("button", { name: enCommon.more_actions });
+      expect(screen.queryByRole("button", { name: enIssues.detail.open_issue_page })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: enInbox.context_menu.archive })).not.toBeInTheDocument();
+    });
 
     it("puts the notification's actions under the header, after why it is here and the issue's own", async () => {
       const { container } = renderWithArchive();
@@ -1756,7 +1794,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listTimeline.mockResolvedValue([root]);
     act(() => client.setQueryData(issueKeys.timeline("issue-1"), [root]));
     await screen.findByText("Waiting for an available agent.");
-    const userBlock = container.querySelector(`#comment-body-${root.id}`)!.parentElement!;
+    const userBlock = container.querySelector(`#root-comment-body-${root.id}`)!.parentElement!;
     const agentBlock = container.querySelector(`[data-run-comment-id="${taskId}"]`)!;
     expect(agentBlock).not.toBeNull();
     expect(userBlock.contains(agentBlock)).toBe(false);
@@ -2993,6 +3031,71 @@ describe("IssueDetail (shared)", () => {
         await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
         expect(onHighlightLanded).toHaveBeenCalledTimes(1);
       });
+    });
+
+    // MUL-9959: the reading position is the comment at the viewport's centre,
+    // found as its nearest `[id^="comment-"]` ancestor. The root comment's
+    // body sat in between with id `comment-body-<id>`, so a reader in the
+    // middle of a comment's text saved "body-<id>", which matches no comment,
+    // and the tab came back at the top.
+    it("saves the reading position against the comment whose body is at the viewport's centre", async () => {
+      mockApiObj.listTasksByIssue.mockResolvedValue([]);
+      const anchors: string[] = [];
+      const adapter: ScrollRestorationAdapter = {
+        get: () => undefined,
+        getViewState: () => undefined,
+        setViewState: (key, value) => {
+          if (key === "timeline-anchor:main:issue-1" && value) anchors.push(value);
+        },
+      };
+      const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute("data-tab-scroll-root") ? new DOMRect(0, 0, 400, 200) : new DOMRect(0, 0, 0, 0);
+      });
+      const hadElementFromPoint = "elementFromPoint" in document;
+      const originalElementFromPoint = document.elementFromPoint;
+      let centre: Element | null = null;
+      document.elementFromPoint = () => centre;
+      try {
+        render(
+          <I18nProvider locale="en" resources={TEST_RESOURCES}>
+            <QueryClientProvider client={createTestQueryClient()}>
+              <ScrollRestorationProvider adapter={adapter}>
+                <IssueDetail issueId="issue-1" />
+              </ScrollRestorationProvider>
+            </QueryClientProvider>
+          </I18nProvider>,
+        );
+        centre = await screen.findByText("Started working on this");
+        fireEvent.scroll(centre.closest("[data-tab-scroll-root]")!);
+        await waitFor(() => expect(anchors.length).toBeGreaterThan(0));
+        expect(JSON.parse(anchors.at(-1)!)).toMatchObject({ commentId: "comment-1" });
+      } finally {
+        rect.mockRestore();
+        if (hadElementFromPoint) document.elementFromPoint = originalElementFromPoint;
+        else delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+      }
+    });
+
+    // MUL-9959: the timeline's Virtuoso took the page's saved offset as its
+    // `initialScrollTop`, which it counts from the list's top, so a reader in
+    // the description came back a description's height further down.
+    it("returns to the saved offset of a page scrolled in the description", async () => {
+      mockApiObj.listTasksByIssue.mockResolvedValue([]);
+      const adapter: ScrollRestorationAdapter = {
+        get: (key) => (key === "main:issue-1" ? { top: 300, height: 2000 } : undefined),
+      };
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={createTestQueryClient()}>
+            <ScrollRestorationProvider adapter={adapter}>
+              <IssueDetail issueId="issue-1" />
+            </ScrollRestorationProvider>
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+      const comment = await screen.findByText("Started working on this");
+      await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 200)); });
+      expect(comment.closest<HTMLElement>("[data-tab-scroll-root]")!.scrollTop).toBe(300);
     });
 
     it("restarts a comment landing that a timeline update cancels while it is still aligning", async () => {

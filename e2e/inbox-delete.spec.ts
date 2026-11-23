@@ -123,8 +123,7 @@ test("deleting active issue notifications restores archived history with explici
     expect((await db.query("SELECT id FROM inbox_item WHERE id = $1", [active.rows[0].id])).rowCount).toBe(0);
     expect((await db.query("SELECT id FROM inbox_item WHERE id = $1", [history.rows[0].id])).rowCount).toBe(1);
 
-    await page.getByRole("button", { name: "Inbox", exact: true }).click();
-    await page.getByRole("menuitemradio", { name: "Archived", exact: true }).click();
+    await page.getByRole("tab", { name: "Archived", exact: true }).click();
     await expect(row).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("inbox-delete-retained-archive.png") });
     await row.click({ button: "right" });

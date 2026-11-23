@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -303,7 +304,7 @@ done
 
 	// Verify idle task-env file holds NO live token while parked.
 	pool.mu.Lock()
-	parked := pool.entries[warmPoolKey{provider: "codex", sessionID: "thr-warm-1"}].proc.(*warmCodexProcess)
+	parked := pool.entries[warmPoolKey{provider: "codex", sessionID: "thr-warm-1"}].proc.(*codexProcess)
 	envFilePath := parked.taskEnvFile
 	pool.mu.Unlock()
 	idleData, err := os.ReadFile(envFilePath)
@@ -593,6 +594,80 @@ done
 				t.Fatalf("errored session was parked: pool.Len() = %d", pool.Len())
 			}
 		})
+	}
+}
+
+// A pooled turn ends at its result event while the process keeps writing.
+// Events that land during the turn's teardown must not reach the finished
+// turn: its message channel is about to close and its control-write
+// WaitGroup is being waited on.
+func TestClaudeWarmPoolIgnoresEventsAfterResult(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	fakeClaude := filepath.Join(dir, "claude")
+	script := `#!/bin/sh
+turn=0
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"user"'*)
+      turn=$((turn + 1))
+      printf '{"type":"system","subtype":"init","session_id":"claude-trailing-1"}\n'
+      printf '{"type":"assistant","message":{"id":"msg-%s","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"turn %s"}]}}\n' "$turn" "$turn"
+      printf '{"type":"result","subtype":"success","session_id":"claude-trailing-1","result":"turn %s","is_error":false}\n' "$turn"
+      i=0
+      while [ "$i" -lt 40 ]; do
+        printf '{"type":"system","subtype":"status","session_id":"claude-trailing-1"}\n'
+        printf '{"type":"log","log":{"level":"info","message":"after result %s"}}\n' "$i"
+        printf '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"late"}}}\n'
+        printf '{"type":"assistant","message":{"id":"late-%s-%s","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"late"}]}}\n' "$turn" "$i"
+        printf '{"type":"control_request","request_id":"late-%s-%s","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{}}}\n' "$turn" "$i"
+        i=$((i + 1))
+      done
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakeClaude, []byte(script))
+
+	pool := NewWarmSessionPool(WarmSessionPoolConfig{
+		IdleTTL: 30 * time.Second,
+		MaxIdle: 4,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	defer pool.Close()
+
+	resume := ""
+	for i := 1; i <= 40; i++ {
+		taskID := fmt.Sprintf("task-trailing-%d", i)
+		b, err := New("claude", Config{
+			ExecutablePath: fakeClaude,
+			Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+			TaskID:         taskID,
+			WarmPool:       pool,
+			Env:            map[string]string{"MULTICA_TASK_ID": taskID},
+		})
+		if err != nil {
+			t.Fatalf("New(claude): %v", err)
+		}
+		sess, err := b.Execute(context.Background(), "go", ExecOptions{
+			Cwd:             dir,
+			Model:           "claude-opus-5-5",
+			ResumeSessionID: resume,
+			Timeout:         10 * time.Second,
+		})
+		if err != nil {
+			t.Fatalf("Execute(%s): %v", taskID, err)
+		}
+		for range sess.Messages {
+		}
+		res := <-sess.Result
+		if res.Status != "completed" || res.SessionID != "claude-trailing-1" {
+			t.Fatalf("%s result = %+v", taskID, res)
+		}
+		resume = res.SessionID
 	}
 }
 

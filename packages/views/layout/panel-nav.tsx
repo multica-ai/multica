@@ -104,6 +104,7 @@ export function PanelBody({
 
 export function PanelSection({
   label,
+  heading,
   action,
   collapsed,
   onCollapsedChange,
@@ -111,6 +112,13 @@ export function PanelSection({
   ...props
 }: Omit<React.ComponentProps<"section">, "children" | "className"> & {
   label: string;
+  /**
+   * Shown in place of the label (the Inbox's tabs), which then only names the
+   * section for assistive tech. With `onCollapsedChange`, a chevron after it
+   * toggles the section; it takes room only while the section is collapsed,
+   * so the heading must collapse it too.
+   */
+  heading?: React.ReactNode;
   /** Rendered at the end of the label row (e.g. a create button). */
   action?: React.ReactNode;
   /** With `onCollapsedChange`, the label toggles the section's content. */
@@ -121,33 +129,64 @@ export function PanelSection({
   const id = useId();
   const contentId = useId();
   const collapsible = !!onCollapsedChange;
+  const chevron = (
+    <ChevronDown
+      aria-hidden
+      className={cn(
+        "size-3.5 shrink-0 transition-[transform,opacity] duration-150 ease-out motion-reduce:transition-none",
+        collapsed
+          ? "-rotate-90"
+          : "opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100",
+      )}
+    />
+  );
   return (
     <section {...props} data-mc="panel-section" aria-labelledby={id} className="mt-5">
       <div className="group/section flex h-7 items-center gap-1 pl-3 pr-1">
-        <h3 id={id} className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">
-          {collapsible ? (
-            <button
-              type="button"
-              aria-expanded={!collapsed}
-              aria-controls={collapsed ? undefined : contentId}
-              onClick={() => onCollapsedChange(!collapsed)}
-              className="-mx-1 flex max-w-full items-center gap-0.5 rounded-md px-1 outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            >
-              <span className="truncate">{label}</span>
-              <ChevronDown
-                aria-hidden
-                className={cn(
-                  "size-3.5 shrink-0 transition-[transform,opacity] duration-150 ease-out motion-reduce:transition-none",
-                  collapsed
-                    ? "-rotate-90"
-                    : "opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100",
-                )}
-              />
-            </button>
-          ) : (
-            label
-          )}
-        </h3>
+        {heading ? (
+          <>
+            <h3 id={id} className="sr-only">
+              {label}
+            </h3>
+            <div className="flex min-w-0 flex-1 items-center gap-0.5 text-caption font-medium text-muted-foreground">
+              {heading}
+              {collapsible && (
+                <button
+                  type="button"
+                  aria-label={label}
+                  aria-expanded={!collapsed}
+                  aria-controls={collapsed ? undefined : contentId}
+                  onClick={() => onCollapsedChange(!collapsed)}
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
+                    // An open section leaves the row to its heading; the
+                    // heading itself collapses it (the Inbox's open tab).
+                    !collapsed && "sr-only focus-visible:not-sr-only",
+                  )}
+                >
+                  {chevron}
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <h3 id={id} className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">
+            {collapsible ? (
+              <button
+                type="button"
+                aria-expanded={!collapsed}
+                aria-controls={collapsed ? undefined : contentId}
+                onClick={() => onCollapsedChange(!collapsed)}
+                className="-mx-1 flex max-w-full items-center gap-0.5 rounded-md px-1 outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <span className="truncate">{label}</span>
+                {chevron}
+              </button>
+            ) : (
+              label
+            )}
+          </h3>
+        )}
         {action}
       </div>
       {!collapsed && <div id={contentId}>{children}</div>}

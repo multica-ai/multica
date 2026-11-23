@@ -12,6 +12,7 @@ import { useComposioAvailable } from "../../common/use-composio-available";
 import { CollectionPageState } from "../../layout/collection-page";
 import { OBJECT_PAGE_BODY, ObjectIdentity, ObjectPage } from "../../layout/object-page";
 import { useT } from "../../i18n";
+import { useAppCategoryLabel } from "../hooks/use-app-category-label";
 import { useAppConnectReturn } from "../hooks/use-app-connect-return";
 import { AppAccountsSection } from "./app-accounts-card";
 import { AppActivityCard } from "./app-activity-card";
@@ -29,6 +30,7 @@ export function AppDetailPage({ toolkitSlug }: { toolkitSlug: string }) {
   const available = useComposioAvailable();
   const overview = useQuery({ ...appsOverviewOptions(wsId), enabled: available });
   const catalog = useQuery({ ...appCatalogOptions(wsId), enabled: available });
+  const categoryLabel = useAppCategoryLabel();
   useAppConnectReturn();
 
   const entry = catalog.data?.apps.find((a) => a.slug === toolkitSlug);
@@ -86,7 +88,7 @@ export function AppDetailPage({ toolkitSlug }: { toolkitSlug: string }) {
             />
           }
           title={name}
-          description={entry?.category}
+          description={categoryLabel.entry(entry)}
         />
         {data ? (
           <>

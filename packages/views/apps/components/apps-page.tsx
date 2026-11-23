@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertCircle, Plug, Search } from "@multica/ui/icons";
@@ -27,13 +27,19 @@ import { useTeamAppAccess } from "../../common/use-team-app-access";
 import { useViewerAppsOverview } from "../../common/use-viewer-apps-overview";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
+import { useAppCategoryLabel } from "../hooks/use-app-category-label";
 import { useAppConnectReturn } from "../hooks/use-app-connect-return";
+import { groupAppsByCategory } from "../lib/categories";
 import { buildAppDirectory, matchesAppSearch, type DirectoryApp } from "../lib/directory";
 import { AccountsList, useAccountRows } from "./accounts-list";
 import { DirectoryCard, SetUpCard, type DirectoryCardHandlers } from "./directory-card";
 
 const TABS = ["in_use", "attention", "accounts", "all"] as const;
 type DirectoryTab = (typeof TABS)[number];
+
+/** Cards rendered before "Show more"; the full catalog has well over a thousand apps. */
+const PAGE_SIZE = 60;
+const CURATED = "curated";
 
 function parseTab(value: string | null): DirectoryTab {
   return (TABS as readonly string[]).includes(value ?? "") ? (value as DirectoryTab) : "in_use";
@@ -79,25 +85,39 @@ function AppsDirectory() {
   const withdrawTeam = useDismissTeamAppRequests();
   const navigation = useNavigation();
   const tab = parseTab(navigation.searchParams.get("tab"));
+  const categoryParam = tab === "all" ? navigation.searchParams.get("category") : null;
   const [query, setQuery] = useState("");
   const [connecting, setConnecting] = useState<ConnectTarget | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
+  const [page, setPage] = useState({ key: "", limit: PAGE_SIZE });
+  const categoryLabel = useAppCategoryLabel();
   useAppConnectReturn();
   const accountRows = useAccountRows(viewerOverview, catalog.data?.apps ?? []);
 
-  // The tab lives in the URL so a connect flow started here comes back to it.
-  const setTab = (next: DirectoryTab) => {
+  // The tab and category live in the URL so a connect flow started here comes back to them.
+  const replaceParams = (update: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(navigation.searchParams);
-    if (next === "in_use") params.delete("tab");
-    else params.set("tab", next);
+    update(params);
     const search = params.toString();
     navigation.replace(`${navigation.pathname}${search ? `?${search}` : ""}`);
   };
+  const setTab = (next: DirectoryTab) =>
+    replaceParams((params) => {
+      if (next === "in_use") params.delete("tab");
+      else params.set("tab", next);
+      params.delete("category");
+    });
+  const setCategory = (next: string | null) =>
+    replaceParams((params) => {
+      if (next) params.set("category", next);
+      else params.delete("category");
+    });
 
   const directory = useMemo(() => {
     if (!viewerOverview) return null;
     return buildAppDirectory({ overview: viewerOverview, catalog: catalog.data?.apps ?? [], viewerId });
   }, [viewerOverview, catalog.data, viewerId]);
+  const categories = useMemo(() => groupAppsByCategory(directory?.all ?? []), [directory]);
 
   const handlers: DirectoryCardHandlers = {
     asking,
@@ -143,8 +163,19 @@ function AppsDirectory() {
     attention: directory.attention,
     all: directory.all,
   };
-  const shown = tab === "accounts" ? [] : lists[tab].filter((app) => matchesAppSearch(app, query));
   const needle = query.trim().toLowerCase();
+  const matches = (app: DirectoryApp) =>
+    matchesAppSearch(app, query) || !!categoryLabel.entry(app.entry)?.toLowerCase().includes(needle);
+  const found = tab === "accounts" ? [] : lists[tab].filter(matches);
+  const category =
+    categoryParam === CURATED || categories.groups.some((group) => group.key === categoryParam)
+      ? categoryParam
+      : null;
+  const inCategory = (app: DirectoryApp) =>
+    category === CURATED ? !!app.entry?.curated : categories.categoryOf.get(app.slug) === category;
+  const shown = category ? found.filter(inCategory) : found;
+  const pageKey = `${tab}|${category ?? ""}|${needle}`;
+  const limit = page.key === pageKey ? page.limit : PAGE_SIZE;
   const matchesAccount = (name: string) => !needle || name.toLowerCase().includes(needle);
   const emptyText = query.trim()
     ? t(($) => $.connected_apps.hub.no_matches)
@@ -198,14 +229,71 @@ function AppsDirectory() {
 
         {tab === "accounts" ? (
           <AccountsList overview={viewerOverview} rows={accountRows} matches={matchesAccount} />
-        ) : shown.length > 0 ? (
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {shown.map((app) => <DirectoryCard key={app.slug} app={app} handlers={handlers} />)}
-          </ul>
+        ) : tab === "all" ? (
+          <div className="grid gap-6 md:grid-cols-[12rem_minmax(0,1fr)]">
+            <nav
+              aria-label={t(($) => $.connected_apps.hub.categories_nav)}
+              className="-mx-1 flex gap-1 overflow-x-auto px-1 md:sticky md:top-0 md:mx-0 md:flex-col md:gap-px md:self-start md:overflow-visible md:px-0"
+            >
+              <CategoryItem
+                label={t(($) => $.connected_apps.hub.category_all)}
+                count={found.length}
+                active={category === null}
+                onSelect={() => setCategory(null)}
+              />
+              <CategoryItem
+                label={t(($) => $.connected_apps.hub.category_curated)}
+                count={found.filter((app) => app.entry?.curated).length}
+                active={category === CURATED}
+                onSelect={() => setCategory(CURATED)}
+              />
+              <p className="hidden px-2 pt-3 pb-1 text-caption font-medium text-muted-foreground md:block">
+                {t(($) => $.connected_apps.hub.categories_label)}
+              </p>
+              {categories.groups.map((group) => {
+                const count = found.filter((app) => categories.categoryOf.get(app.slug) === group.key).length;
+                if (count === 0 && category !== group.key) return null;
+                return (
+                  <CategoryItem
+                    key={group.key}
+                    label={categoryLabel.group(group)}
+                    count={count}
+                    active={category === group.key}
+                    onSelect={() => setCategory(group.key)}
+                  />
+                );
+              })}
+            </nav>
+            <section className="min-w-0 space-y-3">
+              {category && (
+                <h3 className="flex items-baseline gap-2 text-body font-semibold">
+                  {category === CURATED
+                    ? t(($) => $.connected_apps.hub.category_curated)
+                    : categoryLabel.group(categories.groups.find((group) => group.key === category)!)}
+                  <span className="text-caption font-normal text-muted-foreground tabular-nums">{shown.length}</span>
+                </h3>
+              )}
+              <AppGrid
+                apps={shown}
+                limit={limit}
+                onShowMore={() => setPage({ key: pageKey, limit: limit + PAGE_SIZE })}
+                emptyText={emptyText}
+                columns="sm:grid-cols-2 xl:grid-cols-3"
+                render={(app) => (
+                  <DirectoryCard key={app.slug} app={app} handlers={handlers} detail={category ? "connect" : "category"} />
+                )}
+              />
+            </section>
+          </div>
         ) : (
-          <p className="rounded-lg border border-dashed px-4 py-6 text-center text-caption text-muted-foreground">
-            {emptyText}
-          </p>
+          <AppGrid
+            apps={shown}
+            limit={limit}
+            onShowMore={() => setPage({ key: pageKey, limit: limit + PAGE_SIZE })}
+            emptyText={emptyText}
+            columns="sm:grid-cols-2 lg:grid-cols-3"
+            render={(app) => <DirectoryCard key={app.slug} app={app} handlers={handlers} />}
+          />
         )}
 
         {popular.length > 0 && (
@@ -231,6 +319,69 @@ function AppsDirectory() {
         />
       )}
     </div>
+  );
+}
+
+function AppGrid({
+  apps,
+  limit,
+  onShowMore,
+  emptyText,
+  columns,
+  render,
+}: {
+  apps: DirectoryApp[];
+  limit: number;
+  onShowMore: () => void;
+  emptyText: string;
+  columns: string;
+  render: (app: DirectoryApp) => ReactNode;
+}) {
+  const { t } = useT("settings");
+  if (apps.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed px-4 py-6 text-center text-caption text-muted-foreground">
+        {emptyText}
+      </p>
+    );
+  }
+  const hidden = apps.length - limit;
+  return (
+    <>
+      <ul className={`grid gap-3 ${columns}`}>{apps.slice(0, limit).map(render)}</ul>
+      {hidden > 0 && (
+        <div className="flex justify-center">
+          <Button variant="outline" size="sm" onClick={onShowMore}>
+            {t(($) => $.connected_apps.hub.show_more)}
+            <span className="text-muted-foreground tabular-nums">{hidden}</span>
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function CategoryItem({
+  label,
+  count,
+  active,
+  onSelect,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-current={active ? "true" : undefined}
+      onClick={onSelect}
+      className="flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-left text-body whitespace-nowrap outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring aria-[current=true]:bg-accent aria-[current=true]:font-medium md:w-full"
+    >
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="text-caption text-muted-foreground tabular-nums">{count}</span>
+    </button>
   );
 }
 

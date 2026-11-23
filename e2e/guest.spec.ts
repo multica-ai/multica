@@ -209,6 +209,8 @@ test.describe("as a guest", () => {
     await expectNoMemberActions(page);
 
     await inbox.getByText(fixture.issues.review.title, { exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/${slug}/inbox\\?issue=${fixture.issues.review.id}`));
+    await page.getByRole("button", { name: "Toggle right sidebar" }).click();
     await expect(page.getByText("Guests can view and comment, but cannot change issue properties.")).toBeVisible();
     await expectClean(seen);
     await expectNoMemberActions(page);
