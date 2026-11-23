@@ -14,43 +14,17 @@
  * Only that mix-up is reported. A list that names neither property, such as
  * `transition-[width]` next to a static `-translate-x-1/2`, is left alone.
  *
- * Classes are grouped per string literal (a template literal's static text
- * counts as one string), and the string arguments of one direct `cn()` or
- * `clsx()` call — including ternary, `&&`/`||`/`??` and array branches — are
- * grouped together. Classes passed through variables are not followed.
- * apps/mobile is skipped: NativeWind runs Tailwind v3, where these utilities
- * do go through `transform`.
+ * Classes that land on one element are grouped as described in
+ * `ui-class-groups.mjs`. apps/mobile is skipped: NativeWind runs Tailwind v3,
+ * where these utilities do go through `transform`.
  *
  * Run: node scripts/check-ui-transition-properties.mjs
  */
 
-import { readdirSync, readFileSync, realpathSync } from "node:fs";
-import { extname, join, relative, resolve, sep } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
 
-const repoRoot = resolve(import.meta.dirname, "..");
-const roots = [
-  "apps/web",
-  "apps/desktop",
-  "apps/docs",
-  "apps/storybook",
-  "packages/ui",
-  "packages/views",
-  "packages/ee",
-];
-const extensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".mdx"]);
-const skippedDirectories = new Set(["node_modules", ".next", ".turbo", "dist", "build", "out"]);
-
-function walk(directory, files = []) {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name.startsWith(".") || skippedDirectories.has(entry.name)) continue;
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) walk(path, files);
-    else if (extensions.has(extname(entry.name))) files.push(path);
-  }
-  return files;
-}
+import { classGroups, repoPath, sourceFiles } from "./ui-class-groups.mjs";
 
 function utilityName(token) {
   const withoutVariant = token.slice(token.lastIndexOf(":") + 1);
@@ -94,77 +68,21 @@ export function classGroupViolations(strings) {
   return movers.filter((mover) => isMismatch(listed, mover.property));
 }
 
-function classStrings(node) {
-  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
-  if (ts.isTemplateExpression(node)) {
-    return [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join(" ");
-  }
-  return null;
-}
-
-const classMergers = new Set(["cn", "clsx"]);
-const branchOperators = new Set([
-  ts.SyntaxKind.AmpersandAmpersandToken,
-  ts.SyntaxKind.BarBarToken,
-  ts.SyntaxKind.QuestionQuestionToken,
-]);
-
-/** String nodes an argument of `cn()` can resolve to without following variables. */
-function mergedStringNodes(node, nodes = []) {
-  if (classStrings(node) !== null) nodes.push(node);
-  else if (ts.isParenthesizedExpression(node)) mergedStringNodes(node.expression, nodes);
-  else if (ts.isConditionalExpression(node)) {
-    mergedStringNodes(node.whenTrue, nodes);
-    mergedStringNodes(node.whenFalse, nodes);
-  } else if (ts.isBinaryExpression(node) && branchOperators.has(node.operatorToken.kind)) {
-    mergedStringNodes(node.left, nodes);
-    mergedStringNodes(node.right, nodes);
-  } else if (ts.isArrayLiteralExpression(node)) {
-    for (const element of node.elements) mergedStringNodes(element, nodes);
-  }
-  return nodes;
-}
-
 export function transitionViolations(sourceText, filePath) {
-  const source = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true);
-  const relativePath = relative(repoRoot, filePath).split(sep).join("/");
-  const violations = [];
-  const grouped = new Set();
-
-  const check = (nodes) => {
-    const strings = nodes.map((node) => ({ text: classStrings(node), node }));
-    for (const { string, token, property } of classGroupViolations(strings)) {
-      const { line, character } = source.getLineAndCharacterOfPosition(string.node.getStart(source));
-      violations.push({
-        file: relativePath,
-        line: line + 1,
-        column: character + 1,
-        token,
-        property,
-      });
-    }
-  };
-
-  const visit = (node) => {
-    if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      classMergers.has(node.expression.text)
-    ) {
-      const nodes = node.arguments.flatMap((argument) => mergedStringNodes(argument));
-      for (const string of nodes) grouped.add(string);
-      check(nodes);
-    } else if (classStrings(node) !== null && !grouped.has(node)) {
-      check([node]);
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  return violations;
+  const file = repoPath(filePath);
+  return classGroups(sourceText, filePath).flatMap((strings) =>
+    classGroupViolations(strings).map(({ string, token, property }) => ({
+      file,
+      line: string.line,
+      column: string.column,
+      token,
+      property,
+    })),
+  );
 }
 
 function main() {
-  const files = roots.flatMap((root) => walk(join(repoRoot, root)));
+  const files = sourceFiles();
   const violations = files.flatMap((file) =>
     transitionViolations(readFileSync(file, "utf8"), file),
   );
