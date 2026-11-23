@@ -1558,7 +1558,7 @@ describe("BillingTab", () => {
     }
   });
 
-  it("keeps the in-progress explanation when the concurrent change refreshes the summary", async () => {
+  it("keeps the in-progress explanation when a newer quote returns after the refusal", async () => {
     const user = userEvent.setup();
     Object.assign(mocks.entitlements, {
       plan: "pro",
@@ -1566,42 +1566,64 @@ describe("BillingTab", () => {
     });
     mocks.summary.hasStripeCustomer = true;
     setSeatCapacity();
-    mocks.previewSeats.mockImplementation(async ({ additionalSeats }) => ({
+    const quote = (version: number, additionalSeats = 1) => ({
       currentSeats: 5,
       additionalSeats,
       resultingSeats: 5 + additionalSeats,
-      purchaseVersion: mocks.summary.seatCapacity?.version,
+      purchaseVersion: version,
       currency: "usd",
       prorationAmount: 0,
       nextInvoiceAmount: 6000,
       quotedAt: "2030-01-01T00:00:00Z",
-    }));
-    // The plan change that won the race bumps the subscription version, so
-    // the summary refetched after the refusal carries a new version.
-    mocks.purchaseSeats.mockImplementation(async () => {
-      setSeatCapacity({ version: 10 });
-      // React Query hands out a new data object on refetch.
-      mocks.summary = { ...mocks.summary };
-      throw new ApiError("conflict", 409, "Conflict", {
-        code: "plan_change_in_progress",
-      });
     });
+    let resolveLateQuote: (value: ReturnType<typeof quote>) => void = () => {};
+    mocks.previewSeats
+      .mockResolvedValueOnce(quote(9))
+      .mockImplementationOnce(
+        () => new Promise((resolve) => { resolveLateQuote = resolve; }),
+      )
+      .mockResolvedValue(quote(10, 2));
+    let rejectPurchase: (error: unknown) => void = () => {};
+    mocks.purchaseSeats.mockImplementation(
+      () => new Promise((_, reject) => { rejectPurchase = reject; }),
+    );
 
-    renderWithI18n(<BillingTab />);
+    const { rerender } = renderWithI18n(<BillingTab />);
     await user.click(screen.getByRole("button", { name: "Add seats" }));
     await user.click(await screen.findByRole("button", { name: "Add 1 seat" }));
 
+    // The plan change that wins the race lands while the purchase is pending:
+    // the summary moves to a new version and a new quote goes out.
+    setSeatCapacity({ version: 10 });
+    mocks.summary = { ...mocks.summary };
+    rerender(<BillingTab />);
+    await waitFor(() => expect(mocks.previewSeats).toHaveBeenCalledTimes(2), {
+      timeout: 3_000,
+    });
+
+    rejectPurchase(
+      new ApiError("conflict", 409, "Conflict", {
+        code: "plan_change_in_progress",
+      }),
+    );
     const copy =
       "A plan change is still being processed. Try again in a few minutes.";
     expect(await screen.findByText(copy)).toBeInTheDocument();
-    // Past the quote debounce: no new quote replaces the explanation.
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-    expect(screen.getByText(copy)).toBeInTheDocument();
-    expect(mocks.previewSeats).toHaveBeenCalledTimes(1);
 
+    await act(async () => {
+      resolveLateQuote(quote(10));
+    });
+    expect(screen.getByText(copy)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add 1 seat" }),
+    ).not.toBeInTheDocument();
+
+    // Editing the seat count asks for a fresh quote.
     await user.clear(screen.getByLabelText("Additional seats"));
     await user.type(screen.getByLabelText("Additional seats"), "2");
-    await waitFor(() => expect(mocks.previewSeats).toHaveBeenCalledTimes(2));
+    expect(
+      await screen.findByRole("button", { name: "Add 2 seats" }, { timeout: 3_000 }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the seat dialog open while purchase submission is pending", async () => {

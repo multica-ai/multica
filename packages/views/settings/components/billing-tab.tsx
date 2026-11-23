@@ -337,6 +337,11 @@ function BillingTabContent() {
   // a new quote at once and replace that explanation; the user retries by
   // editing the seat count or reopening the dialog.
   const seatPurchaseBlockedRef = useRef(false);
+  const blockSeatPurchase = () => {
+    seatPurchaseBlockedRef.current = true;
+    // A quote already in flight must not clear the explanation either.
+    seatPreviewInputRef.current = "";
+  };
   const consumedCallbackKeyRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   // The invitation Members held back for the checkout this page is about to
@@ -1197,7 +1202,7 @@ function BillingTabContent() {
         seatPurchaseIntentRef.current = null;
         setSeatPreview(null);
         if (purchaseErrorCode === "seat_purchase_in_progress") {
-          seatPurchaseBlockedRef.current = true;
+          blockSeatPurchase();
           setSeatPurchaseError(
             t(($) => $.workspace.seat_purchase.in_progress),
           );
@@ -1208,7 +1213,7 @@ function BillingTabContent() {
           purchaseErrorCode === "plan_change_in_progress" ||
           purchaseErrorCode === "plan_change_unresolved"
         ) {
-          seatPurchaseBlockedRef.current = true;
+          blockSeatPurchase();
           setSeatPurchaseError(
             purchaseErrorCode === "plan_change_unresolved"
               ? t(($) => $.workspace.seat_purchase.plan_change_unresolved)
