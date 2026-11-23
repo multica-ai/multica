@@ -1048,6 +1048,30 @@ describe("BillingTab", () => {
     );
   });
 
+  it("hands a return for another workspace to the billing return page", () => {
+    navigationState.search =
+      "tab=billing&workspace_id=22222222-2222-2222-2222-222222222222&result=autopilot_addon&session_id=cs_test_9";
+
+    renderWithI18n(<BillingTab />);
+
+    expect(screen.queryByRole("status", { name: "Add-on return" })).not.toBeInTheDocument();
+    expect(navigationState.replace).toHaveBeenCalledOnce();
+    expect(navigationState.replace).toHaveBeenCalledWith(
+      "/billing/return?workspace_id=22222222-2222-2222-2222-222222222222&result=autopilot_addon&session_id=cs_test_9",
+    );
+  });
+
+  it("consumes a return stamped with this workspace in place", () => {
+    navigationState.search = "tab=billing&workspace_id=workspace-1&result=cancel";
+
+    renderWithI18n(<BillingTab />);
+
+    expect(screen.getByText("Checkout cancelled")).toBeInTheDocument();
+    expect(navigationState.replace).toHaveBeenCalledWith(
+      "/acme/settings?tab=billing&workspace_id=workspace-1",
+    );
+  });
+
   it("hands an add-on return's Checkout Session to the return notice after clearing the URL", () => {
     navigationState.search = "tab=billing&result=autopilot_addon&session_id=cs_test_7";
 
@@ -1532,6 +1556,52 @@ describe("BillingTab", () => {
     } else {
       expect(mocks.previewSeats).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("keeps the in-progress explanation when the concurrent change refreshes the summary", async () => {
+    const user = userEvent.setup();
+    Object.assign(mocks.entitlements, {
+      plan: "pro",
+      status: "active",
+    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
+    mocks.previewSeats.mockImplementation(async ({ additionalSeats }) => ({
+      currentSeats: 5,
+      additionalSeats,
+      resultingSeats: 5 + additionalSeats,
+      purchaseVersion: mocks.summary.seatCapacity?.version,
+      currency: "usd",
+      prorationAmount: 0,
+      nextInvoiceAmount: 6000,
+      quotedAt: "2030-01-01T00:00:00Z",
+    }));
+    // The plan change that won the race bumps the subscription version, so
+    // the summary refetched after the refusal carries a new version.
+    mocks.purchaseSeats.mockImplementation(async () => {
+      setSeatCapacity({ version: 10 });
+      // React Query hands out a new data object on refetch.
+      mocks.summary = { ...mocks.summary };
+      throw new ApiError("conflict", 409, "Conflict", {
+        code: "plan_change_in_progress",
+      });
+    });
+
+    renderWithI18n(<BillingTab />);
+    await user.click(screen.getByRole("button", { name: "Add seats" }));
+    await user.click(await screen.findByRole("button", { name: "Add 1 seat" }));
+
+    const copy =
+      "A plan change is still being processed. Try again in a few minutes.";
+    expect(await screen.findByText(copy)).toBeInTheDocument();
+    // Past the quote debounce: no new quote replaces the explanation.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(screen.getByText(copy)).toBeInTheDocument();
+    expect(mocks.previewSeats).toHaveBeenCalledTimes(1);
+
+    await user.clear(screen.getByLabelText("Additional seats"));
+    await user.type(screen.getByLabelText("Additional seats"), "2");
+    await waitFor(() => expect(mocks.previewSeats).toHaveBeenCalledTimes(2));
   });
 
   it("keeps the seat dialog open while purchase submission is pending", async () => {
