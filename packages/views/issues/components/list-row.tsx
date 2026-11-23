@@ -125,15 +125,21 @@ function ListRowContent({
           {storeProperties.priority && issue.priority !== "none" && (
             <PriorityIcon
               priority={issue.priority}
-              className={selected ? "hidden" : "group-hover/row:hidden"}
+              className={`transition-opacity duration-100 motion-reduce:transition-none ${
+                selected
+                  ? "opacity-0"
+                  : "group-hover/row:opacity-0 group-focus-within/row:opacity-0"
+              }`}
             />
           )}
           <input
             type="checkbox"
             checked={selected}
             onChange={() => toggle(issue.id)}
-            className={`absolute inset-0 cursor-pointer accent-primary ${
-              selected ? "" : "hidden group-hover/row:block"
+            className={`absolute inset-0 cursor-pointer accent-primary transition-opacity duration-100 motion-reduce:transition-none ${
+              selected
+                ? "opacity-100"
+                : "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
             }`}
           />
         </div>

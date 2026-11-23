@@ -81,7 +81,7 @@ import {
   runOrdinals,
 } from "./environment-model";
 import { EnvironmentStartMenu, type DeclaredState } from "./environment-start-menu";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
@@ -414,7 +414,7 @@ export function IssueEnvironmentsSection({
           />
         }
       />
-      {open && (
+      <IssueSidebarCollapsible open={open}>
         <div className="px-2">
           {(preparingShown || justRequested) && preparingAgentName && (
             <StatusRow
@@ -441,18 +441,20 @@ export function IssueEnvironmentsSection({
                 className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-micro text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
               >
                 {t(($) => $.environments.ended_count, { count: ended.length })}
-                <ChevronRight aria-hidden="true" className={cn("size-3 text-faint-foreground transition-transform motion-reduce:transition-none", showEnded && "rotate-90")} />
+                <ChevronRight aria-hidden="true" className={cn("size-3 text-faint-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", showEnded && "rotate-90")} />
               </button>
-              {showEnded && groupBy(ended, (env) => env.runtime_id).map((group) => (
-                <div key={group.key}>
-                  {renderGroupHeader(group)}
-                  {group.items.map((env) => renderEnv(env, group))}
-                </div>
-              ))}
+              <IssueSidebarCollapsible open={showEnded}>
+                {groupBy(ended, (env) => env.runtime_id).map((group) => (
+                  <div key={group.key}>
+                    {renderGroupHeader(group)}
+                    {group.items.map((env) => renderEnv(env, group))}
+                  </div>
+                ))}
+              </IssueSidebarCollapsible>
             </>
           )}
         </div>
-      )}
+      </IssueSidebarCollapsible>
     </div>
   );
 }
