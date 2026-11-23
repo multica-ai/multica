@@ -338,6 +338,12 @@ export type ChatWakeupStatus =
  * wakeup ends; `expires_at` is its deadline, and the agent comes back once more
  * when the deadline passes first.
  */
+export interface ChatWakeupTiming {
+  at?: string;
+  interval_seconds?: number;
+  expires_at?: string;
+}
+
 export interface ChatWakeup {
   id: string;
   chat_session_id: string;

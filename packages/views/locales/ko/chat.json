@@ -281,6 +281,11 @@
     "last_check": "마지막 확인: {{note}}",
     "cancel": "웨이크업 취소",
     "cancel_failed": "웨이크업을 취소하지 못했습니다",
+    "edit_timing": "웨이크업 일정 편집",
+    "edit_reminder": "알림 시간",
+    "edit_deadline": "마감 시간",
+    "edit_interval": "확인 간격(분)",
+    "edit_failed": "웨이크업 일정을 저장하지 못했습니다",
     "retry": "다시 시도",
     "retry_failed": "웨이크업을 다시 시도하지 못했습니다",
     "status": {

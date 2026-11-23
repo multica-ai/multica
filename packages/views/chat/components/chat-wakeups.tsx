@@ -13,6 +13,7 @@ import { useCancelChatWakeup, useRetryChatWakeup } from "@multica/core/chat/muta
 import type { ChatMessage, ChatWakeup } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { ChatWakeupTimingDialog } from "./chat-wakeup-timing-dialog";
 
 const EMPTY: ChatWakeup[] = [];
 const MINUTE = 60_000;
@@ -194,6 +195,7 @@ function WakeupRow({ wakeup, sessionId, now }: { wakeup: ChatWakeup; sessionId: 
         {failure && <div className="truncate text-caption text-destructive">{failure}</div>}
       </div>
       {report === "failed" && <RetryButton wakeup={wakeup} sessionId={sessionId} />}
+      {active && <ChatWakeupTimingDialog wakeup={wakeup} sessionId={sessionId} />}
       {active && (
         <IconButton
           variant="ghost"

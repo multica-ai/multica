@@ -281,6 +281,11 @@
     "last_check": "前回の確認：{{note}}",
     "cancel": "ウェイクアップをキャンセル",
     "cancel_failed": "ウェイクアップをキャンセルできませんでした",
+    "edit_timing": "ウェイクアップの日時を編集",
+    "edit_reminder": "リマインダーの日時",
+    "edit_deadline": "期限",
+    "edit_interval": "確認間隔（分）",
+    "edit_failed": "ウェイクアップの日時を保存できませんでした",
     "retry": "再試行",
     "retry_failed": "ウェイクアップを再試行できませんでした",
     "status": {

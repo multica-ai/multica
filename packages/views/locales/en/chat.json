@@ -286,6 +286,11 @@
     "last_check": "Last check: {{note}}",
     "cancel": "Cancel wakeup",
     "cancel_failed": "Couldn't cancel the wakeup",
+    "edit_timing": "Edit wakeup timing",
+    "edit_reminder": "Reminder time",
+    "edit_deadline": "Deadline",
+    "edit_interval": "Check interval (minutes)",
+    "edit_failed": "Couldn't save the wakeup timing",
     "retry": "Retry",
     "retry_failed": "Couldn't retry the wakeup",
     "status": {

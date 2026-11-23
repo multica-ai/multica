@@ -98,7 +98,7 @@ If the agent hadn't produced anything yet, the message you just sent is taken ba
 
 You can keep typing while the agent is replying. **Send** adds a plain text message without a skill link to the current reply without stopping it, when the runtime supports steering. The agent reads it at its next safe boundary and continues the original task. Upgrade your daemon to enable this.
 
-On web and desktop, **Add to current run** above your draft means your text will join the running reply. **Start after this run** means the message will be queued, for example when it has files or a skill link, or the current run doesn't support steering.
+On web and desktop, **Add to current run** above your draft means your text will join the running reply. **Start after this run** means the message will be queued, for example when it has files or a skill link, or the current run doesn't support steering. In an active wakeup’s row, select **Edit wakeup timing** to change the reminder time, check interval, or deadline. The conversation owner and the person who requested the wakeup can edit it.
 
 Messages with attachments or skill links, and messages sent before a reply starts or to a runtime without steering support, enter the queue. If guidance is not delivered before the reply ends, it automatically becomes a queued message; you do not need to resend it. If you stop while delivery is in progress, Chat waits for its result before queuing undelivered guidance. If the reply is retried automatically, guidance stays with the original request so both are processed together. When resuming the same session, guidance already delivered there is not sent again.
 

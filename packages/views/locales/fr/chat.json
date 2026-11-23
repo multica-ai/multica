@@ -286,6 +286,11 @@
     "last_check": "Dernière vérification : {{note}}",
     "cancel": "Annuler le réveil",
     "cancel_failed": "Impossible d'annuler le réveil",
+    "edit_timing": "Modifier la planification du réveil",
+    "edit_reminder": "Heure du rappel",
+    "edit_deadline": "Échéance",
+    "edit_interval": "Intervalle de vérification (minutes)",
+    "edit_failed": "Impossible d’enregistrer la planification du réveil",
     "retry": "Réessayer",
     "retry_failed": "Impossible de relancer le réveil",
     "status": {

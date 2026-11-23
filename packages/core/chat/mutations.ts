@@ -7,6 +7,7 @@ import type {
   ChatSession,
   ChatPinnedAgent,
   ChatWakeup,
+  ChatWakeupTiming,
   ChatDraftRestoresResponse,
   ChatQuickActionsPendingState,
 } from "../types";
@@ -80,6 +81,19 @@ export function useCancelChatWakeup() {
     onSettled: (_data, _err, { sessionId }) => {
       qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
+    },
+  });
+}
+
+export function useRescheduleChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId, timing }: { sessionId: string; wakeupId: string; timing: ChatWakeupTiming }) =>
+      api.rescheduleChatWakeup(sessionId, wakeupId, timing),
+    onSettled: (_data, _err, { sessionId }) => {
+      void qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      void qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
     },
   });
 }

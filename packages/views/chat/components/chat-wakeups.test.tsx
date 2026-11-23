@@ -1,13 +1,23 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ChatWakeup } from "@multica/core/types";
 import enChat from "../../locales/en/chat.json";
+import enCommon from "../../locales/en/common.json";
 
 const cancelMutate = vi.hoisted(() => vi.fn());
 const retryMutate = vi.hoisted(() => vi.fn());
 
-vi.mock("@multica/core/chat/mutations", () => ({
+const reschedule = vi.hoisted(() => vi.fn());
+
+vi.mock("@multica/core/api", async (original) => ({
+  ...(await original<typeof import("@multica/core/api")>()),
+  api: { rescheduleChatWakeup: reschedule },
+}));
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
+vi.mock("@multica/core/chat/mutations", async (original) => ({
+  ...(await original<typeof import("@multica/core/chat/mutations")>()),
   useCancelChatWakeup: () => ({ mutate: cancelMutate }),
   useRetryChatWakeup: () => ({ mutate: retryMutate, isPending: false }),
 }));
@@ -21,7 +31,7 @@ import {
   wakeupReportState,
 } from "./chat-wakeups";
 
-const TEST_RESOURCES = { en: { chat: enChat } };
+const TEST_RESOURCES = { en: { chat: enChat, common: enCommon } };
 const HOUR = 3_600_000;
 
 function wakeup(overrides: Partial<ChatWakeup> & Pick<ChatWakeup, "id">): ChatWakeup {
@@ -112,6 +122,29 @@ describe("ChatWakeupStrip", () => {
       { sessionId: "session-1", wakeupId: "sooner" },
       expect.anything(),
     );
+  });
+
+  it("keeps the timing input on error and refetches after a successful edit", async () => {
+    reschedule.mockReset().mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(undefined);
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    renderWithI18n(
+      <QueryClientProvider client={client}>
+        <ChatWakeupStrip sessionId="session-1" wakeups={[wakeup({ id: "edit-a", kind: "check", interval_seconds: 1800 })]} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Wakeups" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit wakeup timing" }));
+    const interval = await screen.findByRole("spinbutton", { name: "Check interval (minutes)" });
+    fireEvent.change(interval, { target: { value: "15" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't save the wakeup timing");
+    expect(interval).toHaveValue(15);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Save" })).toBeNull());
+    expect(reschedule).toHaveBeenLastCalledWith("session-1", "edit-a", { interval_seconds: 900 });
+    expect(invalidate).toHaveBeenCalled();
   });
 
   it("renders nothing without an active wakeup", () => {

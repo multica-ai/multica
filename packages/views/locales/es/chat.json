@@ -286,6 +286,11 @@
     "last_check": "Última revisión: {{note}}",
     "cancel": "Cancelar recordatorio",
     "cancel_failed": "No se pudo cancelar el recordatorio",
+    "edit_timing": "Editar horario de seguimiento",
+    "edit_reminder": "Hora del recordatorio",
+    "edit_deadline": "Fecha límite",
+    "edit_interval": "Intervalo de comprobación (minutos)",
+    "edit_failed": "No se pudo guardar el horario de seguimiento",
     "retry": "Reintentar",
     "retry_failed": "No se pudo reintentar el aviso",
     "status": {

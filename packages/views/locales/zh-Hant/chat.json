@@ -281,6 +281,11 @@
     "last_check": "上次檢查：{{note}}",
     "cancel": "取消喚醒",
     "cancel_failed": "無法取消喚醒",
+    "edit_timing": "編輯喚醒時間",
+    "edit_reminder": "提醒時間",
+    "edit_deadline": "截止時間",
+    "edit_interval": "檢查間隔（分鐘）",
+    "edit_failed": "無法儲存喚醒時間",
     "retry": "重試",
     "retry_failed": "無法重試此喚醒",
     "status": {
