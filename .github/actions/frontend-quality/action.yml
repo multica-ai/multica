@@ -21,6 +21,10 @@ runs:
       shell: bash
       run: node scripts/check-ui-transition-properties.mjs
 
+    - name: Check UI focus outlines
+      shell: bash
+      run: node scripts/check-ui-focus-outlines.mjs
+
     - name: Check shared dependencies use the pnpm catalog
       shell: bash
       run: node scripts/check-dependency-catalog.mjs
