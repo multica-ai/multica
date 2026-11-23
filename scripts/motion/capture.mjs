@@ -84,7 +84,8 @@ if (!env.PORT || !/^dev-/.test(env.MULTICA_DEV_PROFILE ?? "")) {
   fail('run through `make env-exec ARGS="-- node scripts/motion/capture.mjs ..."`.');
 }
 const base = (options.url || `http://localhost:${env.FRONTEND_PORT}`).replace(/\/+$/, "");
-const profile = JSON.parse(readFileSync(join(homedir(), ".multica/profiles", env.MULTICA_DEV_PROFILE, "config.json"), "utf8"));
+const profilesHome = env.MULTICA_DEV_PROFILES_HOME || join(homedir(), ".multica", "profiles");
+const profile = JSON.parse(readFileSync(join(profilesHome, env.MULTICA_DEV_PROFILE, "config.json"), "utf8"));
 const slug = JSON.parse(execFileSync("bash", [join(repoRoot, "scripts", "dev-env.sh"), "status", "--json"]).toString()).workspace_slug;
 
 async function api(method, path, body) {
@@ -222,12 +223,15 @@ async function record(page, name, clip, action, { fps = 35, leadMs = 250, tailMs
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     }
   })();
-  await new Promise((r) => setTimeout(r, leadMs));
-  await action();
-  await new Promise((r) => setTimeout(r, tailMs));
-  done = true;
-  await capture;
-  await cdp.detach();
+  try {
+    await new Promise((r) => setTimeout(r, leadMs));
+    await action();
+    await new Promise((r) => setTimeout(r, tailMs));
+  } finally {
+    done = true;
+    await capture.catch(() => {});
+    await cdp.detach().catch(() => {});
+  }
 
   const dir = join(options.out, `${name}.frames`);
   rmSync(dir, { recursive: true, force: true });
