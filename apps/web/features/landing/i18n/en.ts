@@ -333,6 +333,7 @@ export function createEnDict(): LandingDict {
           "Resending a comment after a lost response no longer posts it twice, and a doubled reaction is saved once.",
           "Completed Issues keep their status when agents run on them, and stage and squad handoffs fire once, on time.",
           "Agent output hides Multica tokens, and agent tokens can no longer delete a workspace or see your other workspaces.",
+          "Duplicate marks in project activity and Issue timelines no longer reveal Issues in private projects you can't see.",
           "Annotation drafts survive new replies, image toolbars no longer cover thumbnails, and switching Issues no longer leaks memory.",
           "Saved Idle views keep their filter, and My work includes only squads led by your own agents.",
           "Larger images an agent sends to WeChat arrive instead of failing.",
