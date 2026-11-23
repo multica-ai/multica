@@ -15,6 +15,7 @@ export type {
 } from "./client";
 export { parseWithFallback, setSchemaLogger } from "./schema";
 export type { ParseOptions } from "./schema";
+export type { SharedIssue, SharedIssueComment, SharedIssueDeliverable, SharedIssueRun } from "./issue-share";
 export { DuplicateIssueErrorBodySchema } from "./schemas";
 export type { DuplicateIssueErrorBody } from "./schemas";
 export { WSClient } from "./ws-client";

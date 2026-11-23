@@ -2165,6 +2165,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
 		r.Post("/api/share-links/join", h.JoinByShareLink)
 		r.With(handler.RequireHumanActor).Get("/api/share/issue", h.GetSharedIssue)
+		r.With(handler.RequireHumanActor).Get("/api/share/issue/runs/{runId}/messages", h.ListSharedIssueRunMessages)
+		r.With(handler.RequireHumanActor).Get("/api/share/issue/deliverables/{attachmentId}", h.DownloadSharedIssueDeliverable)
 
 		// PAT management is human-only (MUL-8154): a machine credential must
 		// not mint a non-expiring PAT, enumerate the owner's PATs, or revoke

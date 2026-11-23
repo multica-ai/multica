@@ -27,7 +27,14 @@ import type {
   CreateDocFolderRequest,
 } from "../types/doc";
 import type { ZodType } from "zod";
-import { IssueShareSchema, SharedIssueSchema, type IssueShare, type SharedIssue } from "./issue-share";
+import {
+  IssueShareSchema,
+  SharedIssueMessagesSchema,
+  SharedIssueSchema,
+  type IssueShare,
+  type SharedIssue,
+  type SharedIssueMessages,
+} from "./issue-share";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -1882,12 +1889,40 @@ export class ApiClient {
       headers: { "X-Issue-Share-Token": token },
       signal,
       cache: "no-store",
+      redirect: "error",
     });
     const issue = parseWithFallback<SharedIssue | null>(raw, SharedIssueSchema, null, {
       endpoint: "GET /api/share/issue",
     });
     if (!issue) throw new Error("Malformed shared issue response");
     return issue;
+  }
+
+  async listSharedIssueRunMessages(
+    token: string, runId: string, after?: number, signal?: AbortSignal,
+  ): Promise<SharedIssueMessages> {
+    const cursor = after === undefined ? "" : `?after=${after}`;
+    const raw = await this.fetch<unknown>(`/api/share/issue/runs/${encodeURIComponent(runId)}/messages${cursor}`, {
+      headers: { "X-Issue-Share-Token": token },
+      signal,
+      cache: "no-store",
+      redirect: "error",
+    });
+    const page = parseWithFallback<SharedIssueMessages | null>(raw, SharedIssueMessagesSchema, null, {
+      endpoint: "GET /api/share/issue/runs/{id}/messages",
+    });
+    if (!page) throw new Error("Malformed shared issue run messages response");
+    return page;
+  }
+
+  async getSharedIssueDeliverable(token: string, id: string, signal?: AbortSignal): Promise<Blob> {
+    const response = await this.fetchRaw(`/api/share/issue/deliverables/${encodeURIComponent(id)}`, {
+      headers: { "X-Issue-Share-Token": token },
+      signal,
+      cache: "no-store",
+      redirect: "error",
+    });
+    return response.blob();
   }
 
   async createIssue(

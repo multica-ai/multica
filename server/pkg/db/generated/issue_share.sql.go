@@ -69,6 +69,39 @@ func (q *Queries) GetIssueShareToken(ctx context.Context, arg GetIssueShareToken
 }
 
 const getSharedIssue = `-- name: GetSharedIssue :one
+WITH shared AS (
+    SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.requester_user_id, i.description_revision
+    FROM issue_share s
+    JOIN issue i ON i.id = s.issue_id AND i.workspace_id = s.workspace_id
+    JOIN "user" viewer ON viewer.id = $1
+    WHERE s.token = $2
+), shared_comments AS (
+    SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision, c.recovery_settled_at, c.deleted_at, c.suppressed_agent_ids
+    FROM shared i
+    JOIN comment c ON c.issue_id = i.id AND c.workspace_id = i.workspace_id
+    WHERE c.deleted_at IS NULL AND c.quick_action_id IS NULL
+      AND c.author_type IN ('member', 'agent') AND c.type IN ('comment', 'progress_update')
+      AND (c.source_task_id IS NULL OR EXISTS (
+          SELECT 1 FROM agent_task_queue source
+          WHERE source.id = c.source_task_id AND source.issue_id = i.id
+            AND source.chat_session_id IS NULL
+      ))
+), shared_runs AS (
+    SELECT r.id, r.status, r.started_at, r.completed_at, r.agent_id
+    FROM shared i
+    JOIN agent_task_queue r ON r.issue_id = i.id
+    WHERE r.chat_session_id IS NULL
+      AND r.status IN ('completed', 'failed', 'cancelled')
+      AND r.completed_at IS NOT NULL
+      AND NOT (r.escalation_for_task_id IS NOT NULL AND r.started_at IS NULL AND r.status = 'cancelled')
+), shared_agents AS (
+    SELECT a.id, a.name, a.avatar_url
+    FROM shared i
+    JOIN agent a ON a.workspace_id = i.workspace_id
+    JOIN agent_invocation_target target ON target.agent_id = a.id
+      AND target.target_type = 'workspace' AND target.target_id = i.workspace_id
+    WHERE a.permission_mode = 'public_to'
+)
 SELECT jsonb_build_object(
     'identifier', w.issue_prefix || '-' || i.number::text,
     'title', i.title,
@@ -76,37 +109,31 @@ SELECT jsonb_build_object(
     'status', i.status,
     'status_label', COALESCE(st.name, ''),
     'comments', COALESCE((
-        SELECT jsonb_agg(jsonb_build_object(
+        SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
             'id', c.id, 'author_type', c.author_type,
-            'content', c.content, 'created_at', c.created_at
-        ) ORDER BY c.created_at, c.id)
-        FROM comment c
-        WHERE c.issue_id = i.id AND c.workspace_id = i.workspace_id
-          AND c.deleted_at IS NULL AND c.quick_action_id IS NULL
-          AND c.author_type IN ('member', 'agent') AND c.type = 'comment'
-          AND (c.source_task_id IS NULL OR EXISTS (
-              SELECT 1 FROM agent_task_queue source
-              WHERE source.id = c.source_task_id AND source.issue_id = i.id
-                AND source.chat_session_id IS NULL
-          ))
+            'content', c.content, 'created_at', c.created_at,
+            'parent_id', parent.id, 'source_task_id', run.id,
+            'author_name', COALESCE(u.name, a.name),
+            'author_avatar_url', COALESCE(u.avatar_url, a.avatar_url)
+        )) ORDER BY c.created_at, c.id)
+        FROM shared_comments c
+        LEFT JOIN shared_comments parent ON parent.id = c.parent_id
+        LEFT JOIN shared_runs run ON run.id = c.source_task_id
+        LEFT JOIN "user" u ON c.author_type = 'member' AND u.id = c.author_id
+        LEFT JOIN shared_agents a ON c.author_type = 'agent' AND a.id = c.author_id
     ), '[]'::jsonb),
     'runs', COALESCE((
-        SELECT jsonb_agg(jsonb_build_object(
-            'id', r.id, 'status', r.status, 'completed_at', r.completed_at
-        ) ORDER BY r.completed_at DESC, r.id)
-        FROM agent_task_queue r
-        WHERE r.issue_id = i.id AND r.chat_session_id IS NULL
-          AND r.status IN ('completed', 'failed', 'cancelled')
-          AND r.completed_at IS NOT NULL
-          AND NOT (r.escalation_for_task_id IS NOT NULL AND r.started_at IS NULL AND r.status = 'cancelled')
+        SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+            'id', r.id, 'status', r.status, 'started_at', r.started_at, 'completed_at', r.completed_at,
+            'agent_name', a.name, 'agent_avatar_url', a.avatar_url
+        )) ORDER BY r.completed_at DESC, r.id)
+        FROM shared_runs r
+        LEFT JOIN shared_agents a ON a.id = r.agent_id
     ), '[]'::jsonb)
 )::jsonb AS shared_issue
-FROM issue_share s
-JOIN issue i ON i.id = s.issue_id AND i.workspace_id = s.workspace_id
+FROM shared i
 JOIN workspace w ON w.id = i.workspace_id
-JOIN "user" u ON u.id = $1
 LEFT JOIN issue_status st ON st.workspace_id = i.workspace_id AND st.key = i.status
-WHERE s.token = $2
 `
 
 type GetSharedIssueParams struct {
@@ -119,6 +146,150 @@ func (q *Queries) GetSharedIssue(ctx context.Context, arg GetSharedIssueParams) 
 	var shared_issue []byte
 	err := row.Scan(&shared_issue)
 	return shared_issue, err
+}
+
+const listSharedIssueDeliverables = `-- name: ListSharedIssueDeliverables :many
+SELECT latest.id, latest.workspace_id, latest.issue_id, latest.comment_id, latest.uploader_type, latest.uploader_id, latest.filename, latest.url, latest.content_type, latest.size_bytes, latest.created_at, latest.chat_session_id, latest.chat_message_id, latest.task_id, latest.source_context_id, latest.width, latest.height
+FROM (
+    SELECT DISTINCT ON (btrim(lower(split_part(a.content_type, ';', 1))), btrim(a.filename)) a.id, a.workspace_id, a.issue_id, a.comment_id, a.uploader_type, a.uploader_id, a.filename, a.url, a.content_type, a.size_bytes, a.created_at, a.chat_session_id, a.chat_message_id, a.task_id, a.source_context_id, a.width, a.height
+    FROM issue_share s
+    JOIN issue i ON i.id = s.issue_id AND i.workspace_id = s.workspace_id
+    JOIN "user" viewer ON viewer.id = $1
+    JOIN comment c ON c.issue_id = i.id AND c.workspace_id = i.workspace_id
+    JOIN attachment a ON a.comment_id = c.id AND a.workspace_id = i.workspace_id
+      AND (a.issue_id IS NULL OR a.issue_id = i.id)
+    WHERE s.token = $2
+      AND c.deleted_at IS NULL AND c.quick_action_id IS NULL AND c.type = 'comment'
+      AND c.author_type IN ('member', 'agent')
+      AND (c.source_task_id IS NULL OR EXISTS (
+          SELECT 1 FROM agent_task_queue source
+          WHERE source.id = c.source_task_id AND source.issue_id = i.id
+            AND source.chat_session_id IS NULL
+      ))
+      AND (a.task_id IS NULL OR EXISTS (
+          SELECT 1 FROM agent_task_queue source
+          WHERE source.id = a.task_id AND source.issue_id = i.id
+            AND source.chat_session_id IS NULL
+      ))
+      AND a.chat_session_id IS NULL AND a.chat_message_id IS NULL AND a.source_context_id IS NULL
+      AND lower(btrim(a.filename)) <> 'askuser.json'
+    ORDER BY btrim(lower(split_part(a.content_type, ';', 1))), btrim(a.filename), a.created_at DESC, a.id DESC
+) latest
+WHERE ($3::uuid IS NULL OR latest.id = $3::uuid)
+ORDER BY latest.created_at DESC, latest.id DESC
+`
+
+type ListSharedIssueDeliverablesParams struct {
+	ViewerID     pgtype.UUID `json:"viewer_id"`
+	Token        string      `json:"token"`
+	AttachmentID pgtype.UUID `json:"attachment_id"`
+}
+
+func (q *Queries) ListSharedIssueDeliverables(ctx context.Context, arg ListSharedIssueDeliverablesParams) ([]Attachment, error) {
+	rows, err := q.db.Query(ctx, listSharedIssueDeliverables, arg.ViewerID, arg.Token, arg.AttachmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Attachment{}
+	for rows.Next() {
+		var i Attachment
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.CommentID,
+			&i.UploaderType,
+			&i.UploaderID,
+			&i.Filename,
+			&i.Url,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.CreatedAt,
+			&i.ChatSessionID,
+			&i.ChatMessageID,
+			&i.TaskID,
+			&i.SourceContextID,
+			&i.Width,
+			&i.Height,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSharedIssueRunMessages = `-- name: ListSharedIssueRunMessages :many
+SELECT COALESCE(page.seq, -1)::integer AS seq,
+       COALESCE(page.type, '')::text AS type,
+       COALESCE(page.content, '')::text AS content,
+       page.created_at
+FROM issue_share s
+JOIN issue i ON i.id = s.issue_id AND i.workspace_id = s.workspace_id
+JOIN "user" viewer ON viewer.id = $1
+JOIN agent_task_queue r ON r.issue_id = i.id AND r.id = $2
+LEFT JOIN LATERAL (
+    SELECT m.seq, m.type, m.content, m.created_at
+    FROM task_message m
+    WHERE m.task_id = r.id AND m.seq > $3::integer
+      AND m.type IN ('text', 'text_delta', 'commentary') AND m.content IS NOT NULL
+    ORDER BY m.seq
+    LIMIT $4::integer
+) page ON true
+WHERE s.token = $5 AND r.chat_session_id IS NULL
+  AND r.status IN ('completed', 'failed', 'cancelled') AND r.completed_at IS NOT NULL
+  AND NOT (r.escalation_for_task_id IS NOT NULL AND r.started_at IS NULL AND r.status = 'cancelled')
+ORDER BY page.seq
+`
+
+type ListSharedIssueRunMessagesParams struct {
+	ViewerID pgtype.UUID `json:"viewer_id"`
+	RunID    pgtype.UUID `json:"run_id"`
+	AfterSeq int32       `json:"after_seq"`
+	PageSize int32       `json:"page_size"`
+	Token    string      `json:"token"`
+}
+
+type ListSharedIssueRunMessagesRow struct {
+	Seq       int32              `json:"seq"`
+	Type      string             `json:"type"`
+	Content   string             `json:"content"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListSharedIssueRunMessages(ctx context.Context, arg ListSharedIssueRunMessagesParams) ([]ListSharedIssueRunMessagesRow, error) {
+	rows, err := q.db.Query(ctx, listSharedIssueRunMessages,
+		arg.ViewerID,
+		arg.RunID,
+		arg.AfterSeq,
+		arg.PageSize,
+		arg.Token,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSharedIssueRunMessagesRow{}
+	for rows.Next() {
+		var i ListSharedIssueRunMessagesRow
+		if err := rows.Scan(
+			&i.Seq,
+			&i.Type,
+			&i.Content,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const revokeIssueShare = `-- name: RevokeIssueShare :execrows
