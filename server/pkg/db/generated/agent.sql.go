@@ -5028,6 +5028,33 @@ func (q *Queries) IsTaskSessionRetired(ctx context.Context, arg IsTaskSessionRet
 	return retired, err
 }
 
+const issueAgentHasConsecutiveRunFailures = `-- name: IssueAgentHasConsecutiveRunFailures :one
+SELECT count(*) FILTER (WHERE status = 'failed') = 3
+FROM (
+    SELECT status
+    FROM agent_task_queue
+    WHERE issue_id = $1 AND agent_id = $2
+      AND status IN ('completed', 'failed')
+      AND COALESCE(context->>'type', '') <> 'triage'
+    ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+    LIMIT 3
+) outcomes
+`
+
+type IssueAgentHasConsecutiveRunFailuresParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
+
+// Check the latest execution outcomes, ordered by completion. Cancelled and
+// triage tasks do not establish whether this agent can execute the issue.
+func (q *Queries) IssueAgentHasConsecutiveRunFailures(ctx context.Context, arg IssueAgentHasConsecutiveRunFailuresParams) (bool, error) {
+	row := q.db.QueryRow(ctx, issueAgentHasConsecutiveRunFailures, arg.IssueID, arg.AgentID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
 UPDATE agent_task_queue
 SET issue_id = $2

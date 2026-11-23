@@ -1206,6 +1206,20 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
 ORDER BY terminal_at DESC
 LIMIT 1;
 
+-- name: IssueAgentHasConsecutiveRunFailures :one
+-- Check the latest execution outcomes, ordered by completion. Cancelled and
+-- triage tasks do not establish whether this agent can execute the issue.
+SELECT count(*) FILTER (WHERE status = 'failed') = 3
+FROM (
+    SELECT status
+    FROM agent_task_queue
+    WHERE issue_id = $1 AND agent_id = $2
+      AND status IN ('completed', 'failed')
+      AND COALESCE(context->>'type', '') <> 'triage'
+    ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+    LIMIT 3
+) outcomes;
+
 -- name: GetLatestTaskRolloutMissing :one
 -- Reports whether the most recent terminal task for (agent_id, issue_id)
 -- withheld its Codex session because the rollout was missing (MUL-5305). When

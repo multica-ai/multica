@@ -1278,6 +1278,27 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin, false)
 }
 
+// ErrIssueAgentConsecutiveFailures pauses automatic dispatch until the agent
+// completes a run for the issue. An explicit human action can start that run.
+var ErrIssueAgentConsecutiveFailures = errors.New("automatic dispatch paused after three consecutive failures for this issue and agent")
+
+func (s *TaskService) guardIssueAgentFailureStreak(ctx context.Context, issueID, agentID pgtype.UUID, humanAction bool) error {
+	if humanAction {
+		return nil
+	}
+	paused, err := s.Queries.IssueAgentHasConsecutiveRunFailures(ctx, db.IssueAgentHasConsecutiveRunFailuresParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		return fmt.Errorf("check issue agent failure streak: %w", err)
+	}
+	if paused {
+		return ErrIssueAgentConsecutiveFailures
+	}
+	return nil
+}
+
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, freshRerun bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
@@ -1315,6 +1336,9 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		return db.AgentTaskQueue{}, err
 	}
 	if err := s.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if err := s.guardIssueAgentFailureStreak(ctx, issue.ID, agent.ID, attr.HumanAction); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
 	originatorUserID := attr.UserID
@@ -1491,6 +1515,9 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		return db.AgentTaskQueue{}, err
 	}
 	if err := s.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if err := s.guardIssueAgentFailureStreak(ctx, issue.ID, agent.ID, attr.HumanAction); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
 	originatorUserID := attr.UserID
