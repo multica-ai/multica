@@ -89,6 +89,7 @@ type harness struct {
 	messages                []map[string]any
 	prompt                  string
 	sessionAgent            string
+	sessionMetadata         map[string]string
 	issue                   map[string]any
 	issueStatus             int
 	issueBody               string
@@ -239,13 +240,15 @@ func setup(t *testing.T) *harness {
 		case r.URL.Path == "/sessions" && r.Method == "POST":
 			h.creates++
 			var input struct {
-				Agent     string           `json:"agent"`
-				Resources []map[string]any `json:"resources"`
+				Agent     string            `json:"agent"`
+				Metadata  map[string]string `json:"metadata"`
+				Resources []map[string]any  `json:"resources"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 				t.Fatal(err)
 			}
 			h.sessionAgent = input.Agent
+			h.sessionMetadata = input.Metadata
 			h.sessionResources = input.Resources
 			io.WriteString(w, `{"id":"sess_1","status":"idle"}`)
 		case r.URL.Path == "/sessions/sess_1/events" && r.Method == "POST":
@@ -369,6 +372,9 @@ func TestIssueRun(t *testing.T) {
 	}
 	if h.creates != 1 || h.sends != 1 || len(h.messages) != 1 || h.b.state.first() != nil {
 		t.Fatal("incorrect lifecycle")
+	}
+	if h.sessionMetadata["source"] != "multica" {
+		t.Fatalf("session metadata source = %q, want multica", h.sessionMetadata["source"])
 	}
 	data, err := os.ReadFile(h.b.path)
 	if err != nil {

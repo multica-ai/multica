@@ -259,14 +259,16 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
 	if taskContext && !strings.HasPrefix(token, "mat_") {
+		if hint := replacedTaskTokenHint(token); hint != "" {
+			return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", hint)
+		}
 		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
-		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), the likeliest cause outside a
-		// real task is a leftover marker from a crashed daemon task in a
-		// local_directory. Name the exact file so a normal user can recover
-		// instead of hitting an opaque "requires mat_ token" error. Shares its
-		// wording with requireHumanLocalCommand: same cause, same remedy.
-		if markerPath := leftoverDaemonTaskMarkerPath(); markerPath != "" {
-			return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", leftoverMarkerSuffix(markerPath))
+		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), name the exact file and say
+		// whether it can be a leftover, instead of an opaque "requires mat_
+		// token" error. Shares its wording with requireHumanLocalCommand: same
+		// cause, same remedy.
+		if hint := taskMarkerHint(); hint != "" {
+			return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", hint)
 		}
 		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", daemonPortOnlyContextHint())
 	}
@@ -401,6 +403,19 @@ func daemonPortOnlyContextHint() string {
 	return "; MULTICA_DAEMON_PORT is set without task identity — if this is a host or container startup shell, remove that variable and retry"
 }
 
+// replacedTaskTokenHint explains a task that holds a personal access token.
+// The daemon always injects a mat_ token next to MULTICA_TASK_ID, and an
+// agent's custom env cannot override MULTICA_*, so a mul_ token here was put
+// back after launch — typically by a secrets manager wrapping the runtime
+// command (`doppler run`) or a shell profile exporting MULTICA_TOKEN (#7666).
+// The hint names the prefix only, never the token.
+func replacedTaskTokenHint(token string) string {
+	if !strings.HasPrefix(token, "mul_") || strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")) == "" {
+		return ""
+	}
+	return "; MULTICA_TOKEN holds a personal access token (mul_) although MULTICA_TASK_ID is set, so something between the daemon and this command replaced the task token — usually a secrets manager in the runtime's launch command or a shell profile exporting MULTICA_TOKEN. Let the daemon's MULTICA_* values win (Doppler: doppler run --preserve-env=MULTICA_TOKEN -- <agent command>); see https://multica.ai/docs/daemon-runtimes#secrets-managers"
+}
+
 // requireTaskLocalConfigRoot prevents daemon-managed subprocesses that lost
 // part of their injected environment from silently resolving Multica state
 // below the daemon owner's HOME. Commands that intentionally support task-local
@@ -415,8 +430,8 @@ func requireTaskLocalConfigRoot() error {
 		// too: a user hitting this one through `config show` or `auth status`
 		// is as stuck as one hitting the others, and "which command did you
 		// happen to run first" must not decide whether the error is actionable.
-		if markerPath := leftoverDaemonTaskMarkerPath(); markerPath != "" {
-			return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s%s", cli.TaskConfigRootEnv, leftoverMarkerSuffix(markerPath))
+		if hint := taskMarkerHint(); hint != "" {
+			return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s%s", cli.TaskConfigRootEnv, hint)
 		}
 		return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s%s", cli.TaskConfigRootEnv, daemonPortOnlyContextHint())
 	}
@@ -437,8 +452,8 @@ func requireHumanLocalCommand(command string) error {
 	// until someone deletes the file by hand (MUL-6132). Name it, so the user
 	// knows which file that is; the bare message below sends them to the source
 	// instead. Mirrors newAPIClient's leftover-marker handling.
-	if markerPath := leftoverDaemonTaskMarkerPath(); markerPath != "" {
-		return fmt.Errorf("%s is not available inside a daemon-managed task%s", command, leftoverMarkerSuffix(markerPath))
+	if hint := taskMarkerHint(); hint != "" {
+		return fmt.Errorf("%s is not available inside a daemon-managed task%s", command, hint)
 	}
 	return fmt.Errorf("%s is not available inside a daemon-managed task", command)
 }
@@ -455,6 +470,11 @@ func daemonTaskContextMarkerPath() string {
 	if err != nil {
 		return ""
 	}
+	return daemonTaskContextMarkerPathFrom(dir)
+}
+
+// daemonTaskContextMarkerPathFrom is daemonTaskContextMarkerPath starting at dir.
+func daemonTaskContextMarkerPathFrom(dir string) string {
 	for {
 		markerPath := filepath.Join(dir, execenv.TaskContextMarkerRelPath)
 		// Only a marker we can read AND whose managed_by matches counts as a

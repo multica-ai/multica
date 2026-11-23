@@ -1,0 +1,162 @@
+/* Motion choreography for Inbox auto-advance prototypes.
+ * `--inbox-motion-scale` is 1 at normal speed and 2.5 in slow-motion review mode. */
+
+.inbox-row-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows calc(160ms * var(--inbox-motion-scale, 1)) cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity calc(120ms * var(--inbox-motion-scale, 1)) ease;
+}
+
+.inbox-row-wrap[data-motion="instant"] {
+  transition: none;
+}
+
+.inbox-row-wrap[data-state="collapsing"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.inbox-row-wrap[data-state="entering"] {
+  animation: inbox-row-expand calc(170ms * var(--inbox-motion-scale, 1)) cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes inbox-row-expand {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+
+/* B · Pure crossfade (zero translation) */
+.inbox-stage-crossfade-enter {
+  animation: inbox-crossfade-in calc(130ms * var(--inbox-motion-scale, 1)) ease-out both;
+}
+
+@keyframes inbox-crossfade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* C / D · Directional vertical glide (aligned with list progression) */
+.inbox-stage-glide-next {
+  animation: inbox-glide-from-bottom calc(160ms * var(--inbox-motion-scale, 1)) cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.inbox-stage-glide-prev {
+  animation: inbox-glide-from-top calc(160ms * var(--inbox-motion-scale, 1)) cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes inbox-glide-from-bottom {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes inbox-glide-from-top {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* E · Card stack (leaving card lifts + scales back, next card rises cleanly underneath) */
+.inbox-card-enter-next {
+  animation: inbox-card-rise calc(220ms * var(--inbox-motion-scale, 1)) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.inbox-card-enter-prev {
+  animation: inbox-card-drop calc(220ms * var(--inbox-motion-scale, 1)) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.inbox-card-leave-next {
+  animation: inbox-card-lift-out calc(190ms * var(--inbox-motion-scale, 1)) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.inbox-card-leave-prev {
+  animation: inbox-card-sink-out calc(190ms * var(--inbox-motion-scale, 1)) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes inbox-card-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes inbox-card-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-22px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes inbox-card-lift-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.985);
+  }
+}
+
+@keyframes inbox-card-sink-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+}
+
+/* Target comment flash pulse matching Multica's deep-link landing highlight */
+.inbox-comment-flash {
+  animation: inbox-comment-pulse calc(1600ms * var(--inbox-motion-scale, 1)) ease-out;
+}
+
+@keyframes inbox-comment-pulse {
+  0% {
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--brand) 65%, transparent);
+    background-color: color-mix(in oklch, var(--brand) 8%, var(--card));
+  }
+  65% {
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--brand) 35%, transparent);
+    background-color: color-mix(in oklch, var(--brand) 4%, var(--card));
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    background-color: var(--card);
+  }
+}

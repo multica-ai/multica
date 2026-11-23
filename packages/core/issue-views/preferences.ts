@@ -10,11 +10,11 @@ import type { IssueViewScope } from "./queries";
 
 /**
  * A preference container: a view surface, the user's starred sidebar views,
- * or the sidebar's Projects section.
+ * the sidebar's Projects section, or the All Projects page.
  */
 export type IssueViewPreferenceScope =
   | IssueViewScope
-  | { scope_type: "sidebar" | "sidebar_projects"; scope_id?: null };
+  | { scope_type: "sidebar" | "sidebar_projects" | "projects_page"; scope_id?: null };
 
 export interface ViewBarPrefs {
   hidden: string[];

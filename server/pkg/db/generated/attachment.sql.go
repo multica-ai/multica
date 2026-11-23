@@ -53,6 +53,47 @@ func (q *Queries) BindChatAttachmentsToMessage(ctx context.Context, arg BindChat
 	return items, nil
 }
 
+const bindUploaderDraftAttachmentsToIssue = `-- name: BindUploaderDraftAttachmentsToIssue :execrows
+UPDATE attachment
+SET issue_id = $1
+WHERE workspace_id = $2
+  AND id = ANY($3::uuid[])
+  AND issue_id IS NULL
+  AND comment_id IS NULL
+  AND chat_session_id IS NULL
+  AND chat_message_id IS NULL
+  AND task_id IS NULL
+  AND source_context_id IS NULL
+  AND uploader_type = $4
+  AND uploader_id = $5
+`
+
+type BindUploaderDraftAttachmentsToIssueParams struct {
+	IssueID       pgtype.UUID   `json:"issue_id"`
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
+	UploaderType  string        `json:"uploader_type"`
+	UploaderID    pgtype.UUID   `json:"uploader_id"`
+}
+
+// A comment edit's own drafts: attachments the editor uploaded that are not
+// bound to anything yet (a guest's uploads stay unbound until a comment takes
+// them, MUL-9420) join the comment's issue, so ReplaceCommentAttachments can
+// link them in the same transaction.
+func (q *Queries) BindUploaderDraftAttachmentsToIssue(ctx context.Context, arg BindUploaderDraftAttachmentsToIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, bindUploaderDraftAttachmentsToIssue,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.AttachmentIds,
+		arg.UploaderType,
+		arg.UploaderID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countUnboundChatAttachmentsForTask = `-- name: CountUnboundChatAttachmentsForTask :one
 SELECT COUNT(*) FROM attachment
 WHERE workspace_id = $1
@@ -564,21 +605,43 @@ func (q *Queries) LinkAttachmentsToChatMessage(ctx context.Context, arg LinkAtta
 
 const linkAttachmentsToComment = `-- name: LinkAttachmentsToComment :exec
 UPDATE attachment
-SET comment_id = $1
-WHERE issue_id = $2
+SET comment_id = $1,
+    issue_id = $2
+WHERE workspace_id = $3
+  AND (issue_id = $2 OR (
+    issue_id IS NULL
+    AND chat_session_id IS NULL
+    AND chat_message_id IS NULL
+    AND task_id IS NULL
+    AND uploader_type = $4
+    AND uploader_id = $5
+  ))
   AND comment_id IS NULL
   AND source_context_id IS NULL
-  AND id = ANY($3::uuid[])
+  AND id = ANY($6::uuid[])
 `
 
 type LinkAttachmentsToCommentParams struct {
-	CommentID pgtype.UUID   `json:"comment_id"`
-	IssueID   pgtype.UUID   `json:"issue_id"`
-	Column3   []pgtype.UUID `json:"column_3"`
+	CommentID     pgtype.UUID   `json:"comment_id"`
+	IssueID       pgtype.UUID   `json:"issue_id"`
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	UploaderType  string        `json:"uploader_type"`
+	UploaderID    pgtype.UUID   `json:"uploader_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
 }
 
+// An unbound upload is a draft and joins only its own uploader's comment
+// (MUL-9420): a guest's file taken off its comment must not be adoptable by
+// anyone else who learns its id.
 func (q *Queries) LinkAttachmentsToComment(ctx context.Context, arg LinkAttachmentsToCommentParams) error {
-	_, err := q.db.Exec(ctx, linkAttachmentsToComment, arg.CommentID, arg.IssueID, arg.Column3)
+	_, err := q.db.Exec(ctx, linkAttachmentsToComment,
+		arg.CommentID,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.UploaderType,
+		arg.UploaderID,
+		arg.AttachmentIds,
+	)
 	return err
 }
 
@@ -1024,6 +1087,41 @@ func (q *Queries) ListAttachmentsBySourceContext(ctx context.Context, arg ListAt
 	return items, nil
 }
 
+const listCommentAttachmentIDsAmong = `-- name: ListCommentAttachmentIDsAmong :many
+SELECT id FROM attachment
+WHERE comment_id = $1
+  AND workspace_id = $2
+  AND id = ANY($3::uuid[])
+`
+
+type ListCommentAttachmentIDsAmongParams struct {
+	CommentID     pgtype.UUID   `json:"comment_id"`
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
+}
+
+// Which of attachment_ids are attached to the comment: an edit checks that
+// it got every file it asked for before committing.
+func (q *Queries) ListCommentAttachmentIDsAmong(ctx context.Context, arg ListCommentAttachmentIDsAmongParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listCommentAttachmentIDsAmong, arg.CommentID, arg.WorkspaceID, arg.AttachmentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSourceContextAttachmentURLsByWorkspace = `-- name: ListSourceContextAttachmentURLsByWorkspace :many
 SELECT url FROM attachment
 WHERE workspace_id = $1
@@ -1224,6 +1322,7 @@ type LockAttachmentsForCommentLinkParams struct {
 // requested set under that lock and returns the ids still eligible, so the
 // caller can refuse before the comment is committed when a requested
 // attachment was deleted while the issue lock was contended.
+// Ownerless uploads are already pinned by LockUnboundAttachmentsForCommentLink.
 func (q *Queries) LockAttachmentsForCommentLink(ctx context.Context, arg LockAttachmentsForCommentLinkParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, lockAttachmentsForCommentLink, arg.WorkspaceID, arg.IssueID, arg.AttachmentIds)
 	if err != nil {
@@ -1285,11 +1384,73 @@ func (q *Queries) LockAttachmentsForIssueLink(ctx context.Context, arg LockAttac
 	return items, nil
 }
 
+const lockUnboundAttachmentsForCommentLink = `-- name: LockUnboundAttachmentsForCommentLink :many
+SELECT id FROM attachment
+WHERE workspace_id = $1
+  AND issue_id IS NULL
+  AND comment_id IS NULL
+  AND chat_session_id IS NULL
+  AND chat_message_id IS NULL
+  AND task_id IS NULL
+  AND source_context_id IS NULL
+  AND uploader_type = $2
+  AND uploader_id = $3
+  AND id = ANY($4::uuid[])
+ORDER BY id
+FOR UPDATE
+`
+
+type LockUnboundAttachmentsForCommentLinkParams struct {
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	UploaderType  string        `json:"uploader_type"`
+	UploaderID    pgtype.UUID   `json:"uploader_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
+}
+
+// Like issue updates, comment creation locks ownerless uploads before the
+// issue row. Once it takes the issue, it locks existing issue children below.
+// This keeps both upload adoption and owner-first deletion in the same order.
+// Only the comment author's own uploads qualify (see LinkAttachmentsToComment).
+func (q *Queries) LockUnboundAttachmentsForCommentLink(ctx context.Context, arg LockUnboundAttachmentsForCommentLinkParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockUnboundAttachmentsForCommentLink,
+		arg.WorkspaceID,
+		arg.UploaderType,
+		arg.UploaderID,
+		arg.AttachmentIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const replaceCommentAttachments = `-- name: ReplaceCommentAttachments :execrows
 UPDATE attachment
 SET comment_id = CASE
   WHEN id = ANY($3::uuid[]) THEN $1
   ELSE NULL
+END,
+issue_id = CASE
+  WHEN id = ANY($3::uuid[]) THEN issue_id
+  WHEN uploader_type = 'member' AND EXISTS (
+    SELECT 1 FROM member m
+    WHERE m.workspace_id = attachment.workspace_id
+      AND m.user_id = attachment.uploader_id
+      AND m.role = 'guest'
+  ) THEN NULL
+  ELSE issue_id
 END
 WHERE issue_id = $2
   AND source_context_id IS NULL
@@ -1305,10 +1466,29 @@ type ReplaceCommentAttachmentsParams struct {
 	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
 }
 
+// A file removed from the comment stays an issue attachment, except a guest's
+// (MUL-9420): a guest attaches files only through its comments, so its file
+// goes back to being its unbound draft rather than staying on the issue.
 func (q *Queries) ReplaceCommentAttachments(ctx context.Context, arg ReplaceCommentAttachmentsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, replaceCommentAttachments, arg.CommentID, arg.IssueID, arg.AttachmentIds)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const sumWorkspaceAttachmentBytes = `-- name: SumWorkspaceAttachmentBytes :one
+SELECT COALESCE(SUM(size_bytes), 0)::bigint AS used_bytes
+FROM attachment
+WHERE workspace_id = $1
+`
+
+// Attachment bytes a workspace holds, for its storage limit (MUL-9489). Every
+// row counts, whatever owns it; thumbnails are not attachment rows. An
+// index-only scan on idx_attachment_workspace_size.
+func (q *Queries) SumWorkspaceAttachmentBytes(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, sumWorkspaceAttachmentBytes, workspaceID)
+	var used_bytes int64
+	err := row.Scan(&used_bytes)
+	return used_bytes, err
 }

@@ -97,9 +97,7 @@
     "section_labels": "Etiquetas",
     "filter_search_placeholder": "Filtrar...",
     "no_labels": "Todavía no hay etiquetas",
-    "no_results": "Sin resultados",
-    "manage_labels": "Gestionar etiquetas...",
-    "manage_labels_title": "Etiquetas de skills"
+    "no_results": "Sin resultados"
   },
   "detail": {
     "read_only": "Solo lectura",
@@ -190,7 +188,8 @@
       "permissions_owner": "Puedes editar y eliminar esta skill. Los cambios surten efecto en la próxima ejecución del agente.",
       "permissions_locked_creator": "Solo el creador ({{name}}) o un administrador del espacio de trabajo pueden editar esta skill.",
       "permissions_locked": "Solo el creador o un administrador del espacio de trabajo pueden editar esta skill.",
-      "character_count": "{{count}} caracteres"
+      "character_count_one": "{{count}} carácter",
+      "character_count_other": "{{count}} caracteres"
     },
     "files": {
       "list_aria": "Archivos de la skill",
@@ -254,15 +253,9 @@
     }
   },
   "create": {
-    "back": "Volver",
-    "back_aria": "Volver al selector de método",
     "close": "Cerrar",
     "close_aria": "Cerrar",
     "method": {
-      "chooser": {
-        "title": "Skill nueva",
-        "desc": "Elige cómo añadir una skill a este espacio de trabajo."
-      },
       "manual": {
         "title": "Crear manualmente",
         "desc": "Parte de un SKILL.md en blanco."
@@ -309,7 +302,19 @@
       "cancel": "Cancelar",
       "import": "Importar",
       "importing": "Importando…",
-      "toast_imported": "Skill importada"
+      "toast_imported": "Skill importada",
+      "select_all": "Seleccionar todo",
+      "import_count": "Importar {{count}}",
+      "done": "Listo",
+      "stop": "Detener tras el elemento actual",
+      "unreadable": "No se ha podido leer esta skill. Vuelve a elegir la carpeta.",
+      "uncertain": "El resultado es incierto. Actualiza la lista de skills y compruébala antes de reintentar. Si ya existe el mismo nombre, la importación seguirá bloqueada; revísala en la lista.",
+      "check_results": "Comprobar resultados",
+      "retry_ready": "No aparece en la lista actualizada. Puedes reintentar esta importación.",
+      "uncertain_manual": "El resultado es incierto y no se conoce el nombre de la skill del archivo. Revisa la lista de skills manualmente antes de volver a importar este archivo.",
+      "check_failed": "No se ha podido verificar la lista de skills. Las importaciones con resultados inciertos siguen bloqueadas. Vuelve a comprobarlo o revisa la lista manualmente.",
+      "workspace_changed": "Ha cambiado el espacio de trabajo. Se han detenido las importaciones pendientes. Cierra este diálogo y ábrelo de nuevo en el espacio de trabajo correcto.",
+      "summary": "Importadas: {{success}} · Fallidas o sin confirmar: {{failed}}"
     },
     "url": {
       "url_label": "URL de la skill",
@@ -351,8 +356,6 @@
     "toast_imported": "Skill importada",
     "toast_import_failed": "No se ha podido importar la skill",
     "select_all": "Seleccionar todas ({{count}})",
-    "bulk_ready": "{{count}} skills seleccionadas",
-    "bulk_import_button": "Importar {{count}} skills",
     "bulk_progress": "Importando {{completed}} / {{total}}…",
     "bulk_cancel_button": "Cancelar",
     "bulk_complete_hint": "Importación completa.",
@@ -364,7 +367,6 @@
     "bulk_summary_skipped": "Omitidas",
     "bulk_summary_failed": "Fallidas",
     "conflict_single_title": "Ya existe una skill con este nombre",
-    "conflict_bulk_title": "{{count}} skills necesitan una decisión",
     "conflict_hint": "Elige si sobreescribir la skill existente del espacio de trabajo, importarla con un nombre nuevo, u omitirla.",
     "conflict_locked_creator": "Esta skill la creó {{creator}}. Solo el creador puede sobreescribirla desde la importación local; edítala desde la página de detalle de la skill si necesitas cambiarla.",
     "conflict_locked": "Solo el creador puede sobreescribir esta skill desde la importación local; edítala desde la página de detalle de la skill si necesitas cambiarla.",
@@ -375,10 +377,17 @@
     "conflict_overwrite_all": "Sobreescribir todas",
     "conflict_skip_all": "Omitir todas",
     "conflict_rename_label": "Nombre nuevo de la skill",
-    "conflict_footer": "{{count}} decisiones de conflicto pendientes.",
     "conflict_apply_button": "Aplicar decisiones",
     "conflict_missing_resolution": "Elige cómo resolver este conflicto.",
-    "conflict_name_still_exists": "Ese nombre ya existe. Elige otro nombre u omítela."
+    "conflict_name_still_exists": "Ese nombre ya existe. Elige otro nombre u omítela.",
+    "bulk_ready_one": "{{count}} skill seleccionada",
+    "bulk_ready_other": "{{count}} skills seleccionadas",
+    "bulk_import_button_one": "Importar {{count}} skill",
+    "bulk_import_button_other": "Importar {{count}} skills",
+    "conflict_bulk_title_one": "{{count}} skill necesita una decisión",
+    "conflict_bulk_title_other": "{{count}} skills necesitan una decisión",
+    "conflict_footer_one": "{{count}} decisión de conflicto pendiente.",
+    "conflict_footer_other": "{{count}} decisiones de conflicto pendientes."
   },
   "file_tree": {
     "no_files": "Sin archivos",

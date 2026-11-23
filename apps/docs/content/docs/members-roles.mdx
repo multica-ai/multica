@@ -1,14 +1,14 @@
 ---
 title: Members and roles
-description: Invite members and manage workspace permissions with the owner, admin, and member roles.
+description: Invite members and guests and choose the right level of access for each person.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { RolesDemo } from "@/components/demos/roles-demo";
 
-Everyone who joins a [workspace](/workspaces) is a member, and each member has one role: `owner`, `admin`, or `member`. Roles only control workspace settings and team management; day-to-day collaboration — creating issues, writing comments — is open to all members.
+In a [workspace](/workspaces), `owner`, `admin`, and `member` can create issues and post comments. Their permissions differ when managing settings and people. A [guest](#guests) can read and comment on issues only in projects shared with them.
 
-## The three roles
+## Permissions for owners, admins, and members [#the-three-roles]
 
 | Action | owner | admin | member |
 |---|:---:|:---:|:---:|
@@ -24,12 +24,16 @@ A workspace must always keep at least one `owner`: the last `owner` cannot be de
 <RolesDemo />
 
 <Callout type="info">
-Roles do not decide who can run an agent. Each agent has its own Access scope, and `owner` and `admin` cannot bypass it to run agents they were not granted. See [Agents](/agents#permissions-and-access).
+Guests cannot run agents. Each agent has its own Access scope, and `owner` and `admin` cannot bypass it to run agents they were not granted. See [Agents](/agents#permissions-and-access).
+</Callout>
+
+<Callout type="info">
+Roles do not open private projects either. An `owner` or `admin` sees a private project only when they are on its member list. See [Private projects](/projects#private-projects).
 </Callout>
 
 ## Invite members
 
-`owner` and `admin` open **Settings → Members**, click **Invite member**, enter an email, pick a role, and send. Invitations can only grant `admin` or `member`; an `owner` must join the workspace first and then be promoted by an existing `owner`.
+`owner` and `admin` open **Settings → Members**, click **Invite member**, enter an email, pick a role, and send. Invitations can grant `admin`, `member`, or [guest](#guests) access; an `owner` must join the workspace first and then be promoted by an existing `owner`.
 
 ![Member management: the invite form and the roster with roles](/images/docs/members-roster.webp)
 
@@ -38,6 +42,12 @@ The invitee accepts by logging in with that email — no prior signup is needed.
 The invitation link appears only in the email; there is no place in the product to view or copy it. If the email fails to send, the invitation record still exists — revoke it and send a new one.
 
 When you need a link you can pass along yourself, generate one under **Share links** in **Settings → Members** by choosing a role and an expiry. Anyone with the link can join with that role until it expires or is revoked.
+
+## Guests
+
+A guest sees only the projects shared with it. In those projects it can read issues, comment, react, and follow them; it cannot create or edit issues, run or mention agents, or open workspace settings, and it sees no other projects, agents, autopilots, or runtimes.
+
+`owner` and `admin` invite a guest by choosing **Guest** in the invite dialog and picking the projects it can see. From a member's actions menu they can make a member a guest, which takes back its agents, autopilots, and runtime access; make a guest a member; or change a guest's projects with **Manage accessible projects**. Like everything else about a private project, a guest's access to one is shown and changed only by people on that project's member list; changing a guest's projects leaves its access to private projects you are not on as it is.
 
 ## Change roles
 
@@ -58,3 +68,4 @@ Removing a member also deactivates the runtimes they own, archives the agents bo
 - [Issues](/issues) — the work members and agents handle together.
 - [Agents](/agents) — how workspace roles differ from agent Access.
 - [Daemon and runtimes](/daemon-runtimes) — who owns runtimes and where they run.
+- [Share an agent pool across a team](/team-agent-pool) — roles and agent Access together, in a 10-person team example.

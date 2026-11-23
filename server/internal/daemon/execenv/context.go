@@ -159,6 +159,12 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // cloud-mode tasks whose envRoot is wiped wholesale by the GC loop — may
 // pass nil to skip the bookkeeping entirely.
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) ([]string, error) {
+	return writeContextFilesTracked(workDir, provider, ctx, manifest, nil)
+}
+
+// writeContextFilesTracked additionally records, when installed is non-nil,
+// each successful skill write's absolute directory keyed by skill ID.
+func writeContextFilesTracked(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest, installed map[string]string) ([]string, error) {
 	if err := writeTaskContextMarker(workDir, ctx, manifest); err != nil {
 		return nil, err
 	}
@@ -176,7 +182,7 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 			}
 			// Codex skills are written to codex-home in Prepare; skip here.
 			if provider != "codex" {
-				preparedSkillNames, err = writeSkillFilesWithNames(skillsDir, ctx.AgentSkills, manifest)
+				preparedSkillNames, err = writeSkillFilesWithNamesTracked(skillsDir, ctx.AgentSkills, manifest, installed)
 				if err != nil {
 					return nil, fmt.Errorf("write skill files: %w", err)
 				}
@@ -409,6 +415,10 @@ func skillsDirPath(workDir, provider string) string {
 	case "qwen":
 		// Qwen Code discovers project-level skills from .qwen/skills/ in the workdir.
 		return filepath.Join(workDir, ".qwen", "skills")
+	case "amp":
+		return filepath.Join(workDir, ".agents", "skills")
+	case "droid":
+		return filepath.Join(workDir, ".factory", "skills")
 	case "qwenpaw":
 		// QwenPaw discovers workspace-level skills from <workDir>/skill_pool/.
 		// See get_workspace_skills_dir in QwenPaw's skill_system/store.py.
@@ -576,6 +586,14 @@ func isFrontmatterValidYAML(content string) bool {
 	}
 	var m map[string]any
 	return yaml.Unmarshal([]byte(fmBody), &m) == nil
+}
+
+// SkillBody removes a complete frontmatter block for explicit prompt
+// injection. Malformed/unclosed frontmatter is preserved instead of dropping
+// skill text.
+func SkillBody(content string) string {
+	_, body, _ := frontmatterParts(content)
+	return body
 }
 
 // frontmatterParts splits content into the raw YAML frontmatter body (the text
@@ -945,13 +963,26 @@ func sanitizeSkillName(name string) string {
 // skill entirely (which would silently drop a Multica skill the agent
 // expects to see).
 func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest) error {
-	_, err := writeSkillFilesWithNames(skillsDir, skills, manifest)
+	return writeSkillFilesTracked(skillsDir, skills, manifest, nil)
+}
+
+// writeSkillFilesTracked additionally records, when installed is non-nil,
+// each successful write's absolute directory by skill ID.
+func writeSkillFilesTracked(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest, installed map[string]string) error {
+	_, err := writeSkillFilesWithNamesTracked(skillsDir, skills, manifest, installed)
 	return err
 }
 
 // writeSkillFilesWithNames returns the allocated invocation names in input
 // order, including suffixes needed to preserve user-owned skill directories.
 func writeSkillFilesWithNames(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest) ([]string, error) {
+	return writeSkillFilesWithNamesTracked(skillsDir, skills, manifest, nil)
+}
+
+// writeSkillFilesWithNamesTracked additionally records, when installed is
+// non-nil, each successful write's absolute directory by skill ID, so
+// explicit invocation never has to repeat the allocator.
+func writeSkillFilesWithNamesTracked(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest, installed map[string]string) ([]string, error) {
 	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
 		return nil, fmt.Errorf("create skills dir: %w", err)
 	}
@@ -1008,6 +1039,9 @@ func writeSkillFilesWithNames(skillsDir string, skills []SkillContextForEnv, man
 			if err := recordWriteFile(fpath, []byte(f.Content), 0o644, manifest); err != nil {
 				return nil, err
 			}
+		}
+		if installed != nil && skill.ID != "" {
+			installed[skill.ID] = dir
 		}
 		preparedSkillNames[i] = slug
 	}

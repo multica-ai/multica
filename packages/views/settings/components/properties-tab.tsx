@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
@@ -18,7 +18,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
-  propertyListOptions,
+  propertyUsageListOptions,
   useCreateProperty,
   useUpdateProperty,
 } from "@multica/core/properties";
@@ -79,6 +79,9 @@ import {
 } from "../../common/property-icon";
 import { useLocale, useT } from "../../i18n";
 import { SettingsReadOnlyNotice, SettingsTab } from "./settings-layout";
+import { CatalogHeader, CatalogRow, CatalogRows, CatalogTable } from "./catalog-table";
+import { cn } from "@multica/ui/lib/utils";
+import { paletteColor } from "@multica/core/appearance";
 
 const MAX_ACTIVE_PROPERTIES = 20;
 
@@ -124,7 +127,7 @@ export function PropertiesTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
 
-  const { data: properties = [], isLoading } = useQuery(propertyListOptions(wsId, true));
+  const { data: properties = [], isLoading } = useQuery(propertyUsageListOptions(wsId));
   const update = useUpdateProperty();
 
   const activeCount = useMemo(
@@ -185,15 +188,14 @@ export function PropertiesTab() {
           </p>
         )}
 
-        <div className="@container/properties overflow-hidden rounded-lg border border-surface-border bg-card">
-          <div className="hidden grid-cols-[minmax(10rem,1fr)_6rem_minmax(10rem,1.4fr)_6rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-caption font-medium text-muted-foreground @min-[50rem]/properties:grid">
+        <CatalogTable columns="minmax(10rem,1fr) 6rem minmax(10rem,1.4fr) 6rem 7rem">
+          <CatalogHeader>
             <span>{t(($) => $.properties.columns.name)}</span>
             <span>{t(($) => $.properties.columns.type)}</span>
             <span>{t(($) => $.properties.columns.options)}</span>
             <span>{t(($) => $.properties.columns.usage)}</span>
             <span>{t(($) => $.properties.columns.updated)}</span>
-            <span />
-          </div>
+          </CatalogHeader>
 
           {isLoading ? (
             <div className="px-4 py-12 text-center text-body text-muted-foreground">
@@ -214,108 +216,91 @@ export function PropertiesTab() {
               )}
             </div>
           ) : (
-            <div className="divide-y divide-surface-border">
+            <CatalogRows>
               {visible.map((property) => (
-                <div
+                <CatalogRow
                   key={property.id}
-                  className="grid gap-2 px-4 py-3 @min-[50rem]/properties:grid-cols-[minmax(10rem,1fr)_6rem_minmax(10rem,1.4fr)_6rem_7rem_2rem] @min-[50rem]/properties:items-center @min-[50rem]/properties:gap-4"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <PropertyIcon property={property} />
-                    <span className="truncate text-body font-medium">{property.name}</span>
-                    {property.archived && (
-                      <Badge variant="outline" className="shrink-0 text-micro">
-                        {t(($) => $.properties.archived_badge)}
-                      </Badge>
-                    )}
-                  </div>
-                  <span className="text-caption text-muted-foreground @min-[50rem]/properties:text-body">
-                    <PropertyTypeLabel type={property.type} />
-                  </span>
-                  <div className="flex min-w-0 flex-wrap items-center gap-1">
-                    {(property.config.options ?? []).slice(0, 6).map((option) => (
-                      <span
-                        key={option.id}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-2 py-0.5 text-caption"
-                      >
-                        <span
-                          className="size-2 rounded-full"
-                          style={{ backgroundColor: option.color }}
+                  name={
+                    <div className="flex min-w-0 items-center gap-2">
+                      <PropertyIcon property={property} />
+                      <span className="truncate text-body font-medium">{property.name}</span>
+                      {property.archived && (
+                        <Badge variant="outline" className="shrink-0 text-micro">
+                          {t(($) => $.properties.archived_badge)}
+                        </Badge>
+                      )}
+                    </div>
+                  }
+                  meta={
+                    <>
+                      <span>
+                        <PropertyTypeLabel type={property.type} />
+                      </span>
+                      <PropertyOptionChips property={property} />
+                      <span className="tabular-nums">
+                        {t(($) => $.properties.usage_count, { count: property.usage_count ?? 0 })}
+                      </span>
+                      <span className="text-caption">
+                        {new Date(property.updated_at).toLocaleDateString(locale)}
+                      </span>
+                    </>
+                  }
+                  menu={
+                    canManage ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <IconButton
+                              variant="ghost"
+                              size="icon-sm"
+                              label={t(($) => $.properties.actions.open, { name: property.name })}
+                            >
+                              <MoreHorizontal className="size-4" />
+                            </IconButton>
+                          }
                         />
-                        {option.name}
-                      </span>
-                    ))}
-                    {(property.config.options?.length ?? 0) > 6 && (
-                      <span className="text-caption text-muted-foreground">
-                        +{(property.config.options?.length ?? 0) - 6}
-                      </span>
-                    )}
-                    {!typeHasOptions(property.type) && (
-                      <span className="text-caption text-muted-foreground">—</span>
-                    )}
-                  </div>
-                  <span className="text-caption tabular-nums text-muted-foreground @min-[50rem]/properties:text-body">
-                    {t(($) => $.properties.usage_count, { count: property.usage_count ?? 0 })}
-                  </span>
-                  <span className="text-caption text-muted-foreground">
-                    {new Date(property.updated_at).toLocaleDateString(locale)}
-                  </span>
-                  {canManage ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <IconButton
-                            variant="ghost"
-                            size="icon-sm"
-                            label={t(($) => $.properties.actions.open, { name: property.name })}
-                          >
-                            <MoreHorizontal className="size-4" />
-                          </IconButton>
-                        }
-                      />
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setEditing(property)}>
-                          <Pencil className="size-4" />
-                          {t(($) => $.properties.actions.edit)}
-                        </DropdownMenuItem>
-                        {property.archived ? (
-                          <DropdownMenuItem
-                            onClick={() =>
-                              update.mutate(
-                                { id: property.id, archived: false },
-                                {
-                                  onError: (error) =>
-                                    toast.error(
-                                      error instanceof Error
-                                        ? error.message
-                                        : t(($) => $.properties.save_failed),
-                                    ),
-                                },
-                              )
-                            }
-                          >
-                            <ArchiveRestore className="size-4" />
-                            {t(($) => $.properties.actions.unarchive)}
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setEditing(property)}>
+                            <Pencil className="size-4" />
+                            {t(($) => $.properties.actions.edit)}
                           </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onClick={() => setPendingArchive(property)}
-                          >
-                            <Archive className="size-4" />
-                            {t(($) => $.properties.actions.archive)}
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : (
-                    <span />
-                  )}
-                </div>
+                          {property.archived ? (
+                            <DropdownMenuItem
+                              onClick={() =>
+                                update.mutate(
+                                  { id: property.id, archived: false },
+                                  {
+                                    onError: (error) =>
+                                      toast.error(
+                                        error instanceof Error
+                                          ? error.message
+                                          : t(($) => $.properties.save_failed),
+                                      ),
+                                  },
+                                )
+                              }
+                            >
+                              <ArchiveRestore className="size-4" />
+                              {t(($) => $.properties.actions.unarchive)}
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => setPendingArchive(property)}
+                            >
+                              <Archive className="size-4" />
+                              {t(($) => $.properties.actions.archive)}
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : null
+                  }
+                />
               ))}
-            </div>
+            </CatalogRows>
           )}
-        </div>
+        </CatalogTable>
       </div>
 
       <PropertyEditorDialog open={createOpen} onOpenChange={setCreateOpen} />
@@ -329,6 +314,91 @@ export function PropertiesTab() {
         onClose={() => setPendingArchive(null)}
       />
     </SettingsTab>
+  );
+}
+
+const WIDE_OPTION_CHIPS = 6;
+const NARROW_OPTION_CHIPS = 3;
+
+function OptionChip({
+  option,
+  className,
+  children,
+}: {
+  option: IssuePropertyOption;
+  className?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border border-surface-border px-2 py-0.5 text-caption text-foreground",
+        className,
+      )}
+    >
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: paletteColor(option.color) }}
+      />
+      {children ?? option.name}
+    </span>
+  );
+}
+
+/**
+ * The Options column. When the catalog is narrow the chips take their own
+ * line under the rest of the metadata, show fewer, and truncate instead of
+ * wrapping, so a select with many options still fits in three lines. The cell
+ * opens a read-only list of every option, so what the row hides or cuts off
+ * stays reachable by touch and keyboard for members without the edit menu.
+ */
+function PropertyOptionChips({ property }: { property: IssueProperty }) {
+  const { t } = useT("settings");
+  if (!typeHasOptions(property.type)) {
+    return <span className="hidden text-caption @3xl/catalog:block">—</span>;
+  }
+  const options = property.config.options ?? [];
+  if (options.length === 0) return <div />;
+  const narrowRest = options.length - NARROW_OPTION_CHIPS;
+  const wideRest = options.length - WIDE_OPTION_CHIPS;
+  return (
+    <Popover>
+      <PopoverTrigger
+        aria-label={t(($) => $.properties.options_preview, { name: property.name })}
+        className="order-last flex min-w-0 basis-full cursor-pointer items-center gap-1 overflow-hidden rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring @3xl/catalog:order-none @3xl/catalog:flex-wrap @3xl/catalog:overflow-visible"
+      >
+        {options.slice(0, WIDE_OPTION_CHIPS).map((option, index) => (
+          <OptionChip
+            key={option.id}
+            option={option}
+            className={cn(
+              "min-w-0 @3xl/catalog:min-w-auto",
+              index >= NARROW_OPTION_CHIPS && "hidden @3xl/catalog:inline-flex",
+            )}
+          >
+            <span className="truncate @3xl/catalog:overflow-visible @3xl/catalog:whitespace-normal">
+              {option.name}
+            </span>
+          </OptionChip>
+        ))}
+        {narrowRest > 0 && (
+          <span className="shrink-0 text-caption @3xl/catalog:hidden">+{narrowRest}</span>
+        )}
+        {wideRest > 0 && (
+          <span className="hidden text-caption @3xl/catalog:inline">+{wideRest}</span>
+        )}
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="max-h-[min(24rem,var(--available-height))] w-auto max-w-72 overflow-y-auto p-2"
+      >
+        <div className="flex flex-wrap gap-1">
+          {options.map((option) => (
+            <OptionChip key={option.id} option={option} />
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -461,7 +531,7 @@ function PropertyEditorDialog({
       {/* Options are unbounded, so the form is the part that has to give:
           header and footer stay put and the fields scroll, keeping "Save
           property" clickable no matter how many options are on the draft. */}
-      <DialogContent className="flex max-h-[85dvh] flex-col sm:max-w-lg">
+      <DialogContent className="flex max-h-[85%] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {property
@@ -594,6 +664,7 @@ function PropertyEditorDialog({
                         <button
                           type="button"
                           aria-label={option.color}
+                          // eslint-disable-next-line no-restricted-syntax -- color swatch
                           className="size-6 shrink-0 cursor-pointer rounded-full border border-surface-border transition-transform hover:scale-110"
                           style={{ backgroundColor: option.color }}
                         />

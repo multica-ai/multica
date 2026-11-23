@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -47,8 +48,11 @@ var skillCreateCmd = &cobra.Command{
 var skillUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Update a skill",
-	Args:  exactArgs(1),
-	RunE:  runSkillUpdate,
+	Long: "Update a skill. Content and description are replaced whole, so pass --base-revision " +
+		"(the revision from `multica skill get`): if anyone saved the skill since, nothing is written " +
+		"and you get a conflict instead of silently overwriting their change.",
+	Args: exactArgs(1),
+	RunE: runSkillUpdate,
 }
 
 var skillDeleteCmd = &cobra.Command{
@@ -144,6 +148,7 @@ func init() {
 	skillUpdateCmd.Flags().Bool("content-stdin", false, "Read new content from stdin. Mutually exclusive with --content and --content-file.")
 	skillUpdateCmd.Flags().String("content-file", "", "Read new content from a UTF-8 file. Mutually exclusive with --content and --content-stdin.")
 	skillUpdateCmd.Flags().String("config", "", "New config as JSON string")
+	skillUpdateCmd.Flags().Int64("base-revision", 0, "Revision from skill get; the update fails instead of overwriting if the skill changed since")
 	skillUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// skill delete
@@ -170,7 +175,36 @@ func init() {
 	skillFilesUpsertCmd.Flags().String("content", "", "File content (required)")
 	skillFilesUpsertCmd.Flags().Bool("content-stdin", false, "Read file content from stdin. Mutually exclusive with --content and --content-file.")
 	skillFilesUpsertCmd.Flags().String("content-file", "", "Read file content from a UTF-8 file. Mutually exclusive with --content and --content-stdin.")
+	skillFilesUpsertCmd.Flags().Int64("base-revision", 0, "Skill revision from skill get; the write fails instead of overwriting if the skill changed since")
 	skillFilesUpsertCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// skill files delete
+	skillFilesDeleteCmd.Flags().Int64("base-revision", 0, "Skill revision from skill get; the delete fails if the skill changed since")
+}
+
+// skillBaseRevision reads --base-revision. Unset means "no precondition", which
+// keeps last-write-wins for scripts written before skill revisions existed.
+func skillBaseRevision(cmd *cobra.Command) (int64, bool, error) {
+	if !cmd.Flags().Changed("base-revision") {
+		return 0, false, nil
+	}
+	base, _ := cmd.Flags().GetInt64("base-revision")
+	if base <= 0 {
+		return 0, false, fmt.Errorf("--base-revision must be a positive revision from `multica skill get`")
+	}
+	return base, true, nil
+}
+
+// skillWriteError turns a stale-revision 409 into instructions an agent can act on.
+func skillWriteError(action string, base int64, err error) error {
+	var httpErr *cli.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict &&
+		strings.Contains(httpErr.Body, "revision_conflict") {
+		return fmt.Errorf("%s: the skill changed since revision %d, so nothing was written. "+
+			"Run `multica skill get --with-content` for the latest content and revision, merge your change into it, and retry with the new --base-revision (%s)",
+			action, base, httpErr.Body)
+	}
+	return fmt.Errorf("%s: %w", action, err)
 }
 
 // Skill commands
@@ -326,11 +360,12 @@ func runSkillGet(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, skill)
 	}
 
-	headers := []string{"ID", "NAME", "DESCRIPTION", "CREATED_AT"}
+	headers := []string{"ID", "NAME", "DESCRIPTION", "REVISION", "CREATED_AT"}
 	rows := [][]string{{
 		strVal(skill, "id"),
 		strVal(skill, "name"),
 		strVal(skill, "description"),
+		strVal(skill, "revision"),
 		strVal(skill, "created_at"),
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
@@ -421,13 +456,20 @@ func runSkillUpdate(cmd *cobra.Command, args []string) error {
 	if len(body) == 0 {
 		return fmt.Errorf("no fields to update; use --name, --description, --content, or --config")
 	}
+	base, hasBase, err := skillBaseRevision(cmd)
+	if err != nil {
+		return err
+	}
+	if hasBase {
+		body["base_revision"] = base
+	}
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/skills/"+args[0], body, &result); err != nil {
-		return fmt.Errorf("update skill: %w", err)
+		return skillWriteError("update skill", base, err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -768,13 +810,20 @@ func runSkillFilesUpsert(cmd *cobra.Command, args []string) error {
 		"path":    filePath,
 		"content": content,
 	}
+	base, hasBase, err := skillBaseRevision(cmd)
+	if err != nil {
+		return err
+	}
+	if hasBase {
+		body["base_revision"] = base
+	}
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/skills/"+args[0]+"/files", body, &result); err != nil {
-		return fmt.Errorf("upsert skill file: %w", err)
+		return skillWriteError("upsert skill file", base, err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -792,11 +841,20 @@ func runSkillFilesDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	path := "/api/skills/" + args[0] + "/files/" + args[1]
+	base, hasBase, err := skillBaseRevision(cmd)
+	if err != nil {
+		return err
+	}
+	if hasBase {
+		path += "?base_revision=" + strconv.FormatInt(base, 10)
+	}
+
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	if err := client.DeleteJSON(ctx, "/api/skills/"+args[0]+"/files/"+args[1]); err != nil {
-		return fmt.Errorf("delete skill file: %w", err)
+	if err := client.DeleteJSON(ctx, path); err != nil {
+		return skillWriteError("delete skill file", base, err)
 	}
 
 	fmt.Printf("Skill file deleted: %s\n", args[1])

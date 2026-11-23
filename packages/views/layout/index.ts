@@ -1,4 +1,5 @@
 export { AppRail } from "./app-rail";
+export { AppBottomBar } from "./bottom-bar";
 export { AppShellProvider, useAppShell } from "./app-shell-context";
 export { CompactNavSheet } from "./compact-nav-sheet";
 export { ShellRouteDataPrefetch } from "./route-data-prefetch";

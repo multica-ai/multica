@@ -120,6 +120,40 @@ func TestPlatformSkillHintsFollowPreparedDirectories(t *testing.T) {
 	}
 }
 
+// TestPlatformSkillDomainsMatchDescription keeps the brief's recall hint and
+// the skill's description naming the same domains (MUL-9256). The description
+// is guarded against the skill's references in the service package; this
+// closes the last hop, so a reference added there reaches every runtime's brief.
+func TestPlatformSkillDomainsMatchDescription(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("..", "..", "service", "builtin_skills", platformSkillName, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var description string
+	for _, line := range strings.Split(string(data), "\n") {
+		if value, ok := strings.CutPrefix(line, "description: "); ok {
+			description = strings.Trim(value, `"`)
+			break
+		}
+	}
+	_, after, ok := strings.Cut(description, "does not fully cover: ")
+	domains, _, ok2 := strings.Cut(after, ". ")
+	if !ok || !ok2 {
+		t.Fatalf("cannot find the domain list in the description %q; update this parser with the new wording", description)
+	}
+	if domains != platformSkillDomains {
+		t.Errorf("brief domains drifted from the skill description:\n description: %s\n brief:       %s", domains, platformSkillDomains)
+	}
+
+	for _, provider := range []string{"claude", "codex", "traecli"} {
+		brief := buildMetaSkillContent(provider, TaskContextForEnv{IssueID: "issue-platform-domains", AgentSkills: []SkillContextForEnv{platformSkillFixture()}})
+		if !strings.Contains(brief, "does not fully cover — "+platformSkillDomains+" — ") {
+			t.Errorf("%s brief does not list the platform skill's domains", provider)
+		}
+	}
+}
+
 func assertPlatformSkillHints(t *testing.T, provider, brief, slug string) {
 	t.Helper()
 	if slug == "" {

@@ -1,7 +1,9 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient, ApiError } from "./client";
 import { parseWithFallback } from "./schema";
+import { CreateIssueResponseSchema } from "./schemas";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
 function stubFetchJson(body: unknown, status = 200) {
@@ -39,6 +41,15 @@ describe("ApiClient schema fallback", () => {
   });
 
   describe("GitHub repository import", () => {
+    it("accepts attributed connections alongside legacy rows without a connector name", async () => {
+      const installation = { id: "inst-1", workspace_id: "ws-1", account_login: "alice", account_type: "User", account_avatar_url: null, created_at: "2026-11-17T00:00:00Z" };
+      stubFetchJson({ installations: [installation, { ...installation, id: "inst-2", account_login: "acme-org", connected_by: "Ada" }], can_manage: false });
+      const response = await new ApiClient("https://api.example.test").listGitHubInstallations("ws-1");
+      expect(response.installations).toEqual([installation, { ...installation, id: "inst-2", account_login: "acme-org", connected_by: "Ada" }]);
+      expect(response.can_manage).toBe(false);
+      expect(response.installations.every((row) => row.installation_id === undefined)).toBe(true);
+    });
+
     it("falls back safely when installation or repository responses are malformed", async () => {
       stubFetchJson({ installations: "not-an-array", configured: true });
       const client = new ApiClient("https://api.example.test");
@@ -59,18 +70,34 @@ describe("ApiClient schema fallback", () => {
       });
     });
 
-    it("adds the allowlisted repository return target to the connect request", async () => {
+    it.each([undefined, "all", "selected", "future-selection", 42])("handles repository selection metadata safely (%s)", async (selection) => {
+      stubFetchJson({ repositories: [], total_count: 0, next_page: null, repository_selection: selection });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.listGitHubInstallationRepositories("ws-1", "install-1");
+      expect(response.repository_selection).toBe(selection === undefined ? undefined : selection === "all" || selection === "selected" ? selection : "unknown");
+    });
+
+    it.each([undefined, "desktop-nonce", 42])("accepts missing or malformed connect correlation metadata (%s)", async (connectionID) => {
+      stubFetchJson({ configured: true, url: "https://github.com/apps/test/installations/new", connection_id: connectionID });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.getGitHubConnectURL("ws-1", { desktop: true });
+      expect(response.configured).toBe(true);
+      expect(response.connection_id).toBe(typeof connectionID === "string" ? connectionID : undefined);
+      expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("https://api.example.test/api/workspaces/ws-1/github/connect?desktop=1");
+    });
+
+    it("uses the unified GitHub connect endpoint", async () => {
       stubFetchJson({
         configured: true,
         url: "https://github.com/apps/multica/installations/new",
       });
       const client = new ApiClient("https://api.example.test");
 
-      await client.getGitHubConnectURL("ws-1", "repositories");
+      await client.getGitHubConnectURL("ws-1");
 
       const fetchMock = vi.mocked(fetch);
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://api.example.test/api/workspaces/ws-1/github/connect?return_to=repositories",
+        "https://api.example.test/api/workspaces/ws-1/github/connect",
         expect.any(Object),
       );
     });
@@ -169,6 +196,32 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listSkills();
       expect(res).toEqual([]);
+    });
+
+    it.each([{ body: { skills: [] } }, { body: null }, { body: [{ id: "missing-identity" }] }])(
+      "rejects malformed skill lists for absence checks while preserving rendering fallback: %j",
+      async ({ body }) => {
+        stubFetchJson(body);
+        const client = new ApiClient("https://api.example.test");
+        await expect(client.listSkills()).resolves.toEqual([]);
+        stubFetchJson(body);
+        await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+      },
+    );
+
+    it("does not accept a defaulted 204 response as proof of absence", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(null, { status: 204 })));
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listSkills()).resolves.toEqual([]);
+      await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+    });
+
+    it("accepts a verified empty list and older valid rows for absence checks", async () => {
+      const client = new ApiClient("https://api.example.test");
+      stubFetchJson([]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toEqual([]);
+      stubFetchJson([baseSkill]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toMatchObject([{ id: "skill-1", name: "review-helper" }]);
     });
 
     it("treats a missing labels field as an empty array (older backends)", async () => {
@@ -314,6 +367,11 @@ describe("ApiClient schema fallback", () => {
       const issue = await client.createIssue({ title: "Created" });
       expect(issue.id).toBe("issue-1");
       expect(issue.labels).toBeUndefined();
+    });
+
+    it.each([true, false, undefined, null, "off"])("validates the create PR override %s without breaking older responses", (value) => {
+      const parsed = CreateIssueResponseSchema.parse({ ...validIssue, pr_auto_complete_disabled: value });
+      expect(parsed.pr_auto_complete_disabled).toBe(typeof value === "boolean" ? value : undefined);
     });
 
     it("validates a well-formed labels array", async () => {
@@ -1009,15 +1067,6 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
-  describe("listGroupedIssues", () => {
-    it("falls back to empty groups when the response is malformed", async () => {
-      stubFetchJson({ groups: "not-an-array" });
-      const client = new ApiClient("https://api.example.test");
-      const res = await client.listGroupedIssues({ group_by: "assignee" });
-      expect(res).toEqual({ groups: [] });
-    });
-  });
-
   describe("listComments", () => {
     it("returns [] when the response is not an array", async () => {
       stubFetchJson({ wrong: "shape" });
@@ -1042,6 +1091,36 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const subs = await client.listIssueSubscribers("issue-1");
       expect(subs).toEqual([]);
+    });
+
+    const subscriber = (delivery?: unknown) => ({
+      issue_id: "issue-1",
+      user_type: "member",
+      user_id: "user-1",
+      reason: "commenter",
+      created_at: "2026-01-01T00:00:00Z",
+      ...(delivery === undefined ? {} : { delivery }),
+    });
+
+    it("keeps each valid delivery tier", async () => {
+      stubFetchJson(["all", "key_updates", "delegated"].map(subscriber));
+      const client = new ApiClient("https://api.example.test");
+      const subs = await client.listIssueSubscribers("issue-1");
+      expect(subs.map((s) => s.delivery)).toEqual(["all", "key_updates", "delegated"]);
+    });
+
+    it.each([
+      { name: "missing", delivery: undefined },
+      { name: "unknown", delivery: "muted" },
+      { name: "malformed", delivery: 42 },
+      { name: "null", delivery: null },
+    ])("keeps the row without a tier when delivery is $name", async ({ delivery }) => {
+      stubFetchJson([subscriber(delivery)]);
+      const client = new ApiClient("https://api.example.test");
+      const subs = await client.listIssueSubscribers("issue-1");
+      expect(subs).toHaveLength(1);
+      expect(subs[0]).toMatchObject({ user_id: "user-1", reason: "commenter" });
+      expect(subs[0]!.delivery).toBeUndefined();
     });
   });
 
@@ -1077,6 +1156,51 @@ describe("ApiClient schema fallback", () => {
 
       await expect(client.getChildIssueProgress()).resolves.toEqual({
         progress: [],
+      });
+    });
+  });
+
+  describe("listIssuePullRequestSummaries", () => {
+    it("drops a malformed row instead of blanking every card's PR chips", async () => {
+      stubFetchJson({
+        pull_requests: [
+          {
+            issue_id: "issue-1",
+            id: "pr-1",
+            repo_owner: "acme",
+            repo_name: "widget",
+            number: 1,
+            state: "merged",
+            html_url: "https://github.com/acme/widget/pull/1",
+          },
+          { issue_id: "issue-1", id: "pr-2", number: "two" },
+        ],
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listIssuePullRequestSummaries()).resolves.toEqual({
+        pull_requests: [
+          {
+            issue_id: "issue-1",
+            id: "pr-1",
+            provider: "github",
+            repo_owner: "acme",
+            repo_name: "widget",
+            number: 1,
+            title: "",
+            state: "merged",
+            html_url: "https://github.com/acme/widget/pull/1",
+          },
+        ],
+      });
+    });
+
+    it("falls back to no PRs when the list is not an array", async () => {
+      stubFetchJson({ pull_requests: "invalid" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listIssuePullRequestSummaries()).resolves.toEqual({
+        pull_requests: [],
       });
     });
   });
@@ -1329,6 +1453,7 @@ describe("ApiClient schema fallback", () => {
 
       await expect(
         client.createWorkspaceSubscriptionCheckout({
+          plan: "business",
           interval: "year",
           idempotencyKey: "checkout-intent-1",
         }),
@@ -1344,6 +1469,7 @@ describe("ApiClient schema fallback", () => {
       };
       expect(init.headers["Idempotency-Key"]).toBe("checkout-intent-1");
       expect(JSON.parse(String(init.body))).toEqual({
+        plan: "business",
         interval: "year",
         idempotency_key: "checkout-intent-1",
       });
@@ -1362,6 +1488,7 @@ describe("ApiClient schema fallback", () => {
 
       await expect(
         client.createWorkspaceSubscriptionCheckout({
+          plan: "pro",
           interval: "month",
           idempotencyKey: "checkout-intent-1",
         }),
@@ -1429,35 +1556,12 @@ describe("workspace subscription contract", () => {
     status: "active",
     seats: 3,
     limits: {
-      issue_count: { mode: "unlimited" },
       autopilot_runs: { mode: "unlimited" },
     },
     current_period_end: "2026-09-01T00:00:00Z",
     snapshot_expires_at: null,
     version: 7,
   };
-
-  it("maps limited issue usage and accepts a no-content unlimited response", async () => {
-    stubFetchJson({
-      used: 11,
-      limit: 17,
-    });
-    const client = new ApiClient("https://api.example.test");
-
-    await expect(client.getIssueLimitUsage()).resolves.toEqual({
-      used: 11,
-      limit: 17,
-    });
-
-    stubFetchJson({ used: 11 });
-    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
-    );
-    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
-  });
 
   it("maps a full summary to camelCase without inventing values", async () => {
     stubFetchJson({
@@ -1485,6 +1589,7 @@ describe("workspace subscription contract", () => {
         checkout: false,
         portal: true,
         purchase_seats: false,
+        change_plan: true,
       },
     });
     const client = new ApiClient("https://api.example.test");
@@ -1514,7 +1619,220 @@ describe("workspace subscription contract", () => {
       checkout: false,
       portal: true,
       purchaseSeats: false,
+      changePlan: true,
+      checkPlanChange: false,
+      // An older cloud sends no add-on action and no add-on summary.
+      purchaseAutopilotRuns: false,
     });
+    expect(summary?.autopilotAddon).toBeNull();
+    expect(summary?.planChange).toBeNull();
+    expect(summary?.trial).toBeNull();
+  });
+
+  it("reads the storage limit when Cloud sends one, and nothing when it is missing or malformed (MUL-9489)", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const read = async (storage: unknown) => {
+      stubFetchJson({
+        entitlement: { ...entitlement, limits: { ...entitlement.limits, ...(storage === undefined ? {} : { storage_bytes: storage }) } },
+        billing_interval: null,
+        human_members: 3,
+        seat_capacity: null,
+        cancel_at_period_end: false,
+        grace_until: null,
+        has_stripe_customer: false,
+        available_actions: { checkout: true, portal: false, purchase_seats: false, change_plan: false },
+      });
+      return (await client.getWorkspaceSubscriptionSummary())?.entitlement;
+    };
+
+    expect((await read({ mode: "limited", limit: 30_000_000_000 }))?.limits.storageBytes).toEqual({
+      mode: "limited",
+      limit: 30_000_000_000,
+    });
+    expect((await read(undefined))?.limits.storageBytes).toBeNull();
+    const malformed = await read({ mode: "limited", limit: "lots" });
+    expect(malformed?.limits.storageBytes).toBeNull();
+    expect(malformed?.plan).toBe("pro");
+  });
+
+  it("reads the autopilot add-on action and this month's add-ons", async () => {
+    const base = {
+      entitlement,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+    };
+    stubFetchJson({
+      ...base,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: true,
+        purchase_autopilot_runs: true,
+      },
+      autopilot_addon: {
+        purchased_runs: 3000,
+        period_start: "2026-11-01T00:00:00Z",
+        period_end: "2026-12-01T00:00:00Z",
+      },
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+    expect(summary?.availableActions.purchaseAutopilotRuns).toBe(true);
+    expect(summary?.autopilotAddon).toEqual({
+      purchasedRuns: 3000,
+      periodStart: "2026-11-01T00:00:00Z",
+      periodEnd: "2026-12-01T00:00:00Z",
+    });
+
+    // Malformed add-on fields never take the summary down: no add-on offered.
+    stubFetchJson({
+      ...base,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: true,
+        purchase_autopilot_runs: "yes",
+      },
+      autopilot_addon: { purchased_runs: -1 },
+    });
+    const malformed = await client.getWorkspaceSubscriptionSummary();
+    expect(malformed).not.toBeNull();
+    expect(malformed?.availableActions.purchaseAutopilotRuns).toBe(false);
+    expect(malformed?.autopilotAddon).toBeNull();
+  });
+
+  it("reads a plan change that still holds the subscription", async () => {
+    stubFetchJson({
+      entitlement,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: false,
+        change_plan: false,
+        check_plan_change: true,
+      },
+      plan_change: {
+        target_plan: "business",
+        state: "confirming",
+        since: "2026-11-18T08:00:00Z",
+      },
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary?.availableActions.checkPlanChange).toBe(true);
+    expect(summary?.planChange).toEqual({
+      targetPlan: "business",
+      state: "confirming",
+      since: "2026-11-18T08:00:00Z",
+    });
+  });
+
+  it.each([
+    ["an unknown state", { target_plan: "business", state: "settling", since: "2026-11-18T08:00:00Z" }, "confirming"],
+    ["a malformed hold", { state: "unresolved" }, null],
+  ])("tolerates %s in plan_change", async (_name, planChange, expected) => {
+    stubFetchJson({
+      entitlement,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+      available_actions: { checkout: false, portal: true, purchase_seats: false },
+      plan_change: planChange,
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary).not.toBeNull();
+    expect(summary?.planChange?.state ?? null).toBe(expected);
+  });
+
+  it("reads a no-card trial", async () => {
+    stubFetchJson({
+      entitlement: {
+        ...entitlement,
+        plan: "business",
+        status: "trialing",
+        current_period_end: "2026-12-19T08:00:00Z",
+      },
+      billing_interval: null,
+      human_members: 7,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: false,
+      available_actions: { checkout: true, portal: false, purchase_seats: false },
+      trial: {
+        plan: "business",
+        state: "active",
+        started_at: "2026-12-05T08:00:00Z",
+        ends_at: "2026-12-19T08:00:00Z",
+      },
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary?.entitlement.status).toBe("trialing");
+    expect(summary?.trial).toEqual({
+      plan: "business",
+      state: "active",
+      startedAt: "2026-12-05T08:00:00Z",
+      endsAt: "2026-12-19T08:00:00Z",
+    });
+  });
+
+  it.each([
+    ["absent (an older cloud)", undefined],
+    ["an unknown state", { plan: "business", state: "paused", started_at: "2026-12-05T08:00:00Z", ends_at: "2026-12-19T08:00:00Z" }],
+    ["an unparseable end", { plan: "business", state: "active", started_at: "2026-12-05T08:00:00Z", ends_at: "soon" }],
+    ["a missing plan", { state: "active", started_at: "2026-12-05T08:00:00Z", ends_at: "2026-12-19T08:00:00Z" }],
+  ])("reads %s trial as no trial without failing the summary", async (_name, trial) => {
+    stubFetchJson({
+      entitlement,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+      available_actions: { checkout: false, portal: true, purchase_seats: false },
+      ...(trial === undefined ? {} : { trial }),
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary).not.toBeNull();
+    expect(summary?.trial).toBeNull();
+  });
+
+  it("offers no plan switch when cloud does not report change_plan", async () => {
+    stubFetchJson({
+      entitlement,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+      available_actions: { checkout: false, portal: true, purchase_seats: false },
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary?.availableActions.changePlan).toBe(false);
   });
 
   it("represents canceled subscriptions without current seat capacity", async () => {
@@ -1612,21 +1930,116 @@ describe("workspace subscription contract", () => {
     ).toBe("pro");
   });
 
-  it("maps validated prices and rejects a non-positive amount", async () => {
-    stubFetchJson({
-      month: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 1 },
-      year: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
-    });
+  const planPrices = (monthAmount: number, yearAmount: number) => ({
+    month: { currency: "usd", unit_amount: monthAmount, interval: "month", interval_count: 1 },
+    year: { currency: "usd", unit_amount: yearAmount, interval: "year", interval_count: 1 },
+  });
+
+  it("maps validated per-plan prices and rejects a non-positive amount", async () => {
+    stubFetchJson({ pro: planPrices(1500, 14400), business: planPrices(3000, 28800) });
     const client = new ApiClient("https://api.example.test");
     const prices = await client.getWorkspaceSubscriptionPrices();
-    expect(prices?.month.unitAmount).toBe(2000);
-    expect(prices?.year.interval).toBe("year");
+    expect(prices?.pro.month.unitAmount).toBe(1500);
+    expect(prices?.pro.year.interval).toBe("year");
+    expect(prices?.business.month.unitAmount).toBe(3000);
+    expect(prices?.business.year.unitAmount).toBe(28800);
+    // An older cloud sells no add-on pack.
+    expect(prices?.autopilotAddon).toBeNull();
 
     // A zero or missing amount must not be rendered next to a purchase button.
+    stubFetchJson({ pro: planPrices(0, 14400), business: planPrices(3000, 28800) });
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("reads the add-on pack price on its own", async () => {
+    const client = new ApiClient("https://api.example.test");
     stubFetchJson({
-      month: { currency: "usd", unit_amount: 0, interval: "month", interval_count: 1 },
-      year: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+      pro: planPrices(1500, 14400),
+      business: planPrices(3000, 28800),
+      autopilot_addon: { currency: "usd", unit_amount: 1000, runs_per_pack: 1000 },
     });
+    expect((await client.getWorkspaceSubscriptionPrices())?.autopilotAddon).toEqual({
+      currency: "usd",
+      unitAmount: 1000,
+      runsPerPack: 1000,
+    });
+
+    // A malformed pack price hides the add-on but keeps the plan prices.
+    for (const malformed of [
+      { currency: "usd", unit_amount: 0, runs_per_pack: 1000 },
+      { currency: "USD", unit_amount: 1000, runs_per_pack: 1000 },
+      { currency: "usd", unit_amount: 1000 },
+      "1000",
+    ]) {
+      stubFetchJson({
+        pro: planPrices(1500, 14400),
+        business: planPrices(3000, 28800),
+        autopilot_addon: malformed,
+      });
+      const prices = await client.getWorkspaceSubscriptionPrices();
+      expect(prices?.pro.month.unitAmount).toBe(1500);
+      expect(prices?.autopilotAddon).toBeNull();
+    }
+  });
+
+  it("starts an add-on Checkout with the accepted price and reads the session back", async () => {
+    const client = new ApiClient("https://api.example.test");
+    stubFetchJson({ session_id: "cs_test_1", url: "https://checkout.stripe.com/c/pay/cs_test_1" });
+    await expect(
+      client.createWorkspaceAutopilotAddonCheckout({
+        packs: 3,
+        expectedUnitAmount: 1000,
+        currency: "usd",
+        idempotencyKey: "addon-1",
+      }),
+    ).resolves.toEqual({ sessionId: "cs_test_1", url: "https://checkout.stripe.com/c/pay/cs_test_1" });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/autopilot-addon/checkout-sessions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          packs: 3,
+          expected_unit_amount: 1000,
+          currency: "usd",
+          idempotency_key: "addon-1",
+        }),
+      }),
+    );
+    // A Checkout URL that is not Stripe's HTTPS page is never followed.
+    stubFetchJson({ session_id: "cs_test_1", url: "javascript:alert(1)" });
+    expect(
+      await client.createWorkspaceAutopilotAddonCheckout({
+        packs: 1,
+        expectedUnitAmount: 1000,
+        currency: "usd",
+        idempotencyKey: "addon-2",
+      }),
+    ).toBeNull();
+
+    // An unknown status keeps waiting instead of claiming an outcome.
+    for (const [status, expected] of [
+      ["paid", "paid"],
+      ["expired", "expired"],
+      ["complete", "open"],
+    ] as const) {
+      stubFetchJson({ session_id: "cs_test_1", status, packs: 1, runs: 1000, currency: "usd", amount: 1000 });
+      expect((await client.getWorkspaceAutopilotAddonCheckout("cs_test_1"))?.status).toBe(expected);
+    }
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/autopilot-addon/checkout-sessions/cs_test_1",
+      expect.anything(),
+    );
+    stubFetchJson({ session_id: "cs_test_1", status: "paid", packs: 0, runs: 1000, currency: "usd", amount: 1000 });
+    expect(await client.getWorkspaceAutopilotAddonCheckout("cs_test_1")).toBeNull();
+  });
+
+  it("rejects prices that omit a paid plan or use the retired flat shape", async () => {
+    const client = new ApiClient("https://api.example.test");
+
+    stubFetchJson({ pro: planPrices(1500, 14400) });
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+
+    stubFetchJson(planPrices(1500, 14400));
     expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
   });
 
@@ -1635,28 +2048,162 @@ describe("workspace subscription contract", () => {
 
     // An interval outside the contract.
     stubFetchJson({
-      month: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 1 },
-      year: { currency: "usd", unit_amount: 20000, interval: "week", interval_count: 1 },
+      pro: {
+        month: { currency: "usd", unit_amount: 1500, interval: "month", interval_count: 1 },
+        year: { currency: "usd", unit_amount: 14400, interval: "week", interval_count: 1 },
+      },
+      business: planPrices(3000, 28800),
     });
     expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
 
     // Valid intervals in the wrong slots. Accepting this would let the UI quote
     // a yearly amount as the monthly price.
     stubFetchJson({
-      month: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
-      year: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 1 },
+      pro: planPrices(1500, 14400),
+      business: {
+        month: { currency: "usd", unit_amount: 28800, interval: "year", interval_count: 1 },
+        year: { currency: "usd", unit_amount: 3000, interval: "month", interval_count: 1 },
+      },
     });
     expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
   });
 
   it("rejects a prices response whose interval count is not one", async () => {
     stubFetchJson({
-      month: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 3 },
-      year: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+      pro: {
+        month: { currency: "usd", unit_amount: 1500, interval: "month", interval_count: 3 },
+        year: { currency: "usd", unit_amount: 14400, interval: "year", interval_count: 1 },
+      },
+      business: planPrices(3000, 28800),
     });
     const client = new ApiClient("https://api.example.test");
 
     expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("maps plan change previews, including a downgrade credit", async () => {
+    stubFetchJson({
+      current_plan: "business",
+      target_plan: "pro",
+      interval: "year",
+      seats: 4,
+      subscription_version: 7,
+      currency: "usd",
+      proration_amount: -28800,
+      next_invoice_amount: 57600,
+      invoice_now: false,
+      quoted_at: "2026-11-18T08:00:00Z",
+    });
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.previewWorkspacePlanChange({ plan: "pro" }),
+    ).resolves.toEqual({
+      currentPlan: "business",
+      targetPlan: "pro",
+      interval: "year",
+      seats: 4,
+      subscriptionVersion: 7,
+      currency: "usd",
+      prorationAmount: -28800,
+      nextInvoiceAmount: 57600,
+      invoiceNow: false,
+      quotedAt: "2026-11-18T08:00:00Z",
+      autopilotRunsLimitAfter: null,
+    });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/plan-changes/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ plan: "pro" }),
+      }),
+    );
+  });
+
+  it("returns null for a malformed plan change preview", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const valid = {
+      current_plan: "pro",
+      target_plan: "business",
+      interval: "month",
+      seats: 3,
+      subscription_version: 7,
+      currency: "usd",
+      proration_amount: 4500,
+      next_invoice_amount: 9000,
+      invoice_now: true,
+      quoted_at: "2026-11-18T08:00:00Z",
+    };
+
+    for (const malformed of [
+      { ...valid, target_plan: "enterprise" },
+      { ...valid, target_plan: "pro" },
+      { ...valid, proration_amount: 45.5 },
+      { ...valid, invoice_now: undefined },
+      { ...valid, currency: "USD" },
+    ]) {
+      stubFetchJson(malformed);
+      expect(
+        await client.previewWorkspacePlanChange({ plan: "business" }),
+      ).toBeNull();
+    }
+  });
+
+  it("confirms a plan change with the accepted quote and idempotency key", async () => {
+    stubFetchJson({
+      plan: "business",
+      previous_plan: "pro",
+      interval: "month",
+      seats: 3,
+      currency: "usd",
+      proration_amount: 4500,
+      invoice_now: true,
+    });
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.changeWorkspacePlan({
+        plan: "business",
+        expectedSubscriptionVersion: 7,
+        quotedAt: "2026-11-18T08:00:00Z",
+        acceptedProrationAmount: 4500,
+        currency: "usd",
+        idempotencyKey: "plan-change-1",
+      }),
+    ).resolves.toEqual({
+      plan: "business",
+      previousPlan: "pro",
+      interval: "month",
+      seats: 3,
+      currency: "usd",
+      prorationAmount: 4500,
+      invoiceNow: true,
+    });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/plan-changes",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          plan: "business",
+          expected_subscription_version: 7,
+          quoted_at: "2026-11-18T08:00:00Z",
+          accepted_proration_amount: 4500,
+          currency: "usd",
+          idempotency_key: "plan-change-1",
+        }),
+        headers: expect.objectContaining({ "Idempotency-Key": "plan-change-1" }),
+      }),
+    );
+
+    stubFetchJson({ plan: "free", previous_plan: "pro" });
+    await expect(
+      client.changeWorkspacePlan({
+        plan: "business",
+        expectedSubscriptionVersion: 7,
+        quotedAt: "2026-11-18T08:00:00Z",
+        acceptedProrationAmount: 4500,
+        currency: "usd",
+        idempotencyKey: "plan-change-2",
+      }),
+    ).resolves.toBeNull();
   });
 
   it("maps seat purchase previews and confirmations without trusting client totals", async () => {
@@ -1726,5 +2273,147 @@ describe("workspace subscription contract", () => {
         headers: expect.objectContaining({ "Idempotency-Key": "seat-request-1" }),
       }),
     );
+  });
+});
+
+describe("dashboard history limit (MUL-9490)", () => {
+  const planPrices = (monthAmount: number, yearAmount: number) => ({
+    month: { currency: "usd", unit_amount: monthAmount, interval: "month", interval_count: 1 },
+    year: { currency: "usd", unit_amount: yearAmount, interval: "year", interval_count: 1 },
+  });
+  const prices = { pro: planPrices(1500, 14400), business: planPrices(3000, 28800) };
+
+  it("reads plan limits from prices, and drops them alone when malformed", async () => {
+    const client = new ApiClient("https://api.example.test");
+    stubFetchJson({
+      ...prices,
+      plan_limits: {
+        free: { dashboard_history_days: 30 },
+        pro: { dashboard_history_days: 90 },
+        business: { dashboard_history_days: 365 },
+      },
+    });
+    expect((await client.getWorkspaceSubscriptionPrices())?.planLimits).toEqual({
+      free: { dashboardHistoryDays: 30 },
+      pro: { dashboardHistoryDays: 90 },
+      business: { dashboardHistoryDays: 365 },
+    });
+
+    // An older Cloud sends none; the prices themselves stay usable.
+    stubFetchJson(prices);
+    const older = await client.getWorkspaceSubscriptionPrices();
+    expect(older?.pro.month.unitAmount).toBe(1500);
+    expect(older?.planLimits).toBeNull();
+
+    // A malformed block, or a missing plan, reads as no plan limits.
+    for (const planLimits of [
+      "30",
+      { free: { dashboard_history_days: 30 }, pro: { dashboard_history_days: 90 } },
+    ]) {
+      stubFetchJson({ ...prices, plan_limits: planLimits });
+      const parsed = await client.getWorkspaceSubscriptionPrices();
+      expect(parsed?.business.month.unitAmount).toBe(3000);
+      expect(parsed?.planLimits).toBeNull();
+    }
+
+    // A malformed day count is unknown for that plan only.
+    stubFetchJson({
+      ...prices,
+      plan_limits: {
+        free: { dashboard_history_days: "30" },
+        pro: { dashboard_history_days: 0 },
+        business: { dashboard_history_days: 365 },
+      },
+    });
+    expect((await client.getWorkspaceSubscriptionPrices())?.planLimits).toEqual({
+      free: { dashboardHistoryDays: null },
+      pro: { dashboardHistoryDays: null },
+      business: { dashboardHistoryDays: 365 },
+    });
+  });
+
+  it("reads the features limit and treats a missing or malformed one as none", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const ws = "11111111-1111-1111-1111-111111111111";
+    stubFetchJson({ features: {}, limits: { dashboard_history_days: 30 } });
+    expect((await client.getWorkspaceFeatures(ws)).limits).toEqual({ dashboardHistoryDays: 30 });
+
+    for (const body of [
+      { features: {} },
+      { features: {}, limits: null },
+      { features: {}, limits: { dashboard_history_days: null } },
+      { features: {}, limits: { dashboard_history_days: "30" } },
+      { features: {}, limits: { dashboard_history_days: -1 } },
+      { features: {}, limits: [] },
+    ]) {
+      stubFetchJson(body);
+      expect((await client.getWorkspaceFeatures(ws)).limits).toEqual({ dashboardHistoryDays: null });
+    }
+  });
+
+  it("reads the entitlement's history range when Cloud sends it", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const summary = (limits: Record<string, unknown>) => ({
+      entitlement: {
+        workspace_id: "11111111-1111-1111-1111-111111111111",
+        plan: "free",
+        status: "active",
+        seats: 1,
+        limits: { autopilot_runs: { mode: "limited", limit: 200 }, ...limits },
+        current_period_end: null,
+        snapshot_expires_at: null,
+        version: 1,
+      },
+      billing_interval: null,
+      human_members: 1,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: false,
+      available_actions: { checkout: true, portal: false, purchase_seats: false },
+    });
+    stubFetchJson(summary({ dashboard_history_days: { mode: "limited", limit: 30 } }));
+    expect((await client.getWorkspaceSubscriptionSummary())?.entitlement.limits.dashboardHistoryDays).toEqual({
+      mode: "limited",
+      limit: 30,
+    });
+    stubFetchJson(summary({}));
+    const older = await client.getWorkspaceSubscriptionSummary();
+    expect(older?.entitlement.limits.autopilotRuns).toEqual({ mode: "limited", limit: 200 });
+    expect(older?.entitlement.limits.dashboardHistoryDays).toBeNull();
+    stubFetchJson(summary({ dashboard_history_days: { mode: "limited", limit: "30" } }));
+    expect((await client.getWorkspaceSubscriptionSummary())?.entitlement.limits.dashboardHistoryDays).toBeNull();
+  });
+
+  it("reports the limit header every dashboard endpoint was served under", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const calls = [
+      client.getDashboardUsageDaily.bind(client),
+      client.getDashboardUsageByAgent.bind(client),
+      client.getDashboardAgentRunTime.bind(client),
+      client.getDashboardRunTimeDaily.bind(client),
+      client.getDashboardFailuresDaily.bind(client),
+      client.getDashboardFailuresByAgent.bind(client),
+    ];
+    for (const call of calls) {
+      for (const [header, want] of [
+        ["30", 30],
+        [null, null],
+        ["", null],
+        ["abc", null],
+        ["0", null],
+        ["-5", null],
+      ] as const) {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (header !== null) headers["X-Dashboard-History-Limit-Days"] = header;
+        const fetchMock = vi.fn().mockResolvedValue(new Response("[]", { status: 200, headers }));
+        vi.stubGlobal("fetch", fetchMock);
+        const seen: (number | null)[] = [];
+        const rows = await call({ days: 371, tz: "UTC", onHistoryLimit: (v) => seen.push(v) });
+        expect(rows).toEqual([]);
+        expect(seen).toEqual([want]);
+        expect(String(fetchMock.mock.calls[0]?.[0])).toContain("days=371");
+      }
+    }
   });
 });

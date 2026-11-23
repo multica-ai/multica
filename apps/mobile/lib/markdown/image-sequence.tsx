@@ -16,14 +16,20 @@
  *
  * The URIs are resolved the same way `MarkdownImage` resolves the one it
  * renders — same attachment match, same `resolveAttachmentUrl` pass — so the
- * URI a tap reports is the one the sequence holds.
+ * URI a tap reports is the one the sequence holds. Bodies go through the
+ * renderer's HTML pass first: mobile shows `<img>` as a Markdown image, whose
+ * URL is entity-decoded and normalized, and drops the tags around it. Image
+ * file cards are decided by the same rule on both sides (see
+ * `preprocessFileCards`), so a card shown as a link is never counted.
  */
 import { createContext, use, useMemo, type ReactNode } from "react";
+import { normalizeUri } from "micromark-util-sanitize-uri";
 import {
   collectImageSequence,
   type ImageSequenceBlock,
 } from "@multica/core/attachments/image-sequence";
 import { resolveAttachmentUrl } from "@/lib/attachment-url";
+import { stripHtml } from "./preprocess";
 
 const ImageSequenceContext = createContext<readonly string[]>([]);
 
@@ -44,9 +50,18 @@ export function ImageSequenceProvider({
 }) {
   const uris = useMemo(
     () =>
-      collectImageSequence(blocks).map(
-        (item) => resolveAttachmentUrl(item.url) ?? item.url,
-      ),
+      collectImageSequence(
+        blocks.map((block) =>
+          block?.content ? { ...block, content: stripHtml(block.content) } : block,
+        ),
+      ).map((item) => {
+        // An unmatched image file card renders as a Markdown image, whose
+        // destination is normalized like any other.
+        const url = !item.imageByConstruction && !item.attachment
+          ? normalizeUri(item.url)
+          : item.url;
+        return resolveAttachmentUrl(url) ?? url;
+      }),
     [blocks],
   );
   return (

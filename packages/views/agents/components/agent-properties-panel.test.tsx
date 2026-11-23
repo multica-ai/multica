@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import type { AgentActivity } from "@multica/core/agents";
+import { configStore } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
@@ -19,11 +21,17 @@ const activityRef = vi.hoisted(() => ({
   current: new Map<string, unknown>(),
 }));
 const mockInitiateListModels = vi.hoisted(() => vi.fn());
+const appsApi = vi.hoisted(() => ({
+  listAgentApps: vi.fn(),
+  getAppsOverview: vi.fn(),
+  listAppCatalog: vi.fn(),
+}));
 
 vi.mock("@multica/core/api", () => ({
   api: {
     initiateListModels: (...args: unknown[]) => mockInitiateListModels(...args),
     getListModelsResult: vi.fn(),
+    ...appsApi,
   },
 }));
 vi.mock("@multica/core/hooks", () => ({
@@ -143,6 +151,7 @@ beforeEach(() => {
   pickers.model = null;
   activityRef.current = new Map();
   mockInitiateListModels.mockReset();
+  configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: false });
 });
 afterEach(cleanup);
 
@@ -155,7 +164,7 @@ describe("AgentPropertiesPanel", () => {
       "Status",
       "Owner",
       "Runtime",
-      "Harness",
+      "CLI",
       "Model",
       "Access",
       "Runs (7d)",
@@ -246,5 +255,83 @@ describe("AgentPropertiesPanel", () => {
 
     expect(screen.getByText("0")).toBeInTheDocument();
     expect(screen.queryByText(/% success/)).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentPropertiesPanel Apps line", () => {
+  const account = (slug: string, status = "active") => ({
+    id: `c-${slug}`,
+    toolkit_slug: slug,
+    status,
+    connected_at: "",
+    last_used_at: null,
+  });
+
+  function withApps(scopes: Record<string, "team" | "personal">, personal: ReturnType<typeof account>[]) {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    appsApi.listAgentApps.mockResolvedValue({
+      apps: Object.entries(scopes).map(([toolkit_slug, account_scope]) => ({
+        agent_id: "agent-1",
+        toolkit_slug,
+        account_scope,
+        level: "write",
+      })),
+    });
+    appsApi.getAppsOverview.mockResolvedValue({
+      catalog_mode: "all",
+      can_manage: false,
+      team: [],
+      personal,
+      agent_apps: [],
+    });
+    appsApi.listAppCatalog.mockResolvedValue({ catalog_mode: "all", apps: [] });
+  }
+
+  it("is absent while Connected Apps is off", () => {
+    renderPanel(claude);
+
+    expect(screen.queryByText("Apps")).not.toBeInTheDocument();
+    expect(appsApi.listAgentApps).not.toHaveBeenCalled();
+  });
+
+  it("leads with the apps that still need the viewer's account", async () => {
+    withApps(
+      { gmail: "personal", googlecalendar: "personal", notion: "personal", posthog: "team" },
+      [account("gmail"), account("notion", "expired")],
+    );
+    renderPanel(claude);
+
+    expect(
+      await screen.findByRole("button", { name: "Apps: 2 need your account. Show apps" }),
+    ).toHaveClass("text-warning");
+  });
+
+  it("counts the apps when the viewer has every account they need", async () => {
+    withApps({ gmail: "personal", posthog: "team" }, [account("gmail")]);
+    renderPanel(claude);
+
+    expect(await screen.findByText("2 apps")).toBeInTheDocument();
+  });
+
+  it("reads None without apps and scrolls to the Apps section", async () => {
+    withApps({}, []);
+    const section = document.createElement("div");
+    section.id = "agent-apps-agent-1";
+    section.tabIndex = -1;
+    section.scrollIntoView = vi.fn();
+    document.body.append(section);
+    renderPanel(claude);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Apps: None. Show apps" }));
+    expect(section.scrollIntoView).toHaveBeenCalled();
+    expect(section).toHaveFocus();
+    section.remove();
+  });
+
+  it("is not offered on a Qoder runtime", () => {
+    withApps({ gmail: "personal" }, []);
+    renderPanel(qoder);
+
+    expect(screen.queryByText("Apps")).not.toBeInTheDocument();
   });
 });

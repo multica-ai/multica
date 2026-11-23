@@ -9,7 +9,7 @@ import { CHANGELOG_URL } from "../layout/help-links";
 import { HighlightActionButton } from "./highlight-action";
 import { highlightCopy, type WhatsNewRelease } from "./releases";
 
-function versionLabel(version: string) {
+export function versionLabel(version: string) {
   return `v${version}`;
 }
 
@@ -17,7 +17,7 @@ function releaseAnchor(version: string) {
   return `${CHANGELOG_URL}#release-${version.replace(/\./g, "-")}`;
 }
 
-function formatReleaseDate(date: string, language: string) {
+export function formatReleaseDate(date: string, language: string) {
   const parsed = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) return date;
   return new Intl.DateTimeFormat(language, { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed);

@@ -39,7 +39,7 @@ function tab(agent: Agent, onSave = vi.fn().mockResolvedValue(undefined)) {
 
 async function typeInstructions(text: string) {
   const user = userEvent.setup();
-  const field = screen.getByLabelText("System prompt");
+  const field = screen.getByLabelText("Instructions");
   await user.clear(field);
   await user.type(field, text);
   return user;
@@ -66,7 +66,7 @@ describe("InstructionsTab", () => {
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Discard" }));
 
-    expect(screen.getByLabelText("System prompt")).toHaveValue(
+    expect(screen.getByLabelText("Instructions")).toHaveValue(
       "Review carefully.",
     );
     expect(screen.queryByText("Unsaved changes")).toBeNull();
@@ -79,7 +79,7 @@ describe("InstructionsTab", () => {
     expect(screen.getByText("0 characters")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("tab", { name: "Preview" }));
 
-    expect(screen.queryByLabelText("System prompt")).toBeNull();
+    expect(screen.queryByLabelText("Instructions")).toBeNull();
     expect(screen.getByText("Nothing to preview yet.")).toBeInTheDocument();
   });
 
@@ -89,7 +89,7 @@ describe("InstructionsTab", () => {
 
     rerender(tab({ ...baseAgent, instructions: "Server-side change." }));
 
-    expect(screen.getByLabelText("System prompt")).toHaveValue("Local draft.");
+    expect(screen.getByLabelText("Instructions")).toHaveValue("Local draft.");
   });
 
   it("adopts a server change while the editor is clean", () => {
@@ -97,7 +97,7 @@ describe("InstructionsTab", () => {
 
     rerender(tab({ ...baseAgent, instructions: "Server-side change." }));
 
-    expect(screen.getByLabelText("System prompt")).toHaveValue(
+    expect(screen.getByLabelText("Instructions")).toHaveValue(
       "Server-side change.",
     );
   });
@@ -118,7 +118,7 @@ describe("InstructionsTab", () => {
     rerender(tab(baseAgent, onSave));
     await act(async () => rejectSave(new Error("Update failed")));
 
-    expect(screen.getByLabelText("System prompt")).toHaveValue(
+    expect(screen.getByLabelText("Instructions")).toHaveValue(
       "Inspect the patch.",
     );
   });

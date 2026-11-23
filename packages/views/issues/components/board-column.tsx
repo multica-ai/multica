@@ -36,6 +36,7 @@ import { VirtuosoSeed } from "../../common/virtuoso-seed";
 import { useBoardWorkflow } from "./board-workflow-context";
 import { ColumnHandoff } from "../../workflows/column-handoff";
 import type { IssueCreateDefaults } from "../surface/types";
+import { paletteColor } from "@multica/core/appearance";
 
 // Insertion-position prediction intentionally omitted. The server's
 // ORDER BY uses PostgreSQL's en_US.utf8 collation (glibc), which
@@ -183,10 +184,10 @@ export const BoardColumn = memo(function BoardColumn({
 
   const computeItemKey = (_index: number, issue: Issue) => issue.id;
   const itemContent = (index: number, issue: Issue) => (
-    // pt-2 on every card but the first reproduces the previous `space-y-2`
+    // Top padding on every card but the first reproduces the previous `space-y-2`
     // gap; padding (not margin) is inside Virtuoso's measured item box so its
     // height math stays correct.
-    <div className={index === 0 ? undefined : "pt-2"}>
+    <div className={index === 0 ? undefined : "pt-[var(--board-card-gap,var(--space-xs,0.5rem))]"}>
       <DraggableBoardCard
         issue={issue}
         childProgress={childProgressMap?.get(issue.id)}
@@ -202,8 +203,9 @@ export const BoardColumn = memo(function BoardColumn({
 
   return (
     <div
+      data-mc="board-column"
       style={{ width: BOARD_COL_WIDTH }}
-      className={`group/column relative flex shrink-0 flex-col rounded-xl bg-muted/40 p-2 ${
+      className={`group/column relative flex shrink-0 flex-col rounded-board-column bg-board-column p-2 ${
         hint ? "ring-2 ring-brand/30" : ""
       }`}
     >
@@ -238,7 +240,7 @@ export const BoardColumn = memo(function BoardColumn({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground"
+                  className="text-muted-foreground"
                   aria-label={tCommon(($) => $.more_actions)}
                 >
                   <MoreHorizontal className="size-3.5" />
@@ -255,7 +257,7 @@ export const BoardColumn = memo(function BoardColumn({
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            className="rounded-full text-muted-foreground"
+                            className="text-muted-foreground"
                             aria-label={tCommon(($) => $.more_actions)}
                           >
                             <MoreHorizontal className="size-3.5" />
@@ -285,7 +287,7 @@ export const BoardColumn = memo(function BoardColumn({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground"
+                  className="text-muted-foreground"
                   aria-label={t(($) => $.board.add_issue_tooltip)}
                   onClick={() => {
                     const data = {
@@ -419,7 +421,7 @@ function BoardGroupHeading({
       <div className="flex min-w-0 items-center gap-2">
         <span
           className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
-          style={group.propertyOptionColor ? { backgroundColor: group.propertyOptionColor } : undefined}
+          style={group.propertyOptionColor ? { backgroundColor: paletteColor(group.propertyOptionColor) } : undefined}
         />
         <TruncatedTooltip content={group.title}>
           <span className="truncate text-body font-medium">

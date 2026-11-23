@@ -9,6 +9,7 @@ import { WSClient } from "../api/ws-client";
 import { createQueryClient } from "../query-client";
 import type { Invitation } from "../types";
 import { myInvitationListOptions, workspaceKeys } from "../workspace/queries";
+import { memberLimitKeys } from "../billing/member-limit";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
 vi.mock("../platform/workspace-storage", () => ({
@@ -27,11 +28,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Global QueryClient defaults are staleTime: Infinity + no focus refetch, so
-// the pending-invitations list only moves when something invalidates it. The
-// invitation:accepted / invitation:declined handlers must include it: the
+// Realtime invalidation must refresh even a fresh pending-invitations list.
+// The invitation:accepted / invitation:declined handlers must include it: the
 // accepting client may have concluded the invite from another surface, and
-// its own stale sidebar row otherwise survives until restart.
+// its list must update without waiting for a later focus/online fallback.
 it.each(["invitation:accepted", "invitation:declined"] as const)(
   "refreshes the pending-invitations list on %s when the actor is the current user",
   async (event) => {
@@ -137,8 +137,8 @@ it.each(["invitation:accepted", "invitation:declined"] as const)(
     });
     renderHook(() => useRealtimeSync(ws, stores), { wrapper: Wrapper });
     try {
-      // Cache hit + staleTime: Infinity: the list mounts fresh and never
-      // fetches, so any call after the event means a (wrong) invalidation.
+      // The cache is fresh: any call after this non-actor event means a
+      // (wrong) invalidation rather than normal focus/online recovery.
       await waitFor(() => expect(page.result.current.data).toEqual([]));
       expect(listMyInvitations).not.toHaveBeenCalled();
 
@@ -278,3 +278,37 @@ it.each(["invitation:accepted", "invitation:declined"] as const)(
     }
   },
 );
+
+// A declined invitation frees its member slot: an admin watching Members must
+// not keep seeing the workspace as full (MUL-9488). Accepting already refreshes
+// it through the member list, which the limit's key sits under.
+it("refreshes the member limit when an invitation is declined", async () => {
+  const qc = createQueryClient();
+  const invalidate = vi.spyOn(qc, "invalidateQueries");
+  setApiInstance({ listMyInvitations: vi.fn(async () => []) } as unknown as ApiClient);
+  const handlers: Record<string, (payload: unknown, actorId?: string) => void> = {};
+  const ws = {
+    on: (e: string, handler: (payload: unknown) => void) => {
+      handlers[e] = handler;
+      return () => {
+        delete handlers[e];
+      };
+    },
+    onAny: () => () => {},
+    onReconnect: () => () => {},
+  } as unknown as WSClient;
+  const stores = {
+    authStore: { getState: () => ({ user: { id: "admin" } }) },
+  } as unknown as RealtimeSyncStores;
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+  renderHook(() => useRealtimeSync(ws, stores), { wrapper: Wrapper });
+
+  await act(async () => {
+    handlers["invitation:declined"]!({ invitation_id: "inv-1" }, "invitee");
+  });
+
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: memberLimitKeys.all("ws-1") });
+  expect(memberLimitKeys.all("ws-1").slice(0, 3)).toEqual([...workspaceKeys.members("ws-1")]);
+});

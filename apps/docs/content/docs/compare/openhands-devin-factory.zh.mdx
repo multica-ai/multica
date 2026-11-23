@@ -1,0 +1,61 @@
+---
+title: Multica 与 OpenHands、Devin、Factory 对比
+description: OpenHands、Devin 和 Factory 构建的是编程智能体；Multica 是团队给多个智能体分配、运行和审查工作的工作区，其中也包括 Devin CLI 和 Factory Droid。
+---
+
+OpenHands、Devin 和 Factory 各自构建一个编程智能体，以及围绕它的平台。Multica 不构建智能体。它给团队提供一个工作区：任务分配给基于 [31 种 AI 编程工具](/providers)的智能体，这些智能体运行在团队连接的电脑上，每次运行都记录在任务上。Devin CLI 和 Factory Droid 就是其中两种工具，所以这不一定是二选一。
+
+本页关于 OpenHands、Devin 和 Factory 的描述来自它们截至 2026 年 11 月的公开文档和定价页：[OpenHands](https://docs.openhands.dev/enterprise)、[Devin](https://docs.devin.ai/admin/billing/self-serve) 和 [Factory](https://docs.factory.com/remote-control)。最新情况请以它们为准。
+
+## 简短回答
+
+- **选 Devin 或 Factory**：如果你想要由一家供应商提供智能体和托管的云端环境，并且愿意统一用这家。
+- **选 OpenHands**：如果你想要一个 MIT 许可的智能体，可以修改、自托管，或基于它的 SDK 二次开发。
+- **选 Multica**：如果团队同时在用多种编程工具，例如 Claude Code、Codex、Cursor Agent、Copilot CLI、Devin CLI 或 Factory Droid，并希望把它们当作队友放在同一个看板上管理，运行在自己的机器上，按智能体控制访问，并设置审查环节。Multica 可以自托管。
+
+## 对比
+
+| | Multica | OpenHands | Devin | Factory |
+|---|---|---|---|---|
+| 是什么 | 为编程智能体分配、运行和跟踪工作的工作区 | 开源的编程智能体和 SDK，另有 Cloud 和 Enterprise 版本 | Cognition 的 AI 软件工程师，提供云端会话、CLI 和桌面应用 | 运行其 Droid 智能体的平台，提供 CLI、桌面端和网页端 |
+| 自带编程智能体 | 没有；智能体基于你选择的工具运行 | 有 | 有 | 有 |
+| 同一工作区里的工具 | 31 种，包括 Devin CLI 和 Factory Droid；不同智能体可以用不同工具 | 自己的智能体；定价页还写明可以运行 Codex、Claude 等其他智能体 | Devin | Droid |
+| 智能体在哪里运行 | 你连接的电脑：笔记本、服务器、虚拟机 | 本地、Docker 或 Kubernetes、OpenHands Cloud，或自托管的 Enterprise | Devin 的云端虚拟机，或通过 Devin CLI 在你的电脑上 | 通过 Remote Control 在你的机器上，或在 Factory 托管的 Droid Computers 上 |
+| 工作从哪里来 | 自己的任务、评论、对话、自动化，以及 Slack、飞书等聊天渠道 | Git 托管平台、Jira 和 Slack 集成 | Slack、Linear 等集成；Enterprise 支持 Jira | Factory 应用、CLI 和集成 |
+| 团队访问控制 | 按智能体设置 Access、工作区角色、访客、私有项目 | Teams 和 Enterprise 提供多用户 RBAC | Team 套餐提供 SSO 和成本控制 | Business 和 Enterprise 提供管理控制 |
+| 自托管 | 支持，使用 Docker Compose 或 Helm | 支持 | 托管服务；Devin CLI 在本地运行 | Enterprise 提供本地部署选项 |
+| 许可证 | 源码可用（source-available），在组织内部免费使用 | MIT | 专有 | 专有 |
+| 付费方式 | 内部自托管免费；各工具通过自己的订阅或 API key 计费 | 开源免费；Teams 和 Enterprise 付费 | 带用量额度的订阅套餐；Enterprise 按 ACU 计费 | 按席位付费；Enterprise 定制 |
+
+## Multica 是 Devin 的开源替代品吗？
+
+部分是，区别很重要：
+
+- **Multica 是源码可用，不是 OSI 定义的开源。** 它使用 [Multica License](https://github.com/multica-ai/multica/blob/main/LICENSE)，即带附加条件的 Apache License 2.0。在你的组织内部使用免费，包括为整个团队自托管；作为托管服务提供给他人，或嵌入你出售的产品，需要商业授权。如果你需要 OSI 许可的智能体，OpenHands 是 MIT。
+- **Multica 本身不是自主智能体。** 它覆盖的是 Devin 团队侧的能力，例如分配工作、跟进进度、审查、运行重复性工作；具体写代码由你已有的智能体完成，例如 Claude Code 或 Codex。
+
+## 什么时候 OpenHands、Devin 或 Factory 更合适
+
+- 你希望每个任务都有托管的云端环境，不想为智能体保持机器在线。
+- 你想统一使用一家供应商的智能体、模型和支持合同。
+- 你想基于 SDK 构建自己的智能体产品，这正是 OpenHands Software Agent SDK 的用途。
+- 你的工程师主要在一个智能体自己的应用里，一次和一个智能体协作。
+
+## 什么时候 Multica 更合适
+
+- **团队混用多种工具。** 有人习惯 Claude Code，有人用 Codex、Cursor 或 Copilot。Multica 里每个智能体各自选择工具和模型，共用一个看板、一个[收件箱](/inbox)和一个[统计](/analytics)视图。
+- **你想用已经付费的订阅。** Multica 用工具自己的登录账号驱动它们，不转售模型，也不对智能体算力计费。
+- **智能体应该运行在代码和密钥本来所在的地方。** 运行时就是你的笔记本、构建服务器或虚拟机；自托管 Multica 时，工作区数据也留在你的服务器上。
+- **多人共用这些智能体。** [Access](/agents#权限与-access) 决定谁能运行每个智能体，[小队](/squads)把工作分给合适的那个，[工作流](/workflows)加上审查环节。见[团队共享智能体池](/team-agent-pool)。
+- **工作会重复出现。** [自动化](/autopilots)按计划或 webhook 创建并分配任务。
+
+## 在 Multica 里使用 Devin 或 Factory
+
+Devin CLI（`devin`）和 Factory Droid（`droid`）是 Multica 内置支持的工具。在一台已连接 Multica 的电脑上安装并登录 CLI，然后在这个运行时上创建智能体：它像其他智能体一样接任务、回复评论、参与审查，用量由工具自己的套餐承担。Devin 的模型别名、Droid 的 Skills 路径等细节见[支持的 AI 编程工具](/providers)。OpenHands 目前不是内置工具。
+
+## 相关页面
+
+- [Multica 与 Linear、Jira 对比](/compare/linear-jira)
+- [Multica 与本地 worktree 管理工具对比](/compare/worktree-managers)
+- [团队共享智能体池](/team-agent-pool)
+- [安全模型](/security-model)：智能体在运行时上能访问什么。

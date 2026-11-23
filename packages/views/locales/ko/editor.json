@@ -17,14 +17,14 @@
     },
     "heading_dropdown": {
       "text": "텍스트",
-      "normal_text": "일반 텍스트",
+      "normal_text": "텍스트",
       "heading_1": "제목 1",
       "heading_2": "제목 2",
       "heading_3": "제목 3"
     },
     "list_dropdown": {
       "bullet_list": "글머리 기호 목록",
-      "ordered_list": "번호 목록",
+      "ordered_list": "번호 매기기 목록",
       "task_list": "체크리스트"
     },
     "sub_issue": {
@@ -44,7 +44,7 @@
     "image_copied": "이미지를 복사했습니다",
     "copy_image_failed": "이미지를 복사하지 못했습니다",
     "canvas_label": "이미지 캔버스. 드래그하여 이동, 스크롤하여 확대/축소, 두 번 클릭하여 실제 크기로 전환할 수 있습니다.",
-    "unavailable": "이 이미지를 불러올 수 없어 건너뛰었습니다."
+    "unavailable": "이 이미지를 더 이상 사용할 수 없어 건너뛰었습니다."
   },
   "canvas": {
     "zoom_in": "확대",
@@ -54,6 +54,10 @@
   },
   "attachment": {
     "download_failed": "다운로드 링크를 가져오지 못했습니다. 잠시 후 다시 시도하세요.",
+    "copy_contents": "내용 복사",
+    "contents_copied": "내용을 복사했습니다",
+    "copy_failed": "내용을 복사하지 못했습니다",
+    "more_actions": "추가 작업",
     "preview": "미리보기",
     "preview_loading": "미리보기 불러오는 중...",
     "preview_failed": "미리보기를 불러오지 못했습니다",
@@ -96,8 +100,10 @@
     "copy_failed": "복사하지 못했습니다"
   },
   "mention": {
-    "group_users": "사용자",
+    "group_users": "멤버",
     "group_issues": "태스크",
+    "group_projects": "프로젝트",
+    "group_docs": "문서",
     "all_members": "모든 멤버",
     "agent_badge": "에이전트",
     "squad_badge": "스쿼드",
@@ -112,8 +118,6 @@
     "html_preview": "HTML 미리보기",
     "close_preview": "닫기",
     "copy_code": "코드 복사",
-    "show_preview": "미리보기 표시",
-    "show_source": "소스 표시",
     "fullscreen": "전체 화면"
   },
   "dynamic_block": {
@@ -127,7 +131,10 @@
     "error_mermaid": "이 다이어그램을 그릴 수 없습니다",
     "error_at_line": "{{message}} ({{line}}행)",
     "view_source": "소스 보기",
-    "copy_error": "오류 복사"
+    "copy_error": "오류 복사",
+    "title": "제목",
+    "rename": "이름 바꾸기",
+    "add_title": "제목 추가"
   },
   "file_card": {
     "uploading": "{{filename}} 업로드 중"
@@ -178,5 +185,75 @@
     "clear_filter": "필터 지우기",
     "no_matches": "일치하는 행이 없습니다",
     "close": "닫기"
+  },
+  "voice": {
+    "dictate": "음성 입력",
+    "hold_to_talk": "누르고 말하기",
+    "tap_or_hold": "음성 입력 (탭하거나 길게 눌러 말하기)",
+    "cancel": "취소",
+    "insert": "삽입",
+    "send": "보내기",
+    "retry": "다시 시도",
+    "dismiss": "닫기",
+    "requesting": "마이크를 기다리는 중…",
+    "transcribing": "받아쓰는 중…",
+    "release_to_insert": "손을 떼면 삽입",
+    "recording": "녹음 중",
+    "errors": {
+      "permission_denied": "마이크 접근이 차단되어 있습니다. 브라우저나 시스템 설정에서 허용한 뒤 다시 시도하세요.",
+      "no_microphone": "마이크를 찾을 수 없습니다. 연결한 뒤 다시 시도하세요.",
+      "microphone_failed": "마이크를 시작할 수 없습니다.",
+      "no_speech": "말소리를 듣지 못했습니다. 마이크에 조금 더 가까이에서 다시 시도하세요.",
+      "unavailable": "이 컴퓨터에서는 음성을 받아쓸 수 없습니다.",
+      "transcription_failed": "받아쓰기에 실패했습니다. 녹음은 보관되어 있으니 다시 시도할 수 있습니다."
+    },
+    "models": {
+      "more_languages": "그 외 {{more}}개 언어",
+      "in_use": "사용 중",
+      "recommended": "추천",
+      "most_accurate": "가장 정확함",
+      "fastest": "가장 빠름",
+      "by": "제공: {{author}}",
+      "license": "라이선스",
+      "downloading": "다운로드 중 {{percent}}%",
+      "failed": "다운로드에 실패했습니다. 다시 시도하면 중단된 지점부터 이어서 받습니다.",
+      "download": "다운로드",
+      "retry": "다시 시도",
+      "cancel": "취소",
+      "use": "사용",
+      "delete": "{{name}} 삭제"
+    },
+    "setup": {
+      "title": "음성 입력 설정",
+      "description": "음성은 이 컴퓨터에서 받아쓰므로 녹음이 외부로 나가지 않습니다. 먼저 음성 모델을 한 번 다운로드하세요.",
+      "later": "나중에",
+      "start": "받아쓰기 시작"
+    }
+  },
+  "block_menu": {
+    "label": "블록 삽입",
+    "blocks": {
+      "paragraph": "텍스트",
+      "heading1": "제목 1",
+      "heading2": "제목 2",
+      "heading3": "제목 3",
+      "bulletList": "글머리 기호 목록",
+      "orderedList": "번호 매기기 목록",
+      "taskList": "체크리스트",
+      "blockquote": "인용",
+      "codeBlock": "코드 블록",
+      "mermaid": "Mermaid 다이어그램",
+      "table": "표",
+      "divider": "구분선",
+      "image": "이미지",
+      "file": "파일"
+    }
+  },
+  "block_handle": {
+    "add": "아래에 추가",
+    "options": "드래그하여 이동, 클릭하여 메뉴 열기",
+    "turn_into": "변환",
+    "duplicate": "복제",
+    "delete": "삭제"
   }
 }

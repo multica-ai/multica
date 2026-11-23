@@ -1,0 +1,64 @@
+---
+title: Multica face à Linear et Jira pour les équipes humains + agents
+description: Quand une équipe qui travaille avec des agents de codage IA doit garder Linear ou Jira, déplacer le travail des agents dans Multica, ou utiliser les deux.
+---
+
+Linear et Jira savent tous deux assigner des tâches à des agents IA ; une équipe qui utilise déjà l'un des deux peut donc légitimement se demander pourquoi ajouter Multica. La réponse courte : ils diffèrent sur **l'origine des agents et l'endroit où ils s'exécutent**. Linear et Jira sont des outils de suivi dotés de leurs propres agents intégrés, auxquels se branchent des services d'agents tiers. Multica est un espace de travail qui exécute les outils de codage IA que votre équipe utilise déjà, sur les ordinateurs que vous connectez, et enregistre chaque exécution sur la tâche.
+
+Les informations sur Linear et Jira de cette page proviennent de leur documentation publique en novembre 2026 ; consultez la [documentation des agents de Linear](https://linear.app/docs/agents-in-linear) et l'[annonce d'Atlassian](https://www.atlassian.com/blog/ai-at-work/your-jira-board-just-got-a-new-kind-of-teammate) pour les détails à jour.
+
+## Réponse courte
+
+- **Gardez Linear ou Jira** si la planification est au cœur de votre processus (cycles ou sprints, feuilles de route, reporting entre équipes) et que les agents que vous voulez sont des services hébergés déjà intégrés à votre outil de suivi.
+- **Utilisez Multica** si vous voulez un pool d'agents partagé, basé sur des CLI comme Claude Code, Codex, Cursor Agent ou Copilot, qui tourne sur vos propres machines ou serveurs, avec un contrôle d'accès par agent, des journaux d'exécution complets et la possibilité de tout auto-héberger.
+- **Utilisez les deux** si la planification reste dans Linear ou Jira et que vous voulez que des agents exécutent le travail. Les agents Multica peuvent lire et mettre à jour Linear via un serveur MCP ; il n'y a pas de synchronisation automatique entre les deux.
+
+## Comparaison
+
+| | Multica | Linear | Jira |
+|---|---|---|---|
+| Ce que c'est | Un espace de travail où personnes et agents prennent des tâches, les agents tournant sur vos runtimes | Un outil de suivi et de planification doté d'une plateforme d'agents | Un outil de suivi de tâches et de projets avec les agents Rovo et des agents tiers |
+| Qui fait le travail d'agent | Des agents que vous configurez sur [31 outils de codage IA](/providers), exécutés par le daemon Multica sur les ordinateurs que vous connectez | Linear Agent, plus des agents tiers installés depuis l'annuaire d'intégrations de Linear | Les agents Rovo, plus des agents tiers connectés comme GitHub Copilot et Cursor |
+| Où s'exécute le code des agents | Vos portables, serveurs ou VM, avec vos propres connexions aux outils | Selon chaque intégration d'agent, le plus souvent le cloud du fournisseur | Selon chaque agent, le plus souvent le cloud du fournisseur |
+| Assigner une tâche ou @mentionner un agent | Oui ; l'agent devient l'assigné | Oui ; l'agent est le délégué, et une personne peut rester l'assignée | Oui |
+| Choisir l'outil et le modèle par agent | Oui, n'importe quel outil pris en charge, et des agents différents peuvent utiliser des outils différents | Dépend de l'agent installé | Dépend de l'agent |
+| Contrôler qui peut exécuter chaque agent | Par agent : **Moi uniquement**, **Tout l'espace de travail** ou **Personnes précises** | Les admins choisissent à quelles équipes un agent installé a accès | Périmètre de l'agent défini dans Rovo Studio, dans les limites des permissions Jira |
+| Ce que la tâche montre d'une exécution | Le journal d'exécution complet : appels d'outils, commandes, erreurs, horodatés | L'activité de l'agent sur la tâche ; le détail dépend de l'agent | Les actions de l'agent journalisées sur l'élément de travail |
+| Répartir le travail entre agents | [Squads](/squads) : un agent leader choisit le membre ; les [workflows](/workflows) confient chaque statut à un agent ou à une personne | Les règles de triage (Triage rules) peuvent déléguer les nouvelles tâches à un agent | Les règles d'automatisation et les colonnes du tableau peuvent déclencher des agents |
+| Travail d'agent récurrent | Les [automatisations](/autopilots) exécutent n'importe lequel de vos agents sur planning ou webhook | Loops exécute Linear Agent sur planning ou sur événement | Jira Automation peut exécuter un agent sur planning ou sur événement |
+| Méthodes d'équipe réutilisables | Des [skills](/skills) attachés aux agents | Consignes pour agents au niveau de l'espace de travail et de l'équipe | Instructions et connaissances des agents dans Rovo Studio |
+| Auto-hébergement | Oui, avec Docker Compose ou Helm | Non | Jira Data Center |
+| Planification | Projets, sous-tâches par étapes, [workflows](/workflows), propriétés personnalisées, vues Liste, Tableau, Grille, Gantt et Couloirs | Cycles, projets, Initiatives, Insights | Sprints, tableaux, chronologies, JQL, rapports |
+| Licence | Source-available : gratuit au sein de votre organisation, auto-hébergement compris | SaaS propriétaire | Propriétaire |
+
+## Quand Linear ou Jira convient mieux
+
+- Votre processus repose sur des cycles ou des sprints, des feuilles de route ou du reporting de portefeuille. Multica a des projets, des workflows et des vues Gantt, mais pas de cycles, de sprints ni de planification de feuille de route.
+- La plupart de l'équipe, produit, design et support compris, vit dans l'outil de suivi, et seules certaines tâches vont aux agents.
+- Vous préférez des agents hébergés, comme l'agent de codage de GitHub Copilot ou les agents cloud de Cursor, et ne voulez pas exécuter d'agents sur vos propres ordinateurs.
+- Vous dépendez de l'écosystème d'intégrations de l'outil de suivi ou d'une administration d'entreprise déjà en place.
+
+## Quand Multica convient mieux
+
+- **Vous payez déjà des CLI de codage.** Multica pilote les abonnements Claude Code, Codex, Cursor Agent, Copilot CLI, Kimi ou autres de vos développeurs, au lieu d'un service d'agent séparé par fournisseur.
+- **Le code et les identifiants doivent rester sur vos machines.** Les agents tournent sur les runtimes que vous connectez ; avec un Multica auto-hébergé, les données de l'espace de travail restent aussi sur vos serveurs. Voir [Modèle de sécurité](/security-model).
+- **Plusieurs développeurs partagent les mêmes agents.** Agents, runtimes et skills appartiennent à l'espace de travail, l'accès décide qui peut exécuter chaque agent, et le tableau montre quel agent travaille sur quoi. Voir [Partager un pool d'agents dans une équipe](/team-agent-pool).
+- **Vous voulez voir exactement ce qu'a fait un agent.** Les appels d'outils et les commandes de chaque exécution restent sur la tâche, et vous pouvez [réorienter une exécution](/mentioning-agents#réorienter-un-agent-en-cours-dexécution) pendant qu'elle travaille.
+- **La revue est une étape, pas une réflexion après coup.** Les agents livrent en `in_review` ; un [workflow](/workflows) peut confier le résultat à un agent de revue ou à un collègue, et le renvoyer en cas de rejet.
+
+## Utiliser Multica avec Linear ou Jira
+
+Beaucoup d'équipes gardent leur outil de suivi pour la planification et utilisent Multica là où les agents font le travail :
+
+1. Gardez les feuilles de route et la planification entre équipes dans Linear ou Jira.
+2. Créez les tâches d'ingénierie destinées aux agents dans un projet Multica, avec le dépôt et la documentation attachés comme [ressources de projet](/project-resources).
+3. Pour que les agents lisent ou mettent à jour Linear pendant leur travail, un `owner` ou un `admin` de l'espace de travail ajoute un serveur MCP Linear dans **Paramètres → Serveurs MCP** et l'assigne à ces agents. Voir [Serveurs MCP partagés de l'espace de travail](/agents-create#serveurs-mcp-partagés-de-lespace-de-travail).
+
+Multica n'importe pas depuis Linear ou Jira et ne se synchronise pas avec eux ; décidez donc quel système possède chaque tâche.
+
+## Voir aussi
+
+- [Partager un pool d'agents dans une équipe](/team-agent-pool) : rôles, accès, squads et passages de relais de revue ensemble.
+- [Multica face à OpenHands, Devin et Factory](/compare/openhands-devin-factory)
+- [Multica face aux gestionnaires de worktrees locaux](/compare/worktree-managers)
+- [Comparatif des outils de codage IA](/providers)

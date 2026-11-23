@@ -19,7 +19,7 @@ import enEditor from "../locales/en/editor.json";
 import enIssues from "../locales/en/issues.json";
 
 const TEST_RESOURCES = {
-  // `editor` carries the shared upload-gate copy ("Uploading…").
+  // `editor` carries the shared upload-gate copy ("Uploading...").
   en: { common: enCommon, modals: enModals, editor: enEditor, issues: enIssues },
 };
 
@@ -34,6 +34,20 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 const mockParentIssue = vi.hoisted(() => ({ value: null as Issue | null }));
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+const mockRecordAssigneePick = vi.hoisted(() => vi.fn());
+const assigneePickerProps = vi.hoisted(() => ({ recordPicks: undefined as boolean | undefined }));
+type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
+const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
+
+// Voice input has its own tests; here only its wiring to the editor matters.
+vi.mock("../voice", () => ({
+  useComposerVoice: (options: VoiceOptions) => {
+    voiceOptions.last = options;
+    return { rootRef: () => {}, onFocusCapture: () => {} };
+  },
+  VoiceDialogFooter: ({ children }: { children: ReactNode }) => children,
+  VoiceMicButton: () => null,
+}));
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockListProperties = vi.hoisted(() => vi.fn());
@@ -50,7 +64,6 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
-const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
@@ -135,6 +148,7 @@ const emptyIssueDraft = () => ({
     startDate: null as string | null,
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
+    assigneePick: undefined as { type: "agent" | "squad" | "member"; id: string } | undefined,
     labelIds: [] as string[],
     propertyValues: {} as Record<string, string | number | boolean | string[]>,
   },
@@ -215,6 +229,7 @@ vi.mock("../navigation/context", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
@@ -224,10 +239,6 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
-}));
-
-vi.mock("./use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: () => mockShowIssueLimitUpgradePrompt,
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
@@ -389,6 +400,12 @@ vi.mock("../editor", async () => {
           if (inFlightRef.current === 0) onUploadingChange?.(false);
         }
       },
+      insertText: (text: string) => {
+        valueRef.current += text;
+        setValue(valueRef.current);
+        onUpdate?.(valueRef.current);
+        return true;
+      },
       hasActiveUploads: () => inFlightRef.current > 0,
       // Placeholder rebuild contract: the real handle draws a card for an
       // upload the document is not showing and reports whether it landed.
@@ -469,7 +486,19 @@ vi.mock("../issues/components", () => ({
     <div data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })} />
   ),
   StagePicker: () => <div data-testid="stage-picker" />,
-  AssigneePicker: () => <div data-testid="assignee-picker" />,
+  // Surface onUpdate so tests can drive manual picks.
+  AssigneePicker: ({ onUpdate, recordPicks }: {
+    onUpdate: (u: { assignee_type: string; assignee_id: string }) => void;
+    recordPicks?: boolean;
+  }) => {
+    assigneePickerProps.recordPicks = recordPicks;
+    return (
+      <div data-testid="assignee-picker">
+        <button type="button" onClick={() => onUpdate({ assignee_type: "member", assignee_id: "alice" })}>pick alice</button>
+        <button type="button" onClick={() => onUpdate({ assignee_type: "agent", assignee_id: "bot" })}>pick bot</button>
+      </div>
+    );
+  },
   // Surface open/onOpenChange so tests can assert progressive-disclosure
   // behavior (mounted only when the user has opted in or has a value).
   StartDatePicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
@@ -497,6 +526,10 @@ vi.mock("../issues/components", () => ({
       onClick={() => onOpenChange?.(false)}
     />
   ),
+}));
+
+vi.mock("../issues/components/pickers/assignee-picker", () => ({
+  useRecordAssigneePick: () => mockRecordAssigneePick,
 }));
 
 vi.mock("../issues/components/pickers/custom-property-picker", () => ({
@@ -795,7 +828,7 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("checkbox", { name: /Start date/ }));
     await user.click(await screen.findByRole("checkbox", { name: /Customer tier/ }));
     await user.click(screen.getByRole("button", { name: "Copy 3 fields" }));
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
       title: "Child scope", description: "Only implement validation", status: "todo",
       priority: "high", start_date: "2026-11-05", due_date: undefined,
@@ -803,10 +836,25 @@ describe("CreateIssueModal", () => {
     }));
   });
 
-  it("uses the same compact attachment control as agent mode", () => {
+  it("dictates into the description and leaves creating to the button", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Voice issue";
+    mockDraftStore.draft.manual.description = "Steps:";
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    expect(voiceOptions.last?.submit).toBeUndefined();
+    act(() => {
+      expect(voiceOptions.last?.insert(" open the inbox")).toBe(true);
+    });
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+    expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Voice issue", description: "Steps: open the inbox",
+    }));
+  });
+
+  it("uses the same attachment control as agent mode, sized to match the mic", () => {
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Upload file" })).toHaveAttribute("data-size", "sm");
+    expect(screen.getByRole("button", { name: "Upload file" })).not.toHaveAttribute("data-size");
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -818,7 +866,7 @@ describe("CreateIssueModal", () => {
     fireEvent.change(screen.getByPlaceholderText("Issue title"), {
       target: { value: "  Ship create issue regression coverage  " },
     });
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
@@ -852,8 +900,134 @@ describe("CreateIssueModal", () => {
 
     await user.click(screen.getByRole("button", { name: "View issue" }));
 
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/TES-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
+  });
+
+  it("records only the assignee picked by hand and finally submitted", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    // The picker leaves recording to the dialog.
+    expect(assigneePickerProps.recordPicks).toBe(false);
+    await user.click(screen.getByRole("button", { name: "pick alice" }));
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Assigned issue");
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledWith("agent", "bot"));
+    expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1);
+    expect(mockRecordAssigneePick).toHaveBeenCalledWith("agent", "bot");
+  });
+
+  it("does not record a remembered default assignee", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Default assignee");
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledWith("member", "alice"));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
+  });
+
+  it("does not record re-picking the prefilled assignee", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "pick alice" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Same assignee");
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledWith("member", "alice"));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
+  });
+
+  it("records a pick made while an earlier create was in flight with that later create", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
+    let resolveCreate!: (v: unknown) => void;
+    mockCreateIssue.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveCreate = resolve; }),
+    );
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "First");
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    await act(async () => {
+      resolveCreate({ id: "issue-1", identifier: "TES-1", title: "First", status: "todo", labels: [] });
+    });
+    // The first create submitted the prefilled assignee.
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledTimes(1));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+    await waitFor(() => expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1));
+    expect(mockRecordAssigneePick).toHaveBeenCalledWith("agent", "bot");
+  });
+
+  it("counts a hand pick once when the kept draft is submitted again", async () => {
+    const user = userEvent.setup();
+    let resolveCreate!: (v: unknown) => void;
+    mockCreateIssue.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveCreate = resolve; }),
+    );
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "First");
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
+    // Editing the title mid-flight keeps the draft open after success.
+    await user.type(screen.getByPlaceholderText("Issue title"), " again");
+    await act(async () => {
+      resolveCreate({ id: "issue-1", identifier: "TES-1", title: "First", status: "todo", labels: [] });
+    });
+    await waitFor(() => expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledTimes(2));
+    expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not credit an earlier hand pick to a prefilled assignee", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
+    mockDraftStore.draft.manual.assigneePick = { type: "member", id: "alice" };
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ assignee_type: "agent", assignee_id: "bot" }} />);
+
+    // Re-picking the prefilled assignee writes it into the draft.
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Prefilled");
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledWith("agent", "bot"));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
+  });
+
+  it("records a hand-picked assignee kept in a reopened draft", async () => {
+    const user = userEvent.setup();
+    const first = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    first.unmount();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Reopened");
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+
+    await waitFor(() => expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1));
+    expect(mockRecordAssigneePick).toHaveBeenCalledWith("agent", "bot");
   });
 
   it("starts a fresh create from todo without a remembered stage", async () => {
@@ -867,7 +1041,7 @@ describe("CreateIssueModal", () => {
     fireEvent.change(screen.getByPlaceholderText("Issue title"), {
       target: { value: "Follow up" },
     });
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
       expect.objectContaining({ status: "in_progress", parent_issue_id: "parent-1", stage: 2 }),
@@ -878,7 +1052,7 @@ describe("CreateIssueModal", () => {
     fireEvent.change(screen.getByPlaceholderText("Issue title"), {
       target: { value: "Another child" },
     });
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
       expect.objectContaining({ status: "todo", parent_issue_id: "parent-1", stage: undefined }),
@@ -897,7 +1071,7 @@ describe("CreateIssueModal", () => {
     fireEvent.change(screen.getByPlaceholderText("Issue title"), {
       target: { value: "Labeled issue" },
     });
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => {
       expect(mockCreateIssue).toHaveBeenCalledWith(
@@ -935,7 +1109,7 @@ describe("CreateIssueModal", () => {
     fireEvent.change(screen.getByPlaceholderText("Issue title"), {
       target: { value: "Labeled issue" },
     });
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => {
       expect(mockAttachLabel).toHaveBeenCalledTimes(2);
@@ -963,7 +1137,7 @@ describe("CreateIssueModal", () => {
 
     await user.type(screen.getByPlaceholderText("Issue title"), "First follow-up issue");
     await user.type(screen.getByPlaceholderText("Add description..."), "Description to clear");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
@@ -1003,7 +1177,7 @@ describe("CreateIssueModal", () => {
     });
 
     await user.type(screen.getByPlaceholderText("Issue title"), "Second follow-up issue");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
     expect(mockCreateIssue).toHaveBeenNthCalledWith(2, expect.objectContaining({
       title: "Second follow-up issue",
@@ -1022,7 +1196,7 @@ describe("CreateIssueModal", () => {
     expect(mockDraftStore.draft.manual.status).toBe("todo");
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Fresh issue");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(3));
     expect(mockCreateIssue).toHaveBeenNthCalledWith(3, expect.objectContaining({
       status: "todo", parent_issue_id: undefined, stage: undefined,
@@ -1036,7 +1210,7 @@ describe("CreateIssueModal", () => {
     const modal = renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "First issue");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     // The submitted draft is consumed, leaving an untouched continuation.
     await waitFor(() => expect(mockClearDraft).toHaveBeenCalledTimes(1));
     const endsAfterSubmit = mockEndBatchContinuation.mock.calls.length;
@@ -1054,7 +1228,7 @@ describe("CreateIssueModal", () => {
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Carried priority issue");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     await waitFor(() => expect(mockCreateIssue).toHaveBeenLastCalledWith(
       expect.objectContaining({ priority: "high" }),
     ));
@@ -1068,7 +1242,7 @@ describe("CreateIssueModal", () => {
     }} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "First issue");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     await waitFor(() => expect(screen.getByPlaceholderText("Issue title")).toHaveValue(""));
     await user.type(screen.getByPlaceholderText("Issue title"), "Unfinished next issue");
     modal.unmount();
@@ -1088,7 +1262,7 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByText("Customer tier"));
     await user.click(screen.getByRole("button", { name: "Edit Customer tier" }));
     await user.type(screen.getByPlaceholderText("Issue title"), "Enterprise follow-up");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1116,7 +1290,7 @@ describe("CreateIssueModal", () => {
 
     renderModal(<CreateIssueModal onClose={onClose} />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Keep this draft");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Customer tier is invalid"));
     expect(onClose).not.toHaveBeenCalled();
@@ -1195,7 +1369,7 @@ describe("CreateIssueModal", () => {
       );
       const view = renderModal(panel);
       await screen.findByRole("button", { name: "Edit Customer tier" });
-      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+      await user.click(screen.getByRole("button", { name: "Create issue" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "An unavailable custom property was removed from the draft. Review it before submitting again.",
@@ -1225,7 +1399,7 @@ describe("CreateIssueModal", () => {
       // A user-initiated retry reads the updated local selection, not the
       // rejected payload. Keep this retry open so reopening can check the store.
       create.mockRejectedValueOnce(new Error("Try again later"));
-      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+      await user.click(screen.getByRole("button", { name: "Create issue" }));
       await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
       expect(submittedIssue(1)).toMatchObject({
         title: "Keep this draft",
@@ -1238,7 +1412,7 @@ describe("CreateIssueModal", () => {
       });
       view.unmount();
       renderModal(panel);
-      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+      await user.click(screen.getByRole("button", { name: "Create issue" }));
       await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
       expect(submittedIssue(2).properties).toEqual(remainingProperties);
       expect(mockSetIssueProperty).not.toHaveBeenCalled();
@@ -1260,7 +1434,7 @@ describe("CreateIssueModal", () => {
       );
       renderModal(<CreateIssueModal onClose={vi.fn()} />);
       await screen.findByText("Customer tier");
-      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+      await user.click(screen.getByRole("button", { name: "Create issue" }));
 
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Invalid property"));
       expect(mockDraftStore.draft).toEqual(originalDraft);
@@ -1284,7 +1458,7 @@ describe("CreateIssueModal", () => {
       }),
     );
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Invalid property"));
     expect(mockDraftStore.draft.manual.propertyValues).toEqual({ "property-tier": "option-enterprise" });
@@ -1302,7 +1476,7 @@ describe("CreateIssueModal", () => {
     mockCreateIssue.mockImplementationOnce(() => new Promise((_, reject) => { rejectCreate = reject; }));
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
     await screen.findByRole("button", { name: "Edit Customer tier" });
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     await user.type(screen.getByPlaceholderText("Issue title"), " with new edits");
     await user.click(screen.getByRole("button", { name: "Edit Customer tier" }));
     await act(async () => {
@@ -1315,7 +1489,7 @@ describe("CreateIssueModal", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(mockDraftStore.draft.manual.title).toBe("Draft before submit with new edits");
     expect(mockDraftStore.draft.manual.propertyValues).toEqual({ "property-tier": "option-enterprise" });
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     expect(mockCreateIssue).toHaveBeenNthCalledWith(2, expect.objectContaining({
       title: "Draft before submit with new edits",
       properties: { "property-tier": "option-enterprise" },
@@ -1330,7 +1504,7 @@ describe("CreateIssueModal", () => {
     mockCreateIssue.mockImplementationOnce(() => new Promise((_, reject) => { rejectCreate = reject; }));
     const view = renderModal(<CreateIssueModal onClose={vi.fn()} />);
     await screen.findByText("Customer tier");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
     view.unmount();
     mockDraftStore.draft.manual.title = "Reopened draft";
     const reopenedDraft = structuredClone(mockDraftStore.draft);
@@ -1406,7 +1580,7 @@ describe("CreateIssueModal", () => {
       "1",
     );
 
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => {
       expect(mockCreateIssue).toHaveBeenCalledWith(
@@ -1559,7 +1733,7 @@ describe("CreateIssueModal", () => {
 
     renderModal(<CreateIssueModal onClose={onClose} />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Login bug");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockToastCustom).toHaveBeenCalledTimes(1));
     expect(mockToastError).not.toHaveBeenCalled();
@@ -1574,7 +1748,7 @@ describe("CreateIssueModal", () => {
     expect(screen.getByText(/Login bug/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "View existing issue" }));
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-dup");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/MUL-7");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-dup");
   });
 
@@ -1592,34 +1766,11 @@ describe("CreateIssueModal", () => {
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Login bug");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
     expect(mockToastError).toHaveBeenCalledWith("Backend says title is taken");
     expect(mockToastCustom).not.toHaveBeenCalled();
-  });
-
-  it("offers the Cloud-authorized upgrade recovery when manual create reaches the issue limit", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-    mockCreateIssue.mockRejectedValue(
-      new ApiError("workspace has reached its issue limit", 402, "Payment Required", {
-        code: "issue_limit_reached",
-        limit: 1000,
-        policy_revision: 1,
-      }),
-    );
-
-    renderModal(<CreateIssueModal onClose={onClose} />);
-    await user.type(screen.getByPlaceholderText("Issue title"), "One more issue");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
-
-    await waitFor(() => {
-      expect(mockShowIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
-    });
-    expect(mockToastError).not.toHaveBeenCalled();
-    expect(mockClearDraft).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
   });
 
   // Non-409 errors with a real message: surface the backend reason rather
@@ -1630,7 +1781,7 @@ describe("CreateIssueModal", () => {
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Anything");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
     expect(mockToastError).toHaveBeenCalledWith("Server is overloaded, try again");
@@ -1644,7 +1795,7 @@ describe("CreateIssueModal", () => {
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Anything");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
     expect(mockToastError).toHaveBeenCalledWith("Failed to create issue");
@@ -1676,6 +1827,17 @@ describe("CreateIssueModal", () => {
       expect.objectContaining({ projectId: "proj-1" }),
     );
     expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
+  });
+
+  it("opens without a project when asked for none, over an unfinished draft's project", async () => {
+    const user = userEvent.setup();
+    const firstOpen = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByTestId("project-picker"));
+    firstOpen.unmount();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ project_id: null }} />);
+
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "none");
   });
 
   it("restores an unfinished project selection after manual create remounts", async () => {
@@ -1817,7 +1979,7 @@ describe("CreateIssueModal", () => {
     );
 
     await user.type(screen.getByPlaceholderText("Issue title"), "Create from source comment");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
 
     await waitFor(() => expect(mockCreateCommentSubIssue).toHaveBeenCalledWith(
       "comment-source",
@@ -2096,7 +2258,7 @@ describe("CreateIssueModal", () => {
 
       const pending = startPendingUpload();
 
-      const createButton = await screen.findByRole("button", { name: "Uploading…" });
+      const createButton = await screen.findByRole("button", { name: "Uploading..." });
       await waitFor(() => expect(createButton).toBeDisabled());
       expect(createButton).toHaveAttribute("aria-busy", "true");
 
@@ -2110,7 +2272,7 @@ describe("CreateIssueModal", () => {
         });
       });
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Create Issue" })).not.toBeDisabled(),
+        expect(screen.getByRole("button", { name: "Create issue" })).not.toBeDisabled(),
       );
     });
 
@@ -2266,18 +2428,18 @@ describe("CreateIssueModal", () => {
       renderManual();
 
       // Accessible name must stay the label alone — the keycaps are decorative.
-      expect(screen.getByRole("button", { name: "Create Issue" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Create issue" })).toBeInTheDocument();
       expect(document.querySelector("[data-slot='shortcut-keycaps']")).toBeInTheDocument();
 
       // And the affordance survives the empty → filled transition.
       await user.type(screen.getByPlaceholderText("Issue title"), "Now valid");
-      expect(screen.getByRole("button", { name: "Create Issue" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Create issue" })).toBeInTheDocument();
       expect(document.querySelector("[data-slot='shortcut-keycaps']")).toBeInTheDocument();
     });
 
     it("keeps Create focusable via aria-disabled while the title is empty", () => {
       renderManual();
-      const createButton = screen.getByRole("button", { name: "Create Issue" });
+      const createButton = screen.getByRole("button", { name: "Create issue" });
 
       // Native `disabled` would drop it out of the tab order, hiding the
       // "Enter a title to create" tooltip from keyboard and SR users.
@@ -2296,7 +2458,7 @@ describe("CreateIssueModal", () => {
       renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
       const switchToAgent = screen.getByRole("button", { name: /Switch to Agent/i });
-      const create = screen.getByRole("button", { name: "Create Issue" });
+      const create = screen.getByRole("button", { name: "Create issue" });
 
       // Grid placement only sees direct children — re-wrapping either control
       // collapses the 2x2 phone footer back to one jammed row.

@@ -87,7 +87,8 @@ type SDK interface {
 // satisfies it; tests use an in-memory fake.
 type Store interface {
 	UpsertUserComposioConnection(ctx context.Context, arg db.UpsertUserComposioConnectionParams) (db.UserComposioConnection, error)
-	ListActiveUserComposioConnections(ctx context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error)
+	ListActiveUserComposioConnections(ctx context.Context, arg db.ListActiveUserComposioConnectionsParams) ([]db.UserComposioConnection, error)
+	ListAllActiveUserComposioConnections(ctx context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error)
 	GetUserComposioConnection(ctx context.Context, arg db.GetUserComposioConnectionParams) (db.UserComposioConnection, error)
 	MarkUserComposioConnectionRevoked(ctx context.Context, arg db.MarkUserComposioConnectionRevokedParams) error
 }
@@ -136,6 +137,13 @@ type Service struct {
 	authCache    map[string]string
 	authCacheExp time.Time
 	authCacheTTL time.Duration
+	// authCreateMu serializes creating managed auth configs so two concurrent
+	// connects for the same new app do not register two configs.
+	authCreateMu sync.Mutex
+	tools        toolCache
+	// teamConnectGate decides whether a completed team handshake may write
+	// its account; see SetTeamConnectGate.
+	teamConnectGate TeamConnectGate
 }
 
 // NewService validates its inputs and returns a ready Service. It errors when a
@@ -239,8 +247,18 @@ func toolkitLogoURL(slug, upstreamLogoURL string) string {
 // The composio_user_id sent to Composio is the Multica user id verbatim — the
 // invariant the rest of the integration relies on.
 func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitSlug string) (string, error) {
+	return s.BeginConnectReturning(ctx, userID, pgtype.UUID{}, toolkitSlug, "")
+}
+
+// BeginConnectReturning is BeginConnect for an account that belongs to
+// workspaceID, whose callback sends the browser back to returnTo, an app
+// path; an unsafe or empty path keeps the settings page.
+func (s *Service) BeginConnectReturning(ctx context.Context, userID, workspaceID pgtype.UUID, toolkitSlug, returnTo string) (string, error) {
+	if !SafeReturnPath(returnTo) {
+		returnTo = ""
+	}
 	slug := strings.ToLower(strings.TrimSpace(toolkitSlug))
-	authConfigID, err := s.authConfigForToolkit(ctx, slug)
+	authConfigID, err := s.ensureAuthConfig(ctx, slug)
 	if err != nil {
 		return "", err
 	}
@@ -252,12 +270,17 @@ func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitS
 	}
 	composioUserID := util.UUIDToString(userID)
 
-	state, err := signState(s.secret, stateClaims{
+	claims := stateClaims{
 		UserID:       composioUserID,
 		ToolkitSlug:  slug,
 		AuthConfigID: authConfigID,
+		ReturnTo:     returnTo,
 		Exp:          s.now().Add(s.stateTTL).Unix(),
-	})
+	}
+	if workspaceID.Valid {
+		claims.PersonalWorkspaceID = util.UUIDToString(workspaceID)
+	}
+	state, err := signState(s.secret, claims)
 	if err != nil {
 		return "", fmt.Errorf("composio: sign state: %w", err)
 	}
@@ -285,23 +308,31 @@ func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitS
 //
 // Idempotency: the upsert is keyed on (user_id, connected_account_id), so a
 // duplicate callback re-activates the same row instead of creating a second.
-func (s *Service) CompleteCallback(ctx context.Context, state, status, connectedAccountID string) (string, error) {
+func (s *Service) CompleteCallback(ctx context.Context, state, status, connectedAccountID string) (CallbackResult, error) {
 	claims, err := verifyState(s.secret, state, s.now())
 	if err != nil {
-		return "", err
+		return CallbackResult{}, err
+	}
+	result := CallbackResult{ToolkitSlug: claims.ToolkitSlug, WorkspaceID: claims.WorkspaceID, ConnectedBy: claims.ConnectedBy, ReturnTo: claims.ReturnTo}
+	if claims.WorkspaceID == "" {
+		result.UserID, result.PersonalWorkspaceID = claims.UserID, claims.PersonalWorkspaceID
 	}
 
 	if !strings.EqualFold(strings.TrimSpace(status), "success") {
 		// Honor the state for the redirect slug, but do not write an active row.
-		return claims.ToolkitSlug, ErrConnectNotSuccessful
+		return result, ErrConnectNotSuccessful
 	}
 	if strings.TrimSpace(connectedAccountID) == "" {
-		return claims.ToolkitSlug, errors.New("composio: callback missing connected_account_id")
+		return result, errors.New("composio: callback missing connected_account_id")
+	}
+
+	if result.Team() {
+		return result, s.completeTeamCallback(ctx, claims, connectedAccountID)
 	}
 
 	userID, err := util.ParseUUID(claims.UserID)
 	if err != nil {
-		return claims.ToolkitSlug, fmt.Errorf("composio: state has invalid user id: %w", err)
+		return result, fmt.Errorf("composio: state has invalid user id: %w", err)
 	}
 
 	// The auth_config_id was resolved at BeginConnect and signed into the state,
@@ -321,25 +352,32 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 	// composio_user_id == multica user id invariant) and was created under the
 	// toolkit's auth config. Any mismatch fails closed with ErrAccountVerification.
 	if err := s.verifyAccountOwnership(ctx, connectedAccountID, claims.UserID, authConfigID); err != nil {
-		return claims.ToolkitSlug, err
+		return result, err
 	}
 
+	var workspaceID pgtype.UUID
+	if claims.PersonalWorkspaceID != "" {
+		if workspaceID, err = util.ParseUUID(claims.PersonalWorkspaceID); err != nil {
+			return result, fmt.Errorf("composio: state has invalid workspace id: %w", err)
+		}
+	}
 	if _, err := s.store.UpsertUserComposioConnection(ctx, db.UpsertUserComposioConnectionParams{
 		UserID:             userID,
+		WorkspaceID:        workspaceID,
 		ToolkitSlug:        claims.ToolkitSlug,
 		AuthConfigID:       authConfigID,
 		ConnectedAccountID: connectedAccountID,
 		// Invariant: composio_user_id == Multica user id.
 		ComposioUserID: claims.UserID,
 	}); err != nil {
-		return claims.ToolkitSlug, fmt.Errorf("composio: upsert connection: %w", err)
+		return result, fmt.Errorf("composio: upsert connection: %w", err)
 	}
-	return claims.ToolkitSlug, nil
+	return result, nil
 }
 
-// ListConnections returns the user's active connections.
+// ListConnections returns the user's active connections in every workspace.
 func (s *Service) ListConnections(ctx context.Context, userID pgtype.UUID) ([]Connection, error) {
-	rows, err := s.store.ListActiveUserComposioConnections(ctx, userID)
+	rows, err := s.store.ListAllActiveUserComposioConnections(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +458,7 @@ func (s *Service) Disconnect(ctx context.Context, userID, connectionID pgtype.UU
 // a multi-account request shape. Until then, newest-wins keeps behavior
 // deterministic rather than order-dependent.
 func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MCPSession, error) {
-	rows, err := s.store.ListActiveUserComposioConnections(ctx, userID)
+	rows, err := s.store.ListAllActiveUserComposioConnections(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -459,14 +497,52 @@ func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MC
 // the Composio tab. The older `/settings/integrations` path was NOT a real
 // route and 404'd after the legacy rewrite. When FrontendBaseURL is unset it
 // returns a site-relative path.
-func (s *Service) CallbackRedirect(slug string, success bool) string {
-	var path string
-	if success {
-		path = "/settings?tab=integrations&connected=" + url.QueryEscape(slug)
-	} else {
-		path = "/settings?tab=integrations&error=composio_connect_failed"
+func (s *Service) CallbackRedirect(result CallbackResult, success bool) string {
+	return s.callbackRedirect(result, success, "")
+}
+
+// CallbackFeatureLockedReason marks a failed connect the workspace's plan
+// refused (ErrTeamConnectRefused), so the page can show the upgrade prompt
+// instead of asking the user to retry. Clients that do not know the reason
+// still see the ordinary failure.
+const CallbackFeatureLockedReason = "feature_locked"
+
+// CallbackRedirectFailure is the failure redirect carrying a reason.
+func (s *Service) CallbackRedirectFailure(result CallbackResult, reason string) string {
+	return s.callbackRedirect(result, false, reason)
+}
+
+func (s *Service) callbackRedirect(result CallbackResult, success bool, reason string) string {
+	if result.ReturnTo != "" && SafeReturnPath(result.ReturnTo) {
+		path, rawQuery, _ := strings.Cut(result.ReturnTo, "?")
+		q, err := url.ParseQuery(rawQuery)
+		if err != nil {
+			q = url.Values{}
+		}
+		if success {
+			q.Set("app_connected", result.ToolkitSlug)
+		} else {
+			q.Set("app_connect_error", result.ToolkitSlug)
+			if reason != "" {
+				q.Set("app_connect_error_reason", reason)
+			}
+		}
+		return s.frontendURL + path + "?" + q.Encode()
 	}
-	return s.frontendURL + path
+	q := url.Values{}
+	q.Set("tab", "apps")
+	if success {
+		q.Set("connected", result.ToolkitSlug)
+	} else {
+		q.Set("error", "composio_connect_failed")
+		if reason != "" {
+			q.Set("reason", reason)
+		}
+	}
+	if result.Team() {
+		q.Set("scope", "team")
+	}
+	return s.frontendURL + "/settings?" + q.Encode()
 }
 
 // rowToConnection maps a DB row to the API-facing Connection view.
@@ -530,7 +606,7 @@ func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 			seen[slug] = struct{}{}
 			// Filter out toolkits with no enabled auth config: the user has no
 			// working action for them, so they are omitted from the catalog.
-			if _, canConnect := connectable[slug]; !canConnect {
+			if _, canConnect := connectable[slug]; !canConnect && len(tk.ComposioManagedAuthSchemes) == 0 {
 				continue
 			}
 			category := ""

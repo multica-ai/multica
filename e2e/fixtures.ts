@@ -10,7 +10,7 @@ import pg from "pg";
 // `||` (not `??`) so an empty `NEXT_PUBLIC_API_URL=` in .env still falls
 // back to localhost. dotenv sets unset-vs-empty both as "" — treating them
 // the same matches user intent.
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT || "8080"}`;
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT || "8080"}`;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
 
 interface TestWorkspace {
@@ -52,6 +52,8 @@ export class TestApiClient {
   private email: string | null = null;
   private createdIssueIds: string[] = [];
   private createdProjectIds: string[] = [];
+  private createdDocIds: string[] = [];
+  private createdDocFolderIds: string[] = [];
   private seededIssueIds: string[] = [];
   private createdPropertyIds: string[] = [];
 
@@ -184,6 +186,29 @@ export class TestApiClient {
     } finally {
       await client.end();
     }
+  }
+
+  async createDoc(title: string, content: string, folderId?: string) {
+    const res = await this.authedFetch("/api/docs", {method: "POST", body: JSON.stringify({title, content, folder_id: folderId})});
+    if (!res.ok) throw new Error(`create doc: ${res.status} ${await res.text()}`);
+    const doc = await res.json() as {id: string; revision: number; title: string; content: string};
+    this.createdDocIds.push(doc.id); return doc;
+  }
+  /** `flush` first stores what editors typed into a live doc; without collab it is ignored. */
+  async getDoc(id: string, { flush = false } = {}) {
+    const res = await this.authedFetch(`/api/docs/${id}${flush ? "?flush=true" : ""}`);
+    if (!res.ok) throw new Error(`get doc: ${res.status}`);
+    return await res.json() as {id: string; revision: number; title: string; content: string; folder_id: string | null; version_count: number};
+  }
+  async updateDoc(id: string, base: number, content: string) {
+    const res = await this.authedFetch(`/api/docs/${id}`, {method: "PATCH", body: JSON.stringify({base_revision: base, content})});
+    if (!res.ok) throw new Error(`update doc: ${res.status} ${await res.text()}`);
+    return await res.json() as {revision: number};
+  }
+  async createDocFolder(title: string) {
+    const res = await this.authedFetch("/api/doc-folders", {method: "POST", body: JSON.stringify({title})});
+    if (!res.ok) throw new Error(`create folder: ${res.status}`);
+    const folder = await res.json() as {id: string}; this.createdDocFolderIds.push(folder.id); return folder;
   }
 
   /** Create a project and register it for cleanup. */
@@ -350,15 +375,30 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
-  async createComment(issueId: string, content: string) {
+  async createComment(issueId: string, content: string, parentId?: string) {
     const res = await this.authedFetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, ...(parentId ? { parent_id: parentId } : {}) }),
     });
     if (!res.ok) {
       throw new Error(`create comment failed: ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as { id: string };
+  }
+
+  async seedCommentNotification(issueId: string, commentId: string, title: string) {
+    if (!this.workspaceId || !this.email) throw new Error("Select a workspace before seeding a notification");
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(
+        `INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, actor_type, actor_id, type, issue_id, title, details)
+         SELECT $1, 'member', id, 'member', id, 'new_comment', $2, $3, $4::jsonb FROM "user" WHERE email = $5`,
+        [this.workspaceId, issueId, title, JSON.stringify({ comment_id: commentId }), this.email],
+      );
+    } finally {
+      await client.end();
+    }
   }
 
   /** Seed an owned runtime without launching an actual agent tool. */
@@ -434,8 +474,36 @@ export class TestApiClient {
     return res.json();
   }
 
+  async getIssue(id: string) {
+    const res = await this.authedFetch(`/api/issues/${id}`);
+    if (!res.ok) throw new Error(`get issue: ${res.status}`);
+    return await res.json() as {id: string; status: string; description: string | null; description_revision?: number};
+  }
+
+  /** The local edit `multica issue edit-description` sends. */
+  async editIssueDescription(id: string, oldText: string, newText: string) {
+    const res = await this.authedFetch(`/api/issues/${id}/description/edits`, {
+      method: "POST",
+      body: JSON.stringify({ edits: [{ old_text: oldText, new_text: newText }] }),
+    });
+    if (!res.ok) throw new Error(`edit issue description: ${res.status} ${await res.text()}`);
+    return await res.json() as {description: string | null};
+  }
+
+  async listIssueActivity(id: string) {
+    const res = await this.authedFetch(`/api/issues/${id}/timeline`);
+    if (!res.ok) throw new Error(`issue timeline: ${res.status}`);
+    const entries = await res.json() as {type: string; action?: string; actor_id: string; details?: Record<string, string>}[];
+    return entries.filter((entry) => entry.type === "activity");
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
+    for (const id of this.createdDocIds) await this.authedFetch(`/api/docs/${id}`, {method: "DELETE"});
+    this.createdDocIds = [];
+    for (const id of this.createdDocFolderIds.reverse()) await this.authedFetch(`/api/doc-folders/${id}`, {method: "DELETE"});
+    this.createdDocFolderIds = [];
+
     if (this.seededIssueIds.length > 0 && this.workspaceId) {
       const client = new pg.Client(DATABASE_URL);
       await client.connect();

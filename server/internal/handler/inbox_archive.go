@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -31,10 +32,24 @@ type archivedInboxFacetsResponse struct {
 	Statuses    map[string]int64 `json:"statuses"`
 	Priorities  map[string]int64 `json:"priorities"`
 	Actors      map[string]int64 `json:"actors"`
+	Types       map[string]int64 `json:"types"`
+	Projects    map[string]int64 `json:"projects"`
+	Assignees   map[string]int64 `json:"assignees"`
+	Labels      map[string]int64 `json:"labels"`
 	UnreadCount int64            `json:"unread_count"`
 }
 
-func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.ArchivedInboxFacetsParams, bool) {
+// Values the closed-set filters accept; the type groups mirror the CASE in
+// inbox_archive.sql and INBOX_TYPE_GROUPS in packages/core/inbox.
+var (
+	archivedInboxTypeGroups = []string{"mention", "comment", "assign", "review", "change", "run", "system"}
+	archivedInboxDueDates   = []string{"overdue", "today", "this_week", "next_7_days", "none"}
+	archivedInboxNegatable  = []string{"type", "actor", "status", "priority", "project", "assignee", "label", "dueDate"}
+)
+
+// parseArchivedInboxFilters also gates the archive on owner access, so every
+// archive read that goes through it shares the active list's protection.
+func (h *Handler) parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.ArchivedInboxFacetsParams, bool) {
 	var p db.ArchivedInboxFacetsParams
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -44,9 +59,17 @@ func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.Archi
 	if !ok {
 		return p, false
 	}
+	if !h.requireInboxOwnerAccess(w, r, userID, p.WorkspaceID) {
+		return p, false
+	}
 	p.RecipientID = parseUUID(userID)
 	q := r.URL.Query()
-	for name, target := range map[string]*[]string{"statuses": &p.Statuses, "priorities": &p.Priorities, "actors": &p.Actors} {
+	lists := map[string]*[]string{
+		"statuses": &p.Statuses, "priorities": &p.Priorities, "actors": &p.Actors,
+		"types": &p.Types, "projects": &p.Projects, "assignees": &p.Assignees,
+		"labels": &p.Labels, "due_dates": &p.DueDates, "negated": &p.Negated,
+	}
+	for name, target := range lists {
 		*target = []string{}
 		if raw := q.Get(name); raw != "" {
 			if len(raw) > 8192 {
@@ -68,6 +91,14 @@ func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.Archi
 			*target = slices.Compact(*target)
 		}
 	}
+	for name, allowed := range map[string][]string{"types": archivedInboxTypeGroups, "due_dates": archivedInboxDueDates, "negated": archivedInboxNegatable} {
+		for _, value := range *lists[name] {
+			if !slices.Contains(allowed, value) {
+				writeError(w, http.StatusBadRequest, "invalid "+name+" filter")
+				return p, false
+			}
+		}
+	}
 	if raw := q.Get("unread_only"); raw != "" {
 		if raw != "true" && raw != "false" {
 			writeError(w, http.StatusBadRequest, "invalid unread_only")
@@ -75,27 +106,83 @@ func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.Archi
 		}
 		p.UnreadOnly = raw == "true"
 	}
+	if raw := q.Get("received_after"); raw != "" {
+		after, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid received_after")
+			return p, false
+		}
+		p.ReceivedAfter = pgtype.Timestamptz{Time: after.UTC(), Valid: true}
+	}
+	// Due-date buckets are relative to the viewer's calendar day, which only
+	// the client knows.
+	if raw := q.Get("today"); raw != "" {
+		today, err := time.Parse(time.DateOnly, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid today")
+			return p, false
+		}
+		p.Today = pgtype.Date{Time: today, Valid: true}
+	} else if len(p.DueDates) > 0 {
+		writeError(w, http.StatusBadRequest, "due_dates requires today")
+		return p, false
+	}
 	return p, true
 }
 
 // A cursor is tied to the recipient and filters, so it cannot accidentally
 // continue a different archive or a changed filter selection.
-func archivedInboxScope(p db.ArchivedInboxFacetsParams, groupID pgtype.UUID) string {
+func archivedInboxScope(p db.ArchivedInboxFacetsParams, groupID pgtype.UUID, notificationTypes []string) string {
 	encoded, _ := json.Marshal(struct {
-		Filters db.ArchivedInboxFacetsParams
-		Group   pgtype.UUID
-	}{p, groupID})
+		Filters           db.ArchivedInboxFacetsParams
+		Group             pgtype.UUID
+		NotificationTypes []string `json:",omitempty"`
+	}{p, groupID, notificationTypes})
 	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }
 
+// archivedInboxNotificationTypes reads the exact-type filter, which the CLI
+// sends because it filters on one type rather than a type group.
+func archivedInboxNotificationTypes(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+	types := []string{}
+	raw := r.URL.Query().Get("notification_types")
+	if raw == "" {
+		return types, true
+	}
+	if len(raw) > 8192 {
+		writeError(w, http.StatusBadRequest, "filter is too long")
+		return nil, false
+	}
+	types = strings.Split(raw, ",")
+	if len(types) > 100 {
+		writeError(w, http.StatusBadRequest, "too many filter values")
+		return nil, false
+	}
+	if slices.Contains(types, "") {
+		writeError(w, http.StatusBadRequest, "empty filter value")
+		return nil, false
+	}
+	slices.Sort(types)
+	return slices.Compact(types), true
+}
+
 func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) {
-	filters, ok := parseArchivedInboxFilters(w, r)
+	r, cancel := h.inboxReadRequest(r)
+	defer cancel()
+	filters, ok := h.parseArchivedInboxFilters(w, r)
 	if !ok {
 		return
 	}
 	p := db.ListArchivedInboxPageParams{
 		WorkspaceID: filters.WorkspaceID, RecipientID: filters.RecipientID,
-		Statuses: filters.Statuses, Priorities: filters.Priorities, Actors: filters.Actors, UnreadOnly: filters.UnreadOnly,
+		Types: filters.Types, Negated: filters.Negated, Actors: filters.Actors, ReceivedAfter: filters.ReceivedAfter,
+		Statuses: filters.Statuses, Priorities: filters.Priorities, Projects: filters.Projects,
+		Assignees: filters.Assignees, Labels: filters.Labels, DueDates: filters.DueDates, Today: filters.Today,
+		UnreadOnly: filters.UnreadOnly,
+	}
+	p.NotificationTypes, ok = archivedInboxNotificationTypes(w, r)
+	if !ok {
+		return
 	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -112,7 +199,7 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	scope := archivedInboxScope(filters, p.GroupID)
+	scope := archivedInboxScope(filters, p.GroupID, p.NotificationTypes)
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		if len(raw) > 2048 {
 			writeError(w, http.StatusBadRequest, "invalid archive cursor")
@@ -136,19 +223,34 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 		p.BeforeTime = pgtype.Timestamptz{Time: before, Valid: true}
 	}
 	p.PageLimit = int32(limit + 1)
-	rows, err := h.Queries.ListArchivedInboxPage(r.Context(), p)
+	// Filtered inside the query, before grouping and paging, so a hidden
+	// notification neither shows up nor shortens a page. Not part of the
+	// cursor scope: access can change between pages.
+	hidden, ok := h.requestInboxHiddenProjects(w, r, uuidToString(filters.WorkspaceID))
+	if !ok {
+		return
+	}
+	p.HiddenProjectIds = hidden.Param()
+	rows, err := runInboxRead(r.Context(), h, "archived_page", func(ctx context.Context, q *db.Queries) ([]db.ListArchivedInboxPageRow, error) {
+		return q.ListArchivedInboxPage(ctx, p)
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load archived inbox page")
+		writeInboxReadError(w, err, "failed to load archived inbox page")
 		return
 	}
 	resp := archivedInboxPageResponse{Items: make([]InboxItemResponse, 0, limit), HasMore: len(rows) > limit}
 	if resp.HasMore {
 		rows = rows[:limit]
 	}
+	issuePrefix := h.getIssuePrefix(r.Context(), filters.WorkspaceID)
 	for _, row := range rows {
 		item := inboxToResponse(row.InboxItem)
+		item.IssueIdentifier = inboxIssueIdentifier(issuePrefix, row.IssueNumber)
 		item.Body = inboxListBody(row.InboxItem.Type, row.InboxItem.IssueID, row.InboxItem.Body)
 		item.IssueStatus, item.IssuePriority = textToPtr(row.IssueStatus), textToPtr(row.IssuePriority)
+		item.IssueProjectID, item.IssueDueDate = uuidToPtr(row.IssueProjectID), dateToPtr(row.IssueDueDate)
+		item.IssueAssigneeType, item.IssueAssigneeID = textToPtr(row.IssueAssigneeType), uuidToPtr(row.IssueAssigneeID)
+		item.IssueLabelIDs = inboxLabelIDs(row.IssueLabelIds)
 		if row.CommentID != "" {
 			var details map[string]json.RawMessage
 			if len(item.Details) == 0 || string(item.Details) == "null" {
@@ -172,24 +274,38 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) GetArchivedInboxFacets(w http.ResponseWriter, r *http.Request) {
-	p, ok := parseArchivedInboxFilters(w, r)
+	r, cancel := h.inboxReadRequest(r)
+	defer cancel()
+	p, ok := h.parseArchivedInboxFilters(w, r)
 	if !ok {
 		return
 	}
-	rows, err := h.Queries.ArchivedInboxFacets(r.Context(), p)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load archived inbox filters")
+	hidden, ok := h.requestInboxHiddenProjects(w, r, uuidToString(p.WorkspaceID))
+	if !ok {
 		return
 	}
-	resp := archivedInboxFacetsResponse{Statuses: map[string]int64{}, Priorities: map[string]int64{}, Actors: map[string]int64{}}
+	p.HiddenProjectIds = hidden.Param()
+	rows, err := runInboxRead(r.Context(), h, "archived_facets", func(ctx context.Context, q *db.Queries) ([]db.ArchivedInboxFacetsRow, error) {
+		return q.ArchivedInboxFacets(ctx, p)
+	})
+	if err != nil {
+		writeInboxReadError(w, err, "failed to load archived inbox filters")
+		return
+	}
+	resp := archivedInboxFacetsResponse{
+		Statuses: map[string]int64{}, Priorities: map[string]int64{}, Actors: map[string]int64{},
+		Types: map[string]int64{}, Projects: map[string]int64{}, Assignees: map[string]int64{}, Labels: map[string]int64{},
+	}
+	dimensions := map[string]map[string]int64{
+		"statuses": resp.Statuses, "priorities": resp.Priorities, "actors": resp.Actors,
+		"types": resp.Types, "projects": resp.Projects, "assignees": resp.Assignees, "labels": resp.Labels,
+	}
 	for _, row := range rows {
+		if counts, ok := dimensions[row.Dimension]; ok {
+			counts[row.Key] = row.Count
+			continue
+		}
 		switch row.Dimension {
-		case "statuses":
-			resp.Statuses[row.Key] = row.Count
-		case "priorities":
-			resp.Priorities[row.Key] = row.Count
-		case "actors":
-			resp.Actors[row.Key] = row.Count
 		case "unread":
 			resp.UnreadCount = row.Count
 		}

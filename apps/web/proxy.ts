@@ -1,9 +1,18 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { LOCALE_COOKIE } from "@multica/core/i18n";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import { buildAiVisitRecord, reportAiVisit, type AiVisitFormat } from "@multica/core/ai-traffic";
+import { LOCALE_COOKIE, type SupportedLocale } from "@multica/core/i18n";
 import {
+  isSupportedLocale,
   MULTICA_LOCALE_HEADER,
   resolveLocaleFromSignals,
 } from "./lib/locale-routing";
+import {
+  isLandingPath,
+  landingPathLocale,
+  localizeHref,
+  splitLandingLocale,
+  stripLandingLocale,
+} from "./lib/landing-locale-path";
 import { runtimeRewriteDestination } from "./config/runtime-urls";
 import { isOfficialMarketingHost } from "./lib/public-host";
 
@@ -25,7 +34,7 @@ const LEGACY_ROUTE_SEGMENTS = new Set([
   "usage",
 ]);
 
-function resolveLocale(req: NextRequest): string {
+function resolveLocale(req: NextRequest): SupportedLocale {
   return resolveLocaleFromSignals({
     cookieLocale: req.cookies.get(LOCALE_COOKIE)?.value,
     acceptLanguage: req.headers.get("accept-language"),
@@ -36,17 +45,82 @@ function resolveLocale(req: NextRequest): string {
 // request header. layout.tsx reads it through `await headers()`. The
 // `request: { headers }` form is what makes the header land on the upstream
 // request — without it the value would only sit on the response.
-function nextWithLocale(req: NextRequest): NextResponse {
+function nextWithLocale(req: NextRequest, locale = resolveLocale(req)): NextResponse {
   const headers = new Headers(req.headers);
-  headers.set(MULTICA_LOCALE_HEADER, resolveLocale(req));
+  headers.set(MULTICA_LOCALE_HEADER, locale);
   return NextResponse.next({ request: { headers } });
+}
+
+// The marketing site has one URL per language: English at the root, the
+// others under /zh, /ko and /ja (lib/landing-locale-path). Returns null for
+// paths that are not marketing pages.
+function routeLandingLocale(
+  req: NextRequest,
+  hasSession: boolean,
+  lastSlug: string | undefined,
+): NextResponse | null {
+  const { pathname } = req.nextUrl;
+  const prefixed = splitLandingLocale(pathname);
+  if (prefixed) {
+    // A workspace that took a language prefix as its slug before the prefix
+    // was reserved keeps its bare root for its members.
+    if (prefixed.path === "/" && hasSession && lastSlug === pathname.slice(1)) return null;
+    const url = req.nextUrl.clone();
+    url.pathname = prefixed.path;
+    const headers = new Headers(req.headers);
+    headers.set(MULTICA_LOCALE_HEADER, prefixed.locale);
+    return NextResponse.rewrite(url, { request: { headers } });
+  }
+  if (!isLandingPath(pathname)) return null;
+
+  // A remembered language choice goes to that language's URL. Without one the
+  // root URL stays English — the same page crawlers index — and the page
+  // offers the browser's language rather than switching to it.
+  const cookie = req.cookies.get(LOCALE_COOKIE)?.value ?? null;
+  const chosen = isSupportedLocale(cookie) ? landingPathLocale(cookie) : "en";
+  if (chosen !== "en") {
+    const url = req.nextUrl.clone();
+    url.pathname = localizeHref(chosen, pathname);
+    return NextResponse.redirect(url);
+  }
+  const resolved = resolveLocale(req);
+  return nextWithLocale(req, landingPathLocale(resolved) === "en" ? resolved : "en");
+}
+
+/** Root files AI crawlers read; they pass through untouched and are only observed. */
+const CRAWLER_FILES: Readonly<Record<string, AiVisitFormat>> = {
+  "/llms.txt": "markdown",
+  "/robots.txt": "text",
+};
+
+// AI visits to the public site, recorded on the official host only so
+// self-hosted instances stay quiet; retained in PostHog when configured. `/docs` is logged by the docs app.
+// `next start` reports its own bind address as `nextUrl.hostname`, so the
+// Host header decides; a spoofed one can only add a log line.
+function recordAiVisit(req: NextRequest, response: NextResponse, event?: NextFetchEvent) {
+  const { pathname } = req.nextUrl;
+  const host = req.headers.get("host")?.replace(/:\d+$/, "") ?? req.nextUrl.hostname;
+  if (!isOfficialMarketingHost(host)) return;
+  const format = CRAWLER_FILES[pathname] ?? (isLandingPath(stripLandingLocale(pathname)) ? "html" : null);
+  if (!format) return;
+  reportAiVisit(
+    buildAiVisitRecord({
+      app: "web",
+      method: req.method,
+      pathname,
+      headers: req.headers,
+      format,
+      status: response.headers.has("location") ? response.status : null,
+    }),
+    { env: process.env, waitUntil: event && ((promise) => event.waitUntil(promise)) },
+  );
 }
 
 // Next.js 16 renamed `middleware` → `proxy`. API surface (NextRequest /
 // NextResponse / cookies / matcher) is identical; the only behavioral
 // change is the runtime — proxy is forced to nodejs and cannot opt into
 // edge.
-export function proxy(req: NextRequest) {
+export function proxy(req: NextRequest, event?: NextFetchEvent) {
   const { pathname } = req.nextUrl;
   const runtimeDestination = runtimeRewriteDestination(pathname, process.env);
   if (runtimeDestination) {
@@ -55,6 +129,13 @@ export function proxy(req: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
+  const response = CRAWLER_FILES[pathname] ? NextResponse.next() : routeRequest(req);
+  recordAiVisit(req, response, event);
+  return response;
+}
+
+function routeRequest(req: NextRequest): NextResponse {
+  const { pathname } = req.nextUrl;
   const hasSession = req.cookies.has("multica_logged_in");
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;
 
@@ -106,6 +187,9 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  const landing = routeLandingLocale(req, hasSession, lastSlug);
+  if (landing) return landing;
+
   // --- Default: forward locale header to RSC, no redirect/rewrite ---
   // Covers logged-out root path, /login, /:slug/*, and everything else.
   return nextWithLocale(req);
@@ -122,9 +206,11 @@ export const config = {
     "/api",
     "/api/((?!upload-file(?:/|$)).*)",
     "/auth/:path*",
-    "/uploads/:path*",
     "/docs/:path*",
     "/ws",
+    "/collab",
+    "/llms.txt",
+    "/robots.txt",
     "/((?!api|v1|_next/static|_next/image|favicon.ico|.*\\.).*)",
   ],
 };

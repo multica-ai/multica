@@ -99,6 +99,8 @@ Settings → Webhooks :
 </Tab>
 </Tabs>
 
+Un administrateur GitLab peut aussi configurer un [System Hook](https://docs.gitlab.com/administration/system_hooks/) pour toute l'instance, avec la même URL et le même secret, en activant **Merge request events**. Multica ne traite ses événements de MR que pour les dépôts enregistrés dans **Paramètres → Code → Dépôts** de cet espace de travail, appartenant à l'instance GitLab connectée et lisibles avec le jeton de connexion. Les autres événements système sont ignorés. Les dépôts peuvent utiliser des URL de clonage HTTPS ou SSH. Cela évite de créer un hook par projet, mais nécessite un administrateur GitLab. Les System Hooks n'envoient pas d'événements Pipeline : conservez les webhooks Pipeline de projet ou de groupe pour l'état de la CI. Les deux peuvent coexister. Une réponse `202` confirme la réception, sans garantir qu'une tâche a été liée ou a changé de statut. Les MR fusionnées avant la connexion ne sont pas rejouées.
+
 Multica authentifie chaque livraison à l'aide du secret stocké : un webhook qui n'a pas le secret correspondant est rejeté.
 
 ## Ce qui est reflété

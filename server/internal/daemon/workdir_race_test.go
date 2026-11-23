@@ -72,7 +72,7 @@ func TestHandleTask_DoesNotCallStartTaskItself(t *testing.T) {
 		Agent:       &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	if !runnerCalled.Load() {
 		t.Fatal("fake runner was never invoked — handleTask aborted before runner.run, can't assert ordering")
@@ -794,7 +794,7 @@ func prepareTimeoutStopsLeaseDuringBlockedStart(t *testing.T, budget time.Durati
 
 // TestHandleTask_KeepsEnvRootActiveAcrossCompletion is the regression guard
 // for issue #3999 race B. After runner.run returns, the in-process active
-// guard installed inside runTask (defer unmarkActiveEnvRoot at the
+// guard installed inside runTask (deferred release at the
 // goroutine's exit) has already fired by the time handleTask calls
 // reportTaskResult and execenv.WriteGCMeta. Without an outer guard at the
 // handleTask level, the GC loop sees a window where the directory has
@@ -848,8 +848,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 	// isActiveEnvRoot back to false before reportTaskResult fires.
 	d.runner = taskRunnerFunc(func(_ context.Context, tk Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
 		predicted := execenv.PredictRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, tk))
-		d.markActiveEnvRoot(predicted)
-		defer d.unmarkActiveEnvRoot(predicted)
+		defer d.markActiveEnvRoot(predicted)()
 		return TaskResult{
 			Status:  "completed",
 			EnvRoot: predicted,
@@ -864,7 +863,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 		Agent:       &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	if !completeCalled.Load() {
 		t.Fatal("/complete was never hit — handleTask did not reach reportTaskResult")
