@@ -337,11 +337,6 @@ export interface IssueAssigneeGroup {
   total: number;
 }
 
-/** Raw backend response shape for `GET /api/issues/grouped?group_by=assignee`. */
-export interface GroupedIssuesResponse {
-  groups: IssueAssigneeGroup[];
-}
-
 // Server-authoritative Table query contract. Membership, grouping and counts
 // are evaluated against the complete result set; the browser only owns view
 // state such as collapsed groups/parents.

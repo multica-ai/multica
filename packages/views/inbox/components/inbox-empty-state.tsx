@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlarmClock,
@@ -18,26 +18,26 @@ import {
   undoUnsubscribeArchiveInbox,
   useUnsnoozeInbox,
 } from "@multica/core/inbox/mutations";
-import { inboxKeys, snoozedInboxOptions } from "@multica/core/inbox/queries";
+import { inboxKeys } from "@multica/core/inbox/queries";
 import {
   useInboxSelectionStore,
+  type InboxTab,
   type LastInboxCleared,
 } from "@multica/core/inbox/selection-store";
-import type { SnoozedInboxIssue } from "@multica/core/types";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useLocale, useT } from "../../i18n";
-import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
+import { inboxTabHref } from "./inbox-view";
 import { formatSnoozeTime } from "./inbox-snooze-time";
 import { useInboxUndoShortcut } from "./use-inbox-shortcut";
+import { useSnoozedInboxRows } from "./use-inbox-tab-rows";
 import { useRestoreInbox } from "./use-leave-inbox-row";
-
-const NO_SNOOZED: SnoozedInboxIssue[] = [];
 
 /**
  * The empty detail canvas of `/inbox`:
- * - Prompt to pick a row when notifications still exist in the Work panel.
- * - Quiet archived-empty state when browsing Archived.
+ * - Prompt to pick a row when the Work panel's tab still lists any.
+ * - Quiet empty states for the Snoozed and Archived tabs.
  * - Filtered-empty state when active filters hid remaining notifications
  *   (never confused with true Inbox Zero).
  * - Calm Inbox Zero state with MulticaBleedMark, persistent inline undo for
@@ -46,7 +46,7 @@ const NO_SNOOZED: SnoozedInboxIssue[] = [];
  */
 export function InboxEmptyState({
   wsId,
-  isArchivedView,
+  tab,
   visibleCount,
   totalActiveCount,
   hasActiveFilters,
@@ -55,7 +55,8 @@ export function InboxEmptyState({
   onClearFiltersAndContinue,
 }: {
   wsId: string;
-  isArchivedView: boolean;
+  tab: InboxTab;
+  /** Rows the tab lists. */
   visibleCount: number;
   /** Total active (unfiltered, unarchived) notifications in the Inbox. */
   totalActiveCount: number;
@@ -68,27 +69,18 @@ export function InboxEmptyState({
   const locale = useLocale();
   const qc = useQueryClient();
   const { push } = useNavigation();
-  const builtinNav = useBuiltinViewNavigation();
+  const paths = useWorkspacePaths();
   const restoreInbox = useRestoreInbox();
   const { mutateAsync: unsnoozeAsync } = useUnsnoozeInbox();
 
   const lastCleared = useInboxSelectionStore((s) => s.lastClearedByWorkspace[wsId] ?? null);
   const clearLastCleared = useInboxSelectionStore((s) => s.clearLastCleared);
 
-  const isFilteredEmpty = !isArchivedView && hasActiveFilters && visibleCount === 0 && totalActiveCount > 0;
-  const isInboxZero = !isArchivedView && visibleCount === 0 && !isFilteredEmpty;
+  const isLive = tab === "inbox";
+  const isFilteredEmpty = isLive && hasActiveFilters && visibleCount === 0 && totalActiveCount > 0;
+  const isInboxZero = isLive && visibleCount === 0 && !isFilteredEmpty;
 
-  const { data: snoozed = NO_SNOOZED } = useQuery({
-    ...snoozedInboxOptions(wsId),
-    enabled: isInboxZero && !!wsId,
-  });
-
-  const activeSnoozed = useMemo(() => {
-    const now = Date.now();
-    return snoozed
-      .filter((entry) => new Date(entry.snoozed_until).getTime() > now)
-      .sort((a, b) => new Date(a.snoozed_until).getTime() - new Date(b.snoozed_until).getTime());
-  }, [snoozed]);
+  const { rows: activeSnoozed } = useSnoozedInboxRows(wsId, isInboxZero);
 
   const [undoing, setUndoing] = useState(false);
 
@@ -145,8 +137,6 @@ export function InboxEmptyState({
     }
     store.returnRow(wsId, entry.key);
     store.recordTransition(wsId, entry.key, "prev");
-    if (entry.kind === "unsubscribed") store.rememberSidebarIssue(wsId, entry.issueId);
-    else if (entry.href.includes("/issues/")) store.rememberSidebarIssue(wsId, entry.key);
     push?.(entry.href);
   };
 
@@ -165,7 +155,7 @@ export function InboxEmptyState({
   const canUndoCleared = (entry: LastInboxCleared) => entry.kind !== "unsubscribed" || entry.undoable;
 
   // Z undoes what the inline undo shows, once its toast is gone.
-  const showsUndo = !isArchivedView && visibleCount === 0 && !!lastCleared && canUndoCleared(lastCleared);
+  const showsUndo = isLive && visibleCount === 0 && !!lastCleared && canUndoCleared(lastCleared);
   useInboxUndoShortcut(showsUndo && lastCleared ? () => void handleUndoCleared(lastCleared) : null);
   const undoKeycaps = !isCompact && <ActionShortcutKeycaps action="undoInboxAction" />;
 
@@ -179,8 +169,20 @@ export function InboxEmptyState({
     );
   }
 
+  if (tab === "snoozed") {
+    return (
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6 text-center text-muted-foreground">
+        <AlarmClock className="mb-3 h-10 w-10 text-faint-foreground" />
+        <p className="relative text-body">{t(($) => $.snooze.view_empty)}</p>
+        <p className="relative mt-1 max-w-sm text-label text-faint-foreground">
+          {t(($) => $.snooze.view_empty_description)}
+        </p>
+      </div>
+    );
+  }
+
   // Archived view empty state stays quiet and distinct from Inbox Zero.
-  if (isArchivedView) {
+  if (tab === "archived") {
     return (
       <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
         <Archive className="mb-3 h-10 w-10 text-faint-foreground" />
@@ -265,10 +267,7 @@ export function InboxEmptyState({
         {activeSnoozed.length > 0 && earliestSnooze && (
           <button
             type="button"
-            onClick={() => {
-              builtinNav.prepare("snoozed");
-              push?.(builtinNav.hrefFor("snoozed"));
-            }}
+            onClick={() => push?.(inboxTabHref(paths, "snoozed"))}
             className="mt-2 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-caption text-faint-foreground transition-colors hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
           >
             <AlarmClock className="size-3.5 shrink-0" />

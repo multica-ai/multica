@@ -598,7 +598,8 @@
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
     "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다 — 이 태스크는 아직 로컬 에이전트에서 실행되지 않았습니다",
     "pull_requests_empty_title": "연결된 PR이 없습니다.",
-    "guest_readonly_note": "게스트는 보고 댓글을 남길 수 있지만 작업 속성은 바꿀 수 없습니다."
+    "guest_readonly_note": "게스트는 보고 댓글을 남길 수 있지만 작업 속성은 바꿀 수 없습니다.",
+    "open_issue_page": "태스크 페이지에서 열기"
   },
   "timeline": {
     "loading": "불러오는 중...",
@@ -1667,7 +1668,6 @@
       "target_squad": "스쿼드 · 리더가 배분",
       "target_member": "멤버",
       "instructions_hint": "이번 실행의 지침으로 처리자에게 전달되며, 태스크 설명·댓글과 함께 맥락이 됩니다.",
-      "next_hint": "담당자가 상태를 직접 업데이트하며, 막힌 경우가 아니라 재작업이 필요할 때만 되돌려 보냅니다. 실행이 끝나도 상태가 자동으로 바뀌지는 않습니다.",
       "preview_brief": "에이전트가 받는 설명 미리 보기",
       "preview_title": "“{{status}}” 단계 설명",
       "preview_description": "태스크가 이 단계에 들어오면 처리자의 실행이 받는 내용입니다. 미리 보기에는 저장이 필요 없습니다.",
@@ -1839,8 +1839,7 @@
       "all_issues": "전체 태스크",
       "my_work": "내 작업",
       "working": "실행 중",
-      "subscribed": "구독 중",
-      "snoozed": "미뤄둔 항목"
+      "subscribed": "구독 중"
     },
     "untitled": "제목 없는 뷰",
     "copy_name": "{{name}} (사본)",

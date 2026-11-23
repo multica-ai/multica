@@ -1762,35 +1762,6 @@ func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) er
 	return err
 }
 
-const lockIssueForAttachmentWrite = `-- name: LockIssueForAttachmentWrite :one
-SELECT id FROM issue
-WHERE id = $1 AND workspace_id = $2
-FOR NO KEY UPDATE
-`
-
-type LockIssueForAttachmentWriteParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-// Owner-first guard for a write to one of an issue's attachments: take the
-// issue before the attachment row, so a writer that reaches the same row
-// through the issue — teardown's issue_id cascade, or the revision bump this
-// write itself performs — either waits for this transaction or is waited on,
-// never both.
-//
-// FOR NO KEY UPDATE, the mode of that revision bump, is the weakest mode that
-// actually serializes issue writers. FOR KEY SHARE is NOT enough: it is
-// compatible with FOR NO KEY UPDATE (see LockLiveComment), so a concurrent
-// CreateComment would take the issue anyway, wait on the attachment this
-// transaction holds, and deadlock with its bump.
-func (q *Queries) LockIssueForAttachmentWrite(ctx context.Context, arg LockIssueForAttachmentWriteParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, lockIssueForAttachmentWrite, arg.ID, arg.WorkspaceID)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const lockIssueForChannelMediaBind = `-- name: LockIssueForChannelMediaBind :one
 SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
@@ -1887,6 +1858,32 @@ func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIss
 		&i.DescriptionRevision,
 	)
 	return i, err
+}
+
+const lockIssueForWrite = `-- name: LockIssueForWrite :one
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR NO KEY UPDATE
+`
+
+type LockIssueForWriteParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Lock the issue before writing an attachment or reaction row, matching the
+// order used by issue teardown. This also lets concurrent duplicate reaction
+// adds wait before AddIssueReaction takes its statement snapshot.
+//
+// FOR NO KEY UPDATE conflicts with issue revision bumps and still allows
+// foreign-key checks. FOR KEY SHARE would let a concurrent CreateComment
+// lock the issue while waiting for an attachment that this transaction
+// holds, deadlocking when this transaction tries to bump the revision.
+func (q *Queries) LockIssueForWrite(ctx context.Context, arg LockIssueForWriteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockIssueForWrite, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const lockIssuesForDuplicateMark = `-- name: LockIssuesForDuplicateMark :many

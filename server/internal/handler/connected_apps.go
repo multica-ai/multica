@@ -76,8 +76,12 @@ type AppCatalogEntry struct {
 	Name             string `json:"name"`
 	Logo             string `json:"logo,omitempty"`
 	Category         string `json:"category,omitempty"`
+	CategoryID       string `json:"category_id,omitempty"`
 	Curated          bool   `json:"curated"`
 	RecommendedScope string `json:"recommended_scope,omitempty"`
+	// ConnectMethod is "oauth" or "key" (the member enters an API key or
+	// token); empty for apps that are not Composio toolkits.
+	ConnectMethod string `json:"connect_method,omitempty"`
 	// Allowed is false only in the admin's full view (?view=all) for apps
 	// the workspace catalog leaves out.
 	Allowed bool `json:"allowed"`
@@ -391,7 +395,10 @@ func (h *Handler) ListAppCatalog(w http.ResponseWriter, r *http.Request) {
 		if !allowed && !viewAll {
 			continue
 		}
-		entry := AppCatalogEntry{Slug: slug, Name: tk.Name, Logo: tk.LogoURL, Category: tk.Category, Allowed: allowed}
+		entry := AppCatalogEntry{
+			Slug: slug, Name: tk.Name, Logo: tk.LogoURL, Category: tk.Category, CategoryID: tk.CategoryID,
+			ConnectMethod: tk.ConnectMethod, Allowed: allowed,
+		}
 		if app, ok := connectedapps.Curated(slug); ok {
 			entry.Curated, entry.RecommendedScope = true, app.Scope
 		}

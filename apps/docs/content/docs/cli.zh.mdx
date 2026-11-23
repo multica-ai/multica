@@ -141,6 +141,8 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
+如果 `issue comment add` 超时或连接中断，评论可能已经保存。在智能体运行中，直接重新执行同一条命令是安全的：CLI 会根据运行、任务、父评论、内容和附件生成幂等键，服务器会返回已保存的评论，不会再发一条。在其他场景下，每次尝试都传同一个 `--idempotency-key <key>` 即可获得同样的保护。旧版服务器会忽略这个键。
+
 同一项目、同一父任务下已有标题相同（不区分大小写，忽略多余空格）且未关闭的任务时，`issue create` 会拒绝创建并给出那个任务。确实要再建一个，加 `--allow-duplicate`；要把一个任务标为另一个的重复，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
 
 一个任务要依次提交多个 PR 时，用 `issue create --title "..." --pr-auto-complete off` 或 `issue update <id> --pr-auto-complete off`，让这个任务在 PR 合并后保持原状态。用 `--pr-auto-complete on` 恢复工作区规则，从下一次 PR 事件起生效。`issue pull-requests <id>` 会显示任务开关、工作区开关、目标状态和判断结果，没有关联 PR 时也会显示。支持该字段的服务端会在创建事务内保存开关；旧服务端会补调一次 PUT，失败时 CLI 会给出已创建的任务 ID 和重试用的 update 命令，请勿重复创建。
@@ -484,7 +486,8 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `issue` | `list` | 列出任务 | `--status`、`--priority`、`--assignee`、`--project`、`--updated-since` / `--updated-until`（配套的 RFC3339 时间范围）、`--metadata`（可重复）、`--property`（可重复，`"名称=值"` 或 `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` 这样的比较；`__none__` 匹配未设置）、`--limit`、`--offset`、`--sort`（支持 `property:<名称或 id>`）、`--full-id`、`--fields`（仅 JSON；逗号分隔，只输出这些字段）、`--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
 | | `get <id>` | 查看单个任务 | `--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
 | | `create` | 创建任务 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复）、`--property`（可重复）、`--allow-duplicate`（已有同名未关闭任务时仍创建） |
-| | `update <id>` | 更新任务字段 | 与 `create` 同类字段，另有 `--position`、`--no-start`、`--duplicate-of` |
+| | `update <id>` | 更新任务字段 | 与 `create` 同类字段，另有 `--description-base-revision`（取自 `issue get`，描述已变更时拒绝覆盖）、`--position`、`--no-start`、`--duplicate-of` |
+| | `edit-description <id>` | 精确替换任务描述中的局部文本，无需整篇重写 | `--old` / `--old-file`（必填）、`--new` / `--new-file`（必填）、`--replace-all` |
 | | `batch update <id>...` | 对多条任务应用相同修改 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
 | | `delete <id>...` | 永久删除一条或多条任务 | `--yes` 跳过确认；接受任务编号或完整 UUID; `--dry-run` |
 | | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign`、`--no-start` |
@@ -509,6 +512,9 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `cancel-task <task-id>` | 取消进行中或排队中的运行 | `--issue` |
 | `project` | `get/create/update/delete` | 管理项目 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重复）、`--visibility`（`workspace` 或 `private`）、`--member`（可重复，配合 `--visibility private`）；`update`：`--visibility`、`--member`（项目正在改为私有或已经是私有时都会加入名单） |
 | | `list` | 列出和筛选项目 | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
+| | `overview <id>` | 一次读取项目详情、进度、资源、运行中智能体和近期活动 | `--output`（默认 `json`，可选 `table`） |
+| | `progress <id>` | 查看项目进度、每周趋势、完成预测与分组分布 | `--history`、`--by`（`assignee` 或 `label`）、`--output`（`table` 或 `json`） |
+| | `activity <id>` | 按时间倒序列出项目内任务的近期变更 | `--limit`、`--before`（JSON 输出的 `next_cursor`）、`--output`（`table` 或 `json`） |
 | | `status <id> <status>` | 修改项目状态 | |
 | | `archive/restore <id>` | 归档或恢复项目。已归档的项目不出现在 `list` 中、不再接受新任务，向它创建任务的自动化会被暂停 | `list --archived` 只列出已归档的项目 |
 | | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
@@ -535,10 +541,10 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `mcp list/add/update/remove` | 管理工作区的 MCP 服务库 | 写操作需要 owner/admin。这里添加的服务不会分配给任何 agent——用 `multica agent mcp add` 分配给某个 agent。`list` 只列出名称与 transport；存储的条目是只写的，任何角色都读不回。`--server-config-file` / `--server-config-stdin` 避免 token 进入 shell 历史 |
 | | `member list/invite <email>` | 查看成员、发出邀请 | `invite`：`--role`（member 或 admin，默认 member） |
 | `repo` | `list/add/remove/checkout` | 管理工作区仓库并检出到本机 | `--url`（可重复）；`checkout`：`--ref` |
-| `skill` | `list/get/create/update/delete` | 管理 skill | |
+| `skill` | `list/get/create/update/delete` | 管理 skill | `get`：`--with-content`（默认只返回元数据和 `revision`）；`update`：`--base-revision`（取自 `skill get`，内容已变更时返回 HTTP 409 拒绝覆盖） |
 | | `import` | 从 URL 或本地文件导入 skill | `--url` / `--file`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`，默认 `fail`） |
 | | `search <query>` | 搜索 skill | |
-| | `files list/upsert/delete <skill-id>` | 管理 skill 内的文件 | |
+| | `files list/upsert/delete <skill-id>` | 管理 skill 内的文件 | `list`：`--with-content`；`upsert` / `delete`：`--base-revision`（内容已变更时返回 HTTP 409 拒绝覆盖） |
 | | `label list/add/remove <skill-id>` | 管理 skill 上的标签 | `add` / `remove`：`<label-id>` 可使用完整 UUID 或短前缀 |
 | `squad` | `list/get/create/update/delete` | 管理小队（`delete` 为归档） | |
 | | `member list/add/set-role/remove` | 管理小队成员 | |

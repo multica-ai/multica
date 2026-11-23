@@ -29,8 +29,9 @@ var docCmd = &cobra.Command{
 		"People may be editing a doc while you work on it. For targeted changes prefer " +
 		"`multica doc edit`: it replaces text you quote and lands wherever that text now is. " +
 		"`multica doc update` replaces the whole doc and needs --base-revision, the revision you read " +
-		"with `multica doc get`; edits made since then are merged in, and the update is refused only " +
-		"when you and someone else changed the same paragraph. " +
+		"with `multica doc get`; edits made since then are usually merged in. The update is refused, with nothing " +
+		"written, when you and someone else changed the same paragraph, and also when your revision is too old " +
+		"to merge from or the live-editing service is unavailable. " +
 		"Pass --message to say what changed and why — it shows in the doc's history.",
 }
 
@@ -95,6 +96,48 @@ var docEditCmd = &cobra.Command{
 	RunE: runDocEdit,
 }
 
+var docHistoryCmd = &cobra.Command{
+	Use:   "history <doc-id>",
+	Short: "List a doc's versions, or show one with --version",
+	Long: "List the saved versions of a doc, newest first: who saved each one, its action " +
+		"(edit or restore) and the change summary. --output json adds the run and issue an agent saved it from.\n\n" +
+		"Pass --version <n> to get that version with its full content (`--output content` prints only the Markdown), " +
+		"for example to compare it with `multica doc get --output content` or to pick one for `multica doc restore`.",
+	Args: exactArgs(1),
+	RunE: runDocHistory,
+}
+
+var docRestoreCmd = &cobra.Command{
+	Use:   "restore <doc-id>",
+	Short: "Restore a doc to an earlier version",
+	Long: "Replace a doc's title and content with an earlier version from `multica doc history`.\n\n" +
+		"The restore is saved as a new version, so nothing is lost: the content it replaces stays in the history. " +
+		"It replaces the whole doc, including edits made after the version you restore; " +
+		"to undo one change and keep the rest, use `multica doc edit` instead. " +
+		"--base-revision is the revision from `multica doc get`; when the doc changed after it, " +
+		"live edits included, nothing is restored.",
+	Args: exactArgs(1),
+	RunE: runDocRestore,
+}
+
+var docCommentCmd = &cobra.Command{
+	Use:   "comment",
+	Short: "Read the discussion on a doc",
+	Long: "Read the comment threads people left on a doc. Writing in doc discussions " +
+		"(commenting, replying, resolving) is reserved for people, so there are no write commands.",
+}
+
+var docCommentListCmd = &cobra.Command{
+	Use:   "list <doc-id>",
+	Short: "List the comment threads on a doc",
+	Long: "List the comment threads on a doc, each root comment followed by its replies. " +
+		"A root comment's QUOTE (anchor_quote in --output json) is the doc text it was left on.\n\n" +
+		"Resolved threads are hidden unless you pass --include-resolved. " +
+		"The table shortens long comments; --output json has the full text.",
+	Args: exactArgs(1),
+	RunE: runDocCommentList,
+}
+
 var docFolderCmd = &cobra.Command{
 	Use:   "folder",
 	Short: "Manage knowledge base doc folders",
@@ -136,8 +179,18 @@ var docFolderMoveCmd = &cobra.Command{
 }
 
 func init() {
-	docCmd.AddCommand(docListCmd, docSearchCmd, docGetCmd, docCreateCmd, docUpdateCmd, docEditCmd, docMoveCmd, docFolderCmd)
+	docCmd.AddCommand(docListCmd, docSearchCmd, docGetCmd, docCreateCmd, docUpdateCmd, docEditCmd, docMoveCmd,
+		docHistoryCmd, docRestoreCmd, docCommentCmd, docFolderCmd)
 	docFolderCmd.AddCommand(docFolderListCmd, docFolderCreateCmd, docFolderUpdateCmd, docFolderMoveCmd)
+	docCommentCmd.AddCommand(docCommentListCmd)
+	docHistoryCmd.Flags().Int("version", 0, "Show this version with its content instead of listing versions")
+	docHistoryCmd.Flags().String("output", "", "Output format: table or json for the list (default table); json or content with --version (default json)")
+	docRestoreCmd.Flags().Int("version", 0, "Version number from doc history to restore (required)")
+	docRestoreCmd.Flags().Int64("base-revision", 0, "Revision from doc get (required)")
+	docRestoreCmd.Flags().String("message", "", "Change summary for history")
+	docRestoreCmd.Flags().String("output", "json", "Output format: table or json")
+	docCommentListCmd.Flags().Bool("include-resolved", false, "Include resolved threads")
+	docCommentListCmd.Flags().String("output", "table", "Output format: table or json")
 	docMoveCmd.Flags().String("folder", "", "Destination folder id, or `root` for the top level (required)")
 	docMoveCmd.Flags().String("output", "json", "Output format: table or json")
 	docListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -224,6 +277,11 @@ func docWriteError(action string, base int64, err error) error {
 	var httpErr *cli.HTTPError
 	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
 		switch {
+		case action == "restore doc" && strings.Contains(httpErr.Body, "revision_conflict"):
+			return fmt.Errorf("%s: the doc changed since revision %d, so nothing was restored. "+
+				"A restore replaces the whole doc, including those newer edits: run `multica doc get` to read them, "+
+				"and retry with the new --base-revision only if the whole doc should still go back to that version (%s)",
+				action, base, httpErr.Body)
 		case strings.Contains(httpErr.Body, "revision_conflict"):
 			return fmt.Errorf("%s: the doc changed since revision %d, so nothing was written. "+
 				"Run `multica doc get` for the latest content and revision, merge your change into it, and retry with the new --base-revision (%s)",
@@ -551,6 +609,174 @@ func runDocEdit(cmd *cobra.Command, args []string) error {
 	delete(doc, "content")
 	output, _ := cmd.Flags().GetString("output")
 	return printDocSummary(doc, output)
+}
+
+func docActor(m map[string]any, typeKey, idKey string) string {
+	if strVal(m, idKey) == "" {
+		return ""
+	}
+	return strVal(m, typeKey) + ":" + truncateID(strVal(m, idKey))
+}
+
+func runDocHistory(cmd *cobra.Command, args []string) error {
+	number, _ := cmd.Flags().GetInt("version")
+	output, _ := cmd.Flags().GetString("output")
+	if cmd.Flags().Changed("version") && number <= 0 {
+		return fmt.Errorf("--version must be a version number from `multica doc history`")
+	}
+	switch {
+	case number > 0 && output != "" && output != "json" && output != "content":
+		return fmt.Errorf("--output must be json or content with --version")
+	case number == 0 && output != "" && output != "table" && output != "json":
+		return fmt.Errorf("--output must be table or json; pass --version to see a version's content")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	id, err := resolveDocRef(ctx, client, args[0], false)
+	if err != nil {
+		return err
+	}
+
+	if number > 0 {
+		var version map[string]any
+		if err := client.GetJSON(ctx, fmt.Sprintf("/api/docs/%s/versions/%d", id, number), &version); err != nil {
+			return fmt.Errorf("get doc version %d: %w", number, err)
+		}
+		if output == "content" {
+			_, err := fmt.Fprint(os.Stdout, strVal(version, "content"))
+			return err
+		}
+		return cli.PrintJSON(os.Stdout, version)
+	}
+
+	var result struct {
+		Versions []map[string]any `json:"versions"`
+	}
+	if err := client.GetJSON(ctx, "/api/docs/"+id+"/versions", &result); err != nil {
+		return fmt.Errorf("list doc versions: %w", err)
+	}
+	if result.Versions == nil {
+		result.Versions = []map[string]any{}
+	}
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result.Versions)
+	}
+	rows := make([][]string, 0, len(result.Versions))
+	for _, v := range result.Versions {
+		action := strVal(v, "action")
+		if ref := strVal(v, "action_ref"); action == "restore" && ref != "" {
+			action = "restore of v" + ref
+		}
+		saved := strVal(v, "updated_at")
+		if len(saved) >= 16 {
+			saved = strings.Replace(saved[:16], "T", " ", 1)
+		}
+		rows = append(rows, []string{
+			strVal(v, "number"), saved, docActor(v, "author_type", "author_id"),
+			action, oneLine(strVal(v, "message"), 60),
+		})
+	}
+	cli.PrintTable(os.Stdout, []string{"VERSION", "SAVED", "AUTHOR", "ACTION", "MESSAGE"}, rows)
+	return nil
+}
+
+func runDocRestore(cmd *cobra.Command, args []string) error {
+	number, _ := cmd.Flags().GetInt("version")
+	if number <= 0 {
+		return fmt.Errorf("--version is required: a version number from `multica doc history`")
+	}
+	base, _ := cmd.Flags().GetInt64("base-revision")
+	if base <= 0 {
+		return fmt.Errorf("--base-revision is required: pass the revision from `multica doc get`")
+	}
+	body := map[string]any{"base_revision": base, "action": "restore", "action_ref": number}
+	if v, _ := cmd.Flags().GetString("message"); v != "" {
+		body["message"] = v
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	id, err := resolveDocRef(ctx, client, args[0], false)
+	if err != nil {
+		return err
+	}
+	var doc map[string]any
+	if err := client.PatchJSON(ctx, "/api/docs/"+id, body, &doc); err != nil {
+		return docWriteError("restore doc", base, err)
+	}
+	delete(doc, "content")
+	output, _ := cmd.Flags().GetString("output")
+	return printDocSummary(doc, output)
+}
+
+func runDocCommentList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	id, err := resolveDocRef(ctx, client, args[0], false)
+	if err != nil {
+		return err
+	}
+	var result struct {
+		Comments []map[string]any `json:"comments"`
+	}
+	if err := client.GetJSON(ctx, "/api/docs/"+id+"/comments", &result); err != nil {
+		return fmt.Errorf("list doc comments: %w", err)
+	}
+
+	// Group replies under their root, keeping the server's chronological order.
+	includeResolved, _ := cmd.Flags().GetBool("include-resolved")
+	var roots []map[string]any
+	replies := map[string][]map[string]any{}
+	for _, c := range result.Comments {
+		if parent := strVal(c, "parent_id"); parent != "" {
+			replies[parent] = append(replies[parent], c)
+			continue
+		}
+		if includeResolved || strVal(c, "resolved_at") == "" {
+			roots = append(roots, c)
+		}
+	}
+	threads := make([]map[string]any, 0, len(result.Comments))
+	for _, root := range roots {
+		threads = append(threads, root)
+		threads = append(threads, replies[strVal(root, "id")]...)
+	}
+
+	if output, _ := cmd.Flags().GetString("output"); output == "json" {
+		return cli.PrintJSON(os.Stdout, threads)
+	}
+	rows := make([][]string, 0, len(threads))
+	for _, c := range threads {
+		replyTo, status, quote := strVal(c, "parent_id"), "", ""
+		if replyTo == "" {
+			replyTo, status, quote = "-", "open", oneLine(strVal(c, "anchor_quote"), 40)
+			if strVal(c, "resolved_at") != "" {
+				status = "resolved"
+			}
+		}
+		rows = append(rows, []string{
+			strVal(c, "id"), replyTo, docActor(c, "author_type", "author_id"),
+			status, quote, oneLine(strVal(c, "content"), 80),
+		})
+	}
+	cli.PrintTable(os.Stdout, []string{"ID", "REPLY TO", "AUTHOR", "STATUS", "QUOTE", "COMMENT"}, rows)
+	return nil
 }
 
 func printDocFolderSummary(folder map[string]any, output string) error {

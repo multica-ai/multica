@@ -12,7 +12,6 @@ import {
   CircleDashed,
   CircleDot,
   Filter,
-  MoreHorizontal,
   SlidersHorizontal,
   X,
 } from "@multica/ui/icons";
@@ -54,15 +53,14 @@ type Copy = {
   archive: string;
   archivedToast: string;
   runFailed: string;
-  /** The section's ⋯ menu: View archived first, then the bulk actions. */
-  menu: [string, ...string[]];
-  menuLabel: string;
+  /** The section header's tabs after the Inbox. */
   archivedTitle: string;
-  unarchive: string;
+  snoozedTitle: string;
+  restore: string;
   captions: Record<Phase, string>;
 };
 
-type Phase = "idle" | "start" | "opened" | "archived" | "archivedAgain" | "menu" | "archivedView";
+type Phase = "idle" | "start" | "opened" | "archived" | "archivedAgain" | "archivedView";
 
 const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
   en: {
@@ -119,10 +117,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     archive: "Archive",
     archivedToast: "Notification archived",
     runFailed: "Run failed",
-    menu: ["View archived", "Mark all as read", "Archive all read", "Archive completed", "Archive all"],
-    menuLabel: "Inbox actions",
     archivedTitle: "Archived",
-    unarchive: "Unarchive",
+    snoozedTitle: "Snoozed",
+    restore: "Move back to Inbox",
     captions: {
       idle: "Notifications that concern you sit at the top of the Work panel.",
       start: "Three unread notifications. Open the one where someone mentioned you.",
@@ -131,10 +128,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       archived:
         "The row left the Inbox and the next notification opened: the draft is in. Once you've read it, archive this one too (E). Archiving never changes the issue's status.",
       archivedAgain:
-        "That notification left too and the next one opened. The draft stays In Review until you change the issue's Status. Archived notifications are in the section's ⋯ menu. Click ⋯.",
-      menu: "The ⋯ menu holds View archived and the bulk actions. Click View archived.",
+        "That notification left too and the next one opened. The draft stays In Review until you change the issue's Status. Archived notifications have a tab of their own in the section header. Click Archived.",
       archivedView:
-        "Archived notifications keep their read state, and you can unarchive any of them here. Use Replay to watch again.",
+        "The section lists the archive now. Archived notifications keep their read state, and Move back to Inbox restores one. Use Replay to watch again.",
     },
   },
   zh: {
@@ -191,18 +187,18 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     archive: "归档",
     archivedToast: "已归档通知",
     runFailed: "运行失败",
-    menu: ["查看已归档", "全部标为已读", "归档全部已读", "归档已完成", "归档全部"],
-    menuLabel: "收件箱操作",
     archivedTitle: "已归档",
-    unarchive: "取消归档",
+    snoozedTitle: "已延后",
+    restore: "移回收件箱",
     captions: {
       idle: "和你有关的通知在工作面板的最上方。",
       start: "三条未读通知。打开有人 @你 的那一条。",
       opened: "任务打开并定位到那条评论。通知变为已读，但仍留在列表里。处理完点\"归档\"（E）。",
       archived: "这一行离开了收件箱，下一条通知自动打开：初稿到了。看完也点\"归档\"（E）。归档不会改变任务的状态。",
-      archivedAgain: "这条通知也归档了，下一条自动打开。初稿仍是审核中，直到你在任务的\"状态\"里修改。已归档的通知在分区的 ⋯ 菜单里。点 ⋯。",
-      menu: "⋯ 菜单里有\"查看已归档\"和批量操作。点\"查看已归档\"。",
-      archivedView: "已归档的通知保留已读状态，可以在这里取消归档。点右上角可以重新演示。",
+      archivedAgain:
+        "这条通知也归档了，下一条自动打开。初稿仍是审核中，直到你在任务的\"状态\"里修改。已归档的通知在分区标题的标签里。点\"已归档\"。",
+      archivedView:
+        "分区现在列出已归档的通知。它们保留已读状态，点\"移回收件箱\"即可恢复。点右上角可以重新演示。",
     },
   },
   "zh-Hant": {
@@ -259,18 +255,18 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     archive: "歸檔",
     archivedToast: "已歸檔通知",
     runFailed: "執行失敗",
-    menu: ["查看已歸檔", "全部標為已讀", "歸檔全部已讀", "歸檔已完成", "歸檔全部"],
-    menuLabel: "收件箱操作",
     archivedTitle: "已歸檔",
-    unarchive: "取消歸檔",
+    snoozedTitle: "已延後",
+    restore: "移回收件箱",
     captions: {
       idle: "和你有關的通知在工作面板的最上方。",
       start: "三條未讀通知。開啟有人 @你 的那一條。",
       opened: "任務開啟並定位到那條評論。通知變為已讀，但仍留在列表裡。處理完點\"歸檔\"（E）。",
       archived: "這一列離開了收件箱，下一條通知自動開啟：初稿到了。看完也點\"歸檔\"（E）。歸檔不會改變任務的狀態。",
-      archivedAgain: "這條通知也歸檔了，下一條自動開啟。初稿仍是審查中，直到你在任務的\"狀態\"裡修改。已歸檔的通知在分區的 ⋯ 選單裡。點 ⋯。",
-      menu: "⋯ 選單裡有\"查看已歸檔\"和批次操作。點\"查看已歸檔\"。",
-      archivedView: "已歸檔的通知保留已讀狀態，可以在這裡取消歸檔。點右上角可以重新播放。",
+      archivedAgain:
+        "這條通知也歸檔了，下一條自動開啟。初稿仍是審查中，直到你在任務的\"狀態\"裡修改。已歸檔的通知在分區標題的分頁裡。點\"已歸檔\"。",
+      archivedView:
+        "分區現在列出已歸檔的通知。它們保留已讀狀態，點\"移回收件箱\"即可復原。點右上角可以重新播放。",
     },
   },
   ja: {
@@ -327,16 +323,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     archive: "アーカイブ",
     archivedToast: "通知をアーカイブしました",
     runFailed: "実行失敗",
-    menu: [
-      "アーカイブ済みを表示",
-      "すべて既読にする",
-      "既読の項目をすべてアーカイブ",
-      "完了した項目をアーカイブ",
-      "すべてアーカイブ",
-    ],
-    menuLabel: "インボックスの操作",
     archivedTitle: "アーカイブ済み",
-    unarchive: "アーカイブ解除",
+    snoozedTitle: "スヌーズ中",
+    restore: "インボックスに戻す",
     captions: {
       idle: "あなたに関係する通知は作業パネルの一番上に並びます。",
       start: "未読の通知が 3 件あります。あなたがメンションされた通知を開きます。",
@@ -345,9 +334,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       archived:
         "行がインボックスから外れ、次の通知が開きました。初稿が届いています。読んだらこれも「アーカイブ」（E）します。アーカイブしてもタスクのステータスは変わりません。",
       archivedAgain:
-        "この通知もアーカイブされ、次の通知が開きました。タスクの「ステータス」を変えるまで、初稿はレビュー中のままです。アーカイブした通知はセクションの ⋯ メニューから見られます。⋯ をクリックします。",
-      menu: "⋯ メニューには「アーカイブ済みを表示」と一括操作があります。「アーカイブ済みを表示」をクリックします。",
-      archivedView: "アーカイブした通知は既読のまま残り、ここからアーカイブを解除できます。「もう一度」で最初から見られます。",
+        "この通知もアーカイブされ、次の通知が開きました。タスクの「ステータス」を変えるまで、初稿はレビュー中のままです。アーカイブした通知はセクション見出しのタブにあります。「アーカイブ済み」をクリックします。",
+      archivedView:
+        "セクションにアーカイブした通知が並びます。既読の状態はそのまま残り、「インボックスに戻す」で元に戻せます。「もう一度」で最初から見られます。",
     },
   },
   ko: {
@@ -404,10 +393,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     archive: "보관",
     archivedToast: "알림을 보관했습니다",
     runFailed: "실행 실패함",
-    menu: ["보관된 알림 보기", "모두 읽음으로 표시", "읽은 항목 모두 보관", "완료된 항목 보관", "모두 보관"],
-    menuLabel: "인박스 작업",
     archivedTitle: "보관됨",
-    unarchive: "보관 해제",
+    snoozedTitle: "미뤄둔 항목",
+    restore: "인박스로 되돌리기",
     captions: {
       idle: "나와 관련된 알림은 작업 패널 맨 위에 모입니다.",
       start: "읽지 않은 알림이 3개 있습니다. 누군가 나를 멘션한 알림을 여세요.",
@@ -416,9 +404,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       archived:
         "행이 인박스에서 빠지고 다음 알림이 열렸습니다. 초안이 도착했습니다. 읽고 나면 이것도 '보관'(E)하세요. 보관해도 태스크의 상태는 바뀌지 않습니다.",
       archivedAgain:
-        "이 알림도 보관되고 다음 알림이 열렸습니다. 태스크의 '상태'를 바꾸기 전까지 초안은 리뷰 중으로 남습니다. 보관된 알림은 섹션의 ⋯ 메뉴에서 볼 수 있습니다. ⋯을 클릭하세요.",
-      menu: "⋯ 메뉴에는 '보관된 알림 보기'와 일괄 작업이 있습니다. '보관된 알림 보기'를 클릭하세요.",
-      archivedView: "보관된 알림은 읽음 상태를 유지하고, 여기서 보관을 해제할 수 있습니다. '다시 보기'로 다시 볼 수 있습니다.",
+        "이 알림도 보관되고 다음 알림이 열렸습니다. 태스크의 '상태'를 바꾸기 전까지 초안은 리뷰 중으로 남습니다. 보관된 알림은 섹션 제목의 탭에 있습니다. '보관됨'을 클릭하세요.",
+      archivedView:
+        "이제 섹션에 보관된 알림이 나열됩니다. 보관된 알림은 읽음 상태를 유지하고, '인박스로 되돌리기'로 되돌릴 수 있습니다. '다시 보기'로 다시 볼 수 있습니다.",
     },
   },
   fr: {
@@ -475,16 +463,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
     archive: "Archiver",
     archivedToast: "Notification archivée",
     runFailed: "Exécution en échec",
-    menu: [
-      "Voir les archivées",
-      "Tout marquer comme lu",
-      "Archiver tout ce qui est lu",
-      "Archiver les éléments terminés",
-      "Tout archiver",
-    ],
-    menuLabel: "Actions de la boîte de réception",
     archivedTitle: "Archivées",
-    unarchive: "Désarchiver",
+    snoozedTitle: "Reportés",
+    restore: "Remettre dans la boîte de réception",
     captions: {
       idle: "Les notifications qui vous concernent sont en haut du panneau Travail.",
       start: "Trois notifications non lues. Ouvrez celle où quelqu'un vous a mentionné.",
@@ -493,10 +474,9 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
       archived:
         "La ligne a quitté la boîte de réception et la notification suivante s'est ouverte : le premier jet est arrivé. Une fois lu, archivez-le aussi (E). Archiver ne change jamais le statut de la tâche.",
       archivedAgain:
-        "Cette notification est partie à son tour et la suivante s'est ouverte. Le premier jet reste En relecture tant que vous ne changez pas le Statut de la tâche. Les notifications archivées sont dans le menu ⋯ de la section. Cliquez sur ⋯.",
-      menu: "Le menu ⋯ regroupe Voir les archivées et les actions groupées. Cliquez sur Voir les archivées.",
+        "Cette notification est partie à son tour et la suivante s'est ouverte. Le premier jet reste En relecture tant que vous ne changez pas le Statut de la tâche. Les notifications archivées ont leur propre onglet dans l'en-tête de la section. Cliquez sur Archivées.",
       archivedView:
-        "Les notifications archivées gardent leur état de lecture et peuvent être désarchivées ici. Utilisez Rejouer pour revoir la démo.",
+        "La section liste maintenant les archives. Les notifications archivées gardent leur état de lecture, et Remettre dans la boîte de réception en restaure une. Utilisez Rejouer pour revoir la démo.",
     },
   },
 };
@@ -509,7 +489,6 @@ const ARCHIVED: Record<Step, NoticeId[]> = {
   opened: [],
   archived: ["mention"],
   archivedAgain: ["mention", "draft"],
-  menu: ["mention", "draft"],
   archivedView: ["mention", "draft"],
 };
 const READ: Record<Step, NoticeId[]> = {
@@ -517,7 +496,6 @@ const READ: Record<Step, NoticeId[]> = {
   opened: ["assigned", "mention"],
   archived: ["assigned", "mention", "draft"],
   archivedAgain: ["assigned", "mention", "draft", "failed"],
-  menu: ["assigned", "mention", "draft", "failed"],
   archivedView: ["assigned", "mention", "draft", "failed"],
 };
 const OPEN: Record<Step, NoticeId | null> = {
@@ -525,7 +503,6 @@ const OPEN: Record<Step, NoticeId | null> = {
   opened: "mention",
   archived: "draft",
   archivedAgain: "failed",
-  menu: "failed",
   archivedView: null,
 };
 
@@ -637,6 +614,36 @@ function InboxBar({
   );
 }
 
+/** A tab in the Inbox section's header, as the product's Inbox · Snoozed · Archived. */
+function DemoTab({
+  label,
+  active,
+  count = 0,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  count?: number;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      disabled={!onClick}
+      onClick={onClick}
+      className={cn(
+        "flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5",
+        active ? "bg-accent text-foreground" : "text-muted-foreground enabled:hover:text-foreground",
+      )}
+    >
+      {label}
+      {count > 0 && <span className="text-brand tabular-nums">{count}</span>}
+    </button>
+  );
+}
+
 export function InboxDemo() {
   const t = useDemoCopy(copy);
   const [frameRef, visible] = useStartWhenVisible<HTMLElement>();
@@ -648,103 +655,89 @@ export function InboxDemo() {
   const unread = rows.filter((n) => !isRead(n.id)).length;
   const selected = t.notices.find((n) => n.id === OPEN[phase]) ?? null;
 
+  const archivedTab = phase === "archivedView";
+  const archivedRows = t.notices.filter((n) => ARCHIVED[phase].includes(n.id));
+
   const panel = (
     <div className="flex min-w-0 flex-col gap-0.5 bg-muted/30 p-1.5 sm:w-[46%] sm:shrink-0 sm:border-r">
       <div className="flex h-7 items-center gap-1 px-2">
-        <span className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">{t.inbox}</span>
+        <span role="tablist" aria-label={t.inbox} className="-ml-1.5 flex min-w-0 flex-1 items-center gap-0.5 text-caption font-medium">
+          <DemoTab label={t.inbox} active={!archivedTab} count={unread} />
+          <DemoTab label={t.snoozedTitle} active={false} />
+          <CoachMark active={visible && phase === "archivedAgain"} quiet ringClassName="rounded-md">
+            <DemoTab
+              label={t.archivedTitle}
+              active={archivedTab}
+              onClick={phase === "archivedAgain" ? () => setPhase("archivedView") : undefined}
+            />
+          </CoachMark>
+        </span>
         <span aria-hidden className="flex items-center gap-1.5 text-faint-foreground">
           <Filter className="size-3.5" />
           <SlidersHorizontal className="size-3.5" />
         </span>
-        <span className="relative">
-          <CoachMark active={visible && phase === "archivedAgain"} quiet ringClassName="rounded-md">
-            <button
-              type="button"
-              aria-label={t.menuLabel}
-              aria-expanded={phase === "menu"}
-              disabled={phase !== "archivedAgain"}
-              onClick={() => setPhase("menu")}
-              className={cn(
-                "flex size-5 items-center justify-center rounded-md text-faint-foreground",
-                phase === "menu" && "bg-accent text-foreground",
-              )}
-            >
-              <MoreHorizontal className="size-3.5" />
-            </button>
-          </CoachMark>
-          {phase === "menu" && (
-            <span className="absolute top-full right-0 z-30 sm:right-auto sm:left-0 mt-1 flex w-max min-w-44 flex-col rounded-lg border bg-popover p-1 text-popover-foreground shadow-md motion-safe:animate-in motion-safe:fade-in">
-              {t.menu.map((label, index) =>
-                index === 0 ? (
-                  <CoachMark key={label} active quiet ringClassName="rounded-md" className="flex w-full">
-                    <button
-                      type="button"
-                      onClick={() => setPhase("archivedView")}
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-caption hover:bg-accent"
-                    >
-                      <Archive aria-hidden className="size-3.5 text-muted-foreground" />
-                      {label}
-                    </button>
-                  </CoachMark>
-                ) : (
-                  <span key={label} className="px-2 py-1.5 text-caption text-muted-foreground">
-                    {label}
-                  </span>
-                ),
-              )}
-            </span>
-          )}
-        </span>
-        {unread > 0 && <span className="w-4 text-right text-caption font-medium text-brand tabular-nums">{unread}</span>}
       </div>
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-        {rows.map((notice) => {
-          const rowUnread = !isRead(notice.id);
-          const active = notice.id === selected?.id;
-          const clickable = visible && phase === "start" && notice.id === "mention";
-          return (
-            <li key={notice.id} className="m-0 p-0">
-              <CoachMark active={clickable} side="right" ringClassName="rounded-md" className="flex w-full">
-                <button
-                  type="button"
-                  disabled={!clickable}
-                  aria-current={active ? "page" : undefined}
-                  onClick={() => setPhase("opened")}
-                  className={cn(
-                    "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left motion-safe:animate-in motion-safe:fade-in",
-                    active ? "bg-accent" : "enabled:hover:bg-accent/50",
-                  )}
-                >
-                  <span className="mt-[3px] flex shrink-0">
-                    <DemoStatus status={statusOf(notice.id)} />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="flex min-w-0 items-center gap-2 leading-5">
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-body",
-                          rowUnread ? "font-medium text-foreground" : "text-muted-foreground",
-                        )}
-                      >
-                        {notice.title}
+        {archivedTab
+          ? archivedRows.map((notice) => (
+              <li
+                key={notice.id}
+                className="m-0 flex h-8 items-center gap-2 rounded-md px-2 motion-safe:animate-in motion-safe:fade-in"
+              >
+                <DemoStatus status={statusOf(notice.id)} />
+                <span className="min-w-0 flex-1 truncate text-body text-muted-foreground">{notice.title}</span>
+                <span title={t.restore} className="flex shrink-0 text-muted-foreground">
+                  <ArchiveRestore aria-label={t.restore} className="size-3.5" />
+                </span>
+              </li>
+            ))
+          : rows.map((notice) => {
+              const rowUnread = !isRead(notice.id);
+              const active = notice.id === selected?.id;
+              const clickable = visible && phase === "start" && notice.id === "mention";
+              return (
+                <li key={notice.id} className="m-0 p-0">
+                  <CoachMark active={clickable} side="right" ringClassName="rounded-md" className="flex w-full">
+                    <button
+                      type="button"
+                      disabled={!clickable}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => setPhase("opened")}
+                      className={cn(
+                        "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left motion-safe:animate-in motion-safe:fade-in",
+                        active ? "bg-accent" : "enabled:hover:bg-accent/50",
+                      )}
+                    >
+                      <span className="mt-[3px] flex shrink-0">
+                        <DemoStatus status={statusOf(notice.id)} />
                       </span>
-                      <span className="shrink-0 text-caption text-faint-foreground tabular-nums">{notice.time}</span>
-                    </span>
-                    <span className="mt-0.5 flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
-                      <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                        <RowAvatar name={notice.actor} agent={notice.agent} />
-                        <span className="min-w-0 flex-1 truncate">
-                          <span className="font-medium">{notice.actor}</span> {notice.detail}
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="flex min-w-0 items-center gap-2 leading-5">
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate text-body",
+                              rowUnread ? "font-medium text-foreground" : "text-muted-foreground",
+                            )}
+                          >
+                            {notice.title}
+                          </span>
+                          <span className="shrink-0 text-caption text-faint-foreground tabular-nums">{notice.time}</span>
+                        </span>
+                        <span className="mt-0.5 flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
+                          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                            <RowAvatar name={notice.actor} agent={notice.agent} />
+                            <span className="min-w-0 flex-1 truncate">
+                              <span className="font-medium">{notice.actor}</span> {notice.detail}
+                            </span>
+                          </span>
+                          {rowUnread && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand" />}
                         </span>
                       </span>
-                      {rowUnread && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand" />}
-                    </span>
-                  </span>
-                </button>
-              </CoachMark>
-            </li>
-          );
-        })}
+                    </button>
+                  </CoachMark>
+                </li>
+              );
+            })}
       </ul>
       <div aria-hidden className="mt-1 flex flex-col gap-0.5">
         {t.sections.map((label) => (
@@ -759,8 +752,10 @@ export function InboxDemo() {
 
   const detail = selected ? (
     <div key={selected.id} className="flex min-w-0 flex-1 flex-col motion-safe:animate-in motion-safe:fade-in">
-      <div className="flex h-10 items-center gap-2 border-b px-3">
-        <span className="shrink-0 text-caption text-muted-foreground">{selected.issue}</span>
+      <div className="flex h-10 items-center gap-1.5 border-b px-3 text-caption">
+        <span className="shrink-0 text-muted-foreground">{t.inbox}</span>
+        <ChevronRight aria-hidden className="size-3 shrink-0 text-faint-foreground" />
+        <span className="shrink-0 text-muted-foreground">{selected.issue}</span>
         <span className="min-w-0 flex-1 truncate text-label font-medium">{selected.title}</span>
       </div>
       <InboxBar
@@ -789,37 +784,6 @@ export function InboxDemo() {
           </DemoComment>
         )}
       </div>
-    </div>
-  ) : phase === "archivedView" ? (
-    <div className="flex min-w-0 flex-1 flex-col motion-safe:animate-in motion-safe:fade-in">
-      <div className="flex h-10 items-center gap-2 border-b px-3">
-        <Archive aria-hidden className="size-3.5 text-muted-foreground" />
-        <span className="text-label font-medium">{t.archivedTitle}</span>
-      </div>
-      <ul className="m-0 flex list-none flex-col gap-0.5 p-1.5">
-        {t.notices
-          .filter((n) => ARCHIVED[phase].includes(n.id))
-          .map((notice) => (
-            <li key={notice.id} className="m-0 flex items-start gap-2 rounded-md px-2 py-1.5">
-              <span className="mt-[3px] flex shrink-0">
-                <DemoStatus status={statusOf(notice.id)} />
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-body leading-5 text-muted-foreground">{notice.title}</span>
-                <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-caption leading-4 text-muted-foreground">
-                  <RowAvatar name={notice.actor} agent={notice.agent} />
-                  <span className="min-w-0 flex-1 truncate">
-                    <span className="font-medium">{notice.actor}</span> {notice.detail}
-                  </span>
-                </span>
-              </span>
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-caption text-muted-foreground">
-                <ArchiveRestore aria-hidden className="size-3.5" />
-                {t.unarchive}
-              </span>
-            </li>
-          ))}
-      </ul>
     </div>
   ) : (
     <div className="flex min-h-32 flex-1 items-center justify-center p-4 text-caption text-muted-foreground">

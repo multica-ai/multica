@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps, ReactNode } from "react";
-import { Archive } from "@multica/ui/icons";
+import { Archive, ArchiveRestore } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -15,7 +15,7 @@ import { InboxActorAvatar, InboxActorLine } from "./inbox-actor";
 import { useTimeAgo } from "./inbox-list-item";
 
 /**
- * The bar under the header of an issue opened from the Inbox: the one place
+ * The bar under the header of an issue the Inbox page has open: the one place
  * its notification lives, whatever state that is in. Open, it says why the
  * issue is here and offers what resolves it, the issue's own actions first,
  * then the notification's. Settled (archived, snoozed), it says so, with the
@@ -42,7 +42,7 @@ export function InboxBar({ settled = false, children }: { settled?: boolean; chi
 }
 
 /**
- * Reserves the 40px InboxBar slot while a cold issue opened from the Inbox
+ * Reserves the 40px InboxBar slot while a cold issue the Inbox page opened
  * loads, so the reading column below never shifts 40px when the issue lands.
  * When the Inbox list already holds the notification row, renders its real
  * actor and reason immediately.
@@ -169,5 +169,21 @@ export function InboxArchiveButton({ onClick }: { onClick: () => void }) {
       shortcut="archiveInboxItem"
       onClick={onClick}
     />
+  );
+}
+
+/** An archived notification's bar: why it was in the Inbox, and the way back into it. */
+export function InboxArchivedBar({ item, onRestore }: { item: InboxItem; onRestore: () => void }) {
+  const { t } = useT("inbox");
+  return (
+    <InboxBar settled>
+      <InboxBarReason item={item} />
+      <InboxBarButton
+        icon={<ArchiveRestore />}
+        label={t(($) => $.detail.restore)}
+        shortcut="archiveInboxItem"
+        onClick={onRestore}
+      />
+    </InboxBar>
   );
 }

@@ -232,6 +232,10 @@ type TaskContextForEnv struct {
 	// statuses and commands are the issue's real contract (MUL-8145). Servers
 	// that send no workflow leave it false and the brief unchanged.
 	HasProjectWorkflow bool
+	// ProjectWorkflowStatusMap is true when that block is a status map
+	// rather than per-step commands (MUL-9913): the brief then states the
+	// rules for choosing from the map. Only meaningful with HasProjectWorkflow.
+	ProjectWorkflowStatusMap bool
 	// ConnectedApps lists per-run external app capabilities mounted through
 	// MCP overlays. Rendered briefly so the agent can map app names such as
 	// Notion to the actual MCP server name (`composio`).

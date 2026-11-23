@@ -141,6 +141,8 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
+`issue comment add` がタイムアウトしたり接続が切れたりした場合でも、コメントはすでに保存されている可能性があります。エージェントの実行中であれば、同じコマンドをそのまま再実行して問題ありません。CLI は実行、issue、親コメント、内容、添付ファイルから冪等キーを生成し、サーバーは保存済みのコメントを返して二重に投稿しません。それ以外の場面では、毎回同じ `--idempotency-key <key>` を渡すと同じ保護が得られます。古いサーバーはこのキーを無視します。
+
 同じプロジェクト・同じ親タスクの下に、タイトルが同じ（大文字小文字と余分な空白は区別しない）未完了のタスクがすでにあると、`issue create` は作成を拒否してそのタスクを示します。それでも作る場合は `--allow-duplicate` を付けます。あるタスクを別のタスクの重複にするには `multica issue status MUL-124 cancelled --duplicate-of MUL-123` を使います。
 
 複数の PR を順番に作成するタスクでは、`issue create --title "..." --pr-auto-complete off` または `issue update <id> --pr-auto-complete off` で、マージ時も状態を維持できます。`--pr-auto-complete on` はワークスペースのルールを復元し、次の PR イベントから有効になります。`issue pull-requests <id>` は、PR が未関連付けでもタスクとワークスペースの設定、移行先の状態、判定結果を表示します。対応サーバーは作成トランザクション内で設定を保存し、旧サーバーには追加の PUT を送ります。失敗時は作成済み ID と再試行用の update コマンドが表示されるため、create を繰り返さないでください。
@@ -409,8 +411,10 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | コマンド | 用途 |
 | --- | --- |
 | `issue` | タスクの作成、更新、割り当て、検索。コメント、購読者、ラベル、プロパティ、ウェイクアップ、タイムライン、実行履歴の管理 |
-| `project` | プロジェクトとそのリソースを管理 |
+| `project` | プロジェクトとそのリソース、および使用するワークフローを管理 |
 | `inbox` | 自分の通知を読み取り、管理する：一覧、既読、アーカイブ、スヌーズ |
+| `workflow` | タスクのワークフロー（ステータスと各ステップの担当者）を管理 |
+| `issue-status` | ワークスペースのステータスカタログ（ステータス、色、アイコン）を管理 |
 | `label`、`property` | ワークスペースのラベルとカスタムプロパティを管理 |
 | `view` | 保存したビューを読み取り、ビューに表示されるタスクを一覧 |
 | `agent`、`skill`、`squad` | エージェント、スキル、スクワッドを管理 |
@@ -482,7 +486,8 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 | `issue` | `list` | タスクを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--updated-since` / `--updated-until`（RFC3339 の期間指定、両方必須）、`--metadata`（繰り返し可）、`--property`（繰り返し可、`"名前=値"` または `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` のような比較；`__none__` は未設定に一致）、`--limit`、`--offset`、`--sort`（`property:<名前または id>` に対応）、`--full-id`、`--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します）、`--fields`（JSON のみ；カンマ区切りで残すフィールドを指定） |
 | | `get <id>` | 単一のタスクを表示 | `--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します） |
 | | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可）、`--property`（繰り返し可）、`--allow-duplicate`（同じタイトルの未完了タスクがあっても作成） |
-| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start`、`--duplicate-of` |
+| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--description-base-revision`（`issue get` の値；説明が更新済みなら上書きを拒否）、`--position`、`--no-start`、`--duplicate-of` |
+| | `edit-description <id>` | 全文を書き換えずにタスク説明の該当テキストを正確に置換 | `--old` / `--old-file`（必須）、`--new` / `--new-file`（必須）、`--replace-all` |
 | | `batch update <id>...` | 複数のタスクに同じ変更を適用 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
 | | `delete <id>...` | 1 件以上のタスクを完全に削除 | `--yes` で確認を省略。タスク番号または完全な UUID を指定; `--dry-run` |
 | | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign`、`--no-start` |
@@ -507,10 +512,17 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 | | `cancel-task <task-id>` | 進行中またはキュー中の実行をキャンセル | `--issue` |
 | `project` | `get/create/update/delete` | プロジェクトを管理 | `create`: `--title`（必須）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（繰り返し可）、`--visibility`（`workspace` または `private`）、`--member`（繰り返し可、`--visibility private` と併用）；`update`: `--visibility`、`--member`（プロジェクトをプライベートにする場合も、すでにプライベートの場合もリストに追加） |
 | | `list` | プロジェクトを一覧表示・絞り込み | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
+| | `overview <id>` | プロジェクト詳細、進捗、リソース、実行中エージェント、最近のアクティビティを 1 回で取得 | `--output`（既定は `json`、または `table`） |
+| | `progress <id>` | プロジェクトの進捗、週次推移、完了見込み、内訳を表示 | `--history`、`--by`（`assignee` または `label`）、`--output`（`table` または `json`） |
+| | `activity <id>` | プロジェクト内のタスク変更を新しい順に表示 | `--limit`、`--before`（JSON 出力の `next_cursor`）、`--output`（`table` または `json`） |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
 | | `archive/restore <id>` | プロジェクトをアーカイブ／復元。アーカイブ済みのプロジェクトは `list` に表示されず、新しいタスクを受け付けず、そこにタスクを作成する自動化は一時停止される | `list --archived` でアーカイブ済みのプロジェクトのみを表示 |
 | | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
 | | `member list/add/remove` | プライベートプロジェクトのメンバーを一覧・追加・削除。追加と削除はリストに載っている `owner`/`admin` とプロジェクトのアクセス管理者のみ。エージェントはアクセス権を変更できない | `add <project-id> <member>...`、`remove <project-id> <member>`。メンバーは名前、メールアドレス、またはユーザー ID |
+| | `workflow get/set <project-id>` | プロジェクトで有効なワークフローを表示または切り替え | `set <project-id> <workflow\|default>`: `--map old=new`（繰り返し可）、`--dry-run` でステータス移行計画を表示。切り替えはタスクの再割り当てや実行の開始を行いません。管理者とプロジェクトリードのみ |
+| `workflow` | `list/get/create/update/delete` | ワークフローを管理。`get` などは ID、ID プレフィックス、正確な名前、または `default` を受け付けます。ワークフローが宣言するステータスはワークスペースのカタログ項目で、`issue-status` で編集します | `create` / `update`: `--name`、`--description`、`--steps-file`（ステップの JSON 配列；全置換）；`update`: `--map old=new`（繰り返し可）、`--dry-run`。編集・削除はワークフロー所有者とワークスペース管理者のみ。プロジェクトで使用中のワークフローは削除不可 |
+| | `handoff set <workflow> <status-key>` | 1 つのステップの担当者、指示、次・戻し先ステータスを設定（未指定項目は維持） | `--handler`（`none`、`project_lead`、`creator`、またはメンバー／エージェント／スクワッドの名前・UUID）、`--instructions` / `--instructions-file`、`--next`、`--back`、`--copy-for-project` |
+| `issue-status` | `list/get/create/update/archive` | すべてのワークフローが参照するワークスペースのステータスカタログを管理。タスクの現在ステータス変更は `issue status` を使用 | `create`: `--name`、`--category`、`--color`、`--key`、`--icon`；`update`: `--name`、`--description`、`--color`、`--icon`（空文字でカテゴリ既定に戻す）、`--position`；`list`: `--include-archived`。変更はワークスペースの owner / admin のみ |
 | `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | `list`: `--resource-type`（`issue` または `skill`）、`--full-id`；`create`: `--name`、`--color`、`--resource-type`（`issue` または `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
 | `view` | `list/get/issues/create/update/duplicate/delete` | 開けるビュー（自分のものとワークスペースで共有されたもの）を読み取り、`issues` でビューに表示されるタスクを保存された並び順で一覧（保存されたフィルターはすべてサーバー側で適用）。`create`・`update`・`duplicate`・`delete` はアプリと同じ形式でビューを書き込むため、サイドバーに表示され、アプリで引き続き編集できます。`update` は指定した項目だけを変更し、読み取り後に他の人が変更したビューは上書きせずに拒否します。変更・削除できるのは所有者（共有ビューはワークスペースのオーナーと管理者も）だけです。エージェントの実行中は、ビューと「自分」の条件はランタイム所有者のものになります | `<view>` は ID、ID プレフィックス、または完全な名前を受け付けます；`list`: `--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`: `--limit`（最大 100）、`--cursor`（前のページの `next_cursor`）、`--today`（相対的な期日フィルターの基準日、既定は今日）、`--fields`（JSON のみ）、`--full-id`；`create`: `--name`、`--scope`、`--project`、`--scope-variant`、`--visibility`；`create/update/duplicate` のフィルター: `--status`、`--priority`、`--assignee`、`--creator`、`--label`、`--project-filter`、`--property "Name=Value"`、`--negate <filter>` など；表示: `--view-mode`、`--grouping`、`--sort`、`--direction`、`--show-sub-issues` など；`--definition-file`、`--clear-filters`、`--dry-run` |
@@ -529,10 +541,10 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 | | `mcp list/add/update/remove` | ワークスペースの MCP サーバーライブラリを管理 | 書き込みは owner/admin のみ。ここに追加したサーバーはどのエージェントにも割り当てられません — `multica agent mcp add` で割り当てます。`list` は名前と transport のみを表示し、保存されたエントリは書き込み専用でどのロールにも返りません。`--server-config-file` / `--server-config-stdin` はトークンをシェル履歴から守ります |
 | | `member list/invite <email>` | メンバーの表示と招待 | `invite`: `--role`（member または admin。デフォルトは member） |
 | `repo` | `list/add/remove/checkout` | ワークスペースのリポジトリを管理し、ローカルにチェックアウト | `--url`（繰り返し可）；`checkout`: `--ref` |
-| `skill` | `list/get/create/update/delete` | スキルを管理 | |
+| `skill` | `list/get/create/update/delete` | スキルを管理 | `get`: `--with-content`（既定はメタデータと `revision` のみ）；`update`: `--base-revision`（`skill get` の値；更新済みなら HTTP 409 で上書きを拒否） |
 | | `import` | URL またはローカルファイルからスキルをインポート | `--url` / `--file`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`。デフォルトは `fail`） |
 | | `search <query>` | スキルを検索 | |
-| | `files list/upsert/delete <skill-id>` | スキル内のファイルを管理 | |
+| | `files list/upsert/delete <skill-id>` | スキル内のファイルを管理 | `list`: `--with-content`；`upsert` / `delete`: `--base-revision`（更新済みなら HTTP 409 で上書きを拒否） |
 | | `label list/add/remove <skill-id>` | スキルのラベルを管理 | `add` / `remove`: `<label-id>` は完全な UUID または短いプレフィックス |
 | `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | |
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |

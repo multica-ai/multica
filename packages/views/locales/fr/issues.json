@@ -610,7 +610,8 @@
     "workdir_path_copy_failed": "Échec de la copie du chemin du répertoire de travail",
     "workdir_path_unavailable": "Aucun répertoire de travail local pour l'instant — cette tâche n'a pas encore été exécutée par un agent local",
     "pull_requests_empty_title": "Aucune pull request associée.",
-    "guest_readonly_note": "Les invités peuvent consulter et commenter, mais pas modifier les propriétés de la tâche."
+    "guest_readonly_note": "Les invités peuvent consulter et commenter, mais pas modifier les propriétés de la tâche.",
+    "open_issue_page": "Ouvrir la page de la tâche"
   },
   "timeline": {
     "loading": "Chargement...",
@@ -1741,7 +1742,6 @@
       "target_squad": "Squad · le leader répartit",
       "target_member": "Membre",
       "instructions_hint": "Envoyées au responsable avec cette exécution, avec la description et les commentaires de la tâche.",
-      "next_hint": "Le responsable met directement à jour le statut et ne la renvoie que pour une reprise, pas en cas de blocage. La fin d'une exécution ne change jamais le statut automatiquement.",
       "preview_brief": "Aperçu des consignes de l’agent",
       "preview_title": "Consignes de l’étape « {{status}} »",
       "preview_description": "Ce que reçoit l’exécution du responsable quand une tâche entre dans cette étape. Pas besoin d’enregistrer pour prévisualiser.",
@@ -1923,8 +1923,7 @@
       "all_issues": "Toutes les tâches",
       "my_work": "Mon travail",
       "working": "En cours d'exécution",
-      "subscribed": "Abonnements",
-      "snoozed": "Reportés"
+      "subscribed": "Abonnements"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",

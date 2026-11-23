@@ -593,7 +593,8 @@
     "load_failed": "No se pudo cargar la tarea.",
     "load_retry": "Reintentar",
     "not_found_title": "Tarea no encontrada",
-    "guest_readonly_note": "Los invitados pueden ver y comentar, pero no cambiar las propiedades de la tarea."
+    "guest_readonly_note": "Los invitados pueden ver y comentar, pero no cambiar las propiedades de la tarea.",
+    "open_issue_page": "Abrir la página de la tarea"
   },
   "timeline": {
     "loading": "Cargando...",
@@ -1734,7 +1735,6 @@
       "target_squad": "Squad · el líder reparte",
       "target_member": "Miembro",
       "instructions_hint": "Se envía al responsable con esta ejecución, junto con la descripción y los comentarios de la tarea.",
-      "next_hint": "El responsable actualiza el estado directamente y la devuelve solo para rehacer trabajo, no por bloqueos. Terminar una ejecución nunca cambia el estado automáticamente.",
       "preview_brief": "Ver el encargo del agente",
       "preview_title": "Encargo del paso “{{status}}”",
       "preview_description": "Lo que recibe la ejecución del responsable cuando una tarea entra en este paso. No hace falta guardar los cambios para verlo.",
@@ -1923,8 +1923,7 @@
       "all_issues": "Todas las tareas",
       "my_work": "Mi trabajo",
       "working": "En ejecución",
-      "subscribed": "Suscritas",
-      "snoozed": "Pospuestos"
+      "subscribed": "Suscritas"
     },
     "untitled": "Vista sin título",
     "copy_name": "{{name}} (copia)",

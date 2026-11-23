@@ -112,6 +112,21 @@ var corsExposedHeaders = []string{
 	handler.HeaderDashboardHistoryLimit,
 }
 
+// logSecretboxGateDisabled explains why a secretbox-gated integration stayed
+// off. A key that reached the process but fails to decode (invalid base64,
+// wrong length) is an operator error the old blanket "not set" message hid:
+// the operator reads "not set", goes to debug their env plumbing, and the real
+// reason — the value arrived and was simply invalid — never surfaces
+// (#9036). Distinguish the two so the log answers the question the operator
+// will actually ask next.
+func logSecretboxGateDisabled(label, envVar string, err error) {
+	if os.Getenv(envVar) != "" {
+		slog.Warn(label+" disabled ("+envVar+" is set but invalid)", "reason", err)
+		return
+	}
+	slog.Info(label + " disabled (" + envVar + " not set)")
+}
+
 func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {
 	r.Get(publicapiv1.PathContext, h.GetPluginContext)
 	r.Get(publicapiv1.PathIssue, h.GetPluginIssue)
@@ -476,6 +491,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Error("live doc editing disabled", "error", err)
 	}
 	h.Collab = collabClient
+	if collabClient != nil {
+		registerCollabListeners(bus, collabClient)
+	}
 	h.ThemeStore = themeStoreFromEnv()
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
@@ -797,7 +815,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			}
 		}
 	} else {
-		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
+		logSecretboxGateDisabled("lark integration", "MULTICA_LARK_SECRET_KEY", err)
 	}
 
 	// Slack integration. Multi-tenant B2 model (MUL-3666): Multica hosts ONE
@@ -904,7 +922,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			slog.Info("slack integration enabled (BYO per-installation socket mode)")
 		}
 	} else {
-		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
+		logSecretboxGateDisabled("slack integration", "MULTICA_SLACK_SECRET_KEY", err)
 	}
 
 	// DingTalk uses one outbound Stream connection per BYO installation. The
@@ -954,7 +972,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			slog.Info("dingtalk integration enabled (BYO per-installation stream mode)")
 		}
 	} else {
-		slog.Info("dingtalk integration disabled (MULTICA_DINGTALK_SECRET_KEY not set)")
+		logSecretboxGateDisabled("dingtalk integration", "MULTICA_DINGTALK_SECRET_KEY", err)
 	}
 
 	// WeCom smart-bot integration ("智能机器人" / aibot). Per-installation
@@ -1265,7 +1283,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			}
 		}
 	} else {
-		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
+		logSecretboxGateDisabled("wecom integration", "MULTICA_WECOM_SECRET_KEY", err)
 	}
 
 	// WeChat iLink needs only an at-rest key; users authorize their bot by QR.
@@ -1290,7 +1308,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			slog.Info("weixin integration enabled (QR login and long polling)")
 		}
 	} else {
-		slog.Info("weixin integration disabled (MULTICA_WEIXIN_SECRET_KEY not set)")
+		logSecretboxGateDisabled("weixin integration", "MULTICA_WEIXIN_SECRET_KEY", err)
 	}
 
 	// ShareCRM (纷享销客) uses one outbound SSE connection per BYO installation.
@@ -1333,7 +1351,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			slog.Info("sharecrm integration enabled (BYO per-installation SSE mode)")
 		}
 	} else {
-		slog.Info("sharecrm integration disabled (MULTICA_SHARECRM_SECRET_KEY not set)")
+		logSecretboxGateDisabled("sharecrm integration", "MULTICA_SHARECRM_SECRET_KEY", err)
 	}
 
 	// Telegram integration. Same shape as Slack: BYO bot token pasted at
@@ -1402,7 +1420,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			slog.Info("telegram integration enabled (per-installation long polling)")
 		}
 	} else {
-		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
+		logSecretboxGateDisabled("telegram integration", "MULTICA_TELEGRAM_SECRET_KEY", err)
 	}
 
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
@@ -1515,7 +1533,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			slog.Info("vcs integration enabled")
 		}
 	} else {
-		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
+		logSecretboxGateDisabled("vcs integration", "MULTICA_VCS_SECRET_KEY", err)
 	}
 
 	// Plugin secrets use a dedicated deployment key. Keeping this separate from
@@ -1542,7 +1560,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			slog.Info("Plugin secret encryption enabled")
 		}
 	} else {
-		slog.Info("Plugin secrets disabled (MULTICA_PLUGIN_SECRET_KEY not set)")
+		logSecretboxGateDisabled("Plugin secrets", "MULTICA_PLUGIN_SECRET_KEY", err)
 	}
 
 	// Hook engine. Event-triggered hooks are dispatched off the bus onto a
@@ -2331,6 +2349,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
 					r.Post("/comments", h.CreateComment)
+					r.Get("/comments/idempotent", h.LookupIdempotentComment)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/workflow-handoff", h.PreviewWorkflowHandoff)

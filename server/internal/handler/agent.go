@@ -375,6 +375,9 @@ type TaskIssueStatusData struct {
 // in the per-turn prompt, never in the cached runtime brief.
 type TaskProjectWorkflowData struct {
 	Brief string `json:"brief"`
+	// StatusMap marks a status-map brief, which the daemon pairs with the
+	// status-map rules; without it the brief lists per-step commands.
+	StatusMap bool `json:"status_map,omitempty"`
 	// stepMoved selects the server-side leader briefing without changing the wire.
 	stepMoved bool
 }

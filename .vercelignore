@@ -21,6 +21,8 @@ _features
 /Dockerfile.web
 /Makefile
 /*.md
+# apps/docs embeds this file with <include> (content/docs/self-hosting-ai.mdx).
+!/SELF_HOSTING_AI.md
 /docker-compose*.yml
 /playwright.config.ts
 /skills-lock.json

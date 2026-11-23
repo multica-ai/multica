@@ -157,6 +157,41 @@ async function expectGuestProjectMenu(page: Page, seen: PageWatch, title: string
   await expectClean(seen);
 }
 
+/** A guest's whole issue menu: the server lets it change nothing about the issue. */
+const GUEST_ISSUE_MENU = [
+  "Open in new tab",
+  "Open in Desktop",
+  "Pin to sidebar",
+  "Copy link",
+  "Copy link with title",
+  "Copy issue ID",
+];
+
+/** The palette's issue commands a guest keeps, mirroring the server's guest allowlist. */
+const GUEST_ISSUE_COMMANDS = [
+  "issue-copy-link",
+  "issue-copy-identifier",
+  "issue-pin",
+  "issue-subscribe",
+  "issue-fold-comments",
+  "issue-unfold-comments",
+];
+
+function issueRow(page: Page, title: string) {
+  return page.locator('[data-mc="issue-row"]').filter({ hasText: title });
+}
+
+/** Board cards cannot be selected; list rows can. */
+async function showAsList(page: Page) {
+  await page.getByRole("button", { name: "Display", exact: true }).click();
+  const popover = page.locator("[data-slot=popover-content]");
+  const list = popover.getByRole("button", { name: "List", exact: true });
+  await list.click();
+  await expect(list).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+}
+
 test.describe("as a guest", () => {
   test("Inbox and the Work panel show only what is shared", async ({ page }) => {
     const seen = await openAsGuest(page, `/${slug}/inbox`);
@@ -174,6 +209,8 @@ test.describe("as a guest", () => {
     await expectNoMemberActions(page);
 
     await inbox.getByText(fixture.issues.review.title, { exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/${slug}/inbox\\?issue=${fixture.issues.review.id}`));
+    await page.getByRole("button", { name: "Toggle right sidebar" }).click();
     await expect(page.getByText("Guests can view and comment, but cannot change issue properties.")).toBeVisible();
     await expectClean(seen);
     await expectNoMemberActions(page);
@@ -215,6 +252,79 @@ test.describe("as a guest", () => {
       await expectNoMemberActions(page);
     });
   }
+
+  test("an issue's right-click menu only opens, pins and copies", async ({ page }) => {
+    const { shared } = fixture.projects;
+    const seen = await openAsGuest(page, `/${slug}/projects/${shared.id}?tab=issues`);
+    const card = page.locator("[data-board-card]").filter({ hasText: fixture.issues.review.title });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expectClean(seen);
+
+    await card.click({ button: "right" });
+    const menu = page.getByRole("menu");
+    // Opening the menu used to load the issue's runs and the quick actions,
+    // both refused to a guest (MUL-9883).
+    await expect(menu.getByRole("menuitem")).toHaveText(GUEST_ISSUE_MENU);
+    await expectClean(seen);
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+  });
+
+  test("a selection only copies links", async ({ page }) => {
+    const { shared } = fixture.projects;
+    const seen = await openAsGuest(page, `/${slug}/projects/${shared.id}?tab=issues`);
+    await expect(page.getByText(fixture.issues.review.title).first()).toBeVisible({ timeout: 30_000 });
+    await showAsList(page);
+
+    for (const key of ["review", "export"] as const) {
+      const row = issueRow(page, fixture.issues[key].title);
+      await row.hover();
+      await row.getByRole("checkbox").check();
+    }
+    const bar = page.getByRole("toolbar", { name: "2 selected" });
+    await expect(bar).toBeVisible();
+    await expect(bar.getByRole("button")).toHaveCount(2);
+    await expect(bar.getByRole("button", { name: "Clear selection" })).toBeVisible();
+    await expect(bar.getByRole("button", { name: "Copy links" })).toBeVisible();
+    await expectClean(seen);
+
+    await issueRow(page, fixture.issues.review.title).click({ button: "right" });
+    const menu = page.getByRole("menu");
+    await expect(menu.getByRole("menuitem")).toHaveText(["Copy links", "Clear selection"]);
+    await expectClean(seen);
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+  });
+
+  test("the command palette offers an issue's guest commands and searches cleanly", async ({ page }) => {
+    const issue = fixture.issues.review;
+    const seen = await openAsGuest(page, `/${slug}/issues/${issue.identifier}`);
+    await expect(page.getByText(issue.title).first()).toBeVisible({ timeout: 30_000 });
+    await expectClean(seen);
+
+    await page.keyboard.press("ControlOrMeta+k");
+    const input = page.getByPlaceholder("Search, or type what needs doing...");
+    await expect(input).toBeVisible();
+    await input.fill(">");
+    const issueCommands = page.locator('[cmdk-item][data-value^="command:context-issue:"]');
+    await expect
+      .poll(() => issueCommands.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-value")).sort()))
+      .toEqual(GUEST_ISSUE_COMMANDS.map((id) => `command:context-issue:${id}`).sort());
+    // The global commands are listed too, so their absence below is not vacuous.
+    await expect(page.getByRole("option", { name: "Change theme..." })).toBeVisible();
+    for (const name of ["New issue", "New project", "New autopilot", "Chat with an agent"]) {
+      await expect(page.getByRole("option", { name, exact: true })).toHaveCount(0);
+    }
+    await expectClean(seen);
+
+    // Typing loads the autopilot, skill and doc lists and searches docs on the
+    // server, all refused to a guest.
+    await input.fill("sign-up");
+    await expect(page.getByRole("option", { name: new RegExp(issue.title) }).first()).toBeVisible();
+    // The doc search fires DOC_SEARCH_DEBOUNCE_MS (300 ms) after the last keystroke.
+    await page.waitForTimeout(500);
+    await expectClean(seen);
+  });
 
   test("a project that is not shared is not found", async ({ page }) => {
     const { id } = fixture.projects.internal;

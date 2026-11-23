@@ -63,6 +63,12 @@ type CLIConfig struct {
 	// MULTICA_DAEMON_MAX_CONCURRENT_TASKS env, this field, default.
 	MaxConcurrentTasks int `json:"max_concurrent_tasks,omitempty"`
 
+	// Daemon log rotation overrides. Zero means unset; valid environment values
+	// take precedence, followed by these fields, then the 20 MB / 5 / 30 defaults.
+	DaemonLogMaxSizeMB  int `json:"daemon_log_max_size_mb,omitempty"`
+	DaemonLogMaxBackups int `json:"daemon_log_max_backups,omitempty"`
+	DaemonLogMaxAgeDays int `json:"daemon_log_max_age_days,omitempty"`
+
 	// PollInterval is how often the daemon polls the server for new tasks
 	// (Go duration string, e.g. "10s", "500ms"). Same persist-once
 	// motivation as MaxConcurrentTasks. Empty ("") means "not set — use
@@ -90,6 +96,8 @@ type CLIConfig struct {
 	// flag, MULTICA_DAEMON_HEARTBEAT_INTERVAL env, this field,
 	// DefaultHeartbeatInterval.
 	HeartbeatInterval string `json:"heartbeat_interval,omitempty"`
+
+	LogLevel string `json:"log_level,omitempty"`
 
 	// AgentTimeout is the absolute wall-clock cap per agent run (Go
 	// duration string). Unlike the other duration knobs, "0s" is a

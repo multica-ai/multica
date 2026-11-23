@@ -84,6 +84,11 @@ const (
 	// the server leave out the workflow brief's lines that override those
 	// rules; an older daemon still states them, so it keeps getting them.
 	DaemonCapabilityWorkflowStatusRulesV1 = "workflow-status-rules-v1"
+	// DaemonCapabilityWorkflowStatusMapV1 advertises that the daemon's
+	// runtime brief states the status-map rules for an issue whose claim
+	// carries a status-map workflow brief (MUL-9913). Without it the server
+	// keeps sending the per-step command brief those daemons point at.
+	DaemonCapabilityWorkflowStatusMapV1 = "workflow-status-map-v1"
 	// DaemonCapabilityTaskSupplementAuthorV1 is sent when claiming a
 	// supplement: the daemon renders the claim's author_type, so an agent's
 	// message is presented as an agent's. Without it the server marks an

@@ -90,7 +90,6 @@ type ListConnectedAccountsRequest struct {
 type ConnectedAccount struct {
 	ID           string         `json:"id"`
 	UserID       string         `json:"user_id"`
-	AuthConfigID string         `json:"auth_config_id"`
 	AuthConfig   AuthConfigRef  `json:"auth_config"`
 	Toolkit      Toolkit        `json:"toolkit"`
 	Status       string         `json:"status"`
@@ -102,7 +101,7 @@ type ConnectedAccount struct {
 }
 
 // AuthConfigRef is the nested auth_config object Composio returns on connected
-// accounts. Some responses also include the older top-level auth_config_id.
+// accounts, the only place a connected account names its auth config.
 type AuthConfigRef struct {
 	ID                string `json:"id"`
 	AuthScheme        string `json:"auth_scheme,omitempty"`

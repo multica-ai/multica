@@ -1578,6 +1578,10 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	rt, lookupErr := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceHeartbeatHTTP, runtimeUUID)
 	runtimeLookupMs = time.Since(lookupStart).Milliseconds()
 	if lookupErr != nil {
+		if writeQueryCancellation(w, r, lookupErr) {
+			outcome = "request_canceled"
+			return
+		}
 		// Only pgx.ErrNoRows means the runtime row is gone. Daemon reads this
 		// 404 as a signal to drop the stale runtime locally; treating a
 		// transient DB error the same way would force daemons to self-cleanup
@@ -3330,10 +3334,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// Resolved before the leader briefing, which words the owning
 		// leader's status moves by it (MUL-8145).
 		legacyRuntimeRules := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusRulesV1)
-		projectWorkflow := h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules)
+		stepCommands := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusMapV1)
+		projectWorkflow := h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules, stepCommands)
 		leaderWorkflow := leaderNoWorkflow
 		if projectWorkflow != nil {
 			leaderWorkflow = leaderWorkflowCurrentDaemon
+			if projectWorkflow.StatusMap {
+				leaderWorkflow = leaderWorkflowStatusMap
+			}
 			if projectWorkflow.stepMoved {
 				leaderWorkflow = leaderWorkflowStepMoved
 			} else if legacyRuntimeRules {
@@ -5782,6 +5790,9 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 		// database failures distinct so a brief outage cannot kill healthy work.
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		if writeQueryCancellation(w, r, err) {
 			return
 		}
 		slog.Warn("get agent task status failed", "task_id", taskID, "error", err)

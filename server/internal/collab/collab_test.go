@@ -118,7 +118,41 @@ func TestClientMapsServiceResponses(t *testing.T) {
 	}
 
 	srv.Close()
-	if err = client.Flush(ctx, DocumentName("abc")); !errors.Is(err, ErrUnavailable) {
+	if _, err = client.Flush(ctx, DocumentName("abc")); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unreachable err = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestRevalidate(t *testing.T) {
+	var gotPath, gotSecret string
+	var got RevalidateRequest
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotSecret = r.URL.Path, r.Header.Get(SecretHeader)
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"asked":1}`))
+	}))
+	defer srv.Close()
+	client, err := NewClient(srv.URL, "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	req := RevalidateRequest{WorkspaceID: "ws-1", Actor: &Actor{Type: "member", ID: "u-1"}}
+	if err := client.Revalidate(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/internal/revalidate" || gotSecret != "s3cret" || got.WorkspaceID != "ws-1" || got.Actor == nil || got.Actor.ID != "u-1" {
+		t.Fatalf("request = %s %q %+v", gotPath, gotSecret, got)
+	}
+
+	status = http.StatusBadRequest
+	if err := client.Revalidate(ctx, req); err == nil {
+		t.Fatal("a refused revalidate must return an error")
+	}
+	srv.Close()
+	if err := client.Revalidate(ctx, req); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("unreachable err = %v, want ErrUnavailable", err)
 	}
 }

@@ -10,11 +10,11 @@ La boîte de réception rassemble l'activité de travail qui vous concerne et si
 
 ## Où la trouver
 
-La boîte de réception est une section du panneau **Travail**, sous les épingles et au-dessus des vues et des projets ; sans épingle, c'est la première section. Le nombre de non-lus s'affiche à côté du titre de la section et en badge sur **Travail** dans la barre d'applications ; un clic droit sur **Travail** propose **Tout marquer comme lu**.
+La boîte de réception est une section du panneau **Travail**, sous les épingles et au-dessus des vues et des projets ; sans épingle, c'est la première section. Son en-tête porte trois onglets : **Boîte de réception**, **Reportés** et **Archivées**. Seul l'onglet ouvert affiche son nom ; les deux autres sont des icônes, nommées au survol. Sélectionner à nouveau l'onglet ouvert replie la section. Le nombre de non-lus s'affiche à côté de **Boîte de réception** et en badge sur **Travail** dans la barre d'applications ; un clic droit sur **Travail** propose **Tout marquer comme lu**.
 
-La section affiche une ligne par tâche, de la plus récente à la plus ancienne, lues et non lues confondues. Une ligne montre le statut de la tâche, son titre et l'heure, et qui a fait quoi ; un point signale une ligne non lue. Survolez une ligne pour ouvrir une carte avec le titre complet, le commentaire, et **Ouvrir**, **Marquer comme lu** et **Archiver**.
+L'onglet **Boîte de réception** affiche une ligne par tâche, de la plus récente à la plus ancienne, lues et non lues confondues. Une ligne montre le statut de la tâche, son titre et l'heure, et qui a fait quoi sur une deuxième ligne ; un point signale une ligne non lue. Activez **Lignes compactes** dans les réglages d'affichage pour garder chaque ligne sur une seule ligne. Survolez une ligne pour ouvrir une carte avec le titre complet, le commentaire, et **Ouvrir**, **Marquer comme lu** et **Archiver**.
 
-Sur téléphone, le panneau Travail se trouve dans le tiroir. Sa section Boîte de réception se termine par **Toutes les notifications**, qui ouvre la page Boîte de réception avec sa propre liste et ses filtres.
+Sur téléphone, le panneau Travail se trouve dans le tiroir. Sa section Boîte de réception se termine par **Toutes les notifications**, qui ouvre la page Boîte de réception avec sa propre liste, les mêmes trois onglets et ses filtres.
 
 ## Ce qui arrive dans la boîte de réception
 
@@ -90,11 +90,11 @@ Une exécution d'agent autorisée utilise son identifiant d'exécution pour tout
 
 ## Traiter les notifications
 
-Cliquez sur une ligne pour ouvrir sa tâche au commentaire ou à la demande d'application dont parle la notification. La ligne reste en surbrillance tant que la tâche est ouverte, et un nouveau clic vous ramène à cet endroit. Ouvrir la tâche marque la notification comme lue, et la ligne reste dans la liste. Les notifications sans tâche, comme les mises en pause d'automatisation et les résultats de création rapide, s'ouvrent sur la page Boîte de réception.
+Cliquez sur une ligne pour ouvrir la notification sur la page Boîte de réception, au commentaire dont elle parle. Toutes les notifications s'ouvrent là, y compris celles sans tâche, comme les mises en pause d'automatisation et les résultats de création rapide. La ligne reste en surbrillance tant que la notification est ouverte, et un nouveau clic vous ramène à cet endroit. L'ouvrir la marque comme lue, et la ligne reste dans la liste. Au-dessus de la tâche, **Boîte de réception** ramène à la liste, et **Ouvrir la page de la tâche** (↗) ouvre la tâche sur sa propre page, sans la barre de la boîte de réception.
 
 <InboxDemo />
 
-Une tâche ouverte depuis la boîte de réception affiche une barre sous son en-tête. Elle indique qui a fait quoi, et quand, puis propose ce qui règle d'habitude la notification :
+La tâche affiche une barre sous son en-tête. Elle indique qui a fait quoi, et quand, puis propose ce qui règle d'habitude la notification :
 
 - **Statut**, **Assigné à** et **Actions rapides** modifient la tâche elle-même, comme ses propriétés. Les actions rapides apparaissent dès que l'espace de travail en a.
 - **Reporter** (`H`) retire la tâche de votre boîte de réception jusqu'à l'heure choisie et ouvre la suivante. Voir « Reporter une tâche » ci-dessous.
@@ -103,16 +103,16 @@ Une tâche ouverte depuis la boîte de réception affiche une barre sous son en-
 
 La suivante est la ligne suivante que la section affiche avec ses filtres actuels : vous parcourez ainsi la boîte de réception sans revenir à la liste.
 
-Le bouton de filtre dans l'en-tête de la section restreint la liste par type de notification, date de réception et expéditeur, ou par statut et priorité de la tâche. Une section filtrée garde le bouton visible, et **Effacer les filtres** la réinitialise.
+Sur les onglets **Boîte de réception** et **Archivées**, **Filtrer**, dans le menu ⋯ de la section, restreint la liste par type de notification, date de réception et expéditeur, ou par statut et priorité de la tâche. Tant que des filtres sont actifs, un bouton de filtre avec leur nombre s'affiche dans l'en-tête de la section et permet de les rouvrir ; **Effacer les filtres** les réinitialise.
 
-Le menu ⋯ de la section regroupe **Voir les archivées** et les actions groupées :
+Dans l'onglet **Boîte de réception**, le menu ⋯ de la section regroupe les actions groupées :
 
 - **Tout marquer comme lu** ;
 - **Archiver tout ce qui est lu** ;
 - **Archiver les éléments terminés**, pour les tâches des catégories `done` ou `closed` ;
 - **Tout archiver**.
 
-**Voir les archivées** ouvre les notifications archivées. D'autres éléments se chargent au fil du défilement, et les filtres s'appliquent à l'ensemble des archives, y compris aux éléments pas encore chargés. Les notifications archivées conservent leur état de lecture : **Désarchiver** (ou `E`) en rétablit une exactement comme vous l'aviez laissée.
+L'onglet **Archivées** liste les notifications archivées. D'autres éléments se chargent au fil du défilement, et les filtres s'appliquent à l'ensemble des archives, y compris aux éléments pas encore chargés. Les notifications archivées conservent leur état de lecture : **Remettre dans la boîte de réception**, sur la ligne ou dans la barre d'une notification ouverte (ou `E`), en rétablit une exactement comme vous l'aviez laissée.
 
 ## Reporter une tâche
 
@@ -121,11 +121,13 @@ Reporter retire une tâche de votre boîte de réception jusqu'à l'heure choisi
 Tant qu'une tâche est reportée :
 
 - ses nouvelles notifications attendent avec elle et ne comptent pas dans le badge non lu. À son retour, la ligne indique **Report terminé** et le nombre de nouveautés arrivées entre-temps ;
-- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue, si une app demande votre action ou si toutes ses sous-tâches sont terminées. Les mentions `@all` ne la réveillent pas ;
+- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue ou si toutes ses sous-tâches sont terminées. Les mentions `@all` ne la réveillent pas ;
 - **Tout marquer comme lu** et les actions d'archivage groupé l'ignorent. L'archiver met fin au report, tout comme terminer vous-même la tâche quand **Archiver les tâches que vous traitez** compte la fin de la tâche (c'est le cas par défaut) ;
-- ouvrir la tâche depuis ailleurs ne la marque pas comme lue et ne met pas fin au report. Sa barre de la boîte de réception indique quand elle revient ; **Changer l'heure** la fait revenir maintenant (`H`) ou choisit une autre heure.
+- ouvrir directement la page de la tâche ne la marque pas comme lue et ne met pas fin au report. Ouverte depuis l'onglet **Reportés**, sa barre indique quand elle revient ; **Changer l'heure** la fait revenir maintenant (`H`) ou choisit une autre heure.
 
-Le report est personnel : il ne change que votre boîte de réception. Tout ce que vous avez reporté se trouve dans la vue **Reportés** sous Vues, aussi accessible via **Voir les reportés** dans le menu de la boîte de réception.
+Le report est personnel : il ne change que votre boîte de réception. Tout ce que vous avez reporté se trouve dans l'onglet **Reportés**, où le bouton de chaque ligne le fait revenir maintenant.
+
+Si l'onglet **Reportés** ne se charge pas, sélectionnez **Réessayer**. Les éléments déjà chargés restent visibles si l'actualisation échoue.
 
 ## Quand une notification quitte la boîte de réception
 
@@ -150,7 +152,7 @@ Une notification ultérieure sur la tâche revient dans la boîte de réception.
 Le bouton de réglages dans l'en-tête de la section Boîte de réception ouvre ses réglages d'affichage, enregistrés sur cet appareil :
 
 - **Lignes affichées** : 5, 10 ou 20 ; une ligne « Afficher N de plus » donne accès au reste.
-- **Lignes compactes** : une seule ligne par notification au lieu de deux.
+- **Lignes compactes** : une seule ligne par notification, sans qui a fait quoi. Désactivé par défaut.
 - **Nombre de non lus** : le nombre à côté du titre de la section.
 - **Badge de non lus sur Travail** : le badge sur Travail dans la barre d'applications.
 

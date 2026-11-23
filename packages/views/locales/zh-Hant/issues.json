@@ -598,7 +598,8 @@
     "unsubscribe_subtree_succeeded": "已取消訂閱此任務及其子任務。",
     "subscription_update_failed": "無法更新訂閱狀態，請重試。",
     "pull_requests_empty_title": "暫無關聯 PR。",
-    "guest_readonly_note": "訪客可以查看和評論，不能修改任務屬性。"
+    "guest_readonly_note": "訪客可以查看和評論，不能修改任務屬性。",
+    "open_issue_page": "在任務頁開啟"
   },
   "timeline": {
     "loading": "載入中…",
@@ -1667,7 +1668,6 @@
       "target_squad": "小隊 · 由 leader 分派",
       "target_member": "成員",
       "instructions_hint": "作為這次執行的說明發給處理人，和任務描述、評論一起作為上下文。",
-      "next_hint": "由處理人直接更新狀態，僅在需要返工時才退回，遇到阻塞不需退回。執行結束不會自動變更狀態。",
       "preview_brief": "預覽 AI 代理收到的說明",
       "preview_title": "「{{status}}」這一步的說明",
       "preview_description": "任務進入這一步時，處理人的執行會收到這段說明。預覽不需要先儲存。",
@@ -1839,8 +1839,7 @@
       "all_issues": "全部任務",
       "my_work": "我的工作",
       "working": "執行中",
-      "subscribed": "已訂閱",
-      "snoozed": "已延後"
+      "subscribed": "已訂閱"
     },
     "untitled": "未命名檢視",
     "copy_name": "{{name}}（副本）",

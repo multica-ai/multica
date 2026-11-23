@@ -598,7 +598,8 @@
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
     "subscription_update_failed": "无法更新订阅状态，请重试。",
     "pull_requests_empty_title": "暂无关联 PR。",
-    "guest_readonly_note": "访客可以查看和评论，不能修改任务属性。"
+    "guest_readonly_note": "访客可以查看和评论，不能修改任务属性。",
+    "open_issue_page": "在任务页打开"
   },
   "timeline": {
     "loading": "加载中...",
@@ -1667,7 +1668,6 @@
       "target_squad": "小队 · 由队长分派",
       "target_member": "成员",
       "instructions_hint": "作为这次运行的说明发给处理人，和任务描述、评论一起作为上下文。",
-      "next_hint": "由处理人自己改状态，只有需要返工时才退回，受阻不用退回。运行结束不会自动改状态。",
       "preview_brief": "预览智能体收到的说明",
       "preview_title": "\"{{status}}\"这一步的说明",
       "preview_description": "任务进入这一步时，处理人的运行会收到这段说明。预览不需要先保存。",
@@ -1839,8 +1839,7 @@
       "all_issues": "全部任务",
       "my_work": "我的工作",
       "working": "运行中",
-      "subscribed": "已订阅",
-      "snoozed": "已延后"
+      "subscribed": "已订阅"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",

@@ -1537,7 +1537,7 @@ function CommentCardImpl({
                       size="icon-sm"
                       aria-label={toggleLabel}
                       aria-expanded={open}
-                      aria-controls={open ? `comment-body-${entry.id}` : undefined}
+                      aria-controls={open ? `root-comment-body-${entry.id}` : undefined}
                       onClick={handleToggle}
                       className={commentActionClassName}
                     >
@@ -1551,9 +1551,12 @@ function CommentCardImpl({
 
         {/* Root comment body. Avoid Base UI's Panel here: every mounted panel
             probes computed styles to detect animations, forcing a style
-            recalculation across long issue-detail documents. */}
+            recalculation across long issue-detail documents. Its id must not
+            start with "comment-": timeline lookups resolve the nearest
+            `[id^="comment-"]` ancestor to a comment id, so a reading anchor
+            taken inside the body would name a comment that does not exist. */}
         {open && !deleted && (
-          <div id={`comment-body-${entry.id}`} className="px-4 max-md:px-3 pb-3">
+          <div id={`root-comment-body-${entry.id}`} className="px-4 max-md:px-3 pb-3">
             {edit.editing ? (
               <div
                 {...edit.dropZoneProps}

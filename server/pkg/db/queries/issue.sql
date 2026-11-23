@@ -93,18 +93,15 @@ SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR KEY SHARE;
 
--- name: LockIssueForAttachmentWrite :one
--- Owner-first guard for a write to one of an issue's attachments: take the
--- issue before the attachment row, so a writer that reaches the same row
--- through the issue — teardown's issue_id cascade, or the revision bump this
--- write itself performs — either waits for this transaction or is waited on,
--- never both.
+-- name: LockIssueForWrite :one
+-- Lock the issue before writing an attachment or reaction row, matching the
+-- order used by issue teardown. This also lets concurrent duplicate reaction
+-- adds wait before AddIssueReaction takes its statement snapshot.
 --
--- FOR NO KEY UPDATE, the mode of that revision bump, is the weakest mode that
--- actually serializes issue writers. FOR KEY SHARE is NOT enough: it is
--- compatible with FOR NO KEY UPDATE (see LockLiveComment), so a concurrent
--- CreateComment would take the issue anyway, wait on the attachment this
--- transaction holds, and deadlock with its bump.
+-- FOR NO KEY UPDATE conflicts with issue revision bumps and still allows
+-- foreign-key checks. FOR KEY SHARE would let a concurrent CreateComment
+-- lock the issue while waiting for an attachment that this transaction
+-- holds, deadlocking when this transaction tries to bump the revision.
 SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR NO KEY UPDATE;

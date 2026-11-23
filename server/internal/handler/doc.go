@@ -652,7 +652,7 @@ func (h *Handler) DeleteDoc(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListDocVersions(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	_, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -666,14 +666,19 @@ func (h *Handler) ListDocVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	versions := make([]DocVersionResponse, len(rows))
+	issueIDs := make([]pgtype.UUID, len(rows))
 	for i, v := range rows {
 		versions[i] = docVersionRowToResponse(v)
+		issueIDs[i] = v.IssueID
+	}
+	if !h.hideDocVersionIssues(w, r, workspaceID, versions, issueIDs) {
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
 }
 
 func (h *Handler) GetDocVersion(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	_, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -695,7 +700,40 @@ func (h *Handler) GetDocVersion(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, docVersionToResponse(v, true))
+	versions := []DocVersionResponse{docVersionToResponse(v, true)}
+	if !h.hideDocVersionIssues(w, r, workspaceID, versions, []pgtype.UUID{v.IssueID}) {
+		return
+	}
+	writeJSON(w, http.StatusOK, versions[0])
+}
+
+// hideDocVersionIssues clears issue_id on the versions whose issue sits in a
+// private project the caller cannot see (MUL-8472). The edit and its task_id
+// stay, as a restricted run does in an agent's history. versions and issueIDs
+// are parallel slices. It writes a 500 and returns false when access cannot
+// be resolved.
+func (h *Handler) hideDocVersionIssues(w http.ResponseWriter, r *http.Request, workspaceID string, versions []DocVersionResponse, issueIDs []pgtype.UUID) bool {
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	named := make([]pgtype.UUID, 0, len(issueIDs))
+	for _, id := range issueIDs {
+		if id.Valid {
+			named = append(named, id)
+		}
+	}
+	hiddenIssues, err := h.hiddenIssueIDs(r, hidden, named)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return false
+	}
+	for i, id := range issueIDs {
+		if _, hide := hiddenIssues[id]; hide {
+			versions[i].IssueID = nil
+		}
+	}
+	return true
 }
 
 // --- Folders ---

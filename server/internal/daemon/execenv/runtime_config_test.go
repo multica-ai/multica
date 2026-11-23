@@ -2454,6 +2454,29 @@ func TestBriefCarriesTheWhenToSplitRule(t *testing.T) {
 	}
 }
 
+// TestBriefBatchesTheOpeningReads pins MUL-9919: the independent reads of
+// workflow steps 1–2 go out in one turn without truncated output, and the rule
+// sits under step 2 (after both reads it covers, before step 3) for every
+// provider.
+func TestBriefBatchesTheOpeningReads(t *testing.T) {
+	t.Parallel()
+
+	const rule = "so issue them together in ONE turn, not one read per turn: prefer parallel tool calls, which keep each output whole, and chain them in one shell command only when parallel calls are unavailable. Never cut these reads short with `head -c` or similar"
+	for _, provider := range []string{"claude", "codex"} {
+		out := buildMetaSkillContent(provider, TaskContextForEnv{IssueID: "issue-1", TriggerCommentID: "comment-1"})
+		at := strings.Index(out, rule)
+		step2 := strings.Index(out, "2. Catch up on the comment history")
+		step3 := strings.Index(out, "\n3. ")
+		if at < 0 {
+			t.Errorf("%s brief lost the batched-read rule:\n%s", provider, out)
+			continue
+		}
+		if step2 < 0 || step3 < 0 || at < step2 || at > step3 {
+			t.Errorf("%s brief: batched-read rule must sit between step 2 and step 3:\n%s", provider, out)
+		}
+	}
+}
+
 // TestBriefIssuePointerFollowsTheInstalledSkill ensures the sub-issue pointer
 // names the platform skill only when installed. The retired legacy skill is
 // no longer a fallback, even when an older backend still supplies it.

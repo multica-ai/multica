@@ -71,6 +71,9 @@ type IssueStatusData struct {
 // observer's — and goes into the per-turn prompt as is.
 type ProjectWorkflowData struct {
 	Brief string `json:"brief"`
+	// StatusMap marks a status-map brief (MUL-9913); an older server sends
+	// the per-step command brief and leaves it false.
+	StatusMap bool `json:"status_map,omitempty"`
 }
 
 // Task represents a claimed task from the server.

@@ -598,7 +598,8 @@
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
     "workdir_path_unavailable": "ローカル作業ディレクトリはまだありません — このタスクはローカルエージェントで実行されていません",
     "pull_requests_empty_title": "関連する PR はありません。",
-    "guest_readonly_note": "ゲストは閲覧とコメントのみ可能で、タスクのプロパティは変更できません。"
+    "guest_readonly_note": "ゲストは閲覧とコメントのみ可能で、タスクのプロパティは変更できません。",
+    "open_issue_page": "タスクページで開く"
   },
   "timeline": {
     "loading": "読み込み中...",
@@ -1667,7 +1668,6 @@
       "target_squad": "スクワッド · リーダーが割り振り",
       "target_member": "メンバー",
       "instructions_hint": "今回の実行の指示として処理者に送られ、タスクの説明やコメントと一緒にコンテキストになります。",
-      "next_hint": "担当者が直接ステータスを更新し、差し戻すのは手直しが必要な場合のみで、ブロック時は差し戻しません。実行が完了してもステータスは自動的に変わりません。",
       "preview_brief": "エージェントが受け取る説明をプレビュー",
       "preview_title": "「{{status}}」ステップの説明",
       "preview_description": "タスクがこのステップに入ったとき、処理者の実行が受け取る内容です。プレビューに保存は不要です。",
@@ -1839,8 +1839,7 @@
       "all_issues": "すべてのタスク",
       "my_work": "自分の作業",
       "working": "実行中",
-      "subscribed": "購読中",
-      "snoozed": "スヌーズ中"
+      "subscribed": "購読中"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",

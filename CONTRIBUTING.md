@@ -382,7 +382,9 @@ Three properties are worth knowing because the old flow lacked them:
 - **Temporary environments have a best-effort fallback.** `make up
   ARGS=--ephemeral` records a 24-hour TTL. The next `make up` automatically
   collects expired and directory-less environments; `make gc` runs the same
-  collection explicitly.
+  collection explicitly. Use `make up ARGS="--ttl 48"` to renew a checkout
+  whose environment is still registered, even after expiry. The command keeps
+  that environment's data and gives it a new 48-hour TTL.
 
 Run any command inside an environment's variables without repeating them:
 

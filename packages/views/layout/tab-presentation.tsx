@@ -88,7 +88,8 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
 
   // Read both inbox lists cache-only; the archived view keeps its own list, so
   // an archived selection has to resolve against the archived cache — the same
-  // list the InboxPage populates when `?view=archived` is active.
+  // list the InboxPage populates when `?view=archived` is active. A Snoozed
+  // selection is the snoozed issue itself.
   const inboxList = useQuery({ ...inboxListOptions(wsId), enabled: false }).data;
   const inboxFilters = useInboxFilters(wsId);
   const archivedPages = useInfiniteQuery({ ...archivedInboxPagesOptions(wsId, inboxFilters), enabled: false }).data;
@@ -101,7 +102,7 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     ...(archivedLookup?.items ?? []),
   ], [archivedPages, archivedLookup]);
   const activeInboxList =
-    subject.kind === "inbox" && subject.archived ? archivedInboxList : inboxList;
+    subject.kind === "inbox" && subject.view === "archived" ? archivedInboxList : inboxList;
   const inboxItem =
     subject.kind === "inbox" && subject.selectedKey
       ? (activeInboxList?.find(
@@ -129,7 +130,8 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
   // The canonical query seeds/subscribes to the UUID entry even when the URL
   // uses an identifier, so background tabs receive realtime patches too.
   const { issue } = useCanonicalIssue(wsId, issueId, {
-    enabled: fetch && (subject.kind === "issue" || !!inboxItem?.issue_id),
+    enabled:
+      fetch && (subject.kind === "issue" || !!inboxItem?.issue_id || (subject.kind === "inbox" && subject.view === "snoozed")),
   });
 
   const project = useQuery({

@@ -21,7 +21,7 @@ const copy = {
     scopes: {
       private: { title: "Only me", desc: "Only you can run this agent" },
       workspace: { title: "Entire workspace", desc: "All workspace members can run this agent" },
-      members: { title: "Specific people", desc: "Only the people you pick can run this agent" },
+      members: { title: "Specific people", desc: "You and the people you pick can run this agent" },
     } as Record<Scope, { title: string; desc: string }>,
     targetRequired: "Select at least one person before saving.",
     save: "Save",
@@ -54,7 +54,7 @@ const copy = {
     scopes: {
       private: { title: "仅自己", desc: "只有你可以运行该智能体" },
       workspace: { title: "整个工作区", desc: "默认允许工作区内所有成员运行该智能体" },
-      members: { title: "指定成员", desc: "只有你选择的人可以运行该智能体" },
+      members: { title: "指定成员", desc: "你和所选成员可以运行该智能体" },
     } as Record<Scope, { title: string; desc: string }>,
     targetRequired: "保存前，请至少选择一名成员。",
     save: "保存",
@@ -87,7 +87,7 @@ const copy = {
     scopes: {
       private: { title: "プライベート", desc: "あなただけがこのエージェントを実行できます" },
       workspace: { title: "ワークスペースに公開", desc: "このワークスペースの全員がこのエージェントを実行できます" },
-      members: { title: "特定のメンバーに公開", desc: "選択した人だけがこのエージェントを実行できます" },
+      members: { title: "特定のメンバーに公開", desc: "あなたと選択した人がこのエージェントを実行できます" },
     } as Record<Scope, { title: string; desc: string }>,
     targetRequired: "保存する前に、ワークスペースまたは1人以上のメンバーを選択してください。",
     save: "保存",
@@ -120,7 +120,7 @@ const copy = {
     scopes: {
       private: { title: "비공개", desc: "나만 이 에이전트를 실행할 수 있습니다" },
       workspace: { title: "워크스페이스에 공개", desc: "이 워크스페이스의 모든 사람이 이 에이전트를 실행할 수 있습니다" },
-      members: { title: "특정 사용자에게 공개", desc: "선택한 사람만 이 에이전트를 실행할 수 있습니다" },
+      members: { title: "특정 사용자에게 공개", desc: "나와 선택한 사람이 이 에이전트를 실행할 수 있습니다" },
     } as Record<Scope, { title: string; desc: string }>,
     targetRequired: "저장하기 전에 워크스페이스 또는 한 명 이상의 사용자를 선택하세요.",
     save: "저장",
@@ -153,7 +153,7 @@ const copy = {
     scopes: {
       private: { title: "Moi uniquement", desc: "Vous seul pouvez exécuter cet agent" },
       workspace: { title: "Tout l'espace de travail", desc: "Tous les membres de l'espace de travail peuvent exécuter cet agent" },
-      members: { title: "Personnes précises", desc: "Seules les personnes que vous choisissez peuvent exécuter cet agent" },
+      members: { title: "Personnes précises", desc: "Vous et les personnes que vous choisissez pouvez exécuter cet agent" },
     } as Record<Scope, { title: string; desc: string }>,
     targetRequired: "Sélectionnez au moins une personne avant d'enregistrer.",
     save: "Enregistrer",

@@ -840,7 +840,7 @@
     "workspace_title": "整个工作区",
     "workspace_desc": "工作区内所有成员都可以运行该智能体",
     "members_title": "指定成员",
-    "members_desc": "只有你选择的人可以运行该智能体",
+    "members_desc": "你和所选成员可以运行该智能体",
     "team_title": "公开给团队",
     "team_desc": "向整个团队授予访问权限",
     "team_coming_soon": "即将推出",

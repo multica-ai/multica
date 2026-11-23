@@ -106,7 +106,7 @@
     "work": "Travail",
     "team": "Équipe",
     "chat": "Chat",
-    "autopilots": "Automatisation",
+    "autopilots": "Auto",
     "switch_workspace": "Changer d'espace de travail",
     "pin_workspace": "Épingler l’espace de travail",
     "unpin_workspace": "Désépingler l’espace de travail",
@@ -124,7 +124,7 @@
     "copy_workspace_link": "Copier le lien de l’espace de travail",
     "workspace_meta_one": "{{slug}} · {{count}} membre",
     "workspace_meta_other": "{{slug}} · {{count}} membres",
-    "docs": "Documents"
+    "docs": "Docs"
   },
   "bottom_bar": {
     "label": "Barre d'état",
@@ -178,8 +178,6 @@
       "view_delete": "Supprimer la vue",
       "new_issue_here": "Nouvelle tâche dans ce projet",
       "inbox_actions": "Actions de la boîte de réception",
-      "inbox_view_snoozed": "Voir les reportés",
-      "inbox_view_archived": "Voir les archivées",
       "inbox_empty": "Aucune notification",
       "inbox_settings": "Affichage de la boîte de réception",
       "inbox_all": "Toutes les notifications",

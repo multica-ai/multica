@@ -11,6 +11,8 @@ const { apiMock, providers, sockets } = vi.hoisted(() => ({
       onClose: (e: { event: { reason: string } }) => void;
     };
     destroyed: boolean;
+    tokensSent: number;
+    syncs: number;
     awareness: { local: unknown; states: Map<number, unknown>; emit: () => void };
   }>,
   sockets: [] as Array<{ destroyed: boolean }>,
@@ -56,7 +58,15 @@ vi.mock("@hocuspocus/provider", () => {
     constructor(public config: (typeof providers)[number]["config"]) {
       providers.push(this);
     }
+    tokensSent = 0;
+    syncs = 0;
     attach() {}
+    async sendToken() {
+      this.tokensSent++;
+    }
+    startSync() {
+      this.syncs++;
+    }
     destroy() {
       this.destroyed = true;
     }
@@ -299,6 +309,31 @@ describe("doc sessions", () => {
     expect(sockets).toHaveLength(1);
     releaseDocSession(a, { discard: true });
     releaseDocSession(b, { discard: true });
+  });
+
+  it("joins again with a fresh ticket when the server asks it to reauthenticate", async () => {
+    vi.useFakeTimers();
+    const { url, docId } = ids();
+    const session = acquireDocSession(url, docId, "u1", `doc:${docId}`);
+    const provider = providers.at(-1)!;
+    provider.config.onSynced({ state: true });
+
+    apiMock.createDocCollabTicket.mockRejectedValueOnce(new Error("offline"));
+    provider.config.onClose({ event: { reason: "reauthenticate" } });
+    // Unsynced until it is back in, so a page waiting too long goes solo.
+    expect(session.getState().synced).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(provider.tokensSent).toBe(0);
+
+    // The next try, later, gets a ticket and joins with it, keeping the doc.
+    apiMock.createDocCollabTicket.mockResolvedValueOnce(ticket(docId, { token: "fresh" }));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect([provider.tokensSent, provider.syncs]).toEqual([1, 1]);
+    expect(JSON.parse(await provider.config.token()).ticket).toBe("fresh");
+    expect(providers).toHaveLength(1);
+    provider.config.onSynced({ state: true });
+    expect(session.getState().synced).toBe(true);
+    releaseDocSession(session, { discard: true });
   });
 
   it("ends a reset session once its page lets go, and starts the next one fresh", () => {

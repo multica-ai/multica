@@ -1066,11 +1066,6 @@ export interface RuntimeUsage {
   uncosted_cache_write_tokens?: number;
 }
 
-export interface RuntimeHourlyActivity {
-  hour: number;
-  count: number;
-}
-
 // Subscription rate limits of the account a runtime's agent CLI runs under
 // (`GET /api/runtimes/:id/rate-limits`, MUL-9427), as the CLI last reported
 // them during a task. Window kinds and statuses fall back to "other" / ""

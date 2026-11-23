@@ -379,6 +379,7 @@ Daemon behavior is configured via flags or environment variables:
 | Poll interval | `--poll-interval` | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` (catch-up fallback; WebSocket wake signals deliver work sooner) |
 | Healthy WebSocket claim poll upper bound | `--ws-claim-poll-interval` | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` (configured independently of `--poll-interval`; downward jitter makes the normal interval `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval) |
 | Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
+| Daemon log level | — | `LOG_LEVEL` | `debug` |
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
 | Agent idle watchdog | — | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` (`0` disables the whole watchdog suite) |
 | Agent tool watchdog | — | `MULTICA_AGENT_TOOL_WATCHDOG` | same as the idle watchdog (`0` = never force-stop during a tool call) |
@@ -719,10 +720,14 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 multica issue update <id> --title "New title" --priority urgent
 multica issue update <id> --position 4.5
 multica issue update <id> --attachment revised.png
+multica issue update <id> --description-file ./desc.md --description-base-revision <rev>
+multica issue edit-description <id> --old "Status: draft" --new "Status: ready"
 ```
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
 `--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
+`--description-base-revision` takes the `description_revision` from `multica issue get` and refuses stale description overwrites with HTTP 409 if the description changed since that revision.
+To change part of a description without rewriting the whole body, use `multica issue edit-description <id>` with `--old` / `--old-file` and `--new` / `--new-file` (add `--replace-all` to replace every occurrence; otherwise `--old` must match exactly once).
 
 ### Delete Issue
 
@@ -1392,6 +1397,26 @@ On the API, both endpoints accept `?include=content` and `?include=metadata`.
 A request that sends neither still gets `content`, on both endpoints, so a
 server upgrade never changes what an un-upgraded client receives — it is the
 CLI that asks for the smaller shape.
+
+### Safe concurrent skill edits
+
+`multica skill get` includes a `revision` field (shown as a `REVISION` column in
+table output) that increments by 1 on every write to the skill or its supporting
+files. Pass `--base-revision <revision>` on `skill update`, `skill files upsert`,
+and `skill files delete` to avoid overwriting concurrent changes:
+
+```bash
+multica skill get <skill-id> --with-content --output json
+multica skill update <skill-id> --content-file ./SKILL.md --base-revision <revision>
+multica skill files upsert <skill-id> --path notes.md --content-file ./notes.md --base-revision <revision>
+multica skill files delete <skill-id> <file-id> --base-revision <revision>
+```
+
+If the skill changed since `--base-revision`, the server returns HTTP 409 with
+`"code": "revision_conflict"` and the current `actual_revision`, leaving the
+skill untouched. Re-read with `multica skill get --with-content`, merge your
+changes, and retry with the new revision. Omitting `--base-revision` preserves
+last-write-wins behavior for older scripts.
 
 ### Custom runtime compatibility targets
 
