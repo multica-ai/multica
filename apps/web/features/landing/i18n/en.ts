@@ -311,7 +311,7 @@ export function createEnDict(): LandingDict {
           "Turn off Include squad handoffs in Settings → Notifications to keep squad agents' handoff comments out of your Inbox.",
         ],
         improvements: [
-          "In the Inbox, a notification's main actions sit just above the reply box, with the rest in the More menu.",
+          "Inbox actions sit above the reply box, and after you archive the last notification, it still shows Archived with Undo.",
           "Jump to latest moves to the right and counts new comments, in the Inbox and on Issue pages.",
         ],
         fixes: [
