@@ -1278,6 +1278,33 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin, false)
 }
 
+// A run already in flight when the pause starts can complete, but only a
+// deliberately dispatched human run can reopen automatic dispatch.
+func preserveIssueAgentFailureStreak(ctx context.Context, q *db.Queries, task db.AgentTaskQueue) (db.AgentTaskQueue, error) {
+	if !task.IssueID.Valid || IsTriageTask(task) {
+		return task, nil
+	}
+	var metadata struct {
+		ManualIssueDispatch bool `json:"manual_issue_dispatch"`
+	}
+	if len(task.Context) > 0 {
+		_ = json.Unmarshal(task.Context, &metadata)
+	}
+	if metadata.ManualIssueDispatch {
+		return task, nil
+	}
+	paused, err := q.IssueAgentHasConsecutiveRunFailures(ctx, db.IssueAgentHasConsecutiveRunFailuresParams{
+		IssueID: task.IssueID, AgentID: task.AgentID, ExcludeTaskID: task.ID,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("check issue failure pause on completion: %w", err)
+	}
+	if !paused {
+		return task, nil
+	}
+	return q.PreserveIssueAgentFailureStreak(ctx, task.ID)
+}
+
 // ErrIssueAgentConsecutiveFailures pauses automatic dispatch until the agent
 // completes a run for the issue. An explicit human action can start that run.
 var ErrIssueAgentConsecutiveFailures = errors.New("automatic dispatch paused after three consecutive failures for this issue and agent. Complete a manual run to resume")
@@ -1360,6 +1387,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		RuleVersionID:        attr.RuleVersionID,
 		RerunOfTaskID:        rerunOfTaskID,
 		FreshRerun:           pgtype.Bool{Bool: freshRerun, Valid: true},
+		ManualIssueDispatch:  pgtype.Bool{Bool: attr.HumanAction, Valid: attr.HumanAction},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
@@ -1375,6 +1403,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		task, err = s.Queries.CreateDeferredChannelIssueTask(ctx, db.CreateDeferredChannelIssueTaskParams{
 			ID:                   dbid.NewV7(),
 			AgentID:              createParams.AgentID,
+			ManualIssueDispatch:  createParams.ManualIssueDispatch,
 			RuntimeID:            createParams.RuntimeID,
 			IssueID:              createParams.IssueID,
 			Priority:             createParams.Priority,
@@ -1541,6 +1570,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		RuleVersionID:        attr.RuleVersionID,
 		RerunOfTaskID:        rerunOfTaskID,
 		FreshRerun:           pgtype.Bool{Bool: freshRerun, Valid: true},
+		ManualIssueDispatch:  pgtype.Bool{Bool: attr.HumanAction, Valid: attr.HumanAction},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
@@ -4888,6 +4918,10 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			SessionRolloutMissing: sessionRolloutMissing,
 			RetiredSessionID:      pgtype.Text{String: retiredSessionID, Valid: retiredSessionID != ""},
 		})
+		if err != nil {
+			return err
+		}
+		t, err = preserveIssueAgentFailureStreak(ctx, qtx, t)
 		if err != nil {
 			return err
 		}

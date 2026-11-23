@@ -24,17 +24,19 @@ func TestIssueDispatchAfterConsecutiveFailures(t *testing.T) {
 	otherAgentID := dbfx.Agent(t, "Other agent "+uuid.NewString(), runtimeID, testutil.Cols{"runtime_mode": "local"})
 
 	for _, tc := range []struct {
-		name           string
-		failedRuns     int
-		success        bool
-		successByOther bool
-		manual         bool
-		wantQueued     bool
+		name             string
+		failedRuns       int
+		success          bool
+		successByOther   bool
+		automaticSuccess bool
+		manual           bool
+		wantQueued       bool
 	}{
 		{name: "two failures still allow automatic dispatch", failedRuns: 2, wantQueued: true},
 		{name: "three failures stop automatic dispatch", failedRuns: 3},
 		{name: "successful manual run reopens automatic dispatch", failedRuns: 3, success: true, wantQueued: true},
 		{name: "another agent's success leaves the streak intact", failedRuns: 3, success: true, successByOther: true},
+		{name: "an already running automatic task cannot reopen dispatch", failedRuns: 3, automaticSuccess: true},
 		{name: "human can explicitly dispatch after three failures", failedRuns: 3, manual: true, wantQueued: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,9 +73,24 @@ func TestIssueDispatchAfterConsecutiveFailures(t *testing.T) {
 				if err != nil {
 					t.Fatalf("start manual recovery: %v", err)
 				}
+				var manualDispatch bool
+				dbfx.QueryRow(t, "SELECT COALESCE(context->>'manual_issue_dispatch' = 'true', false) FROM agent_task_queue WHERE id=$1", manual.ID).Scan(&manualDispatch)
+				if !manualDispatch {
+					t.Fatal("manual recovery run was not identified on its stored task")
+				}
 				dbfx.Exec(t, "UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1", manual.ID)
 				if _, err := testHandler.TaskService.CompleteTask(ctx, manual.ID, []byte("{}"), "", "", "", false, "", ""); err != nil {
 					t.Fatalf("complete manual recovery: %v", err)
+				}
+			}
+			if tc.automaticSuccess {
+				at := now.Add(-10 * time.Minute)
+				automaticID := parseUUID(dbfx.Task(t, agentID, testutil.Cols{
+					"issue_id": issue.ID, "runtime_id": runtimeID, "status": "running",
+					"created_at": at, "started_at": at,
+				}))
+				if _, err := testHandler.TaskService.CompleteTask(ctx, automaticID, []byte("{}"), "", "", "", false, "", ""); err != nil {
+					t.Fatalf("complete already running automatic task: %v", err)
 				}
 			}
 			if tc.manual {

@@ -333,7 +333,7 @@ LIMIT @page_limit;
 -- head_sha stamps the commit under review into the task's context JSONB so the
 -- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 -- against an OLD head apart from a fresh request against a NEW head (TEN-356).
--- Empty/absent head_sha leaves context NULL unless fresh_rerun is requested.
+-- Manual issue dispatch is recorded independently of attribution and rerun lineage.
 -- fresh_rerun disables source session/workdir reuse without losing rerun lineage.
 -- Issue-linked tasks never hit quick-create context
 -- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
@@ -381,6 +381,10 @@ SELECT
     END || CASE
         WHEN COALESCE(sqlc.narg('fresh_rerun')::boolean, FALSE)
         THEN '{"fresh_rerun":true}'::jsonb
+        ELSE '{}'::jsonb
+    END || CASE
+        WHEN COALESCE(sqlc.narg(manual_issue_dispatch)::boolean, FALSE)
+        THEN '{"manual_issue_dispatch":true}'::jsonb
         ELSE '{}'::jsonb
     END || CASE
         WHEN sqlc.narg(workflow_handoff_revision)::bigint IS NOT NULL
@@ -437,7 +441,8 @@ SELECT
     sqlc.narg(squad_id),
     jsonb_strip_nulls(jsonb_build_object(
         'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
-        'channel_issue_media_pending', TRUE
+        'channel_issue_media_pending', TRUE,
+        'manual_issue_dispatch', NULLIF(sqlc.narg(manual_issue_dispatch)::boolean, FALSE)
     )),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
@@ -570,7 +575,7 @@ SELECT
     p.agent_id, COALESCE(a.runtime_id, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
-    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
+    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context - 'manual_issue_dispatch',
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
               OR COALESCE(a.runtime_id, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
          ELSE p.session_id END,
@@ -1216,9 +1221,17 @@ FROM (
     WHERE issue_id = $1 AND agent_id = $2
       AND status IN ('completed', 'failed')
       AND COALESCE(context->>'type', '') <> 'triage'
+      AND COALESCE(context->>'preserve_issue_failure_streak', '') <> 'true'
+      AND id IS DISTINCT FROM sqlc.narg(exclude_task_id)::uuid
     ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
     LIMIT 3
 ) outcomes;
+
+-- name: PreserveIssueAgentFailureStreak :one
+UPDATE agent_task_queue
+SET context = COALESCE(context, '{}'::jsonb) || '{"preserve_issue_failure_streak":true}'::jsonb
+WHERE id = $1
+RETURNING *;
 
 -- name: GetLatestTaskRolloutMissing :one
 -- Reports whether the most recent terminal task for (agent_id, issue_id)

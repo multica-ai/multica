@@ -262,6 +262,9 @@ func TestWakeupFailureStreakRetainsInputAndAllowsWakeNow(t *testing.T) {
 	if n := wakeRuns(t, f, w.ID); n != 1 {
 		t.Fatalf("wake now started %d runs, want 1", n)
 	}
+	if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE context->>'wakeup_id'=$1 AND context->>'manual_issue_dispatch'='true'", util.UUIDToString(w.ID)); n != 1 {
+		t.Fatalf("wake now stored %d manually initiated runs, want 1", n)
+	}
 }
 
 func TestChildDoneWakeupRetainsInputDuringFailureStreak(t *testing.T) {
