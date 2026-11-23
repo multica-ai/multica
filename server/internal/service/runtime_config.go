@@ -290,12 +290,17 @@ func claimModelMissingFromCatalog(ctx context.Context, catalog LiveRuntimeModels
 	return ModelMissingFromLiveCatalog(model, ids, known)
 }
 
-// claimModelUnavailableError names the refused model: the generic resolution
+// ModelUnavailableMessage names the refused model: the generic resolution
 // message alone sends the user hunting through the wrong config screen.
+// Shared by the claim path and the personal-config save gate.
+func ModelUnavailableMessage(model string) string {
+	return fmt.Sprintf("Model %s is no longer in this runtime's model catalog. Update the model configuration and retry.", model)
+}
+
 func claimModelUnavailableError(model string) error {
 	return &RuntimeConfigResolutionError{
 		Status:  RuntimeConfigResolutionModelUnavailable,
-		Message: fmt.Sprintf("Model %s is no longer in this runtime's model catalog. Update the model configuration and retry.", model),
+		Message: ModelUnavailableMessage(model),
 		Err:     ErrEffectiveRuntimeModelInvalid,
 	}
 }

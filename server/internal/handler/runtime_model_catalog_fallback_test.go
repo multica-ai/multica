@@ -37,11 +37,18 @@ func reportModelList(t *testing.T, requestID string, body map[string]any) *httpt
 func withModelListStores(t *testing.T) ModelCatalogCache {
 	t.Helper()
 	origStore, origCache := testHandler.ModelListStore, testHandler.ModelCatalogCache
+	origLive := testHandler.TaskService.LiveRuntimeModels
 	cache := NewInMemoryModelCatalogCache()
 	testHandler.ModelListStore = NewInMemoryModelListStore()
 	testHandler.ModelCatalogCache = cache
+	// liveRuntimeModels() and runtimeConfigResolver() read through
+	// TaskService.LiveRuntimeModels first, so it must point at the same fresh
+	// cache or the save/resolve gates would keep seeing the old one and fail
+	// open on whatever the test reports.
+	testHandler.TaskService.LiveRuntimeModels = LiveRuntimeModelsFromCache(cache)
 	t.Cleanup(func() {
 		testHandler.ModelListStore, testHandler.ModelCatalogCache = origStore, origCache
+		testHandler.TaskService.LiveRuntimeModels = origLive
 	})
 	return cache
 }

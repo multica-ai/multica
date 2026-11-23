@@ -392,9 +392,12 @@ func prepareAgentRuntimeCurrentConfig(
 	}
 	if service.ModelMissingFromLiveCatalog(model, liveIDs, liveKnown) {
 		return preparedAgentRuntimeCurrentConfig{}, &agentRuntimeCurrentConfigInputError{
-			HTTPStatus:       http.StatusConflict,
-			Code:             string(service.RuntimeConfigResolutionModelUnavailable),
-			Message:          service.RuntimeConfigResolutionMessage(service.RuntimeConfigResolutionModelUnavailable),
+			HTTPStatus: http.StatusConflict,
+			Code:       string(service.RuntimeConfigResolutionModelUnavailable),
+			// Name the refused model: the first custom-mode save
+			// carries the agent's template model, and a generic "runtime
+			// model unavailable" gives the user nothing to act on.
+			Message:          service.ModelUnavailableMessage(model),
 			ResolutionStatus: service.RuntimeConfigResolutionModelUnavailable,
 		}
 	}
@@ -480,7 +483,7 @@ func repointPersonalUnclaimedTasksToRuntime(
 
 func writeAgentRuntimeCurrentConfigInputError(w http.ResponseWriter, inputErr *agentRuntimeCurrentConfigInputError) {
 	if inputErr.ResolutionStatus != "" {
-		writeRuntimeConfigResolutionStatus(w, inputErr.ResolutionStatus)
+		writeRuntimeConfigResolutionStatus(w, inputErr.ResolutionStatus, inputErr.Message)
 		return
 	}
 	writeError(w, inputErr.HTTPStatus, inputErr.Message)
@@ -617,8 +620,13 @@ func writeRuntimeConfigResolutionHTTPError(w http.ResponseWriter, err error) boo
 	return true
 }
 
-func writeRuntimeConfigResolutionStatus(w http.ResponseWriter, status service.RuntimeConfigResolutionStatus) {
-	message := service.RuntimeConfigResolutionMessage(status)
+// writeRuntimeConfigResolutionStatus writes the 409 conflict body. An empty
+// message falls back to the status's generic copy; callers that can name the
+// refused model pass that specific message instead.
+func writeRuntimeConfigResolutionStatus(w http.ResponseWriter, status service.RuntimeConfigResolutionStatus, message string) {
+	if message == "" {
+		message = service.RuntimeConfigResolutionMessage(status)
+	}
 	writeJSON(w, http.StatusConflict, map[string]any{
 		"code":               string(status),
 		"error":              message,
