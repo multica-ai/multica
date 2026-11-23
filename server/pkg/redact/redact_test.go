@@ -282,7 +282,7 @@ func TestRedactMulticaTokenContext(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"environment assignment", "MULTICA_TOKEN=" + token, "MULTICA_[REDACTED CREDENTIAL]"},
+		{"environment assignment", "MULTICA_TOKEN=" + token, "MULTICA_TOKEN=[REDACTED_MULTICA_TOKEN]"},
 		{
 			name:  "escaped JSON",
 			input: `{"value":"line1\n` + token + `\t` + token + `"}`,
@@ -329,6 +329,11 @@ func TestRedactPrefixedCredentialKeepsTheName(t *testing.T) {
 		input string
 		want  string
 	}{
+		{"reported example", "EXAMPLE_TOKEN=abc123def456", "EXAMPLE_TOKEN=[REDACTED CREDENTIAL]"},
+		{"GitHub token", "GITHUB_TOKEN=" + asm("ghp_", strings.Repeat("a", 36)), "GITHUB_TOKEN=[REDACTED GITHUB TOKEN]"},
+		{"quoted GitHub token", `GITHUB_TOKEN="` + asm("ghp_", strings.Repeat("a", 36)) + `"`, "GITHUB_TOKEN=[REDACTED CREDENTIAL]"},
+		{"incomplete marker", "EXAMPLE_TOKEN=[REDACTEDfixture", "EXAMPLE_TOKEN=[REDACTED CREDENTIAL]"},
+		{"marker with adjacent value", "EXAMPLE_TOKEN=[REDACTED CREDENTIAL]fixture", "EXAMPLE_TOKEN=[REDACTED CREDENTIAL]"},
 		{"prefixed token", "GITEA_TOKEN=" + asm("0123456789", "abcdef0123456789abcdef0123456789abcd"), "GITEA_TOKEN=[REDACTED CREDENTIAL]"},
 		{"prefixed api key", "JELLYFIN_API_KEY=" + asm("a1b2c3d4", "e5f60718293a4b5c6d7e8f90"), "JELLYFIN_API_KEY=[REDACTED CREDENTIAL]"},
 		{"colon separator", "export DB_PASSWORD: " + asm("hunter2", "-extra"), "export DB_PASSWORD: [REDACTED CREDENTIAL]"},
@@ -341,6 +346,9 @@ func TestRedactPrefixedCredentialKeepsTheName(t *testing.T) {
 			got := Text(tc.input)
 			if got != tc.want {
 				t.Fatalf("redaction rewrote the name:\n  got:  %s\n  want: %s", got, tc.want)
+			}
+			if again := Text(got); again != got {
+				t.Fatalf("second redaction changed the result:\n  got:  %s\n  want: %s", again, got)
 			}
 		})
 	}

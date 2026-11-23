@@ -49,8 +49,6 @@ var patterns = []secretPattern{
 
 	// Multica user PATs, daemon tokens, task tokens, and cloud-node PATs.
 	// Preserve short JSON control escapes that act as token separators.
-	// The space-free placeholder lets the generic TOKEN= rule below
-	// replace it in one piece.
 	{regexp.MustCompile(`(?:\b|(\\[bfnrt]))(?:mat|mul|mdt|mcn)_[0-9a-fA-F]{40}\b`), "${1}[REDACTED_MULTICA_TOKEN]"},
 
 	// Google API keys always start with the AIza prefix and are 39 chars total
@@ -72,14 +70,15 @@ var patterns = []secretPattern{
 
 	// Connection strings with embedded passwords
 	{regexp.MustCompile(`(?i)(?:postgres|mysql|mongodb|redis|amqp)(?:ql)?://[^:\s]+:[^@\s]+@`), "[REDACTED CONNECTION STRING]@"},
-
-	// Generic key=value patterns for common secret env var names.
-	// The name and the separator are captured and put back: the keyword list is
-	// not anchored, so matching the keyword alone would erase the tail of a
-	// prefixed name and leave "GITEA_TOKEN=..." as "GITEA_[REDACTED CREDENTIAL]".
-	// Only the value is secret; the name is what the reader needs to act on.
-	{regexp.MustCompile(`(?i)(\b[A-Z0-9_]*(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*)\S+`), "${1}[REDACTED CREDENTIAL]"},
 }
+
+// The generic rule runs last so specific rules can label credentials first.
+// Keep this in sync with packages/core/security/redact-secrets.ts: transcripts
+// may pass through both implementations.
+var credentialAssignment = regexp.MustCompile(
+	`(?i)(\b[A-Z0-9_]*(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*)` +
+		`(?:(["']?)(\[REDACTED(?: (?:API KEY|AWS KEY|AWS SECRET|CONNECTION STRING|CREDENTIAL|GITHUB TOKEN|GITLAB TOKEN|GOOGLE API KEY|JWT|PRIVATE KEY|SLACK TOKEN|STRIPE KEY)|_MULTICA_TOKEN)?\])(\S*)|\S+)`,
+)
 
 // maxRedactDepth bounds the walk in redactValue. Tool inputs are decoded from
 // daemon-supplied JSON, so nesting depth is attacker-influenced; without a
@@ -175,5 +174,13 @@ func Text(s string) string {
 	for _, p := range patterns {
 		s = p.re.ReplaceAllString(s, p.replacement)
 	}
-	return s
+	return credentialAssignment.ReplaceAllStringFunc(s, func(match string) string {
+		parts := credentialAssignment.FindStringSubmatch(match)
+		assignment, quote, marker, suffix := parts[1], parts[2], parts[3], parts[4]
+		// Preserve a complete marker only when it is the whole value.
+		if quote == "" && marker != "" && suffix == "" {
+			return match
+		}
+		return assignment + "[REDACTED CREDENTIAL]"
+	})
 }
