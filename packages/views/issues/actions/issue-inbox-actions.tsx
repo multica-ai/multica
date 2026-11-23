@@ -2,13 +2,22 @@
 
 import { useMemo, useRef, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Archive, Bot, ChevronDown } from "@multica/ui/icons";
+import { AlarmClock, Archive, Bot, Check, ChevronDown, CircleDot } from "@multica/ui/icons";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
+import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
-import type { LastInboxCleared } from "@multica/core/inbox/selection-store";
+import {
+  useMarkInboxRead,
+  useMarkInboxUnread,
+  type InboxUnsubscribeScope,
+} from "@multica/core/inbox/mutations";
+import {
+  useInboxSelectionStore,
+  type LastInboxCleared,
+} from "@multica/core/inbox/selection-store";
 import type { InboxItem } from "@multica/core/types";
 import { findSnoozedInboxIssue, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { nextInboxRow } from "@multica/core/inbox/open-row";
@@ -32,6 +41,7 @@ import {
   useLeaveInboxRow,
   useRestoreInbox,
 } from "../../inbox/components/use-leave-inbox-row";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
@@ -91,6 +101,8 @@ export function IssueInboxBar({
   const archiveWithUndo = useArchiveInboxWithUndo();
   const restore = useRestoreInbox();
   const unsubscribeArchive = useUnsubscribeArchive();
+  const markRead = useMarkInboxRead();
+  const markUnread = useMarkInboxUnread();
   const { snooze, unsnooze } = useInboxSnooze();
   const { data: snoozedList } = useQuery(snoozedInboxOptions(wsId));
   const snoozed = item ? undefined : findSnoozedInboxIssue(snoozedList, issueId);
@@ -271,8 +283,45 @@ export function IssueInboxBar({
     );
   }
 
+  const toggleReadItem = () => {
+    if (!item) return;
+    const store = useInboxSelectionStore.getState();
+    if (item.read === true) {
+      store.markManualUnread(wsId, item.id);
+      markUnread.mutate(item.id, {
+        onError: (err) => {
+          store.clearManualUnread(wsId, item.id);
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.errors.mark_unread_failed),
+          );
+        },
+      });
+    } else {
+      store.clearManualUnread(wsId, item.id);
+      markRead.mutate(item.id, {
+        onError: (err) =>
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.errors.mark_read_failed),
+          ),
+      });
+    }
+  };
+
   return (
     <InboxOpenBar item={item} issueActions={issueActions}>
+      <IconButton
+        label={item.read === true ? t(($) => $.context_menu.mark_unread) : t(($) => $.context_menu.mark_read)}
+        shortcut={<ActionShortcutKeycaps action="markInboxUnread" />}
+        tooltipSide="bottom"
+        className="text-muted-foreground"
+        onClick={toggleReadItem}
+      >
+        {item.read === true ? <CircleDot /> : <Check />}
+      </IconButton>
       <UnsubscribeArchiveButton issueId={issueId} userId={item.recipient_id} onConfirm={unsubscribeItem} />
       <InboxSnoozeMenu
         open={snoozeOpen}

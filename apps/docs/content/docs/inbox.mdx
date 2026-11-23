@@ -12,7 +12,7 @@ The inbox collects the work activity that concerns you and flags where something
 
 The inbox is a section of the **Work** panel, below Pinned and above Views and Projects; with nothing pinned, it is the first section. Its header holds three tabs: **Inbox**, **Snoozed** and **Archived**. Only the open tab shows its name; the other two are icons, named when you hover them. Select the open tab again to collapse the section. The unread count shows next to **Inbox** and as a badge on **Work** in the app rail; right-click **Work** for **Mark all as read**.
 
-The **Inbox** tab lists one row per issue, newest first, read and unread alike. A row shows the issue's status, its title and time, and who did what on a second line; a dot marks it unread. Turn on **Compact rows** in the display settings to keep each row to one line. Hover a row for a card with the full title, the comment, and **Open**, **Mark as read**, and **Archive**.
+The **Inbox** tab lists one row per issue, newest first, read and unread alike. A row shows the issue's status, its title and time, and who did what on a second line; a dot marks it unread. Turn on **Compact rows** in the display settings to keep each row to one line. Hover a row for a card with the full title, the comment, and **Open**, **Mark as read** (or **Mark as unread** when read), **Snooze**, and **Archive**. Right-click a row for **Open in new tab**, **Mark as read** / **Mark as unread**, **Archive** (or **Unarchive** on the Archived tab), **Unsubscribe & archive**, and **Delete**.
 
 On a phone, the Work panel sits in the drawer. Its Inbox section ends with **All notifications**, which opens the Inbox page with its own list, the same three tabs, and filters.
 
@@ -97,11 +97,12 @@ Click a row to open the notification on the Inbox page, at the comment it is abo
 The issue shows a bar under its header. It says who did what, and when, then offers what usually settles the notification:
 
 - **Status**, **Assignee** and **Quick actions** change the issue itself, as its properties do. Quick actions appear once your workspace has some.
+- **Mark as unread / Mark as read** (`U`) toggles the open notification's read state in place without closing it.
 - **Snooze** (`H`) takes the issue out of your inbox until a time you pick, and opens the next one. See [Snooze an issue](#snooze-an-issue) below.
 - **Archive** (`E`) archives the notification and opens the next one. Archiving doesn't modify or delete the issue. To finish the issue, change its status instead; by default that archives its notification too (see [When a notification leaves the inbox](#when-a-notification-leaves-the-inbox)).
 - **Unsubscribe & archive** (`⇧E`) is offered on issues that aren't yours: not assigned to you or to an agent you own. It unsubscribes you from the issue, archives the notification and opens the next one. Ordinary updates stop reaching your inbox, while @mentions still do. On an issue with sub-issues you choose between this issue only and this issue with all its sub-issues. For this issue only, the confirmation offers **Undo**, which restores the subscription as it was. Leaving the sub-issues as well can't be undone there; subscribe again on the issue page instead. The same action is on the hover card and in a row's right-click menu.
 
-The next one is the next row the section lists under its current filters, so you can work through the inbox without going back to the list.
+The next one is the next row the section lists under its current filters, so you can work through the inbox without going back to the list. Press `J` and `K` to step to the next or previous notification in the current tab without archiving.
 
 **Filter**, in the section's ⋯ menu on the **Inbox** and **Archived** tabs, narrows the list by notification type, when it was received, and who it is from, or by the issue's status and priority. While filters are set, a filter button with their count shows in the section header and reopens them; **Clear filters** resets them.
 
@@ -110,7 +111,7 @@ On the **Inbox** tab, the section's ⋯ menu holds the bulk actions:
 - **Mark all as read**;
 - **Archive all read**;
 - **Archive completed**, for issues in the `done` or `closed` category;
-- **Archive all**.
+- **Archive all** (asks for confirmation before archiving all active notifications; snoozed issues are left alone).
 
 The **Archived** tab lists the archived notifications. More records load as you scroll, and filters apply to the entire archive, including records that have not loaded yet. Archived notifications keep their read state, so **Move back to Inbox**, on the row or in the bar of an open one (or `E`), brings one back exactly as you left it.
 

@@ -439,6 +439,18 @@
         "label": "Reporter la notification",
         "description": "Reporte la tâche ouverte depuis la boîte de réception, ou la fait revenir si elle est reportée."
       },
+      "markInboxUnread": {
+        "label": "Marquer la notification comme non lue",
+        "description": "Bascule l'état lu ou non lu de la notification ouverte sans la quitter."
+      },
+      "nextInboxItem": {
+        "label": "Notification suivante",
+        "description": "Ouvre la notification suivante dans la liste active de la boîte de réception."
+      },
+      "prevInboxItem": {
+        "label": "Notification précédente",
+        "description": "Ouvre la notification précédente dans la liste active de la boîte de réception."
+      },
       "undoInboxAction": {
         "label": "Annuler l'action de la boîte de réception",
         "description": "Annule le dernier archivage, report ou désabonnement tant que son message s'affiche ; ensuite, restaure la notification ouverte une fois archivée ou ce qu'indique Boîte de réception vide."

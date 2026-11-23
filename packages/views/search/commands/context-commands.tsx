@@ -267,6 +267,7 @@ export function useInboxCommandGroup(context: ContextOf<"inbox"> | null): Palett
         label: t(($) => $.inbox.mark_unread),
         icon: MailOpen,
         keywords: ["unread", "未读"],
+        shortcut: getShortcut("markInboxUnread"),
         run: () => context.markUnread(item.id),
         primary: true,
       });

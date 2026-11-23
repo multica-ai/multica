@@ -12,7 +12,7 @@ La boîte de réception rassemble l'activité de travail qui vous concerne et si
 
 La boîte de réception est une section du panneau **Travail**, sous les épingles et au-dessus des vues et des projets ; sans épingle, c'est la première section. Son en-tête porte trois onglets : **Boîte de réception**, **Reportés** et **Archivées**. Seul l'onglet ouvert affiche son nom ; les deux autres sont des icônes, nommées au survol. Sélectionner à nouveau l'onglet ouvert replie la section. Le nombre de non-lus s'affiche à côté de **Boîte de réception** et en badge sur **Travail** dans la barre d'applications ; un clic droit sur **Travail** propose **Tout marquer comme lu**.
 
-L'onglet **Boîte de réception** affiche une ligne par tâche, de la plus récente à la plus ancienne, lues et non lues confondues. Une ligne montre le statut de la tâche, son titre et l'heure, et qui a fait quoi sur une deuxième ligne ; un point signale une ligne non lue. Activez **Lignes compactes** dans les réglages d'affichage pour garder chaque ligne sur une seule ligne. Survolez une ligne pour ouvrir une carte avec le titre complet, le commentaire, et **Ouvrir**, **Marquer comme lu** et **Archiver**.
+L'onglet **Boîte de réception** affiche une ligne par tâche, de la plus récente à la plus ancienne, lues et non lues confondues. Une ligne montre le statut de la tâche, son titre et l'heure, et qui a fait quoi sur une deuxième ligne ; un point signale une ligne non lue. Activez **Lignes compactes** dans les réglages d'affichage pour garder chaque ligne sur une seule ligne. Survolez une ligne pour ouvrir une carte avec le titre complet, le commentaire, et **Ouvrir**, **Marquer comme lu** (ou **Marquer comme non lu** une fois lue), **Reporter** et **Archiver**. Un clic droit sur une ligne propose **Ouvrir dans un nouvel onglet**, **Marquer comme lu / non lu**, **Archiver** (ou **Désarchiver** dans l'onglet Archivées), **Se désabonner et archiver** et **Supprimer**.
 
 Sur téléphone, le panneau Travail se trouve dans le tiroir. Sa section Boîte de réception se termine par **Toutes les notifications**, qui ouvre la page Boîte de réception avec sa propre liste, les mêmes trois onglets et ses filtres.
 
@@ -97,11 +97,12 @@ Cliquez sur une ligne pour ouvrir la notification sur la page Boîte de récepti
 La tâche affiche une barre sous son en-tête. Elle indique qui a fait quoi, et quand, puis propose ce qui règle d'habitude la notification :
 
 - **Statut**, **Assigné à** et **Actions rapides** modifient la tâche elle-même, comme ses propriétés. Les actions rapides apparaissent dès que l'espace de travail en a.
+- **Marquer comme non lu / Marquer comme lu** (`U`) bascule l'état de lecture de la notification ouverte sans la fermer.
 - **Reporter** (`H`) retire la tâche de votre boîte de réception jusqu'à l'heure choisie et ouvre la suivante. Voir « Reporter une tâche » ci-dessous.
 - **Archiver** (`E`) archive la notification et ouvre la suivante. L'archivage ne modifie ni ne supprime la tâche. Pour clore la tâche, changez plutôt son statut ; par défaut, sa notification est archivée elle aussi (voir plus bas quand une notification quitte la boîte de réception).
 - **Se désabonner et archiver** (`⇧E`) est proposé sur les tâches qui ne sont pas les vôtres : assignées ni à vous, ni à un agent qui vous appartient. L'action vous désabonne de la tâche, archive la notification et ouvre la suivante. Les mises à jour ordinaires n'arrivent plus dans votre boîte de réception, mais les @mentions, si. Sur une tâche avec des sous-tâches, vous choisissez entre cette tâche seulement et cette tâche avec toutes ses sous-tâches. Pour cette tâche seulement, la confirmation propose **Annuler**, qui rétablit l'abonnement tel qu'il était. Le désabonnement des sous-tâches ne s'annule pas ici ; réabonnez-vous depuis la page de la tâche. La même action se trouve dans la carte au survol et dans le menu contextuel d'une ligne.
 
-La suivante est la ligne suivante que la section affiche avec ses filtres actuels : vous parcourez ainsi la boîte de réception sans revenir à la liste.
+La suivante est la ligne suivante que la section affiche avec ses filtres actuels : vous parcourez ainsi la boîte de réception sans revenir à la liste. Appuyez sur `J` et `K` pour passer à la notification suivante ou précédente dans l'onglet actif sans archiver.
 
 Sur les onglets **Boîte de réception** et **Archivées**, **Filtrer**, dans le menu ⋯ de la section, restreint la liste par type de notification, date de réception et expéditeur, ou par statut et priorité de la tâche. Tant que des filtres sont actifs, un bouton de filtre avec leur nombre s'affiche dans l'en-tête de la section et permet de les rouvrir ; **Effacer les filtres** les réinitialise.
 
@@ -110,7 +111,7 @@ Dans l'onglet **Boîte de réception**, le menu ⋯ de la section regroupe les a
 - **Tout marquer comme lu** ;
 - **Archiver tout ce qui est lu** ;
 - **Archiver les éléments terminés**, pour les tâches des catégories `done` ou `closed` ;
-- **Tout archiver**.
+- **Tout archiver** (demande confirmation avant d'archiver toutes les notifications actives ; les tâches reportées ne sont pas touchées).
 
 L'onglet **Archivées** liste les notifications archivées. D'autres éléments se chargent au fil du défilement, et les filtres s'appliquent à l'ensemble des archives, y compris aux éléments pas encore chargés. Les notifications archivées conservent leur état de lecture : **Remettre dans la boîte de réception**, sur la ligne ou dans la barre d'une notification ouverte (ou `E`), en rétablit une exactement comme vous l'aviez laissée.
 

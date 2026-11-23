@@ -130,6 +130,15 @@ interface InboxSelectionState {
   lastClearedByWorkspace: Record<string, LastInboxCleared>;
   recordLastCleared: (wsId: string, entry: LastInboxCleared) => void;
   clearLastCleared: (wsId: string, matchKey?: string) => void;
+  /**
+   * The notification the viewer explicitly marked unread while it stayed open.
+   * Kept in the store rather than a page ref so marking unread from the Work
+   * panel sidebar, the Inbox bar, a shortcut, or the command bar all suppress
+   * InboxPage's auto-read effect until the selection moves away.
+   */
+  manualUnreadIdByWorkspace: Record<string, string>;
+  markManualUnread: (wsId: string, itemId: string) => void;
+  clearManualUnread: (wsId: string, itemId?: string) => void;
 }
 
 const heldRowId = (wsId: string, list: string) => `${wsId}:${list}`;
@@ -271,5 +280,20 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set, get) =
       if (matchKey !== undefined && current.key !== matchKey) return state;
       const { [wsId]: _cleared, ...lastClearedByWorkspace } = state.lastClearedByWorkspace;
       return { lastClearedByWorkspace };
+    }),
+  manualUnreadIdByWorkspace: {},
+  markManualUnread: (wsId, itemId) =>
+    set((state) =>
+      state.manualUnreadIdByWorkspace[wsId] === itemId
+        ? state
+        : { manualUnreadIdByWorkspace: { ...state.manualUnreadIdByWorkspace, [wsId]: itemId } },
+    ),
+  clearManualUnread: (wsId, itemId) =>
+    set((state) => {
+      const current = state.manualUnreadIdByWorkspace[wsId];
+      if (!current) return state;
+      if (itemId !== undefined && current !== itemId) return state;
+      const { [wsId]: _cleared, ...manualUnreadIdByWorkspace } = state.manualUnreadIdByWorkspace;
+      return { manualUnreadIdByWorkspace };
     }),
 }));

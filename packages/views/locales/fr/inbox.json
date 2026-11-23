@@ -185,6 +185,14 @@
     "cancel": "Annuler",
     "active_issue_description": "Cette action supprime définitivement les notifications actives de la boîte de réception pour cette tâche. Les notifications précédemment archivées, la tâche et ses exécutions sont conservées."
   },
+  "archive_all_dialog": {
+    "title": "Tout archiver ?",
+    "description": "Toutes les notifications actives de votre boîte de réception seront déplacées dans Archivées. Les tickets reportés restent reportés et vous pouvez restaurer les notifications à tout moment.",
+    "description_count_one": "{{count}} notification active de votre boîte de réception sera déplacée dans Archivées. Les tickets reportés restent reportés et vous pouvez la restaurer à tout moment.",
+    "description_count_other": "Les {{count}} notifications actives de votre boîte de réception seront déplacées dans Archivées. Les tickets reportés restent reportés et vous pouvez les restaurer à tout moment.",
+    "cancel": "Annuler",
+    "confirm": "Tout archiver"
+  },
   "unsubscribe": {
     "title": "Se désabonner et archiver. Ses mises à jour ne vous parviendront plus ; les @mentions, si.",
     "this_issue": "Cette tâche uniquement",
