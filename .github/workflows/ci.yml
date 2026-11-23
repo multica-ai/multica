@@ -293,10 +293,12 @@ jobs:
       - name: Test docs
         run: pnpm --filter @multica/docs test
 
-  # Playwright against a real API and a production web build. Only the guest
-  # spec runs here so far: a guest passes an API allowlist that no member-side
-  # test exercises, so a member component reused on a guest page can fail with
-  # 403 unnoticed (MUL-9873). The rest of e2e/ runs locally through `make check`.
+  # Playwright against a real API and a production web build. Two specs run
+  # here so far. The guest spec: a guest passes an API allowlist that no
+  # member-side test exercises, so a member component reused on a guest page
+  # can fail with 403 unnoticed (MUL-9873). The Inbox header spec: the Work
+  # panel's Inbox tabs shipped cut to their first letter in every language
+  # once already (MUL-9930). The rest of e2e/ runs locally through `make check`.
   # The web app is served the way scripts/web-prod.mjs serves it: same-origin,
   # with `next start` proxying /api and /ws to the API.
   e2e:
@@ -390,8 +392,8 @@ jobs:
             curl -sf -o /dev/null "$url" || { echo "$url did not answer within 60s"; exit 1; }
           done
 
-      - name: Run the guest spec
-        run: pnpm exec playwright test e2e/guest.spec.ts
+      - name: Run the guest and Inbox header specs
+        run: pnpm exec playwright test e2e/guest.spec.ts e2e/inbox-section-header-locales.spec.ts
 
       - name: Upload logs and Playwright results
         if: ${{ failure() }}
