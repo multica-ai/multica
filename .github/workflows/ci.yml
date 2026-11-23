@@ -328,6 +328,9 @@ jobs:
       MULTICA_APP_URL: http://localhost:3000
       PLAYWRIGHT_BASE_URL: http://localhost:3000
       NEXT_TELEMETRY_DISABLED: "1"
+      # With Docs off the palette never searches docs, so a guest's refused
+      # doc search would go unnoticed.
+      FF_DOCS_V1: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
