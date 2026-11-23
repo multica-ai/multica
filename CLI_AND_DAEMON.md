@@ -49,6 +49,29 @@ The metadata mirror must serve `/repos/multica-ai/multica/releases/latest` and
 `/<tag>/<asset-name>` and preserve the published `checksums.txt` contents.
 When these variables are unset, the GitHub defaults remain unchanged.
 
+## Bundled agent guides
+
+The CLI carries a version-matched guide for external coding agents. Read it
+offline, without authentication or installing skills into an agent directory:
+
+```bash
+multica skills list --output json
+multica skills read multica-cli
+multica skills read multica-cli references/workspaces.md
+multica skills read multica-cli references/issues.md --output json
+```
+
+`skills list` reports the bundled files and CLI version. `skills read` prints
+Markdown by default; JSON output includes the name, path, CLI version and
+content. The workspace guide covers first-time environment preparation, reuse
+of persistent directories, execution-machine checks and cross-device handoff.
+Reading it does not create resources, change routing, or start runs.
+
+This is separate from `multica skill`, which manages server-side workspace
+skills. Existing standalone skill installation remains supported. A standalone
+skill can point to `multica skills read multica-cli` to load the guide matching
+the installed CLI, rather than copying a separate command reference.
+
 ## Quick Start
 
 ```bash
