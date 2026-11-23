@@ -153,6 +153,11 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// into the running ACP turn (queued, then injected at the next
 		// tool/message boundary of the same session/prompt).
 		minimum = "2.33.0"
+	case "antigravity":
+		// 1.4.8 is the oldest agy verified to append PreInvocation injectSteps
+		// userMessage entries to the running turn and to report each as a
+		// user_input step on the stream-json output.
+		minimum = "1.4.8"
 	case "cursor":
 		// 2026.10.14 is the oldest build verified to forward postToolUse
 		// additional_context into the model turn in --print mode.
