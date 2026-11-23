@@ -15,7 +15,7 @@ import type { IssueAgentState } from "../../issues/surface/use-issue-agent-state
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { formatSnoozeTime } from "./inbox-snooze-time";
 import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "./inbox-display";
-import { InboxBar, InboxBarSeparator, InboxBarStatus } from "./inbox-bar";
+import { InboxBar, InboxBarKeycaps, InboxBarSeparator, InboxBarStatus } from "./inbox-bar";
 import { useInboxUndoShortcut } from "./use-inbox-shortcut";
 
 /**
@@ -165,6 +165,7 @@ export function InboxKeptActions({
           <Button size="sm" variant="ghost" aria-label={undoLabel} className="shrink-0 text-muted-foreground" onClick={onUndo}>
             <Undo2 />
             <span className="@max-[32rem]/inbox-bar:hidden">{undoLabel}</span>
+            <InboxBarKeycaps action="undoInboxAction" />
           </Button>
         </TooltipHint>
       )}
@@ -195,6 +196,7 @@ export function InboxNextButton({ next, onNext }: { next: InboxItem; onNext: () 
       <Button size="sm" className="shrink-0" onClick={onNext}>
         {t(($) => $.kept.next)}
         <ArrowDown />
+        <InboxBarKeycaps action="archiveInboxItem" />
       </Button>
     </TooltipHint>
   );

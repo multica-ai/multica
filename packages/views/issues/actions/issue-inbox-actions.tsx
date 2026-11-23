@@ -2,8 +2,7 @@
 
 import { useMemo, useRef, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Archive, CalendarClock, Check, CircleDot } from "@multica/ui/icons";
-import { IconButton } from "@multica/ui/components/common/icon-button";
+import { AlarmClock, Archive, CalendarClock } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -23,13 +22,13 @@ import { useIsGuest } from "@multica/core/permissions";
 import { InboxArchiveButton, InboxBar, InboxBarButton, InboxBarStatus, InboxOpenBar } from "../../inbox/components/inbox-bar";
 import { inboxRowHref } from "../../inbox/components/inbox-display";
 import { InboxKeptActions, InboxNextButton, useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
+import { InboxMoreMenu } from "../../inbox/components/inbox-more-menu";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
 import { useInboxShortcut } from "../../inbox/components/use-inbox-shortcut";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
 import { inboxTabHref } from "../../inbox/components/inbox-view";
-import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
 import { useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import { useAutoArchiveCause } from "../../inbox/components/use-auto-archive-cause";
 import {
@@ -38,7 +37,6 @@ import {
   useLeaveInboxRow,
   useRestoreInbox,
 } from "../../inbox/components/use-leave-inbox-row";
-import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
@@ -264,16 +262,13 @@ export function IssueInboxBar({
 
   return (
     <InboxOpenBar issueActions={issueActions}>
-      <IconButton
-        label={item.read === true ? t(($) => $.context_menu.mark_unread) : t(($) => $.context_menu.mark_read)}
-        shortcut={<ActionShortcutKeycaps action="markInboxUnread" />}
-        tooltipSide="top"
-        className="text-muted-foreground"
-        onClick={toggleReadItem}
-      >
-        {item.read === true ? <CircleDot /> : <Check />}
-      </IconButton>
-      <UnsubscribeArchiveButton issueId={issueId} userId={item.recipient_id} onConfirm={unsubscribeItem} />
+      <InboxMoreMenu
+        issueId={issueId}
+        userId={item.recipient_id}
+        read={item.read === true}
+        onToggleRead={toggleReadItem}
+        onUnsubscribe={unsubscribeItem}
+      />
       <InboxSnoozeMenu
         open={snoozeOpen}
         onOpenChange={setSnoozeOpen}

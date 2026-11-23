@@ -65,6 +65,7 @@
   "detail": {
     "select_prompt": "選擇一條通知檢視詳情",
     "restore": "移回收件箱",
+    "more_actions": "更多通知操作",
     "original_input": "原始輸入",
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "開啟完整表單",

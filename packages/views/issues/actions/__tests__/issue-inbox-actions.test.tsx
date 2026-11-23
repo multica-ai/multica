@@ -107,7 +107,7 @@ function setup({
     listSnoozedInbox: async () => snoozed,
     getInboxUnreadSummary: async () => [],
     getAgentTaskSnapshot: async () => [],
-    // The child list refetches on mount; the unsubscribe button acts directly once it is known.
+    // The child list refetches on mount; unsubscribing acts directly once it is known.
     listChildIssues: async () => ({ issues: [] }),
     // The bar's reason line shows the actor's avatar.
     getBaseUrl: () => "",
@@ -231,12 +231,18 @@ describe("IssueInboxBar", () => {
     expect(issueAction.compareDocumentPosition(snooze) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("leads with Archive as its one filled action, its shortcuts kept to the tooltips", () => {
+  it("leads with Archive as its one filled action, each named action with its shortcut beside it", () => {
     setup();
     const bar = document.querySelector<HTMLElement>("[data-inbox-bar]")!;
     expect(bar.querySelectorAll('[data-slot="button"][data-variant="default"]')).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Archive" })).toHaveAttribute("data-variant", "default");
-    expect(bar.querySelector('[data-slot="kbd"]')).toBeNull();
+    const archive = screen.getByRole("button", { name: "Archive" });
+    expect(archive).toHaveAttribute("data-variant", "default");
+    expect(within(archive).getByText("E")).toBeInTheDocument();
+    expect(within(screen.getByRole("button", { name: "Snooze" })).getByText("H")).toBeInTheDocument();
+    // Its last button is Archive; the rarer actions wait behind More, first.
+    const buttons = within(bar).getAllByRole("button");
+    expect(buttons.at(-1)).toBe(archive);
+    expect(buttons.at(-3)).toHaveAccessibleName("More notification actions");
   });
 
   it("moves on with Next as the settled group's one filled action", async () => {
@@ -244,8 +250,10 @@ describe("IssueInboxBar", () => {
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
     const next = await screen.findByRole("button", { name: "Next" });
     expect(next).toHaveAttribute("data-variant", "default");
-    expect(screen.getByRole("button", { name: "Undo" })).toHaveAttribute("data-variant", "ghost");
-    expect(document.querySelector('[data-inbox-bar] [data-slot="kbd"]')).toBeNull();
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo).toHaveAttribute("data-variant", "ghost");
+    expect(within(next).getByText("E")).toBeInTheDocument();
+    expect(within(undo).getByText("Z")).toBeInTheDocument();
   });
 
   it("keeps the issue's actions once the notification has left the Inbox", async () => {
@@ -303,20 +311,23 @@ describe("IssueInboxBar", () => {
     });
   });
 
-  it("offers mark unread and read toggle alongside snooze", () => {
+  it("keeps the mark unread and read toggle behind More, beside snooze", async () => {
     state.markRead.mockClear();
     state.markUnread.mockClear();
     useInboxSelectionStore.setState({ manualUnreadIdByWorkspace: {} });
     setup();
     expect(screen.getByRole("button", { name: "Snooze" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mark as unread" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+    fireEvent.click(screen.getByRole("button", { name: "More notification actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Mark as unread/ }));
     expect(state.markUnread).toHaveBeenCalledWith("n-1", expect.any(Object));
     expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace.ws).toBe("n-1");
     cleanup();
 
     setup({ rows: [{ ...ROWS[0]!, read: false }, ROWS[1]!] });
-    fireEvent.click(screen.getByRole("button", { name: "Mark as read" }));
+    fireEvent.click(screen.getByRole("button", { name: "More notification actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Mark as read/ }));
     expect(state.markRead).toHaveBeenCalledWith("n-1", expect.any(Object));
     expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace.ws).toBeUndefined();
   });
@@ -537,9 +548,11 @@ describe("IssueInboxBar", () => {
   // Snooze, archive and unsubscribe share the bar; each key does only its own.
   async function setupTheirs() {
     const nav = setup({ theirs: true });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Unsubscribe & archive" })).not.toHaveAttribute("aria-haspopup"),
-    );
+    // Unsubscribing acts directly (no scope to ask) once the More menu lists it as one item.
+    fireEvent.click(screen.getByRole("button", { name: "More notification actions" }));
+    await screen.findByRole("menuitem", { name: /^Unsubscribe & archive/ });
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     return nav;
   }
 
@@ -567,9 +580,11 @@ describe("IssueInboxBar", () => {
     expect(state.archiveInbox).not.toHaveBeenCalled();
   });
 
-  it("offers no unsubscribe on an issue the viewer does not follow as a bystander", () => {
+  it("offers no unsubscribe on an issue the viewer does not follow as a bystander", async () => {
     setup();
-    expect(screen.queryByRole("button", { name: "Unsubscribe & archive" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "More notification actions" }));
+    await screen.findByRole("menuitem", { name: /^Mark as unread/ });
+    expect(screen.queryByRole("menuitem", { name: /Unsubscribe/ })).toBeNull();
   });
 });
 

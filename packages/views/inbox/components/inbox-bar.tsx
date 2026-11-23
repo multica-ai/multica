@@ -22,8 +22,9 @@ import { useT } from "../../i18n";
  * It floats centred above the composer and takes no layout, so the reading
  * column never shifts when it appears, settles or goes. Its host is the
  * `@container/inbox-bar` (the reading column's width, not the window), so
- * labels give way by the room the group actually has: the issue's values
- * first, then the notification's. Shortcuts live in the tooltips.
+ * labels give way by the room the group actually has: the issue's values and
+ * the notification's keycaps first, then the notification's names. The
+ * tooltips keep both.
  */
 export function InboxBar({ settled = false, children }: { settled?: boolean; children: ReactNode }) {
   const reduceMotion = useReducedMotion();
@@ -94,8 +95,8 @@ export function InboxBarSeparator() {
 }
 
 /**
- * A notification action in the group, named, with its shortcut in the
- * tooltip. A narrow group drops the name; the tooltip keeps it.
+ * A notification action in the group, named, with its shortcut beside it. A
+ * narrow group drops the shortcut, then the name; the tooltip keeps both.
  */
 export function InboxBarButton({
   icon,
@@ -120,8 +121,18 @@ export function InboxBarButton({
       >
         {icon}
         <span className="@max-[32rem]/inbox-bar:hidden">{label}</span>
+        {shortcut && <InboxBarKeycaps action={shortcut} />}
       </Button>
     </TooltipHint>
+  );
+}
+
+/** A shortcut beside its action's name, the first thing a narrow group drops. */
+export function InboxBarKeycaps({ action }: { action: ShortcutActionId }) {
+  return (
+    <span className="flex @max-[40rem]/inbox-bar:hidden">
+      <ActionShortcutKeycaps action={action} />
+    </span>
   );
 }
 

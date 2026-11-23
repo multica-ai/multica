@@ -67,6 +67,7 @@
   "detail": {
     "select_prompt": "Selecciona una notificación para ver los detalles",
     "restore": "Devolver a la bandeja de entrada",
+    "more_actions": "Más acciones de la notificación",
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Abrir formulario completo",
