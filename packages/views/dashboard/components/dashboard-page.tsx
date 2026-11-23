@@ -542,13 +542,13 @@ export function DashboardPage() {
           <TabsList variant="line" className="shrink-0 gap-0 p-0 group-data-horizontal/tabs:h-full">
             <TabsTrigger
               value="usage"
-              className="h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0"
+              className="h-full rounded-none px-2.5"
             >
               {t(($) => $.tab_usage)}
             </TabsTrigger>
             <TabsTrigger
               value="errors"
-              className="h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0"
+              className="h-full rounded-none px-2.5"
             >
               {t(($) => $.errors.title)}
             </TabsTrigger>
