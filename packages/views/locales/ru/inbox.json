@@ -60,6 +60,7 @@
       "days": "{{count}} дн"
     },
     "archived_title": "Архив",
+    "snoozed_title": "Отложенные",
     "archived_empty": "Нет архивных уведомлений",
     "unarchive_tooltip": "Восстановить из архива",
     "actions_aria": "Действия с уведомлением",
@@ -69,6 +70,7 @@
   },
   "detail": {
     "select_prompt": "Выберите уведомление, чтобы посмотреть детали",
+    "restore": "Вернуть во входящие",
     "original_input": "Исходный ввод",
     "retry_with_context": "Повторить с контекстом",
     "edit_advanced": "Открыть полную форму",

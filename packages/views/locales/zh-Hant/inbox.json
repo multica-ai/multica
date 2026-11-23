@@ -54,6 +54,7 @@
       "days": "{{count}} 天"
     },
     "archived_title": "已歸檔",
+    "snoozed_title": "已延後",
     "archived_empty": "暫無已歸檔通知",
     "unarchive_tooltip": "取消歸檔",
     "actions_aria": "通知操作",
@@ -63,6 +64,7 @@
   },
   "detail": {
     "select_prompt": "選擇一條通知檢視詳情",
+    "restore": "移回收件箱",
     "original_input": "原始輸入",
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "開啟完整表單",

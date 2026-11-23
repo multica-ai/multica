@@ -54,6 +54,7 @@
       "days": "{{count}}日"
     },
     "archived_title": "アーカイブ済み",
+    "snoozed_title": "スヌーズ中",
     "archived_empty": "アーカイブされた通知はありません",
     "unarchive_tooltip": "アーカイブ解除",
     "actions_aria": "通知の操作",
@@ -63,6 +64,7 @@
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
+    "restore": "インボックスに戻す",
     "original_input": "元の入力",
     "retry_with_context": "コンテキストを保持して再試行",
     "edit_advanced": "詳細フォームを開く",

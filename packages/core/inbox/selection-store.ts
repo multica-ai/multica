@@ -48,6 +48,13 @@ export type LastInboxCleared =
 export type InboxTransitionDirection = "next" | "prev";
 
 /**
+ * The Inbox's three tabs, in the Work panel's Inbox section and on the
+ * phone's Inbox page: the live Inbox, the issues snoozed out of it, and the
+ * archive.
+ */
+export type InboxTab = "inbox" | "snoozed" | "archived";
+
+/**
  * Directional hint recorded right before the Inbox advances to the next item
  * (`"next"`) or undoes back to a cleared one (`"prev"`), so the arriving
  * detail can play a subtle 12px glide aligned with list order.
@@ -63,9 +70,12 @@ const INBOX_TRANSITION_TTL_MS = 3_000;
 interface InboxSelectionState {
   lastResolvedKeyByWorkspace: Record<string, string>;
   rememberResolvedKey: (wsId: string, key: string) => void;
-  /** The issue last opened from the Work panel's Inbox section. */
-  sidebarIssueByWorkspace: Record<string, string | null>;
-  rememberSidebarIssue: (wsId: string, issueId: string | null) => void;
+  /**
+   * The tab the Work panel's Inbox section last showed, per workspace, for
+   * pages other than the Inbox, whose own `?view=` sets the tab there.
+   */
+  sectionTabByWorkspace: Record<string, InboxTab>;
+  setSectionTab: (wsId: string, tab: InboxTab) => void;
   /**
    * Pending directional transition into the next (or undone) Inbox item.
    * Consumed once when that destination mounts; stale entries expire.
@@ -74,26 +84,20 @@ interface InboxSelectionState {
   recordTransition: (wsId: string, targetKey: string, direction: InboxTransitionDirection) => void;
   consumeTransition: (wsId: string, key: string) => InboxTransitionDirection | null;
   /**
-   * Issues the Inbox section opened in another tab of this window. Desktop
-   * tabs share this store, so each of these keeps counting as opened from
-   * the Inbox beside the issue the current tab last opened from it.
-   */
-  sidebarTabIssuesByWorkspace: Record<string, string[]>;
-  rememberSidebarTabIssue: (wsId: string, issueId: string) => void;
-  forgetSidebarTabIssue: (wsId: string, issueId: string) => void;
-  /**
    * The issue a notification row was last clicked for, with a counter that
-   * moves on every click. The issue page replays its landing (the comment or
-   * app request the link names) when the counter moves, which a click on the
-   * row already open needs: the page neither remounts nor sees a new link.
+   * moves on every click. The Inbox page replays its landing (the comment or
+   * app request the notification is about) when the counter moves, which a
+   * click on the row already open needs: the detail neither remounts nor sees
+   * a new link.
    *
    * Until the page reports it `landed`, the click outranks the page's record
-   * that it already landed on that comment. The record belongs to the issue's
-   * route, which a click on another page cannot reach before it navigates.
+   * that it already landed on that comment. The record belongs to the Inbox
+   * page's route, which a click on another page cannot reach before it
+   * navigates.
    */
   landing: { issueId: string; token: number; landed: boolean } | null;
   requestLanding: (issueId: string) => void;
-  /** The issue page landed the click with this token. */
+  /** The Inbox page landed the click with this token. */
   completeLanding: (token: number) => void;
   /**
    * The open notification's row as each list last showed it, by
@@ -132,10 +136,10 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set, get) =
     set((state) => state.lastResolvedKeyByWorkspace[wsId] === key ? state : {
       lastResolvedKeyByWorkspace: { ...state.lastResolvedKeyByWorkspace, [wsId]: key },
     }),
-  sidebarIssueByWorkspace: {},
-  rememberSidebarIssue: (wsId, issueId) =>
-    set((state) => (state.sidebarIssueByWorkspace[wsId] ?? null) === issueId ? state : {
-      sidebarIssueByWorkspace: { ...state.sidebarIssueByWorkspace, [wsId]: issueId },
+  sectionTabByWorkspace: {},
+  setSectionTab: (wsId, tab) =>
+    set((state) => (state.sectionTabByWorkspace[wsId] ?? "inbox") === tab ? state : {
+      sectionTabByWorkspace: { ...state.sectionTabByWorkspace, [wsId]: tab },
     }),
   transitionByWorkspace: {},
   recordTransition: (wsId, targetKey, direction) =>
@@ -156,24 +160,6 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set, get) =
     });
     return fresh ? entry.direction : null;
   },
-  sidebarTabIssuesByWorkspace: {},
-  rememberSidebarTabIssue: (wsId, issueId) =>
-    set((state) => {
-      const issueIds = state.sidebarTabIssuesByWorkspace[wsId] ?? [];
-      return issueIds.includes(issueId) ? state : {
-        sidebarTabIssuesByWorkspace: { ...state.sidebarTabIssuesByWorkspace, [wsId]: [...issueIds, issueId] },
-      };
-    }),
-  forgetSidebarTabIssue: (wsId, issueId) =>
-    set((state) => {
-      const issueIds = state.sidebarTabIssuesByWorkspace[wsId] ?? [];
-      return issueIds.includes(issueId) ? {
-        sidebarTabIssuesByWorkspace: {
-          ...state.sidebarTabIssuesByWorkspace,
-          [wsId]: issueIds.filter((id) => id !== issueId),
-        },
-      } : state;
-    }),
   landing: null,
   requestLanding: (issueId) =>
     set((state) => ({ landing: { issueId, token: (state.landing?.token ?? 0) + 1, landed: false } })),

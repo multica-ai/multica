@@ -721,6 +721,7 @@ const mockTimeline: TimelineEntry[] = [
 // ---------------------------------------------------------------------------
 
 import { IssueDetail, groupSubIssuesByStage } from "./issue-detail";
+import { InboxArchiveButton, InboxOpenBar } from "../../inbox/components/inbox-bar";
 import { ScrollRestorationProvider, type ScrollRestorationAdapter } from "../../platform";
 import { READING_COLUMN } from "../../layout/reading-column";
 import {
@@ -1569,11 +1570,39 @@ describe("IssueDetail (shared)", () => {
       return render(
         <I18nProvider locale="en" resources={TEST_RESOURCES}>
           <QueryClientProvider client={queryClient}>
-            <IssueDetail issueId="issue-1" onArchive={onArchive} inboxItem={item ?? undefined} />
+            <IssueDetail
+              issueId="issue-1"
+              inbox={{
+                crumb: { href: "/test/inbox", label: "Inbox" },
+                item: item ?? undefined,
+                bar: (issueActions) =>
+                  item ? (
+                    <InboxOpenBar item={item} issueActions={issueActions}>
+                      <InboxArchiveButton onClick={onArchive} />
+                    </InboxOpenBar>
+                  ) : null,
+              }}
+            />
           </QueryClientProvider>
         </I18nProvider>,
       );
     }
+
+    it("leads with the way back to the Inbox and opens the issue page on its own", async () => {
+      renderWithArchive();
+
+      const open = await screen.findByRole("button", { name: enIssues.detail.open_issue_page });
+      expect(open).toHaveAttribute("href", "/test/issues/TES-1");
+      expect(screen.getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/test/inbox");
+    });
+
+    it("leaves the issue page without either", async () => {
+      renderIssueDetail();
+
+      await screen.findByRole("button", { name: enCommon.more_actions });
+      expect(screen.queryByRole("button", { name: enIssues.detail.open_issue_page })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: enInbox.context_menu.archive })).not.toBeInTheDocument();
+    });
 
     it("puts the notification's actions under the header, after why it is here and the issue's own", async () => {
       const { container } = renderWithArchive();

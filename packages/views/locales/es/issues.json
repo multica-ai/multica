@@ -593,7 +593,8 @@
     "load_failed": "No se pudo cargar la tarea.",
     "load_retry": "Reintentar",
     "not_found_title": "Tarea no encontrada",
-    "guest_readonly_note": "Los invitados pueden ver y comentar, pero no cambiar las propiedades de la tarea."
+    "guest_readonly_note": "Los invitados pueden ver y comentar, pero no cambiar las propiedades de la tarea.",
+    "open_issue_page": "Abrir la página de la tarea"
   },
   "timeline": {
     "loading": "Cargando...",
