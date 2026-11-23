@@ -1,62 +1,30 @@
--- Rollback 739: merge any split squad buckets back into squad_id = NULL,
--- restore legacy unique constraints, triggers, and rollup_task_usage_hourly_window.
+-- Rollback 739: attach the concurrently-built legacy unique indexes (from
+-- 740/741 down) as UNIQUE constraints (metadata-only instant attach, zero
+-- index rebuild / table scan), then restore the legacy triggers and
+-- rollup_task_usage_hourly_window.
 
-WITH merged AS (
-    SELECT
-        bucket_hour, workspace_id, runtime_id, agent_id, project_id, provider, model,
-        SUM(input_tokens)::bigint        AS input_tokens,
-        SUM(output_tokens)::bigint       AS output_tokens,
-        SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
-        SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
-        SUM(cost_usd_ticks)::bigint      AS cost_usd_ticks,
-        SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint             AS uncosted_input_tokens,
-        SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint           AS uncosted_output_tokens,
-        SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint   AS uncosted_cache_read_tokens,
-        SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens,
-        SUM(task_count)::bigint          AS task_count,
-        SUM(event_count)::bigint         AS event_count,
-        MAX(updated_at)                  AS updated_at
-      FROM task_usage_hourly
-     WHERE (bucket_hour, workspace_id, runtime_id, agent_id, COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid), provider, model) IN (
-         SELECT bucket_hour, workspace_id, runtime_id, agent_id, COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid), provider, model
-           FROM task_usage_hourly
-          WHERE squad_id IS NOT NULL
-     )
-     GROUP BY 1, 2, 3, 4, 5, 6, 7
-),
-cleared AS (
-    DELETE FROM task_usage_hourly
-     WHERE (bucket_hour, workspace_id, runtime_id, agent_id, COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid), provider, model) IN (
-         SELECT bucket_hour, workspace_id, runtime_id, agent_id, COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid), provider, model
-           FROM merged
-     )
-)
-INSERT INTO task_usage_hourly (
-    bucket_hour, workspace_id, runtime_id, agent_id, project_id, squad_id, provider, model,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-    cost_usd_ticks, uncosted_input_tokens, uncosted_output_tokens,
-    uncosted_cache_read_tokens, uncosted_cache_write_tokens,
-    task_count, event_count, updated_at
-)
-SELECT
-    bucket_hour, workspace_id, runtime_id, agent_id, project_id, NULL, provider, model,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-    cost_usd_ticks, uncosted_input_tokens, uncosted_output_tokens,
-    uncosted_cache_read_tokens, uncosted_cache_write_tokens,
-    task_count, event_count, updated_at
-  FROM merged;
-
-DELETE FROM task_usage_hourly_dirty WHERE squad_id IS NOT NULL;
-
-ALTER TABLE task_usage_hourly
-    ADD CONSTRAINT uq_task_usage_hourly_key
-    UNIQUE NULLS NOT DISTINCT
-    (bucket_hour, workspace_id, runtime_id, agent_id, project_id, provider, model);
-
-ALTER TABLE task_usage_hourly_dirty
-    ADD CONSTRAINT uq_task_usage_hourly_dirty_key
-    UNIQUE NULLS NOT DISTINCT
-    (bucket_hour, workspace_id, runtime_id, agent_id, project_id, provider, model);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'task_usage_hourly'::regclass
+           AND conname = 'uq_task_usage_hourly_key'
+    ) THEN
+        ALTER TABLE task_usage_hourly
+            ADD CONSTRAINT uq_task_usage_hourly_key
+            UNIQUE USING INDEX uq_task_usage_hourly_key;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'task_usage_hourly_dirty'::regclass
+           AND conname = 'uq_task_usage_hourly_dirty_key'
+    ) THEN
+        ALTER TABLE task_usage_hourly_dirty
+            ADD CONSTRAINT uq_task_usage_hourly_dirty_key
+            UNIQUE USING INDEX uq_task_usage_hourly_dirty_key;
+    END IF;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION enqueue_task_usage_hourly_dirty_for_atq()
 RETURNS TRIGGER

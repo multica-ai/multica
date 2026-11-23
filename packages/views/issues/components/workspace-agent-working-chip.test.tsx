@@ -2,19 +2,37 @@
 
 import { cleanup, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkingAgentSummary } from "@multica/core/types";
+import type { AgentTask, WorkingAgentSummary } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
   avatarAgentIds: undefined as readonly string[] | undefined,
   buttonVariant: undefined as string | undefined,
+  snapshot: [] as AgentTask[],
 }));
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual =
+    await vi.importActual<typeof import("@tanstack/react-query")>(
+      "@tanstack/react-query",
+    );
+  return {
+    ...actual,
+    useQuery: () => ({ data: mockState.snapshot }),
+  };
+});
 
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
-    getActorName: (_type: string, id: string) => `Agent ${id}`,
+    getActorName: (type: string, id: string) =>
+      type === "squad" ? `Squad ${id}` : `Agent ${id}`,
     getActorInitials: () => "AG",
     getActorAvatarUrl: () => null,
+    hasActor: () => true,
   }),
 }));
 

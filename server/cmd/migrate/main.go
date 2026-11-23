@@ -438,6 +438,8 @@ var concurrentIndexCleanups = map[string]string{
 // the retry, while a bare CREATE would stay wedged on "already exists"; both
 // cases need direction-specific cleanup before the rollback can retry safely.
 var concurrentDownIndexCleanups = map[string]string{
+	"740_task_usage_hourly_drop_legacy_key":                 "uq_task_usage_hourly_key",
+	"741_task_usage_hourly_dirty_drop_legacy_key":           "uq_task_usage_hourly_dirty_key",
 	"730_drop_remote_app_connection_owner_idx":              "uq_remote_app_connection_owner",
 	"144_drop_agent_task_queue_chat_pending_v1":             "idx_agent_task_queue_chat_pending",
 	"171_drop_legacy_label_namespace_index":                 "issue_label_workspace_name_lower_idx",

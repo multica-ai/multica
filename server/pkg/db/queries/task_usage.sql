@@ -279,8 +279,8 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (
       sqlc.arg('squad_scope')::text = ''
-      OR (sqlc.arg('squad_scope')::text = 'standalone' AND atq.squad_id IS NULL)
-      OR (sqlc.arg('squad_scope')::text = 'squad' AND atq.squad_id = sqlc.narg('squad_id')::uuid)
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
   )
 GROUP BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
@@ -325,8 +325,8 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (
       sqlc.arg('squad_scope')::text = ''
-      OR (sqlc.arg('squad_scope')::text = 'standalone' AND atq.squad_id IS NULL)
-      OR (sqlc.arg('squad_scope')::text = 'squad' AND atq.squad_id = sqlc.narg('squad_id')::uuid)
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
   )
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC;
@@ -335,7 +335,7 @@ ORDER BY total_seconds DESC;
 -- Per-(squad, agent) terminal-task run time and task counts for the workspace.
 -- squad_id IS NULL represents standalone (non-squad-triggered) agent runs.
 SELECT
-    atq.squad_id,
+    COALESCE(atq.usage_squad_id, atq.squad_id)::uuid AS squad_id,
     atq.agent_id,
     COALESCE(
         SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
@@ -358,10 +358,10 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (
       sqlc.arg('squad_scope')::text = ''
-      OR (sqlc.arg('squad_scope')::text = 'standalone' AND atq.squad_id IS NULL)
-      OR (sqlc.arg('squad_scope')::text = 'squad' AND atq.squad_id = sqlc.narg('squad_id')::uuid)
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
   )
-GROUP BY atq.squad_id, atq.agent_id
+GROUP BY COALESCE(atq.usage_squad_id, atq.squad_id), atq.agent_id
 ORDER BY total_seconds DESC;
 
 -- name: ListDashboardFailuresDaily :many
@@ -404,8 +404,8 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (
       sqlc.arg('squad_scope')::text = ''
-      OR (sqlc.arg('squad_scope')::text = 'standalone' AND atq.squad_id IS NULL)
-      OR (sqlc.arg('squad_scope')::text = 'squad' AND atq.squad_id = sqlc.narg('squad_id')::uuid)
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
   )
 GROUP BY 1, 2
 ORDER BY 1 DESC, 2;
@@ -436,8 +436,8 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (
       sqlc.arg('squad_scope')::text = ''
-      OR (sqlc.arg('squad_scope')::text = 'standalone' AND atq.squad_id IS NULL)
-      OR (sqlc.arg('squad_scope')::text = 'squad' AND atq.squad_id = sqlc.narg('squad_id')::uuid)
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
   )
 GROUP BY atq.agent_id, 2
 ORDER BY atq.agent_id, 2;
@@ -446,7 +446,7 @@ ORDER BY atq.agent_id, 2;
 -- Per-(squad, agent, failure_reason) terminal-task counts for the Errors tab's
 -- Squad breakdown. squad_id IS NULL represents standalone agent runs.
 SELECT
-    atq.squad_id,
+    COALESCE(atq.usage_squad_id, atq.squad_id)::uuid AS squad_id,
     atq.agent_id,
     CASE
         WHEN atq.status = 'failed'
@@ -464,8 +464,8 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (
       sqlc.arg('squad_scope')::text = ''
-      OR (sqlc.arg('squad_scope')::text = 'standalone' AND atq.squad_id IS NULL)
-      OR (sqlc.arg('squad_scope')::text = 'squad' AND atq.squad_id = sqlc.narg('squad_id')::uuid)
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
   )
-GROUP BY atq.squad_id, atq.agent_id, 3
-ORDER BY atq.squad_id NULLS LAST, atq.agent_id, 3;
+GROUP BY COALESCE(atq.usage_squad_id, atq.squad_id), atq.agent_id, 3
+ORDER BY 1 NULLS LAST, atq.agent_id, 3;

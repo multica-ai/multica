@@ -84,14 +84,14 @@ func TestDashboardSquadAttributionAndEndpoints(t *testing.T) {
 		"updated_at":    now.Add(-4 * time.Minute),
 	})
 
-	// 2. Delegated member task (squad_id = squadID, is_leader_task = false, failed, 2000 input tokens)
+	// 2. Delegated member task (usage_squad_id = squadID, squad_id = NULL, is_leader_task = false, failed, 2000 input tokens)
 	memberSquadTaskID := dbfx.Task(t, memberID, testutil.Cols{
 		"issue_id":               issueID,
 		"runtime_id":             runtimeID,
 		"status":                 "failed",
 		"failure_reason":         "timeout",
 		"is_leader_task":         false,
-		"squad_id":               squadID,
+		"usage_squad_id":         squadID,
 		"delegated_from_task_id": leaderTaskID,
 		"started_at":             started,
 		"completed_at":           completed,
@@ -334,8 +334,11 @@ func TestSquadInheritanceAndDaemonClaimSafety(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, uuidToString(delegatedTask.ID)) })
 
-	if uuidToString(delegatedTask.SquadID) != squadID {
-		t.Fatalf("delegated task squad_id = %q, want %q", uuidToString(delegatedTask.SquadID), squadID)
+	if uuidToString(delegatedTask.UsageSquadID) != squadID {
+		t.Fatalf("delegated task usage_squad_id = %q, want %q", uuidToString(delegatedTask.UsageSquadID), squadID)
+	}
+	if delegatedTask.SquadID.Valid {
+		t.Fatalf("delegated task must keep role-proof squad_id NULL, got %q", uuidToString(delegatedTask.SquadID))
 	}
 	if delegatedTask.IsLeaderTask {
 		t.Fatalf("delegated task must have is_leader_task=false")
@@ -429,14 +432,17 @@ func TestSquadInheritanceAndDaemonClaimSafety(t *testing.T) {
 		t.Fatalf("EnqueueTaskForIssue(child): %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, uuidToString(childTask.ID)) })
-	if uuidToString(childTask.SquadID) != squadID {
-		t.Fatalf("sub-issue task squad_id = %q, want %q", uuidToString(childTask.SquadID), squadID)
+	if uuidToString(childTask.UsageSquadID) != squadID {
+		t.Fatalf("sub-issue task usage_squad_id = %q, want %q", uuidToString(childTask.UsageSquadID), squadID)
+	}
+	if childTask.SquadID.Valid {
+		t.Fatalf("sub-issue task must keep role-proof squad_id NULL, got %q", uuidToString(childTask.SquadID))
 	}
 	if childTask.IsLeaderTask {
 		t.Fatalf("sub-issue task must have is_leader_task=false")
 	}
 
-	// Case C: Standalone human-created issue assigned to memberID stays squad_id = NULL.
+	// Case C: Standalone human-created issue assigned to memberID stays usage_squad_id = NULL & squad_id = NULL.
 	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, standaloneIssueID, memberID)
 	standaloneIssue, err := testHandler.Queries.GetIssue(ctx, parseUUID(standaloneIssueID))
 	if err != nil {
@@ -447,7 +453,106 @@ func TestSquadInheritanceAndDaemonClaimSafety(t *testing.T) {
 		t.Fatalf("EnqueueTaskForIssue(standalone): %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, uuidToString(standaloneTask.ID)) })
-	if standaloneTask.SquadID.Valid {
-		t.Fatalf("standalone task must have NULL squad_id, got %q", uuidToString(standaloneTask.SquadID))
+	if standaloneTask.SquadID.Valid || standaloneTask.UsageSquadID.Valid {
+		t.Fatalf("standalone task must have NULL squad_id and usage_squad_id, got squad=%q usage_squad=%q",
+			uuidToString(standaloneTask.SquadID), uuidToString(standaloneTask.UsageSquadID))
+	}
+}
+
+// TestDashboardRollupHealsLegacyNullBucketOnProjectMove reproduces the
+// trigger-enqueued dirty-key scenario: a pre-735 task_usage_hourly row sits
+// under (old_project, squad_id=NULL) while the underlying task carries a
+// squad_id. Moving the issue to a new project enqueues dirty keys via trigger
+// (not watermark). Rollup must heal/delete the legacy NULL row on old_project
+// and write only the new (new_project, squad_id) row — zero double-counting.
+func TestDashboardRollupHealsLegacyNullBucketOnProjectMove(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := createClaimReclaimRuntime(t, ctx, "squad-move-rt")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "squad-move-agent")
+
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, 'Move Squad', '', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID) })
+
+	projA := dbfx.Project(t, "Move Proj A")
+	projB := dbfx.Project(t, "Move Proj B")
+
+	dbfx.Exec(t, `UPDATE issue SET project_id = $2 WHERE id = $1`, issueID, projA)
+
+	const provider = "squad-move-prov"
+	const model = "claude-sonnet-4-6"
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly WHERE runtime_id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly_dirty WHERE runtime_id = $1`, runtimeID)
+	})
+
+	// Place task_usage in an older hour outside the rollup's p_from..p_to
+	// watermark window so ONLY dirty_from_queue (enqueued by the project-move
+	// trigger) drives the rollup — exercising the exact bug path.
+	oldTime := time.Now().UTC().Add(-6 * time.Hour)
+	oldBucket := oldTime.Truncate(time.Hour)
+
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":       issueID,
+		"runtime_id":     runtimeID,
+		"status":         "completed",
+		"usage_squad_id": squadID,
+		"started_at":     oldTime.Add(-2 * time.Minute),
+		"completed_at":   oldTime,
+	})
+	dbfx.Insert(t, "task_usage", testutil.Cols{
+		"task_id":       taskID,
+		"provider":      provider,
+		"model":         model,
+		"input_tokens":  1000,
+		"output_tokens": 0,
+		"created_at":    oldTime,
+		"updated_at":    oldTime,
+	})
+
+	// Simulate pre-735 state: the bucket on projA was rolled up with squad_id = NULL.
+	dbfx.Exec(t, `
+		INSERT INTO task_usage_hourly (
+			bucket_hour, workspace_id, runtime_id, agent_id, project_id, squad_id,
+			provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+			task_count, event_count
+		)
+		VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 1000, 0, 0, 0, 1, 1)
+	`, oldBucket, testWorkspaceID, runtimeID, agentID, projA, provider, model)
+
+	// Move issue from projA to projB — fires enqueue_task_usage_hourly_dirty_for_issue_project.
+	dbfx.Exec(t, `UPDATE issue SET project_id = $2 WHERE id = $1`, issueID, projB)
+
+	// Run rollup over ONLY the last 5 minutes (excludes oldTime from dirty_raw!).
+	now := time.Now().UTC()
+	var affected int64
+	dbfx.QueryRow(t, `SELECT rollup_task_usage_hourly_window($1, $2)`,
+		now.Add(-5*time.Minute), now.Add(time.Minute),
+	).Scan(&affected)
+
+	var totalTokens int64
+	var oldProjRows int
+	dbfx.QueryRow(t, `
+		SELECT COALESCE(SUM(input_tokens), 0),
+		       COUNT(*) FILTER (WHERE project_id = $2)
+		  FROM task_usage_hourly
+		 WHERE runtime_id = $1 AND provider = $3
+	`, runtimeID, projA, provider).Scan(&totalTokens, &oldProjRows)
+
+	if oldProjRows != 0 {
+		t.Fatalf("legacy NULL bucket on old project survived move: oldProjRows=%d", oldProjRows)
+	}
+	if totalTokens != 1000 {
+		t.Fatalf("total input_tokens after project move = %d, want 1000 (no double-counting)", totalTokens)
 	}
 }

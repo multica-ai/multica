@@ -1,18 +1,17 @@
 -- Switch the task_usage_hourly rollup pipeline and dirty-key triggers to the
--- squad_id-aware unique indexes built concurrently in migrations 736–737.
+-- squad_id-aware unique indexes built concurrently in migrations 736–737,
+-- reading effective squad attribution via COALESCE(usage_squad_id, squad_id).
 --
--- The legacy unique constraints (without squad_id) are dropped only now, after
--- uq_task_usage_hourly_squad_key_idx and uq_task_usage_hourly_dirty_squad_key_idx
--- are live and valid. Existing rows with squad_id = NULL remain valid; when
--- recomputed for a task with squad_id IS NOT NULL, dirty_from_updates also
--- enqueues the matching NULL squad_id key so legacy pre-split buckets heal
--- automatically without double-counting.
-
-ALTER TABLE task_usage_hourly
-    DROP CONSTRAINT IF EXISTS uq_task_usage_hourly_key;
-
-ALTER TABLE task_usage_hourly_dirty
-    DROP CONSTRAINT IF EXISTS uq_task_usage_hourly_dirty_key;
+-- The legacy unique constraints (uq_task_usage_hourly_key and
+-- uq_task_usage_hourly_dirty_key) are dropped in the subsequent migrations
+-- 740–741 so rollback can rebuild their backing indexes CONCURRENTLY before
+-- 739 down attaches them via ADD CONSTRAINT ... UNIQUE USING INDEX.
+--
+-- Both dirty_from_updates and dirty_from_queue UNION a NULL::uuid squad_id
+-- variant whenever a squad-attributed key is recomputed, so pre-735 legacy
+-- buckets (stored with squad_id = NULL) heal automatically on both watermark
+-- updates and trigger-driven invalidations (project move, issue delete,
+-- task/usage delete) without double-counting.
 
 CREATE OR REPLACE FUNCTION enqueue_task_usage_hourly_dirty_for_atq()
 RETURNS TRIGGER
@@ -22,7 +21,7 @@ BEGIN
     IF TG_OP = 'UPDATE' THEN
         IF OLD.runtime_id IS DISTINCT FROM NEW.runtime_id
            OR OLD.issue_id IS DISTINCT FROM NEW.issue_id
-           OR OLD.squad_id IS DISTINCT FROM NEW.squad_id THEN
+           OR COALESCE(OLD.usage_squad_id, OLD.squad_id) IS DISTINCT FROM COALESCE(NEW.usage_squad_id, NEW.squad_id) THEN
             IF OLD.runtime_id IS NOT NULL THEN
                 INSERT INTO task_usage_hourly_dirty (
                     bucket_hour, workspace_id, runtime_id, agent_id,
@@ -34,7 +33,7 @@ BEGIN
                     OLD.runtime_id,
                     OLD.agent_id,
                     i_old.project_id,
-                    OLD.squad_id,
+                    COALESCE(OLD.usage_squad_id, OLD.squad_id),
                     tu.provider,
                     tu.model
                   FROM task_usage tu
@@ -56,7 +55,7 @@ BEGIN
                     NEW.runtime_id,
                     NEW.agent_id,
                     i_new.project_id,
-                    NEW.squad_id,
+                    COALESCE(NEW.usage_squad_id, NEW.squad_id),
                     tu.provider,
                     tu.model
                   FROM task_usage tu
@@ -80,7 +79,7 @@ BEGIN
                 OLD.runtime_id,
                 OLD.agent_id,
                 i.project_id,
-                OLD.squad_id,
+                COALESCE(OLD.usage_squad_id, OLD.squad_id),
                 tu.provider,
                 tu.model
               FROM task_usage tu
@@ -98,7 +97,7 @@ $$;
 
 DROP TRIGGER IF EXISTS trg_atq_dirty_hourly ON agent_task_queue;
 CREATE TRIGGER trg_atq_dirty_hourly
-BEFORE UPDATE OF runtime_id, issue_id, squad_id OR DELETE ON agent_task_queue
+BEFORE UPDATE OF runtime_id, issue_id, squad_id, usage_squad_id OR DELETE ON agent_task_queue
 FOR EACH ROW
 WHEN (current_setting('multica.workspace_teardown', true) IS DISTINCT FROM 'on')
 EXECUTE FUNCTION enqueue_task_usage_hourly_dirty_for_atq();
@@ -118,7 +117,7 @@ BEGIN
         atq.runtime_id,
         atq.agent_id,
         OLD.project_id,
-        atq.squad_id,
+        COALESCE(atq.usage_squad_id, atq.squad_id),
         tu.provider,
         tu.model
       FROM agent_task_queue atq
@@ -147,7 +146,7 @@ BEGIN
             atq.runtime_id,
             atq.agent_id,
             OLD.project_id,
-            atq.squad_id,
+            COALESCE(atq.usage_squad_id, atq.squad_id),
             tu.provider,
             tu.model
           FROM agent_task_queue atq
@@ -167,7 +166,7 @@ BEGIN
             atq.runtime_id,
             atq.agent_id,
             NEW.project_id,
-            atq.squad_id,
+            COALESCE(atq.usage_squad_id, atq.squad_id),
             tu.provider,
             tu.model
           FROM agent_task_queue atq
@@ -196,7 +195,7 @@ BEGIN
         atq.runtime_id,
         atq.agent_id,
         i.project_id,
-        atq.squad_id,
+        COALESCE(atq.usage_squad_id, atq.squad_id),
         OLD.provider,
         OLD.model
       FROM agent_task_queue atq
@@ -227,14 +226,14 @@ BEGIN
     WITH
     dirty_raw AS (
         SELECT DISTINCT
-            task_usage_hour_bucket(tu.created_at) AS bucket_hour,
-            a.workspace_id                        AS workspace_id,
-            atq.runtime_id                        AS runtime_id,
-            atq.agent_id                          AS agent_id,
-            i.project_id                          AS project_id,
-            atq.squad_id                          AS squad_id,
-            tu.provider                           AS provider,
-            tu.model                              AS model
+            task_usage_hour_bucket(tu.created_at)      AS bucket_hour,
+            a.workspace_id                             AS workspace_id,
+            atq.runtime_id                             AS runtime_id,
+            atq.agent_id                               AS agent_id,
+            i.project_id                               AS project_id,
+            COALESCE(atq.usage_squad_id, atq.squad_id) AS squad_id,
+            tu.provider                                AS provider,
+            tu.model                                   AS model
           FROM task_usage tu
           JOIN agent_task_queue atq ON atq.id      = tu.task_id
           JOIN agent            a   ON a.id        = atq.agent_id
@@ -259,11 +258,24 @@ BEGIN
           FROM dirty_raw
          WHERE squad_id IS NOT NULL
     ),
-    dirty_from_queue AS (
+    dirty_queue_raw AS (
         SELECT bucket_hour, workspace_id, runtime_id, agent_id,
                project_id, squad_id, provider, model
           FROM task_usage_hourly_dirty
          WHERE enqueued_at < p_to
+    ),
+    dirty_from_queue AS (
+        SELECT bucket_hour, workspace_id, runtime_id, agent_id,
+               project_id, squad_id, provider, model
+          FROM dirty_queue_raw
+        UNION
+        -- Heal pre-735 legacy NULL-squad buckets when triggers (issue project
+        -- move, issue delete, task/task_usage delete) enqueue a squad-attributed
+        -- dirty key, preventing old NULL buckets from surviving and double-counting.
+        SELECT bucket_hour, workspace_id, runtime_id, agent_id,
+               project_id, NULL::uuid AS squad_id, provider, model
+          FROM dirty_queue_raw
+         WHERE squad_id IS NOT NULL
     ),
     dirty_keys AS (
         SELECT * FROM dirty_from_updates
@@ -294,7 +306,7 @@ BEGIN
           FROM dirty_keys dk
           JOIN agent_task_queue atq ON atq.runtime_id  = dk.runtime_id
                                     AND atq.agent_id    = dk.agent_id
-                                    AND atq.squad_id IS NOT DISTINCT FROM dk.squad_id
+                                    AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NOT DISTINCT FROM dk.squad_id
           JOIN agent            a   ON a.id            = atq.agent_id
                                     AND a.workspace_id = dk.workspace_id
           LEFT JOIN issue       i   ON i.id            = atq.issue_id

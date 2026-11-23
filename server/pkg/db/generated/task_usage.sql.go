@@ -221,8 +221,8 @@ WHERE a.workspace_id = $1
   AND ($3::uuid IS NULL OR i.project_id = $3)
   AND (
       $4::text = ''
-      OR ($4::text = 'standalone' AND atq.squad_id IS NULL)
-      OR ($4::text = 'squad' AND atq.squad_id = $5::uuid)
+      OR ($4::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR ($4::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $5::uuid)
   )
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC
@@ -313,8 +313,8 @@ WHERE a.workspace_id = $1
   AND ($3::uuid IS NULL OR i.project_id = $3)
   AND (
       $4::text = ''
-      OR ($4::text = 'standalone' AND atq.squad_id IS NULL)
-      OR ($4::text = 'squad' AND atq.squad_id = $5::uuid)
+      OR ($4::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR ($4::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $5::uuid)
   )
 GROUP BY atq.agent_id, 2
 ORDER BY atq.agent_id, 2
@@ -369,7 +369,7 @@ func (q *Queries) ListDashboardFailuresByAgent(ctx context.Context, arg ListDash
 
 const listDashboardFailuresBySquad = `-- name: ListDashboardFailuresBySquad :many
 SELECT
-    atq.squad_id,
+    COALESCE(atq.usage_squad_id, atq.squad_id)::uuid AS squad_id,
     atq.agent_id,
     CASE
         WHEN atq.status = 'failed'
@@ -387,11 +387,11 @@ WHERE a.workspace_id = $1
   AND ($3::uuid IS NULL OR i.project_id = $3)
   AND (
       $4::text = ''
-      OR ($4::text = 'standalone' AND atq.squad_id IS NULL)
-      OR ($4::text = 'squad' AND atq.squad_id = $5::uuid)
+      OR ($4::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR ($4::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $5::uuid)
   )
-GROUP BY atq.squad_id, atq.agent_id, 3
-ORDER BY atq.squad_id NULLS LAST, atq.agent_id, 3
+GROUP BY COALESCE(atq.usage_squad_id, atq.squad_id), atq.agent_id, 3
+ORDER BY 1 NULLS LAST, atq.agent_id, 3
 `
 
 type ListDashboardFailuresBySquadParams struct {
@@ -461,8 +461,8 @@ WHERE a.workspace_id = $1
   AND ($4::uuid IS NULL OR i.project_id = $4)
   AND (
       $5::text = ''
-      OR ($5::text = 'standalone' AND atq.squad_id IS NULL)
-      OR ($5::text = 'squad' AND atq.squad_id = $6::uuid)
+      OR ($5::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR ($5::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $6::uuid)
   )
 GROUP BY 1, 2
 ORDER BY 1 DESC, 2
@@ -552,8 +552,8 @@ WHERE a.workspace_id = $1
   AND ($4::uuid IS NULL OR i.project_id = $4)
   AND (
       $5::text = ''
-      OR ($5::text = 'standalone' AND atq.squad_id IS NULL)
-      OR ($5::text = 'squad' AND atq.squad_id = $6::uuid)
+      OR ($5::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR ($5::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $6::uuid)
   )
 GROUP BY DATE(atq.completed_at AT TIME ZONE $2::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE $2::text) DESC
@@ -631,7 +631,7 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 
 const listDashboardSquadRunTime = `-- name: ListDashboardSquadRunTime :many
 SELECT
-    atq.squad_id,
+    COALESCE(atq.usage_squad_id, atq.squad_id)::uuid AS squad_id,
     atq.agent_id,
     COALESCE(
         SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
@@ -654,10 +654,10 @@ WHERE a.workspace_id = $1
   AND ($3::uuid IS NULL OR i.project_id = $3)
   AND (
       $4::text = ''
-      OR ($4::text = 'standalone' AND atq.squad_id IS NULL)
-      OR ($4::text = 'squad' AND atq.squad_id = $5::uuid)
+      OR ($4::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR ($4::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $5::uuid)
   )
-GROUP BY atq.squad_id, atq.agent_id
+GROUP BY COALESCE(atq.usage_squad_id, atq.squad_id), atq.agent_id
 ORDER BY total_seconds DESC
 `
 

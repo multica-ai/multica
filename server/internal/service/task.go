@@ -816,11 +816,24 @@ func attributionCreateParams(attr attribution.Result) (source pgtype.Text, deleg
 	return
 }
 
-// resolveInheritedSquadID propagates squad attribution along delegation chains
-// (leader comment @mention -> member task, multi-hop delegation, and squad-
-// created sub-issues) while leaving direct standalone human triggers unattributed.
-// Callers keep is_leader_task=false for inherited tasks so daemon claim never
-// injects a squad-leader briefing onto member runs.
+// effectiveTaskSquadID returns a task's squad attribution (usage_squad_id if
+// set, falling back to squad_id for leader/worker tasks created before
+// usage_squad_id existed or stamped directly with squad_id).
+func effectiveTaskSquadID(task db.AgentTaskQueue) pgtype.UUID {
+	if task.UsageSquadID.Valid {
+		return task.UsageSquadID
+	}
+	return task.SquadID
+}
+
+// resolveInheritedSquadID propagates squad usage attribution along delegation
+// chains (leader comment @mention -> member task, multi-hop delegation, and
+// squad-created sub-issues) while leaving direct standalone human triggers
+// unattributed.
+//
+// Callers write the result to usage_squad_id — NEVER to squad_id — so existing
+// leader/worker routing semantics keyed off squad_id (workflow step ownership,
+// self-trigger suppression, conversation root ownership) remain untouched.
 func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issue, explicitSquadID, delegatedFromTaskID pgtype.UUID) pgtype.UUID {
 	if explicitSquadID.Valid {
 		return explicitSquadID
@@ -829,15 +842,19 @@ func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issu
 		return pgtype.UUID{}
 	}
 	if delegatedFromTaskID.Valid {
-		if sourceTask, err := s.Queries.GetAgentTask(ctx, delegatedFromTaskID); err == nil && sourceTask.SquadID.Valid {
-			return sourceTask.SquadID
+		if sourceTask, err := s.Queries.GetAgentTask(ctx, delegatedFromTaskID); err == nil {
+			if sid := effectiveTaskSquadID(sourceTask); sid.Valid {
+				return sid
+			}
 		}
 	}
 	if issue.OriginType.Valid &&
 		(issue.OriginType.String == "agent_create" || issue.OriginType.String == "quick_create") &&
 		issue.OriginID.Valid {
-		if originTask, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil && originTask.SquadID.Valid {
-			return originTask.SquadID
+		if originTask, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil {
+			if sid := effectiveTaskSquadID(originTask); sid.Valid {
+				return sid
+			}
 		}
 	}
 	return pgtype.UUID{}
@@ -1359,7 +1376,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
 		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
-		SquadID:              inheritedSquadID,
+		UsageSquadID:         inheritedSquadID,
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
 		RuleVersionID:        attr.RuleVersionID,
@@ -1538,7 +1555,8 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
-		SquadID:              resolvedSquadID,
+		SquadID:              squadID,
+		UsageSquadID:         resolvedSquadID,
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
 		RuleVersionID:        attr.RuleVersionID,
@@ -1736,7 +1754,7 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		RuntimeID:            agent.RuntimeID,
 		Priority:             priorityToInt("high"),
 		Context:              contextJSON,
-		SquadID:              squadID,
+		UsageSquadID:         squadID,
 		OriginatorUserID:     requesterID,
 		AccountableUserID:    attr.AccountableUserID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,

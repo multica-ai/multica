@@ -1353,14 +1353,18 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 				leaderSquadID = squad.ID
 			}
 		}
-		taskSquadID := leaderSquadID
-		if !taskSquadID.Valid && w.SourceTaskID.Valid {
-			if srcTask, srcErr := q.GetAgentTask(ctx, w.SourceTaskID); srcErr == nil && srcTask.SquadID.Valid {
-				taskSquadID = srcTask.SquadID
+		usageSquadID := leaderSquadID
+		if !usageSquadID.Valid && w.SourceTaskID.Valid {
+			if srcTask, srcErr := q.GetAgentTask(ctx, w.SourceTaskID); srcErr == nil {
+				if srcTask.UsageSquadID.Valid {
+					usageSquadID = srcTask.UsageSquadID
+				} else if srcTask.SquadID.Valid {
+					usageSquadID = srcTask.SquadID
+				}
 			}
 		}
 		contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_chain": chain})
-		task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true}, IsLeaderTask: pgtype.Bool{Bool: leaderSquadID.Valid, Valid: true}, SquadID: taskSquadID, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps})
+		task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true}, IsLeaderTask: pgtype.Bool{Bool: leaderSquadID.Valid, Valid: true}, SquadID: leaderSquadID, UsageSquadID: usageSquadID, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps})
 	}
 	if err != nil {
 		return err

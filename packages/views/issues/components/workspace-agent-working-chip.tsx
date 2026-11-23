@@ -1,7 +1,7 @@
 "use client";
 
-import { useContext, useMemo } from "react";
-import { QueryClient, QueryClientContext, useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -9,9 +9,8 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@multica/ui/components/ui/hover-card";
-import { useWorkspaceSlug } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { AgentTask, WorkingAgentSummary } from "@multica/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
@@ -22,33 +21,16 @@ import {
 import { useT } from "../../i18n";
 
 const EMPTY_SNAPSHOT: AgentTask[] = [];
-const FALLBACK_QUERY_CLIENT = new QueryClient();
 
-/** Read cached snapshot safely (even in minimal unit-test trees that render
- *  without a QueryClientProvider or WorkspaceSlugProvider). */
 export function useWorkingExecutionUnits(
   agents: readonly WorkingAgentSummary[] | undefined,
 ): WorkingExecutionUnit[] | undefined {
-  const ctxClient = useContext(QueryClientContext);
-  const queryClient = ctxClient ?? FALLBACK_QUERY_CLIENT;
-  const slug = useWorkspaceSlug();
+  const wsId = useWorkspaceId();
   const { hasActor } = useActorName();
-  const { data: workspaces } = useQuery(
-    {
-      ...workspaceListOptions(),
-      enabled: Boolean(ctxClient) && Boolean(slug),
-    },
-    queryClient,
-  );
-  const wsId = slug ? (workspaces?.find((w) => w.slug === slug)?.id ?? "") : "";
-  const canQuery = Boolean(ctxClient) && Boolean(wsId) && (agents?.length ?? 0) > 0;
-  const { data: snapshot = EMPTY_SNAPSHOT } = useQuery(
-    {
-      ...agentTaskSnapshotOptions(wsId),
-      enabled: canQuery,
-    },
-    queryClient,
-  );
+  const { data: snapshot = EMPTY_SNAPSHOT } = useQuery({
+    ...agentTaskSnapshotOptions(wsId),
+    enabled: Boolean(wsId) && (agents?.length ?? 0) > 0,
+  });
   const isKnownSquad = useMemo(
     () => (hasActor ? (id: string) => hasActor("squad", id) !== false : null),
     [hasActor],

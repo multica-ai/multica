@@ -193,6 +193,8 @@ type AgentTaskQueue struct {
 	CancelledByName           pgtype.Text `json:"cancelled_by_name"`
 	IssueSnapshot             []byte      `json:"issue_snapshot"`
 	WorkflowStep              pgtype.Text `json:"workflow_step"`
+	// Squad UUID for usage attribution and unified execution avatar grouping. Separate from squad_id (which carries leader/worker routing authority). NULL for standalone non-squad runs.
+	UsageSquadID pgtype.UUID `json:"usage_squad_id"`
 }
 
 type AgentToLabel struct {
@@ -2094,7 +2096,7 @@ type TaskUsageHourly struct {
 	UncostedOutputTokens     pgtype.Int8 `json:"uncosted_output_tokens"`
 	UncostedCacheReadTokens  pgtype.Int8 `json:"uncosted_cache_read_tokens"`
 	UncostedCacheWriteTokens pgtype.Int8 `json:"uncosted_cache_write_tokens"`
-	// Triggering squad UUID (copied from agent_task_queue.squad_id). NULL for standalone non-squad runs and legacy pre-backfill buckets.
+	// Triggering squad UUID (from COALESCE(agent_task_queue.usage_squad_id, agent_task_queue.squad_id)). NULL for standalone non-squad runs and legacy pre-backfill buckets.
 	SquadID pgtype.UUID `json:"squad_id"`
 }
 
