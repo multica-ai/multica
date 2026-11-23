@@ -366,8 +366,9 @@ func TestCommandWorkdirGuidanceAllKinds(t *testing.T) {
 				for _, want := range []string{
 					"## Command Working Directory",
 					"no `cd <absolute path> &&` prefix",
-					"omit it for this directory",
-					"a path relative to where the shell is",
+					"omit it when the tool's default directory is already the target",
+					"later commands run where the last `cd` left it",
+					"with a relative path",
 					"overrides any default guidance to always set a working directory or to prefer absolute paths",
 				} {
 					if !strings.Contains(brief, want) {

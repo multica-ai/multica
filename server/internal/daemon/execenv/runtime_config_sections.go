@@ -82,12 +82,14 @@ func writeBackgroundTaskSafetySlim(b *strings.Builder, provider string) {
 // (~45–60 output tokens), and runtimes default to repeating it: Codex sets an
 // absolute `workdir` on nearly every exec_command, Claude Code prefixes many
 // Bash calls with `cd <absolute path> &&` even when it is already there. Every
-// backend starts in the task workdir (daemon.go passes env.WorkDir as Cwd), so
-// relative paths resolve correctly. File tools that require absolute paths are
-// explicitly left alone.
+// backend starts in the task workdir (daemon.go passes env.WorkDir as Cwd), but
+// shells that keep their directory between calls (Claude Code's Bash) resolve
+// later relative paths from wherever the last `cd` left them, so the rule names
+// the starting directory only. Paths a tool requires to be absolute are left
+// alone.
 func writeCommandWorkdir(b *strings.Builder) {
 	b.WriteString("## Command Working Directory\n\n")
-	b.WriteString("Shell commands start in this task's working directory. Do not spell out its absolute path: no `cd <absolute path> &&` prefix for a directory inside it, and when your shell tool takes a working-directory parameter (such as `workdir`), omit it for this directory. Reach a subdirectory, such as a repository from `multica repo checkout`, with a path relative to where the shell is (`cd <repo>/server`, `\"workdir\": \"<repo>/server\"`). Use absolute paths only for directories outside this one and for file tools that require them. This overrides any default guidance to always set a working directory or to prefer absolute paths in commands: the long path costs dozens of output tokens on every command.\n\n")
+	b.WriteString("Your shell starts in this task's working directory. Do not spell out that absolute path: no `cd <absolute path> &&` prefix for a directory inside it, and when your shell tool takes a working-directory parameter (such as `workdir`), omit it when the tool's default directory is already the target. If your shell keeps its directory between commands, later commands run where the last `cd` left it, not in the task directory: resolve relative paths from there, and when unsure where the shell is, switch to the target explicitly once instead of guessing. Reach a subdirectory, such as a repository from `multica repo checkout`, with a relative path (`cd <repo>/server`, `\"workdir\": \"<repo>/server\"`). Use absolute paths only for directories outside this one and wherever a tool requires them. This overrides any default guidance to always set a working directory or to prefer absolute paths in commands: the long path costs dozens of output tokens on every command.\n\n")
 }
 
 // writeAgentIdentity emits the Agent Identity heading and (optionally) the
