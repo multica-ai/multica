@@ -832,9 +832,11 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 		lastTurnError, turnErrorGraceExpired := turnErrors.finish()
-		if cleanupErr == nil && cleanup.tools.Load() > 0 && cleanup.unobserved {
-			cleanupErr = fmt.Errorf("runtime exited before tool process ownership could be recorded")
-		}
+		// Do not rewrite a verified cleanup as cleanup_unconfirmed just because
+		// no descendant was observed. In-process tools never spawn one; treating
+		// that as uncertainty blocks the agent until a manual rerun (#11281).
+		// finish()/complete() already fail when snapshotting fails or retained
+		// identities remain.
 
 		// Wait closes the process pipes, so a prompt write still blocked when the
 		// child exited has returned by now. The writer sends exactly once.

@@ -113,3 +113,39 @@ func TestPiCleanupSuccessfulBackgroundServiceSurvives(t *testing.T) {
 		})
 	}
 }
+
+func TestPiCleanupInProcessToolCancelIsConfirmed(t *testing.T) {
+	for _, provider := range []string{"pi", "omp"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			fake, dir, env := testutil.PiCleanupExecutable(t, "inprocess")
+			backend, err := ResolveBackend(provider, Config{ExecutablePath: fake, Env: env, Logger: slog.Default()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend.(*piBackend).terminateGrace = 100 * time.Millisecond
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err := os.WriteFile(filepath.Join(dir, "session.jsonl"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			session, err := backend.Execute(ctx, "test", ExecOptions{Cwd: dir, ResumeSessionID: filepath.Join(dir, "session.jsonl")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for msg := range session.Messages {
+				if msg.Type == MessageToolUse {
+					break
+				}
+			}
+			cancel()
+			result := waitPiResult(t, session, 4*time.Second)
+			if result.Status == "cleanup_unconfirmed" {
+				t.Fatalf("in-process tool cancel reported unconfirmed cleanup: %s", result.Error)
+			}
+			if result.Status != "aborted" {
+				t.Fatalf("status = %s: %s", result.Status, result.Error)
+			}
+		})
+	}
+}

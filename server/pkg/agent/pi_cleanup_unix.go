@@ -21,10 +21,8 @@ type piTrackedProcess struct {
 }
 
 type piUnixProcessTracker struct {
-	root                int
-	known               map[int]piTrackedProcess
-	observedDescendants bool
-	toolInFlight        bool
+	root  int
+	known map[int]piTrackedProcess
 }
 
 func newPiProcessTracker(cmd *exec.Cmd) piProcessTracker {
@@ -38,13 +36,7 @@ func piRuntimeExited(cmd *exec.Cmd) bool {
 	return piProcessMissing(cmd.Process.Pid, err) || (err == nil && info.zombie)
 }
 
-func (p *piUnixProcessTracker) unobservedTools() bool { return !p.observedDescendants }
-
-func (p *piUnixProcessTracker) snapshot(toolInFlight bool) error {
-	if toolInFlight != p.toolInFlight {
-		p.observedDescendants = false
-		p.toolInFlight = toolInFlight
-	}
+func (p *piUnixProcessTracker) snapshot(_ bool) error {
 	all, err := listCursorUnixProcessInfos()
 	if err != nil {
 		return fmt.Errorf("inspect runtime descendants: %w", err)
@@ -107,9 +99,6 @@ func (p *piUnixProcessTracker) snapshot(toolInFlight bool) error {
 		}
 		if prior, ok := p.known[pid]; ok {
 			if prior.info.start == info.start {
-				if toolInFlight && pid != p.root {
-					p.observedDescendants = true
-				}
 				continue
 			}
 			// Retain the original identity; never adopt the replacement.
@@ -126,9 +115,6 @@ func (p *piUnixProcessTracker) snapshot(toolInFlight bool) error {
 			continue
 		}
 		p.known[pid] = piTrackedProcess{info: info, id: identity}
-		if toolInFlight && pid != p.root {
-			p.observedDescendants = true
-		}
 	}
 	return captureErr
 }

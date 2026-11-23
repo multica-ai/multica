@@ -17,7 +17,6 @@ type piProcessTracker interface {
 	snapshot(bool) error
 	signal(syscall.Signal) error
 	remaining() ([]int, error)
-	unobservedTools() bool
 	close()
 }
 
@@ -25,17 +24,16 @@ type piProcessTracker interface {
 // Process groups alone do not own Pi's detached Unix tools. This is bounded,
 // best-effort discovery, not containment of arbitrary double-forking programs.
 type piRunCleanup struct {
-	mu         sync.Mutex
-	tracker    piProcessTracker
-	err        error
-	tools      atomic.Int32
-	once       sync.Once
-	done       chan struct{}
-	stop       chan struct{}
-	observed   chan struct{}
-	exited     chan struct{}
-	finished   bool
-	unobserved bool
+	mu       sync.Mutex
+	tracker  piProcessTracker
+	err      error
+	tools    atomic.Int32
+	once     sync.Once
+	done     chan struct{}
+	stop     chan struct{}
+	observed chan struct{}
+	exited   chan struct{}
+	finished bool
 }
 
 func newPiRunCleanup(cmd *exec.Cmd) *piRunCleanup {
@@ -136,7 +134,6 @@ func (c *piRunCleanup) finalize(cmd *exec.Cmd, closeStdin, closePipes func(), gr
 		// Re-scan before killing the parent, then stop every retained identity.
 		// Never signal a detached numeric PGID after its leader has exited.
 		c.err = errors.Join(c.err, c.tracker.snapshot(c.tools.Load() > 0))
-		c.unobserved = c.tracker.unobservedTools()
 		signalProcessGroup(cmd, syscall.SIGKILL)
 		signalErr := c.tracker.signal(syscall.SIGKILL)
 		for {
