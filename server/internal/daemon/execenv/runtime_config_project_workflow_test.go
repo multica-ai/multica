@@ -97,3 +97,71 @@ func TestBriefWithoutProjectWorkflowKeepsBuiltInStatusRules(t *testing.T) {
 		}
 	}
 }
+
+// A status-map [Project workflow] block lists no commands (MUL-9913): the
+// brief states how to choose from the map instead, and keeps every invariant
+// of the command form — no built-in moves, no competing status list.
+func TestBriefWithStatusMapStatesTheMapRules(t *testing.T) {
+	t.Parallel()
+	catalog := []IssueStatusForEnv{{Key: "wont_fix", Name: "Won't Fix", Category: "closed"}}
+	for name, ctx := range map[string]TaskContextForEnv{
+		"agent":          {IssueID: "issue-1", AgentID: "a-1", AgentName: "Eve", HasProjectWorkflow: true, ProjectWorkflowStatusMap: true},
+		"squad leader":   {IssueID: "issue-1", AgentID: "a-1", AgentName: "Eve", HasProjectWorkflow: true, ProjectWorkflowStatusMap: true, IsSquadLeader: true},
+		"custom catalog": {IssueID: "issue-1", AgentID: "a-1", AgentName: "Eve", HasProjectWorkflow: true, ProjectWorkflowStatusMap: true, IssueStatuses: catalog},
+	} {
+		out := buildMetaSkillContent("claude", ctx)
+		for _, rule := range builtInStatusRules {
+			if strings.Contains(out, rule) {
+				t.Errorf("%s: status-map brief still carries built-in rule %q", name, rule)
+			}
+		}
+		for _, want := range []string{
+			"3. Complete the task within your Agent Identity boundaries",
+			"5. Before exiting, confirm the issue sits on the status in `[Project workflow]` that matches where things actually stand.",
+			"`[Project workflow]` in the per-turn message is this issue's status map",
+			"Entering a status that hands off reassigns the issue to its handler and starts their run",
+			"A status without a handler hands nothing off and starts no run",
+			`where the map's "From here" line routes it`,
+			"A `done`-category status means finished and accepted",
+			"a `closed`-category status whose meaning fits. Comment why first",
+			"add no wakeup for that",
+			"This issue's status map is in `[Project workflow]`",
+			"--duplicate-of",
+			"questions, discussion, and acknowledgements never touch status",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: status-map brief missing %q\n---\n%s", name, want, out)
+			}
+		}
+		// The command form's wording would point at lines the map lacks.
+		// The map is the only status list, and no built-in key is named.
+		for _, stale := range []string{
+			"Step done", "Needs changes", "Can't proceed", "Move this issue only with its commands", "statuses and commands are in",
+			"`wont_fix`", "`in_progress`", "`in_review`",
+		} {
+			if strings.Contains(out, stale) {
+				t.Errorf("%s: status-map brief carries %q", name, stale)
+			}
+		}
+		if got := strings.Count(out, "**Issue status"); got != 1 {
+			t.Errorf("%s: brief has %d issue-status sections, want 1", name, got)
+		}
+	}
+	leader := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1", HasProjectWorkflow: true, ProjectWorkflowStatusMap: true, IsSquadLeader: true})
+	if !strings.Contains(leader, "a dispatch turn leaves the parent at its current step, and you move it on only on the later turn") {
+		t.Errorf("leader status-map brief must keep dispatch-is-not-delivery\n---\n%s", leader)
+	}
+}
+
+// The status map flag only applies with a workflow block, and an issue
+// without one picks closed statuses by the same rule.
+func TestStatusMapFlagNeedsAWorkflowAndSharesTheClosedRule(t *testing.T) {
+	t.Parallel()
+	plain := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1", ProjectWorkflowStatusMap: true})
+	if plain != buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"}) {
+		t.Fatal("the status map flag must not change a brief without a project workflow")
+	}
+	if !strings.Contains(plain, issueStatusClosedRule) {
+		t.Errorf("brief without a workflow must carry the closed-status rule\n---\n%s", plain)
+	}
+}

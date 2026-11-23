@@ -3334,10 +3334,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// Resolved before the leader briefing, which words the owning
 		// leader's status moves by it (MUL-8145).
 		legacyRuntimeRules := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusRulesV1)
-		projectWorkflow := h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules)
+		stepCommands := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusMapV1)
+		projectWorkflow := h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules, stepCommands)
 		leaderWorkflow := leaderNoWorkflow
 		if projectWorkflow != nil {
 			leaderWorkflow = leaderWorkflowCurrentDaemon
+			if projectWorkflow.StatusMap {
+				leaderWorkflow = leaderWorkflowStatusMap
+			}
 			if projectWorkflow.stepMoved {
 				leaderWorkflow = leaderWorkflowStepMoved
 			} else if legacyRuntimeRules {
