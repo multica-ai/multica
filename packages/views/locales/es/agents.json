@@ -839,7 +839,7 @@
     "workspace_title": "Todo el espacio de trabajo",
     "workspace_desc": "Todos los miembros del espacio de trabajo pueden ejecutar este agente",
     "members_title": "Personas concretas",
-    "members_desc": "Solo las personas que elijas pueden ejecutar este agente",
+    "members_desc": "Tú y las personas que elijas podéis ejecutar este agente",
     "team_title": "Público para el equipo",
     "team_desc": "Concede acceso a un equipo completo",
     "team_coming_soon": "Próximamente",

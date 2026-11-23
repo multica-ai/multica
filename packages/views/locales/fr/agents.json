@@ -864,7 +864,7 @@
     "workspace_title": "Tout l'espace de travail",
     "workspace_desc": "Tous les membres de l'espace de travail peuvent exécuter cet agent",
     "members_title": "Personnes précises",
-    "members_desc": "Seules les personnes que vous choisissez peuvent exécuter cet agent",
+    "members_desc": "Vous et les personnes que vous choisissez pouvez exécuter cet agent",
     "team_title": "Public pour l'équipe",
     "team_desc": "Accorder l'accès à toute une équipe",
     "team_coming_soon": "Bientôt disponible",
