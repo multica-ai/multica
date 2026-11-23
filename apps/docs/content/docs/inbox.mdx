@@ -90,7 +90,7 @@ An authorized agent run uses its task credential for all of this; it never falls
 
 ## Handle notifications
 
-Click a row to open its issue at the comment or app request the notification is about. The row stays lit while the issue is open, and clicking it again takes you back to that spot. Opening the issue marks the notification read, and the row stays in the list. Notifications without an issue, such as autopilot pauses and quick-create results, open on the Inbox page instead.
+Click a row to open its issue at the comment the notification is about. The row stays lit while the issue is open, and clicking it again takes you back to that spot. Opening the issue marks the notification read, and the row stays in the list. Notifications without an issue, such as autopilot pauses and quick-create results, open on the Inbox page instead.
 
 <InboxDemo />
 
@@ -121,7 +121,7 @@ Snooze takes an issue out of your inbox until a time you pick, then brings it ba
 While an issue is snoozed:
 
 - new notifications on it wait with it and don't count toward the unread badge. When it comes back, the row says **Snooze ended** and how many updates arrived meanwhile;
-- it comes back early when someone mentions you by name, it is assigned to you, a run fails, an app asks for your action, or all its sub-issues finish. `@all` mentions don't wake it;
+- it comes back early when someone mentions you by name, it is assigned to you, a run fails, or all its sub-issues finish. `@all` mentions don't wake it;
 - **Mark all as read** and the archive-all actions leave it alone. Archiving it ends the snooze, and so does completing the issue yourself while **Archive issues you handle** counts completing (it does by default);
 - opening the issue from anywhere else doesn't read it or end the snooze. Its inbox bar shows when it comes back; **Change time** there brings it back now (`H`) or picks another time.
 

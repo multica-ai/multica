@@ -90,7 +90,7 @@ Une exécution d'agent autorisée utilise son identifiant d'exécution pour tout
 
 ## Traiter les notifications
 
-Cliquez sur une ligne pour ouvrir sa tâche au commentaire ou à la demande d'application dont parle la notification. La ligne reste en surbrillance tant que la tâche est ouverte, et un nouveau clic vous ramène à cet endroit. Ouvrir la tâche marque la notification comme lue, et la ligne reste dans la liste. Les notifications sans tâche, comme les mises en pause d'automatisation et les résultats de création rapide, s'ouvrent sur la page Boîte de réception.
+Cliquez sur une ligne pour ouvrir sa tâche au commentaire dont parle la notification. La ligne reste en surbrillance tant que la tâche est ouverte, et un nouveau clic vous ramène à cet endroit. Ouvrir la tâche marque la notification comme lue, et la ligne reste dans la liste. Les notifications sans tâche, comme les mises en pause d'automatisation et les résultats de création rapide, s'ouvrent sur la page Boîte de réception.
 
 <InboxDemo />
 
@@ -121,7 +121,7 @@ Reporter retire une tâche de votre boîte de réception jusqu'à l'heure choisi
 Tant qu'une tâche est reportée :
 
 - ses nouvelles notifications attendent avec elle et ne comptent pas dans le badge non lu. À son retour, la ligne indique **Report terminé** et le nombre de nouveautés arrivées entre-temps ;
-- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue, si une app demande votre action ou si toutes ses sous-tâches sont terminées. Les mentions `@all` ne la réveillent pas ;
+- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue ou si toutes ses sous-tâches sont terminées. Les mentions `@all` ne la réveillent pas ;
 - **Tout marquer comme lu** et les actions d'archivage groupé l'ignorent. L'archiver met fin au report, tout comme terminer vous-même la tâche quand **Archiver les tâches que vous traitez** compte la fin de la tâche (c'est le cas par défaut) ;
 - ouvrir la tâche depuis ailleurs ne la marque pas comme lue et ne met pas fin au report. Sa barre de la boîte de réception indique quand elle revient ; **Changer l'heure** la fait revenir maintenant (`H`) ou choisit une autre heure.
 
