@@ -175,7 +175,7 @@ CLI を検出します。Web から接続する場合や別のマシンを追加
 ## ランタイム
 
 Multica はモデルを同梱していません。インストールと認証を済ませたエージェント CLI をそのまま動かします。
-現在のソースコードは 31 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
+現在のソースコードは 32 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
 
 | プロバイダー | CLI | プロバイダー | CLI |
 | --- | --- | --- | --- |
@@ -194,7 +194,7 @@ Multica はモデルを同梱していません。インストールと認証を
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
 | Muse Code | `muse` | Devin CLI | `devin` |
 | Amp | `amp` | Factory Droid | `droid` |
-| ZCode | `zcode` / ZCode Desktop | | |
+| ZCode | `zcode` / ZCode Desktop | Tomcat | `tomcat` |
 
 インストールと認証の方法：[AI コーディングツールをインストールする](https://multica.ai/docs/ja/install-agent-runtime) ·
 [プロバイダー](https://multica.ai/docs/ja/providers)

@@ -175,7 +175,7 @@ Full walkthrough: [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Tut
 ## Runtimes
 
 Multica does not ship a model. It drives the agent CLIs you already have installed and
-authenticated — the current source supports 31 — so switching providers is a dropdown, not a migration.
+authenticated — the current source supports 32 — so switching providers is a dropdown, not a migration.
 
 | Provider | CLI | Provider | CLI |
 | --- | --- | --- | --- |
@@ -194,7 +194,7 @@ authenticated — the current source supports 31 — so switching providers is a
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
 | Muse Code | `muse` | Devin CLI | `devin` |
 | Amp | `amp` | Factory Droid | `droid` |
-| ZCode | `zcode` / ZCode Desktop | | |
+| ZCode | `zcode` / ZCode Desktop | Tomcat | `tomcat` |
 
 Installing and authenticating them: [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) ·
 [Providers](https://multica.ai/docs/providers)

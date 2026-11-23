@@ -992,6 +992,8 @@ var providerThinkingEnums = map[string]map[string]bool{
 // server accepts any well-formed token for them and lets the daemon's
 // per-model check decide before execution.
 var thinkingDynamicCatalogProviders = map[string]bool{
+	"tomcat": true, // serve models owns the tiers; ACP setup confirms effort before prompting.
+
 	"codex": true,
 	"dsh":   true,
 	// Grok advertises each model's effort catalog through session/new, so the

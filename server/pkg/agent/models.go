@@ -301,6 +301,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverCodebuddyModels(ctx, runtimeCmd)
 		})
+	case "tomcat":
+		// No adapter memo: an explicit refresh must read newly saved credentials
+		// and models immediately, without changing the shared discovery cache.
+		return discoverTomcatModels(ctx, runtimeCmd)
 	case "amp":
 		// Amp selects its own models; manual IDs select native modes.
 		return Catalog{Models: []Model{}}, nil

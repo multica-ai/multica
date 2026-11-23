@@ -141,6 +141,7 @@ You also need at least one AI agent CLI installed:
 - Qoder CLI (`qodercli` on PATH)
 - Qoder CN CLI (`qoderclicn` on PATH)
 - Trae CLI (`traecli` on PATH)
+- [Tomcat](https://github.com/teisun/tomcat-agent/releases/tag/cli-v0.1.97) (`tomcat` 0.1.97 on PATH; configure models and credentials in Tomcat; restart its shared service after upgrading)
 - [Grok Build CLI](https://docs.x.ai/) (`grok` on PATH)
 - Qwen Code (`qwen` on PATH)
 - [Amp](https://ampcode.com/docs/cli) (`amp` on PATH on macOS, Linux or Windows through WSL; set an Amp access token in `AMP_API_KEY` on the daemon machine)
