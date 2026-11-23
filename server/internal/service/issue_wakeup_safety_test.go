@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -306,5 +307,38 @@ func TestChildDoneWakeupRetainsInputDuringFailureStreak(t *testing.T) {
 	}
 	if n := wakeRuns(t, f, w.ID); n != 1 {
 		t.Fatalf("child-done rule resumed with %d runs, want 1", n)
+	}
+}
+
+func TestManualAppDecisionRunCanClearIssueFailureStreak(t *testing.T) {
+	f, s, issueID, agentID := conditionFixture(t)
+	ctx := t.Context()
+	f.Exec(t, "UPDATE issue SET status='in_progress',assignee_type='agent',assignee_id=$1 WHERE id=$2", agentID, issueID)
+	for _, minutesAgo := range []int{3, 2, 1} {
+		at := time.Now().Add(-time.Duration(minutesAgo) * time.Minute)
+		f.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "status": "failed", "failure_reason": "agent_error.process_failure",
+			"created_at": at, "started_at": at, "completed_at": at,
+		})
+	}
+	issue, err := f.q.GetIssue(ctx, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Tasks.EnqueueTaskForIssue(ctx, issue); !errors.Is(err, ErrIssueAgentConsecutiveFailures) {
+		t.Fatalf("automatic dispatch before app decision: %v", err)
+	}
+	requestID := dbid.NewV7()
+	if err := s.Tasks.EnqueueAppDecisionRun(ctx, issueID, parseTestUUID(t, agentID), parseTestUUID(t, f.UserID), requestID, "approved"); err != nil {
+		t.Fatalf("enqueue app approval run: %v", err)
+	}
+	var taskID pgtype.UUID
+	f.QueryRow(t, "SELECT id FROM agent_task_queue WHERE trigger_evidence_ref_id=$1", requestID).Scan(&taskID)
+	f.Exec(t, "UPDATE agent_task_queue SET status='running', started_at=now() WHERE id=$1", taskID)
+	if _, err := s.Tasks.CompleteTask(ctx, taskID, []byte("{}"), "", "", "", false, "", ""); err != nil {
+		t.Fatalf("complete app approval run: %v", err)
+	}
+	if _, err := s.Tasks.EnqueueTaskForIssue(ctx, issue); err != nil {
+		t.Fatalf("automatic dispatch after successful app approval run: %v", err)
 	}
 }

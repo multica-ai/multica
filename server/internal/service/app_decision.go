@@ -50,6 +50,12 @@ func (s *TaskService) EnqueueAppDecisionRun(ctx context.Context, issueID, agentI
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, OriginDerived); err != nil {
 		return err
 	}
+	// A person deciding the request initiates the continuation. A note
+	// folded into an existing run does not change that run's origin.
+	var decisionContext []byte
+	if actorID.Valid {
+		decisionContext = []byte(`{"manual_issue_dispatch":true}`)
+	}
 	overlay := s.buildRuntimeMCPOverlay(ctx, actorID, agent)
 	task, err := s.Queries.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{
 		ID:                   dbid.NewV7(),
@@ -59,6 +65,7 @@ func (s *TaskService) EnqueueAppDecisionRun(ctx context.Context, issueID, agentI
 		Priority:             priorityToInt(issue.Priority),
 		TriggerSummary:       pgtype.Text{String: "App request decided", Valid: true},
 		HandoffNote:          pgtype.Text{String: note, Valid: true},
+		WakeupContext:        decisionContext,
 		OriginatorUserID:     actorID,
 		AccountableUserID:    actorID,
 		OriginatorSource:     pgtype.Text{String: string(attribution.SourceDirectHuman), Valid: true},
