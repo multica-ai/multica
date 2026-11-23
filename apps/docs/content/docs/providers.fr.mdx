@@ -87,17 +87,20 @@ Si l'outil est installé hors du `PATH` du daemon, indiquez son emplacement avec
 
 ## Prise en charge de la réorientation
 
-Vous pouvez [ajouter un message à une exécution encore en cours](/mentioning-agents#réorienter-un-agent-en-cours-dexécution) au lieu d'attendre la suivante. L'outil de codage IA doit le prendre en charge, à partir de ces versions :
+Vous pouvez [ajouter un message à une exécution encore en cours](/mentioning-agents#réorienter-un-agent-en-cours-dexécution) au lieu d'attendre la suivante. L'outil de codage IA doit le prendre en charge, avec la version ou la capacité native ci-dessous :
 
-| Outil | Version minimale |
+| Outil | Version minimale ou condition |
 |---|---|
 | Antigravity | 1.4.8 |
 | Claude Code | 2.1.110 |
 | Codex | 0.100.0 |
 | Cursor Agent | 2026.10.14 |
 | Grok | 1.0.14 |
+| Hermes | Commande native `/steer` détectée à l'exécution |
 | Kiro CLI | 2.33.0 |
 | Pi | 1.4.0 |
+
+Dans le chat direct, la prise en charge Hermes est détectée sur la session active une fois l'exécution démarrée, sans se baser sur un numéro de version. Aucun correctif Hermes n'est nécessaire. Si la session n'annonce pas la commande native `/steer`, les messages restent en file. L'accusé de commande confirme la transmission, pas l'incorporation par le modèle : Hermes peut reporter un guidage tardif dans un prochain prompt, et une réponse perdue suivie d'un repli en file peut dupliquer le message.
 
 Avec les autres outils ou des versions plus anciennes, « Ajouter à l'exécution en cours » n'est pas proposé : la réponse est traitée dans une nouvelle exécution après celle en cours, ou vous arrêtez l'exécution en cours pour recommencer.
 

@@ -89,17 +89,20 @@ If the tool is installed somewhere the daemon's `PATH` does not reach, point `MU
 
 ## Steer a running run
 
-You can [add a message to a run that is still working](/mentioning-agents#steer-a-running-agent) instead of waiting for the next run. This needs support from the AI coding tool, and from these versions on:
+You can [add a message to a run that is still working](/mentioning-agents#steer-a-running-agent) instead of waiting for the next run. This needs support from the AI coding tool, with the version or native capability below:
 
-| Tool | Minimum version |
+| Tool | Minimum version or requirement |
 |---|---|
 | Antigravity | 1.4.8 |
 | Claude Code | 2.1.110 |
 | Codex | 0.100.0 |
 | Cursor Agent | 2026.10.14 |
 | Grok | 1.0.14 |
+| Hermes | Native `/steer` detected at runtime |
 | Kiro CLI | 2.33.0 |
 | Pi | 1.4.0 |
+
+In direct Chat, Hermes support is detected from the live session once the run is active, rather than by version number. No Hermes patch is required. If the session does not advertise native `/steer`, messages stay queued. A command acknowledgement confirms handoff, not model incorporation: Hermes may turn late guidance into a subsequent prompt, and a lost response followed by queue fallback can duplicate input.
 
 With other tools or older versions, **Add to current run** is not offered: a reply is handled in a new run after the current one, or you stop the current run and start over.
 

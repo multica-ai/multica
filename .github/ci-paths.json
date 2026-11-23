@@ -24,6 +24,8 @@
     "server/pkg/agent/builtin_runtimes.go",
     "server/pkg/agent/agent.go",
     "server/pkg/agent/version.go",
+    "server/pkg/agent/hermes.go",
+    "server/pkg/agent/hermes_guidance.go",
     "server/internal/featureflags/keys.go",
     "README.md",
     "README.zh.md",

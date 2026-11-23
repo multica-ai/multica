@@ -6,7 +6,7 @@ import { i18n, type Lang } from "./i18n";
 import { undocumentedRuntimes } from "./undocumented-runtimes";
 
 // How many tools Multica supports, and which of them can be steered mid-run
-// from which version, are defined once in the daemon but copied by hand into
+// from which version or live capability, are defined in the daemon but copied by hand into
 // the README, the providers page and the landing site in every locale. These
 // are the facts AI assistants quote back when recommending Multica, and both
 // have drifted before. This reads the daemon sources and requires every copy
@@ -22,7 +22,13 @@ const sources = {
   registry: "server/pkg/agent/builtin_runtimes.go",
   probe: "server/internal/daemon/agents_probe.go",
   steering: "server/pkg/agent/version.go",
+  hermes: "server/pkg/agent/hermes.go",
+  hermesGuidance: "server/pkg/agent/hermes_guidance.go",
 } as const;
+
+// Hermes negotiates native /steer on the live session instead of using a
+// version floor. The source-contract check below keeps this entry honest.
+const negotiatedSteering = [{ id: "hermes", command: "/steer" }] as const;
 
 const readmes = ["README.md", "README.zh.md", "README.ja.md"] as const;
 
@@ -200,7 +206,7 @@ function steeringTable(markdown: string): SteeringRow[] | null {
     (t) =>
       t.header.length === 2 &&
       t.rows.length > 0 &&
-      t.rows.every((row) => /^\d+\.\d+\.\d+$/.test(row[1] ?? "")),
+      t.rows.some((row) => /^\d+\.\d+\.\d+$/.test(row[1] ?? "")),
   );
   return found.length === 1
     ? found[0]!.rows.map((row) => ({ name: row[0]!, version: row[1]! }))
@@ -282,9 +288,15 @@ describe("extractors", () => {
     ]);
   });
 
-  it("finds the steering table by its version column", () => {
-    const mdx = ["| Tool | Minimum version |", "|---|---|", "| Pi | 1.4.0 |"].join("\n");
-    expect(steeringTable(mdx)).toEqual([{ name: "Pi", version: "1.4.0" }]);
+  it("finds the steering table with version floors and native requirements", () => {
+    const mdx = [
+      "| Tool | Minimum version or requirement |", "|---|---|",
+      "| Pi | 1.4.0 |", "| Hermes | Native `/steer` detected at runtime |",
+    ].join("\n");
+    expect(steeringTable(mdx)).toEqual([
+      { name: "Pi", version: "1.4.0" },
+      { name: "Hermes", version: "Native `/steer` detected at runtime" },
+    ]);
   });
 
   it("reads counts linked to the providers page", () => {
@@ -325,7 +337,18 @@ describe("runtime facts in docs", () => {
     }
   });
 
-  it("lists every steerable tool at its minimum version in every locale", () => {
+  it("keeps Hermes steering negotiated through its live native command", () => {
+    const execute = goBlock(readRepoFile(sources.hermes), /^func \(b \*hermesBackend\) Execute\(/m);
+    expect(execute).toMatch(/session\.SupplementRequiresNegotiation\s*=\s*true/);
+    expect(execute).toMatch(/session\.SupplementReady\s*=\s*guidance\.ready/);
+    expect(execute).toMatch(/session\.Supplement\s*=\s*guidance\.send/);
+    const guidance = readRepoFile(sources.hermesGuidance);
+    expect(guidance).toContain('"available_commands_update"');
+    expect(guidance).toMatch(/command\.Name\s*==\s*"steer"/);
+    expect(steering.map((s) => s.id)).not.toContain("hermes");
+  });
+
+  it("lists every steerable tool at its minimum version or native requirement in every locale", () => {
     const problems: string[] = [];
     for (const lang of i18n.languages) {
       const file = providersFile(lang);
@@ -354,6 +377,21 @@ describe("runtime facts in docs", () => {
           problems.push(`${file}: steering table lists ${name} at ${row.version}; the minimum is ${minimum}`);
         }
       }
+      for (const { id, command } of negotiatedSteering) {
+        const name = nameByCommand.get(commandById.get(id) ?? "");
+        if (name === undefined) {
+          problems.push(`${file}: the supported tools table has no row for runtime "${id}"`);
+          continue;
+        }
+        expected.add(name);
+        const row = rows.find((r) => r.name === name);
+        if (!row || !row.version.includes(`\`${command}\``) || /\d+\.\d+\.\d+/.test(row.version)) {
+          problems.push(`${file}: ${name} must list native \`${command}\` detection, without an invented version floor`);
+        }
+      }
+      if (new Set(rows.map((r) => r.name)).size !== rows.length) {
+        problems.push(`${file}: steering table contains duplicate tools`);
+      }
       for (const row of rows) {
         if (!expected.has(row.name)) {
           problems.push(`${file}: steering table lists ${row.name}, which does not support steering; remove the row`);
@@ -362,13 +400,13 @@ describe("runtime facts in docs", () => {
     }
     expect(
       problems,
-      `Steering support is defined by SupportsTaskSupplement in ${sources.steering}.`,
+      `Version-gated steering is defined in ${sources.steering}; Hermes negotiates it in ${sources.hermes}.`,
     ).toEqual([]);
   });
 
   it("names every steerable tool, and no other, in each README", () => {
     const steerable = new Set(
-      steering.flatMap(({ id }) => {
+      [...steering, ...negotiatedSteering].flatMap(({ id }) => {
         const name = englishNameByCommand.get(commandById.get(id) ?? "");
         return name === undefined ? [] : [proseName(name)];
       }),
@@ -394,7 +432,7 @@ describe("runtime facts in docs", () => {
     }
     expect(
       problems,
-      `Steering support is defined by SupportsTaskSupplement in ${sources.steering}; tool names come from ${providersFile("en")}.`,
+      `Steering support comes from ${sources.steering} and ${sources.hermes}; tool names come from ${providersFile("en")}.`,
     ).toEqual([]);
   });
 
