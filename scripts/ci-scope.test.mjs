@@ -66,6 +66,7 @@ for (const [name, files, selected] of [
   ["mobile brand copy", ["apps/mobile/components/brand/multica-logo.tsx"], ["quality"]],
   ["README logo", ["docs/assets/logo-dark.svg"], ["quality"]],
   ["brand generator", ["scripts/brand/sync.mjs"], ["quality"]],
+  ["motion checks", ["scripts/motion/checks.test.mjs"], ["quality"]],
   ["PR evidence uploader", ["scripts/pr-shots"], ["quality"]],
   ["cross-module runtime contract", ["packages/core/runtimes/cli-version.ts"], ["frontend", "backend", "runtime", "quality", "e2e"]],
   ["inbox type contract", ["packages/core/types/inbox.ts"], ["frontend", "backend", "quality", "e2e"]],
