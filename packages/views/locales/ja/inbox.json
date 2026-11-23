@@ -214,9 +214,7 @@
     "failed": "スヌーズできませんでした",
     "unsnooze_failed": "戻せませんでした",
     "view_empty": "スヌーズ中の項目はありません",
-    "view_empty_description": "インボックスでタスクをスヌーズすると、戻る時間までここで待機します。",
-    "col_updates": "スヌーズ中",
-    "col_back": "戻る時間"
+    "view_empty_description": "インボックスでタスクをスヌーズすると、戻る時間までここで待機します。"
   },
   "auto_archive_prompt": {
     "title": "対応済みの通知を自動でアーカイブ",

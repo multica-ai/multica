@@ -219,9 +219,7 @@
     "failed": "No se pudo posponer",
     "unsnooze_failed": "No se pudo recuperar",
     "view_empty": "Nada pospuesto",
-    "view_empty_description": "Pospón un issue desde tu bandeja de entrada y esperará aquí hasta que sea hora de volver.",
-    "col_updates": "Mientras estaba pospuesto",
-    "col_back": "Vuelve"
+    "view_empty_description": "Pospón un issue desde tu bandeja de entrada y esperará aquí hasta que sea hora de volver."
   },
   "auto_archive_prompt": {
     "title": "Archiva las notificaciones cuando ya las has gestionado",

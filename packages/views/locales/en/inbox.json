@@ -219,9 +219,7 @@
     "failed": "Failed to snooze",
     "unsnooze_failed": "Failed to bring back",
     "view_empty": "Nothing snoozed",
-    "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back.",
-    "col_updates": "While snoozed",
-    "col_back": "Back"
+    "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back."
   },
   "auto_archive_prompt": {
     "title": "Archive notifications once you've handled them",

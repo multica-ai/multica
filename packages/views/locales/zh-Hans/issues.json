@@ -1840,8 +1840,7 @@
       "all_issues": "全部任务",
       "my_work": "我的工作",
       "working": "运行中",
-      "subscribed": "已订阅",
-      "snoozed": "已延后"
+      "subscribed": "已订阅"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",

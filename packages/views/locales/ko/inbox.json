@@ -214,9 +214,7 @@
     "failed": "미루지 못했습니다",
     "unsnooze_failed": "되돌리지 못했습니다",
     "view_empty": "미뤄둔 항목이 없습니다",
-    "view_empty_description": "인박스에서 태스크를 미루면 돌아올 시간까지 여기에서 기다립니다.",
-    "col_updates": "미뤄둔 동안",
-    "col_back": "돌아오는 시간"
+    "view_empty_description": "인박스에서 태스크를 미루면 돌아올 시간까지 여기에서 기다립니다."
   },
   "auto_archive_prompt": {
     "title": "처리한 알림을 자동으로 보관하세요",
