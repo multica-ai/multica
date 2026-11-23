@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { i18n, type Lang } from "./i18n";
@@ -15,6 +15,7 @@ import { undocumentedRuntimes } from "./undocumented-runtimes";
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const thisFile = "apps/docs/lib/runtime-facts-coverage.test.ts";
+const docsDir = "apps/docs/content/docs";
 
 const sources = {
   families: "server/pkg/agent/agent.go",
@@ -36,9 +37,15 @@ const providersCountPatterns: Record<Lang, RegExp> = {
   fr: /(\d+) outils de codage IA/g,
 };
 
+// A count that links to the providers page: "[31 AI coding tools](/providers)".
+const linkedCount = /\[(\d+)[^\]\n]*\]\(\/providers(?:#[^)]*)?\)/g;
+
+const comparePages = ["linear-jira", "worktree-managers", "openhands-devin-factory"] as const;
+
 // Every hand-written statement of the tool count. Each pattern captures the
 // number; the page description and the opening paragraph of providers*.mdx
-// share a phrase, hence min: 2.
+// share a phrase, hence min: 2. Any other docs page that links a count to
+// /providers is checked too, without an entry here.
 const countMentions: CountMention[] = [
   { file: "README.md", pattern: /## Supported agent CLIs \((\d+)\)/g, min: 1 },
   { file: "README.md", pattern: /#supported-agent-clis-(\d+)\)/g, min: 1 },
@@ -50,6 +57,17 @@ const countMentions: CountMention[] = [
     pattern: providersCountPatterns[lang],
     min: 2,
   })),
+  ...comparePages.flatMap((page) =>
+    i18n.languages.map((lang) => ({ file: docsFile(`compare/${page}`, lang), pattern: linkedCount, min: 1 })),
+  ),
+  // The comparison table cell: "31, including Devin CLI and Factory Droid".
+  ...i18n.languages.map((lang) => ({
+    file: docsFile("compare/openhands-devin-factory", lang),
+    pattern: /^\|[^|\n]+\| (\d+)[^|\n\d]*Devin CLI/gm,
+    min: 1,
+  })),
+  { file: docsFile("compare/openhands-devin-factory", "ja"), pattern: /その (\d+) 種類/g, min: 1 },
+  { file: "apps/web/features/landing/site/cloud-page.tsx", pattern: /"(\d+) coding agents/g, min: 1 },
   { file: "apps/web/features/landing/i18n/en.ts", pattern: /supports (\d+) coding tools/g, min: 1 },
   { file: "apps/web/features/landing/i18n/zh.ts", pattern: /支持 (\d+) 款 AI 编程工具/g, min: 1 },
   { file: "apps/web/features/landing/i18n/ja.ts", pattern: /(\d+) 種類のコーディングツール/g, min: 1 },
@@ -60,9 +78,12 @@ const countMentions: CountMention[] = [
   { file: "apps/web/features/landing/i18n/site-ko.ts", pattern: /에이전트 (\d+)종 전체/g, min: 1 },
 ];
 
+function docsFile(page: string, lang: Lang): string {
+  return lang === i18n.defaultLanguage ? `${docsDir}/${page}.mdx` : `${docsDir}/${page}.${lang}.mdx`;
+}
+
 function providersFile(lang: Lang): string {
-  const name = lang === i18n.defaultLanguage ? "providers.mdx" : `providers.${lang}.mdx`;
-  return `apps/docs/content/docs/${name}`;
+  return docsFile("providers", lang);
 }
 
 function readRepoFile(rel: string): string {
@@ -266,6 +287,11 @@ describe("extractors", () => {
     expect(steeringTable(mdx)).toEqual([{ name: "Pi", version: "1.4.0" }]);
   });
 
+  it("reads counts linked to the providers page", () => {
+    const mdx = "on [31 AI coding tools](/providers), see [the matrix](/providers#steer) or [2 runs](/tasks)";
+    expect([...mdx.matchAll(linkedCount)].map((m) => m[1])).toEqual(["31"]);
+  });
+
   it("matches tool names as whole names", () => {
     expect(namesTool("Grok, Kiro, Pi, and Antigravity", "Pi")).toBe(true);
     expect(namesTool("Oh-My-Pi and Grok", "Pi")).toBe(false);
@@ -382,7 +408,12 @@ describe("runtime facts in docs", () => {
         problems.push(`${file}: the supported tools table has ${tools.length} tools, not ${toolCount}`);
       }
     }
-    for (const { file, pattern, min } of countMentions) {
+    const listed = new Set(countMentions.map((m) => m.file));
+    const otherLinkedCounts = readdirSync(path.join(repoRoot, docsDir), { recursive: true })
+      .map((entry) => `${docsDir}/${String(entry).split(path.sep).join("/")}`)
+      .filter((file) => file.endsWith(".mdx") && !listed.has(file))
+      .map((file) => ({ file, pattern: linkedCount, min: 0 }));
+    for (const { file, pattern, min } of [...countMentions, ...otherLinkedCounts]) {
       const text = readRepoFile(file);
       const matches = [...text.matchAll(pattern)];
       if (matches.length < min) {

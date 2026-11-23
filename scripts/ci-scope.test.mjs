@@ -27,6 +27,7 @@ for (const [name, files, selected] of [
   ["self-hosting guide for agents", ["SELF_HOSTING_AI.md"], ["docs"]],
   ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality", "docs", "e2e"]],
   ["landing site copy", ["apps/web/features/landing/i18n/site-ko.ts"], ["frontend", "quality", "docs", "e2e"]],
+  ["cloud page", ["apps/web/features/landing/site/cloud-page.tsx"], ["frontend", "quality", "docs", "e2e"]],
   ["landing demo copy", ["apps/web/features/landing/i18n/demo-en.ts"], ["frontend", "quality", "e2e"]],
   ["mobile UI", ["apps/mobile/app/index.tsx"], ["quality"]],
   ["collaboration service", ["apps/collab/src/documents.ts"], ["frontend", "quality"]],
