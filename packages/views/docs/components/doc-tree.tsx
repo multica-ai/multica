@@ -404,10 +404,7 @@ export function DocTree() {
                   title={t(($) => $.actions.new_doc)}
                   className={ROW_ACTION_CLASS}
                   disabled={createDoc.isPending}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void newDoc(folder.id);
-                  }}
+                  onClick={() => void newDoc(folder.id)}
                 >
                   <Plus className="size-3.5" />
                 </button>
@@ -601,21 +598,10 @@ function DocFolderItem({
         data-doc-folder={folderId}
         {...dragProps}
         {...dropProps}
-        onClick={() => setOpen((v) => !v)}
-        onKeyDown={(event) => {
-          if (event.target !== event.currentTarget) return;
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            setOpen((v) => !v);
-          }
-        }}
-        role="button"
-        tabIndex={0}
-        aria-expanded={open}
         className={cn(
           PANEL_ROW_CLASS,
           panelRowStateClass(false),
-          "group/row cursor-pointer transition-[background-color,box-shadow] duration-150 motion-reduce:transition-none",
+          "group/row relative transition-[background-color,box-shadow] duration-150 motion-reduce:transition-none",
           isDropTarget && "bg-nav-item-hover ring-1 ring-ring",
         )}
       >
@@ -628,7 +614,16 @@ function DocFolderItem({
         />
         <Folder className="size-4 shrink-0" />
         <TruncatedTooltip content={title} side="right">
-          <span className="min-w-0 flex-1 truncate">{title}</span>
+          {/* Stretched over the row, under its actions, so the whole row
+              toggles the folder while the actions stay sibling controls. */}
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className="min-w-0 flex-1 cursor-pointer truncate text-left outline-none after:absolute after:inset-0 after:rounded-nav-item focus-visible:after:outline-2 focus-visible:after:outline-ring"
+          >
+            {title}
+          </button>
         </TruncatedTooltip>
         {actions}
       </div>

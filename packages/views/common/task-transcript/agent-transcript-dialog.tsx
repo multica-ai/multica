@@ -30,6 +30,7 @@ import {
   GitBranch,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
@@ -630,6 +631,7 @@ export function AgentTranscriptDialog({
   }, [open, task.agent_id, task.runtime_id]);
 
   const reduceMotion = useReducedMotion();
+  const isMobile = useIsMobile();
   // Track rows that arrive live while the transcript is open so only newly
   // streamed steps fade in (never historical rows mounted during Virtuoso scroll).
   const knownSeqsRef = useRef<{ taskId: string; seqs: Set<number> } | null>(null);
@@ -1317,10 +1319,13 @@ export function AgentTranscriptDialog({
             {selectedStep && (
               <motion.div
                 key="step-inspector-drawer"
-                initial={reduceMotion ? false : { opacity: 0, width: 0 }}
+                // Width is always owned by motion: below md the inspector
+                // fills the dialog (its close button must stay in view), so
+                // it only fades; from md up it slides in as a drawer.
+                initial={reduceMotion ? false : { opacity: 0, width: isMobile ? "100%" : 0 }}
                 animate={{
                   opacity: 1,
-                  width: "auto",
+                  width: isMobile ? "100%" : "auto",
                   transition: { duration: reduceMotion ? 0 : 0.2, ease: UI_EASE_OUT },
                 }}
                 exit={
@@ -1328,11 +1333,11 @@ export function AgentTranscriptDialog({
                     ? { opacity: 0, transition: { duration: 0 } }
                     : {
                         opacity: 0,
-                        width: 0,
+                        ...(isMobile ? {} : { width: 0 }),
                         transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_IN },
                       }
                 }
-                className="flex shrink-0 overflow-hidden max-md:w-full"
+                className="flex shrink-0 overflow-hidden"
               >
                 <StepInspector
                   step={selectedStep}

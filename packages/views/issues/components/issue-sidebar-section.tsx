@@ -70,15 +70,7 @@ export function IssueSidebarCollapsible({
 
   return (
     <Collapsible open={open}>
-      <CollapsibleContent
-        className={cn(
-          "h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 data-[starting-style]:h-0 data-[starting-style]:opacity-0 data-[ending-style]:h-0 data-[ending-style]:opacity-0",
-          reduceMotion
-            ? "transition-none"
-            : "transition-[height,opacity] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
-          className,
-        )}
-      >
+      <CollapsibleContent className={cn(reduceMotion && "transition-none", className)}>
         {children}
       </CollapsibleContent>
     </Collapsible>

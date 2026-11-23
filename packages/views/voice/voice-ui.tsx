@@ -296,7 +296,7 @@ export function VoiceHud({ voice }: { voice: ComposerVoice }) {
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mb-3 flex justify-center">
-      <AnimatePresence initial={false}>
+      <AnimatePresence>
         {voice.showHud && (
           <motion.div
             key="voice-hud"
