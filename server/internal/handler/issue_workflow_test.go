@@ -566,7 +566,7 @@ func TestStatusChangeHandsOffOnDefaultProject(t *testing.T) {
 		t.Fatalf("handoff note = %q, want none: the brief rides the claim", tasks[0].HandoffNote.String)
 	}
 	brief := claimBriefForTest(t, issueID, tasks[0])
-	for _, want := range []string{"Implement it and open a PR.", "This project's workflow — Default (Workflow handoff project)", "Set one with: multica issue status"} {
+	for _, want := range []string{"Implement it and open a PR.", "This project's workflow — Default (Workflow handoff project)", "\nStatus map for "} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("claim brief is missing %q:\n%s", want, brief)
 		}
@@ -1009,9 +1009,8 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 	for _, want := range []string{
 		"This project's workflow — Default (Workflow claim project)",
 		"Implement it and open a PR.",
-		"\nStatus map:\n",
+		"\nStatus map for ",
 		"   ← current",
-		"Set one with: multica issue status",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("assignee brief is missing %q:\n%s", want, brief)
@@ -1026,7 +1025,7 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 	}
 	for _, legacy := range []bool{false, true} {
 		commands := testHandler.claimProjectWorkflow(context.Background(), issue, &assignee, legacy, true)
-		if commands == nil || commands.StatusMap || !strings.Contains(commands.Brief, "Step done      → multica issue status") || strings.Contains(commands.Brief, "Status map:") {
+		if commands == nil || commands.StatusMap || !strings.Contains(commands.Brief, "Step done      → multica issue status") || strings.Contains(commands.Brief, "Status map for ") {
 			t.Fatalf("legacy=%v daemon must keep the command brief: %+v", legacy, commands)
 		}
 	}

@@ -53,19 +53,20 @@ func TestStatusMapDescribesEveryStatus(t *testing.T) {
 	in.StatusKey = "in_progress"
 	brief := Brief(in)
 	for _, want := range []string{
-		"This project's workflow — Delivery (Payments)\n",
-		`MUL-7 is at "in_progress", which has no handler: the work the issue asks for is yours until it reaches a status that hands off.` + "\n",
-		"\nStatus map:\n",
-		"- `in_progress` (started) — Work underway.   ← current\n",
-		"- `in_review` (started) — Delivered; awaiting review or acceptance.\n" +
+		// A status without a handler gets no introduction: the runtime
+		// rules say its work stays with the assignee.
+		"This project's workflow — Delivery (Payments)\n\nStatus map for MUL-7:\n",
+		"- `todo`\n",
+		"- `in_progress`   ← current\n",
+		"- `in_review` — Delivered; awaiting review.\n" +
 			"    Hands off to Sentinel. Their step: Review the PR: tests and scope.\n" +
 			"    Routes: next `done`, send back `in_progress`.\n",
 		// The custom status carries its category and catalog description, so
 		// the agent can tell when it fits.
 		"- `wont_fix` Won't Fix (closed) — Decided not to do: duplicate or out of scope.\n",
 		"- `done` (done) — Finished and accepted.\n",
-		"- `cancelled` (closed) — Won't be done: dropped or a duplicate.\n",
-		"\nSet one with: multica issue status MUL-7 <status>\n",
+		"- `blocked`\n",
+		"- `cancelled` (closed)\n",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief is missing %q:\n%s", want, brief)
@@ -86,7 +87,7 @@ func TestStatusMapForTheStepYouHandle(t *testing.T) {
 	for _, want := range []string{
 		`You are handling the "in_review" step of MUL-7.` + "\n",
 		"\nStep instructions:\n> Review the PR:\ttests and scope.\n> Then approve.\n",
-		"awaiting review or acceptance.   ← current\n    Hands off to Sentinel.\n",
+		"awaiting review.   ← current\n    Hands off to Sentinel.\n",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief is missing %q:\n%s", want, brief)
@@ -116,14 +117,15 @@ func TestStatusMapRoutesOnlyWhatItsAuthorOrABoardStageDecides(t *testing.T) {
 	}
 }
 
-func TestStatusMapWithoutHandoffsLeavesTheWorkToFinish(t *testing.T) {
+// The map carries no command and no rule: the runtime brief states both, and
+// a status without a handler reads as current with nothing more to say.
+func TestStatusMapRepeatsNoRuntimeRule(t *testing.T) {
 	def := Definition{Name: "Plain", Steps: stepsFor(ArrangeKeys([]string{"in_progress"}))}
 	brief := Brief(BriefInput{Workflow: def, StatusKey: "todo", IssueIdentifier: "MUL-7"})
-	if !strings.Contains(brief, `MUL-7 is at "todo", which has no handler: the work the issue asks for is yours to finish.`) {
-		t.Fatalf("brief must leave the work to finish:\n%s", brief)
-	}
-	if strings.Contains(brief, "hands off") {
-		t.Fatalf("nothing hands off in this workflow:\n%s", brief)
+	want := "This project's workflow — Plain\n\nStatus map for MUL-7:\n" +
+		"- `todo`   ← current\n- `in_progress`\n- `done` (done) — Finished and accepted.\n- `cancelled` (closed)\n"
+	if brief != want {
+		t.Fatalf("brief = %q, want %q", brief, want)
 	}
 }
 
@@ -135,14 +137,14 @@ func TestStatusMapForObserversAndTerminalStatuses(t *testing.T) {
 	observer := Brief(in)
 	for _, want := range []string{
 		`MUL-7 is at the "in_review" step and is assigned to Sentinel. You are not its assignee`,
-		"\nStatus map:\n",
+		"\nStatus map for MUL-7:\n",
 		"\nMoving the issue into a status that hands off reassigns it to that handler and starts their run.\n",
 	} {
 		if !strings.Contains(observer, want) {
 			t.Errorf("observer brief is missing %q:\n%s", want, observer)
 		}
 	}
-	if strings.Contains(observer, "Set one with") || strings.Contains(observer, "Step instructions") {
+	if strings.Contains(observer, "Step instructions") {
 		t.Errorf("observer brief must leave the status to the assignee:\n%s", observer)
 	}
 
@@ -150,8 +152,7 @@ func TestStatusMapForObserversAndTerminalStatuses(t *testing.T) {
 	in.StatusKey = "wont_fix"
 	terminal := Brief(in)
 	if !strings.Contains(terminal, `MUL-7 has reached the terminal status "Won't Fix" (wont_fix). Leave the issue at this status`) ||
-		!strings.Contains(terminal, "(closed) — Decided not to do: duplicate or out of scope.   ← current\n") ||
-		strings.Contains(terminal, "Set one with") {
+		!strings.Contains(terminal, "(closed) — Decided not to do: duplicate or out of scope.   ← current\n") {
 		t.Errorf("terminal brief must keep the issue where it is:\n%s", terminal)
 	}
 }

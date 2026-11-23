@@ -8,25 +8,30 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 )
 
-// builtInMeanings say what each built-in status means for the issue. Custom
-// statuses carry their catalog description instead.
+// builtInMeanings name the built-in statuses the runtime rules pick by
+// meaning: the one for delivered work, and done. The others read on their
+// own key. Custom statuses carry their catalog description instead.
 var builtInMeanings = map[string]string{
-	issuestatus.Backlog:    "Not planned yet.",
-	issuestatus.Todo:       "Not started.",
-	issuestatus.InProgress: "Work underway.",
-	issuestatus.InReview:   "Delivered; awaiting review or acceptance.",
-	issuestatus.Blocked:    "Can't proceed; something is missing.",
-	issuestatus.Done:       "Finished and accepted.",
-	issuestatus.Cancelled:  "Won't be done: dropped or a duplicate.",
+	issuestatus.InReview: "Delivered; awaiting review.",
+	issuestatus.Done:     "Finished and accepted.",
+}
+
+// mappedCategories are the lifecycle categories the runtime rules refer to;
+// a status in any other category shows none.
+var mappedCategories = map[string]bool{
+	issuestatus.CategoryDone:   true,
+	issuestatus.CategoryClosed: true,
 }
 
 // maxEntryHintRunes caps the line a step's instructions lend to its map
 // entry; the full instructions are the handler's to read.
 const maxEntryHintRunes = 160
 
-// statusMapBrief renders the workflow as a status map: every status with its
-// lifecycle category, what it means, who entering it hands off to and where
-// its author routed the work on. The agent picks the status that matches
+// statusMapBrief renders the workflow as a status map: every status, with
+// what the runtime rules need to choose among them — the done and closed
+// categories, what a status means, who entering it hands off to and where
+// its author routed the work on. It repeats nothing those rules say, and the
+// command lives in the runtime brief's command list. The agent picks the status that matches
 // where the issue stands, under the rules its runtime brief states, instead
 // of following a move computed for each step (MUL-9913).
 func statusMapBrief(in BriefInput) string {
@@ -48,33 +53,17 @@ func statusMapBrief(in BriefInput) string {
 	case step.HandsOff():
 		fmt.Fprintf(&b, "You are handling the %q step of %s.\n", in.statusName(in.StatusKey), in.IssueIdentifier)
 		writeStepInstructions(&b, step)
-	default:
-		// A status without a handler is a progress marker, not a stage of
-		// its own (MUL-8231).
-		fmt.Fprintf(&b, "%s is at %s, which has no handler: the work the issue asks for is yours ",
-			in.IssueIdentifier, statusLabel(in.statusName(in.StatusKey), in.StatusKey))
-		if in.Workflow.HandsOffAnywhere() {
-			b.WriteString("until it reaches a status that hands off.\n")
-		} else {
-			b.WriteString("to finish.\n")
-		}
 	}
+	// A status without a handler needs no introduction: the runtime rules
+	// say its work stays with the assignee (MUL-8231).
 
-	b.WriteString("\nStatus map:\n")
+	fmt.Fprintf(&b, "\nStatus map for %s:\n", in.IssueIdentifier)
 	for _, s := range in.Workflow.Steps {
 		writeStatusMapEntry(&b, in, s)
 	}
-	if stepMoved {
-		return b.String()
-	}
-	if in.Observer {
+	if in.Observer && !stepMoved {
 		b.WriteString("\nMoving the issue into a status that hands off reassigns it to that handler and starts their run.\n")
-		return b.String()
 	}
-	if terminal && !terminalMoves {
-		return b.String()
-	}
-	fmt.Fprintf(&b, "\nSet one with: multica issue status %s <status>\n", in.IssueIdentifier)
 	return b.String()
 }
 
@@ -86,7 +75,7 @@ func writeStatusMapEntry(b *strings.Builder, in BriefInput, s Step) {
 	if n := in.statusName(s.StatusKey); n != s.StatusKey {
 		fmt.Fprintf(b, " %s", n)
 	}
-	if category := in.category(s.StatusKey); category != "" {
+	if category := in.category(s.StatusKey); mappedCategories[category] {
 		fmt.Fprintf(b, " (%s)", category)
 	}
 	if meaning := in.meaning(s.StatusKey); meaning != "" {
@@ -146,8 +135,8 @@ func (in BriefInput) category(key string) string {
 }
 
 func (in BriefInput) meaning(key string) string {
-	if m, ok := builtInMeanings[key]; ok {
-		return m
+	if issuestatus.IsBuiltIn(key) {
+		return builtInMeanings[key]
 	}
 	if in.StatusDescription == nil {
 		return ""

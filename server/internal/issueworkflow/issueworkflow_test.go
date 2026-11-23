@@ -385,7 +385,7 @@ func TestBriefForMovedStep(t *testing.T) {
 						MovedBy: "Lin\n\tLee\x01", StatusName: func(key string) string { return testCatalog()[key].Name },
 					}
 					brief := Brief(in)
-					heading, leaks := "Status map:", []string{}
+					heading, leaks := "Status map for MUL-7:", []string{}
 					if mode != "map" {
 						heading, leaks = "Statuses in this workflow:", []string{"Needs changes", "Can't proceed"}
 					}
