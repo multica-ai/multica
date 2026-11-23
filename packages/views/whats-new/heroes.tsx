@@ -613,6 +613,85 @@ function ProjectFoldersArt() {
   );
 }
 
+/* ── Inbox page: the Inbox · Snoozed · Archived tabs over the list ──── */
+
+function InboxTabsArt() {
+  const { t } = useT("inbox");
+  const tabs = [
+    { id: "inbox", label: t(($) => $.page.title), count: 3 },
+    { id: "snoozed", label: t(($) => $.list.snoozed_title), icon: <AlarmClock className="size-3" /> },
+    { id: "archived", label: t(($) => $.list.archived_title), icon: <Archive className="size-3" /> },
+  ];
+  return (
+    <Surface className="top-4 left-6 w-[19rem]">
+      <div className="flex h-9 items-center gap-0.5 px-2">
+        {tabs.map((tab, i) => (
+          <span
+            key={tab.id}
+            className={cn(
+              "flex h-6 items-center gap-1 rounded-md px-2 text-label whitespace-nowrap",
+              i === 0 ? "bg-surface-selected font-medium text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {tab.icon}
+            {tab.label}
+            {tab.count !== undefined && <span className="text-brand tabular-nums">{tab.count}</span>}
+          </span>
+        ))}
+      </div>
+      <div className="px-1 pb-8">
+        <InboxRowArt title={128} detail={92} agent active />
+        <InboxRowArt title={104} detail={136} />
+        <InboxRowArt title={140} detail={76} agent />
+      </div>
+    </Surface>
+  );
+}
+
+/* ── Project overview: the tabs and the progress panel with its trend ── */
+
+/** Done issues at the end of each recent week, rising toward the scope. */
+const PROJECT_TREND = [1, 2, 2, 4, 5, 7, 8];
+const PROJECT_SCOPE = 12;
+
+function ProjectOverviewArt() {
+  const { t } = useT("projects");
+  const done = PROJECT_TREND[PROJECT_TREND.length - 1]!;
+  const points = PROJECT_TREND.map((value, i) => `${(i / (PROJECT_TREND.length - 1)) * 100},${32 - (value / PROJECT_SCOPE) * 30}`).join(" ");
+  return (
+    <Surface className="top-4 left-6 w-[19.5rem]">
+      <div className="flex h-9 items-center gap-4 border-b border-surface-border px-4 text-label whitespace-nowrap">
+        <span className="flex h-full items-center border-b-2 border-foreground font-medium">{t(($) => $.detail.tab_overview)}</span>
+        <span className="flex items-center gap-1 text-muted-foreground">
+          {t(($) => $.detail.tab_issues)}
+          <span className="tabular-nums">{PROJECT_SCOPE}</span>
+        </span>
+        <span className="text-muted-foreground">{t(($) => $.detail.tab_activity)}</span>
+      </div>
+      <div className="flex">
+        <div className="min-w-0 flex-1 px-3 pt-3 pb-8">
+          <TextLine words={[34, 46, 22]} />
+          <TextLine words={[40, 28, 30]} />
+          <TextLine words={[30, 44]} />
+        </div>
+        <div className="w-[9.5rem] shrink-0 border-l border-surface-border px-3 pt-2.5 pb-4">
+          <div className="text-caption font-medium text-muted-foreground">{t(($) => $.detail.section_progress)}</div>
+          <div className="mt-0.5 truncate text-label font-medium tabular-nums">
+            {t(($) => $.detail.progress_panel.summary, { count: PROJECT_SCOPE, completed: done })}
+          </div>
+          <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-muted">
+            <span className="bg-info" style={{ width: `${(done / PROJECT_SCOPE) * 100}%` }} />
+            <span className="bg-warning" style={{ width: `${(2 / PROJECT_SCOPE) * 100}%` }} />
+          </div>
+          <svg viewBox="0 0 100 32" preserveAspectRatio="none" className="mt-2.5 h-8 w-full overflow-visible text-info">
+            <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          </svg>
+        </div>
+      </div>
+    </Surface>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
@@ -622,3 +701,5 @@ export const CHAT_WAKEUP_HERO: WhatsNewHero = { ground: "lime", Art: ChatWakeupA
 export const CHAT_STEERING_HERO: WhatsNewHero = { ground: "orange", Art: ChatSteeringArt };
 export const WEIXIN_HERO: WhatsNewHero = { ground: "ice", Art: WeixinArt };
 export const PROJECT_FOLDERS_HERO: WhatsNewHero = { ground: "brand", Art: ProjectFoldersArt };
+export const INBOX_TABS_HERO: WhatsNewHero = { ground: "lime", Art: InboxTabsArt };
+export const PROJECT_OVERVIEW_HERO: WhatsNewHero = { ground: "ice", Art: ProjectOverviewArt };

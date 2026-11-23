@@ -1,8 +1,8 @@
-import { AlarmClock, BellOff, CircleDot, Command, Folder, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
+import { AlarmClock, BellOff, CircleDot, CodeXml, Command, Folder, FolderKanban, Gauge, Globe, History, Inbox, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Target, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
-import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, PROJECT_FOLDERS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
+import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, INBOX_TABS_HERO, PROJECT_FOLDERS_HERO, PROJECT_OVERVIEW_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -51,6 +51,130 @@ export type CompleteWhatsNewRelease = Omit<WhatsNewRelease, "highlights"> & {
 };
 
 export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
+  {
+    version: "0.12.0",
+    date: "2026-11-23",
+    highlights: [
+      {
+        id: "inbox-tabs",
+        icon: Inbox,
+        hero: INBOX_TABS_HERO,
+        action: { kind: "route", to: (p) => p.inbox() },
+        copy: {
+          en: {
+            title: "Handle every notification on the Inbox page",
+            body: "Click a notification in the Work panel's Inbox and it opens on the Inbox page, with its actions in one bar. Switch between the Inbox, Snoozed, and Archived tabs at the top of the section; press E to archive and H to snooze.",
+          },
+          "zh-Hans": {
+            title: "在收件箱页面处理所有通知",
+            body: "在「工作」面板的收件箱里点一条通知，它会在收件箱页面打开，相关操作都在同一个操作栏里。分区顶部可切换「收件箱」「已延后」「已归档」三个页签；按 E 归档，按 H 延后。",
+          },
+          "zh-Hant": {
+            title: "在收件箱頁面處理所有通知",
+            body: "在「工作」面板的收件箱裡點一則通知，它會在收件箱頁面開啟，相關操作都在同一個操作列裡。分區頂部可切換「收件箱」「已延後」「已歸檔」三個頁籤；按 E 歸檔，按 H 延後。",
+          },
+          ja: {
+            title: "すべての通知をインボックスページで処理",
+            body: "「作業」パネルのインボックスで通知をクリックすると、インボックスページで開き、操作は 1 本のバーにまとまっています。セクション上部で「インボックス」「スヌーズ中」「アーカイブ済み」のタブを切り替えられ、E でアーカイブ、H でスヌーズします。",
+          },
+          ko: {
+            title: "모든 알림을 인박스 페이지에서 처리하기",
+            body: "'작업' 패널의 인박스에서 알림을 클릭하면 인박스 페이지에서 열리고, 관련 작업은 막대 하나에 모여 있습니다. 섹션 위쪽에서 '인박스', '미뤄둔 항목', '보관됨' 탭을 전환할 수 있으며, E로 보관하고 H로 미룹니다.",
+          },
+          fr: {
+            title: "Traitez toutes les notifications sur la page Boîte de réception",
+            body: "Cliquez sur une notification dans la boîte de réception du panneau Travail : elle s'ouvre sur la page Boîte de réception, avec ses actions réunies dans une seule barre. En haut de la section, passez d'un onglet à l'autre entre Boîte de réception, Reportés et Archivées ; appuyez sur E pour archiver et sur H pour reporter.",
+          },
+          es: {
+            title: "Gestiona todas las notificaciones en la página de la bandeja de entrada",
+            body: "Haz clic en una notificación de la bandeja de entrada del panel Trabajo y se abrirá en la página de la bandeja de entrada, con sus acciones en una sola barra. Arriba de la sección, cambia entre las pestañas Bandeja de entrada, Pospuestos y Archivado; pulsa E para archivar y H para posponer.",
+          },
+          ru: {
+            title: "Все уведомления — на странице «Входящие»",
+            body: "Нажмите на уведомление во «Входящих» на панели «Работа» — оно откроется на странице «Входящие», а все действия собраны в одной панели. Вверху раздела переключайтесь между вкладками «Входящие», «Отложенные» и «Архив»; E архивирует, H откладывает.",
+          },
+        },
+      },
+      {
+        id: "project-overview",
+        icon: Target,
+        hero: PROJECT_OVERVIEW_HERO,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "See how a project is going",
+            body: "Open a project: the Overview tab shows its description at full width, next to progress, a weekly trend, and the finish date the recent pace points to. The Activity tab lists what changed. Cancelled issues don't count toward progress.",
+          },
+          "zh-Hans": {
+            title: "随时了解项目进展",
+            body: "打开一个项目，「概览」页签会整宽显示项目说明，旁边是进度、每周趋势，以及按近期速度预计的完成日期。「活动」页签列出项目的变化。已取消的任务不计入进度。",
+          },
+          "zh-Hant": {
+            title: "隨時掌握專案進展",
+            body: "打開一個專案，「概覽」頁籤會整寬顯示專案說明，旁邊是進度、每週趨勢，以及按近期速度預計的完成日期。「活動」頁籤列出專案的變化。已取消的任務不計入進度。",
+          },
+          ja: {
+            title: "プロジェクトの進み具合をひと目で",
+            body: "プロジェクトを開くと、「概要」タブに説明が全幅で表示され、横に進捗、週ごとの推移、最近のペースから見込まれる完了日が並びます。「アクティビティ」タブでは変更履歴を確認できます。キャンセルしたタスクは進捗に含まれません。",
+          },
+          ko: {
+            title: "프로젝트 진행 상황 한눈에 보기",
+            body: "프로젝트를 열면 '개요' 탭에 설명이 전체 너비로 표시되고, 옆에 진행률, 주간 추이, 최근 속도로 예상한 완료일이 함께 보입니다. '활동' 탭에서는 변경 내역을 볼 수 있습니다. 취소된 태스크는 진행률에 포함되지 않습니다.",
+          },
+          fr: {
+            title: "Suivez l'avancement d'un projet",
+            body: "Ouvrez un projet : l'onglet Aperçu affiche sa description en pleine largeur, à côté de l'avancement, de la tendance hebdomadaire et de la date de fin prévue au rythme récent. L'onglet Activité liste les changements. Les tâches annulées ne comptent pas dans l'avancement.",
+          },
+          es: {
+            title: "Consulta cómo va un proyecto",
+            body: "Abre un proyecto: la pestaña Resumen muestra su descripción a todo el ancho, junto al progreso, la tendencia semanal y la fecha de fin que marca el ritmo reciente. La pestaña Actividad muestra los cambios. Las tareas canceladas no cuentan en el progreso.",
+          },
+          ru: {
+            title: "Следите за ходом проекта",
+            body: "Откройте проект: на вкладке «Обзор» описание занимает всю ширину, а рядом — прогресс, недельный тренд и дата завершения в текущем темпе. Вкладка «Активность» показывает изменения. Отменённые задачи в прогресс не входят.",
+          },
+        },
+      },
+      {
+        id: "editor-live-blocks",
+        icon: CodeXml,
+        copy: {
+          en: {
+            title: "Preview HTML and Mermaid while you edit",
+            body: "In an issue description you're editing, start a code block with ```html or ```mermaid and the preview renders in place. Click its title bar to add or rename the title, and press Enter on the selected block to edit the source.",
+          },
+          "zh-Hans": {
+            title: "编辑时直接预览 HTML 和 Mermaid",
+            body: "编辑任务描述时，用 ```html 或 ```mermaid 开始一个代码块，预览会直接显示在原位。点标题栏可添加或重命名标题；选中代码块后按 Enter 即可编辑源码。",
+          },
+          "zh-Hant": {
+            title: "編輯時直接預覽 HTML 和 Mermaid",
+            body: "編輯任務描述時，用 ```html 或 ```mermaid 開始一個程式碼區塊，預覽會直接顯示在原位。點標題列可新增或重新命名標題；選取區塊後按 Enter 即可編輯原始碼。",
+          },
+          ja: {
+            title: "編集中に HTML と Mermaid をプレビュー",
+            body: "タスクの説明を編集中に ```html または ```mermaid でコードブロックを始めると、その場でプレビューが表示されます。タイトルバーをクリックしてタイトルを追加・変更でき、ブロックを選択して Enter を押すとソースを編集できます。",
+          },
+          ko: {
+            title: "편집하면서 HTML과 Mermaid 미리 보기",
+            body: "태스크 설명을 편집할 때 ```html 또는 ```mermaid로 코드 블록을 시작하면 그 자리에서 미리 보기가 표시됩니다. 제목 막대를 클릭해 제목을 추가하거나 바꿀 수 있고, 블록을 선택한 뒤 Enter를 누르면 소스를 편집합니다.",
+          },
+          fr: {
+            title: "Prévisualisez HTML et Mermaid pendant l'édition",
+            body: "Dans la description d'une tâche en cours d'édition, commencez un bloc de code par ```html ou ```mermaid : l'aperçu s'affiche sur place. Cliquez sur sa barre de titre pour ajouter ou renommer le titre, et appuyez sur Entrée sur le bloc sélectionné pour modifier la source.",
+          },
+          es: {
+            title: "Previsualiza HTML y Mermaid mientras editas",
+            body: "Al editar la descripción de una tarea, empieza un bloque de código con ```html o ```mermaid y la vista previa aparece en su sitio. Haz clic en la barra de título para añadir o cambiar el título, y pulsa Intro sobre el bloque seleccionado para editar el código.",
+          },
+          ru: {
+            title: "Предпросмотр HTML и Mermaid прямо при редактировании",
+            body: "При редактировании описания задачи начните блок кода с ```html или ```mermaid — предпросмотр появится на месте. Нажмите на строку заголовка, чтобы добавить или переименовать заголовок, а Enter на выделенном блоке откроет исходный код.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.11.0",
     date: "2026-11-18",
