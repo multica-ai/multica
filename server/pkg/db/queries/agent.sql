@@ -1425,7 +1425,7 @@ WITH victims AS (
           )
       )
       AND (
-          runtime_id IS NULL
+          t.runtime_id IS NULL
           OR NOT EXISTS (
               SELECT 1 FROM agent_runtime r WHERE r.id = t.runtime_id
           )

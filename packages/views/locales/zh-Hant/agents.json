@@ -256,7 +256,7 @@
     "service_tier_tooltip": "速度 · {{value}}",
     "service_tier_clear": "執行時預設",
     "service_tier_clear_title": "清除速度覆蓋，交由本地 Codex 配置決定",
-    "wait_timeout_global": "等待超時 · {{value}}",
+    "wait_timeout_global": "全域",
     "wait_timeout_minutes_value": "{{value}} 分鐘",
     "wait_timeout_tooltip": "佇列等待超時 · {{value}}",
     "wait_timeout_input_label": "佇列等待超時（分鐘）",
