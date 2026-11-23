@@ -249,16 +249,15 @@ export function ChatMessageList({
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
   const reduceMotion = useReducedMotion();
+  const playedTransition = hasReachedLiveEnd && !reduceMotion ? enterTransition : null;
   const enterClass =
-    hasReachedLiveEnd && enterTransition
-      ? reduceMotion
-        ? "animate-chat-enter-fade"
-        : enterTransition === "next"
-          ? "animate-chat-enter-next"
-          : enterTransition === "prev"
-            ? "animate-chat-enter-prev"
-            : "animate-chat-enter-fade"
-      : undefined;
+    playedTransition === "next"
+      ? "animate-chat-enter-next"
+      : playedTransition === "prev"
+        ? "animate-chat-enter-prev"
+        : playedTransition === "fade"
+          ? "animate-chat-enter-fade"
+          : undefined;
 
   const pendingTaskId = pendingTask?.task_id ?? null;
   const wakeupsBySourceTask = useWakeupsBySourceTask(wakeups);
@@ -392,7 +391,7 @@ export function ChatMessageList({
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
-      data-chat-enter-transition={hasReachedLiveEnd && enterTransition ? (reduceMotion ? "fade" : enterTransition) : undefined}
+      data-chat-enter-transition={playedTransition ?? undefined}
       style={fadeStyle}
       // The gutter lives on the scroll container, so it applies once to the
       // whole list — rows, header, footer — and the scrollbar still rides the
