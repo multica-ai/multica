@@ -53,8 +53,10 @@ export function createIssueDropAnimation(
       ...scale,
     };
 
-    const previousActiveOpacity = active.node.style.opacity;
-    active.node.style.opacity = "0";
+    // `visibility`, not `opacity`: the slot's own opacity transition would
+    // fade it out on drop and back in after landing.
+    const previousActiveVisibility = active.node.style.visibility;
+    active.node.style.visibility = "hidden";
 
     const innerCard = overlayNode.firstElementChild as HTMLElement | null;
     const timing: KeyframeAnimationOptions = {
@@ -94,7 +96,7 @@ export function createIssueDropAnimation(
     const cleanup = () => {
       if (cleaned) return;
       cleaned = true;
-      active.node.style.opacity = previousActiveOpacity;
+      active.node.style.visibility = previousActiveVisibility;
       innerAnim?.cancel();
     };
 

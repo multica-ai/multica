@@ -119,18 +119,22 @@ function PanelDisclosureInner({
     <motion.div
       id={id}
       inert={!isPresent}
-      initial={{ height: 0, opacity: 0 }}
+      // Clip only while the height moves, so rows' focus outlines aren't cut
+      // off once the section rests open.
+      initial={{ height: 0, opacity: 0, overflow: "hidden" }}
       animate={{
         height: "auto",
         opacity: 1,
         transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+        transitionEnd: { overflow: "visible" },
       }}
       exit={{
         height: 0,
         opacity: 0,
+        overflow: "hidden",
         transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
       }}
-      className={cn("overflow-hidden", !isPresent && "pointer-events-none", className)}
+      className={cn(!isPresent && "pointer-events-none", className)}
     >
       {children}
     </motion.div>

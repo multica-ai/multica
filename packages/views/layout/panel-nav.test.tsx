@@ -55,6 +55,32 @@ describe("PanelDisclosure", () => {
     await waitFor(() => expect(screen.queryByText("section body")).toBeNull());
   });
 
+  it("clips only while animating, so a resting section keeps its rows' focus outlines", async () => {
+    const { rerender } = render(
+      <PanelDisclosure open id="sec-3">
+        <span>clip body</span>
+      </PanelDisclosure>,
+    );
+    const body = () => document.getElementById("sec-3")!;
+    expect(body().style.overflow).toBe("visible");
+
+    rerender(
+      <PanelDisclosure open={false} id="sec-3">
+        <span>clip body</span>
+      </PanelDisclosure>,
+    );
+    await waitFor(() => expect(document.getElementById("sec-3")).toBeNull());
+
+    rerender(
+      <PanelDisclosure open id="sec-3">
+        <span>clip body</span>
+      </PanelDisclosure>,
+    );
+    // jsdom never applies Motion's discrete `transitionEnd`, so the return
+    // to `visible` after the enter animation is only observable in a browser.
+    expect(body().style.overflow).toBe("hidden");
+  });
+
   it("unmounts immediately in the same frame when reduced motion is enabled", () => {
     useAppearanceStore.setState({ ...DEFAULT_APPEARANCE, reduceMotion: true });
     const { rerender } = render(

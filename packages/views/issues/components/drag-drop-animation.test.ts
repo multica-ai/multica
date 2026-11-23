@@ -73,7 +73,8 @@ describe("createIssueDropAnimation", () => {
 
     const promise = drop(args);
 
-    expect(activeNode.style.opacity).toBe("0");
+    expect(activeNode.style.visibility).toBe("hidden");
+    expect(activeNode.style.opacity).toBe("0.85");
     expect(outerAnimate).toHaveBeenCalledWith(
       [
         { transform: "translate3d(10px, 20px, 0) scaleX(1) scaleY(1)" },
@@ -103,6 +104,7 @@ describe("createIssueDropAnimation", () => {
     outerAnim.onfinish?.();
     await promise;
 
+    expect(activeNode.style.visibility).toBe("");
     expect(activeNode.style.opacity).toBe("0.85");
     expect(innerAnim.cancel).toHaveBeenCalledOnce();
   });
@@ -117,7 +119,7 @@ describe("createIssueDropAnimation", () => {
     expect(result).toBeUndefined();
     expect(outerAnimate).not.toHaveBeenCalled();
     expect(innerAnimate).not.toHaveBeenCalled();
-    expect(activeNode.style.opacity).toBe("0.85");
+    expect(activeNode.style.visibility).toBe("");
   });
 
   it("skips animation immediately when reduced motion is enabled", () => {
@@ -131,6 +133,6 @@ describe("createIssueDropAnimation", () => {
     expect(result).toBeUndefined();
     expect(outerAnimate).not.toHaveBeenCalled();
     expect(innerAnimate).not.toHaveBeenCalled();
-    expect(activeNode.style.opacity).toBe("0.85");
+    expect(activeNode.style.visibility).toBe("");
   });
 });

@@ -109,7 +109,7 @@ function MainTopBar({ railMounted }: { railMounted: boolean }) {
 }
 
 const CURTAIN_ENTER_DURATION = 0.16;
-const CURTAIN_EXIT_DURATION = 0.18;
+const CURTAIN_EXIT_DURATION = 0.14;
 
 function WorkspaceLoadingCurtain({
   label,

@@ -333,14 +333,13 @@ describe("AppRail inbox return", () => {
 describe("AppRail badges", () => {
   it("counts inbox unread on Work with an animated counter that respects reduced motion", () => {
     state.inboxUnread = 4;
-    const { rerender } = renderRail();
+    renderRail();
     const badge = () => countBadge("/acme/issues") as (HTMLElement & { animated?: boolean }) | null;
     expect(badge()).toHaveAttribute("aria-label", "4");
     expect(badge()?.animated).toBe(true);
 
     act(() => useAppearanceStore.getState().set({ reduceMotion: true }));
     expect(badge()?.animated).toBe(false);
-    void rerender;
   });
 
   it("leaves Work unbadged when the Inbox settings turn the badge off", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@multica/core/appearance";
 import { useSidebarSafe } from "@multica/ui/components/ui/sidebar";
@@ -47,33 +47,32 @@ export function ListColumn({
   // over the page. Only the inner box moves, so the column keeps its width
   // (no collapse motion) and the list keeps its state.
   const peeking = collapsed && !!shell?.peekSpace && shell.peekSpace === shell.space;
+  // Derived during render so the column keeps floating on the very frame the
+  // peek ends; a post-commit effect would drop it for one frame and skip the
+  // exit animation.
+  const [prevPeeking, setPrevPeeking] = useState(peeking);
   const [peekExiting, setPeekExiting] = useState(false);
-  const prevPeekingRef = useRef(peeking);
-
-  useEffect(() => {
-    const wasPeeking = prevPeekingRef.current;
-    prevPeekingRef.current = peeking;
-    if (peeking || !collapsed || reduceMotion) {
-      setPeekExiting(false);
-      return;
-    }
-    if (wasPeeking) {
-      setPeekExiting(true);
-    }
-  }, [peeking, collapsed, reduceMotion]);
+  if (peeking !== prevPeeking) {
+    setPrevPeeking(peeking);
+    setPeekExiting(!peeking && collapsed && !reduceMotion);
+  } else if (peekExiting && (!collapsed || reduceMotion)) {
+    setPeekExiting(false);
+  }
 
   const floating = peeking || peekExiting;
-  const animateStyle = !collapsed
-    ? { opacity: 1, x: 0 }
-    : peeking
-      ? { opacity: 1, x: 0 }
-      : { opacity: 0, x: reduceMotion ? 0 : -8 };
-  const transition =
-    reduceMotion || !floating
-      ? { duration: 0 }
-      : peeking
-        ? { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT }
-        : { duration: PEEK_EXIT_DURATION, ease: UI_EASE_IN };
+  // Outside a peek the inner box rests visible: a collapsing column is
+  // clipped by its own shrinking width, not faded.
+  const animateStyle =
+    peeking && !reduceMotion
+      ? { opacity: [0, 1], x: [-8, 0] }
+      : peekExiting
+        ? { opacity: 0, x: -8 }
+        : { opacity: 1, x: 0 };
+  const transition = peeking && !reduceMotion
+    ? { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT }
+    : peekExiting
+      ? { duration: PEEK_EXIT_DURATION, ease: UI_EASE_IN }
+      : { duration: 0 };
 
   return (
     <>
