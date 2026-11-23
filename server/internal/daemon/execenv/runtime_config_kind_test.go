@@ -348,6 +348,39 @@ func TestAntigravityBackgroundTaskSafetyAllKinds(t *testing.T) {
 	}
 }
 
+// TestCodexWorkdirGuidanceAllKinds pins the Codex-only rule against spelling
+// out the absolute task workdir on every exec_command (MUL-9950). Other
+// runtimes have no `workdir` tool parameter, so the section must not leak.
+func TestCodexWorkdirGuidanceAllKinds(t *testing.T) {
+	t.Parallel()
+	for name, ctx := range map[string]TaskContextForEnv{
+		"comment":      {IssueID: "i", TriggerCommentID: "c"},
+		"assignment":   {IssueID: "i"},
+		"autopilot":    {AutopilotRunID: "r"},
+		"quick-create": {QuickCreatePrompt: "p"},
+		"chat":         {ChatSessionID: "c"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			codex := buildMetaSkillContent("codex", ctx)
+			for _, want := range []string{
+				"## Command Working Directory",
+				"Omit `workdir` for commands that run here",
+				"pass a relative path",
+				"overrides any default guidance to always set `workdir`",
+			} {
+				if !strings.Contains(codex, want) {
+					t.Errorf("codex brief missing %q", want)
+				}
+			}
+			for _, provider := range []string{"claude", "codebuddy", "opencode", "hermes", "antigravity"} {
+				if strings.Contains(buildMetaSkillContent(provider, ctx), "## Command Working Directory") {
+					t.Errorf("%s brief carries the Codex-only workdir section", provider)
+				}
+			}
+		})
+	}
+}
+
 // TestBackgroundTaskSafetySlimHardPins asserts the slim brief carries the
 // same hardened Background Task Safety pins as the legacy brief (MUL-4140).
 // The verbose path is covered by
