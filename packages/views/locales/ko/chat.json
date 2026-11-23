@@ -1,10 +1,11 @@
 {
   "limit_reset": {
     "last_known": "{{provider}} 마지막 확인값 ({{time}})",
-    "label": "리셋",
+    "label": "리셋까지",
     "countdown_label": "한도 초기화까지 남은 시간",
-    "unknown": "리셋 시각 확인 불가",
-    "at": "리셋 {{time}} (KST)"
+    "unknown": "남은 시간 확인 불가",
+    "duration_days": "{{days}}일 {{hours}}시간 {{minutes}}분",
+    "duration": "{{hours}}시간 {{minutes}}분"
   },
   "fab": {
     "running": "AIDO가 작업 중입니다...",

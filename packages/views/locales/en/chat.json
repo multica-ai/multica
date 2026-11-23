@@ -1,10 +1,11 @@
 {
   "limit_reset": {
     "last_known": "{{provider}} last known value ({{time}})",
-    "label": "Reset",
+    "label": "resets in",
     "countdown_label": "Time until limit reset",
-    "unknown": "Reset time unavailable",
-    "at": "Reset {{time}} (KST)"
+    "unknown": "time unavailable",
+    "duration_days": "{{days}}d {{hours}}h {{minutes}}m",
+    "duration": "{{hours}}h {{minutes}}m"
   },
   "fab": {
     "running": "AIDO is working...",

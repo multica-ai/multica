@@ -1,10 +1,11 @@
 {
   "limit_reset": {
     "last_known": "{{provider}} 上次确认值 ({{time}})",
-    "label": "重置",
+    "label": "距重置",
     "countdown_label": "距离额度重置的时间",
-    "unknown": "无法确认重置时间",
-    "at": "重置 {{time}} (KST)"
+    "unknown": "剩余时间未知",
+    "duration_days": "{{days}}天{{hours}}小时{{minutes}}分",
+    "duration": "{{hours}}小时{{minutes}}分"
   },
   "fab": {
     "running": "AIDO 正在工作...",

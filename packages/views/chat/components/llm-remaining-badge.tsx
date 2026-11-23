@@ -34,34 +34,8 @@ function limitingRemaining(...usageValues: Array<number | null | undefined>): nu
   return remainingValues.length > 0 ? Math.min(...remainingValues) : null;
 }
 
-function compactResetLabel(label: string | undefined): string {
-  if (!label || label === "—" || label === "-") return "-";
-  return label
-    .replace(/^resets\s+/i, "")
-    .replace(/에 재설정$/, "")
-    .trim();
-}
-
-function limitingClaudeSevenDayResetLabel(data: LlmLimitStatus): string | undefined {
-  const sevenDayRemaining = remainingFromUsage(data.seven_day_pct);
-  const sonnetRemaining = remainingFromUsage(data.sonnet_pct);
-  if (sevenDayRemaining === null) return data.sonnet_reset_label;
-  if (sonnetRemaining === null) return data.seven_day_reset_label;
-  return sonnetRemaining < sevenDayRemaining ? data.sonnet_reset_label : data.seven_day_reset_label;
-}
-
 function compactRemainingLabel(value: number | null): string {
   return value === null ? "확인 불가" : `${value}%`;
-}
-
-export function formatResetCountdown(resetAt: string | null | undefined, now: number): string {
-  const target = resetAt ? Date.parse(resetAt) : Number.NaN;
-  if (!Number.isFinite(target)) return "--:--:--";
-  const seconds = Math.max(0, Math.ceil((target - now) / 1000));
-  const days = Math.floor(seconds / 86400);
-  const time = [Math.floor(seconds / 3600) % 24, Math.floor(seconds / 60) % 60, seconds % 60]
-    .map((value) => String(value).padStart(2, "0")).join(":");
-  return `${days ? `D-${days} ` : ""}${time}`;
 }
 
 function limitingReset(
@@ -81,25 +55,37 @@ function ResetCountdown({ data }: { data: LlmLimitStatus }) {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const compactTime = new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul", month: "numeric", day: "numeric",
-    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  });
-  const exactTime = new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul", dateStyle: "full", timeStyle: "long",
-  });
   const providers = [
     ["C", limitingReset(now, [data.seven_day_pct, data.seven_day_resets_at], [data.sonnet_pct, data.sonnet_resets_at], [data.five_hour_pct, data.five_hour_resets_at])],
     ["G", limitingReset(now, [data.gpt_seven_day_pct, data.gpt_seven_resets_at], [data.gpt_five_hour_pct, data.gpt_five_resets_at])],
   ] as const;
-  return <div data-testid="chat-reset-countdown" className="flex flex-col pb-0.5 text-[10px] leading-4 tabular-nums" aria-label={t($ => $.limit_reset.countdown_label)}>
-    {providers.map(([provider, target]) => {
-      const date = target ? new Date(target) : null;
-      return <div key={provider} title={date ? t($ => $.limit_reset.at, { time: exactTime.format(date) }) : t($ => $.limit_reset.unknown)}>
-        {provider} {t($ => $.limit_reset.label)} {target && date && <time dateTime={target}>{compactTime.format(date)} KST</time>}{date && " · "}{formatResetCountdown(target, now)}
-      </div>;
-    })}
-  </div>;
+  return (
+    <div
+      data-testid="chat-reset-countdown"
+      className="min-w-0 overflow-x-auto whitespace-nowrap pb-0.5 text-[10px] leading-4 tabular-nums"
+      aria-label={t($ => $.limit_reset.countdown_label)}
+    >
+      {providers.map(([provider, target], index) => {
+        const totalMinutes = target ? Math.max(0, Math.floor((Date.parse(target) - now) / 60_000)) : 0;
+        const duration = {
+          days: Math.floor(totalMinutes / 1440),
+          hours: Math.floor(totalMinutes / 60) % 24,
+          minutes: totalMinutes % 60,
+        };
+        return (
+          <span key={provider}>
+            {index > 0 && " · "}
+            {provider} {t($ => $.limit_reset.label)}{" "}
+            {target
+              ? duration.days > 0
+                ? t($ => $.limit_reset.duration_days, duration)
+                : t($ => $.limit_reset.duration, duration)
+              : t($ => $.limit_reset.unknown)}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 export function retainKnownQuota(previous: LlmLimitStatus | undefined, current: LlmLimitStatus): LlmLimitStatus {
@@ -140,16 +126,12 @@ export function LlmRemainingBadge({ className }: { className?: string }) {
   const claudeSevenDayRemaining = limitingRemaining(data.seven_day_pct, data.sonnet_pct);
   const gptFiveHourRemaining = remainingFromUsage(data.gpt_five_hour_pct);
   const gptSevenDayRemaining = remainingFromUsage(data.gpt_seven_day_pct);
-  const claudeFiveHourReset = compactResetLabel(data.five_hour_reset_label);
-  const claudeSevenDayReset = compactResetLabel(limitingClaudeSevenDayResetLabel(data));
-  const gptFiveHourReset = compactResetLabel(data.gpt_five_reset_label);
-  const gptSevenDayReset = compactResetLabel(data.gpt_seven_reset_label);
 
   const ariaLabel = [
-    `채팅 LLM 잔량: Claude 5시간 ${compactRemainingLabel(claudeFiveHourRemaining)}, 리셋 ${claudeFiveHourReset}`,
-    `Claude 1주 ${compactRemainingLabel(claudeSevenDayRemaining)}, 리셋 ${claudeSevenDayReset}`,
-    `GPT 5시간 ${gptFiveHourRemaining === null ? "확인 불가" : `${gptFiveHourRemaining}%`}, 리셋 ${gptFiveHourReset}`,
-    `GPT 1주 ${gptSevenDayRemaining === null ? "확인 불가" : `${gptSevenDayRemaining}%`}, 리셋 ${gptSevenDayReset}`,
+    `채팅 LLM 잔량: Claude 5시간 ${compactRemainingLabel(claudeFiveHourRemaining)}`,
+    `Claude 1주 ${compactRemainingLabel(claudeSevenDayRemaining)}`,
+    `GPT 5시간 ${compactRemainingLabel(gptFiveHourRemaining)}`,
+    `GPT 1주 ${compactRemainingLabel(gptSevenDayRemaining)}`,
   ].join(", ");
   const claudeLastKnown = data.claude_status !== undefined && data.claude_status !== "available" && (claudeFiveHourRemaining !== null || claudeSevenDayRemaining !== null);
   const gptLastKnown = data.gpt_status !== undefined && data.gpt_status !== "available" && (gptFiveHourRemaining !== null || gptSevenDayRemaining !== null);
@@ -184,13 +166,13 @@ export function LlmRemainingBadge({ className }: { className?: string }) {
       <span
         data-acceptance="chat-claude-token-remaining-badge"
         data-testid="chat-llm-gauge-claude"
-        aria-label={`Claude 5시간 잔량 ${compactRemainingLabel(claudeFiveHourRemaining)}, 리셋 ${claudeFiveHourReset}; Claude 1주 잔량 ${compactRemainingLabel(claudeSevenDayRemaining)}, 리셋 ${claudeSevenDayReset}`}
+        aria-label={`Claude 5시간 잔량 ${compactRemainingLabel(claudeFiveHourRemaining)}; Claude 1주 잔량 ${compactRemainingLabel(claudeSevenDayRemaining)}`}
         className="sr-only"
       />
       <span
         data-acceptance="chat-gpt-token-remaining-badge"
         data-testid="chat-llm-gauge-gpt"
-        aria-label={`GPT 5시간 잔량 ${gptFiveHourRemaining === null ? "확인 불가" : `${gptFiveHourRemaining}%`}, 리셋 ${gptFiveHourReset}; GPT 1주 잔량 ${gptSevenDayRemaining === null ? "확인 불가" : `${gptSevenDayRemaining}%`}, 리셋 ${gptSevenDayReset}`}
+        aria-label={`GPT 5시간 잔량 ${compactRemainingLabel(gptFiveHourRemaining)}; GPT 1주 잔량 ${compactRemainingLabel(gptSevenDayRemaining)}`}
         className="sr-only"
       />
       <Button
