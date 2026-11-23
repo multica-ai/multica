@@ -124,7 +124,7 @@
     "copy_workspace_link": "Copier le lien de l’espace de travail",
     "workspace_meta_one": "{{slug}} · {{count}} membre",
     "workspace_meta_other": "{{slug}} · {{count}} membres",
-    "docs": "Documents"
+    "docs": "Docs"
   },
   "bottom_bar": {
     "label": "Barre d'état",

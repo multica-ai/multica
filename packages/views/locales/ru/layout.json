@@ -96,7 +96,7 @@
     "workspace_meta_few": "{{slug}} · {{count}} участника",
     "workspace_meta_many": "{{slug}} · {{count}} участников",
     "workspace_meta_other": "{{slug}} · {{count}} участника",
-    "docs": "Документы"
+    "docs": "Доки"
   },
   "bottom_bar": {
     "label": "Строка состояния",

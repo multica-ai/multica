@@ -8,10 +8,11 @@ import { TestApiClient } from "./fixtures";
 // friends were cut to "Autop…" there, so each language's `rail.*` label is a
 // short name that must fit whole; the full name stays in the tooltip. A
 // selected tile sets its label in a heavier weight, so every tile is checked
-// while it is selected too. Docs is left out while it sits behind the
-// `docs_v1` flag. Larger Appearance font sizes are not covered: the label
-// grows with them and the tile does not.
-const SPACES = ["work", "team", "chat", "autopilots"] as const;
+// while it is selected too. The Docs tile renders only with the `docs_v1`
+// flag on, so run this with `FF_DOCS_V1=true`, as CI's e2e job does. Larger
+// Appearance font sizes are not covered: the label grows with them and the
+// tile does not.
+const SPACES = ["work", "docs", "team", "chat", "autopilots"] as const;
 
 const railLabels = Object.fromEntries(
   SUPPORTED_LOCALES.map((locale) => {
