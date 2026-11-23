@@ -311,6 +311,9 @@ func antigravitySupplementHookCommand(env *execenv.Environment) ([]string, bool)
 }
 
 func taskSupplementLaunch(provider, version string, env *execenv.Environment, customArgs []string) ([]string, bool) {
+	if provider == "antigravity" && agent.AntigravityUsesACP(customArgs) {
+		return nil, agent.AntigravityACPSupportsTaskSupplement(version)
+	}
 	if !agent.SupportsTaskSupplement(provider, version) {
 		return nil, false
 	}
@@ -318,10 +321,6 @@ func taskSupplementLaunch(provider, version string, env *execenv.Environment, cu
 	case "cursor":
 		return cursorSupplementHookCommand(env)
 	case "antigravity":
-		if agent.AntigravityUsesACP(customArgs) {
-			// ACP prompt replacement has no receipt for the previous turn.
-			return nil, false
-		}
 		return antigravitySupplementHookCommand(env)
 	default:
 		return nil, true
@@ -8147,6 +8146,7 @@ func resolveTaskModelSelection(
 	runtimeCmd agent.Command,
 	sel taskModelSelection,
 	taskLog *slog.Logger,
+	customArgs ...string,
 ) taskModelSelection {
 	capabilityChecksPending := sel.ThinkingLevel != "" || sel.ServiceTier != ""
 
@@ -8202,7 +8202,9 @@ func resolveTaskModelSelection(
 	// drop a level: on a lookup error or a fallback/empty catalog we keep the
 	// persisted level and let the CLI object, unless the binary itself has no
 	// such effort flag (MUL-7691).
-	if sel.ThinkingLevel != "" {
+	// agy models describes print-mode variants. The live ACP session validates
+	// its own separate thinking selector after model selection.
+	if sel.ThinkingLevel != "" && !(provider == "antigravity" && agent.AntigravityUsesACP(customArgs)) {
 		check, err := agent.CheckThinkingLevelWith(loadCatalog, provider, sel.Model, sel.ThinkingLevel)
 		if err != nil {
 			taskLog.Warn("thinking_level: catalog cannot validate; passing through",
@@ -9444,7 +9446,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		serviceTier = task.Agent.ServiceTier
 	}
 	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
-		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog, customArgs...)
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
 	var idleWatchdogTimeout time.Duration

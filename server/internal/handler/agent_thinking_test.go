@@ -101,6 +101,38 @@ func TestCreateAgent_ThinkingLevel_ValidationConsistency(t *testing.T) {
 	})
 }
 
+func TestAntigravityACPThinkingLevelSettings(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := createProviderRuntime(t, "antigravity")
+	body := map[string]any{
+		"name": "antigravity-acp-thinking", "runtime_id": runtimeID,
+		"visibility": "private", "thinking_level": "max",
+	}
+	testutil.Call(t, testHandler.CreateAgent, newRequest(http.MethodPost, "/api/agents", body)).Want(http.StatusBadRequest)
+	body["custom_args"] = []string{"--multica-antigravity-acp"}
+	var saved struct {
+		ID            string `json:"id"`
+		ThinkingLevel string `json:"thinking_level"`
+	}
+	testutil.Call(t, testHandler.CreateAgent, newRequest(http.MethodPost, "/api/agents", body)).Want(http.StatusCreated).JSON(&saved)
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, saved.ID) })
+	if saved.ThinkingLevel != "max" {
+		t.Fatalf("stored thinking_level = %q", saved.ThinkingLevel)
+	}
+
+	update := func(body map[string]any) *http.Request {
+		return withURLParam(newRequest(http.MethodPatch, "/api/agents/"+saved.ID, body), "id", saved.ID)
+	}
+	testutil.Call(t, testHandler.UpdateAgent, update(map[string]any{"thinking_level": "low"})).Want(http.StatusOK).JSON(&saved)
+	if saved.ThinkingLevel != "low" {
+		t.Fatalf("updated thinking_level = %q", saved.ThinkingLevel)
+	}
+	testutil.Call(t, testHandler.UpdateAgent, update(map[string]any{"custom_args": []string{}})).Want(http.StatusBadRequest)
+	testutil.Call(t, testHandler.UpdateAgent, update(map[string]any{"custom_args": []string{}, "thinking_level": ""})).Want(http.StatusOK)
+}
+
 func TestCreateAgent_PiThinkingLevelValidation(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

@@ -141,8 +141,8 @@ func taskSupplementFailureReason(ctx context.Context, err error) string {
 }
 
 // runTaskSupplementLoop serially claims and acknowledges durable additions for
-// one negotiated run. It performs no HTTP request until the provider confirms a live
-// turn, wakes immediately on a content-free WebSocket hint, and otherwise uses
+// one negotiated run. It performs no HTTP request until the adapter is ready
+// to accept additions, wakes immediately on a content-free WebSocket hint, and otherwise uses
 // the same five-second cadence as task cancellation polling.
 func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Session, taskID string, wakeup <-chan struct{}, taskLog *slog.Logger) {
 	if session == nil || session.Supplement == nil || session.SupplementReady == nil {

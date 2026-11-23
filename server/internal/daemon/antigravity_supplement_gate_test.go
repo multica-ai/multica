@@ -62,9 +62,12 @@ func TestAntigravityACPSupplementCapability(t *testing.T) {
 		"local worktree":  {WorkDir: dir, LocalWorktree: &execenv.LocalWorktree{}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			command, supported := taskSupplementLaunch("antigravity", "1.5.15", env, []string{"--multica-antigravity-acp"})
-			if supported || command != nil {
-				t.Fatalf("advertised in-turn delivery for ACP, command=%q", command)
+			for _, version := range []string{"1.5.0", "1.5.15", "1.4.12", ""} {
+				command, supported := taskSupplementLaunch("antigravity", version, env, []string{"--multica-antigravity-acp"})
+				want := version == "1.5.0" || version == "1.5.15"
+				if supported != want || command != nil {
+					t.Fatalf("version %q: steering=%v command=%q, want %v and no hook command", version, supported, command, want)
+				}
 			}
 		})
 	}

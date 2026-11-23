@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,13 +51,41 @@ var antigravityACPBlockedArgs = map[string]blockedArgMode{
 
 type antigravityACPInitialize struct {
 	ProtocolVersion int `json:"protocolVersion"`
-	Capabilities    struct {
+	AgentInfo       struct {
+		Version string `json:"version"`
+	} `json:"agentInfo"`
+	Capabilities struct {
 		LoadSession bool `json:"loadSession"`
 		Session     struct {
 			Resume *struct{} `json:"resume"`
 			Load   *struct{} `json:"load"`
 		} `json:"sessionCapabilities"`
 	} `json:"agentCapabilities"`
+}
+
+// AntigravityACPSupportsTaskSupplement reports whether agy can use another
+// session/prompt for steering. The 1.4 harness queues concurrent prompts.
+func AntigravityACPSupportsTaskSupplement(version string) bool {
+	detected, err := parseSemver(version)
+	return err == nil && !detected.lessThan(semver{Major: 1, Minor: 5})
+}
+
+// Writes are serialized by hermesClient. If a frame stalls or breaks partway
+// through, retire stdin so the next RPC cannot follow a truncated JSON line.
+type antigravityACPWriter struct{ io.WriteCloser }
+
+func (w antigravityACPWriter) Write(data []byte) (int, error) {
+	timer := time.AfterFunc(5*time.Second, func() { _ = w.Close() })
+	defer timer.Stop()
+	n, err := w.WriteCloser.Write(data)
+	if n == len(data) {
+		return n, nil
+	}
+	_ = w.Close()
+	if err == nil {
+		err = io.ErrShortWrite
+	}
+	return n, err
 }
 
 func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -118,7 +147,14 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 	}
 
 	runCtx, cancelRun := runContext(ctx, opts.Timeout)
-	stream := antigravityACPStream{messages: make(chan Message, 256), tools: make(map[string]bool)}
+	stream := antigravityACPStream{
+		messages: make(chan Message, 256),
+		tools:    make(map[string]antigravityACPTool),
+		activity: make(chan struct{}, 1),
+	}
+	turn := antigravityACPTurn{
+		stream: &stream, submissions: make(chan antigravityACPSupplement), done: make(chan struct{}),
+	}
 	results := make(chan Result, 1)
 	transportCtx, disconnect := context.WithCancel(context.Background())
 	setupTimeout := opts.HandshakeTimeout
@@ -136,7 +172,7 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 	var streaming, promptSent, terminalObserved atomic.Bool
 	c := &hermesClient{
 		cfg:                        cfg,
-		stdin:                      stdin,
+		stdin:                      antigravityACPWriter{stdin},
 		pending:                    make(map[int]*pendingRPC),
 		toolName:                   antigravityACPToolName,
 		toolStartCanComplete:       true,
@@ -147,19 +183,30 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 		// The response to our session/prompt is the terminal boundary. Ignore
 		// dialect-specific turn_end notifications on the shared transport.
 		acceptNotification: func(updateType string) bool { return updateType != "turn_end" },
-		acceptUpdate:       stream.acceptToolUpdate,
+		acceptUpdate:       stream.acceptUpdate,
 		onMessage:          stream.send,
+		onUsage:            opts.OnUsage,
 		selectPermission: func(raw json.RawMessage) (string, bool, bool) {
 			if !streaming.Load() {
 				return "", false, false
 			}
-			return antigravityACPPermission(raw, sessionID)
-		},
-		onPromptDone: func(hermesPromptResult) {
-			streaming.Store(false)
-			terminalObserved.Store(true)
+			option, grant, ok := antigravityACPPermission(raw, sessionID)
+			if ok {
+				stream.signalActivity()
+			}
+			return option, grant, ok
 		},
 	}
+	c.onPromptResponse = func(id int) {
+		if int(turn.latestPromptID.Load()) == id {
+			stream.replyOpen.Store(false)
+			// A detached reply can follow this response. Keep the prompt's
+			// answer available as the fallback if no more text arrives.
+			stream.deliverable.startBlock()
+			stream.textNewlines, stream.thoughtNewlines = "", ""
+		}
+	}
+	c.onPromptDone = func(result hermesPromptResult) { turn.recordPromptUsage(c, result) }
 
 	processDone := make(chan error, 1)
 	go func() {
@@ -183,7 +230,8 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 	turnDone := make(chan Result, 1)
 	go func() {
 		defer cancelSetup()
-		turnDone <- b.runACPTurn(runCtx, setupCtx, transportCtx, c, cwd, prompt, mcpServers, opts, func(id string) {
+		defer close(turn.done)
+		result := b.runACPTurn(runCtx, setupCtx, transportCtx, c, &turn, cwd, prompt, mcpServers, opts, func(id string) {
 			cancelSetup()
 			sessionID = id
 			streaming.Store(true)
@@ -191,6 +239,8 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 			promptSent.Store(true)
 			trySend(stream.messages, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 		})
+		terminalObserved.Store(true)
+		turnDone <- result
 	}()
 
 	go func() {
@@ -259,6 +309,7 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 		if exitErr != nil && result.Status == "failed" {
 			cfg.Logger.Debug("agy acp process exited", "error", exitErr)
 		}
+		result.Usage = c.liveUsage()
 		result.Output, _ = stream.deliverable.result()
 		result.Output = strings.TrimRight(result.Output, "\r\n")
 		result.DurationMs = time.Since(start).Milliseconds()
@@ -266,14 +317,15 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 		results <- result
 	}()
 
-	// agy 1.5 steers with a second session/prompt. A prompt that races the
-	// previous end_turn can also run as a new turn, with the same response.
-	// Leave Supplement unset so Multica can schedule an explicit follow-up.
-	// https://antigravity.google/docs/ide/extensions/acp/
-	return &Session{Messages: stream.messages, Result: results, TerminalObserved: terminalObserved.Load, CleanupRequired: true}, nil
+	session := &Session{Messages: stream.messages, Result: results, TerminalObserved: terminalObserved.Load, CleanupRequired: true}
+	if opts.EnableTaskSupplement {
+		session.Supplement = turn.supplement
+		session.SupplementReady = func() bool { return runCtx.Err() == nil && turn.ready.Load() }
+	}
+	return session, nil
 }
 
-func (b *antigravityBackend) runACPTurn(runCtx, setupCtx, transportCtx context.Context, c *hermesClient, cwd, prompt string, mcpServers []any,
+func (b *antigravityBackend) runACPTurn(runCtx, setupCtx, transportCtx context.Context, c *hermesClient, turn *antigravityACPTurn, cwd, prompt string, mcpServers []any,
 	opts ExecOptions, bound func(string), sent func()) Result {
 	result := Result{SessionID: opts.ResumeSessionID}
 	fail := func(method string, err error) Result {
@@ -346,9 +398,12 @@ func (b *antigravityBackend) runACPTurn(runCtx, setupCtx, transportCtx context.C
 	if id == "" {
 		return fail(method, errors.New("ACP response did not contain a session ID"))
 	}
-	model, err := antigravityACPSelectModel(setupCtx, c.request, id, opts.Model, setup)
+	model, modelConfig, err := antigravityACPSelectModel(setupCtx, c.request, id, opts.Model, setup)
 	if err != nil {
 		return fail("model selection", err)
+	}
+	if err := antigravityACPSetThinking(setupCtx, c.request, id, opts.ThinkingLevel, modelConfig); err != nil {
+		return fail("thinking level selection", err)
 	}
 	if err := setupCtx.Err(); err != nil {
 		return fail("session setup", err)
@@ -357,78 +412,77 @@ func (b *antigravityBackend) runACPTurn(runCtx, setupCtx, transportCtx context.C
 		return fail("session/prompt", err)
 	}
 
+	c.usageMu.Lock()
+	c.usageModel = model
+	c.usageMu.Unlock()
 	bound(id)
-	response, err := c.requestAndNotifySent(transportCtx, "session/prompt", map[string]any{
-		"sessionId": id,
-		"prompt":    []map[string]string{{"type": "text", "text": prompt}},
-	}, func() {
-		result.SessionID = id
-		sent()
-	})
+	first, err := turn.sendPrompt(c, id, prompt)
 	if err != nil {
 		return fail("session/prompt", err)
 	}
-
-	pr, err := parseACPPromptResult(response)
-	if err != nil {
-		return fail("session/prompt", err)
-	}
-	c.mergeUsage(pr.usage)
-	usage := c.accumulatedUsage()
-	if acpUsagePresent(usage) {
-		if pr.modelID != "" {
-			model = pr.modelID
-		}
-		if model == "" {
-			model = "unknown"
-		}
-		result.Usage = map[string]TokenUsage{model: usage}
-	}
-	switch pr.stopReason {
-	case "end_turn":
-		result.Status = "completed"
-	case "cancelled":
-		result.Status, result.Error = "aborted", "agy acp cancelled the turn"
-	case "":
-		return fail("session/prompt", errors.New("ACP response did not contain a stop reason"))
-	default:
-		return fail("session/prompt", fmt.Errorf("ACP stop reason %q", pr.stopReason))
-	}
+	sent()
+	turn.ready.Store(opts.EnableTaskSupplement && AntigravityACPSupportsTaskSupplement(init.AgentInfo.Version))
+	defer turn.ready.Store(false)
+	result = turn.wait(runCtx, transportCtx, c, id, first)
+	result.SessionID = id
 	return result
 }
 
-func antigravityACPSelectModel(ctx context.Context, request acpRequestFn, id, requested string, setup json.RawMessage) (string, error) {
+func antigravityACPSelectModel(ctx context.Context, request acpRequestFn, id, requested string, setup json.RawMessage) (string, json.RawMessage, error) {
 	if _, ok := findACPConfigOption(setup, "model"); ok {
 		current, _ := acpConfigOptionCurrentValue(setup, "model")
 		if requested == "" || current == requested {
-			return current, nil
+			return current, setup, nil
 		}
 		updated, err := request(ctx, "session/set_config_option", map[string]string{
 			"sessionId": id, "configId": "model", "value": requested,
 		})
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		// Antigravity accepts legacy variant IDs such as <model>-high,
 		// then reports the base model and thinking level separately.
 		if selected, ok := acpConfigOptionCurrentValue(updated, "model"); ok {
 			if selected != requested && !strings.HasPrefix(requested, selected+"-") {
-				return "", fmt.Errorf("requested model %q, ACP selected %q", requested, selected)
+				return "", nil, fmt.Errorf("requested model %q, ACP selected %q", requested, selected)
 			}
-			return selected, nil
+			return selected, updated, nil
 		}
-		return "", nil
+		return "", updated, nil
 	}
 
 	current := extractACPCurrentModelID(setup)
 	if requested == "" || current == requested {
-		return current, nil
+		return current, setup, nil
 	}
 	if current == "" {
-		return "", fmt.Errorf("ACP session does not advertise model selection for %q", requested)
+		return "", nil, fmt.Errorf("ACP session does not advertise model selection for %q", requested)
 	}
-	_, err := request(ctx, "session/set_model", map[string]string{"sessionId": id, "modelId": requested})
-	return requested, err
+	updated, err := request(ctx, "session/set_model", map[string]string{"sessionId": id, "modelId": requested})
+	return requested, updated, err
+}
+
+func antigravityACPSetThinking(ctx context.Context, request acpRequestFn, id, level string, config json.RawMessage) error {
+	if level == "" {
+		return nil
+	}
+	option, ok := parseACPEffortOption(config)
+	if !ok || !option.supports(level) {
+		return fmt.Errorf("ACP session does not advertise thinking level %q", level)
+	}
+	if option.CurrentValue == level {
+		return nil
+	}
+	updated, err := request(ctx, "session/set_config_option", map[string]string{
+		"sessionId": id, "configId": option.ConfigID, "value": level,
+	})
+	if err != nil {
+		return err
+	}
+	if current, ok := acpConfigOptionCurrentValue(updated, option.ConfigID); !ok || current != level {
+		return fmt.Errorf("ACP did not confirm thinking level %q (reported %q)", level, current)
+	}
+	return nil
 }
 
 func antigravityACPPermission(raw json.RawMessage, sessionID string) (string, bool, bool) {
@@ -460,35 +514,83 @@ func antigravityACPToolName(name, title, kind string) string {
 type antigravityACPStream struct {
 	messages        chan Message
 	deliverable     acpDeliverableTracker
-	tools           map[string]bool // true once a tool has finished
+	tools           map[string]antigravityACPTool
+	activity        chan struct{}
+	activeTools     atomic.Int64
+	replyOpen       atomic.Bool
 	textNewlines    string
 	thoughtNewlines string
 }
 
-func (s *antigravityACPStream) acceptToolUpdate(updateType string, data json.RawMessage) bool {
-	if updateType != "tool_call" && updateType != "tool_call_update" {
+type antigravityACPTool struct {
+	active, daemon, done bool
+}
+
+func (s *antigravityACPStream) quietPeriod() time.Duration {
+	if s.activeTools.Load() > 0 {
+		return antigravityACPBackgroundQuiet
+	}
+	if s.replyOpen.Load() {
+		return antigravityACPReplyQuiet
+	}
+	return antigravityACPSettleQuiet
+}
+
+func (s *antigravityACPStream) acceptUpdate(updateType string, data json.RawMessage) bool {
+	switch updateType {
+	case "tool_call", "tool_call_update":
+		return s.acceptToolUpdate(updateType, data)
+	case "agent_message_chunk", "agent_thought_chunk":
+		s.replyOpen.Store(true)
+	case "usage_update":
+		s.replyOpen.Store(false)
+	default:
 		return true
 	}
+	s.signalActivity()
+	return true
+}
+
+func (s *antigravityACPStream) signalActivity() {
+	select {
+	case s.activity <- struct{}{}:
+	default:
+	}
+}
+
+func (s *antigravityACPStream) acceptToolUpdate(updateType string, data json.RawMessage) bool {
 	var update struct {
-		ID     string `json:"toolCallId"`
-		Status string `json:"status"`
+		ID     string          `json:"toolCallId"`
+		Status string          `json:"status"`
+		Input  json.RawMessage `json:"rawInput"`
 	}
 	if json.Unmarshal(data, &update) != nil || update.ID == "" {
 		return false
 	}
-	done, seen := s.tools[update.ID]
-	if done {
+	tool, seen := s.tools[update.ID]
+	if tool.done {
 		return false
 	}
-	if update.Status == "completed" || update.Status == "failed" {
-		s.tools[update.ID] = true
-		return true
+	wasActive := tool.active
+	var command struct {
+		IsDaemon bool `json:"IsDaemon"`
 	}
-	if updateType == "tool_call" {
-		s.tools[update.ID] = false
-		return !seen
+	_ = json.Unmarshal(update.Input, &command)
+	tool.daemon = tool.daemon || command.IsDaemon
+	tool.done = update.Status == "completed" || update.Status == "failed"
+	tool.active = !tool.daemon && !tool.done && (tool.active ||
+		updateType == "tool_call" || update.Status == "in_progress" || update.Status == "pending")
+	s.tools[update.ID] = tool
+	if tool.active && !wasActive {
+		s.activeTools.Add(1)
+	} else if wasActive && !tool.active {
+		s.activeTools.Add(-1)
 	}
-	return true
+	accepted := tool.done || updateType != "tool_call" || !seen
+	if accepted || wasActive != tool.active {
+		s.signalActivity()
+	}
+	return accepted
 }
 
 func (s *antigravityACPStream) send(msg Message) {

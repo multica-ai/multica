@@ -26,8 +26,8 @@ type Backend interface {
 type ExecOptions struct {
 	// SkillInvocation is set only for validated member-authored skill selections.
 	SkillInvocation *SkillInvocation
-	// EnableTaskSupplement installs provider hooks only for runs whose daemon/server
-	// capability handshake enabled additional messages.
+	// EnableTaskSupplement enables additional messages for runs whose
+	// daemon/server handshake accepted the capability.
 	EnableTaskSupplement bool
 	Cwd                  string
 	Model                string
@@ -127,8 +127,8 @@ type ExecOptions struct {
 	// "use the runtime/model default" —
 	// every backend that consumes this skips its --effort / reasoning_effort
 	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude, codex, opencode, codebuddy, dsh, and grok (ACP
-	// `--effort` on `grok agent`) backends; other backends ignore
+	// by claude, codex, opencode, codebuddy, dsh, grok, and Antigravity
+	// in ACP mode; other backends ignore
 	// the field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
@@ -160,9 +160,8 @@ type ExecOptions struct {
 	ClaudeSettingsPath string
 	// SupplementHookCommand is the argv of the provider's multica hook relay
 	// (the daemon's own binary followed by CursorHookHelperArg or
-	// AntigravityHookHelperArg). The cursor and antigravity backends need it,
-	// with EnableTaskSupplement, to accept additional messages; other
-	// providers ignore it.
+	// AntigravityHookHelperArg). Cursor and Antigravity print mode use it
+	// with EnableTaskSupplement; native transports ignore it.
 	SupplementHookCommand []string
 	// OnUsage optionally receives the backend's cumulative usage snapshot while
 	// the run is still live, keyed exactly like Result.Usage so a mid-run flush
@@ -214,13 +213,14 @@ type Session struct {
 	// backend's bounded process cleanup finished. A missing acknowledgement
 	// must prevent automatic continuation, even after upstream cancellation.
 	CleanupRequired bool
-	// Supplement delivers an additional human instruction to the currently
-	// active provider turn. Nil means the backend cannot safely do so.
+	// Supplement sends an additional instruction to the active session.
+	// With Antigravity ACP, success acknowledges the completed write. A
+	// replacement prompt can run immediately after the prior provider turn.
 	// Adapters bound their own transport calls; a hook-based adapter may wait
 	// for the next provider boundary until ctx or the execution is cancelled.
 	Supplement func(context.Context, string) error
-	// SupplementReady reports whether Supplement currently targets a live,
-	// provider-confirmed turn. The daemon must not claim durable input before
+	// SupplementReady reports whether the adapter can accept an instruction
+	// for this execution. The daemon must not claim durable input before
 	// this becomes true: claiming during provider initialization would convert
 	// a transient startup window into a user-visible delivery failure. Nil is
 	// fail-closed and means no run-scoped input may be claimed.

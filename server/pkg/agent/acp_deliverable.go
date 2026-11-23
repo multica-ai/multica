@@ -46,11 +46,21 @@ func (t *acpDeliverableTracker) observe(msg Message) {
 		t.full.WriteString(msg.Content)
 		t.deliverable.WriteString(msg.Content)
 	case MessageToolUse:
-		if block := t.deliverable.String(); strings.TrimSpace(block) != "" {
-			t.lastTextBlock = block
-		}
-		t.deliverable.Reset()
+		t.startBlockLocked()
 	}
+}
+
+func (t *acpDeliverableTracker) startBlock() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.startBlockLocked()
+}
+
+func (t *acpDeliverableTracker) startBlockLocked() {
+	if block := t.deliverable.String(); strings.TrimSpace(block) != "" {
+		t.lastTextBlock = block
+	}
+	t.deliverable.Reset()
 }
 
 // result returns the deliverable for Result.Output and the full text stream to

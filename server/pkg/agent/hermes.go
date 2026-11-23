@@ -1183,6 +1183,9 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// onPromptResponse identifies the actual request that settled, including
+	// RPC errors. Multiple prompts can have outstanding responses.
+	onPromptResponse func(id int)
 	// onUsage mirrors the run's cumulative usage to the daemon while the turn is
 	// live (agent.ExecOptions.OnUsage). Nil means the caller does not meter live.
 	onUsage func(map[string]TokenUsage)
@@ -1318,6 +1321,28 @@ func (c *hermesClient) notify(method string, params any) error {
 // that request use it to avoid advertising readiness before the provider has
 // received the lifecycle-starting frame.
 func (c *hermesClient) requestAndNotifySent(ctx context.Context, method string, params any, afterWrite func()) (json.RawMessage, error) {
+	id, pr, err := c.sendRequest(method, params, nil)
+	if err != nil {
+		return nil, err
+	}
+	if afterWrite != nil {
+		afterWrite()
+	}
+
+	select {
+	case res := <-pr.ch:
+		return res.result, res.err
+	case <-ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return nil, ctx.Err()
+	}
+}
+
+// sendRequest writes a request and leaves its response buffered separately.
+// beforeWrite exposes its ID before a synchronous peer can respond.
+func (c *hermesClient) sendRequest(method string, params any, beforeWrite func(int)) (int, *pendingRPC, error) {
 	c.mu.Lock()
 	id := c.nextID
 	c.nextID++
@@ -1336,28 +1361,19 @@ func (c *hermesClient) requestAndNotifySent(ctx context.Context, method string, 
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return nil, err
+		return 0, nil, err
 	}
 	data = append(data, '\n')
+	if beforeWrite != nil {
+		beforeWrite(id)
+	}
 	if err := c.writeLine(data); err != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return nil, fmt.Errorf("write %s: %w", method, err)
+		return 0, nil, fmt.Errorf("write %s: %w", method, err)
 	}
-	if afterWrite != nil {
-		afterWrite()
-	}
-
-	select {
-	case res := <-pr.ch:
-		return res.result, res.err
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, ctx.Err()
-	}
+	return id, pr, nil
 }
 
 func (c *hermesClient) closeAllPending(err error) {
@@ -1815,6 +1831,9 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 		return
 	}
 
+	if pr.method == "session/prompt" && c.onPromptResponse != nil {
+		c.onPromptResponse(id)
+	}
 	if errData, hasErr := raw["error"]; hasErr {
 		var rpcErr struct {
 			Code    int             `json:"code"`

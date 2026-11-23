@@ -1592,8 +1592,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// Pi has a fixed token universe and a daemon-discovered per-model subset.
 	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
 	// combination-invalid values are logged and omitted from the invocation.
-	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
-		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
+	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel, req.CustomArgs...) {
+		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel, req.CustomArgs...))
 		return
 	}
 	// For ACP-catalog providers the provider name is not the capability answer
@@ -2172,6 +2172,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// fields in the request: a Qoder agent must never be left with settings the
 	// bridge refuses at run time.
 	runtimeChange := req.RuntimeConfig != nil || req.RuntimeID != nil
+	var effectiveCustomArgs []string
+	checkThinkingCarry := req.RuntimeID != nil
 	if runtimeChange || req.CustomArgs != nil || req.McpConfig != nil || req.Model != nil || req.ThinkingLevel != nil || req.ServiceTier != nil {
 		provider := targetProvider
 		if provider == "" {
@@ -2182,17 +2184,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if req.CustomArgs != nil || req.RuntimeID != nil {
-			var customArgs []string
+		checkThinkingCarry = checkThinkingCarry || (provider == "antigravity" && req.CustomArgs != nil)
+		if req.CustomArgs != nil || req.RuntimeID != nil || (provider == "antigravity" && req.ThinkingLevel != nil) {
 			if req.CustomArgs != nil {
-				customArgs = *req.CustomArgs
+				effectiveCustomArgs = *req.CustomArgs
 			} else if len(existing.CustomArgs) > 0 {
-				if err := json.Unmarshal(existing.CustomArgs, &customArgs); err != nil {
+				if err := json.Unmarshal(existing.CustomArgs, &effectiveCustomArgs); err != nil {
 					writeError(w, http.StatusInternalServerError, "failed to read existing custom_args")
 					return
 				}
 			}
-			if err := agent.ValidateCustomArgs(provider, customArgs); err != nil {
+		}
+		if req.CustomArgs != nil || req.RuntimeID != nil {
+			if err := agent.ValidateCustomArgs(provider, effectiveCustomArgs); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -2340,8 +2344,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			if !agent.IsKnownThinkingValue(provider, value) {
-				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value))
+			if !agent.IsKnownThinkingValue(provider, value, effectiveCustomArgs...) {
+				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value, effectiveCustomArgs...))
 				return
 			}
 			switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID, effectiveModelValue(params, existing), value) {
@@ -2354,8 +2358,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			}
 			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
 		}
-	} else if req.RuntimeID != nil && existing.ThinkingLevel.Valid && existing.ThinkingLevel.String != "" {
-		// Runtime is changing but the caller didn't touch thinking_level.
+	} else if checkThinkingCarry && existing.ThinkingLevel.Valid && existing.ThinkingLevel.String != "" {
+		// The runtime or its Antigravity transport is changing while
+		// thinking_level was omitted.
 		// If the existing value is not in the new provider's enum at all,
 		// preserving it would smuggle a literal-invalid token to the daemon.
 		// Hold the same line as the explicit-set path: always 400 on
@@ -2371,7 +2376,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
+		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String, effectiveCustomArgs...) {
 			writeError(w, http.StatusBadRequest, existingThinkingLevelRejection(provider, existing.ThinkingLevel.String))
 			return
 		}
@@ -2770,8 +2775,8 @@ func effectiveThinkingLevel(params db.UpdateAgentParams, existing db.Agent, clea
 // at all. The second one made "high" look like a spelling mistake and sent
 // users hunting for a value that does not exist for that runtime (MUL-5770),
 // so it now names the capability gap instead.
-func thinkingLevelRejection(provider, value string) string {
-	if !agent.ThinkingControlSupported(provider) {
+func thinkingLevelRejection(provider, value string, customArgs ...string) string {
+	if !agent.ThinkingControlSupported(provider) && !(provider == "antigravity" && agent.AntigravityUsesACP(customArgs)) {
 		return thinkingCapabilityRejection(provider)
 	}
 	return fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider)
