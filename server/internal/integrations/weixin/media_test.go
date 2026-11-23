@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestInboundMediaWithoutStorageIsExplicitlyUnavailable(t *testing.T) {
@@ -206,5 +208,32 @@ func TestMediaTransferTimeoutScalesWithSize(t *testing.T) {
 	}
 	if got := mediaTransferTimeout(maxMediaBytes); got != mediaTransferMax {
 		t.Fatalf("budget is not capped: %s", got)
+	}
+}
+
+type deadlineStore struct {
+	objectStore
+	deadline time.Duration
+}
+
+func (s *deadlineStore) KeyFromURL(string) string { return "key" }
+
+func (s *deadlineStore) GetReader(ctx context.Context, _ string) (io.ReadCloser, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		s.deadline = time.Until(deadline)
+	}
+	return nil, errors.New("unavailable")
+}
+
+// The CDN upload's size-scaled budget must not stretch a stalled storage read,
+// which would hold the conversation's later replies behind it.
+func TestAttachmentStorageReadKeepsFixedDeadline(t *testing.T) {
+	store := &deadlineStore{}
+	o := &Outbound{objects: store}
+	if _, err := o.attachment(context.Background(), nil, "owner", db.Attachment{Url: "u", SizeBytes: 10 << 20}); err == nil {
+		t.Fatal("expected storage read failure")
+	}
+	if store.deadline <= 0 || store.deadline > attachmentReadTimeout {
+		t.Fatalf("storage read deadline %s, want at most %s", store.deadline, attachmentReadTimeout)
 	}
 }

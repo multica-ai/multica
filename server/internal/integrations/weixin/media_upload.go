@@ -29,6 +29,8 @@ const (
 	mediaTransferBase    = 45 * time.Second
 	mediaTransferMinRate = 16 << 10 // bytes per second
 	mediaTransferMax     = 10 * time.Minute
+
+	attachmentReadTimeout = 45 * time.Second
 )
 
 func mediaTransferTimeout(size int64) time.Duration {
@@ -184,20 +186,31 @@ func (o *Outbound) attachment(ctx context.Context, api *apiClient, userID string
 	if row.SizeBytes > maxMediaBytes {
 		return messageItem{}, errors.New("weixin: file exceeds the 20 MiB transfer limit")
 	}
-	ctx, cancel := context.WithTimeout(ctx, mediaTransferTimeout(row.SizeBytes))
-	defer cancel()
 	key := o.objects.KeyFromURL(row.Url)
 	if key == "" {
 		return messageItem{}, errors.New("weixin: attachment is not in Multica object storage")
 	}
+	data, err := o.readAttachment(ctx, key)
+	if err != nil {
+		return messageItem{}, err
+	}
+	// Upload applies its own size-scaled deadline for the slow CDN leg.
+	return api.Upload(ctx, userID, data, row.Filename, row.ContentType)
+}
+
+// readAttachment keeps the fixed object-storage deadline: a stalled read must
+// not hold the conversation's reply queue for the CDN upload's longer budget.
+func (o *Outbound) readAttachment(ctx context.Context, key string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, attachmentReadTimeout)
+	defer cancel()
 	reader, err := o.objects.GetReader(ctx, key)
 	if err != nil {
-		return messageItem{}, errors.New("weixin: cannot read attachment")
+		return nil, errors.New("weixin: cannot read attachment")
 	}
 	defer reader.Close()
 	data, err := io.ReadAll(io.LimitReader(reader, maxMediaBytes+1))
 	if err != nil || len(data) > maxMediaBytes {
-		return messageItem{}, errors.New("weixin: attachment transfer failed or exceeds limit")
+		return nil, errors.New("weixin: attachment transfer failed or exceeds limit")
 	}
-	return api.Upload(ctx, userID, data, row.Filename, row.ContentType)
+	return data, nil
 }
