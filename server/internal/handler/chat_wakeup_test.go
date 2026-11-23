@@ -66,6 +66,43 @@ func TestCancelChatSessionWakeup_RequesterOrSessionOwner(t *testing.T) {
 	}
 }
 
+func TestRescheduleChatSessionWakeupRequesterOrOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "ChatWakeupRescheduleAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	suffix := time.Now().UnixNano()
+	requester := createWorkspaceMemberUser(t, "Reschedule requester", fmt.Sprintf("reschedule-requester-%d@multica.test", suffix))
+	bystander := createWorkspaceMemberUser(t, "Reschedule bystander", fmt.Sprintf("reschedule-bystander-%d@multica.test", suffix))
+	wakeupID := seedChatWakeup(t, sessionID, agentID, requester)
+
+	reschedule := func(userID string, at time.Time) *testutil.Response {
+		t.Helper()
+		req := newRequestAs(userID, http.MethodPatch, "/api/chat/sessions/"+sessionID+"/wakeups/"+wakeupID, map[string]any{"at": at})
+		req = withURLParams(req, "sessionId", sessionID, "wakeupId", wakeupID)
+		return testutil.Call(t, testHandler.RescheduleChatSessionWakeup, withChatTestWorkspaceCtx(t, req))
+	}
+	reschedule(bystander, time.Now().Add(2*time.Hour)).Want(http.StatusForbidden)
+	reschedule(requester, time.Now().Add(-time.Minute)).Want(http.StatusBadRequest)
+	for i, userID := range []string{requester, testUserID} {
+		at := time.Now().UTC().Truncate(time.Second).Add(time.Duration(2+i) * time.Hour)
+		var updated ChatWakeupResponse
+		reschedule(userID, at).Want(http.StatusOK).JSON(&updated)
+		if updated.Title != "Release shipped" || updated.FireAt == nil {
+			t.Fatalf("reschedule changed the title or removed the reminder: %+v", updated)
+		}
+		for _, value := range []string{*updated.FireAt, updated.NextEvalAt, updated.ExpiresAt} {
+			got, err := time.Parse(time.RFC3339, value)
+			if err != nil || !got.Equal(at) {
+				t.Fatalf("rescheduled timestamp = %q, want %v", value, at)
+			}
+		}
+	}
+	cancelChatWakeupAs(t, testUserID, sessionID, wakeupID)
+	reschedule(requester, time.Now().Add(2*time.Hour)).Want(http.StatusConflict)
+}
+
 // chat_wakeup has no chat_session FK, so DeleteChatSession prunes it.
 func TestDeleteChatSession_PrunesChatWakeups(t *testing.T) {
 	if testHandler == nil {

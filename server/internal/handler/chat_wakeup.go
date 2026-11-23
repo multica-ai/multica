@@ -300,6 +300,24 @@ func (h *Handler) chatSessionWakeupForUser(w http.ResponseWriter, r *http.Reques
 	return session.ID, id, true
 }
 
+func (h *Handler) RescheduleChatSessionWakeup(w http.ResponseWriter, r *http.Request) {
+	sessionID, id, ok := h.chatSessionWakeupForUser(w, r)
+	if !ok {
+		return
+	}
+	var in service.ChatWakeupTiming
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	updated, err := h.chatWakeups().Reschedule(r.Context(), sessionID, id, in)
+	if err != nil {
+		chatWakeupError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, chatWakeupToResponse(updated))
+}
+
 func (h *Handler) CancelChatSessionWakeup(w http.ResponseWriter, r *http.Request) {
 	sessionID, id, ok := h.chatSessionWakeupForUser(w, r)
 	if !ok {

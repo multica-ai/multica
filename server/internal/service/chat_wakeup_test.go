@@ -582,3 +582,45 @@ func TestChatWakeupFinishedCheckWhoseReportFailedCanRetry(t *testing.T) {
 		t.Fatalf("retry of a finished check must ask for the report, not another check:\n%s", input.Content)
 	}
 }
+
+func TestChatWakeupReschedulePreservesHistoryAndCheckBudget(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	ctx := t.Context()
+	w := f.create(t, ChatWakeupInput{IntervalSeconds: 1800, ExpiresInSeconds: 7200})
+	f.fx.Exec(t, "UPDATE chat_wakeup SET check_count = 99, last_check_note = 'Previous result' WHERE id = $1", w.ID)
+
+	interval := int64(600)
+	at := f.clock.Add(30 * time.Minute)
+	if _, err := f.svc.Reschedule(ctx, w.ChatSessionID, w.ID, ChatWakeupTiming{IntervalSeconds: &interval, ExpiresAt: &at}); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("schedule requiring two more checks: %v", err)
+	}
+	at = f.clock.Add(20 * time.Minute)
+	updated, err := f.svc.Reschedule(ctx, w.ChatSessionID, w.ID, ChatWakeupTiming{IntervalSeconds: &interval, ExpiresAt: &at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.IntervalSeconds.Int64 != interval || updated.CheckCount != 99 || updated.LastCheckNote.String != "Previous result" ||
+		updated.ExpiresAt.Time.Sub(at).Abs() > time.Microsecond || updated.NextEvalAt.Time.Sub(f.clock.Add(10*time.Minute)).Abs() > time.Microsecond {
+		t.Fatalf("rescheduled check did not preserve history or apply timing: %+v", updated)
+	}
+}
+
+func TestChatWakeupRescheduleKeepsConditionBaseline(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	issueID := f.fx.Issue(t, "Watch the release")
+	condition, err := json.Marshal(map[string]any{"type": "issue", "issue_id": issueID, "state": "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := f.create(t, ChatWakeupInput{Condition: condition})
+	f.fx.Exec(t, "UPDATE chat_wakeup SET condition_state = 'baseline' WHERE id = $1", w.ID)
+	at := f.clock.Add(2 * time.Hour)
+	updated, err := f.svc.Reschedule(t.Context(), w.ChatSessionID, w.ID, ChatWakeupTiming{ExpiresAt: &at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(updated.Condition) != string(w.Condition) || updated.ConditionState != "baseline" ||
+		!updated.NextEvalAt.Time.Equal(w.NextEvalAt.Time) || updated.ExpiresAt.Time.Sub(at).Abs() > time.Microsecond {
+		t.Fatalf("rescheduled condition changed the watch or lost the deadline: %+v", updated)
+	}
+}
