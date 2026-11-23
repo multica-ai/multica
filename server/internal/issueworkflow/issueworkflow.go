@@ -770,6 +770,9 @@ func Brief(in BriefInput) string {
 		effectiveStatus = in.EffectiveStatus(in.StatusKey)
 	}
 	terminal := effectiveStatus == issuestatus.Done || effectiveStatus == issuestatus.Cancelled
+	// Nothing on the board follows a terminal status, so its only moves are
+	// the ones its author configured (MUL-9746).
+	terminalMoves := terminal && (step.NextStatusKey != "" || step.BackStatusKey != "")
 	name := func(key string) string {
 		if in.StatusName == nil {
 			return key
@@ -836,7 +839,7 @@ func Brief(in BriefInput) string {
 			b.WriteString("to finish.\n")
 		}
 	} else {
-		if terminal {
+		if terminal && !terminalMoves {
 			fmt.Fprintf(&b, "%s has reached the terminal status %s. Leave the issue at this status unless a member explicitly asks you to reopen it.\n",
 				in.IssueIdentifier, statusLabel(name(in.StatusKey), in.StatusKey))
 		} else {
@@ -875,7 +878,7 @@ func Brief(in BriefInput) string {
 		b.WriteString("\nMoving the issue into a step that hands off reassigns it to that step's handler and starts their run.\n")
 		return b.String()
 	}
-	if terminal {
+	if terminal && !terminalMoves {
 		return b.String()
 	}
 	b.WriteString("\nYour moves:\n")
@@ -890,7 +893,11 @@ func Brief(in BriefInput) string {
 			fmt.Fprintf(&b, "Step done      → leave the issue at `%s`; `done` is set by a human\n", in.StatusKey)
 		}
 	default:
-		if next := in.Workflow.NextStatus(in.StatusKey); next != "" {
+		next := step.NextStatusKey
+		if !terminal {
+			next = in.Workflow.NextStatus(in.StatusKey)
+		}
+		if next != "" {
 			fmt.Fprintf(&b, "Step done      → multica issue status %s %s%s\n", in.IssueIdentifier, next, handsOffTo(next))
 		}
 	}
@@ -898,7 +905,7 @@ func Brief(in BriefInput) string {
 		fmt.Fprintf(&b, "Needs changes  → multica issue status %s %s%s\n", in.IssueIdentifier, step.BackStatusKey, handsOffTo(step.BackStatusKey))
 	}
 	switch {
-	case in.Workflow.Has(issuestatus.Blocked):
+	case in.Workflow.Has(issuestatus.Blocked) && !terminal:
 		fmt.Fprintf(&b, "Can't proceed  → multica issue status %s blocked, then comment why\n", in.IssueIdentifier)
 	case step.BackStatusKey != "":
 		b.WriteString("Can't proceed  → comment why, then run Needs changes\n")
