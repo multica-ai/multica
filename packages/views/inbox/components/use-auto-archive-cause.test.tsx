@@ -63,7 +63,7 @@ afterEach(() => {
 describe("useAutoArchiveCause", () => {
   it("reports the reason for an agent-triggered archive", () => {
     const { settle, cause, reason } = setup();
-    noteInboxAutoArchive({ issue_id: "issue-agent", reason: "agent_triggered" });
+    noteInboxAutoArchive({ issue_id: "issue-agent", reason: "actor_acted", trigger: "agent_triggered" });
     settle(archived("issue-agent"));
     expect(reason()).toBe("agent_triggered");
     expect(cause()).toBeNull();
