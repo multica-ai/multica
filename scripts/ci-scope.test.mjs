@@ -16,7 +16,8 @@ function filterFiles(files) {
 }
 
 for (const [name, files, selected] of [
-  ["readme only", ["README.md"], []],
+  ["readme only", ["README.md"], ["docs"]],
+  ["translated readme", ["README.ja.md"], ["docs"]],
   ["stable release promotion", [".github/workflows/promote-release.yml"], ["scripts"]],
   ["release orchestration", [".github/workflows/release.yml"], ["scripts"]],
   ["release creation", [".goreleaser.yml"], ["scripts"]],
@@ -24,7 +25,10 @@ for (const [name, files, selected] of [
   ["docs test", ["apps/docs/lib/unrendered-bold.test.ts"], ["quality", "docs"]],
   ["AI traffic classifier", ["packages/core/ai-traffic/index.ts"], ["frontend", "quality", "docs", "e2e"]],
   ["self-hosting guide for agents", ["SELF_HOSTING_AI.md"], ["docs"]],
-  ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality", "e2e"]],
+  ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality", "docs", "e2e"]],
+  ["landing site copy", ["apps/web/features/landing/i18n/site-ko.ts"], ["frontend", "quality", "docs", "e2e"]],
+  ["cloud page", ["apps/web/features/landing/site/cloud-page.tsx"], ["frontend", "quality", "docs", "e2e"]],
+  ["landing demo copy", ["apps/web/features/landing/i18n/demo-en.ts"], ["frontend", "quality", "e2e"]],
   ["mobile UI", ["apps/mobile/app/index.tsx"], ["quality"]],
   ["collaboration service", ["apps/collab/src/documents.ts"], ["frontend", "quality"]],
   ["migration only", ["server/migrations/999_example.up.sql"], ["backend", "sqlc", "e2e"]],
@@ -33,6 +37,8 @@ for (const [name, files, selected] of [
   ["built-in runtime registry", ["server/pkg/agent/builtin_runtimes.go"], ["backend", "runtime", "docs", "e2e"]],
   ["daemon config", ["server/internal/daemon/config.go"], ["backend", "runtime", "docs", "e2e"]],
   ["feature flag keys", ["server/internal/featureflags/keys.go"], ["backend", "runtime", "docs", "e2e"]],
+  ["runtime protocol families", ["server/pkg/agent/agent.go"], ["backend", "runtime", "docs", "e2e"]],
+  ["steering support", ["server/pkg/agent/version.go"], ["backend", "runtime", "docs", "e2e"]],
   ["daemon dependency", ["server/internal/skill/service.go"], ["backend", "runtime", "e2e"]],
   ["process-group control", ["server/internal/daemon/processtree/controller_unix.go"], ["backend", "runtime", "processtree", "e2e"]],
   ["process-group caller", ["server/internal/daemon/gc.go"], ["backend", "runtime", "e2e"]],
