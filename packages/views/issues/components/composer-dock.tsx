@@ -9,7 +9,7 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 
-/** The dock's `mb-3` over the sticky composer, in px. */
+/** The gap between the dock and the composer's top edge, in px. */
 export const COMPOSER_DOCK_GAP = 12;
 const JUMP_COUNT_CAP = 9;
 

@@ -295,7 +295,7 @@ export function QuickActionsMenu({
             {running ? <Loader2 className="animate-spin text-muted-foreground" /> : <Zap className="text-muted-foreground" />}
           </DropdownMenuTrigger>
         </TooltipHint>
-        <DropdownMenuContent align="start" className="w-auto min-w-56 max-w-80">
+        <DropdownMenuContent side="top" align="start" className="w-auto min-w-56 max-w-80">
           {actions.map((action) => (
             <DropdownMenuItem
               key={action.id}

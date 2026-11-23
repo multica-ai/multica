@@ -70,7 +70,7 @@ export function InboxOpenBar({
 /**
  * What happened to a settled notification, in a word; `hint` says the rest on
  * hover, and to a screen reader with the word. A narrow group keeps only the
- * icon.
+ * icon, so without a hint the tooltip carries the word itself.
  */
 export function InboxBarStatus({ icon, label, hint }: { icon: ReactNode; label: ReactNode; hint?: ReactNode }) {
   const status = (
@@ -83,7 +83,7 @@ export function InboxBarStatus({ icon, label, hint }: { icon: ReactNode; label: 
     </span>
   );
   return (
-    <TooltipHint label={hint} side="top">
+    <TooltipHint label={hint ?? label} side="top">
       {status}
     </TooltipHint>
   );

@@ -60,6 +60,7 @@ export function InboxIssueActions({
         onMarkDuplicate={onMarkDuplicate}
         isDuplicate={isDuplicate}
         align="start"
+        side="top"
         tooltip={t(($) => $.detail.prop_status)}
         triggerRender={chip}
         trigger={
@@ -80,6 +81,7 @@ export function InboxIssueActions({
         assigneeId={issue.assignee_id}
         onUpdate={update}
         align="start"
+        side="top"
         tooltip={t(($) => $.detail.prop_assignee)}
         triggerRender={chip}
         trigger={

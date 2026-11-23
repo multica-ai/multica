@@ -202,7 +202,7 @@ export function IssueInboxBar({
       if (movingOn && hadBarForIssueRef.current === issueId) {
         return (
           <InboxBar settled>
-            <InboxBarStatus icon={<Archive />} label={t(($) => $.kept.notification_archived)} />
+            <InboxBarStatus icon={<Archive />} label={t(($) => $.kept.archived)} />
           </InboxBar>
         );
       }

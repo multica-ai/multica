@@ -1627,6 +1627,22 @@ describe("IssueDetail (shared)", () => {
       expect(screen.queryByRole("button", { name: "Mark as done" })).not.toBeInTheDocument();
     });
 
+    it("gives the group its own room above a composer that rides the timeline, clear of the last comment", async () => {
+      mockViewport.isMobile = true;
+      const { container } = renderWithArchive();
+
+      const archive = await screen.findByRole("button", { name: enInbox.context_menu.archive });
+      const anchor = archive.closest("[data-composer-dock]")!.parentElement!;
+      const composer = container.querySelector("[data-mc='comment-composer']")?.parentElement;
+      // The group sits on the anchor, which keeps the room above it (mt-14)
+      // and stops just short of the composer (mt-3); pinned, it holds off the
+      // viewport bottom.
+      expect(anchor).toHaveClass("sticky", "h-0", "mt-14");
+      expect(anchor.nextElementSibling).toBe(composer);
+      expect(composer).toHaveClass("mt-3");
+      expect(composer).not.toHaveClass("sticky");
+    });
+
     it("archives the notification without changing the issue's status", async () => {
       const onArchive = vi.fn();
       renderWithArchive(onArchive);

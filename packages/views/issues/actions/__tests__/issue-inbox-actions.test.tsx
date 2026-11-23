@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
@@ -340,6 +340,23 @@ describe("IssueInboxBar", () => {
 
     fireEvent.keyDown(document, { key: "h", code: "KeyH" });
     expect(state.unsnooze).toHaveBeenCalledWith({ id: "n-1" });
+  });
+
+  it("keeps when a snoozed issue comes back in the tooltip, for a group too narrow to show it", async () => {
+    const until = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    setup({
+      rows: [ROWS[1]!],
+      snoozed: [{ issue_id: "issue-1", item_id: "n-1", snoozed_until: until, snoozed_at: SNOOZED_AT, updates: 0 }],
+    });
+    const label = within(screen.getByRole("status")).getByText(/^Back /);
+    await act(async () => {
+      fireEvent.pointerEnter(label.parentElement!, { pointerType: "mouse" });
+      fireEvent.mouseEnter(label.parentElement!);
+      fireEvent.mouseMove(label.parentElement!);
+    });
+    await waitFor(() =>
+      expect(document.querySelector("[data-slot=tooltip-content]")).toHaveTextContent(label.textContent!),
+    );
   });
 
   it("stays in place once the notification leaves the Inbox some other way, with undo and the next one", async () => {

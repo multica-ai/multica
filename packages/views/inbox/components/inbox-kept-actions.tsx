@@ -139,6 +139,7 @@ export function InboxKeptActions({
   const statusIcon =
     icon ?? (inboxCleared ? <CheckCircle2 className="text-success" /> : <Archive />);
   const undoLabel = t(($) => $.toasts.undo);
+  const goToMyWorkLabel = t(($) => $.zero.go_to_my_work);
 
   return (
     <InboxBar settled>
@@ -170,10 +171,12 @@ export function InboxKeptActions({
       {next ? (
         <InboxNextButton next={next} onNext={onNext} />
       ) : inboxCleared && onGoToMyWork ? (
-        <Button size="sm" className="shrink-0" onClick={onGoToMyWork}>
-          {t(($) => $.zero.go_to_my_work)}
-          <ArrowRight />
-        </Button>
+        <TooltipHint label={goToMyWorkLabel} side="top">
+          <Button size="sm" aria-label={goToMyWorkLabel} className="shrink-0" onClick={onGoToMyWork}>
+            <span className="@max-[32rem]/inbox-bar:hidden">{goToMyWorkLabel}</span>
+            <ArrowRight />
+          </Button>
+        </TooltipHint>
       ) : null}
     </InboxBar>
   );

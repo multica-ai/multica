@@ -146,7 +146,6 @@
     "archived": "アーカイブ済み",
     "leaves": "移動するとインボックスから外れます",
     "filtered": "フィルターに一致しなくなりました",
-    "notification_archived": "通知をアーカイブしました",
     "changed_status": "{{status}} に変更",
     "reassigned": "{{name}} に再割り当て",
     "unassigned": "割り当て解除",

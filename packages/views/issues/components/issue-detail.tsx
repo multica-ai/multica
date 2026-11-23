@@ -2262,7 +2262,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
       if (cancelled) return;
       const composer = composerRef.current;
       // The Inbox's group floats above the composer and covers the row too.
-      const group = composer?.querySelector("[data-inbox-bar]");
+      const group = composer?.parentElement?.querySelector("[data-inbox-bar]");
       const offset =
         (composer?.getBoundingClientRect().height ?? 0) +
         (group ? group.getBoundingClientRect().height + COMPOSER_DOCK_GAP : 0);
@@ -4610,26 +4610,23 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           {/* The composer dock: the Inbox's group and "Jump to latest"
               (MUL-8324, MUL-8951) float just above the composer's top edge.
               With the sticky composer the dock rides the composer itself;
-              without it, a zero-height sticky anchor pins it to the viewport
-              bottom (clear of a phone's chat launcher) until the composer
-              scrolls in. */}
-          {!stickyComposer && (inboxBar || jumpToLatest.visible) && (
-            <div className="sticky bottom-0 z-10 h-0">
-              <ComposerDock
-                className="bottom-6 max-md:above-chat-launcher"
-                inboxBar={inboxBar}
-                jump={jumpToLatestButton}
-              />
+              without it, it rides a zero-height sticky anchor just above the
+              composer, which holds it off the viewport bottom (clear of a
+              phone's chat launcher) until the composer scrolls in. Either way
+              the Inbox's group gets its own room at the end of the timeline
+              (the anchor's or the composer's margin), so it never covers the
+              last comment for good. */}
+          <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
+          {!stickyComposer && (
+            <div className={cn("sticky bottom-6 z-10 h-0 max-md:above-chat-launcher", inboxBar && "mt-14")}>
+              <ComposerDock className="bottom-0" inboxBar={inboxBar} jump={jumpToLatestButton} />
             </div>
           )}
-          <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
           <div
             ref={composerRef}
             data-comment-images={commentImageLayout}
             className={cn(
-              // Room for the Inbox's group at the end of the timeline, so it
-              // never covers the last comment for good.
-              inboxBar ? "mt-18 max-md:mt-28" : "mt-4",
+              !inboxBar ? "mt-4" : stickyComposer ? "mt-18" : "mt-3",
               stickyComposer &&
                 "sticky bottom-0 z-10 -mb-4 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
             )}

@@ -146,7 +146,6 @@
     "archived": "已归档",
     "leaves": "离开后移出收件箱",
     "filtered": "不再符合筛选",
-    "notification_archived": "通知已归档",
     "changed_status": "已改为{{status}}",
     "reassigned": "已改派给 {{name}}",
     "unassigned": "已取消分配",

@@ -146,7 +146,6 @@
     "archived": "보관됨",
     "leaves": "다른 곳으로 이동하면 인박스에서 빠집니다",
     "filtered": "더 이상 필터와 일치하지 않음",
-    "notification_archived": "알림이 보관됨",
     "changed_status": "상태 변경됨: {{status}}",
     "reassigned": "{{name}}님에게 재할당됨",
     "unassigned": "할당 해제됨",
