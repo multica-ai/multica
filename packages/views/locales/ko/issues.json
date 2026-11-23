@@ -1,4 +1,21 @@
 {
+  "sharing": {
+    "generate": "읽기 전용 링크 생성",
+    "copy": "읽기 전용 링크 복사",
+    "revoke": "읽기 전용 링크 취소",
+    "generate_description": "링크가 있는 사람은 Multica에 로그인하면 태스크의 제목, 상태, 설명을 볼 수 있습니다. 워크스페이스 외부 사용자도 볼 수 있습니다.",
+    "revoke_description": "이 링크로는 더 이상 접근할 수 없습니다. 다시 생성하면 새 링크가 만들어집니다.",
+    "generate_confirm": "링크 생성",
+    "revoke_confirm": "링크 취소",
+    "generated": "읽기 전용 링크를 생성했습니다",
+    "revoked": "읽기 전용 링크를 취소했습니다",
+    "changed": "공유 상태가 변경되었습니다. 태스크 메뉴를 다시 열고 시도하세요.",
+    "save_failed": "공유 설정을 저장하지 못했습니다. 다시 시도하세요.",
+    "read_only": "공유 태스크 · 읽기 전용",
+    "unavailable": "이 공유 링크를 사용할 수 없습니다",
+    "load_failed": "공유 태스크를 불러오지 못했습니다.",
+    "retry": "다시 시도"
+  },
   "web": {
     "open_in_desktop": "데스크톱에서 열기"
   },

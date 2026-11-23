@@ -206,4 +206,20 @@ describe("before_send $exception pipeline", () => {
     const evt = { event: "$pageview", properties: { $current_url: "/acme/issues" } };
     expect(beforeSend(evt)).toBe(evt);
   });
+
+  it("omits the shared issue token from event URL properties", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    const beforeSend = getBeforeSend(posthog);
+    const url = "https://multica.ai/share/issue#0123456789abcdef01234567";
+    const fromCampaign = url.replace("#", "?utm_source=example#");
+    const evt = { event: "$pageview", properties: { $current_url: url, $initial_referrer: fromCampaign } };
+
+    expect(beforeSend(evt)).toMatchObject({
+      properties: {
+        $current_url: "https://multica.ai/share/issue",
+        $initial_referrer: "https://multica.ai/share/issue?utm_source=example",
+      },
+    });
+  });
 });

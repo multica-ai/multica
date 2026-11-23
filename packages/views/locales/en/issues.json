@@ -1,4 +1,21 @@
 {
+  "sharing": {
+    "generate": "Generate read-only link",
+    "copy": "Copy read-only link",
+    "revoke": "Revoke read-only link",
+    "generate_description": "Anyone who has the link and signs in to Multica can view this issue’s title, status, and description, including people outside your workspace.",
+    "revoke_description": "Anyone using this link will lose access. A new link will have a different address.",
+    "generate_confirm": "Generate link",
+    "revoke_confirm": "Revoke link",
+    "generated": "Read-only link generated",
+    "revoked": "Read-only link revoked",
+    "changed": "Sharing changed. Reopen the issue menu and try again.",
+    "save_failed": "Couldn’t save sharing changes. Try again.",
+    "read_only": "Shared issue · Read-only",
+    "unavailable": "This share link is unavailable",
+    "load_failed": "Couldn’t load the shared issue.",
+    "retry": "Retry"
+  },
   "web": {
     "open_in_desktop": "Open in Desktop"
   },

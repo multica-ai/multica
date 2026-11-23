@@ -1,4 +1,21 @@
 {
+  "sharing": {
+    "generate": "Generar enlace de solo lectura",
+    "copy": "Copiar enlace de solo lectura",
+    "revoke": "Revocar enlace de solo lectura",
+    "generate_description": "Cualquiera que tenga el enlace e inicie sesión en Multica podrá ver el título, el estado y la descripción de la tarea, aunque no pertenezca al espacio de trabajo.",
+    "revoke_description": "Quienes usen este enlace perderán el acceso. Al volver a generarlo, se creará una dirección diferente.",
+    "generate_confirm": "Generar enlace",
+    "revoke_confirm": "Revocar enlace",
+    "generated": "Enlace de solo lectura generado",
+    "revoked": "Enlace de solo lectura revocado",
+    "changed": "El estado del enlace ha cambiado. Vuelve a abrir el menú de la tarea e inténtalo de nuevo.",
+    "save_failed": "No se pudieron guardar los cambios. Inténtalo de nuevo.",
+    "read_only": "Tarea compartida · Solo lectura",
+    "unavailable": "Este enlace no está disponible",
+    "load_failed": "No se pudo cargar la tarea compartida.",
+    "retry": "Reintentar"
+  },
   "web": {
     "open_in_desktop": "Abrir en la aplicación de escritorio"
   },

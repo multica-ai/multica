@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_issue_share_token;

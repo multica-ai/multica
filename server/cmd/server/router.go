@@ -81,6 +81,7 @@ var corsAllowedHeaders = []string{
 	"If-Match",
 	"X-Workspace-ID",
 	"X-Workspace-Slug",
+	"X-Issue-Share-Token",
 	"X-Request-ID",
 	"X-Agent-ID",
 	"X-Task-ID",
@@ -2163,6 +2164,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
 		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
 		r.Post("/api/share-links/join", h.JoinByShareLink)
+		r.With(handler.RequireHumanActor).Get("/api/share/issue", h.GetSharedIssue)
 
 		// PAT management is human-only (MUL-8154): a machine credential must
 		// not mint a non-expiring PAT, enumerate the owner's PATs, or revoke
@@ -2285,6 +2287,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
+					r.With(handler.RequireHumanActor).Get("/share", h.GetIssueShare)
+					r.With(handler.RequireHumanActor).Post("/share", h.CreateIssueShare)
+					r.With(handler.RequireHumanActor).Delete("/share", h.RevokeIssueShare)
 					r.Put("/", h.UpdateIssue)
 					r.Post("/description/edits", h.EditIssueDescription)
 					r.Post("/collab-ticket", h.CreateIssueCollabTicket)

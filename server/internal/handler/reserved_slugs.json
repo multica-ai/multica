@@ -15,6 +15,7 @@
         "callback",
         "invite",
         "invitations",
+        "share",
         "verify",
         "reset",
         "password",

@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 
 import {
   analyticsPageTitle,
+  isSensitiveAnalyticsUrl,
   resolveGoogleAnalyticsId,
   sanitizeAnalyticsUrl,
 } from "./google-analytics";
@@ -20,6 +21,12 @@ it("strips credentials from URLs but keeps campaign params", () => {
   expect(sanitizeAnalyticsUrl("https://multica.ai/invite/inv_1")).toBe("https://multica.ai/invite/[id]");
   expect(sanitizeAnalyticsUrl("https://multica.ai/?utm_source=x&code=c")).toBe("https://multica.ai/?utm_source=x");
   expect(sanitizeAnalyticsUrl("javascript:alert(1)")).toBe("");
+});
+
+it("treats a shared issue link as sensitive", () => {
+  const url = "https://multica.ai/share/issue#0123456789abcdef01234567";
+  expect(isSensitiveAnalyticsUrl(url)).toBe(true);
+  expect(sanitizeAnalyticsUrl(url)).toBe("https://multica.ai/share/issue");
 });
 
 it("reports route labels as page_title, never workspace content", () => {

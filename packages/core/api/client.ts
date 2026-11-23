@@ -27,6 +27,7 @@ import type {
   CreateDocFolderRequest,
 } from "../types/doc";
 import type { ZodType } from "zod";
+import { IssueShareSchema, SharedIssueSchema, type IssueShare, type SharedIssue } from "./issue-share";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -1842,6 +1843,50 @@ export class ApiClient {
       // parseWithFallback already logged the zod issues + raw payload.
       throw new Error("GET /api/issues/:id returned a malformed issue");
     }
+    return issue;
+  }
+
+  async getIssueShare(wsId: string, issueId: string, signal?: AbortSignal): Promise<IssueShare> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/share`, {
+      headers: workspaceHeader({ workspaceId: wsId }),
+      signal,
+    });
+    const share = parseWithFallback<IssueShare | null>(raw, IssueShareSchema, null, {
+      endpoint: "GET /api/issues/{id}/share",
+    });
+    if (!share) throw new Error("Malformed issue share response");
+    return share;
+  }
+
+  async createIssueShare(wsId: string, issueId: string): Promise<IssueShare> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/share`, {
+      method: "POST",
+      headers: workspaceHeader({ workspaceId: wsId }),
+    });
+    const share = parseWithFallback<IssueShare | null>(raw, IssueShareSchema, null, {
+      endpoint: "POST /api/issues/{id}/share",
+    });
+    if (!share?.token) throw new Error("Malformed issue share creation response");
+    return share;
+  }
+
+  async revokeIssueShare(wsId: string, issueId: string, token: string): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/share`, {
+      method: "DELETE",
+      headers: { ...workspaceHeader({ workspaceId: wsId }), "X-Issue-Share-Token": token },
+    });
+  }
+
+  async getSharedIssue(token: string, signal?: AbortSignal): Promise<SharedIssue> {
+    const raw = await this.fetch<unknown>("/api/share/issue", {
+      headers: { "X-Issue-Share-Token": token },
+      signal,
+      cache: "no-store",
+    });
+    const issue = parseWithFallback<SharedIssue | null>(raw, SharedIssueSchema, null, {
+      endpoint: "GET /api/share/issue",
+    });
+    if (!issue) throw new Error("Malformed shared issue response");
     return issue;
   }
 

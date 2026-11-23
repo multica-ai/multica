@@ -63,6 +63,7 @@ import {
 } from "../../common/menu-primitives";
 import type { UseIssueActionsResult } from "./use-issue-actions";
 import { InboxRestoreMenuItem } from "./inbox-restore";
+import { IssueShareMenuItems } from "./issue-share-menu-items";
 import { PluginHookMenuItems, PluginModalMenuItems } from "../../plugins";
 import { useLocale, useT } from "../../i18n";
 
@@ -445,6 +446,7 @@ export function IssueActionsMenuItems({
         <Link2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_link)}
       </P.Item>
+      {!guest && <IssueShareMenuItems issue={issue} wsId={wsId} Item={P.Item} />}
       <P.Item onClick={copyTitleAsLink}>
         <Type className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_title_as_link)}

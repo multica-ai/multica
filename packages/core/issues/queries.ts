@@ -141,6 +141,8 @@ export const issueKeys = {
     [...issueKeys.sidebarAll(wsId), source, request, limit] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
+  share: (wsId: string, id: string, userId: string | null) =>
+    [...issueKeys.detail(wsId, id), "share", userId] as const,
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
   identifier: (wsId: string, identifier: string) =>
     [...issueKeys.all(wsId), "identifier", identifier] as const,
