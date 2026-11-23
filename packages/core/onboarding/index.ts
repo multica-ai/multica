@@ -8,6 +8,7 @@ export type {
 } from "./types";
 export {
   saveQuestionnaire,
+  recordOnboardingStarted,
   completeOnboarding,
   joinCloudWaitlist,
 } from "./store";

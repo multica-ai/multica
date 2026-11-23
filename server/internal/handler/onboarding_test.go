@@ -289,6 +289,26 @@ func TestPatchOnboardingSplitsQuestionnaireAndSourceEvents(t *testing.T) {
 	}
 }
 
+// Onboarding asks no questions; opening it writes the empty v2
+// questionnaire, which is the one start the funnel counts.
+func TestPatchOnboardingEmptyQuestionnaireCountsStartOnce(t *testing.T) {
+	userID := newWaitlistTestUser(t, "onboarding-started@multica.ai")
+
+	m := obsmetrics.NewBusinessMetrics()
+	h := *testHandler
+	h.Metrics = m
+
+	patchOnboardingAs(t, &h, userID, `{"version":2}`)
+	patchOnboardingAs(t, &h, userID, `{"version":2}`)
+
+	if got := counterValue(t, m, "multica_onboarding_started_total"); got != 1 {
+		t.Fatalf("expected onboarding started counter 1, got %v", got)
+	}
+	if got := counterValue(t, m, "multica_onboarding_questionnaire_submitted_total"); got != 0 {
+		t.Fatalf("expected no questionnaire submission, got %v", got)
+	}
+}
+
 // Declining every question at once (the About-you Skip writes both
 // role and use_case skip markers; a backfill Skip writes source's) is
 // a resolution too: both counters move exactly once.

@@ -15,16 +15,14 @@ import {
   completeOnboarding,
   createPersonalAgent,
   ONBOARDING_STEP_ORDER,
-  saveQuestionnaire,
+  recordOnboardingStarted,
   type CodingToolsBridge,
   type OnboardingStep,
-  type QuestionnaireAnswers,
 } from "@multica/core/onboarding";
 import { useWorkspaceList } from "@multica/core/workspace";
 import type { Workspace } from "@multica/core/types";
 import { StepWelcome } from "./steps/step-welcome";
 import { StepShell } from "./components/step-shell";
-import { StepAboutYou } from "./steps/step-about-you";
 import { StepWorkspace } from "./steps/step-workspace";
 import { StepAgentSetup, type CreatePersonalAgentRequest } from "./steps/step-agent-setup";
 import { StepPlatformFork } from "./steps/step-platform-fork";
@@ -37,61 +35,6 @@ import {
 } from "./templates";
 import { useT } from "../i18n";
 import { issueRouteRef, type IssueRouteRef } from "@multica/core/paths";
-
-const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
-  source: [],
-  source_other: null,
-  source_skipped: false,
-  role: null,
-  role_other: null,
-  role_skipped: false,
-  use_case: [],
-  use_case_other: null,
-  use_case_skipped: false,
-  version: 2,
-};
-
-/**
- * Coerce a stored questionnaire slot into the array shape used by the
- * current UI. Earlier versions of this app wrote `source` / `use_case`
- * as a single string; tolerate that on read so a user who started
- * onboarding before this change doesn't see their previous answer
- * disappear on re-entry. Empty string and null both collapse to [].
- */
-function coerceToArray<T extends string>(value: unknown): T[] {
-  if (Array.isArray(value)) {
-    return value.filter((v): v is T => typeof v === "string" && v.length > 0);
-  }
-  if (typeof value === "string" && value.length > 0) {
-    return [value as T];
-  }
-  return [];
-}
-
-/**
- * Merge persisted answers into the empty default. Re-entry pre-fills
- * answered slots but treats `*_skipped` as fresh (the user can answer
- * this time) — the v1 skip marker is dropped on read, the analytics
- * record of the prior skip stays in the DB.
- */
-function mergeQuestionnaire(
-  raw: Record<string, unknown>,
-): QuestionnaireAnswers {
-  const merged = {
-    ...EMPTY_QUESTIONNAIRE,
-    ...(raw as Partial<QuestionnaireAnswers>),
-  };
-  return {
-    ...merged,
-    source: coerceToArray<QuestionnaireAnswers["source"][number]>(raw.source),
-    use_case: coerceToArray<QuestionnaireAnswers["use_case"][number]>(
-      raw.use_case,
-    ),
-    source_skipped: false,
-    role_skipped: false,
-    use_case_skipped: false,
-  };
-}
 
 /**
  * Shell's onComplete contract carries the workspace plus an optional
@@ -119,9 +62,9 @@ interface OnboardingFlowProps {
     destination?: OnboardingDestination,
   ) => void;
   /** "new_workspace" is the same flow run by someone who already uses
-   *  Multica: it starts at the workspace step, because the intro and the
-   *  questionnaire only make sense once per person, and it always creates a
-   *  workspace rather than offering to continue with an existing one. */
+   *  Multica: it starts at the workspace step, because the intro only makes
+   *  sense once per person, and it always creates a workspace rather than
+   *  offering to continue with an existing one. */
   mode?: OnboardingMode;
   /** Required in "new_workspace" mode: first-run onboarding has no way out
    *  except signing out, but someone creating a second workspace must be able
@@ -159,14 +102,14 @@ export function OnboardingFlow({
     throw new Error("OnboardingFlow requires an authenticated user");
   }
 
-  // Questionnaire answers are server-persisted and pre-fill the per-
-  // question steps on re-entry. That's the only piece of onboarding
-  // state persisted across sessions — which step the user is on is
-  // deliberately not saved, so every entry starts at Welcome.
-  const storedQuestionnaire = mergeQuestionnaire(user.onboarding_questionnaire);
-  const [answers, setAnswers] = useState<QuestionnaireAnswers>(storedQuestionnaire);
-
   const isNewWorkspace = mode === "new_workspace";
+
+  const startRecorded = useRef(isNewWorkspace);
+  useEffect(() => {
+    if (startRecorded.current) return;
+    startRecorded.current = true;
+    void recordOnboardingStarted(user).catch(() => undefined);
+  }, [user]);
   const [step, setStep] = useState<OnboardingStep>(
     isNewWorkspace ? "workspace" : "welcome",
   );
@@ -181,32 +124,35 @@ export function OnboardingFlow({
     null,
   );
 
-  // Fetched at Step 0 + Step 2. Step 2 uses it to detect a pre-existing
-  // workspace from an earlier abandoned onboarding (so StepWorkspace shows
-  // "Continue with {name}" instead of CreateWorkspaceForm — avoiding the
-  // slug conflict that creation would hit). Step 0 uses it to decide
-  // whether to render the "I've done this before" skip button — only
-  // shown when the user already has at least one workspace, otherwise
-  // skipping would land them in limbo.
-  const { workspaces, ready: workspacesReady } = useWorkspaceList({
+  // Fetched at Welcome and the workspace step. The workspace step uses it to
+  // detect a workspace from an earlier abandoned onboarding (so StepWorkspace
+  // shows "Continue with {name}" instead of CreateWorkspaceForm — avoiding the
+  // slug conflict that creation would hit). Welcome uses it to decide whether
+  // to render the "I've done this before" skip button — only shown when the
+  // user already has at least one workspace, otherwise skipping would land
+  // them in limbo.
+  const {
+    workspaces,
+    ready: workspacesReady,
+    unavailable: workspacesUnavailable,
+  } = useWorkspaceList({
     enabled: step === "welcome" || step === "workspace",
   });
 
-  // Someone who already answered the questions and made a workspace — on
-  // another computer, or in the browser before opening Desktop — picks up at
-  // Step 3 instead of walking the intro again. Decided once, on arrival.
+  // Someone who made a workspace but never finished — on another computer, or
+  // in the browser before opening Desktop — picks up at Step 3 instead of
+  // walking the intro again. Decided once, on arrival; a failed workspace
+  // load decides "nothing to resume" rather than holding Welcome back.
   const [resumeDecided, setResumeDecided] = useState(isNewWorkspace);
-  const answeredBefore =
-    storedQuestionnaire.role !== null || storedQuestionnaire.use_case.length > 0;
   useEffect(() => {
-    if (resumeDecided || !workspacesReady) return;
+    if (resumeDecided || (!workspacesReady && !workspacesUnavailable)) return;
     setResumeDecided(true);
     const existing = workspaces[0];
-    if (answeredBefore && existing && step === "welcome") {
+    if (existing && step === "welcome") {
       setWorkspace(existing);
       setStep("runtime");
     }
-  }, [answeredBefore, resumeDecided, step, workspaces, workspacesReady]);
+  }, [resumeDecided, step, workspaces, workspacesReady, workspacesUnavailable]);
   const existingWorkspace = isNewWorkspace
     ? workspace
     : (workspace ?? workspaces[0] ?? null);
@@ -242,23 +188,6 @@ export function OnboardingFlow({
     // step is hard-coded as the entry point.
     setStep(ONBOARDING_STEP_ORDER[0]!);
   }, []);
-
-  // Apply an in-memory patch and fire-and-forget a PATCH to persist
-  // it. We never block UI on the request — the next step's render is
-  // what matters; a transient save failure surfaces as a toast but
-  // does not roll the user back.
-  const applyAnswers = useCallback(
-    (patch: Partial<QuestionnaireAnswers>) => {
-      setAnswers((a) => {
-        const next = { ...a, ...patch };
-        void saveQuestionnaire(next).catch((err) => {
-          if (err instanceof Error) toast.error(err.message);
-        });
-        return next;
-      });
-    },
-    [],
-  );
 
   // "I've done this before" path — returning user who already has a
   // workspace and just wants to land there. Marks onboarding complete
@@ -373,7 +302,6 @@ export function OnboardingFlow({
     }
     const idx = ONBOARDING_STEP_ORDER.indexOf(from);
     if (idx <= 0) {
-      // About you (the first persisted step) returns to Welcome.
       setStep("welcome");
       return;
     }
@@ -411,7 +339,7 @@ export function OnboardingFlow({
   // and replaying the shell's fade from opacity 0. That full-window re-fade is
   // the flash. Hoisting the shell makes the rail actually persistent and leaves
   // only the step body swapping.
-  if (step === "welcome" && answeredBefore && !resumeDecided) {
+  if (step === "welcome" && !resumeDecided) {
     // Hold Welcome back until the resume check above has the workspace list.
     return null;
   }
@@ -429,12 +357,7 @@ export function OnboardingFlow({
     );
   }
 
-  const stepBack =
-    step === "about_you"
-      ? () => handleBack("about_you")
-      : step === "workspace"
-        ? () => handleBack("workspace")
-        : runtimeStepBack;
+  const stepBack = step === "workspace" ? () => handleBack("workspace") : runtimeStepBack;
 
   return (
     <StepShell
@@ -444,15 +367,6 @@ export function OnboardingFlow({
       onStepChange={handleStepChange}
       chromeFooter={headerTrailing}
     >
-      {step === "about_you" && (
-        <StepAboutYou
-          answers={answers}
-          onChange={applyAnswers}
-          onAdvance={() => advanceFrom("about_you")}
-          onSkip={() => advanceFrom("about_you")}
-        />
-      )}
-
       {step === "workspace" && (
         <StepWorkspace
           existing={existingWorkspace}

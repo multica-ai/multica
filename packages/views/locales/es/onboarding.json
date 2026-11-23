@@ -2,9 +2,6 @@
   "step_nav": {
     "wordmark": "Multica",
     "label": "Pasos de incorporación",
-    "about_you": {
-      "label": "Sobre ti"
-    },
     "workspace": {
       "label": "Espacio de trabajo"
     },
@@ -59,9 +56,6 @@
     "save_failed_toast": "No se ha podido guardar"
   },
   "questions": {
-    "about_you": {
-      "question": "Cuéntanos un poco sobre ti."
-    },
     "source": {
       "question": "¿Cómo conociste Multica?",
       "friends_colleagues": "Amigos o colegas",
@@ -78,32 +72,6 @@
       "dont_remember": "No me acuerdo",
       "other": "Otro",
       "other_placeholder": "p. ej. un podcast que escucho"
-    },
-    "role": {
-      "question": "¿Cuál te describe mejor?",
-      "engineer": "Ingeniero / desarrollador",
-      "product": "Responsable de producto",
-      "designer": "Diseñador",
-      "founder": "Fundador / directivo",
-      "marketing": "Marketing / crecimiento",
-      "writer": "Redactor / contenido",
-      "research": "Investigador / analista",
-      "ops": "Operaciones / gestión de proyectos",
-      "student": "Estudiante / uso personal",
-      "other": "Otro",
-      "other_placeholder": "p. ej. profesor, jefe de soporte"
-    },
-    "use_case": {
-      "question": "¿Para qué quieres usar Multica?",
-      "ship_code": "Publicar código con agentes de IA",
-      "manage_team": "Gestionar las tareas de mi equipo",
-      "personal_tasks": "Organizar mis propias tareas",
-      "plan_research": "Planificar, hacer lluvias de ideas, investigar",
-      "write_publish": "Escribir, editar, publicar",
-      "automate_ops": "Automatizar operaciones y flujos de trabajo",
-      "evaluate": "Solo estoy explorando",
-      "other": "Otro",
-      "other_placeholder": "p. ej. coordinar un grupo de estudio"
     }
   },
   "step_question": {

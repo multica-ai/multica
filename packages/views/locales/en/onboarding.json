@@ -2,9 +2,6 @@
   "step_nav": {
     "wordmark": "Multica",
     "label": "Onboarding steps",
-    "about_you": {
-      "label": "About you"
-    },
     "workspace": {
       "label": "Workspace"
     },
@@ -59,9 +56,6 @@
     "save_failed_toast": "Failed to save"
   },
   "questions": {
-    "about_you": {
-      "question": "Tell us a bit about you."
-    },
     "source": {
       "question": "How did you hear about Multica?",
       "friends_colleagues": "Friends or colleagues",
@@ -78,32 +72,6 @@
       "dont_remember": "Don't remember",
       "other": "Other",
       "other_placeholder": "e.g. a podcast I listen to"
-    },
-    "role": {
-      "question": "Which best describes you?",
-      "engineer": "Engineer / developer",
-      "product": "Product manager",
-      "designer": "Designer",
-      "founder": "Founder / exec",
-      "marketing": "Marketing / growth",
-      "writer": "Writer / content",
-      "research": "Researcher / analyst",
-      "ops": "Operations / project mgmt",
-      "student": "Student / personal use",
-      "other": "Other",
-      "other_placeholder": "e.g. teacher, support lead"
-    },
-    "use_case": {
-      "question": "What do you want to use Multica for?",
-      "ship_code": "Ship code with AI agents",
-      "manage_team": "Manage tasks for my team",
-      "personal_tasks": "Organize my own tasks",
-      "plan_research": "Plan, brainstorm, research",
-      "write_publish": "Write, edit, publish",
-      "automate_ops": "Automate ops & workflows",
-      "evaluate": "Just exploring",
-      "other": "Other",
-      "other_placeholder": "e.g. study group coordination"
     }
   },
   "step_question": {

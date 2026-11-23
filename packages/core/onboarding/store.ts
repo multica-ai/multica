@@ -1,19 +1,14 @@
 import { api } from "../api";
 import { useAuthStore } from "../auth";
 import { setPersonProperties } from "../analytics";
+import type { User } from "../types";
 import type { OnboardingCompletionPath, QuestionnaireAnswers } from "./types";
 
 /**
- * Persist questionnaire answers (one or more slots at a time — each
- * onboarding step PATCHes its own slot) and sync the refreshed user
- * into the auth store. Source of truth is
- * `user.onboarding_questionnaire` (JSONB on the server). No
- * client-side cache here.
- *
- * Resume-by-step is intentionally not persisted: every onboarding
- * entry starts at Welcome. Answered slots are pre-filled on
- * re-entry; skipped slots are treated as fresh (the user can answer
- * this time).
+ * Persist questionnaire answers and sync the refreshed user into the auth
+ * store. Source of truth is `user.onboarding_questionnaire` (JSONB on the
+ * server). Onboarding itself no longer asks anything; the source backfill
+ * prompt is the remaining writer.
  */
 export async function saveQuestionnaire(
   answers: Partial<QuestionnaireAnswers>,
@@ -36,6 +31,16 @@ export async function saveQuestionnaire(
       ...(useCaseList.length > 0 ? { use_case: useCaseList } : {}),
     });
   }
+}
+
+/**
+ * The server counts `onboarding_started` on a user's first questionnaire
+ * write, so entering onboarding writes the empty v2 questionnaire once.
+ */
+export async function recordOnboardingStarted(user: User): Promise<void> {
+  const stored = user.onboarding_questionnaire;
+  if (stored && Object.keys(stored).length > 0) return;
+  await saveQuestionnaire({ version: 2 });
 }
 
 /**

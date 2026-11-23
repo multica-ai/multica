@@ -2,9 +2,6 @@
   "step_nav": {
     "wordmark": "Multica",
     "label": "引導步驟",
-    "about_you": {
-      "label": "關於你"
-    },
     "workspace": {
       "label": "工作區"
     },
@@ -59,9 +56,6 @@
     "save_failed_toast": "儲存失敗"
   },
   "questions": {
-    "about_you": {
-      "question": "簡單介紹一下你自己。"
-    },
     "source": {
       "question": "你是從哪裡瞭解到 Multica 的？",
       "friends_colleagues": "朋友或同事",
@@ -78,32 +72,6 @@
       "dont_remember": "想不起來了",
       "other": "其他",
       "other_placeholder": "例如：一檔播客"
-    },
-    "role": {
-      "question": "哪一項最符合你？",
-      "engineer": "工程師 / 開發者",
-      "product": "產品經理",
-      "designer": "設計師",
-      "founder": "創始人 / 高管",
-      "marketing": "市場 / 增長",
-      "writer": "寫作 / 內容",
-      "research": "研究員 / 分析師",
-      "ops": "運營 / 專案管理",
-      "student": "學生 / 個人使用",
-      "other": "其他",
-      "other_placeholder": "例如：教師、支援負責人"
-    },
-    "use_case": {
-      "question": "你打算用 Multica 做什麼？",
-      "ship_code": "讓 AI 代理幫我寫程式碼",
-      "manage_team": "給團隊做任務管理",
-      "personal_tasks": "管理我自己的任務",
-      "plan_research": "計劃、頭腦風暴、調研",
-      "write_publish": "寫作、編輯、釋出",
-      "automate_ops": "自動化日常運營",
-      "evaluate": "只是隨便看看",
-      "other": "其他",
-      "other_placeholder": "例如：協調學習小組"
     }
   },
   "step_question": {

@@ -2,9 +2,6 @@
   "step_nav": {
     "wordmark": "Multica",
     "label": "オンボーディングの手順",
-    "about_you": {
-      "label": "あなたについて"
-    },
     "workspace": {
       "label": "ワークスペース"
     },
@@ -59,9 +56,6 @@
     "save_failed_toast": "保存できませんでした"
   },
   "questions": {
-    "about_you": {
-      "question": "あなたについて少し教えてください。"
-    },
     "source": {
       "question": "Multica をどこで知りましたか?",
       "friends_colleagues": "友人または同僚",
@@ -78,32 +72,6 @@
       "other": "その他",
       "other_placeholder": "例: よく聴くポッドキャスト",
       "social_github": "GitHub"
-    },
-    "role": {
-      "question": "あなたに最も近いのはどれですか?",
-      "engineer": "エンジニア / 開発者",
-      "product": "プロダクトマネージャー",
-      "designer": "デザイナー",
-      "founder": "創業者 / 経営層",
-      "marketing": "マーケティング / グロース",
-      "writer": "ライター / コンテンツ",
-      "research": "リサーチャー / アナリスト",
-      "ops": "オペレーション / プロジェクト管理",
-      "student": "学生 / 個人利用",
-      "other": "その他",
-      "other_placeholder": "例: 教師、サポートリード"
-    },
-    "use_case": {
-      "question": "Multica を何に使いたいですか?",
-      "ship_code": "AI エージェントとコードをリリース",
-      "manage_team": "チームのタスクを管理",
-      "personal_tasks": "自分のタスクを整理",
-      "plan_research": "計画、ブレインストーミング、リサーチ",
-      "write_publish": "執筆、編集、公開",
-      "automate_ops": "運用とワークフローの自動化",
-      "evaluate": "とりあえず試してみる",
-      "other": "その他",
-      "other_placeholder": "例: スタディグループの運営"
     }
   },
   "step_question": {

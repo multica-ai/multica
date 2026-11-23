@@ -2,9 +2,6 @@
   "step_nav": {
     "wordmark": "Multica",
     "label": "온보딩 단계",
-    "about_you": {
-      "label": "당신에 대해"
-    },
     "workspace": {
       "label": "워크스페이스"
     },
@@ -59,9 +56,6 @@
     "save_failed_toast": "저장하지 못했습니다"
   },
   "questions": {
-    "about_you": {
-      "question": "당신에 대해 간단히 알려주세요."
-    },
     "source": {
       "question": "Multica를 어디서 알게 되셨나요?",
       "friends_colleagues": "친구 또는 동료",
@@ -78,32 +72,6 @@
       "dont_remember": "기억나지 않음",
       "other": "기타",
       "other_placeholder": "예: 자주 듣는 팟캐스트"
-    },
-    "role": {
-      "question": "어떤 역할에 가장 가까우신가요?",
-      "engineer": "엔지니어 / 개발자",
-      "product": "프로덕트 매니저",
-      "designer": "디자이너",
-      "founder": "창업자 / 임원",
-      "marketing": "마케팅 / 그로스",
-      "writer": "작가 / 콘텐츠",
-      "research": "리서처 / 애널리스트",
-      "ops": "운영 / 프로젝트 관리",
-      "student": "학생 / 개인 사용",
-      "other": "기타",
-      "other_placeholder": "예: 교사, 지원팀 리드"
-    },
-    "use_case": {
-      "question": "Multica를 무엇에 쓰고 싶으신가요?",
-      "ship_code": "AI 에이전트와 코드 배포",
-      "manage_team": "팀 태스크 관리",
-      "personal_tasks": "개인 태스크 정리",
-      "plan_research": "기획, 브레인스토밍, 리서치",
-      "write_publish": "작성, 편집, 게시",
-      "automate_ops": "운영 및 워크플로 자동화",
-      "evaluate": "일단 둘러보기",
-      "other": "기타",
-      "other_placeholder": "예: 스터디 그룹 운영"
     }
   },
   "step_question": {
