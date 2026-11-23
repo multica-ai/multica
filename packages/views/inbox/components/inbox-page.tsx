@@ -30,7 +30,6 @@ import {
 import {
   useMarkInboxRead,
   useMarkInboxUnread,
-  useUnarchiveInbox,
   useMarkAllInboxRead,
   useArchiveAllInbox,
   useArchiveAllReadInbox,
@@ -429,7 +428,6 @@ export function InboxPage() {
   const restoreInbox = useRestoreInbox();
   const keptText = useKeptInboxRowText(wsId);
   const { categoryOf } = useIssueStatuses(wsId);
-  const unarchiveMutation = useUnarchiveInbox();
   const markAllReadMutation = useMarkAllInboxRead();
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
@@ -670,15 +668,7 @@ export function InboxPage() {
 
   const handleUnarchive = (id: string) => {
     advanceSelectionPast(id, listedItems);
-    unarchiveMutation.mutate(id, {
-      onSuccess: () => toast.success(t(($) => $.toasts.unarchived)),
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.unarchive_failed),
-        ),
-    });
+    void restoreInbox(id);
   };
 
   // An issue's bar (`IssueInboxBar`) says, and moves on, when its row left

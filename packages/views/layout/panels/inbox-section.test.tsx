@@ -620,7 +620,31 @@ describe("InboxSection", () => {
     const link = await screen.findByRole("link", { name: /^Done with this/ });
     expect(link).toHaveAttribute("href", "/acme/inbox?view=archived&issue=issue-x");
     fireEvent.click(screen.getByRole("button", { name: "Move back to Inbox" }));
-    expect(state.unarchive).toHaveBeenCalledWith("a1", expect.anything());
+    expect(state.unarchive).toHaveBeenCalledWith("a1");
+  });
+
+  it("lands again on every click of an archived row, and moves the page on when the open one is restored", async () => {
+    apiMock.listArchivedInboxPage.mockResolvedValue({
+      items: [
+        item({ id: "a1", issue_id: "issue-x", title: "Done with this", archived: true }),
+        item({ id: "a2", issue_id: "issue-y", title: "And this", archived: true }),
+      ],
+      nextCursor: null,
+      hasMore: false,
+    });
+    const { nav } = renderSection([], null, "/acme/inbox?view=archived&issue=issue-x");
+
+    const link = await screen.findByRole("link", { name: /^Done with this/ });
+    fireEvent.click(link);
+    const first = useInboxSelectionStore.getState().landing;
+    fireEvent.click(link);
+    expect(first?.issueId).toBe("issue-x");
+    expect(useInboxSelectionStore.getState().landing).toEqual({ issueId: "issue-x", token: first!.token + 1, landed: false });
+
+    const [restoreOpen] = screen.getAllByRole("button", { name: "Move back to Inbox" });
+    fireEvent.click(restoreOpen!);
+    expect(nav.replace).toHaveBeenCalledWith("/acme/inbox?view=archived&issue=issue-y");
+    expect(state.unarchive).toHaveBeenCalledWith("a1");
   });
 
   it("follows the Inbox page's tab there, and switches the page's tab from the header", () => {

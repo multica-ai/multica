@@ -29,7 +29,6 @@ import {
   useArchiveCompletedInbox,
   useMarkAllInboxRead,
   useMarkInboxRead,
-  useUnarchiveInbox,
 } from "@multica/core/inbox/mutations";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { inboxRowTime, inboxSnoozeReturnedAt } from "@multica/core/inbox/snooze";
@@ -63,6 +62,7 @@ import {
   useArchiveInboxBatchWithUndo,
   useArchiveInboxWithUndo,
   useLeaveInboxRow,
+  useRestoreInbox,
 } from "../../inbox/components/use-leave-inbox-row";
 import { useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
 import { StatusIcon } from "../../issues/components";
@@ -1103,15 +1103,21 @@ function ArchivedSectionList({
   openKey: string | null;
 }) {
   const { t } = useT("inbox");
+  const p = useWorkspacePaths();
+  const { replace } = useNavigation();
   const { query, items } = archived;
-  const unarchive = useUnarchiveInbox();
+  const restoreInbox = useRestoreInbox();
   const { shown, more, expanded, toggle } = useSectionLimit(items, limit);
-  const restore = (item: InboxItem) =>
-    unarchive.mutate(item.id, {
-      onSuccess: () => toast.success(t(($) => $.toasts.unarchived)),
-      onError: (err) =>
-        toast.error(err instanceof Error && err.message ? err.message : t(($) => $.errors.unarchive_failed)),
-    });
+  // Restoring the open row moves the page on to the next archived one, as
+  // its own bar's restore does.
+  const restore = (item: InboxItem) => {
+    const key = inboxRowKey(item);
+    if (key === openKey) {
+      const next = nextInboxRow(items, key);
+      replace(inboxTabHref(p, "archived", next ? inboxRowKey(next) : null));
+    }
+    void restoreInbox(item.id);
+  };
   if (items.length === 0) {
     if (query.isError) {
       return (
@@ -1167,6 +1173,7 @@ function ArchivedSectionRow({
   const title = inboxRowTitle(item, typeLabels);
   const status = item.issue_status;
   const restoreLabel = t(($) => $.detail.restore);
+  const requestLanding = useInboxSelectionStore((s) => s.requestLanding);
   return (
     <li data-inbox-archived-row className="group/inbox relative">
       <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative")}>
@@ -1190,6 +1197,9 @@ function ArchivedSectionRow({
           newTabTitle={title}
           data-issue-id={item.issue_id ?? undefined}
           draggable={false}
+          onNavigateInPlace={() => {
+            if (item.issue_id) requestLanding(item.issue_id);
+          }}
           aria-current={active ? "page" : undefined}
           className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5 group-focus-within/inbox:pr-5 group-hover/inbox:pr-5")}
         >

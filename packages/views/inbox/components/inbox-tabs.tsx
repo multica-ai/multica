@@ -66,14 +66,16 @@ export function InboxTabs({
             tabIndex={active ? 0 : -1}
             onClick={() => onSelect(id)}
             className={cn(
-              "flex shrink-0 items-center gap-1 rounded-md outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+              // Long labels (French, Russian) truncate rather than push the
+              // section's actions out of the header.
+              "flex min-w-0 items-center gap-1 rounded-md outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring",
               size === "section" ? "h-5 px-1.5" : "h-7 px-2",
               active ? "bg-surface-selected text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {labels[id]}
+            <span className="truncate">{labels[id]}</span>
             {count > 0 && (
-              <span className={cn("tabular-nums", id === "inbox" ? "text-brand" : "text-faint-foreground")}>
+              <span className={cn("shrink-0 tabular-nums", id === "inbox" ? "text-brand" : "text-faint-foreground")}>
                 {count}
               </span>
             )}
