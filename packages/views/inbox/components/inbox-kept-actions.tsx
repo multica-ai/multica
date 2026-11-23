@@ -80,7 +80,7 @@ export function useKeptInboxRowText(wsId: string) {
           : (finished(kept.item) ?? agentLabel(agents ?? null) ?? t(($) => $.kept.archived));
       return `${why} · ${t(($) => $.kept.leaves)}`;
     },
-    /** `cause` is the bar action that archived it (`useMoveOnAfterAutoArchive`). */
+    /** `cause` is the bar action that archived it (`useAutoArchiveCause`). */
     notice: (kept: KeptInboxRow, cause?: InboxBarAction | null) => {
       if (kept.reason === "snoozed") return backAt(kept.item);
       const why = (cause && kept.reason === "archived" ? did(cause) : null) ?? finished(kept.item);

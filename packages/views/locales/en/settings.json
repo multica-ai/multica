@@ -888,10 +888,6 @@
         "dates": "Change dates",
         "labels": "Change labels"
       },
-      "after_label": "After archiving",
-      "after_description": "When the notification you're reading is archived this way. Triggering an agent always stays on the issue; archiving by hand (E) still opens the next one.",
-      "after_stay": "Stay on the issue",
-      "after_next": "Open the next one",
       "archived_label": "Archived notifications",
       "archived_description": "Find them again and unarchive them",
       "archived_action": "View archived"

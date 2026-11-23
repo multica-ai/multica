@@ -888,10 +888,6 @@
         "dates": "Changer les dates",
         "labels": "Changer les libellés"
       },
-      "after_label": "Après l'archivage",
-      "after_description": "Quand la notification que vous lisez est archivée ainsi. Déclencher un agent vous garde toujours sur la tâche ; archiver à la main (E) ouvre toujours la suivante.",
-      "after_stay": "Rester sur la tâche",
-      "after_next": "Ouvrir la suivante",
       "archived_label": "Notifications archivées",
       "archived_description": "Retrouvez-les et désarchivez-les",
       "archived_action": "Voir les archivées"

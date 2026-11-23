@@ -878,10 +878,6 @@
         "dates": "改日期",
         "labels": "改標籤"
       },
-      "after_label": "歸檔後",
-      "after_description": "正在看的通知被自動歸檔時。觸發 AI 代理始終停在目前任務；手動歸檔（E）照舊打開下一條。",
-      "after_stay": "停在目前任務",
-      "after_next": "打開下一條",
       "archived_label": "已歸檔的通知",
       "archived_description": "可以在這裡找回並取消歸檔",
       "archived_action": "查看已歸檔"

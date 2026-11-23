@@ -888,10 +888,6 @@
         "dates": "Cambiar fechas",
         "labels": "Cambiar etiquetas"
       },
-      "after_label": "Después de archivar",
-      "after_description": "Cuando la notificación que estás leyendo se archiva así. Activar un agente siempre te mantiene en la tarea; archivar a mano (E) sigue abriendo la siguiente.",
-      "after_stay": "Quedarse en la tarea",
-      "after_next": "Abrir la siguiente",
       "archived_label": "Notificaciones archivadas",
       "archived_description": "Encuéntralas de nuevo y desarchívalas",
       "archived_action": "Ver archivadas"

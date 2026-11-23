@@ -25,7 +25,7 @@ import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-
 import { inboxTabHref } from "../../inbox/components/inbox-view";
 import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
 import { useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
-import { useMoveOnAfterAutoArchive } from "../../inbox/components/use-move-on-after-auto-archive";
+import { useAutoArchiveCause } from "../../inbox/components/use-auto-archive-cause";
 import {
   clearedLabelForItem,
   useArchiveInboxWithUndo,
@@ -166,7 +166,7 @@ export function IssueInboxBar({
       : undefined;
     leave(issueId, next, cleared);
   };
-  const { cause, reason: archiveReason } = useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
+  const { cause, reason: archiveReason } = useAutoArchiveCause(settled);
 
   // Archived already, E moves on (to the next notification or Inbox Zero).
   useInboxShortcut("archiveInboxItem", item ? archiveItem : settled ? moveOn : null);

@@ -878,10 +878,6 @@
         "dates": "改日期",
         "labels": "改标签"
       },
-      "after_label": "归档后",
-      "after_description": "正在看的通知被自动归档时。触发智能体始终停在当前任务；手动归档（E）照旧打开下一条。",
-      "after_stay": "停在当前任务",
-      "after_next": "打开下一条",
       "archived_label": "已归档的通知",
       "archived_description": "可以在这里找回并取消归档",
       "archived_action": "查看已归档"
