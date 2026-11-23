@@ -42,6 +42,8 @@ var historicalShareCRMOriginVersions = []string{
 	"704_issue_origin_sharecrm_chat_validate",
 	"711_issue_origin_sharecrm_chat",
 	"712_issue_origin_sharecrm_chat_validate",
+	"732_issue_origin_sharecrm_chat",
+	"733_issue_origin_sharecrm_chat_validate",
 }
 
 func TestIssueOriginUpgradeLedgerPaths(t *testing.T) {
@@ -219,8 +221,13 @@ func TestEmptyDatabaseUpgradeAllowsChannelOriginsAndIsIdempotent(t *testing.T) {
 	assertLedger(t, ctx, pool, "708_attachment_workspace_size_idx", true)
 	assertLedger(t, ctx, pool, "709_drop_attachment_workspace_index", true)
 	assertLedger(t, ctx, pool, "710_autopilot_quota_limit_notice", true)
-	assertLedger(t, ctx, pool, "732_issue_origin_sharecrm_chat", true)
-	assertLedger(t, ctx, pool, "733_issue_origin_sharecrm_chat_validate", true)
+	assertLedger(t, ctx, pool, "735_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "736_issue_origin_sharecrm_chat_validate", true)
+	assertLedger(t, ctx, pool, "732_comment_idempotency_receipt", true)
+	assertLedger(t, ctx, pool, "733_comment_idempotency_receipt_key", true)
+	assertLedger(t, ctx, pool, "734_comment_idempotency_receipt_created", true)
+	assertLedger(t, ctx, pool, "732_issue_origin_sharecrm_chat", false)
+	assertLedger(t, ctx, pool, "733_issue_origin_sharecrm_chat_validate", false)
 	assertLedger(t, ctx, pool, "703_issue_origin_sharecrm_chat", false)
 	assertLedger(t, ctx, pool, "704_issue_origin_sharecrm_chat_validate", false)
 	assertLedger(t, ctx, pool, "697_issue_origin_sharecrm_chat", false)
@@ -282,6 +289,9 @@ func TestEmptyDatabaseUpgradeAllowsChannelOriginsAndIsIdempotent(t *testing.T) {
 	assertRelation(t, ctx, pool, "project_folder")
 	assertRelation(t, ctx, pool, "entitlement_feature_attempt")
 	assertIndexValid(t, ctx, pool, "uq_entitlement_feature_attempt_scope")
+	assertRelation(t, ctx, pool, "comment_idempotency_receipt")
+	assertIndexValid(t, ctx, pool, "uq_comment_idempotency_receipt_key")
+	assertIndexValid(t, ctx, pool, "idx_comment_idempotency_receipt_created")
 
 	var before int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&before); err != nil {
@@ -337,8 +347,8 @@ func TestCurrentShareCRMReleaseUpgradesWithoutRebuildingRateLimit(t *testing.T) 
 	before := snapshotOrigins(t, ctx, pool)
 	files := realMigrationFiles(t, []string{
 		"673_runtime_rate_limit",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 	}, "up")
 	options := runOptions{
 		Direction: "up", Files: files,
@@ -374,8 +384,8 @@ func TestCurrentShareCRMReleaseUpgradesWithoutRebuildingRateLimit(t *testing.T) 
 	assertLedger(t, ctx, pool, "684_issue_origin_sharecrm_chat_validate", true)
 	assertLedger(t, ctx, pool, "703_issue_origin_sharecrm_chat", true)
 	assertLedger(t, ctx, pool, "704_issue_origin_sharecrm_chat_validate", true)
-	assertLedger(t, ctx, pool, "732_issue_origin_sharecrm_chat", true)
-	assertLedger(t, ctx, pool, "733_issue_origin_sharecrm_chat_validate", true)
+	assertLedger(t, ctx, pool, "735_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "736_issue_origin_sharecrm_chat_validate", true)
 }
 
 func TestPreSyncShareCRMSchemaUpgradesThroughProjectFolders(t *testing.T) {
@@ -405,8 +415,8 @@ func TestPreSyncShareCRMSchemaUpgradesThroughProjectFolders(t *testing.T) {
 	files := realMigrationFiles(t, []string{
 		"681_project_folder",
 		"682_project_folder_name_idx",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 	}, "up")
 	options := runOptions{
 		Direction: "up", Files: files,
@@ -455,8 +465,8 @@ func TestPreSyncShareCRMSchemaUpgradesThroughProjectFolders(t *testing.T) {
 		"682_project_folder_name_idx",
 		"683_issue_origin_sharecrm_chat",
 		"684_issue_origin_sharecrm_chat_validate",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 	} {
 		assertLedger(t, ctx, pool, version, true)
 	}
@@ -486,8 +496,8 @@ func TestRetiredShareCRMWidenValidatesOnNextMigrate(t *testing.T) {
 	if err := runMigrations(ctx, pool, runOptions{
 		Direction: "up",
 		Files: realMigrationFiles(t, []string{
-			"732_issue_origin_sharecrm_chat",
-			"733_issue_origin_sharecrm_chat_validate",
+			"735_issue_origin_sharecrm_chat",
+			"736_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -500,8 +510,8 @@ func TestRetiredShareCRMWidenValidatesOnNextMigrate(t *testing.T) {
 	assertLedger(t, ctx, pool, "682_issue_origin_sharecrm_chat_validate", false)
 	assertLedger(t, ctx, pool, "683_issue_origin_sharecrm_chat", false)
 	assertLedger(t, ctx, pool, "684_issue_origin_sharecrm_chat_validate", false)
-	assertLedger(t, ctx, pool, "732_issue_origin_sharecrm_chat", true)
-	assertLedger(t, ctx, pool, "733_issue_origin_sharecrm_chat_validate", true)
+	assertLedger(t, ctx, pool, "735_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "736_issue_origin_sharecrm_chat_validate", true)
 }
 
 func TestMorningShareCRMSchemaUpgradesThroughEntitlement(t *testing.T) {
@@ -553,8 +563,8 @@ func TestMorningShareCRMSchemaUpgradesThroughEntitlement(t *testing.T) {
 	files := realMigrationFiles(t, []string{
 		"683_entitlement_feature_attempt",
 		"684_entitlement_feature_attempt_scope_idx",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 	}, "up")
 	options := runOptions{
 		Direction: "up", Files: files,
@@ -593,8 +603,8 @@ func TestMorningShareCRMSchemaUpgradesThroughEntitlement(t *testing.T) {
 		"684_entitlement_feature_attempt_scope_idx",
 		"685_issue_origin_sharecrm_chat",
 		"686_issue_origin_sharecrm_chat_validate",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 	} {
 		assertLedger(t, ctx, pool, version, true)
 	}
@@ -604,7 +614,7 @@ func TestMorningShareCRMSchemaUpgradesThroughEntitlement(t *testing.T) {
 // fork tip: ShareCRM origin filenames 685/686 are recorded, the origin check
 // is validated, and runtime_rate_limit keeps its OID and row. This merge
 // records upstream docs 685-694 and inbox 695/696 under different filenames
-// and re-applies the ShareCRM widen as 732/733 without swapping the check.
+// and re-applies the ShareCRM widen as 735/736 without swapping the check.
 // Inbox migrations run while sharecrm_chat rows and new writes still succeed.
 func TestShareCRM685686UpgradesThroughDocs(t *testing.T) {
 	ctx, pool, schema := newOriginSandbox(t)
@@ -663,8 +673,8 @@ func TestShareCRM685686UpgradesThroughDocs(t *testing.T) {
 		"694_doc_version_workspace_idx",
 		"695_inbox_item_returned_at",
 		"696_inbox_item_active_shown_idx",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 	}, "up")
 	options := runOptions{
 		Direction: "up", Files: files,
@@ -710,8 +720,8 @@ func TestShareCRM685686UpgradesThroughDocs(t *testing.T) {
 		"694_doc_version_workspace_idx",
 		"695_inbox_item_returned_at",
 		"696_inbox_item_active_shown_idx",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 		"673_runtime_rate_limit",
 	} {
 		assertLedger(t, ctx, pool, version, true)
@@ -722,7 +732,7 @@ func TestShareCRM685686UpgradesThroughDocs(t *testing.T) {
 // origin filenames 695/696 are already recorded and the origin check is
 // validated. Upstream inbox migrations now use 695/696, so they must run
 // while existing sharecrm_chat rows and new ShareCRM writes still succeed.
-// The renamed tail 732/733 records itself and does not swap that check.
+// The renamed tail 735/736 records itself and does not swap that check.
 func TestShareCRM695696UpgradesThroughInbox(t *testing.T) {
 	ctx, pool, schema := newOriginSandbox(t)
 	prepareShareCRMIssue(t, ctx, pool, true)
@@ -784,8 +794,8 @@ func TestShareCRM695696UpgradesThroughInbox(t *testing.T) {
 	tail := runOptions{
 		Direction: "up",
 		Files: realMigrationFiles(t, []string{
-			"732_issue_origin_sharecrm_chat",
-			"733_issue_origin_sharecrm_chat_validate",
+			"735_issue_origin_sharecrm_chat",
+			"736_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -807,8 +817,8 @@ func TestShareCRM695696UpgradesThroughInbox(t *testing.T) {
 		"696_issue_origin_sharecrm_chat_validate",
 		"695_inbox_item_returned_at",
 		"696_inbox_item_active_shown_idx",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 		"685_docs",
 		"694_doc_version_workspace_idx",
 	} {
@@ -871,8 +881,8 @@ func TestPureUpstreamValidatedOriginGainsDocsAndShareCRM(t *testing.T) {
 			"694_doc_version_workspace_idx",
 			"695_inbox_item_returned_at",
 			"696_inbox_item_active_shown_idx",
-			"732_issue_origin_sharecrm_chat",
-			"733_issue_origin_sharecrm_chat_validate",
+			"735_issue_origin_sharecrm_chat",
+			"736_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -899,8 +909,8 @@ func TestPureUpstreamValidatedOriginGainsDocsAndShareCRM(t *testing.T) {
 	assertLedger(t, ctx, pool, "685_docs", true)
 	assertLedger(t, ctx, pool, "695_inbox_item_returned_at", true)
 	assertLedger(t, ctx, pool, "696_inbox_item_active_shown_idx", true)
-	assertLedger(t, ctx, pool, "732_issue_origin_sharecrm_chat", true)
-	assertLedger(t, ctx, pool, "733_issue_origin_sharecrm_chat_validate", true)
+	assertLedger(t, ctx, pool, "735_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "736_issue_origin_sharecrm_chat_validate", true)
 	assertIndexValid(t, ctx, pool, "idx_inbox_active_shown")
 	assertLedger(t, ctx, pool, "685_issue_origin_sharecrm_chat", false)
 	assertLedger(t, ctx, pool, "686_issue_origin_sharecrm_chat_validate", false)
@@ -910,7 +920,7 @@ func TestPureUpstreamValidatedOriginGainsDocsAndShareCRM(t *testing.T) {
 // ShareCRM origin filenames 697/698 are already recorded and the origin
 // check is validated. Upstream now uses 697/698 for autopilot_run's
 // idempotency key and its unique index, 699-702 for the guest role and
-// member_search_access, and the ShareCRM widen continues as 732/733.
+// member_search_access, and the ShareCRM widen continues as 735/736.
 // The new tail must not swap a check that already allows sharecrm_chat,
 // and the retired ledger keys stay beside the new filenames.
 func TestShareCRM697698UpgradesThroughAutopilot(t *testing.T) {
@@ -962,8 +972,8 @@ func TestShareCRM697698UpgradesThroughAutopilot(t *testing.T) {
 			"700_member_search_access",
 			"701_member_search_access_pkey_index",
 			"702_member_search_access_pkey",
-			"732_issue_origin_sharecrm_chat",
-			"733_issue_origin_sharecrm_chat_validate",
+			"735_issue_origin_sharecrm_chat",
+			"736_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -1013,8 +1023,8 @@ func TestShareCRM697698UpgradesThroughAutopilot(t *testing.T) {
 		"702_member_search_access_pkey",
 		"703_issue_origin_sharecrm_chat",
 		"704_issue_origin_sharecrm_chat_validate",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 	} {
 		assertLedger(t, ctx, pool, version, true)
 	}
@@ -1025,7 +1035,7 @@ func TestShareCRM697698UpgradesThroughAutopilot(t *testing.T) {
 // check is validated. Upstream now uses 703-707 for doc_comment, 708/709
 // for the attachment workspace size index, and 710 for
 // autopilot_quota_period.rejection_notified_limit. The ShareCRM widen
-// continues as 732/733 and must not swap a check that already allows
+// continues as 735/736 and must not swap a check that already allows
 // sharecrm_chat. The retired ledger keys stay beside the new filenames.
 // An existing runtime_rate_limit keeps its OID and row.
 func TestShareCRM703704UpgradesThroughDocComments(t *testing.T) {
@@ -1090,8 +1100,8 @@ func TestShareCRM703704UpgradesThroughDocComments(t *testing.T) {
 			"708_attachment_workspace_size_idx",
 			"709_drop_attachment_workspace_index",
 			"710_autopilot_quota_limit_notice",
-			"732_issue_origin_sharecrm_chat",
-			"733_issue_origin_sharecrm_chat_validate",
+			"735_issue_origin_sharecrm_chat",
+			"736_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -1147,18 +1157,18 @@ func TestShareCRM703704UpgradesThroughDocComments(t *testing.T) {
 		"708_attachment_workspace_size_idx",
 		"709_drop_attachment_workspace_index",
 		"710_autopilot_quota_limit_notice",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 		"673_runtime_rate_limit",
 	} {
 		assertLedger(t, ctx, pool, version, true)
 	}
 }
 
-// TestShareCRM711712UpgradesThroughDashboardRange is the previous fork tip.
+// TestShareCRM711712UpgradesThroughDashboardRange is an older fork tip.
 // ShareCRM origin filenames 711/712 are already recorded and the origin
 // check is validated. Upstream now uses 711/712 for dashboard_range_view and
-// uq_dashboard_range_view_scope. The ShareCRM widen continues as 732/733 and
+// uq_dashboard_range_view_scope. The ShareCRM widen continues as 735/736 and
 // must not swap a check that already allows sharecrm_chat. The retired
 // ledger keys stay beside the new filenames.
 func TestShareCRM711712UpgradesThroughDashboardRange(t *testing.T) {
@@ -1183,8 +1193,8 @@ func TestShareCRM711712UpgradesThroughDashboardRange(t *testing.T) {
 		Files: realMigrationFiles(t, []string{
 			"711_dashboard_range_view",
 			"712_dashboard_range_view_scope_idx",
-			"732_issue_origin_sharecrm_chat",
-			"733_issue_origin_sharecrm_chat_validate",
+			"735_issue_origin_sharecrm_chat",
+			"736_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -1208,10 +1218,179 @@ func TestShareCRM711712UpgradesThroughDashboardRange(t *testing.T) {
 		"712_issue_origin_sharecrm_chat_validate",
 		"711_dashboard_range_view",
 		"712_dashboard_range_view_scope_idx",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 	} {
 		assertLedger(t, ctx, pool, version, true)
+	}
+}
+
+// TestPreviousShareCRMTipUpgradesThroughCommentIdempotency is the post-#49
+// working tip: every migration through 731, plus the retired ShareCRM ledger
+// keys 732_issue_origin_sharecrm_chat and
+// 733_issue_origin_sharecrm_chat_validate. Upstream reused 732-734 for
+// comment idempotency receipts. Those files must run, the new ShareCRM
+// filenames 735/736 must record themselves without swapping the origin
+// check, and a second upgrade must leave the ledger and the OID alone.
+func TestPreviousShareCRMTipUpgradesThroughCommentIdempotency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("postgres upgrade regression")
+	}
+	admin := openTestPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	name := fmt.Sprintf("origin_prev_%d", time.Now().UnixNano())
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		dropCtx, dropCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer dropCancel()
+		_, _ = admin.Exec(dropCtx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, name)
+		_, _ = admin.Exec(dropCtx, "DROP DATABASE IF EXISTS "+pgx.Identifier{name}.Sanitize())
+	})
+
+	pool := openPoolURL(t, databaseURLFor(t, name))
+	files, err := migrations.Files("up")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skip := map[string]bool{
+		"732_comment_idempotency_receipt":         true,
+		"733_comment_idempotency_receipt_key":     true,
+		"734_comment_idempotency_receipt_created": true,
+		"735_issue_origin_sharecrm_chat":          true,
+		"736_issue_origin_sharecrm_chat_validate": true,
+	}
+	base := make([]string, 0, len(files))
+	for _, file := range files {
+		if skip[migrations.ExtractVersion(file)] {
+			continue
+		}
+		base = append(base, file)
+	}
+	baseOptions := runOptions{
+		Direction:             "up",
+		Files:                 base,
+		SchemaMigrationsTable: "schema_migrations",
+		AdvisoryLockKey:       int64(rand.Uint64()&0x7fffffffffffffff) | 1,
+		Hooks:                 hooksForDirection("up"),
+		Conditions:            conditionsForDirection("up"),
+	}
+	if err := runMigrations(ctx, pool, baseOptions); err != nil {
+		t.Fatalf("previous tip schema: %v", err)
+	}
+	insertLedger(t, ctx, pool, []string{
+		"732_issue_origin_sharecrm_chat",
+		"733_issue_origin_sharecrm_chat_validate",
+	})
+	insertChannelIssue(t, ctx, pool, "sharecrm_chat")
+	insertChannelIssue(t, ctx, pool, "weixin_chat")
+	insertChannelIssue(t, ctx, pool, "slack_chat")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_installation (
+			workspace_id, agent_id, channel_type, config, installer_user_id
+		) VALUES
+			('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2', 'sharecrm', '{"app_id":"sharecrm-kept","app_secret_encrypted":"sealed"}', '00000000-0000-4000-8000-0000000000a3'),
+			('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a4', 'slack', '{"app_id":"slack-kept"}', '00000000-0000-4000-8000-0000000000a3'),
+			('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a5', 'weixin', '{"app_id":"weixin-kept"}', '00000000-0000-4000-8000-0000000000a3')
+	`); err != nil {
+		t.Fatalf("insert channel installations: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO runtime_rate_limit (runtime_id, workspace_id, snapshot, observed_at)
+		VALUES ('00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000a1', '{"kept":true}', now())
+	`); err != nil {
+		t.Fatalf("insert rate-limit snapshot: %v", err)
+	}
+	originOID := originConstraintOID(t, ctx, pool)
+	var rateOID uint32
+	if err := pool.QueryRow(ctx, `SELECT 'runtime_rate_limit'::regclass::oid`).Scan(&rateOID); err != nil {
+		t.Fatal(err)
+	}
+	var sharecrmBefore, installsBefore, snapshotsBefore int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE origin_type = 'sharecrm_chat'`).Scan(&sharecrmBefore); err != nil || sharecrmBefore != 1 {
+		t.Fatalf("sharecrm issues before upgrade = %d, error = %v", sharecrmBefore, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM channel_installation WHERE config->>'app_id' IN ('sharecrm-kept', 'slack-kept', 'weixin-kept')`).Scan(&installsBefore); err != nil || installsBefore != 3 {
+		t.Fatalf("installations before upgrade = %d, error = %v", installsBefore, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM runtime_rate_limit WHERE snapshot->>'kept' = 'true'`).Scan(&snapshotsBefore); err != nil || snapshotsBefore != 1 {
+		t.Fatalf("kept rate-limit rows before upgrade = %d, error = %v", snapshotsBefore, err)
+	}
+
+	if err := runMigrations(ctx, pool, runOptions{
+		Direction:             "up",
+		Files:                 files,
+		SchemaMigrationsTable: "schema_migrations",
+		AdvisoryLockKey:       baseOptions.AdvisoryLockKey,
+		Hooks:                 hooksForDirection("up"),
+		Conditions:            conditionsForDirection("up"),
+	}); err != nil {
+		t.Fatalf("upgrade from previous tip: %v", err)
+	}
+	if got := originConstraintOID(t, ctx, pool); got != originOID {
+		t.Fatalf("upgrade rebuilt an origin check that already allowed sharecrm_chat: oid %d -> %d", originOID, got)
+	}
+	var sharecrmAfter, installsAfter, snapshotsAfter int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE origin_type = 'sharecrm_chat'`).Scan(&sharecrmAfter); err != nil || sharecrmAfter != 1 {
+		t.Fatalf("sharecrm issues after upgrade = %d, error = %v", sharecrmAfter, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM channel_installation WHERE config->>'app_id' IN ('sharecrm-kept', 'slack-kept', 'weixin-kept')`).Scan(&installsAfter); err != nil || installsAfter != 3 {
+		t.Fatalf("kept installations after upgrade = %d, error = %v", installsAfter, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM runtime_rate_limit WHERE snapshot->>'kept' = 'true'`).Scan(&snapshotsAfter); err != nil || snapshotsAfter != 1 {
+		t.Fatalf("kept rate-limit rows after upgrade = %d, error = %v", snapshotsAfter, err)
+	}
+	assertRelation(t, ctx, pool, "comment_idempotency_receipt")
+	assertIndexValid(t, ctx, pool, "uq_comment_idempotency_receipt_key")
+	assertIndexValid(t, ctx, pool, "idx_comment_idempotency_receipt_created")
+	assertValidatedChannelOrigins(t, ctx, pool)
+	for _, version := range []string{
+		"732_issue_origin_sharecrm_chat",
+		"733_issue_origin_sharecrm_chat_validate",
+		"732_comment_idempotency_receipt",
+		"733_comment_idempotency_receipt_key",
+		"734_comment_idempotency_receipt_created",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
+		"673_runtime_rate_limit",
+	} {
+		assertLedger(t, ctx, pool, version, true)
+	}
+	var before int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := runMigrations(ctx, pool, runOptions{
+		Direction:             "up",
+		Files:                 files,
+		SchemaMigrationsTable: "schema_migrations",
+		AdvisoryLockKey:       baseOptions.AdvisoryLockKey,
+		Hooks:                 hooksForDirection("up"),
+		Conditions:            conditionsForDirection("up"),
+	}); err != nil {
+		t.Fatalf("second upgrade: %v", err)
+	}
+	var after int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("second upgrade recorded %d versions, had %d", after, before)
+	}
+	if got := originConstraintOID(t, ctx, pool); got != originOID {
+		t.Fatalf("second upgrade rebuilt the origin check: oid %d -> %d", originOID, got)
+	}
+	var rateAfter uint32
+	if err := pool.QueryRow(ctx, `SELECT 'runtime_rate_limit'::regclass::oid`).Scan(&rateAfter); err != nil {
+		t.Fatal(err)
+	}
+	if rateAfter != rateOID {
+		t.Fatalf("upgrade rebuilt runtime_rate_limit: oid %d -> %d", rateOID, rateAfter)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM runtime_rate_limit WHERE snapshot->>'kept' = 'true'`).Scan(&snapshotsAfter); err != nil || snapshotsAfter != 1 {
+		t.Fatalf("kept rate-limit rows after second upgrade = %d, error = %v", snapshotsAfter, err)
 	}
 }
 
@@ -1260,8 +1439,8 @@ func runOriginMigrations(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	versions := []string{
 		"667_issue_origin_weixin_chat",
 		"668_issue_origin_weixin_chat_validate",
-		"732_issue_origin_sharecrm_chat",
-		"733_issue_origin_sharecrm_chat_validate",
+		"735_issue_origin_sharecrm_chat",
+		"736_issue_origin_sharecrm_chat_validate",
 	}
 	if err := runMigrations(ctx, pool, runOptions{
 		Direction:             "up",
