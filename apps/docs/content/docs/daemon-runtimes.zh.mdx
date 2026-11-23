@@ -285,6 +285,17 @@ Codex 原生子智能体同样默认关闭：父线程结束时，Multica 就把
 这些值存在于运行时进程的实际环境中。运行时启动的任何子进程默认都会继承全部变量，包括 `MULTICA_TOKEN`。子进程不应持有该凭据时，必须显式移除，进程之间没有自动隔离。反过来，有些工具会过滤自己的子进程环境，这时可能需要显式放行变量。例如，Codex 的 shell 工具会丢弃名称中含有 `TOKEN`、`KEY` 或 `SECRET` 的变量，所以守护进程会安装托管的 shell 策略，放行所需的 task 变量。令牌只能存在于进程环境中，不得写入 prompt、日志、仓库文件或持久配置。子进程与父 task 共享身份和权限，不会获得新的独立作用域身份。
 </Callout>
 
+### 通过密钥管理工具启动 [#secrets-managers]
+
+有些团队会通过密钥管理工具启动智能体，例如命令写成 `doppler run -- claude`。密钥管理工具在守护进程之后启动，会用密钥项目里的值重建智能体的环境。如果这个项目里也存了 `MULTICA_TOKEN`（常见的是给脚本用的个人 `mul_` 令牌），它会覆盖 task 令牌，task 里所有 Multica CLI 调用都会失败，报错 `agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token`。CLI 发现 `MULTICA_TASK_ID` 旁边是 `mul_` 令牌时，报错会指向本节。
+
+让守护进程注入的值优先：
+
+- **Doppler**：在 `--` 前加 `--preserve-env=MULTICA_TOKEN`，例如 `doppler run --preserve-env=MULTICA_TOKEN -- claude`。项目里还定义了其他 `MULTICA_` 变量时，用逗号分隔一并列出：`--preserve-env=MULTICA_TOKEN,MULTICA_SERVER_URL`。Doppler 只接受 `=` 写法，用空格隔开的 `--preserve-env MULTICA_TOKEN` 不生效；与 `--mount` 一起使用时该选项不起作用。
+- **其他工具**：使用该工具让已有环境变量优先的选项，或者从智能体运行所用的密钥项目中删除 `MULTICA_` 变量。
+
+`~/.zshrc` 等 shell 配置文件导出 `MULTICA_TOKEN` 时，智能体的 shell 加载它也会同样覆盖 task 令牌。删除这条导出，或者只在 `MULTICA_TASK_ID` 为空时设置。
+
 ### 创建配置
 
 只有工作区 owner 和 admin 可以创建、修改或删除自定义运行时配置：

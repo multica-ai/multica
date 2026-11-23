@@ -285,6 +285,17 @@ Codex 原生子 AI 代理同樣預設關閉：父執行緒結束時，Multica �
 這些值存在於執行時程序的實際環境中。執行時啟動的任何子程序預設都會繼承全部變數，包括 `MULTICA_TOKEN`。子程序不應持有該憑據時，必須顯式移除，程序之間沒有自動隔離。反過來，有些工具會過濾自己的子程序環境，這時可能需要顯式放行變數。例如，Codex 的 shell 工具會丟棄名稱中含有 `TOKEN`、`KEY` 或 `SECRET` 的變數，所以守護程序會安裝託管的 shell 策略，放行所需的 task 變數。令牌只能存在於程序環境中，不得寫入 prompt、日誌、倉庫檔案或持久配置。子程序與父 task 共享身份和權限，不會獲得新的獨立作用域身份。
 </Callout>
 
+### 透過密鑰管理工具啟動 [#secrets-managers]
+
+有些團隊會透過密鑰管理工具啟動 AI 代理，例如命令寫成 `doppler run -- claude`。密鑰管理工具在守護程序之後啟動，會用密鑰專案裡的值重建 AI 代理的環境。如果這個專案裡也存了 `MULTICA_TOKEN`（常見的是給腳本用的個人 `mul_` 權杖），它會覆蓋 task 權杖，task 裡所有 Multica CLI 呼叫都會失敗，報錯 `agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token`。CLI 發現 `MULTICA_TASK_ID` 旁邊是 `mul_` 權杖時，報錯會指向本節。
+
+讓守護程序注入的值優先：
+
+- **Doppler**：在 `--` 前加 `--preserve-env=MULTICA_TOKEN`，例如 `doppler run --preserve-env=MULTICA_TOKEN -- claude`。專案裡還定義了其他 `MULTICA_` 變數時，用逗號分隔一併列出：`--preserve-env=MULTICA_TOKEN,MULTICA_SERVER_URL`。Doppler 只接受 `=` 寫法，用空格隔開的 `--preserve-env MULTICA_TOKEN` 不生效；與 `--mount` 一起使用時該選項不起作用。
+- **其他工具**：使用該工具讓既有環境變數優先的選項，或者從 AI 代理執行所用的密鑰專案中刪除 `MULTICA_` 變數。
+
+`~/.zshrc` 等 shell 設定檔匯出 `MULTICA_TOKEN` 時，AI 代理的 shell 載入它也會同樣覆蓋 task 權杖。刪除這條匯出，或者只在 `MULTICA_TASK_ID` 為空時設定。
+
 ### 建立配置
 
 只有工作區 owner 和 admin 可以建立、修改或刪除自定義執行時配置：
